@@ -966,3 +966,16 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      Recreating the admission binding with a default manager left `helm upgrade` unable to
      apply it — the object was there and `.spec.matchResources` belonged to somebody else
      — which is a cluster the test quietly broke for everything after it.
+
+169. **An admin method's role comes from the caller's identity and never from the
+     request.** A parameter named `role` or `actor` is ignored: it would otherwise be an
+     escalation anybody could write.
+
+170. **Only known keys become filter options.** `String.to_existing_atom` on
+     caller-supplied keys would be a way to grow the atom table from outside; anything not
+     on the list is simply not an option.
+
+171. **`troupe admin` reaches the plane over the same public `/rpc` every other client
+     uses, with the token `troupe login` stored.** There is no privileged path: a person
+     with `curl` and a token can do exactly what the binary can. The commands are
+     generated from one table, and the parity test asserts the table covers the context.
