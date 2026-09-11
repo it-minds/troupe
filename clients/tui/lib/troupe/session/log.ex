@@ -28,6 +28,41 @@ defmodule Troupe.Session.Log do
   def events(sid, agent_path),
     do: GenServer.call(Session.via(sid, :log), {:events, agent_path}, :infinity)
 
+  @doc "Stamps `closed_at` into the running session's `meta.json`."
+  @spec mark_closed(String.t()) :: :ok
+  def mark_closed(sid), do: GenServer.call(Session.via(sid, :log), :mark_closed, :infinity)
+
+  @doc """
+  Closes a persisted session that has no running `Log`: appends one
+  `session_closed` event and stamps `meta.json`. Safe because a stopped
+  session has no writer.
+  """
+  @spec close_on_disk(String.t(), String.t(), map()) :: :ok | {:error, term()}
+  def close_on_disk(workspace, sid, data) when is_map(data) do
+    dir = Paths.session_dir(workspace, sid)
+    path = Path.join(dir, "events.jsonl")
+    seq = sid |> read_file(path) |> Enum.map(& &1.seq) |> Enum.max(fn -> 0 end)
+
+    event = %Event{
+      session_id: sid,
+      seq: seq + 1,
+      ts: System.system_time(:millisecond),
+      agent_path: "session",
+      type: :session_closed,
+      data: data
+    }
+
+    case File.open(path, [:append, :binary]) do
+      {:ok, io} ->
+        :ok = IO.binwrite(io, [Codec.encode_event(event), "\n"])
+        File.close(io)
+        write_meta(dir, workspace, sid, event.ts)
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @doc "Final summary, todo list and prompt of a finished branch."
   @spec branch_summary(String.t(), String.t()) ::
           {:ok, %{summary: String.t(), todos: list(), prompt: String.t()}}
@@ -88,6 +123,25 @@ defmodule Troupe.Session.Log do
     end
   end
 
+  @doc "Reads a session's `meta.json`; `closed_at` is `nil` for an open session."
+  @spec read_meta(String.t()) ::
+          {:ok, %{session_id: String.t(), workspace: String.t(), closed_at: integer() | nil}}
+          | :error
+  def read_meta(meta_path) do
+    with {:ok, content} <- File.read(meta_path),
+         {:ok, %{"session_id" => id, "workspace" => ws} = meta} <- Jason.decode(content) do
+      {:ok, %{session_id: id, workspace: ws, closed_at: meta["closed_at"]}}
+    else
+      _ -> :error
+    end
+  end
+
+  defp write_meta(dir, workspace, sid, closed_at) do
+    meta = %{workspace: workspace, session_id: sid}
+    meta = if closed_at, do: Map.put(meta, :closed_at, closed_at), else: meta
+    File.write!(Path.join(dir, "meta.json"), Jason.encode!(meta))
+  end
+
   ## Server
 
   @impl true
@@ -98,10 +152,8 @@ defmodule Troupe.Session.Log do
     existing = read_file(sid, path)
     seq = existing |> Enum.map(& &1.seq) |> Enum.max(fn -> 0 end)
 
-    File.write!(
-      Path.join(dir, "meta.json"),
-      Jason.encode!(%{workspace: workspace, session_id: sid})
-    )
+    # Starting (or resuming) a session reopens it: `closed_at` is dropped.
+    write_meta(dir, workspace, sid, nil)
 
     {:ok, io} = File.open(path, [:append, :binary])
 
@@ -138,6 +190,17 @@ defmodule Troupe.Session.Log do
 
   def handle_call({:events, agent_path}, _from, state) do
     {:reply, state.events |> Enum.filter(&(&1.agent_path == agent_path)) |> Enum.reverse(), state}
+  end
+
+  def handle_call(:mark_closed, _from, state) do
+    write_meta(
+      Path.dirname(state.path),
+      state.workspace,
+      state.session_id,
+      System.system_time(:millisecond)
+    )
+
+    {:reply, :ok, state}
   end
 
   @impl true

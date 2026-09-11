@@ -43,6 +43,16 @@ defmodule Troupe.Session.Dispatcher do
           diff_stat: String.t() | nil
         }
 
+  @type report :: %{
+          session_id: String.t(),
+          branches: non_neg_integer(),
+          done: non_neg_integer(),
+          failed: non_neg_integer(),
+          active: [String.t()],
+          worktrees: [String.t()],
+          text: String.t()
+        }
+
   ## API
 
   def start_link(%{session_id: sid} = opts) do
@@ -81,6 +91,19 @@ defmodule Troupe.Session.Dispatcher do
 
   @spec commands(String.t()) :: [String.t()]
   def commands(sid), do: GenServer.call(Session.via(sid, :dispatcher), :commands)
+
+  @doc """
+  Ends the session: refuses while branches are active or worktrees unresolved
+  (unless `force?`), then writes `session_closed` and stamps `meta.json`.
+  Returns a report of what the session did.
+  """
+  @spec close(String.t(), boolean()) :: {:ok, report()} | {:error, String.t()}
+  def close(sid, force? \\ false),
+    do: GenServer.call(Session.via(sid, :dispatcher), {:close, force?}, 30_000)
+
+  @doc "`true` when the session has at least one branch and none is active."
+  @spec finished?(String.t()) :: boolean()
+  def finished?(sid), do: GenServer.call(Session.via(sid, :dispatcher), :finished?)
 
   ## Server
 
@@ -122,7 +145,27 @@ defmodule Troupe.Session.Dispatcher do
     {:reply, state.definitions |> Agents.primaries() |> Enum.map(& &1.name), state}
   end
 
-  def handle_call({:dismiss, path}, _from, state) do
+  def handle_call({:close, force?}, _from, state) do
+    report = report(state)
+
+    case blockers(report, force?) do
+      [] ->
+        Log.append(state.session_id, "session", :session_closed, %{
+          branches: report.branches,
+          done: report.done,
+          failed: report.failed,
+          forced: force? and (report.active != [] or report.worktrees != [])
+        })
+
+        :ok = Log.mark_closed(state.session_id)
+        {:reply, {:ok, report}, state}
+
+      blockers ->
+        {:reply, {:error, Enum.join(blockers, "; ") <> "; use force to close anyway"}, state}
+    end
+  end
+
+
     case Map.get(state.ledger, path) do
       %{state: s} when s in @resting ->
         Log.append(state.session_id, path, :window_dismissed, %{})
