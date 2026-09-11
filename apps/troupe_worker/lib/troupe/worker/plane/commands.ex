@@ -43,7 +43,8 @@ defmodule Troupe.Worker.Plane.Commands do
           team: params["team"],
           epoch: params["epoch"],
           owner_subject: params["owner_subject"],
-          profile: params["profile"]
+          profile: params["profile"],
+          bundle: bundle_of(params)
         ],
         &match?({_key, nil}, &1)
       )
@@ -259,6 +260,23 @@ defmodule Troupe.Worker.Plane.Commands do
       {:error, reason} ->
         Logger.error("troupe worker: could not erase objects for #{session_id}: #{inspect(reason)}")
         0
+    end
+  end
+
+  # What the plane says this session should run on, and whether that is a change from
+  # what it was pinned to.
+  defp bundle_of(params) do
+    case params["bundle_version"] do
+      nil ->
+        nil
+
+      version ->
+        %{
+          version: version,
+          hash: params["bundle_hash"],
+          channel: params["channel"],
+          upgraded_from: params["bundle_upgraded_from"]
+        }
     end
   end
 

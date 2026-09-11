@@ -136,6 +136,16 @@ defmodule Troupe.Protocol.Schema do
         "dormant_ms" => required(:integer),
         "moved" => required(:boolean)
       },
+      # The session's configuration changed under it, which happens only at activation and
+      # only when the version it was pinned to has been retired. Durable, because the
+      # model is entitled to know its tools may have changed.
+      "config_upgraded" => %{
+        "channel" => required(:string),
+        "from" => optional(:integer),
+        "to" => required(:integer),
+        "hash" => required(:string)
+      },
+      "session_read_only" => %{"reason" => required(:string)},
       "session_archived" => %{},
       "session_erased" => %{},
       "fs_changed" => %{

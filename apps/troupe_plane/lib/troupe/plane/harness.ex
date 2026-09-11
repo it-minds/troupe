@@ -21,8 +21,8 @@ defmodule Troupe.Plane.Harness do
   plane replica and it is rarely the one the harness reached.
   """
 
+  alias Troupe.Plane.{Bundles, Erasure, Fleet, Identity, Placement, Sessions, TeamBudget, Tokens}
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Erasure, Fleet, Identity, Placement, Sessions, TeamBudget, Tokens}
   alias Troupe.Plane.Identity.User
   alias Troupe.Protocol.{Error, Token}
 
@@ -252,7 +252,10 @@ defmodule Troupe.Plane.Harness do
       state: "active",
       epoch: 1,
       title: params["title"],
-      workspace_source: params["source"]
+      workspace_source: params["source"],
+      # Pinned at creation and kept for the life of the session. A session whose agent
+      # definitions changed underneath it would be a different session halfway through.
+      bundle_version: bundle_version(profile)
     }
 
     case Sessions.create(attrs) do
@@ -268,7 +271,8 @@ defmodule Troupe.Plane.Harness do
       "epoch" => session.epoch,
       "owner_subject" => session.owner_subject,
       "profile" => session.profile,
-      "source" => session.workspace_source
+      "source" => session.workspace_source,
+      "bundle_version" => session.bundle_version
     }
 
     case Router.push(worker, "session.activate", params) do
@@ -382,13 +386,15 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp restore_on_pod(worker, session) do
-    params = %{
-      "session_id" => session.id,
-      "epoch" => session.epoch,
-      "owner_subject" => session.owner_subject,
-      "profile" => session.profile,
-      "team" => team_name(session)
-    }
+    params =
+      %{
+        "session_id" => session.id,
+        "epoch" => session.epoch,
+        "owner_subject" => session.owner_subject,
+        "profile" => session.profile,
+        "team" => team_name(session)
+      }
+      |> Map.merge(bundle_params(session))
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
@@ -479,6 +485,41 @@ defmodule Troupe.Plane.Harness do
     case Fleet.get_worker(session.worker_id) do
       nil -> {:error, Error.new(:unavailable, %{reason: "the pod is gone"})}
       worker -> {:ok, worker}
+    end
+  end
+
+  defp bundle_version(profile) do
+    case Fleet.get_profile(profile) do
+      nil -> nil
+      %{config_bundle_channel: channel} -> Bundles.current(channel) |> then(&(&1 && &1.version))
+    end
+  end
+
+  # What this session should run on now, and whether that is a change. An upgrade is the
+  # only way a session's configuration ever moves, and the worker records it as a durable
+  # event so the model is told rather than left to notice.
+  defp bundle_params(session) do
+    with %{config_bundle_channel: channel} <- Fleet.get_profile(session.profile),
+         resolved <- Bundles.resolve(channel, session.bundle_version) do
+      case resolved do
+        {:keep, bundle} ->
+          %{"bundle_version" => bundle.version, "bundle_hash" => bundle.hash, "channel" => channel}
+
+        {:upgrade, from, bundle} ->
+          Sessions.pin_bundle(session.id, bundle.version)
+
+          %{
+            "bundle_version" => bundle.version,
+            "bundle_hash" => bundle.hash,
+            "channel" => channel,
+            "bundle_upgraded_from" => from
+          }
+
+        {:error, _reason} ->
+          %{"bundle_version" => session.bundle_version, "channel" => channel}
+      end
+    else
+      _ -> %{"bundle_version" => session.bundle_version}
     end
   end
 

@@ -41,6 +41,12 @@ defmodule Troupe.Plane.Fleet do
   @spec list_profiles() :: [Profile.t()]
   def list_profiles, do: Repo.all(from p in Profile, order_by: p.name)
 
+  @doc "The profiles following a config bundle channel."
+  @spec profiles_on_channel(String.t()) :: [String.t()]
+  def profiles_on_channel(channel) do
+    Repo.all(from p in Profile, where: p.config_bundle_channel == ^channel, select: p.name, order_by: p.name)
+  end
+
   # -- workers ----------------------------------------------------------------
 
   @doc """

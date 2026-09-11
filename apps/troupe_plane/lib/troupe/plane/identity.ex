@@ -16,7 +16,9 @@ defmodule Troupe.Plane.Identity do
 
   alias Ecto.Multi
   alias Troupe.Plane.Identity.{Grant, Group, Membership, Team, User}
-  alias Troupe.Plane.Repo
+  alias Troupe.Plane.{Repo, Sessions}
+
+  require Logger
 
   # -- users and groups -------------------------------------------------------
 
@@ -230,6 +232,16 @@ defmodule Troupe.Plane.Identity do
   @spec revoke(Team.t(), String.t()) :: :ok
   def revoke(%Team{} = team, profile) do
     Repo.delete_all(from g in Grant, where: g.team_id == ^team.id and g.profile == ^profile)
+
+    # The grant is what made those sessions allowed, and it is no longer there. They
+    # become read-only rather than erased: history is history, and a team losing a grant
+    # is not a reason to hide what it already did.
+    frozen = Sessions.read_only_for(team.id, profile)
+
+    if frozen > 0 do
+      Logger.info("troupe plane: #{frozen} session(s) of #{team.name} on #{profile} are now read-only")
+    end
+
     :ok
   end
 

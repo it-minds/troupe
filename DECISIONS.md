@@ -714,3 +714,23 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      servers are a property of that profile; asking four servers for their tool list at
      the start of every session would put somebody else's latency on the path of every
      create. A server that cannot be reached costs its tools and nothing else.
+
+125. **A bundle version is immutable and a session is pinned at creation.** A session
+     whose agent definitions changed underneath it would be a different session halfway
+     through. The only way a session's configuration ever moves is a deliberate upgrade at
+     activation, when the version it was pinned to has been retired — and that lands in
+     the log as `config_upgraded`, because the model is entitled to know its tools may
+     have changed.
+
+126. **Publishing announces rather than asks.** A publish that blocked on the slowest pod
+     in the fleet would make publishing a risk. Pods are told, and the mismatch between
+     the published hash and what a pod's heartbeat reports is what surfaces as a
+     condition — so a pod that was restarting is visible rather than silently behind.
+
+127. **Retiring a version is about what may be *started*, not what is running.**
+     Interrupting a running session to change its configuration is the thing versions
+     exist to prevent.
+
+128. **Losing a grant makes the team's sessions read-only, not erased.** History is
+     history, and a team losing a grant is not a reason to hide what it already did.
+     Reads keep working; nothing activates again.

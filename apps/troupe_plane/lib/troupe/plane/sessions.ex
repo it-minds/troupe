@@ -139,6 +139,30 @@ defmodule Troupe.Plane.Sessions do
     end
   end
 
+  @doc """
+  Make every session a team has on a profile read-only, because the grant is gone.
+
+  Reads still work — history is history, and a team losing a grant is not a reason to
+  hide what it already did — but nothing activates again. Active sessions are included:
+  the grant is what made them allowed, and it is no longer there.
+  """
+  @spec read_only_for(Ecto.UUID.t(), String.t()) :: non_neg_integer()
+  def read_only_for(team_id, profile) do
+    {count, _} =
+      Repo.update_all(
+        from(s in Session,
+          where: s.team_id == ^team_id and s.profile == ^profile and s.state in ["active", "dormant"]
+        ),
+        set: [state: "read_only", worker_id: nil, updated_at: DateTime.utc_now()]
+      )
+
+    count
+  end
+
+  @doc "Record which bundle version a session is pinned to."
+  @spec pin_bundle(String.t(), integer()) :: {:ok, Session.t()} | {:error, term()}
+  def pin_bundle(session_id, version), do: put_fields(session_id, %{bundle_version: version})
+
   @doc "Set a session's lifecycle state directly. Erasure is the only caller."
   @spec put_state(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
   def put_state(session_id, state), do: put_fields(session_id, %{state: state})

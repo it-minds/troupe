@@ -231,6 +231,8 @@ defmodule Troupe.Worker.Session.Manager do
         "pod" => System.get_env("HOSTNAME")
       })
 
+      record_upgrade(context.session_id, Keyword.get(opts, :bundle))
+
       {:ok,
        %{
          state
@@ -243,6 +245,22 @@ defmodule Troupe.Worker.Session.Manager do
            activated_at: System.system_time(:millisecond)
        }}
     end
+  end
+
+  # Only when the version it was pinned to has been retired. A session whose bundle did
+  # not move says nothing, because a `config_upgraded` on every activation would be noise
+  # that hid the one that mattered.
+  defp record_upgrade(_session_id, nil), do: :ok
+
+  defp record_upgrade(_session_id, %{upgraded_from: nil}), do: :ok
+
+  defp record_upgrade(session_id, bundle) do
+    Log.append(session_id, ["root"], :config_upgraded, %{
+      "channel" => bundle.channel,
+      "from" => bundle.upgraded_from,
+      "to" => bundle.version,
+      "hash" => bundle.hash
+    })
   end
 
   # Started before the tree, so that everything the tree appends on the way up is sealed

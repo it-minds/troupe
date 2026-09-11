@@ -236,7 +236,7 @@ defmodule Troupe.MCPTest do
   defp response(%{"id" => id}), do: reply(id, %{})
 
   defp reply(id, result), do: json(%{"jsonrpc" => "2.0", "id" => id, "result" => result})
-  defp error(id, message), do: json(%{"jsonrpc" => "2.0", "id" => id, "error" => %{"code" => -32000, "message" => message}})
+  defp error(id, message), do: json(%{"jsonrpc" => "2.0", "id" => id, "error" => %{"code" => -32_000, "message" => message}})
 
   defp json(payload) do
     body = Jason.encode!(payload)

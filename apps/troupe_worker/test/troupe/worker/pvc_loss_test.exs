@@ -81,7 +81,7 @@ defmodule Troupe.Worker.PvcLossTest do
     assert File.read!(Path.join([elsewhere, "workspace", "committed.md"])) == "sealed before the volume died"
 
     # And what was lost is exactly the unsealed tail — not a byte of anything sealed.
-    assert Enum.count(events, &(&1.type == "progress_note")) == 0
+    refute Enum.any?(events, &(&1.type == "progress_note"))
   end
 
   defp archived?(context) do
