@@ -42,6 +42,8 @@ defmodule Troupe.Agent.State do
           done_reason: atom() | nil,
           summary: String.t() | nil,
           finish_summary: String.t() | nil,
+          budget_ask_pending: boolean(),
+          budget_overridden: boolean(),
           started_at: integer() | nil,
           child_counters: %{optional(String.t()) => pos_integer()},
           watch_context: String.t() | nil,
@@ -60,6 +62,8 @@ defmodule Troupe.Agent.State do
             done_reason: nil,
             summary: nil,
             finish_summary: nil,
+            budget_ask_pending: false,
+            budget_overridden: false,
             started_at: nil,
             child_counters: %{},
             watch_context: nil,
@@ -140,6 +144,16 @@ defmodule Troupe.Agent.State do
 
   defp do_apply(s, :question_answered, %{call_id: id}) do
     update_call(s, id, fn c -> %{c | status: :pending} end)
+  end
+
+  defp do_apply(s, :budget_ask_started, _data), do: %{s | budget_ask_pending: true}
+
+  defp do_apply(s, :budget_ask_answered, %{decision: :deny}) do
+    %{s | budget_ask_pending: false}
+  end
+
+  defp do_apply(s, :budget_ask_answered, %{decision: _}) do
+    %{s | budget_ask_pending: false, budget_overridden: true}
   end
 
   defp do_apply(s, :delegation_started, %{call_id: id, child_path: child_path}) do

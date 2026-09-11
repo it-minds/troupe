@@ -304,6 +304,11 @@ defmodule Troupe.UI.TUI.Server do
   defp command_key(%Key{code: "tab"}, state),
     do: %{state | cmd_text: complete_command(state.cmd_text, state)}
 
+  # Shift-Enter inserts a newline rather than running: the box can hold multiline
+  # (typed or pasted) input, folded to a `<pasted N lines>` marker in the title.
+  defp command_key(%Key{code: "enter", modifiers: ["shift"]}, state),
+    do: %{state | cmd_text: state.cmd_text <> "\n"}
+
   defp command_key(%Key{code: "enter"}, %{cmd_text: ""} = state) do
     case Model.windows(state.model) do
       [] -> state
@@ -594,7 +599,7 @@ defmodule Troupe.UI.TUI.Server do
 
   # Paste into an open settings-edit field; if nothing is being edited, ignore it so
   # an accidental paste doesn't clobber the page.
-  defp paste_into_settings(%{settings: %{editing: text} = s} = state, content) when is_binary(text),
+  defp paste_into_settings(%{settings: %{editing: text}} = state, content) when is_binary(text),
     do: put_settings(state, editing: text <> content)
 
   defp paste_into_settings(state, _content), do: state
@@ -687,6 +692,11 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp window_key(%Key{code: "e"}, _path, %{win_text: ""} = state), do: toggle_expanded(state)
+
+  # Shift-Enter inserts a newline; the box can hold multiline (typed or pasted)
+  # input, folded to a `<pasted N lines>` marker in the title.
+  defp window_key(%Key{code: "enter", modifiers: ["shift"]}, _path, state),
+    do: %{state | win_text: state.win_text <> "\n"}
 
   defp window_key(%Key{code: "enter"}, path, %{win_text: text} = state) when text != "" do
     sid = state.session_id

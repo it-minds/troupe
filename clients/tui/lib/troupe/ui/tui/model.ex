@@ -240,9 +240,24 @@ defmodule Troupe.UI.TUI.Model do
 
         %{w | pending: pending}
 
-      t when t in [:approval_answered, :question_answered] ->
+      :budget_ask_started ->
+        pending =
+          w.pending ++
+            [
+              %{
+                kind: :budget,
+                call_id: d.call_id,
+                agent_path: path
+              }
+            ]
+
+        %{w | pending: pending}
+
+      :budget_ask_answered ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
 
+      t when t in [:approval_answered, :question_answered] ->
+        %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
       :branch_state ->
         case d.state do
           :done_unread ->
@@ -999,6 +1014,12 @@ defmodule Troupe.UI.TUI.Model do
               {:blank, ""},
               {:pending, "#{who}QUESTION: #{q}"},
               {:system, "type your answer and press Enter"}
+            ]
+
+          %{kind: :budget} ->
+            [
+              {:blank, ""},
+              {:pending, "#{who}BUDGET EXHAUSTED: continue anyway? (y yes / n stop / a always)"}
             ]
         end
       end)

@@ -505,6 +505,7 @@ defmodule Troupe.TUIWorktreeCompletionTest do
 
   test "bracketed paste inserts into the command line, a window input, and a settings field" do
     ws = tmp_workspace()
+
     scripts = %{
       "code-1" => [
         {:tool, "ask_user", %{"question" => "What do you want?"}},
@@ -542,5 +543,36 @@ defmodule Troupe.TUIWorktreeCompletionTest do
 
     [answered] = events_of(sid, "code-1", :question_answered)
     assert answered.data.text == "a multi-\nline answer"
+  end
+
+  test "shift-enter inserts a newline; a multiline window input shows a pasted marker and sends whole" do
+    ws = tmp_workspace()
+    scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => "Tell me?"}}, {:finish, "ok"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    # Command line: shift-enter inserts a newline; the marker appears.
+    press(pid, "enter", ["shift"])
+    press(pid, "w")
+    assert user_state(pid).cmd_text == "\nw"
+    assert user_state(pid).focus == :command
+    text = screen_text(pid, session)
+    assert text =~ "pasted 1 line"
+    press(pid, "esc")
+
+    # Window input: type, split with shift-enter, marker shows, Enter sends the whole text.
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me something")
+    await_state("code-1", :needs_input)
+    press(pid, "1")
+    type(pid, "answer")
+    press(pid, "enter", ["shift"])
+    type(pid, "two")
+    assert user_state(pid).win_text == "answer\ntwo"
+    assert screen_text(pid, session) =~ "pasted 2 lines"
+
+    press(pid, "enter")
+    await_state("code-1", :done_unread)
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "answer\ntwo"
   end
 end

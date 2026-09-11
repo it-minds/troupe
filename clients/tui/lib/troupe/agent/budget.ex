@@ -16,10 +16,10 @@ defmodule Troupe.Agent.Budget do
           max_wall_clock_ms: pos_integer()
         }
 
-  defstruct max_turns: 50,
-            max_input_tokens: 2_000_000,
-            max_output_tokens: 200_000,
-            max_wall_clock_ms: 3_600_000
+  defstruct max_turns: 150,
+            max_input_tokens: 6_000_000,
+            max_output_tokens: 600_000,
+            max_wall_clock_ms: 10_800_000
 
   @spec from_definition(Definition.t(), map() | keyword()) :: t()
   def from_definition(%Definition{} = def, overrides \\ %{}) do

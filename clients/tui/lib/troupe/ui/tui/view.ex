@@ -797,11 +797,19 @@ defmodule Troupe.UI.TUI.View do
     {text, title} =
       case state.focus do
         :command ->
-          {"/" <> state.cmd_text <> "▏", " command "}
+          cmd = "/" <> state.cmd_text <> "▏"
+          title = if multiline?(state.cmd_text), do: pasted_title(state.cmd_text), else: " command "
+          {cmd, title}
 
         {:window, path} ->
           target = if state.pane.agent in [nil, path], do: "", else: " to the branch root"
-          {state.win_text <> "▏", " → #{path} (Enter sends#{target}, Esc back) "}
+
+          title =
+            if multiline?(state.win_text),
+              do: pasted_title(state.win_text),
+              else: " → #{path} (Enter sends#{target}, Esc back) "
+
+          {state.win_text <> "▏", title}
 
         :settings ->
           settings_command_line(state)
@@ -820,5 +828,16 @@ defmodule Troupe.UI.TUI.View do
          border_style: %Style{fg: if(focused_cmd?, do: :white, else: :dark_gray)}
        }
      }, rect}
+  end
+
+  @doc false
+  @spec multiline?(String.t()) :: boolean()
+  def multiline?(text), do: String.contains?(text, "\n")
+
+  @doc false
+  @spec pasted_title(String.t()) :: String.t()
+  def pasted_title(text) do
+    lines = text |> String.split("\n") |> Enum.count(&(&1 != "")) |> max(1)
+    " pasted #{lines} lines — Enter sends, Shift-Enter newline, Esc clears "
   end
 end

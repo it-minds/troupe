@@ -14,6 +14,7 @@ defmodule Troupe.Session.Approvals do
     pending: %{},
     monitors: %{},
     session_allowed: MapSet.new(),
+    budget_overridden: false,
     auto_approve: false
   ]
 
@@ -21,7 +22,14 @@ defmodule Troupe.Session.Approvals do
     GenServer.start_link(__MODULE__, opts, name: Session.via(sid, :approvals))
   end
 
-  @spec register(String.t(), String.t(), pid(), String.t(), :approval | :question, map()) :: :ok
+  @spec register(
+          String.t(),
+          String.t(),
+          pid(),
+          String.t(),
+          :approval | :question | :budget,
+          map()
+        ) :: :ok
   def register(sid, call_id, agent_pid, agent_path, kind, payload) do
     GenServer.call(
       Session.via(sid, :approvals),
@@ -34,7 +42,6 @@ defmodule Troupe.Session.Approvals do
   def answer(sid, call_id, decision) do
     GenServer.call(Session.via(sid, :approvals), {:answer, call_id, decision})
   end
-
   @spec pending(String.t()) :: [map()]
   def pending(sid), do: GenServer.call(Session.via(sid, :approvals), :pending)
 
@@ -46,6 +53,11 @@ defmodule Troupe.Session.Approvals do
   @spec set_auto_approve(String.t(), boolean()) :: :ok
   def set_auto_approve(sid, value) when is_boolean(value),
     do: GenServer.call(Session.via(sid, :approvals), {:auto_approve, value})
+
+  @doc "Whether the user chose to override the budget for this session."
+  @spec budget_overridden?(String.t()) :: boolean()
+  def budget_overridden?(sid),
+    do: GenServer.call(Session.via(sid, :approvals), :budget_overridden?)
 
   ## Server
 
@@ -90,6 +102,9 @@ defmodule Troupe.Session.Approvals do
 
   def handle_call(:pending, _from, state), do: {:reply, Map.values(state.pending), state}
 
+  def handle_call(:budget_overridden?, _from, state),
+    do: {:reply, state.budget_overridden, state}
+
   def handle_call({:allowed?, tool}, _from, state) do
     {:reply, state.auto_approve or MapSet.member?(state.session_allowed, tool), state}
   end
@@ -119,6 +134,21 @@ defmodule Troupe.Session.Approvals do
     send(entry.agent_pid, {:approval, entry.call_id, :allow})
     tool = Map.get(entry.payload, :name)
     %{state | session_allowed: MapSet.put(state.session_allowed, tool)}
+  end
+
+  defp forward(%{kind: :budget} = entry, :allow_session, state) do
+    send(entry.agent_pid, {:budget_answer, entry.call_id, :always})
+    %{state | budget_overridden: true}
+  end
+
+  defp forward(%{kind: :budget} = entry, :allow, state) do
+    send(entry.agent_pid, {:budget_answer, entry.call_id, :allow})
+    state
+  end
+
+  defp forward(%{kind: :budget} = entry, :deny, state) do
+    send(entry.agent_pid, {:budget_answer, entry.call_id, :deny})
+    state
   end
 
   defp forward(%{kind: :approval} = entry, decision, state) when decision in [:allow, :deny] do

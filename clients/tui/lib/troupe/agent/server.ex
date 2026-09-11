@@ -127,6 +127,9 @@ defmodule Troupe.Agent.Server do
     st = data.state
 
     cond do
+      st.budget_ask_pending ->
+        resume_budget_ask(data)
+
       st.current_calls != [] and not State.turn_complete?(st) -> resume_acting(data)
       State.needs_llm?(st) -> start_turn(data)
       true -> :keep_state_and_data
@@ -264,6 +267,26 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  def handle_event(:info, {:budget_answer, call_id, decision}, :acting, data)
+      when decision in [:allow, :deny, :always] do
+    case data.state.budget_ask_pending do
+      true ->
+        data = log(data, :budget_ask_answered, %{call_id: call_id, decision: decision})
+
+        case decision do
+          :deny ->
+            data = log(data, :branch_state, %{state: :running})
+            finish(data, :budget_exhausted, data.state.finish_summary)
+
+          _ ->
+            {:next_state, :idle, data, [{:next_event, :internal, :start_turn}]}
+        end
+
+      false ->
+        :keep_state_and_data
+    end
+  end
+
   def handle_event(:info, {:child_result, ref, result}, :acting, %Data{children: children} = data)
       when is_map_key(children, ref) do
     {child, data} = child_finished(data, ref)
@@ -324,6 +347,7 @@ defmodule Troupe.Agent.Server do
   def handle_event(:info, {:child_result, _, _}, _state, _data), do: :keep_state_and_data
   def handle_event(:info, {:approval, _, _}, _state, _data), do: :keep_state_and_data
   def handle_event(:info, {:answer, _, _}, _state, _data), do: :keep_state_and_data
+  def handle_event(:info, {:budget_answer, _, _}, _state, _data), do: :keep_state_and_data
 
   def handle_event(:info, msg, state, data) do
     Logger.warning(
@@ -349,17 +373,62 @@ defmodule Troupe.Agent.Server do
   defp start_turn(%Data{} = data) do
     st = data.state
 
-    if Budget.exhausted?(data.spec.budget, st.usage, State.elapsed_ms(st)) do
-      finish(
-        data,
-        :budget_exhausted,
-        st.finish_summary || "Budget exhausted before the task was finished."
-      )
-    else
-      request = Prompt.request(st, data.survey, data.brief)
-      data = spawn_stream(data, request, :turn)
-      {:next_state, :thinking, data}
+    cond do
+      not Budget.exhausted?(data.spec.budget, st.usage, State.elapsed_ms(st)) ->
+        launch_turn(data)
+
+      Approvals.budget_overridden?(data.spec.session_id) ->
+        launch_turn(data)
+
+      st.budget_ask_pending ->
+        # A budget question is already outstanding; wait for the user's answer.
+        {:next_state, :acting, data}
+
+      true ->
+        ask_budget(data)
     end
+  end
+
+  defp launch_turn(%Data{} = data) do
+    request = Prompt.request(data.state, data.survey, data.brief)
+    data = spawn_stream(data, request, :turn)
+    {:next_state, :thinking, data}
+  end
+
+  defp ask_budget(%Data{} = data) do
+    call_id = "budget-#{System.unique_integer([:positive])}"
+
+    :ok =
+      Approvals.register(
+        data.spec.session_id,
+        call_id,
+        self(),
+        data.spec.agent_path,
+        :budget,
+        %{}
+      )
+
+    data = log(data, :budget_ask_started, %{call_id: call_id})
+    data = log(data, :branch_state, %{state: :needs_input})
+    {:next_state, :acting, data}
+  end
+
+  # Re-registers an outstanding budget question after a restart.
+  defp resume_budget_ask(%Data{} = data) do
+    call_id = "budget-#{System.unique_integer([:positive])}"
+
+    :ok =
+      Approvals.register(
+        data.spec.session_id,
+        call_id,
+        self(),
+        data.spec.agent_path,
+        :budget,
+        %{}
+      )
+
+    data = log(data, :budget_ask_started, %{call_id: call_id})
+    {:next_state, :acting, data}
   end
 
   defp continue_turn(%Data{} = data) do
