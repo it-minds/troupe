@@ -13,9 +13,11 @@ defmodule Troupe.Worker.Plane.Commands do
 
   alias Troupe.Protocol.Error
   alias Troupe.Worker.Auth
+  alias Troupe.Worker.ObjectStore
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.Session.{Manager, Sealer, Workspace}
   alias Troupe.Worker.Sessions
+  alias Troupe.Worker.Storage
 
   require Logger
 
@@ -121,6 +123,30 @@ defmodule Troupe.Worker.Plane.Commands do
     end)
   end
 
+  # The key first, then the objects. Once the key is gone nothing under the session's
+  # prefix decrypts — not the current objects, not the prior versions a versioned bucket
+  # keeps, not a copy in a backup — so the deletion that follows is tidiness rather than
+  # the security property.
+  defp dispatch("session.erase", params) do
+    session_id = params["session_id"]
+    team = params["team"]
+
+    # Anything still running for this session stops first, so nothing writes a new
+    # segment behind the erasure.
+    Sessions.fence(session_id, 1_000_000_000)
+
+    key = destroy_key(team, session_id)
+    objects = erase_objects(session_id)
+
+    {:ok,
+     %{
+       "session_id" => session_id,
+       "key_destroyed" => key,
+       "objects_deleted" => objects,
+       "pod" => System.get_env("HOSTNAME")
+     }}
+  end
+
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
@@ -168,6 +194,30 @@ defmodule Troupe.Worker.Plane.Commands do
     :troupe_worker
     |> Application.get_env(:session_defaults, [])
     |> Keyword.put_new_lazy(:report, &reporter/0)
+  end
+
+  defp destroy_key(nil, _session_id), do: false
+
+  defp destroy_key(team, session_id) do
+    case Troupe.KMS.adapter().destroy(team, session_id, []) do
+      :ok ->
+        true
+
+      {:error, reason} ->
+        Logger.error("troupe worker: could not destroy the key for #{session_id}: #{inspect(reason)}")
+        false
+    end
+  end
+
+  defp erase_objects(session_id) do
+    store = Keyword.get_lazy(defaults(), :store, &ObjectStore.from_env/0)
+
+    case Storage.erase(store, session_id) do
+      {:ok, count} -> count
+      {:error, reason} ->
+        Logger.error("troupe worker: could not erase objects for #{session_id}: #{inspect(reason)}")
+        0
+    end
   end
 
   # A pod with no auth server is one running without a plane at all — a test, or a

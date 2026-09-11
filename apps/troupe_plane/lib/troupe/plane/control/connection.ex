@@ -16,7 +16,7 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.Control.Connections
-  alias Troupe.Plane.{Enrolment, Fleet, Placement, Sessions, TeamBudget}
+  alias Troupe.Plane.{Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget}
   alias Troupe.Protocol.{Error, JSONRPC}
 
   require Logger
@@ -158,7 +158,19 @@ defmodule Troupe.Plane.Control.Connection do
           "troupe plane: #{worker.namespace}/#{worker.pod_name} enrolled as #{worker.profile}"
         )
 
-        write(state, {:result, id, %{"profile" => worker.profile, "worker_id" => worker.id}})
+        # Erasures this pod missed go out with the enrolment answer. It applies them
+        # before it serves anything: a pod holding an encrypted cache of a session that
+        # no longer exists must not answer a single read from it.
+        write(
+          state,
+          {:result, id,
+           %{
+             "profile" => worker.profile,
+             "worker_id" => worker.id,
+             "pending_erasures" => Erasure.pending_for(worker.profile, worker.pod_name)
+           }}
+        )
+
         {:ok, %{state | worker: worker, identity: identity}}
 
       {:error, reason} ->
@@ -259,6 +271,12 @@ defmodule Troupe.Plane.Control.Connection do
     })
 
     Placement.release(state.worker.profile, session_id)
+    {:ok, %{"ok" => true}, state}
+  end
+
+  # A pod confirming it has carried an erasure out on its own disk.
+  defp dispatch("session.erased", params, state) do
+    Erasure.applied(params["session_id"], state.worker.pod_name)
     {:ok, %{"ok" => true}, state}
   end
 

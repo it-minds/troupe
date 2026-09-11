@@ -491,3 +491,39 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     next command is refused and the connection closes, and a connection that sends
     nothing is closed shortly after `exp` anyway rather than streaming events on a token
     that has run out.
+
+85. **The session row is written before capacity is reserved.** Reserving *places* the
+    session, and a placement is a conditional write against the row rather than a note
+    in a process — which is what makes it survive the replica that made it. A create that
+    fails after the row exists deletes it: a session that never started is not a session,
+    and leaving it would put a phantom in everybody's listing. A session that ever ran is
+    erased rather than deleted, because a tombstone is the record that it existed.
+
+86. **Only the winner of the epoch bump places the session.** Six clients activating the
+    same dormant session all read "dormant"; the conditional update decides between them.
+    If every caller then reserved capacity, one session would spend six slots. The losers
+    wait for the winner's placement and are handed the same tree.
+
+87. **A session nobody may see is `not_found`, not `forbidden`.** Whether a session
+    exists is itself something a person who cannot see it should not learn.
+
+88. **A user in two teams that both grant the profile is asked which.** The answer decides
+    whose budget pays and whose volume is mounted, and guessing would be a billing
+    decision made by a default.
+
+89. **Erasure destroys the key first and deletes the objects second.** Once the key is
+    gone nothing under the prefix decrypts, so the deletion is tidiness rather than the
+    security property. The other order leaves a window where the ciphertext is gone and
+    the key is not — which protects nobody — and a failure halfway would leave readable
+    data behind.
+
+90. **The plane drives erasure but does not perform it.** It holds no credential that can
+    read a session key and none for object storage. A pod of the profile has both, so the
+    plane asks one and records which pods have complied; a pod that was offline applies
+    the erasure on enrol, before serving anything. That is the Forbidden list working as
+    intended: the component that decides *whether* to erase is not the component that can
+    read what it is erasing.
+
+91. **A tombstone keeps the final head hash.** It is the last link of the audit chain, and
+    an erasure that also erased the proof that the session existed would be
+    indistinguishable from a session tampered out of the index.

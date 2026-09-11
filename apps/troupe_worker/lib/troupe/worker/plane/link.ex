@@ -217,6 +217,7 @@ defmodule Troupe.Worker.Plane.Link do
             # Every token for this pod carries its worker id as the audience, so nothing
             # can be verified until the plane has said what that id is.
             announce_identity(result)
+            apply_pending_erasures(result)
 
             %{state | status: :enrolled, profile: result["profile"], worker_id: result["worker_id"]}
             |> reset_backoff()
@@ -281,6 +282,20 @@ defmodule Troupe.Worker.Plane.Link do
   end
 
   defp announce_identity(_result), do: :ok
+
+  # Before anything else this pod does. A cache of a session that has been erased is
+  # exactly the residue erasure exists to remove, and serving one read from it would
+  # undo the whole thing.
+  defp apply_pending_erasures(result) do
+    pending = Map.get(result, "pending_erasures") || []
+
+    Enum.each(pending, fn erasure ->
+      Commands.handle("session.erase", erasure)
+      report(self(), %{"type" => "session.erased", "session_id" => erasure["session_id"]})
+    end)
+
+    if pending != [], do: Logger.info("troupe worker: applied #{length(pending)} pending erasure(s)")
+  end
 
   defp activate_socket(state) do
     :ok = :inet.setopts(state.socket, active: :once)

@@ -372,7 +372,123 @@ Leadership is a Kubernetes `Lease`. Only the leader reconciles.
 
 ---
 
-## 8. Stages 3–4
+## 8. The plane
+
+The plane decides *what* may happen and *where*; it never sees what happens. Two
+surfaces and one rule: no session content crosses either of them.
+
+### 8.1 The control channel
+
+Workers dial the plane's internal listener — never exposed through ingress — presenting
+the projected ServiceAccount token mounted into the pod. The plane validates it with a
+`TokenReview`, and the **namespace decides the profile**, so a pod can only enrol as
+what it is. Nothing the worker says about itself is trusted for that.
+
+Over the channel: heartbeats, the session *index* (ids, epochs, sequence numbers, head
+hashes, byte counts), usage records, and pushes the other way — activate, dormant,
+fence, drain, erase, JWKS rotation, ACL changes. Every push is idempotent, because a
+reconnect retries without knowing what landed.
+
+A pod is attached to exactly one replica, and rarely the one a harness reached, so
+pushes are *routed*: try locally, otherwise ask the other replicas, each of which
+answers with a single registry lookup.
+
+### 8.2 The harness API
+
+`me`, `teams.list`, `profiles.list`, `sessions.list`, `session.get`, `session.create`,
+`session.open`, `session.pin`, `session.erase`, `token.mint`. A fleet API: it lists what
+you may use and hands you an endpoint and a token for a pod. Detail streams go straight
+to the worker, which is what keeps the plane out of the data path of a live session.
+
+`session.create` is a sequence of reservations, each of which must be given back if a
+later one fails:
+
+    row -> capacity (Placement) -> budget (TeamBudget) -> push to the pod -> token
+
+The row comes first because reserving capacity *places* the session, and a placement is
+a conditional write against the row rather than a note in a process — which is what
+makes it survive the replica that made it.
+
+`session.open` in `read` mode never activates: a session that woke up because somebody
+looked at it would never stay dormant. In `activate` mode the conditional epoch bump is
+the decision — exactly one caller wins it, places the session and pushes it to a pod,
+and the others wait for that and are handed the same tree.
+
+### 8.3 Tokens
+
+JWTs assembled by the plane and signed through OpenBao's transit engine, so the plane
+holds no signing key and cannot export one. ES256 over P-256; `kid` is the key's RFC
+7638 thumbprint, so the plane and the workers agree on it with nothing kept in step.
+
+`aud` is **the pod's worker id**. A profile has many pods, and an audience naming the
+profile would make them interchangeable — which is exactly what a leaked token wants.
+Workers verify offline against a cached JWKS, warn with `auth.expiring` two minutes
+out, and accept `auth.refresh` on the connection that is already open.
+
+The role in a token is a claim about the moment it was minted. Access is checked *again*
+on every command against the ACL mirror the plane pushes, so a revoked collaborator is
+refused on their next command even though their token still verifies.
+
+---
+
+## 9. A worker pod
+
+### 9.1 One process per active session, none per dormant one
+
+A pod is expected to be responsible for tens of thousands of sessions with almost all
+of them asleep, so dormancy stops the session's manager rather than parking it.
+Everything a dormant session *is* lives in object storage, and activation is the only
+path back — which is also what makes relocation and PVC loss the same operation, since
+neither has anything local to start from.
+
+Within a pod, the manager is where serialisation comes from: two clients activating the
+same session reach the same registered process, and the second gets the tree the first
+started.
+
+### 9.2 Sealing
+
+A sealer per active session subscribes to its events, keeps the durable ones, and seals
+a segment at every turn completion and at least every sixty seconds while anything is
+pending. That interval is the whole durability promise: losing a pod's disk costs the
+unsealed tail and nothing more.
+
+Upload, *then* report. A segment the plane has been told about but that is not in
+storage would let a rebuild claim history it cannot produce; a segment in storage the
+plane has not heard of is merely un-anchored, and the next report fixes it. If the plane
+is unreachable, sealing carries on and the reports queue.
+
+### 9.3 Dormancy and fencing
+
+Dormancy is: record it, seal, stop the tree, archive the workspace, upload, report,
+erase. Erasing comes last and covers both the workspace *and* the local event log —
+both are plaintext session content on a PVC, and by then every byte of them is in object
+storage under a key the plane cannot read.
+
+Epochs are minted by the plane alone. A pod whose epoch has been passed refuses to
+activate at all — checked against the plaintext manifest, before anything is decrypted —
+and a running session that is fenced kills its sealer, stops, and discards its cache.
+
+### 9.4 The harness listener
+
+The same gateway code the local daemon runs, with a third endpoint kind. A Unix socket
+authenticates by its permissions, a loopback TCP endpoint by a token in a user-only
+file, and a pod by a signed token whose audience names it — so the endpoint carries an
+authenticator and a guard, and there is one protocol implementation rather than two that
+drift.
+
+### 9.5 Erasure
+
+The plane drives it and does not do it. It holds no credential that can read a session
+key and none for object storage; a pod of the session's profile has both, so the plane
+asks one. The key is destroyed **first**: once it is gone nothing under the session's
+prefix decrypts — not the current objects, not the prior versions a versioned bucket
+keeps, not a copy in a backup — so the deletion that follows is tidiness rather than the
+security property. A pod that was offline when an erasure ran applies it on enrol,
+before serving anything.
+
+---
+
+## 10. Stages 3–4
 
 * **Stage 3 — admin panel and self-service.** The plane grows a LiveView panel whose
   every action goes through `Plane.Admin`, the same context the admin JSON-RPC and the

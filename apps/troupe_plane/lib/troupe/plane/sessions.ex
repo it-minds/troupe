@@ -124,6 +124,48 @@ defmodule Troupe.Plane.Sessions do
   @spec read_only(String.t()) :: {:ok, Session.t()} | {:error, term()}
   def read_only(session_id), do: put_fields(session_id, %{state: "read_only", worker_id: nil})
 
+  @doc "Set a session's lifecycle state directly. Erasure is the only caller."
+  @spec put_state(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def put_state(session_id, state), do: put_fields(session_id, %{state: state})
+
+  @doc """
+  Pin a session, exempting it from retention, or unpin it.
+
+  Recorded with who did it and when, because a pin is a decision somebody made about
+  somebody else's storage bill and a team admin is entitled to see whose.
+  """
+  @spec pin(String.t(), boolean(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def pin(session_id, pinned?, actor) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        attrs =
+          if pinned? do
+            %{pinned: true, pinned_by: actor, pinned_at: DateTime.utc_now()}
+          else
+            %{pinned: false}
+          end
+
+        session |> Session.changeset(attrs) |> Repo.update()
+    end
+  end
+
+  @doc """
+  Remove a session row outright.
+
+  Only for unwinding a `session.create` that did not complete: a row whose placement or
+  budget was refused was never a session, and leaving it behind would put a phantom in
+  everybody's listing. A session that ever ran is erased, not deleted, because a
+  tombstone is the record that it existed.
+  """
+  @spec delete(String.t()) :: :ok
+  def delete(session_id) do
+    Repo.delete_all(from s in Session, where: s.id == ^session_id)
+    :ok
+  end
+
   @doc "Record a sealed segment: the index's view of how far a session has got."
   @spec seal(String.t(), map()) :: {:ok, Session.t()} | {:error, term()}
   def seal(session_id, attrs) do
