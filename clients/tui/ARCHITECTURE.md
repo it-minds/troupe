@@ -328,6 +328,41 @@ Like the survey, the brief is derived and never authoritative: it is not an
 event, replay ignores it, and `list_files`/`grep`/`read_file` remain the truth
 about current contents.
 
+## 4.8 Model catalog
+
+What a provider says about its own models — context window, output cap, price —
+cached in `models.json` in the config dir, keyed by the addressable id
+(`portal/glm-5.2`, or a bare id for the session-wide provider), which is exactly
+what `models.default` takes.
+
+`Troupe.LLM.Catalog` is the pure format module: `parse/2` for the three shapes
+that exist, `describe_price/1`, `cost/2`, and the cache-file mapping. It never
+touches disk or the network.
+
+  * `:anthropic` — `GET /v1/models` reports `max_input_tokens` and `max_tokens`.
+    There is no pricing endpoint, so those entries carry no price.
+  * `:litellm` — a LiteLLM proxy's `GET /model_group/info` reports windows *and*
+    per-token cost, keyed by model group, which is the name callers address.
+    The one source that has prices.
+  * `:openai` — a plain `GET /v1/models` reports ids, and windows if the server
+    volunteers them (LiteLLM does; vanilla servers do not).
+
+`Catalog.Store` fetches and owns the file. Refreshing is explicit — `troupe
+models --refresh` — and `Config.load/2` only ever *reads* the cache, so starting
+a session never blocks on a provider being reachable and works offline. A
+refresh asks every provider that has a key and records the ones that answered,
+so one unreachable gateway does not lose the rest.
+
+Precedence is config first: a `windows:` entry written by hand wins over the
+catalog, which wins over `default_window`. The catalog fills gaps, supplies the
+prices config has no way to state, and contributes models nobody declared.
+`troupe models` flags a hand-written window the provider now contradicts rather
+than silently overruling it either way.
+
+`cost/2` prices the four disjoint token classes of §4.5 separately — a cache
+read is a fraction of fresh input and a cache write a premium on it — falling
+back to the input rate for providers that quote no cache rates.
+
 ## 5. Tools
 
 `Troupe.Tool` behaviour: `name/0`, `description/0`, `schema/0`,

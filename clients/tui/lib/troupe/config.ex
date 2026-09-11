@@ -33,7 +33,8 @@ defmodule Troupe.Config do
           default_window: pos_integer(),
           fake_script: String.t() | nil,
           providers: %{optional(String.t()) => provider()},
-          models_explicit?: boolean()
+          models_explicit?: boolean(),
+          catalog: %{optional(String.t()) => Troupe.LLM.Catalog.t()}
         }
 
   @typedoc "A named provider, addressable as `<name>/<model>` in model aliases."
@@ -65,7 +66,8 @@ defmodule Troupe.Config do
             default_window: 200_000,
             fake_script: nil,
             providers: %{},
-            models_explicit?: false
+            models_explicit?: false,
+            catalog: %{}
 
   @spec load(String.t(), map() | keyword()) :: t()
   def load(workspace, overrides \\ %{}) do
@@ -79,7 +81,13 @@ defmodule Troupe.Config do
     |> apply_env()
     |> apply_overrides(Map.new(overrides))
     |> apply_opencode()
+    |> apply_catalog()
   end
+
+  # The catalog is read from its cache file and never fetched here: loading a
+  # config must not depend on a provider being reachable (Decision 60).
+  defp apply_catalog(%__MODULE__{} = cfg),
+    do: %{cfg | catalog: Troupe.LLM.Catalog.Store.load()}
 
   # Without a key of its own, Troupe reuses opencode's providers (Decision 34).
   defp apply_opencode(%__MODULE__{} = cfg) do
@@ -144,6 +152,7 @@ defmodule Troupe.Config do
           provider: String.t() | nil,
           model: String.t() | nil,
           context: pos_integer() | nil,
+          price: String.t() | nil,
           source: atom(),
           key?: boolean()
         }
@@ -193,12 +202,69 @@ defmodule Troupe.Config do
       end)
 
     (from_providers ++ bare ++ current)
+    |> Enum.map(&enrich(&1, cfg.catalog))
+    |> Kernel.++(catalog_only(cfg))
     |> Enum.sort_by(&{&1.provider || "", &1.model || ""})
     |> Enum.uniq_by(& &1.id)
   end
 
-  defp choice(id, provider, model, context, source, key?),
-    do: %{id: id, provider: provider, model: model, context: context, source: source, key?: key?}
+  # A configured model keeps the window its config declares — the catalog fills
+  # the gap when it declares none, and always supplies the price, which config
+  # has no way to state.
+  defp enrich(choice, catalog) do
+    case Map.fetch(catalog, choice.id) do
+      {:ok, entry} ->
+        %{
+          choice
+          | context: choice.context || entry.context,
+            price: Troupe.LLM.Catalog.describe_price(entry)
+        }
+
+      :error ->
+        choice
+    end
+  end
+
+  defp catalog_only(%__MODULE__{} = cfg) do
+    configured = MapSet.new(cfg.catalog, fn {id, _} -> id end)
+
+    known =
+      cfg.providers
+      |> Enum.flat_map(fn {n, p} -> Enum.map(p.windows, &(n <> "/" <> elem(&1, 0))) end)
+
+    session_key? = cfg.api_key not in [nil, ""]
+
+    configured
+    |> MapSet.to_list()
+    |> Kernel.--(known ++ Map.keys(cfg.models.windows))
+    |> Enum.map(fn id ->
+      entry = Map.fetch!(cfg.catalog, id)
+      {provider, model} = split_model(cfg, id)
+      name = if provider, do: id |> String.split("/", parts: 2) |> hd()
+
+      %{
+        id: id,
+        provider: name,
+        model: model,
+        context: entry.context,
+        price: Troupe.LLM.Catalog.describe_price(entry),
+        source: :catalog,
+        key?: (provider && provider.api_key not in [nil, ""]) || session_key?
+      }
+    end)
+  end
+
+  defp choice(id, provider, model, context, source, key?) do
+    %{
+      id: id,
+      provider: provider,
+      model: model,
+      context: context,
+      price: nil,
+      source: source,
+      key?: key?
+    }
+  end
 
   @doc """
   How a model reads in a menu: its context window, where it came from, and
@@ -208,9 +274,10 @@ defmodule Troupe.Config do
   @spec describe_model(model_choice(), :long | :short | :minimal) :: String.t()
   def describe_model(model, form \\ :long)
 
-  def describe_model(%{context: context, source: source, key?: key?}, form) do
+  def describe_model(%{context: context, source: source, key?: key?} = model, form) do
     [
       context && "#{div(context, 1000)}k" <> if(form == :minimal, do: "", else: " ctx"),
+      form != :minimal && Map.get(model, :price),
       form == :long && to_string(source),
       if(key?, do: nil, else: "no key")
     ]
@@ -262,6 +329,64 @@ defmodule Troupe.Config do
     end
   end
 
+  @doc """
+  Every model Troupe can address, with the window and price the provider last
+  reported, for `troupe models`. A model with no price is not free — it is a
+  provider that does not publish one (Anthropic has no pricing endpoint; a
+  plain OpenAI-compatible server has none either).
+  """
+  @spec describe_catalog(t()) :: String.t()
+  def describe_catalog(%__MODULE__{} = cfg) do
+    rows =
+      case models(cfg) do
+        [] ->
+          "  (none detected; set models.default or configure a provider)"
+
+        list ->
+          Enum.map_join(list, "\n", fn m ->
+            in_use =
+              cond do
+                m.id == cfg.models.default -> "  <- default"
+                m.id == cfg.models.cheap -> "  <- cheap"
+                true -> ""
+              end
+
+            "  " <>
+              String.pad_trailing(m.id, 40) <>
+              String.pad_trailing(if(m.context, do: "#{div(m.context, 1000)}k", else: "-"), 8) <>
+              String.pad_trailing(m.price || "-", 18) <>
+              String.pad_trailing(to_string(m.source), 10) <>
+              String.pad_trailing(if(m.key?, do: "", else: "no key"), 8) <>
+              disagreement(cfg, m) <> in_use
+          end)
+      end
+
+    fetched =
+      case Troupe.LLM.Catalog.Store.fetched_at() do
+        nil -> "never fetched — run `troupe models --refresh`"
+        at -> "fetched #{at}"
+      end
+
+    """
+    #{String.pad_trailing("  model", 42)}#{String.pad_trailing("ctx", 8)}#{String.pad_trailing("$in/$out per Mtok", 18)}source
+    #{rows}
+    catalog: #{Troupe.LLM.Catalog.Store.path()} (#{fetched})
+    """
+  end
+
+  # A window written by hand that the provider now contradicts. Config still
+  # wins — it is the user's declaration — but silently planning compaction
+  # against a window 156k smaller than the real one is worth a word.
+  defp disagreement(%__MODULE__{} = cfg, %{id: id, context: context}) do
+    case catalog_entry(cfg, id) do
+      %Troupe.LLM.Catalog{context: actual} when is_integer(actual) and actual != context ->
+        "provider says #{div(actual, 1000)}k"
+
+      _ ->
+        ""
+    end
+  end
+
   defp mask(nil), do: "(none)"
   defp mask(""), do: "(empty)"
   defp mask(key) when byte_size(key) <= 8, do: "****"
@@ -284,16 +409,35 @@ defmodule Troupe.Config do
 
   def resolve_model(%__MODULE__{}, model) when is_binary(model), do: model
 
+  @doc """
+  The window to plan compaction against: what config declares for this model,
+  else what the provider said about itself the last time the catalog was
+  refreshed, else `default_window`.
+  """
   @spec context_window(t(), String.t()) :: pos_integer()
   def context_window(%__MODULE__{} = cfg, model) do
-    case split_model(cfg, model) do
-      {%{windows: windows}, bare} ->
-        Map.get(windows, bare) || Map.get(cfg.models.windows, model, cfg.default_window)
+    declared =
+      case split_model(cfg, model) do
+        {%{windows: windows}, bare} -> Map.get(windows, bare) || Map.get(cfg.models.windows, model)
+        {nil, _} -> Map.get(cfg.models.windows, model)
+      end
 
-      {nil, _} ->
-        Map.get(cfg.models.windows, model, cfg.default_window)
+    declared || catalog_window(cfg, model) || cfg.default_window
+  end
+
+  defp catalog_window(%__MODULE__{} = cfg, model) do
+    case Map.fetch(cfg.catalog, model) do
+      {:ok, %Troupe.LLM.Catalog{context: context}} -> context
+      :error -> nil
     end
   end
+
+  @doc """
+  What the catalog knows about one model, or `nil`. The prices in it are the
+  provider's own; nothing in Troupe maintains a price table.
+  """
+  @spec catalog_entry(t(), String.t()) :: Troupe.LLM.Catalog.t() | nil
+  def catalog_entry(%__MODULE__{} = cfg, model), do: Map.get(cfg.catalog, model)
 
   defp read_yaml(path) do
     case File.exists?(path) && YamlElixir.read_from_file(path) do

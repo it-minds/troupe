@@ -7,6 +7,28 @@ defmodule Troupe.LLM.HTTP do
 
   alias Troupe.LLM.SSE
 
+  @doc """
+  GETs JSON. Used by the model catalog, which is a request-response call and
+  not a stream. Returns `{:error, reason}` for every failure — a provider that
+  will not describe its models is not a reason to take a session down.
+  """
+  @spec get_json(String.t(), list()) :: {:ok, map()} | {:error, term()}
+  def get_json(url, headers) do
+    case Req.get(url, headers: headers, receive_timeout: 30_000, retry: false) do
+      {:ok, %Req.Response{status: status, body: body}} when status in 200..299 and is_map(body) ->
+        {:ok, body}
+
+      {:ok, %Req.Response{status: status}} ->
+        {:error, {:http, status}}
+
+      {:error, %{reason: reason}} ->
+        {:error, reason}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   @type handler :: (String.t() | nil, String.t(), acc :: term() -> term())
 
   @doc """

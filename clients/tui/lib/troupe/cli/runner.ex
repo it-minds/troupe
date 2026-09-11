@@ -60,6 +60,9 @@ defmodule Troupe.CLI.Runner do
 
       {:ok, %{mode: :config} = args} ->
         IO.puts(Troupe.Config.describe(Troupe.Config.load(args.workspace)))
+
+      {:ok, %{mode: :models} = args} ->
+        IO.puts(models_report(args))
         0
 
       {:ok, %{mode: :run} = args} ->
@@ -163,6 +166,30 @@ defmodule Troupe.CLI.Runner do
     receive do
       {:quit, code} -> code
     end
+  end
+
+  # `troupe models`: the catalog as the providers last described it, refreshed
+  # first when asked. Refreshing is never implicit — it costs two round trips
+  # and a session must start without them.
+  defp models_report(args) do
+    cfg = Troupe.Config.load(args.workspace)
+
+    failures =
+      if args.refresh do
+        {:ok, _catalog, failures} = Troupe.LLM.Catalog.Store.refresh(cfg)
+        failures
+      else
+        []
+      end
+
+    cfg = if args.refresh, do: Troupe.Config.load(args.workspace), else: cfg
+
+    notes =
+      Enum.map(failures, fn {name, reason} ->
+        "  ! #{name}: #{inspect(reason)}"
+      end)
+
+    Enum.join([Troupe.Config.describe_catalog(cfg) | notes], "\n")
   end
 
   defp fail(msg) do

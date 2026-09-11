@@ -7,11 +7,12 @@ defmodule Troupe.CLI do
       troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--workspace DIR]
       troupe resume [SESSION_ID]
       troupe config                show the resolved providers and models (keys masked)
+      troupe models [--refresh]    list every model, its window and its price
       troupe --version
   """
 
   @type args :: %{
-          mode: :tui | :run | :resume | :version | :help | :config,
+          mode: :tui | :run | :resume | :version | :help | :config | :models,
           agent: String.t(),
           task: String.t() | nil,
           headless: boolean(),
@@ -19,7 +20,8 @@ defmodule Troupe.CLI do
           auto_approve: boolean(),
           watch: boolean(),
           workspace: String.t(),
-          session_id: String.t() | nil
+          session_id: String.t() | nil,
+          refresh: boolean()
         }
 
   @spec parse([String.t()]) :: {:ok, args()} | {:error, String.t()}
@@ -33,7 +35,8 @@ defmodule Troupe.CLI do
           watch: :boolean,
           workspace: :string,
           version: :boolean,
-          help: :boolean
+          help: :boolean,
+          refresh: :boolean
         ]
       )
 
@@ -46,7 +49,8 @@ defmodule Troupe.CLI do
       auto_approve: Keyword.get(opts, :auto_approve, false),
       watch: Keyword.get(opts, :watch, false),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),
-      session_id: nil
+      session_id: nil,
+      refresh: Keyword.get(opts, :refresh, false)
     }
 
     cond do
@@ -72,6 +76,7 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["run"], _base), do: {:error, "usage: troupe run [AGENT] \"task\""}
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
+  defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
   defp parse_rest(other, _base), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}

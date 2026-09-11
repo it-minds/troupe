@@ -97,6 +97,7 @@ troupe --watch                          # TUI with watch mode on
 troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]
+troupe models [--refresh]               # every model, its window and its price
 troupe --version
 ```
 
@@ -172,6 +173,24 @@ Troupe detects every model it can address: the ones each provider declares in
 `config.yaml`, the ones opencode's config declares, and whatever `models.default`
 and `models.cheap` already name. `troupe config` prints the list with each
 model's context window, where it came from, and whether a key was found.
+
+`troupe models --refresh` asks the providers themselves what they serve and
+caches the answer in `models.json` next to the config, so windows and prices are
+theirs rather than typed by hand:
+
+```
+  model                                   ctx     $in/$out per Mtok source
+  anthropic/claude-opus-5                 1000k   -                 catalog
+  portal/glm-5.2                          100k    $1.80/$5.50       yaml      provider says 256k
+  portal/qwen3.6-35b                      256k    $0.25/$1.50       catalog     <- cheap
+```
+
+A LiteLLM gateway reports windows and prices; Anthropic reports windows only
+(it has no pricing endpoint, and an unpriced model reads as unpriced, not free);
+a plain OpenAI-compatible server reports whatever it feels like. A window you
+wrote in `config.yaml` still wins — the listing just says when the provider
+disagrees, which is usually a window that went stale. Refreshing is always
+explicit: starting a session reads the cache and never the network.
 
 `/models` opens that list as a menu in the TUI, with the model in use first;
 `↑`/`↓` move, Enter picks one and writes it to the config file that owns the
