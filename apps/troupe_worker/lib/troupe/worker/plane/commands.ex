@@ -15,6 +15,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Error
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
+  alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.Session.{Manager, Reader, Sealer, Workspace}
@@ -105,22 +106,17 @@ defmodule Troupe.Worker.Plane.Commands do
     {:ok, %{"session_id" => params["session_id"], "fenced" => true}}
   end
 
-  defp dispatch("drain", _params) do
-    # What a pod does when it is going away: everything it holds goes to sleep, in
-    # object storage, before the container stops. A session left behind would have to be
-    # rebuilt from its last seal, losing whatever came after it.
-    drained =
-      Sessions.active_ids()
-      |> Enum.map(fn session_id ->
-        case Sessions.dormant(session_id) do
-          {:ok, _} -> session_id
-          _ -> nil
-        end
-      end)
-      |> Enum.reject(&is_nil/1)
+  # What a pod does when it is going away: running turns finish, then everything it holds
+  # goes to sleep in object storage. A session left behind would have to be rebuilt from
+  # its last seal, losing whatever came after it.
+  defp dispatch("drain", params) do
+    options =
+      case params["timeout_ms"] do
+        timeout when is_integer(timeout) -> [timeout_ms: timeout]
+        _ -> []
+      end
 
-    Logger.info("troupe worker: drained #{length(drained)} session(s)")
-    {:ok, %{"drained" => length(drained), "sessions" => drained}}
+    {:ok, Drain.run(options)}
   end
 
   defp dispatch("session.index", _params) do

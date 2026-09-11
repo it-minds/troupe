@@ -762,3 +762,25 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      is Troupe's to tighten; one it was pointed at may be somebody else's, and refusing to
      store credentials because a parent has a different owner would be a failure for no
      gain — the file itself is `0600` either way.
+
+135. **A drain waits for running turns rather than cancelling them.** A turn halfway
+     through a tool call has an OS process attached and a model call already paid for,
+     and killing it loses both. The wait is bounded by the drain timeout — the same
+     number the pod's `terminationGracePeriodSeconds` comes from, because a drain that
+     outlived its grace period would be killed in the middle of the thing it was trying
+     to avoid — and a turn still running at the deadline is cancelled. That costs the
+     turn in flight and nothing before it, because everything before it is sealed.
+
+136. **The plane checks its own index before agreeing a pod is empty.** A pod reporting
+     success while the index still shows sessions on it is exactly the case where
+     believing the pod would lose them, so a drain that cannot confirm refuses to say the
+     pod is safe to remove.
+
+137. **A pod that cannot be reached has its sessions marked dormant, not left claiming to
+     be on it.** They are in the state a lost pod leaves them in — durable as of their
+     last sealed segment, activatable elsewhere — and saying so is what lets them be
+     activated rather than waiting for a pod that is not coming back.
+
+138. **Draining takes the highest ordinals first.** A StatefulSet removes them in that
+     order, and draining a pod Kubernetes is not about to remove would be a session moved
+     for no reason.

@@ -75,6 +75,23 @@ defmodule Troupe.Plane.Sessions do
     end
   end
 
+  @doc """
+  The sessions a pod is holding, by id.
+
+  What a drain waits on: the pod says it is empty and the plane checks its own record
+  before agreeing, because a pod reporting success while the index still shows sessions
+  on it is exactly the case where believing the pod would lose them.
+  """
+  @spec on_worker(Ecto.UUID.t()) :: [String.t()]
+  def on_worker(worker_id) do
+    Repo.all(
+      from s in Session,
+        where: s.worker_id == type(^worker_id, :binary_id) and s.state == "active",
+        select: s.id,
+        order_by: s.id
+    )
+  end
+
   @doc "How many active sessions each pod of a profile is holding, from the database."
   @spec active_counts_by_worker(String.t()) :: %{Ecto.UUID.t() => non_neg_integer()}
   def active_counts_by_worker(profile) do
