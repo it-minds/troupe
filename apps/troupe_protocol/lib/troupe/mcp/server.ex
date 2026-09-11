@@ -2,6 +2,12 @@ defmodule Troupe.MCP.Server do
   @moduledoc """
   One configured MCP server.
 
+  In `troupe_protocol` rather than in core because two very different callers hold this
+  same contract: a worker pod, which offers a *profile's* MCP servers to every session on
+  it, and a harness, which offers a *person's* to one session they are attached to. Both
+  speak the same wire protocol to the same kind of server, and a second copy of it in the
+  TUI would be a second thing to keep in step.
+
   The credential is held here as a resolved value because the worker has to send it, but
   it arrives as a *reference* — the name of a secret the pod was given — and that is the
   only form anything else ever sees. `inspect/1` is overridden for the same reason: a

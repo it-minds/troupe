@@ -23,13 +23,13 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event, as: Key
   alias Troupe.Protocol.{Client, Daemon}
-  alias Troupe.UI.TUI.{State, View}
+  alias Troupe.UI.TUI.{Connectors, State, View}
 
   @frame_ms 33
   @mailbox_threshold 64
   @drain_limit 5_000
 
-  @commands ~w(/plan /build /watch /cancel /agents /sessions /resume /help /quit)
+  @commands ~w(/plan /build /watch /cancel /agents /sessions /connect /resume /help /quit)
 
   @doc false
   def scene(state, frame), do: View.scene(state, frame)
@@ -42,8 +42,13 @@ defmodule Troupe.UI.TUI.Server do
          {:ok, session} <- Client.call(client, "session.get", %{"session_id" => session_id}),
          {:ok, _} <- Client.subscribe(client, "session:" <> session_id, from_seq: 0) do
       state =
-        session_id
-        |> State.new(session["workspace"], client: client, watch: Keyword.get(opts, :watch, false))
+        State.new(session_id, session["workspace"],
+          client: client,
+          watch: Keyword.get(opts, :watch, false),
+          # Read, not offered. A personal connector reaches a session only when the
+          # person says so, and says so again when the session asks them to confirm.
+          connectors: Keyword.get_lazy(opts, :connectors, &Connectors.load/0)
+        )
 
       schedule_frame()
 
@@ -175,6 +180,20 @@ defmodule Troupe.UI.TUI.Server do
   # *durable* events. Re-subscribing from the last seq we actually folded is the
   # whole recovery, and it is why the last seq is tracked rather than the last one
   # that arrived.
+  # The session asking this harness to run one of the tools it offered. Served in a task
+  # against the person's own MCP server, and answered on this connection: the agent is
+  # waiting, and a UI that blocked here would stop redrawing until somebody's laptop
+  # answered.
+  def handle_info({:troupe_request, id, "tool.invoke", params}, state) do
+    Connectors.serve(state.client, state.connectors, id, params, state.session_id)
+    {:noreply, state, render?: false}
+  end
+
+  def handle_info({:troupe_request, id, method, _params}, state) do
+    Client.respond_error(state.client, id, "this client does not serve #{method}")
+    {:noreply, state, render?: false}
+  end
+
   def handle_info({:troupe_resync, _id, topic, _last_seq}, state) do
     Client.subscribe(state.client, topic, from_seq: state.last_seq)
     {:noreply, State.notice(state, "reconnected the event stream"), render?: true}
@@ -275,8 +294,16 @@ defmodule Troupe.UI.TUI.Server do
     trimmed = String.trim(input)
 
     case Map.fetch(slash_commands(), trimmed) do
-      {:ok, handler} -> handler.(state)
-      :error -> State.notice(state, "unknown command #{trimmed} — try /help")
+      {:ok, handler} ->
+        handler.(state)
+
+      :error ->
+        # The one command with an argument, because naming which connector to offer is
+        # the whole point of it.
+        case String.split(trimmed, " ", parts: 2) do
+          ["/connect", argument] -> connect_command(state, String.trim(argument))
+          _other -> State.notice(state, "unknown command #{trimmed} — try /help")
+        end
     end
   end
 
@@ -288,6 +315,7 @@ defmodule Troupe.UI.TUI.Server do
       "/watch" => &toggle_watch/1,
       "/agents" => &State.notice(&1, agents_help(&1)),
       "/sessions" => &sessions_help/1,
+      "/connect" => &connectors_help/1,
       "/resume" => &State.notice(&1, "resume from the shell: troupe resume <session-id>"),
       "/help" => &State.notice(&1, "commands: " <> Enum.join(@commands, " ")),
       "/quit" => &detach/1
@@ -324,6 +352,93 @@ defmodule Troupe.UI.TUI.Server do
   defp detach(state) do
     if owner = Map.get(state, :owner), do: send(owner, {:tui_exit, 0})
     state
+  end
+
+  # -- personal connectors ----------------------------------------------------
+
+  defp connectors_help(%{connectors: []} = state) do
+    State.notice(state, """
+    no personal MCP servers configured. Put them in #{Connectors.config_path() || "~/.config/troupe/mcp.json"}:
+
+      {"servers": [{"name": "notes", "url": "http://127.0.0.1:7331/mcp"}]}
+    """)
+  end
+
+  defp connectors_help(state) do
+    lines =
+      Enum.map_join(state.connectors, "\n", fn server ->
+        marker = if server.name in state.offered, do: "offered", else: "off"
+        "  #{server.name}  #{server.url}  (#{marker})"
+      end)
+
+    State.notice(state, "personal connectors:\n#{lines}\n\n/connect <name> to offer one to this session")
+  end
+
+  # `yes` answers the challenge the session issued a moment ago. Deliberately a second
+  # deliberate act rather than a flag on the first: the point of the consent step is that
+  # the person whose machine will run the tool has seen the words.
+  defp connect_command(state, "yes"), do: confirm_consent(state)
+  defp connect_command(state, "no"), do: State.notice(%{state | pending_consent: nil}, "nothing offered")
+
+  defp connect_command(state, name) do
+    case Enum.find(state.connectors, &(&1.name == name)) do
+      nil ->
+        State.notice(state, "no personal connector called #{name} — /connect to list them")
+
+      server ->
+        case Connectors.offer(server) do
+          {:ok, []} -> State.notice(state, "#{name} offers no tools")
+          {:ok, tools} -> register(state, server, tools)
+          {:error, reason} -> State.notice(state, "#{name} is unreachable: #{inspect(reason)}")
+        end
+    end
+  end
+
+  defp register(state, server, tools, consent \\ nil) do
+    params =
+      %{"tools" => tools}
+      |> then(fn params -> if consent, do: Map.put(params, "consent", consent), else: params end)
+
+    case command(state, "tools.register", params) do
+      {:ok, %{"registered" => registered}} ->
+        state = %{state | offered: Enum.uniq(state.offered ++ [server.name]), pending_consent: nil}
+        State.notice(state, "#{server.name}: offered #{Enum.join(registered, ", ")}")
+
+      {:error, %{message: "consent_required", data: data}} ->
+        pending = %{server: server, tools: tools, challenge: data["challenge"]}
+
+        State.notice(%{state | pending_consent: pending}, """
+        #{data["prompt"]}
+
+        These would run on this machine, with your credentials, for as long as this
+        session is attached: #{Enum.join(data["tools"] || [], ", ")}.
+
+        /connect yes to allow, /connect no to leave it.
+        """)
+
+      {:error, error} ->
+        State.notice(state, "#{server.name}: #{error.message}")
+    end
+  end
+
+  defp confirm_consent(%{pending_consent: nil} = state) do
+    State.notice(state, "nothing is waiting to be confirmed")
+  end
+
+  defp confirm_consent(%{pending_consent: pending} = state) do
+    consent = %{
+      "challenge" => pending.challenge,
+      "confirmed_by" => subject(state)
+    }
+
+    register(state, pending.server, pending.tools, consent)
+  end
+
+  defp subject(state) do
+    case Client.info(state.client) do
+      %{principal: %{"subject" => subject}} when is_binary(subject) -> subject
+      _other -> "this client"
+    end
   end
 
   defp agents_help(state) do

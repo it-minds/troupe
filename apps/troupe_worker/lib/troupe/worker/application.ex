@@ -25,9 +25,18 @@ defmodule Troupe.Worker.Application do
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
       Troupe.Worker.MCP,
-      Troupe.Worker.Disk.Watch,
-      Troupe.Worker.Plane.Link,
-      Troupe.Worker.Harness
-    ]
+      Troupe.Worker.Disk.Watch
+    ] ++ link() ++ [Troupe.Worker.Harness]
+  end
+
+  # A pod with no plane configured does not start the link. Retrying a Service name that
+  # does not resolve, forever, is not resilience: it is a pod that cannot tell "the plane
+  # is down" — which it must survive — from "there is no plane", which is a deployment
+  # that was never finished.
+  defp link do
+    case Application.get_env(:troupe_worker, :plane) do
+      nil -> []
+      opts -> [{Troupe.Worker.Plane.Link, opts}]
+    end
   end
 end

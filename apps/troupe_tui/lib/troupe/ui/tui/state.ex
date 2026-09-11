@@ -39,6 +39,12 @@ defmodule Troupe.UI.TUI.State do
     pane: :input,
     quit_armed?: false,
     pending_deltas: 0,
+    # Personal MCP servers this machine has configured, the ones actually offered to this
+    # session, and the consent challenge waiting to be confirmed. Nothing is offered
+    # until somebody says so, so the second list starts empty and usually stays that way.
+    connectors: [],
+    offered: [],
+    pending_consent: nil,
     dirty?: true
   ]
 
@@ -63,7 +69,8 @@ defmodule Troupe.UI.TUI.State do
       session_id: session_id,
       workspace: workspace,
       client: Keyword.get(opts, :client),
-      watch?: Keyword.get(opts, :watch, false)
+      watch?: Keyword.get(opts, :watch, false),
+      connectors: Keyword.get(opts, :connectors, [])
     }
   end
 

@@ -396,6 +396,9 @@ defmodule Troupe.Operator.Resources do
 
   defp env(profile, policy, settings) do
     base = [
+      # Without this the release boots an empty supervision tree, which is what the same
+      # image does on a laptop and must not do here.
+      %{"name" => "TROUPE_WORKER_AUTOSTART", "value" => "true"},
       %{"name" => "TROUPE_PROFILE", "value" => profile.name},
       %{"name" => "TROUPE_NAMESPACE", "value" => Names.namespace(policy.namespace_prefix, profile.name)},
       %{"name" => "TROUPE_WORKERS_DOMAIN", "value" => policy.workers_domain},

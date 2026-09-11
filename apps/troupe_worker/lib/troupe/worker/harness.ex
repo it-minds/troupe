@@ -23,7 +23,10 @@ defmodule Troupe.Worker.Harness do
     debugging session on a port-forward.
 
   Both hand their connections to `Gateway.Connection` with the same endpoint, so the
-  authenticator, the guard and the scopes are one decision made in one place.
+  authenticator, the guard and the scopes are one decision made in one place — and both
+  need the gateway's own connection supervisor and command ledger, which on a laptop
+  belong to `Gateway.Daemon` and on a pod belong here. A pod never runs the local daemon,
+  so there is exactly one owner either way.
   """
 
   use Supervisor
@@ -54,6 +57,8 @@ defmodule Troupe.Worker.Harness do
     endpoint = Endpoint.remote(socket_port(opts), Auth.authenticator(auth), guard: Auth.guard(auth))
 
     children = [
+      Troupe.Gateway.Commands,
+      Troupe.Gateway.Connections,
       {Listener, name: listener_name(opts), endpoint: endpoint},
       Web.child_spec(
         id: web_name(opts),

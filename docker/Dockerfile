@@ -6,7 +6,7 @@
 
 ARG ELIXIR_VERSION=1.20.4
 ARG OTP_VERSION=28.5.0.5
-ARG DEBIAN_VERSION=bookworm-20250908-slim
+ARG DEBIAN_VERSION=bookworm-20260824-slim
 
 FROM hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSION} AS build
 
@@ -31,13 +31,17 @@ COPY apps/troupe_ctl/mix.exs apps/troupe_ctl/
 COPY apps/troupe_worker/mix.exs apps/troupe_worker/
 COPY apps/troupe_plane/mix.exs apps/troupe_plane/
 COPY apps/troupe_operator/mix.exs apps/troupe_operator/
-RUN mix deps.get --only prod && mix deps.compile
+# Fetching only. `mix deps.compile` cannot run here: in an umbrella the sibling apps are
+# path dependencies, so it tries to compile `troupe_core` before any of its source has
+# been copied and fails. What this layer is worth is the *fetch* — the part that needs
+# the network — and that is cached on `mix.lock` alone, which is the point.
+RUN mix deps.get --only prod
 
 COPY config config
 COPY apps apps
 COPY native native
 
-RUN mix compile && mix release ${RELEASE} --overwrite \
+RUN mix deps.compile && mix compile && mix release ${RELEASE} --overwrite \
  && mv _build/prod/rel/${RELEASE} /app/release
 
 FROM debian:${DEBIAN_VERSION} AS runtime

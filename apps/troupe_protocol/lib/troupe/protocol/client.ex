@@ -225,8 +225,17 @@ defmodule Troupe.Protocol.Client do
               state = %{state | transport: transport, buffer: state.buffer <> IO.iodata_to_binary(chunks)}
               scan_for(state, id, deadline)
 
-            {:closed, _transport, reason} ->
-              {:error, reason}
+            {:closed, transport, reason, chunks} ->
+              # A refusal and the close that follows it can arrive together, so what came
+              # with the close is scanned before the close is reported: otherwise every
+              # rejected handshake would read as `:closed` and say nothing about why.
+              state = %{
+                state
+                | transport: transport,
+                  buffer: state.buffer <> IO.iodata_to_binary(chunks)
+              }
+
+              scan_final(state, id, reason)
 
             :unknown ->
               do_await_response(state, id, deadline)
@@ -234,6 +243,24 @@ defmodule Troupe.Protocol.Client do
       after
         remaining -> {:error, :timeout}
       end
+    end
+  end
+
+  # The same scan, with nothing more coming: whatever is in the buffer is the last word.
+  defp scan_final(state, id, reason) do
+    case String.split(state.buffer, "\n", parts: 2) do
+      [_partial] ->
+        {:error, reason}
+
+      [line, rest] ->
+        state = %{state | buffer: rest}
+
+        case JSONRPC.decode(String.trim(line)) do
+          {:ok, {:result, ^id, result}} -> {:ok, result, state}
+          {:ok, {:error, ^id, error}} -> {:error, error, state}
+          {:ok, other} -> scan_final(dispatch_incoming(state, other), id, reason)
+          {:error, _} -> scan_final(state, id, reason)
+        end
     end
   end
 
@@ -312,9 +339,18 @@ defmodule Troupe.Protocol.Client do
         state = %{state | transport: transport, buffer: state.buffer <> IO.iodata_to_binary(chunks)}
         {:noreply, consume(state)}
 
-      {:closed, transport, reason} ->
+      {:closed, transport, reason, chunks} ->
+        state = %{
+          state
+          | transport: transport,
+            buffer: state.buffer <> IO.iodata_to_binary(chunks)
+        }
+
+        # Whatever arrived alongside the close is delivered before the disconnection is
+        # announced: the last event of a session is not less real for being the last.
+        state = consume(state)
         send(state.owner, {:troupe_disconnected, reason})
-        {:stop, :normal, %{state | transport: transport}}
+        {:stop, :normal, state}
 
       :unknown ->
         {:noreply, state}

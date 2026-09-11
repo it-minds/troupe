@@ -113,9 +113,14 @@ defmodule Troupe.Worker.Plane.Link do
     Process.flag(:trap_exit, true)
     Process.set_label("troupe plane link")
 
+    configured = Application.get_env(:troupe_worker, :plane, [])
+
     state = %__MODULE__{
-      host: Keyword.get(opts, :host, "troupe-plane-control.troupe-system.svc") |> to_charlist(),
-      port: Keyword.get(opts, :port, 4001),
+      host:
+        opts
+        |> Keyword.get(:host, Keyword.get(configured, :host, "troupe-plane-control.troupe-system.svc"))
+        |> to_charlist(),
+      port: Keyword.get(opts, :port, Keyword.get(configured, :port, 4001)),
       token: Keyword.get(opts, :token, {:file, @default_token_path}),
       claims: Keyword.get(opts, :claims, %{}),
       opts: opts

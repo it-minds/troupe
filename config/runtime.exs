@@ -8,6 +8,18 @@ presence = fn
   value -> value
 end
 
+# `host:port`, as the operator sets it, or nothing.
+plane_control = fn
+  nil ->
+    nil
+
+  value ->
+    case String.split(value, ":") do
+      [host, port] -> [host: host, port: String.to_integer(port)]
+      [host] -> [host: host, port: 4001]
+    end
+end
+
 # Read at boot, not at build: an image is built once and run in several clusters, and
 # everything here is a property of the cluster rather than of the code.
 
@@ -70,6 +82,50 @@ if config_env() == :prod do
         device_authorization_endpoint: System.get_env("TROUPE_OIDC_DEVICE_URL"),
         token_endpoint: System.get_env("TROUPE_OIDC_TOKEN_URL")
       ]
+  end
+
+  # -- a worker pod ---------------------------------------------------------
+
+  if System.get_env("TROUPE_WORKER_AUTOSTART") == "true" do
+    plane = presence.(System.get_env("TROUPE_PLANE_CONTROL"))
+
+    config :troupe_worker,
+      autostart: true,
+      profile: System.get_env("TROUPE_PROFILE"),
+      # 4000 is what the operator's Ingress and both probes point at; 4100 is the same
+      # NDJSON the local daemon speaks, for anything inside the cluster that would rather
+      # not carry an HTTP stack.
+      http_port: String.to_integer(System.get_env("TROUPE_HTTP_PORT", "4000")),
+      harness_port: String.to_integer(System.get_env("TROUPE_HARNESS_PORT", "4100")),
+      sessions_per_pod: String.to_integer(System.get_env("TROUPE_SESSIONS_PER_POD", "4")),
+      drain_timeout_seconds:
+        String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
+      worker_id: presence.(System.get_env("TROUPE_POD_ORDINAL")),
+      # The keys this pod verifies session tokens against. The plane pushes them over the
+      # control channel, and a cached copy on disk is what lets a pod that restarted
+      # before its plane is reachable still say yes or no — which is the whole claim
+      # `Worker.Auth` makes.
+      jwks_path: presence.(System.get_env("TROUPE_JWKS_PATH")),
+      token_issuer: presence.(System.get_env("TROUPE_TOKEN_ISSUER")),
+      # Absent means there is no plane to dial. A pod configured without one does not
+      # start the link at all rather than retrying a name that does not resolve.
+      plane: plane_control.(plane),
+      kms: [
+        address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
+        token: presence.(System.get_env("TROUPE_BAO_TOKEN")),
+        mount: System.get_env("TROUPE_BAO_MOUNT", "secret")
+      ]
+
+    if endpoint = presence.(System.get_env("TROUPE_OBJECT_ENDPOINT")) do
+      config :troupe_protocol,
+        object_store: [
+          endpoint: endpoint,
+          bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
+          access_key_id: presence.(System.get_env("TROUPE_OBJECT_ACCESS_KEY_ID")),
+          secret_access_key: presence.(System.get_env("TROUPE_OBJECT_SECRET_ACCESS_KEY")),
+          region: System.get_env("TROUPE_OBJECT_REGION", "us-east-1")
+        ]
+    end
   end
 
   # -- the local daemon -----------------------------------------------------

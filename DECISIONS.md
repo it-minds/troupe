@@ -998,3 +998,125 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      long as the cluster lives — a refused one refused again every thirty seconds,
      forever. Only names the suite itself generates: a profile somebody created by hand is
      theirs.
+
+## Stage 4: collaboration and client-hosted tools
+
+175. **`input_queued` is announced once, remembered in agent state.** `gen_statem`
+     re-delivers a postponed event on *every* state change, and `thinking -> acting` is a
+     state change: announcing from the postpone clause without remembering what has been
+     announced tells everybody watching that one input was queued three times. `State.queued`
+     is that memory, cleared when the input is taken.
+
+176. **Input is one message shape: `{:input, source, content, actor, meta}`.** The three-
+     and four-tuple forms are gone and the watcher goes through the public
+     `Agent.Server.input/5` like every other caller. Two shapes meant two clauses per state
+     and a `command_id` that some inputs had and others did not.
+
+177. **A `command_id` is generated for inputs that arrive without one.** The watcher and a
+     seeded task have none; the schema requires one. Generating it at the edge keeps every
+     input in the log the same shape, and a client that supplied its own still gets that one
+     back.
+
+178. **`author` falls back to the source, not to "system".** A watch trigger's author reads
+     `watch`, which says more about who asked than `system` does, and a subject is used
+     whenever there is one — which is the case several clients on one session exist for.
+
+179. **Presence is published through a module with no path to the log.**
+     `Gateway.Presence` calls `Events.publish_ephemeral/4` and nothing else, so the
+     Forbidden-list item holds structurally rather than by a filter somebody could remove.
+     Joining and leaving are announced by the connection where subscriptions are taken out
+     and dropped, so a client that crashes still leaves.
+
+180. **`presence.set` needs only `observe`, and does not activate a session.** Presence
+     changes nothing, so a seat is enough; and a session must not be woken from dormancy
+     because somebody's cursor moved — there is nobody attached to tell.
+
+181. **Consent is a challenge bound to one connection, one subject and one set of tool
+     names, spent once.** A registration that replays a spent challenge is refused rather
+     than treated as idempotent: a replayed challenge is exactly what a stolen one would
+     look like. The challenge lists the names the *person* offered, not the prefixed names
+     the model will call — the prompt is about their notes tool, and `client.` is our
+     bookkeeping.
+
+182. **A client-hosted tool asks by default.** The consent was to offering the tool, not
+     to every call the model decides to make with it. A profile that says otherwise still
+     wins, exactly as for a built-in.
+
+183. **The registering connection owns the tool because the closure reaches that
+     connection and no other.** There is no name for a second client to call and no
+     registry to look one up in, so "only the registering connection can serve its tools" is
+     a property of the value rather than a check somewhere.
+
+184. **A dropped registrant is answered from `Connection.terminate/2`.** `ClientTools`
+     hears about the registration through its own monitor, but it cannot unblock a tool task
+     already waiting on an answer. Doing it where the answer was going to arrive turns a
+     dropped laptop into an error result in milliseconds instead of at the tool timeout.
+
+185. **`ClientTools` sits above the agent in the session tree.** A restarted agent must
+     come back to the same registrations: the client that offered them has not gone
+     anywhere and would have no way of knowing it needed to offer them again.
+
+186. **The taint is added to the summary projection by the fold, not declared in its empty
+     map.** A session nothing has tainted folds to exactly the map it folded to before the
+     clause existed, so every recorded fixture hash still holds and no upcaster is needed. A
+     client reads a missing key as "not tainted", which is the right default and the only one
+     an old log can support.
+
+187. **`Gateway.Transport` and `Protocol.Client.Transport` are the seam the WebSocket sits
+     behind.** A connection is the protocol — handshake, scopes, subscriptions,
+     backpressure — and none of it is about sockets. A second copy for a second transport is
+     how two implementations drift apart.
+
+188. **A WebSocket frame gains a newline going in and loses one coming out, in exactly two
+     places.** Both transports hand their callers newline-terminated chunks, so buffering is
+     one code path. Getting this wrong is silent: the connection simply waits for a newline a
+     frame never carries.
+
+189. **The WebSock handler and the connection are two processes.** WebSock callbacks own
+     the frames and must return them; a connection has to keep answering calls —
+     `tool.invoke` among them — while frames are arriving. One process could not do both.
+
+190. **The token may arrive in a header or in `initialize`, and `initialize` wins.** A
+     client that sent both meant the one it put in the message; preferring the header would
+     make a refreshed token impossible to use on a connection that is already open.
+
+191. **A worker with no plane configured does not start the link.** Retrying a Service name
+     that does not resolve, forever, is not resilience: it makes "the plane is down", which a
+     pod must survive, indistinguishable from "there is no plane", which is a deployment that
+     was never finished.
+
+192. **A pod may load its JWKS from disk at boot.** `Worker.Auth` claims a worker can say
+     yes or no without asking the plane, and that claim was false for the window between a
+     pod restarting and the plane's next push. A cached copy closes it; a path that is
+     configured and unreadable warns rather than refusing to start, because the push still
+     works and a stale mount should not be an outage.
+
+193. **Readiness reads a drain flag.** Step one of a drain — stop taking new work — was in
+     the drain's own docstring and implemented nowhere. `Drain.draining?` in
+     `:persistent_term` rather than a process, because the thing asking is a health check
+     that must answer while everything else is shutting down.
+
+194. **`mix deps.compile` cannot run in the Dockerfile's dependency layer.** In an umbrella
+     the sibling apps are path dependencies, so it tries to compile `troupe_core` before any
+     of its source has been copied. What that layer is worth is the *fetch* — the part that
+     needs the network — and that is still cached on `mix.lock` alone.
+
+195. **`Troupe.MCP.Client` and `Troupe.MCP.Server` moved to `troupe_protocol`.** Two very
+     different callers hold the same contract: a worker pod offering a *profile's* servers to
+     every session on it, and a harness offering a *person's* to one session. A second copy in
+     the TUI would be a second thing to keep in step. The adaptation to `Troupe.Tool` stays in
+     core, where tools live.
+
+196. **The latency done item gives each of its five clients a session of its own.** Five
+     clients hammering one session measures how long a queue behind a busy agent takes to
+     drain, which is a property of the model's speed rather than of the transport. The done
+     item asks about `input.send` to `input.accepted`, and that is the load under which that
+     number means something.
+
+197. **The latency probe reaches the pod through `kubectl port-forward`, not an Ingress.**
+     kind installs no ingress controller, and adding one would put nginx's latency in the
+     number without making it more honest about Troupe's.
+
+198. **The 200-input ordering test raises `max_turns` to 1000.** The default forty is a
+     guard against a runaway agent, not against a busy conversation; left alone it silently
+     capped the first run at forty accepted inputs and looked like a throughput problem.

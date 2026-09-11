@@ -21,10 +21,17 @@ defmodule Troupe.Protocol.Client.Transport do
           {:tcp, :gen_tcp.socket()}
           | {:ws, Mint.HTTP.t(), Mint.Types.request_ref(), Mint.WebSocket.t()}
 
-  @typedoc "What a transport made of one mailbox message."
+  @typedoc """
+  What a transport made of one mailbox message.
+
+  A close carries whatever arrived with it. A server that refuses a handshake writes the
+  refusal and then closes, and both can land in one read: discarding the bytes because
+  the connection is going would turn every refusal into `:closed`, which tells the caller
+  nothing about why.
+  """
   @type outcome ::
           {:ok, t(), [binary()]}
-          | {:closed, t() | nil, term()}
+          | {:closed, t() | nil, term(), [binary()]}
           | :unknown
 
   @doc """
@@ -82,18 +89,23 @@ defmodule Troupe.Protocol.Client.Transport do
   """
   @spec handle(t(), term()) :: outcome()
   def handle({:tcp, socket} = transport, {:tcp, socket, data}), do: {:ok, transport, [data]}
-  def handle({:tcp, socket} = transport, {:tcp_closed, socket}), do: {:closed, transport, :closed}
+
+  def handle({:tcp, socket} = transport, {:tcp_closed, socket}),
+    do: {:closed, transport, :closed, []}
 
   def handle({:tcp, socket} = transport, {:tcp_error, socket, reason}),
-    do: {:closed, transport, reason}
+    do: {:closed, transport, reason, []}
 
   def handle({:ws, conn, ref, websocket} = transport, message) do
     case Mint.WebSocket.stream(conn, message) do
       {:ok, conn, responses} ->
         collect(conn, ref, websocket, responses)
 
-      {:error, conn, reason, _responses} ->
-        {:closed, {:ws, conn, ref, websocket}, reason}
+      {:error, conn, reason, responses} ->
+        case collect(conn, ref, websocket, responses) do
+          {:ok, transport, texts} -> {:closed, transport, reason, texts}
+          {:closed, transport, _other, texts} -> {:closed, transport, reason, texts}
+        end
 
       :unknown ->
         _ = transport
@@ -224,20 +236,19 @@ defmodule Troupe.Protocol.Client.Transport do
             fold_frames({:ws, conn, ref, websocket}, frames, texts)
 
           {:error, websocket, reason} ->
-            {:halt, {:closed, {:ws, conn, ref, websocket}, reason}}
+            {:halt, {:closed, {:ws, conn, ref, websocket}, reason, texts}}
         end
 
       {:done, ^ref}, {:ok, transport, texts} ->
-        {:halt, done_or_closed(transport, texts)}
+        {:halt, {:closed, transport, :closed, texts}}
 
       _response, acc ->
         {:cont, acc}
     end)
   end
 
-  defp done_or_closed(transport, []), do: {:closed, transport, :closed}
-  defp done_or_closed(transport, texts), do: {:ok, transport, texts}
-
+  # The close frame ends the reduction but keeps what came before it in the same batch,
+  # which on a refused handshake is the refusal itself.
   defp fold_frames(transport, frames, texts) do
     Enum.reduce_while(frames, {:cont, {:ok, transport, texts}}, fn
       {:text, text}, {:cont, {:ok, transport, texts}} ->
@@ -246,8 +257,8 @@ defmodule Troupe.Protocol.Client.Transport do
       {:ping, payload}, {:cont, {:ok, transport, texts}} ->
         {:cont, {:cont, {:ok, pong(transport, payload), texts}}}
 
-      {:close, _code, _reason}, {:cont, {:ok, transport, _texts}} ->
-        {:halt, {:halt, {:closed, transport, :closed}}}
+      {:close, _code, _reason}, {:cont, {:ok, transport, texts}} ->
+        {:halt, {:halt, {:closed, transport, :closed, texts}}}
 
       _frame, acc ->
         {:cont, acc}

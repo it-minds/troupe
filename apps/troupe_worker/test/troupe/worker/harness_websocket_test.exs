@@ -26,9 +26,8 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
   setup context do
     context = requires_tier(context)
 
-    start_supervised!(Troupe.Gateway.Connections)
-    start_supervised!(Troupe.Gateway.Commands)
-
+    # No `Gateway.Connections` or `Gateway.Commands` here on purpose: the harness owns
+    # them on a pod, and starting a second copy would hide the fact that it must.
     {:ok, jwks} = Tokens.jwks()
     auth = start_supervised!({Auth, name: nil, worker_id: @pod, jwks: jwks})
 

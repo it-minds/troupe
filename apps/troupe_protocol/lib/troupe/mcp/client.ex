@@ -11,6 +11,10 @@ defmodule Troupe.MCP.Client do
   Every request carries the server's service credential and nothing about the session
   except metadata for the server's own logs. That separation is the whole point of this
   module being the only place that talks to an MCP server.
+
+  A *personal* connector — one a harness offers, running on somebody's own machine —
+  goes through exactly this code with exactly these rules. The difference is whose
+  credential it is and where the process runs, not what is sent.
   """
 
   alias Troupe.MCP.Server
@@ -126,7 +130,7 @@ defmodule Troupe.MCP.Client do
   defp unwrap(other), do: {:error, {:unexpected_response, other}}
 
   defp version do
-    case :application.get_key(:troupe_core, :vsn) do
+    case :application.get_key(:troupe_protocol, :vsn) do
       {:ok, vsn} -> List.to_string(vsn)
       _ -> "0.0.0"
     end

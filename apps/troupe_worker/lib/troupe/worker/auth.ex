@@ -23,6 +23,8 @@ defmodule Troupe.Worker.Auth do
 
   alias Troupe.Protocol.{Error, Token}
 
+  require Logger
+
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]
 
@@ -128,10 +130,35 @@ defmodule Troupe.Worker.Auth do
 
     {:ok,
      %__MODULE__{
-       worker_id: Keyword.get(opts, :worker_id),
-       issuer: Keyword.get(opts, :issuer),
-       jwks: Keyword.get(opts, :jwks, %{"keys" => []})
+       worker_id: Keyword.get_lazy(opts, :worker_id, &configured_worker_id/0),
+       issuer: Keyword.get_lazy(opts, :issuer, &configured_issuer/0),
+       jwks: Keyword.get_lazy(opts, :jwks, &cached_jwks/0)
      }}
+  end
+
+  defp configured_worker_id, do: Application.get_env(:troupe_worker, :worker_id)
+  defp configured_issuer, do: Application.get_env(:troupe_worker, :token_issuer)
+
+  # The plane pushes the JWKS over the control channel, so a pod that has been up for a
+  # while always has one. A pod that has just restarted has not, and the claim this
+  # module makes — that a worker can say yes or no without asking the plane — is exactly
+  # the claim that is false in that window. A cached copy on disk closes it.
+  #
+  # A path that is configured and unreadable is not fatal: the plane's push still works,
+  # and refusing to start would turn a stale mount into an outage.
+  defp cached_jwks do
+    with path when is_binary(path) <- Application.get_env(:troupe_worker, :jwks_path),
+         {:ok, contents} <- File.read(path),
+         {:ok, %{"keys" => keys} = jwks} when is_list(keys) <- Jason.decode(contents) do
+      jwks
+    else
+      nil ->
+        %{"keys" => []}
+
+      other ->
+        Logger.warning("troupe worker: no cached JWKS (#{inspect(other)}); waiting for the plane")
+        %{"keys" => []}
+    end
   end
 
   @impl GenServer
