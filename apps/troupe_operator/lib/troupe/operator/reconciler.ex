@@ -198,12 +198,14 @@ defmodule Troupe.Operator.Reconciler do
     Status.put(status, "SecretMissing", false, "SecretsPresent", "every referenced secret exists", generation)
   end
 
+  # `SecretMissing` and not `Ready: False`. The spec gives these separate conditions
+  # because they are separate facts: `Ready` is the operator saying it reconciled what it
+  # was asked to, and it did — the namespace, the StatefulSet and the rest all exist.
+  # Whether the pods can *start* is the secret's business, and merging the two would make
+  # a missing secret indistinguishable from an apply that failed.
   defp secret_status(status, missing, generation) do
     message = "missing secret(s): #{Enum.join(missing, ", ")}"
-
-    status
-    |> Status.put("SecretMissing", true, "SecretsMissing", message, generation)
-    |> Status.put("Ready", false, "SecretsMissing", message, generation)
+    Status.put(status, "SecretMissing", true, "SecretsMissing", message, generation)
   end
 
   # A pod restarts for an image, config or volume change only when it has no active

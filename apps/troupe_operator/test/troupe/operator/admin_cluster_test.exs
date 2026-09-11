@@ -129,7 +129,11 @@ defmodule Troupe.Operator.AdminClusterTest do
       missing = condition(current, "SecretMissing")
 
       assert missing["message"] =~ "a-secret-nobody-created"
-      assert condition(current, "Ready")["status"] == "False"
+
+      # `Ready` is untouched: the operator reconciled what it was asked to, and whether
+      # the pods can start is the secret's business. Merging the two would make a missing
+      # secret indistinguishable from an apply that failed.
+      assert condition(current, "Ready")["status"] == "True"
     end
 
     @tag :cluster

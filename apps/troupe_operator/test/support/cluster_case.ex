@@ -25,6 +25,8 @@ defmodule Troupe.Operator.ClusterCase do
   setup_all do
     case cluster() do
       {:ok, conn} ->
+        sweep_stale(conn)
+        ensure_llm_secret(conn)
         {:ok, conn: conn}
 
       {:error, reason} ->
@@ -49,6 +51,62 @@ defmodule Troupe.Operator.ClusterCase do
     else
       :ok
     end
+  end
+
+  @doc """
+  The secret every fixture profile refers to.
+
+  Created here so that a profile referring to a missing secret is a *test that says so*
+  rather than the state every other test happens to be in — which would make
+  `SecretMissing` true everywhere and prove nothing anywhere.
+  """
+  @spec ensure_llm_secret(K8s.Conn.t()) :: :ok
+  def ensure_llm_secret(conn) do
+    secret = %{
+      "apiVersion" => "v1",
+      "kind" => "Secret",
+      "metadata" => %{"name" => "llm-credentials", "namespace" => "troupe-system"},
+      "stringData" => %{"api-key" => "not-a-real-key"}
+    }
+
+    K8s.Client.run(conn, K8s.Client.apply(secret, field_manager: "troupe-test", force: true))
+    :ok
+  end
+
+  @doc """
+  Remove profiles left by an earlier run.
+
+  A test that is interrupted never runs its `on_exit`, and every profile it leaves is
+  reconciled for as long as the cluster lives — a refused one is refused again every
+  thirty seconds, forever. So the suite clears its own litter on the way in rather than
+  trusting that it always got to clean up on the way out.
+
+  Only names this suite generates: a `WorkerProfile` somebody created by hand is theirs.
+  """
+  @spec sweep_stale(K8s.Conn.t()) :: :ok
+  def sweep_stale(conn) do
+    operation = K8s.Client.list("troupe.dev/v1alpha1", "WorkerProfile", namespace: "troupe-system")
+
+    with {:ok, %{"items" => profiles}} <- K8s.Client.run(conn, operation) do
+      for profile <- profiles,
+          name = get_in(profile, ["metadata", "name"]),
+          test_generated?(name) do
+        K8s.Client.run(
+          conn,
+          K8s.Client.delete("troupe.dev/v1alpha1", "WorkerProfile", namespace: "troupe-system", name: name)
+        )
+
+        K8s.Client.run(conn, K8s.Client.delete("v1", "Namespace", name: "troupe-w-#{name}"))
+      end
+    end
+
+    :ok
+  end
+
+  # The shapes the tests make: a prefix this suite uses plus a generated suffix. `dev`
+  # on its own is somebody's, and is left alone.
+  defp test_generated?(name) do
+    String.match?(name, ~r/^(dev|ux|bad|unbound|repair|secretless|secretful|secret-value|admission-probe)-\w+$/)
   end
 
   @doc "Whether a cluster with Troupe's CRDs installed is reachable."

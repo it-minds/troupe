@@ -979,3 +979,22 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      uses, with the token `troupe login` stored.** There is no privileged path: a person
      with `curl` and a token can do exactly what the binary can. The commands are
      generated from one table, and the parity test asserts the table covers the context.
+
+172. **`SecretMissing` does not make `Ready` false.** The spec gives them separate
+     conditions because they are separate facts: `Ready` is the operator saying it
+     reconciled what it was asked to, and it did — the namespace, the StatefulSet and the
+     rest all exist. Whether the pods can *start* is the secret's business, and merging
+     the two would make a missing secret indistinguishable from an apply that failed. An
+     earlier version of this did merge them, and the effect was that every fixture profile
+     in the cluster tests went unready at once.
+
+173. **The cluster suite creates the secret its fixtures refer to.** A profile referring to
+     a missing secret has to be a *test that says so* rather than the state every other
+     test happens to be in — which would make `SecretMissing` true everywhere and prove
+     nothing anywhere.
+
+174. **The cluster suite sweeps its own litter on the way in.** A test that is interrupted
+     never runs its `on_exit`, and every profile it leaves behind is reconciled for as
+     long as the cluster lives — a refused one refused again every thirty seconds,
+     forever. Only names the suite itself generates: a profile somebody created by hand is
+     theirs.
