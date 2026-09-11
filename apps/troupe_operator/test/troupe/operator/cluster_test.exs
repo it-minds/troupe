@@ -15,7 +15,7 @@ defmodule Troupe.Operator.ClusterTest do
   @moduletag timeout: 300_000
 
   setup context do
-    if conn = context[:conn] do
+    if context[:conn] do
       Application.put_env(:troupe_operator, :settings,
         plane_control_host: "troupe-plane-control.troupe-system.svc",
         plane_control_port: 4001,

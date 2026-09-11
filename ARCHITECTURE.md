@@ -597,15 +597,62 @@ what the form promised and what the trail says cannot differ.
 
 ---
 
-## 12. Stage 4
+## 12. Several harnesses, one session
 
-**Client-hosted tools.** A harness offers locally hosted tools — typically personal MCP
-connections — to a session it is attached to. Registration needs `control` and a consent
-step; invocation is a server-to-client `tool.invoke` over the registering connection,
-owned by that connection's process, so a dropped registrant is a dropped tool rather than
-a hung agent. Every registration taints the session visibly, because a tool running on
-somebody's laptop is a thing the other participants are entitled to know about.
+### 12.1 One order, and everyone sees it
 
-The seam is already there: the gateway's connection can send requests as well as
-receive them, and `Troupe.Tool` takes values as well as modules — which is what MCP
-tools already use.
+Every input enters the session actor's mailbox, so the log order *is* the order. There is
+no separate sequencing step and no clock involved: two people typing at the same moment
+are ordered by which message the actor took first, and every attached client replays the
+same log and sees the same answer.
+
+An input that arrives while the agent is busy is postponed by `gen_statem` and produces a
+durable `input_queued` — visible to everyone, because a person who typed something and
+saw nothing happen needs to know whether it was taken. When the session accepts it,
+`input_accepted` carries the author and the `command_id`, which is what lets a client
+render optimistically and then reconcile against what actually happened rather than
+guessing.
+
+### 12.2 Presence is ephemeral, and structurally so
+
+Joining, leaving, focusing an agent, typing: none of it is in the durable log. That is a
+Forbidden-list item, and it holds because presence is published through
+`Events.publish_ephemeral/4`, which has no path to `Session.Log` at all — not because
+something filters it on the way out.
+
+### 12.3 Client-hosted tools
+
+A harness can offer tools that run on the person's own machine — a personal MCP
+connection, usually — to a session it is attached to.
+
+**Consent is a round trip, not a flag.** The worker issues `consent.challenge`, the
+harness shows it to the user, and the registration carries what they confirmed. A
+registration without it is refused. The point is that the person whose machine will run
+the tool has seen the words, rather than a client having set a boolean on their behalf.
+
+**The registering connection owns the tool.** `tool.invoke` is a server-to-client request
+over that connection and no other, so a second client cannot invoke a tool it did not
+register. The agent's tool task monitors the connection under the tool timeout: a
+registrant that disconnects mid-call produces an error result and the agent carries on,
+which is the same contract every other tool failure has.
+
+**Every registration taints the session, visibly.** `session_tainted` is durable and the
+summary carries it, because a tool running on somebody's laptop is something the other
+participants are entitled to know about — and to decide about — rather than something
+they find out from the transcript.
+
+---
+
+## 13. Kept possible, not built
+
+The spec rules these out and then asks that they stay reachable. What that costs, each:
+
+* **A GUI harness** would serve a local LiveView bound to loopback with a one-time token.
+  Nothing in the protocol assumes a terminal and the client SDK works from any process
+  that can receive messages, so this is a client rather than a change.
+* **Remote triggers** need a session created and activated for a service principal with
+  no attached client, under the same grants, budgets and retention, with results waiting
+  in the log for whoever attaches later. That is what the plane already does; a trigger
+  is a caller, not a feature.
+* **A2A** maps onto the event model as tasks. Nothing may assume a session never moves,
+  which fencing and relocation already require.

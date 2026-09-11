@@ -542,27 +542,73 @@ that has run out.
 
 ## 8. Client-hosted tools
 
-*(Stage 4. Listed here so the shape is fixed.)*
+A harness can offer tools that run on its own machine — a personal MCP connection,
+usually — to a session it is attached to. Three things make that safe enough to be worth
+having.
 
-A client that declared `capabilities.tools` may offer tools to a session it is
-attached to, typically a personal MCP connection.
+**Consent is a round trip.** `tools.register` with no consent gets `consent.challenge`
+back; the harness shows the words to the person and registers again carrying what they
+confirmed. A client cannot set a boolean on somebody's behalf.
 
-`tools.register` requires `control` and a consent step: the server first sends
-`consent.challenge`, the client shows it to the user, and the registration carries the
-confirmation. The server then appends durable `tools_registered` and
-`session_tainted` events, and every participant's summary shows the taint.
+**The registering connection owns the tool.** `tool.invoke` goes over that connection and
+no other. A second client attached to the same session cannot invoke a tool it did not
+register, and a registrant that disconnects takes its tools with it.
 
-Invocation is a **server-to-client request**:
+**The session is tainted, visibly.** `session_tainted` is durable and appears in every
+participant's summary, because a tool running on somebody's laptop is something the others
+are entitled to know about.
+
+### `tools.register`
+
+Needs `control`.
 
 ```json
-{"jsonrpc": "2.0", "id": 900, "method": "tool.invoke",
- "params": {"session_id": "s-9f", "call_id": "call_7", "tool": "mcp.local.search",
-            "args": {"q": "retry"}}}
+{"jsonrpc": "2.0", "id": 7, "method": "tools.register", "params": {
+  "tools": [
+    {"name": "notes.search", "description": "Search my local notes.",
+     "schema": {"type": "object", "properties": {"q": {"type": "string"}}}}
+  ],
+  "consent": {"challenge": "…", "confirmed_by": "ada@example.test"}
+}}
 ```
 
-The client must answer with a result or an error. Only the registering connection may
-serve its tools. If that connection drops or exceeds the tool timeout, the agent
-receives an error tool result and keeps running, and `tools_unregistered` is logged.
+Without `consent`, the answer is an error carrying the challenge to show:
+
+```json
+{"jsonrpc": "2.0", "id": 7, "error": {"code": -32010, "message": "consent_required",
+  "data": {"challenge": "…", "prompt": "Let this session run 1 tool on your machine?",
+           "tools": ["notes.search"]}}}
+```
+
+With it: `{"registered": ["client.notes.search"], "taint": "personal_connector"}`.
+
+Registered tools appear as `client.<name>` under the same allowlists, permissions and
+approvals as everything else.
+
+### `tools.unregister` → `{"unregistered": [...]}`
+
+Also happens on its own when the connection drops.
+
+### `tool.invoke` (request, **server → client**)
+
+```json
+{"jsonrpc": "2.0", "id": 42, "method": "tool.invoke", "params": {
+  "call_id": "call-1", "name": "notes.search", "arguments": {"q": "the thing"}}}
+```
+
+The client answers with a result or an error, on the same connection. A client that does
+not answer within the tool's timeout gets the call abandoned and the agent gets an error
+result — the same contract as any other tool that fails.
+
+### Presence
+
+```json
+{"jsonrpc": "2.0", "method": "presence", "params": {
+  "subject": "ada@example.test", "state": "focused", "agent": ["root"]}}
+```
+
+Ephemeral, always. Presence is published through a path that has no access to the durable
+log, so it cannot end up there by accident.
 
 ---
 
