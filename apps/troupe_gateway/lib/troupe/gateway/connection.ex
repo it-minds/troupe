@@ -41,6 +41,10 @@ defmodule Troupe.Gateway.Connection do
     :auth,
     :expiring_timer,
     :expiry_timer,
+    # A token that arrived in a header rather than in `initialize`. Only the WebSocket
+    # transport has headers; the field is here because deciding who is calling is the
+    # connection's job on every transport.
+    :bearer,
     buffer: "",
     initialized?: false,
     scopes: [],
@@ -101,6 +105,7 @@ defmodule Troupe.Gateway.Connection do
      %__MODULE__{
        transport: transport,
        endpoint: Keyword.fetch!(opts, :endpoint),
+       bearer: Keyword.get(opts, :bearer),
        outbound_bound: Keyword.get(opts, :outbound_bound, @outbound_bound),
        durable_bound: Keyword.get(opts, :durable_bound, @durable_bound)
      }}
@@ -431,12 +436,23 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp authenticate(params, %{endpoint: %{kind: :remote, authenticator: authenticator}}) do
-    case authenticator.(params) do
+  defp authenticate(params, %{endpoint: %{kind: :remote, authenticator: authenticator}} = state) do
+    case authenticator.(with_bearer(params, state)) do
       {:ok, principal, scopes} -> {:ok, principal, scopes, nil}
       {:ok, principal, scopes, auth} -> {:ok, principal, scopes, auth}
       other -> other
     end
+  end
+
+  # A token in `initialize` wins over one in a header: a client that sent both meant the
+  # one it put in the message, and silently preferring the header would make a refreshed
+  # token impossible to use on a connection that is already open.
+  defp with_bearer(params, %{bearer: nil}), do: params
+
+  defp with_bearer(params, %{bearer: bearer}) do
+    Map.update(params, "auth", %{"token" => bearer}, fn auth ->
+      Map.put_new(auth, "token", bearer)
+    end)
   end
 
   # Constant-time, so a wrong token cannot be found one byte at a time.

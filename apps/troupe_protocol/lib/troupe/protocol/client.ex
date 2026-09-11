@@ -24,12 +24,13 @@ defmodule Troupe.Protocol.Client do
 
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
+  alias Troupe.Protocol.Client.Transport
 
   @default_timeout 15_000
 
-  @enforce_keys [:socket, :owner]
+  @enforce_keys [:transport, :owner]
   defstruct [
-    :socket,
+    :transport,
     :owner,
     buffer: "",
     next_id: 1,
@@ -44,6 +45,7 @@ defmodule Troupe.Protocol.Client do
           {:owner, pid()}
           | {:address, term()}
           | {:port, :inet.port_number()}
+          | {:url, String.t()}
           | {:token, String.t() | nil}
           | {:client_info, map()}
           | {:capabilities, map()}
@@ -53,6 +55,8 @@ defmodule Troupe.Protocol.Client do
   Connect, handshake, and return a client.
 
   `:address` is either `{:local, path}` for a Unix socket or an IP tuple with `:port`.
+  `:url` — `wss://host/v1/socket` — reaches a worker pod instead, over the WebSocket
+  transport; everything above the framing is identical either way.
   """
   @spec connect([connect_option()]) :: {:ok, pid()} | {:error, term()}
   def connect(opts) do
@@ -150,13 +154,8 @@ defmodule Troupe.Protocol.Client do
     owner = Keyword.fetch!(opts, :owner)
     timeout = Keyword.get(opts, :timeout, @default_timeout)
 
-    address = Keyword.fetch!(opts, :address)
-    port = Keyword.get(opts, :port, 0)
-
-    connect_opts = [:binary, active: :once, packet: :raw, send_timeout: 10_000]
-
-    with {:ok, socket} <- :gen_tcp.connect(address, port, connect_opts, timeout),
-         state = %__MODULE__{socket: socket, owner: owner},
+    with {:ok, transport} <- Transport.connect(opts, timeout),
+         state = %__MODULE__{transport: transport, owner: owner},
          {:ok, state} <- handshake(state, opts, timeout) do
       Process.monitor(owner)
       {:ok, state}
@@ -178,8 +177,8 @@ defmodule Troupe.Protocol.Client do
 
     request = {:request, 0, "initialize", params}
 
-    with :ok <- :gen_tcp.send(state.socket, [JSONRPC.encode(request), ?\n]) do
-      receive_handshake(state, timeout)
+    with {:ok, transport} <- Transport.send(state.transport, request) do
+      receive_handshake(%{state | transport: transport}, timeout)
     end
   end
 
@@ -205,11 +204,11 @@ defmodule Troupe.Protocol.Client do
   defp auth(nil), do: nil
   defp auth(token), do: %{"token" => token}
 
-  # A blocking read used only during the handshake. Afterwards the socket is active
-  # and everything flows through `handle_info`.
+  # A blocking read used only during the handshake. Afterwards the transport is active
+  # and everything flows through `handle_info`. The same `Transport.handle/2` either way,
+  # so a WebSocket client and a socket client take the same path through the handshake.
   defp await_response(state, id, timeout) do
-    deadline = System.monotonic_time(:millisecond) + timeout
-    do_await_response(state, id, deadline)
+    do_await_response(state, id, System.monotonic_time(:millisecond) + timeout)
   end
 
   defp do_await_response(state, id, deadline) do
@@ -219,12 +218,19 @@ defmodule Troupe.Protocol.Client do
       {:error, :timeout}
     else
       receive do
-        {:tcp, socket, data} when socket == state.socket ->
-          :ok = :inet.setopts(socket, active: :once)
-          scan_for(%{state | buffer: state.buffer <> data}, id, deadline)
+        message ->
+          case Transport.handle(state.transport, message) do
+            {:ok, transport, chunks} ->
+              :ok = Transport.activate(transport)
+              state = %{state | transport: transport, buffer: state.buffer <> IO.iodata_to_binary(chunks)}
+              scan_for(state, id, deadline)
 
-        {:tcp_closed, socket} when socket == state.socket ->
-          {:error, :closed}
+            {:closed, _transport, reason} ->
+              {:error, reason}
+
+            :unknown ->
+              do_await_response(state, id, deadline)
+          end
       after
         remaining -> {:error, :timeout}
       end
@@ -267,9 +273,15 @@ defmodule Troupe.Protocol.Client do
   def handle_call({:call, method, params}, from, state) do
     id = state.next_id
 
-    case :gen_tcp.send(state.socket, [JSONRPC.encode({:request, id, method, params}), ?\n]) do
-      :ok ->
-        {:noreply, %{state | next_id: id + 1, pending: Map.put(state.pending, id, from)}}
+    case Transport.send(state.transport, {:request, id, method, params}) do
+      {:ok, transport} ->
+        {:noreply,
+         %{
+           state
+           | transport: transport,
+             next_id: id + 1,
+             pending: Map.put(state.pending, id, from)
+         }}
 
       {:error, reason} ->
         {:reply, {:error, Error.new(:unavailable, %{reason: inspect(reason)})}, state}
@@ -279,38 +291,39 @@ defmodule Troupe.Protocol.Client do
   @impl GenServer
   def handle_cast({:respond, message}, state) do
     # A failed write is not worth crashing a client over: the connection is already
-    # gone, `tcp_closed` is on its way, and the owner is about to hear about it.
-    _ = :gen_tcp.send(state.socket, [JSONRPC.encode(message), ?\n])
-    {:noreply, state}
-  end
-
-  @impl GenServer
-  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    :ok = :inet.setopts(socket, active: :once)
-    {:noreply, consume(%{state | buffer: state.buffer <> data})}
-  end
-
-  def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
-    send(state.owner, {:troupe_disconnected, :closed})
-    {:stop, :normal, state}
-  end
-
-  def handle_info({:tcp_error, socket, reason}, %{socket: socket} = state) do
-    send(state.owner, {:troupe_disconnected, reason})
-    {:stop, :normal, state}
+    # gone, its close is on its way, and the owner is about to hear about it.
+    case Transport.send(state.transport, message) do
+      {:ok, transport} -> {:noreply, %{state | transport: transport}}
+      {:error, _reason} -> {:noreply, state}
+    end
   end
 
   # The owner going away is the only reason to close: a client with nobody listening
   # is a socket held open for nothing.
+  @impl GenServer
   def handle_info({:DOWN, _ref, :process, owner, _reason}, %{owner: owner} = state) do
     {:stop, :normal, state}
   end
 
-  def handle_info(_message, state), do: {:noreply, state}
+  def handle_info(message, state) do
+    case Transport.handle(state.transport, message) do
+      {:ok, transport, chunks} ->
+        :ok = Transport.activate(transport)
+        state = %{state | transport: transport, buffer: state.buffer <> IO.iodata_to_binary(chunks)}
+        {:noreply, consume(state)}
+
+      {:closed, transport, reason} ->
+        send(state.owner, {:troupe_disconnected, reason})
+        {:stop, :normal, %{state | transport: transport}}
+
+      :unknown ->
+        {:noreply, state}
+    end
+  end
 
   @impl GenServer
   def terminate(_reason, state) do
-    :gen_tcp.close(state.socket)
+    Transport.close(state.transport)
     :ok
   end
 

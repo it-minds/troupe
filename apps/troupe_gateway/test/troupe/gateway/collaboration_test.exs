@@ -54,9 +54,21 @@ defmodule Troupe.Gateway.CollaborationTest do
                2 * @inputs,
              "a command_id was accepted twice, which is a lost idempotency guarantee"
 
-      # The single order. Compared over durable events only: ephemerals are droppable
-      # by design and two clients are entitled to see different numbers of them.
-      assert durable_order(ada_seen) == durable_order(bob_seen)
+      # The single order. Compared over durable events only — ephemerals are droppable by
+      # design — and over the part both have reached: one client being a few events
+      # behind the other is lag, not disagreement. Disagreement would be a difference
+      # inside the prefix they have both seen.
+      ada_order = durable_order(ada_seen)
+      bob_order = durable_order(bob_seen)
+      common = min(length(ada_order), length(bob_order))
+
+      assert common >= 2 * @inputs, "only #{common} durable events reached both clients"
+      assert Enum.take(ada_order, common) == Enum.take(bob_order, common)
+
+      # And it is one contiguous run of sequence numbers, so neither client is agreeing
+      # about an order it has holes in.
+      seqs = ada_order |> Enum.take(common) |> Enum.map(&elem(&1, 0))
+      assert seqs == Enum.to_list(hd(seqs)..List.last(seqs))
 
       # And the author of each input is the client that sent it, not whoever the
       # session happens to belong to.

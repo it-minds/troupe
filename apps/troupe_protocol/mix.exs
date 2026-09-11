@@ -28,6 +28,10 @@ defmodule Troupe.Protocol.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
+      # A client attaches to a worker pod over a WebSocket, because a pod is reached
+      # through an Ingress. Mint's is the one already underneath `req`, so this adds a
+      # framing layer rather than a second HTTP stack.
+      {:mint_web_socket, "~> 1.0"},
       # Session tokens are verified by workers offline and minted by the plane, so the
       # JWT shape — and the rules about audience and expiry — belong where both can see
       # them. The plane signs through OpenBao; nothing here holds a private key.

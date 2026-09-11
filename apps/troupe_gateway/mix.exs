@@ -32,6 +32,11 @@ defmodule Troupe.Gateway.MixProject do
       {:troupe_protocol, in_umbrella: true},
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.3"},
+      # The remote transport. A worker pod is reached through an Ingress, so its clients
+      # arrive over HTTP and stay over a WebSocket; the same JSON-RPC either way.
+      {:bandit, "~> 1.12"},
+      {:plug, "~> 1.20"},
+      {:websock_adapter, "~> 0.6"},
       {:stream_data, "~> 1.4", only: [:dev, :test]}]
   end
 end

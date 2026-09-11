@@ -27,6 +27,25 @@ defmodule Troupe.Worker.Drain do
   require Logger
 
   @poll_ms 250
+  @flag {__MODULE__, :draining?}
+
+  @doc """
+  Whether this pod has stopped taking new work.
+
+  Step one of the drain, made visible: the readiness probe reads this, so a draining pod
+  is taken out of its Service's endpoints while it finishes the sessions it already has.
+  A flag in `:persistent_term` rather than a process, because the thing asking is a
+  health check that must answer while everything else is shutting down.
+  """
+  @spec draining?() :: boolean()
+  def draining?, do: :persistent_term.get(@flag, false)
+
+  @doc false
+  @spec reset() :: :ok
+  def reset do
+    :persistent_term.erase(@flag)
+    :ok
+  end
 
   @doc """
   Drain this pod, and say what happened to each session.
@@ -37,6 +56,11 @@ defmodule Troupe.Worker.Drain do
   @spec run(keyword()) :: map()
   def run(opts \\ []) do
     timeout_ms = Keyword.get(opts, :timeout_ms, default_timeout_ms())
+
+    # Before anything else, and not undone: a pod that started draining and then
+    # reported ready again would be sent a session it is about to abandon.
+    :persistent_term.put(@flag, true)
+
     ids = Sessions.active_ids()
     started = System.monotonic_time(:millisecond)
 
