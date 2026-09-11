@@ -43,6 +43,16 @@ defmodule Troupe.Session.Dispatcher do
           diff_stat: String.t() | nil
         }
 
+  @type report :: %{
+          session_id: String.t(),
+          branches: non_neg_integer(),
+          done: non_neg_integer(),
+          failed: non_neg_integer(),
+          active: [String.t()],
+          worktrees: [String.t()],
+          text: String.t()
+        }
+
   ## API
 
   def start_link(%{session_id: sid} = opts) do
@@ -91,6 +101,19 @@ defmodule Troupe.Session.Dispatcher do
   def put_config(sid, config),
     do: GenServer.call(Session.via(sid, :dispatcher), {:put_config, config})
 
+  @doc """
+  Ends the session: refuses while branches are active or worktrees unresolved
+  (unless `force?`), then writes `session_closed` and stamps `meta.json`.
+  Returns a report of what the session did.
+  """
+  @spec close(String.t(), boolean()) :: {:ok, report()} | {:error, String.t()}
+  def close(sid, force? \\ false),
+    do: GenServer.call(Session.via(sid, :dispatcher), {:close, force?}, 30_000)
+
+  @doc "`true` when the session has at least one branch and none is active."
+  @spec finished?(String.t()) :: boolean()
+  def finished?(sid), do: GenServer.call(Session.via(sid, :dispatcher), :finished?)
+
   ## Server
 
   @impl true
@@ -135,6 +158,31 @@ defmodule Troupe.Session.Dispatcher do
 
   def handle_call({:put_config, config}, _from, %__MODULE__{} = state),
     do: {:reply, :ok, %__MODULE__{state | config: config}}
+
+  def handle_call({:close, force?}, _from, state) do
+    report = report(state)
+
+    case blockers(report, force?) do
+      [] ->
+        Log.append(state.session_id, "session", :session_closed, %{
+          branches: report.branches,
+          done: report.done,
+          failed: report.failed,
+          forced: force? and (report.active != [] or report.worktrees != [])
+        })
+
+        :ok = Log.mark_closed(state.session_id)
+        {:reply, {:ok, report}, state}
+
+      blockers ->
+        {:reply, {:error, Enum.join(blockers, "; ") <> "; use force to close anyway"}, state}
+    end
+  end
+
+  def handle_call(:finished?, _from, state) do
+    windows = Map.values(state.ledger)
+    {:reply, windows != [] and not Enum.any?(windows, &(&1.state in @active)), state}
+  end
 
   def handle_call({:dismiss, path}, _from, state) do
     case Map.get(state.ledger, path) do
@@ -533,6 +581,67 @@ defmodule Troupe.Session.Dispatcher do
       window ->
         {:ok, window}
     end
+  end
+
+  ## Close
+
+  # `reason` (set on done) and `message` (set on failure) both survive a later
+  # dismissal, so the counts stay right after windows are dismissed.
+  defp report(%__MODULE__{} = state) do
+    windows = Map.values(state.ledger)
+
+    report = %{
+      session_id: state.session_id,
+      branches: length(windows),
+      done: Enum.count(windows, &(&1.reason != nil or &1.state == :done_unread)),
+      failed: Enum.count(windows, &(&1.message != nil or &1.state == :failed_unread)),
+      active: paths(windows, &(&1.state in @active)),
+      worktrees: paths(windows, &unresolved_worktree?/1),
+      text: ""
+    }
+
+    %{report | text: report_text(report)}
+  end
+
+  defp paths(windows, pred) do
+    windows |> Enum.filter(pred) |> Enum.map(& &1.agent_path) |> Enum.sort()
+  end
+
+  # A worktree the user checked out themselves is theirs to resolve (Decision 39):
+  # Troupe never commits there and refuses `/merge`, so it cannot block a close.
+  defp unresolved_worktree?(%{worktree: %{managed: true, merged: false, discarded: false}}),
+    do: true
+
+  defp unresolved_worktree?(_window), do: false
+
+  defp blockers(_report, true), do: []
+
+  defp blockers(%{} = report, false) do
+    [
+      if(report.active != [],
+        do: "#{length(report.active)} branch(es) still active: #{Enum.join(report.active, ", ")}"
+      ),
+      if(report.worktrees != [],
+        do:
+          "#{length(report.worktrees)} worktree(s) neither merged nor discarded: " <>
+            Enum.join(report.worktrees, ", ")
+      )
+    ]
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp report_text(%{branches: 0}), do: "no branches ran"
+
+  defp report_text(%{} = r) do
+    extra =
+      [
+        if(r.active != [], do: "#{length(r.active)} active"),
+        if(r.worktrees != [], do: "#{length(r.worktrees)} worktree(s) unresolved")
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    base = "#{r.branches} branch(es): #{r.done} done, #{r.failed} failed"
+    Enum.join([base | extra], ", ")
   end
 
   ## Fold

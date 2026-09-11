@@ -268,6 +268,7 @@ Persisted event types and data:
 | `cancelled`            | agent           | `%{}`                                                                |
 | `finished`             | agent           | `%{summary, reason, diff_stat}`                                      |
 | `watch_trigger`        | `"watcher"`     | `%{kind, markers}`                                                   |
+| `session_closed`       | `"session"`     | `%{branches, done, failed, forced}`                                  |
 
 Transient: `llm_delta %{ref, text}`, `agent_state %{from, to}`, `notice %{text}`.
 
@@ -318,6 +319,15 @@ line, `seq` monotonic per session. `Session.Log` is the only writer; `append`
 is a synchronous call that returns after `IO.binwrite` succeeded and the event
 was published. On start the Log reads the file to restore `seq` and its
 in-memory copy.
+
+`Session.Dispatcher.close/2` ends a session: it refuses while branches are
+active or managed worktrees are neither merged nor discarded (`force?` overrides
+and is recorded on the event), then appends `session_closed` and has the Log
+stamp `closed_at` into `meta.json`. `Log.close_on_disk/3` does the same for a
+persisted session with no running Log, which is safe because a stopped session
+has no writer. `session_closed` is a terminal record: nothing folds it, so
+replay is unaffected and it reaches the TUI model through the same inert path as
+`session_started`. Starting or resuming a session drops `closed_at` again.
 
 ## 8. Concurrency rules
 
