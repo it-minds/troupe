@@ -1,5 +1,6 @@
 #!/usr/bin/env sh
-# Builds the Burrito binary for the current host into burrito_out/.
+# Builds the Burrito binary for the current host and installs it as `troupe`
+# in $TROUPE_INSTALL_DIR (default ~/.local/bin).
 # Requires the toolchain pinned in .tool-versions (erlang, elixir, zig).
 set -eu
 cd "$(dirname "$0")/.."
@@ -16,6 +17,21 @@ export MIX_ENV=prod
 export BURRITO_TARGET="$TARGET"
 export TROUPE_REAPER_TARGETS=all
 
+INSTALL_DIR="${TROUPE_INSTALL_DIR:-$HOME/.local/bin}"
+
 mix deps.get
 mix release --overwrite
-ls -la burrito_out/
+
+mkdir -p "$INSTALL_DIR"
+mv "burrito_out/troupe_$TARGET" "$INSTALL_DIR/troupe"
+chmod +x "$INSTALL_DIR/troupe"
+
+# Burrito extracts its payload once per version, so without this a rebuild at
+# the same version keeps running the previous build.
+rm -rf "$HOME/.local/share/.burrito/troupe_erts-"*
+
+echo "installed $INSTALL_DIR/troupe"
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*) ;;
+  *) echo "warning: $INSTALL_DIR is not on your PATH" >&2 ;;
+esac
