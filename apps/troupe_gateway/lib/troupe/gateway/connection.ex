@@ -38,6 +38,9 @@ defmodule Troupe.Gateway.Connection do
     :endpoint,
     :principal,
     :writer,
+    :auth,
+    :expiring_timer,
+    :expiry_timer,
     buffer: "",
     initialized?: false,
     scopes: [],
@@ -111,6 +114,19 @@ defmodule Troupe.Gateway.Connection do
     else
       {:noreply, deliver(state, session_id, event)}
     end
+  end
+
+  # The warning, sent as an ephemeral because it is about the connection rather than
+  # about the session: a client renews on the connection it already has, and a session
+  # in the middle of a turn never notices.
+  def handle_info(:auth_expiring, state) do
+    payload = %{"expires_at" => state.auth && state.auth[:expires_at]}
+    {:noreply, send_control(state, {:notification, "auth.expiring", payload})}
+  end
+
+  def handle_info(:auth_expired, state) do
+    send_control(state, {:notification, "auth.expired", %{}})
+    {:stop, :normal, state}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -190,7 +206,34 @@ defmodule Troupe.Gateway.Connection do
     {:stop, send_control(state, {:error, id, Error.new(:not_initialized)})}
   end
 
+  # Handled here rather than in the dispatch table because it is about the connection
+  # itself: a client renews on the connection it already has, so a session in the middle
+  # of a turn is not interrupted by a reconnect.
+  defp handle_message({:request, id, "auth.refresh", params}, state) do
+    case refresh(params, state) do
+      {:ok, result, state} -> {:ok, send_control(state, {:result, id, result})}
+      {:error, error} -> {:stop, send_control(state, {:error, id, error})}
+    end
+  end
+
   defp handle_message({:request, id, method, params}, state) do
+    # Nothing is accepted past `exp`. The client was warned; this is the refusal, and
+    # the connection goes with it.
+    if expired?(state) do
+      {:stop, send_control(state, {:error, id, Error.new(:unauthenticated, %{reason: "expired"})})}
+    else
+      case guard(state, method, params) do
+        :ok -> dispatch_request(id, method, params, state)
+        {:error, reason} -> {:ok, send_control(state, {:error, id, as_error(reason)})}
+      end
+    end
+  end
+
+  defp handle_message({:notification, _method, _params}, state), do: {:ok, state}
+  defp handle_message({:result, _id, _result}, state), do: {:ok, state}
+  defp handle_message({:error, _id, _error}, state), do: {:ok, state}
+
+  defp dispatch_request(id, method, params, state) do
     case Dispatch.call(method, params, context(state)) do
       {:ok, result} ->
         {:ok, send_control(state, {:result, id, result})}
@@ -208,60 +251,102 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp handle_message({:notification, _method, _params}, state), do: {:ok, state}
-  defp handle_message({:result, _id, _result}, state), do: {:ok, state}
-  defp handle_message({:error, _id, _error}, state), do: {:ok, state}
-
   # -- initialize -------------------------------------------------------------
 
   defp initialize(params, state) do
     version = Map.get(params, "protocol_version", Protocol.version())
 
-    cond do
-      not Protocol.supports?(version) ->
-        {:error, Error.new(:unsupported_version, %{supported: Protocol.supported_versions()})}
-
-      not authenticated?(params, state) ->
-        {:error, Error.new(:unauthenticated)}
-
-      true ->
-        principal = principal_for(state)
-        scopes = scopes_for(params, state)
-
-        state = %{
-          state
-          | initialized?: true,
-            principal: principal,
-            scopes: scopes,
-            capabilities: Map.get(params, "capabilities", %{}),
-            client_info: Map.get(params, "client_info", %{})
-        }
-
-        {:ok,
-         %{
-           "protocol_version" => Protocol.version(),
-           "server_info" => %{
-             "name" => "troupe-daemon",
-             "version" => version_string(),
-             "instance_id" => Daemon.instance_id()
-           },
-           "capabilities" => %{"worktrees" => true, "watch" => true, "remote" => false},
-           "principal" => principal,
-           "scopes" => Enum.map(scopes, &Atom.to_string/1),
-           "limits" => %{
-             "max_message_bytes" => @max_message_bytes,
-             "outbound_queue" => @durable_bound
-           }
-         }, state}
+    if Protocol.supports?(version) do
+      authorise(params, state, version)
+    else
+      {:error, Error.new(:unsupported_version, %{supported: Protocol.supported_versions()})}
     end
   end
 
+  defp authorise(params, state, version) do
+    case authenticate(params, state) do
+      {:ok, principal, scopes, auth} ->
+        state =
+          %{
+            state
+            | initialized?: true,
+              principal: principal,
+              scopes: scopes,
+              auth: auth,
+              capabilities: Map.get(params, "capabilities", %{}),
+              client_info: Map.get(params, "client_info", %{})
+          }
+          |> schedule_expiry()
+
+        {:ok, hello(principal, scopes, version, state), state}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:unauthenticated, %{reason: to_string(reason)})}
+    end
+  end
+
+  defp hello(principal, scopes, version, state) do
+    %{
+      "protocol_version" => Protocol.version(),
+      "server_info" => %{
+        "name" => server_name(state),
+        "version" => version_string(),
+        "instance_id" => Daemon.instance_id()
+      },
+      "capabilities" => capabilities(state),
+      "principal" => principal,
+      "scopes" => Enum.map(scopes, &Atom.to_string/1),
+      "limits" => %{
+        "max_message_bytes" => @max_message_bytes,
+        "outbound_queue" => @durable_bound
+      }
+    }
+    |> maybe_put_expiry(state)
+    |> Map.put("protocol_version", version_answer(version))
+  end
+
+  defp version_answer(_requested), do: Protocol.version()
+
+  defp server_name(%{endpoint: %{kind: :remote}}), do: "troupe-worker"
+  defp server_name(_state), do: "troupe-daemon"
+
+  defp capabilities(%{endpoint: %{kind: :remote}}) do
+    %{"worktrees" => false, "watch" => true, "remote" => true}
+  end
+
+  defp capabilities(_state), do: %{"worktrees" => true, "watch" => true, "remote" => false}
+
+  defp maybe_put_expiry(result, %{auth: %{expires_at: expires_at}}) when is_integer(expires_at) do
+    Map.put(result, "auth", %{"expires_at" => expires_at})
+  end
+
+  defp maybe_put_expiry(result, _state), do: result
+
   # A Unix socket authenticates by its own permissions; a TCP endpoint needs the token
   # from the user-only discovery file, which is the same trust boundary written down.
-  defp authenticated?(_params, %{endpoint: %{kind: :unix}}), do: true
+  # A remote endpoint asks whatever the worker gave it, because deciding who holds a
+  # signed token is not the protocol layer's business.
+  defp authenticate(_params, %{endpoint: %{kind: :unix}}) do
+    {:ok, local_principal(), [:observe, :control, :admin], nil}
+  end
 
-  defp authenticated?(params, %{endpoint: %{kind: :tcp, token: token}}) do
-    constant_time_equal?(get_in(params, ["auth", "token"]), token)
+  defp authenticate(params, %{endpoint: %{kind: :tcp, token: token}}) do
+    if constant_time_equal?(get_in(params, ["auth", "token"]), token) do
+      {:ok, local_principal(), [:observe, :control, :admin], nil}
+    else
+      {:error, Error.new(:unauthenticated)}
+    end
+  end
+
+  defp authenticate(params, %{endpoint: %{kind: :remote, authenticator: authenticator}}) do
+    case authenticator.(params) do
+      {:ok, principal, scopes} -> {:ok, principal, scopes, nil}
+      {:ok, principal, scopes, auth} -> {:ok, principal, scopes, auth}
+      other -> other
+    end
   end
 
   # Constant-time, so a wrong token cannot be found one byte at a time.
@@ -271,14 +356,88 @@ defmodule Troupe.Gateway.Connection do
 
   defp constant_time_equal?(_a, _b), do: false
 
-  defp principal_for(_state) do
+  defp local_principal do
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     %{"subject" => "local:" <> user, "display_name" => user, "kind" => "user"}
   end
 
-  # Locally the socket's permissions authenticate the user, so a connection gets every
-  # scope. Narrower tokens come from `troupe ctl token`.
-  defp scopes_for(_params, _state), do: [:observe, :control, :admin]
+  # -- expiry and renewal -----------------------------------------------------
+
+  # How long before `exp` the client is told to renew. Long enough to survive a slow
+  # round trip to the plane, short enough that a token is not renewed the moment it is
+  # issued.
+  @renew_warning_seconds 120
+  # A connection that never sends another command must not stream events forever on an
+  # expired token, so it is closed shortly after `exp` whether or not anyone asks.
+  @expiry_grace_seconds 30
+
+  defp schedule_expiry(state) do
+    state = cancel_expiry(state)
+
+    case state.auth do
+      %{expires_at: expires_at} when is_integer(expires_at) ->
+        now = System.system_time(:second)
+        warn = max((expires_at - @renew_warning_seconds - now) * 1000, 0)
+        hard = max((expires_at + @expiry_grace_seconds - now) * 1000, 0)
+
+        %{
+          state
+          | expiring_timer: Process.send_after(self(), :auth_expiring, warn),
+            expiry_timer: Process.send_after(self(), :auth_expired, hard)
+        }
+
+      _ ->
+        state
+    end
+  end
+
+  defp cancel_expiry(state) do
+    if state.expiring_timer, do: Process.cancel_timer(state.expiring_timer)
+    if state.expiry_timer, do: Process.cancel_timer(state.expiry_timer)
+    %{state | expiring_timer: nil, expiry_timer: nil}
+  end
+
+  defp expired?(%{auth: %{expires_at: expires_at}}) when is_integer(expires_at) do
+    System.system_time(:second) >= expires_at
+  end
+
+  defp expired?(_state), do: false
+
+  # Asked before every command on a remote endpoint. A token is minted once and an ACL
+  # can change while it is still valid, so the role a token carries is a claim about
+  # the moment it was issued and not a standing permission.
+  defp guard(%{endpoint: %{guard: guard}} = state, method, params) when is_function(guard, 3) do
+    guard.(state.auth && state.auth[:claims], method, params)
+  end
+
+  defp guard(_state, _method, _params), do: :ok
+
+  defp as_error(%Error{} = error), do: error
+  defp as_error(reason), do: Error.new(:forbidden, %{reason: to_string(reason)})
+
+  defp refresh(params, %{endpoint: %{kind: :remote}} = state) do
+    case authenticate(params, state) do
+      {:ok, principal, scopes, auth} ->
+        state = schedule_expiry(%{state | principal: principal, scopes: scopes, auth: auth})
+
+        {:ok,
+         %{
+           "principal" => principal,
+           "scopes" => Enum.map(scopes, &Atom.to_string/1),
+           "auth" => %{"expires_at" => auth && auth[:expires_at]}
+         }, state}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:unauthenticated, %{reason: to_string(reason)})}
+    end
+  end
+
+  defp refresh(_params, _state) do
+    {:error, Error.new(:invalid_request, %{reason: "this endpoint does not use tokens"})}
+  end
 
   defp version_string do
     case :application.get_key(:troupe_gateway, :vsn) do

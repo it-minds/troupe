@@ -23,7 +23,9 @@ defmodule Troupe.Gateway.Listener do
   defstruct [:socket, :endpoint, :acceptor, connection_opts: []]
 
   @spec start_link(keyword()) :: GenServer.on_start()
-  def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+  def start_link(opts) do
+    GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name, __MODULE__))
+  end
 
   @doc "Where this daemon is listening."
   @spec endpoint() :: Endpoint.t()
@@ -154,6 +156,11 @@ defmodule Troupe.Gateway.Listener do
   defp listen(%Endpoint{kind: :tcp, port: port}) do
     :gen_tcp.listen(port, [{:ip, {127, 0, 0, 1}} | @socket_opts])
   end
+
+  # A worker pod listens on every interface: its clients are on the other side of an
+  # Ingress, not on the same machine. What keeps that safe is the token, the pod's
+  # NetworkPolicy, and the fact that the audience names this pod alone.
+  defp listen(%Endpoint{kind: :remote, port: port}), do: :gen_tcp.listen(port, @socket_opts)
 
   # A socket file left by a killed daemon has to go, but only once we know nothing is
   # answering on it — otherwise two daemons race for the same path and clients split

@@ -478,6 +478,66 @@ a dashboard.
 A command outside the connection's scopes returns `forbidden` with
 `data.required_scope`.
 
+### Remote connections: session tokens
+
+A connection to a **worker pod** authenticates with a JWT in `params.auth.token` at
+`initialize`. The token is minted by the plane, signed through OpenBao's transit engine,
+and verified by the worker **offline** against a cached JWKS — the plane is not in the
+data path of a live session, so a pod that cannot reach it still decides who may attach.
+
+| claim | meaning |
+| --- | --- |
+| `sub` | the subject, as the IdP knows them |
+| `aud` | **the pod's worker id**, not the profile and not the plane |
+| `session_id` | the session this token is for, or absent for a create grant |
+| `role` | `owner`, `collaborator`, or `viewer` |
+| `scopes` | the scopes the role carries, so a client need not know the mapping |
+| `team` | the team the session is billed to |
+| `exp` | at most 15 minutes out |
+
+`aud` is what stops a token leaking sideways from being useful: one minted for a `ux`
+pod presented to a `dev` pod fails with `unauthenticated` and `data.reason` of
+`wrong_audience`.
+
+Roles map onto the same three scopes:
+
+| role | scopes |
+| --- | --- |
+| `owner` | `observe`, `control`, `admin` |
+| `collaborator` | `observe`, `control` |
+| `viewer` | `observe` |
+
+The role in a token is a claim about the moment it was minted. **Access is checked again
+on every command** against the ACL the plane has pushed to the pod, so a collaborator
+whose access is revoked is refused on their next command with `forbidden` and
+`data.reason` of `access revoked` — even though the token in their hand still verifies.
+
+### `auth.expiring` (notification, server → client)
+
+```json
+{"jsonrpc": "2.0", "method": "auth.expiring", "params": {"expires_at": 1767225600}}
+```
+
+Sent two minutes before `exp`. Ephemeral, and about the connection rather than any
+session.
+
+### `auth.refresh`
+
+```json
+{"jsonrpc": "2.0", "id": 9, "method": "auth.refresh", "params": {"auth": {"token": "…"}}}
+```
+
+→ `{"principal", "scopes", "auth": {"expires_at"}}`
+
+Renews on the connection that is already open, so a session in the middle of a turn
+never notices. The new token is verified exactly as the first one was, including its
+audience: a refresh is not a way to move a connection to a different pod.
+
+Nothing is accepted past `exp`. The next command after it returns `unauthenticated`
+with `data.reason` of `expired` and the connection closes; a connection that sends
+nothing is closed shortly afterwards regardless, rather than streaming events on a token
+that has run out.
+
 ---
 
 ## 8. Client-hosted tools

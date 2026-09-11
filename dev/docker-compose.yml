@@ -84,6 +84,24 @@ services:
       timeout: 3s
       retries: 30
 
+  # Dev mode gives us KV v2 at `secret/` and nothing else. The plane signs session
+  # tokens through transit rather than holding a private key, so the engine and the
+  # signing key have to exist before anything can mint one.
+  openbao-setup:
+    image: openbao/openbao:2.4.1
+    depends_on:
+      openbao:
+        condition: service_healthy
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: troupe-dev-root
+    entrypoint: >
+      /bin/sh -c "
+      bao secrets enable -path=transit transit 2>/dev/null || true;
+      bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256 2>/dev/null || true;
+      echo 'transit ready'
+      "
+
 volumes:
   postgres-data:
   minio-data:

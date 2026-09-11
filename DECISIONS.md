@@ -455,3 +455,39 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     reclaims only bytes that are already in object storage; above the critical one it
     stops accepting placements, because a pod that runs out of disk mid-turn loses the
     turn.
+
+79. **The plane signs session tokens through OpenBao transit and never holds a key.** A
+    compromised plane can mint tokens while it is compromised and forge nothing
+    afterwards, and the same credential that allows signing allows nothing under the
+    session-key paths. ES256 over P-256, because the public half is a JWK a worker can
+    cache and check offline, and because transit will marshal an ECDSA signature in JWS
+    form directly — its default is ASN.1 DER, which no JWT verifier accepts.
+
+80. **`kid` is the key's RFC 7638 thumbprint, not a name we assign.** The plane that
+    minted a token and the worker that fetched the JWKS agree on it with nothing kept in
+    step between them, and a JWKS carries every version of the transit key so a token
+    minted moments before a rotation stays good until it expires.
+
+81. **`aud` is the pod's worker id, not the profile.** A profile has many pods, and an
+    audience naming the profile would make them interchangeable — which is exactly what
+    a leaked token wants. The worker id is the narrowest thing the plane knows at mint
+    time.
+
+82. **Authentication is injected into the gateway, not branched inside it.** A Unix
+    socket authenticates by its permissions, a loopback TCP endpoint by a token in a
+    user-only file, and a pod by a signed token whose audience names it — so the endpoint
+    carries an authenticator function and the gateway stays a gateway. There is one
+    protocol implementation for local and remote sessions rather than two that drift.
+
+83. **The role in a token is checked once; the ACL is checked on every command.** A token
+    is a claim about the moment it was minted, and a collaborator whose access was
+    revoked still holds one that verifies perfectly. The endpoint therefore carries a
+    guard as well as an authenticator, consulted before every command against the ACL
+    mirror the plane pushes — which is what makes a revocation take effect on a
+    connection that is already open.
+
+84. **A refresh happens on the connection that is already open.** Reconnecting to renew
+    would interrupt a session mid-turn for no reason. Nothing is accepted past `exp`: the
+    next command is refused and the connection closes, and a connection that sends
+    nothing is closed shortly after `exp` anyway rather than streaming events on a token
+    that has run out.

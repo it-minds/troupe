@@ -12,6 +12,7 @@ defmodule Troupe.Worker.Plane.Commands do
   """
 
   alias Troupe.Protocol.Error
+  alias Troupe.Worker.Auth
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.Session.{Manager, Sealer, Workspace}
   alias Troupe.Worker.Sessions
@@ -97,6 +98,29 @@ defmodule Troupe.Worker.Plane.Commands do
     {:ok, %{"sessions" => index()}}
   end
 
+  # Rotation. Every version the plane holds, not only the newest: a token minted moments
+  # before a rotation carries the old `kid` and stays good until it expires.
+  defp dispatch("jwks.updated", params) do
+    with_auth(fn server ->
+      Auth.put_jwks(server, params["jwks"] || %{"keys" => []})
+      {:ok, %{"keys" => length(get_in(params, ["jwks", "keys"]) || [])}}
+    end)
+  end
+
+  # Applied to connections that are already open, which is the whole point of pushing
+  # them: a revoked collaborator holds a token that still verifies.
+  defp dispatch("acl.changed", params) do
+    changes = params["changes"] || []
+
+    with_auth(fn server ->
+      Enum.each(changes, fn change ->
+        Auth.put_acl(server, change["session_id"], change["subject"], change["role"])
+      end)
+
+      {:ok, %{"applied" => length(changes)}}
+    end)
+  end
+
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
@@ -144,6 +168,15 @@ defmodule Troupe.Worker.Plane.Commands do
     :troupe_worker
     |> Application.get_env(:session_defaults, [])
     |> Keyword.put_new_lazy(:report, &reporter/0)
+  end
+
+  # A pod with no auth server is one running without a plane at all — a test, or a
+  # development daemon. Saying so is better than crashing on a push it never asked for.
+  defp with_auth(fun) do
+    case Process.whereis(Auth) do
+      nil -> {:error, Error.new(:internal_error, %{reason: "no auth server on this pod"})}
+      server -> fun.(server)
+    end
   end
 
   defp reporter do

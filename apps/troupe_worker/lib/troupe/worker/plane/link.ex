@@ -23,6 +23,7 @@ defmodule Troupe.Worker.Plane.Link do
 
   alias Troupe.Paths
   alias Troupe.Protocol.{Error, JSONRPC}
+  alias Troupe.Worker.Auth
   alias Troupe.Worker.Disk
   alias Troupe.Worker.Plane.Commands
   alias Troupe.Worker.Sessions
@@ -213,6 +214,9 @@ defmodule Troupe.Worker.Plane.Link do
         case exchange(state, "enrol", params) do
           {:ok, result} ->
             Logger.info("troupe worker: enrolled with the plane as #{result["profile"]}")
+            # Every token for this pod carries its worker id as the audience, so nothing
+            # can be verified until the plane has said what that id is.
+            announce_identity(result)
 
             %{state | status: :enrolled, profile: result["profile"], worker_id: result["worker_id"]}
             |> reset_backoff()
@@ -268,6 +272,15 @@ defmodule Troupe.Worker.Plane.Link do
 
   defp token(fun) when is_function(fun, 0), do: fun.()
   defp token(value) when is_binary(value), do: {:ok, value}
+
+  defp announce_identity(%{"worker_id" => worker_id}) when is_binary(worker_id) do
+    case Process.whereis(Auth) do
+      nil -> :ok
+      server -> Auth.put_worker_id(server, worker_id)
+    end
+  end
+
+  defp announce_identity(_result), do: :ok
 
   defp activate_socket(state) do
     :ok = :inet.setopts(state.socket, active: :once)

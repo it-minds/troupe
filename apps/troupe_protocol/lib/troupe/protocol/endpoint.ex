@@ -13,13 +13,15 @@ defmodule Troupe.Protocol.Endpoint do
   """
 
   @enforce_keys [:kind]
-  defstruct [:kind, :path, :port, :token]
+  defstruct [:kind, :path, :port, :token, :authenticator, :guard]
 
   @type t :: %__MODULE__{
-          kind: :unix | :tcp,
+          kind: :unix | :tcp | :remote,
           path: Path.t() | nil,
           port: :inet.port_number() | nil,
-          token: String.t() | nil
+          token: String.t() | nil,
+          authenticator: (map() -> {:ok, map(), [atom()]} | {:error, term()}) | nil,
+          guard: (map(), String.t(), map() -> :ok | {:error, term()}) | nil
         }
 
   @doc "The endpoint this machine should use, honouring `TROUPE_DAEMON_SOCKET`."
@@ -44,6 +46,27 @@ defmodule Troupe.Protocol.Endpoint do
   @spec tcp(:inet.port_number()) :: t()
   def tcp(port \\ 0) do
     %__MODULE__{kind: :tcp, port: port, token: 32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)}
+  end
+
+  @doc """
+  A worker pod's endpoint: a port, and a function that decides who is calling.
+
+  Locally the socket's permissions are the authentication; in a cluster they are a
+  signed token whose audience is this pod, which is a decision the worker makes and the
+  protocol layer only carries. Injected rather than branched on, so the gateway stays a
+  gateway and does not learn about JWKS.
+  """
+  @spec remote(:inet.port_number(), (map() -> {:ok, map(), [atom()]} | {:error, term()}), keyword()) :: t()
+  def remote(port, authenticator, opts \\ []) do
+    %__MODULE__{
+      kind: :remote,
+      port: port,
+      authenticator: authenticator,
+      # Consulted before every command, because a token is minted once and an ACL can
+      # change while it is still valid: a collaborator whose access was revoked has a
+      # perfectly good token and must still be refused.
+      guard: Keyword.get(opts, :guard)
+    }
   end
 
   @doc """
@@ -111,6 +134,8 @@ defmodule Troupe.Protocol.Endpoint do
   @spec publish!(t()) :: :ok
   def publish!(%__MODULE__{kind: :unix}), do: :ok
 
+  def publish!(%__MODULE__{kind: :remote}), do: :ok
+
   def publish!(%__MODULE__{kind: :tcp} = endpoint) do
     path = discovery_path()
     File.mkdir_p!(Path.dirname(path))
@@ -139,6 +164,8 @@ defmodule Troupe.Protocol.Endpoint do
     :ok
   end
 
+  def retract(%__MODULE__{kind: :remote}), do: :ok
+
   @doc "Read the endpoint a running daemon published, if any."
   @spec discover() :: {:ok, t()} | {:error, :not_running}
   def discover do
@@ -164,9 +191,11 @@ defmodule Troupe.Protocol.Endpoint do
   @spec describe(t()) :: String.t()
   def describe(%__MODULE__{kind: :unix, path: path}), do: "unix:#{path}"
   def describe(%__MODULE__{kind: :tcp, port: port}), do: "tcp:127.0.0.1:#{port}"
+  def describe(%__MODULE__{kind: :remote, port: port}), do: "remote:0.0.0.0:#{port}"
 
   @doc "The `:gen_tcp.connect/3` arguments for reaching this endpoint."
   @spec connect_args(t()) :: {term(), :inet.port_number()}
   def connect_args(%__MODULE__{kind: :unix, path: path}), do: {{:local, path}, 0}
   def connect_args(%__MODULE__{kind: :tcp, port: port}), do: {{127, 0, 0, 1}, port}
+  def connect_args(%__MODULE__{kind: :remote, port: port}), do: {{127, 0, 0, 1}, port}
 end

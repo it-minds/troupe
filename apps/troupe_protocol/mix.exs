@@ -28,6 +28,10 @@ defmodule Troupe.Protocol.MixProject do
   defp deps do
     [
       {:jason, "~> 1.4"},
+      # Session tokens are verified by workers offline and minted by the plane, so the
+      # JWT shape — and the rules about audience and expiry — belong where both can see
+      # them. The plane signs through OpenBao; nothing here holds a private key.
+      {:jose, "~> 1.11"},
       # For the key manager, which is a contract both the plane and the workers hold
       # and therefore has to live where both can see it. See DECISIONS.md.
       {:req, "~> 0.7"}]
