@@ -670,3 +670,18 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      archive is the whole tree rather than the events since the last one, and skipped
      entirely when a cheap fingerprint — file count, total bytes, newest mtime — says
      nothing has changed.
+
+117. **The key-store policies live in code, not in a chart's YAML.** The policy the tests
+     prove and the policy a cluster installs have to be the same string, or the proof is
+     about something nobody deployed. Three credentials and none can do what another can:
+     a pod creates and reads under its granted teams only, the plane destroys metadata and
+     reads nothing, the operator touches keys not at all.
+
+118. **A pod cannot destroy a key, even one of its own team.** Making a session
+     unreadable is an erasure, and an erasure is a decision the plane records and drives.
+     A pod that could do it alone would be a pod that could destroy a session by being
+     wrong.
+
+119. **The plane's policy has no rule for the data path at all — not a deny.** OpenBao
+     denies by default, and an explicit deny invites somebody to "fix" it later by
+     narrowing it into an allow.

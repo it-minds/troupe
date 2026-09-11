@@ -12,7 +12,7 @@ defmodule Troupe.KMS.OpenBaoTest do
   use ExUnit.Case, async: false
 
   alias Troupe.KMS
-  alias Troupe.KMS.OpenBao
+  alias Troupe.KMS.{OpenBao, Policy}
 
   @moduletag timeout: 60_000
 
@@ -112,6 +112,65 @@ defmodule Troupe.KMS.OpenBaoTest do
     assert {:error, :not_found} = OpenBao.fetch("ux", session, options(token: scoped))
   end
 
+  describe "what each credential may not do" do
+    test "the plane cannot read any session key, of any team", context do
+      %{session: session, team: team} = requires_bao(context)
+
+      {:ok, key} = OpenBao.create(team, session, options())
+      {:ok, _} = OpenBao.create("some-other-team", session, options())
+      on_exit(fn -> OpenBao.destroy("some-other-team", session, options()) end)
+
+      plane = token_for(Policy.plane(mount()))
+
+      # The Forbidden list's "no plane credential that can read session keys", checked
+      # against OpenBao rather than against this code's belief about it.
+      assert {:error, :forbidden} = OpenBao.fetch(team, session, options(token: plane))
+      assert {:error, :forbidden} = OpenBao.fetch("some-other-team", session, options(token: plane))
+
+      # And it cannot write one either, which would be a way to replace a key with one
+      # it knows.
+      assert {:error, _} = OpenBao.create(team, "planted-#{session}", options(token: plane))
+
+      # But it can destroy metadata, because erasure has to work — and once it has, the
+      # key is gone for everyone including the pods that could read it.
+      assert :ok = OpenBao.destroy(team, session, options(token: plane))
+      assert {:error, :not_found} = OpenBao.fetch(team, session, options())
+      assert byte_size(key) == 32
+    end
+
+    test "a profile's policy reaches only the teams that profile is granted", context do
+      %{session: session} = requires_bao(context)
+
+      {:ok, _} = OpenBao.create("granted-to-dev", session, options())
+      {:ok, _} = OpenBao.create("granted-to-ux", session, options())
+
+      on_exit(fn ->
+        OpenBao.destroy("granted-to-dev", session, options())
+        OpenBao.destroy("granted-to-ux", session, options())
+      end)
+
+      dev = token_for(Policy.worker(mount(), ["granted-to-dev"]))
+
+      assert {:ok, _} = OpenBao.fetch("granted-to-dev", session, options(token: dev))
+      assert {:error, :forbidden} = OpenBao.fetch("granted-to-ux", session, options(token: dev))
+    end
+
+    test "a pod cannot destroy a key, even one of its own team", context do
+      %{session: session} = requires_bao(context)
+
+      {:ok, _} = OpenBao.create("granted-to-dev", session, options())
+      on_exit(fn -> OpenBao.destroy("granted-to-dev", session, options()) end)
+
+      dev = token_for(Policy.worker(mount(), ["granted-to-dev"]))
+
+      # Making a session unreadable is an erasure, and an erasure is a decision the plane
+      # records and drives. A pod that could do it on its own would be a pod that could
+      # destroy a session by being wrong.
+      assert {:error, _} = OpenBao.destroy("granted-to-dev", session, options(token: dev))
+      assert {:ok, _} = OpenBao.fetch("granted-to-dev", session, options())
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp requires_bao(%{team: _} = context), do: context
@@ -153,6 +212,33 @@ defmodule Troupe.KMS.OpenBaoTest do
       {:ok, %{status: _}} -> {:error, :not_found}
       error -> error
     end
+  end
+
+  # A real token carrying a real policy, so what is being tested is OpenBao's
+  # enforcement rather than this test's imagination of it.
+  defp token_for(document) do
+    name = "troupe-test-#{System.unique_integer([:positive])}"
+
+    {:ok, _} =
+      Req.request(
+        method: :put,
+        url: "#{address()}/v1/sys/policies/acl/#{name}",
+        headers: [{"x-vault-token", root_token()}],
+        json: %{"policy" => document},
+        retry: false
+      )
+
+    {:ok, %{body: body}} =
+      Req.request(
+        method: :post,
+        url: "#{address()}/v1/auth/token/create",
+        headers: [{"x-vault-token", root_token()}],
+        json: %{"policies" => [name], "ttl" => "10m"},
+        decode_body: true,
+        retry: false
+      )
+
+    get_in(body, ["auth", "client_token"])
   end
 
   # A real policy and a real token, because the question is whether OpenBao enforces the
