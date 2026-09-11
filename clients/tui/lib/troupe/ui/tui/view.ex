@@ -636,7 +636,7 @@ defmodule Troupe.UI.TUI.View do
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},
       {true, ["e #{verb} output", "e #{verb}", "e"]},
       {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
-      {w.state in [:running, :needs_input], ["x cancel", "x cancel", "x"]},
+      {w.state in [:running, :needs_input], ["x cancel & remove", "x cancel", "x"]},
       {w.state in [:done_unread, :failed_unread], ["d dismiss", "d dismiss", "d"]},
       {true, ["Tab profile", nil, nil]}
     ]

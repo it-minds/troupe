@@ -160,11 +160,17 @@ The ledger is a fold over persisted events:
 | `branch_spawned`                   | (new) -> `:running`                          |
 | `branch_state %{state: s}`         | -> `s` (`:running`, `:needs_input`, `:done_unread`) |
 | `branch_failed`                    | -> `:failed_unread`                          |
+| `cancelled`                        | marks the window cancelled (no state change) |
 | `window_dismissed`                 | -> `:dismissed`                              |
 
 `:done_unread` and `:failed_unread` are resting states. Nothing is removed
 without a `window_dismissed` event, and that event is only written when the
-user asks. On (re)start the Dispatcher folds the log, re-monitors live Nodes,
+user asks — `{:dismiss, agent_path}`, or `{:cancel, agent_path}`, which stops
+the branch and then removes the window it stopped (Decision 57). Because the
+cancelled mark is folded from the log, a Dispatcher that restarts between the
+`cancelled` event and the branch coming to rest still removes the window.
+
+On (re)start the Dispatcher folds the log, re-monitors live Nodes,
 re-spawns branches whose ledger state is `:running` or `:needs_input` and
 which have no live Node, and terminates Nodes of `:done_unread` windows.
 
@@ -184,6 +190,7 @@ a timeout.
 | `{:switch_profile, name}`                                   | Agent.Server (send)| none                                    |
 | `:cancel`                                                   | Agent.Server (send)| none                                    |
 | `{:dismiss, agent_path}`                                    | Dispatcher (call)  | `:ok | {:error, reason}`                |
+| `{:cancel, agent_path}` (stop, discard worktree, dismiss)   | Dispatcher (call)  | `:ok | {:error, reason}`                |
 | `{:approval, call_id, :allow | :deny | :allow_session}`     | Approvals (call)   | `:ok | {:error, :unknown_call}`         |
 | `{:answer, call_id, text}`                                  | Approvals (call)   | `:ok | {:error, :unknown_call}`         |
 | `{:merge, agent_path}` / `{:discard, agent_path}`           | Dispatcher (call)  | `{:ok, info} | {:error, reason}`        |

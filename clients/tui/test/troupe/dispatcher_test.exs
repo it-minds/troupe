@@ -178,4 +178,41 @@ defmodule Troupe.DispatcherTest do
     assert length(Session.Branches.live_nodes(sid)) == 8
     assert length(Troupe.windows(sid)) == 8
   end
+
+  # Decision 57
+  test "cancel_branch stops a running branch, removes its window and frees the slot" do
+    ws = tmp_workspace()
+    fallback = fn _ -> {:delay, 20_000, {:finish, "never"}} end
+    {sid, _, _} = start_session!(workspace: ws, fallback: fallback)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "long task")
+    {:ok, "code-2"} = Troupe.dispatch(sid, "code", "another")
+    eventually(fn -> length(Session.Branches.live_nodes(sid)) == 2 end)
+
+    :ok = Troupe.cancel_branch(sid, "code-1")
+    await_event("code-1", :window_dismissed)
+
+    assert window(sid, "code-1").state == :dismissed
+    assert window(sid, "code-2").state == :running
+    assert [cancelled] = events_of(sid, "code-1", :cancelled)
+    assert cancelled.agent_path == "code-1"
+    eventually(fn -> Session.Branches.live_nodes(sid) |> length() == 1 end)
+  end
+
+  # Decision 57
+  test "cancel_branch removes a resting window, and refuses one already removed" do
+    ws = tmp_workspace()
+    {sid, _, _} = start_session!(workspace: ws, scripts: %{"code-1" => [{:finish, "done"}]})
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "quick")
+    await_state("code-1", :done_unread)
+
+    :ok = Troupe.cancel_branch(sid, "code-1")
+    await_event("code-1", :window_dismissed)
+    assert window(sid, "code-1").state == :dismissed
+
+    assert {:error, msg} = Troupe.cancel_branch(sid, "code-1")
+    assert msg =~ "was dismissed"
+    assert {:error, "no window code-9"} = Troupe.cancel_branch(sid, "code-9")
+  end
 end

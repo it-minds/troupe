@@ -324,7 +324,7 @@ defmodule Troupe.UI.TUI.Server do
         _ -> nil
       end
 
-    target = fn -> if args == "", do: active, else: args end
+    target = fn -> if args == "", do: active, else: resolve_window(state, args) end
 
     result =
       case name do
@@ -338,7 +338,7 @@ defmodule Troupe.UI.TUI.Server do
           toggle_watch(sid, state.model.watch.enabled)
 
         "cancel" ->
-          with_target(target.(), &Troupe.cancel(sid, &1))
+          with_target(target.(), &Troupe.cancel_branch(sid, &1))
 
         "dismiss" ->
           with_target(target.(), &Troupe.dismiss(sid, &1))
@@ -588,8 +588,23 @@ defmodule Troupe.UI.TUI.Server do
     {:notice, "watch mode on (#{backend})"}
   end
 
-  defp with_target(nil, _fun), do: {:error, "no window given; activate one or pass its path"}
+  defp with_target(nil, _fun), do: {:error, "no window given; activate one or pass its number"}
   defp with_target(path, fun), do: fun.(path)
+
+  @doc """
+  Resolves a window argument: the number on its tile (`/cancel 3`) or its path
+  (`/cancel code-3`). Numbers are what the strip and the digit keys already show,
+  and no agent path is a bare number, so there is nothing to disambiguate.
+  """
+  @spec resolve_window(map(), String.t()) :: String.t()
+  def resolve_window(state, arg) do
+    with {n, ""} <- Integer.parse(arg),
+         w when w != nil <- Enum.at(Model.windows(state.model), n - 1) do
+      w.path
+    else
+      _ -> arg
+    end
+  end
 
   ## Window keys
 
@@ -637,8 +652,10 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp window_key(%Key{code: "x"}, path, %{win_text: ""} = state) do
-    Troupe.cancel(state.session_id, path)
-    state
+    case Troupe.cancel_branch(state.session_id, path) do
+      :ok -> %{state | focus: :command}
+      {:error, msg} -> notice(state, msg)
+    end
   end
 
   defp window_key(%Key{code: "d"}, path, %{win_text: ""} = state) do
@@ -905,7 +922,7 @@ defmodule Troupe.UI.TUI.Server do
       not Map.get(wt, :discarded, false)
   end
 
-  defp eligible?("cancel", w), do: w.state in [:running, :needs_input]
+  defp eligible?("cancel", w), do: w.state != :dismissed
   defp eligible?("dismiss", w), do: w.state in [:done_unread, :failed_unread]
 
   # Exact match: rotate through every candidate. Otherwise the first candidate with that prefix.

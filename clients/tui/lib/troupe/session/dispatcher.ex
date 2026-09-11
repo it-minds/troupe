@@ -40,7 +40,8 @@ defmodule Troupe.Session.Dispatcher do
           created_seq: non_neg_integer(),
           source: atom(),
           worktree: map() | nil,
-          diff_stat: String.t() | nil
+          diff_stat: String.t() | nil,
+          cancelled: boolean()
         }
 
   @type report :: %{
@@ -73,6 +74,16 @@ defmodule Troupe.Session.Dispatcher do
 
   @spec dismiss(String.t(), String.t()) :: :ok | {:error, String.t()}
   def dismiss(sid, path), do: GenServer.call(Session.via(sid, :dispatcher), {:dismiss, path})
+
+  @doc """
+  Cancels a branch and removes its window: stops the agent, discards the
+  Troupe-managed worktree it was working in, and dismisses the window. A branch
+  that is still running comes to rest first (the agent kills its tasks and
+  children), and the window is removed when it does.
+  """
+  @spec cancel(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def cancel(sid, path),
+    do: GenServer.call(Session.via(sid, :dispatcher), {:cancel, path}, 120_000)
 
   @spec continue(String.t(), String.t(), String.t()) :: :ok | {:error, String.t()}
   def continue(sid, path, text),
@@ -201,6 +212,40 @@ defmodule Troupe.Session.Dispatcher do
     end
   end
 
+  def handle_call({:cancel, path}, _from, state) do
+    case Map.get(state.ledger, path) do
+      nil ->
+        {:reply, {:error, "no window #{path}"}, state}
+
+      %{state: :dismissed} ->
+        {:reply, {:error, "window #{path} was dismissed"}, state}
+
+      %{state: s} when s in @active ->
+        case Session.whereis(state.session_id, {:agent, path}) do
+          # The agent stops itself, logs `cancelled` and comes to rest; the window
+          # is removed then, when nothing is writing the worktree any more.
+          pid when is_pid(pid) ->
+            send(pid, :cancel)
+
+          # An active window with no agent behind it (a Node that never came back)
+          # has nobody to write those two events, so the Dispatcher writes them.
+          nil ->
+            Log.append(state.session_id, path, :cancelled, %{})
+
+            Log.append(state.session_id, path, :branch_state, %{
+              state: :done_unread,
+              reason: :cancelled,
+              summary: "Cancelled by user"
+            })
+        end
+
+        {:reply, :ok, state}
+
+      _resting ->
+        {:reply, :ok, remove_window(state, path)}
+    end
+  end
+
   def handle_call({:continue, path, text}, _from, state) do
     case Map.get(state.ledger, path) do
       nil ->
@@ -315,7 +360,8 @@ defmodule Troupe.Session.Dispatcher do
         state
       end
 
-    dismiss_when_internal(state, after_w)
+    state = dismiss_when_internal(state, after_w)
+    state = remove_when_cancelled(state, after_w)
 
     {:noreply, state}
   end
@@ -398,6 +444,7 @@ defmodule Troupe.Session.Dispatcher do
       source: o.source,
       worktree: nil,
       diff_stat: nil,
+      cancelled: false,
       budget: o.budget,
       existing_worktree: o.existing
     }
@@ -632,6 +679,38 @@ defmodule Troupe.Session.Dispatcher do
 
   defp dismiss_when_internal(state, _window), do: state
 
+  # `/cancel` removes the window it stops. A branch that was still running is
+  # removed once it comes to rest, so nothing is writing the worktree that is
+  # about to be discarded.
+  defp remove_when_cancelled(state, %{cancelled: true, state: s, agent_path: path})
+       when s in @resting,
+       do: remove_window(state, path)
+
+  defp remove_when_cancelled(state, _window), do: state
+
+  # Stops the branch's Node, discards the worktree Troupe made for it, and
+  # dismisses the window. A worktree the user checked out themselves is theirs
+  # (Decision 39) and is left alone, as is one already merged or discarded.
+  defp remove_window(state, path) do
+    window = Map.get(state.ledger, path)
+    state = stop_node(state, path)
+
+    state =
+      if unresolved_worktree?(window) do
+        _ = Worktree.discard(state.workspace, window.branch_id)
+        Log.append(state.session_id, path, :worktree_discarded, %{})
+        update_window(state, path, &%{&1 | worktree: Map.put(&1.worktree, :discarded, true)})
+      else
+        state
+      end
+
+    Log.append(state.session_id, path, :window_dismissed, %{})
+    # The events above fold back through `handle_info` and apply exactly this, but
+    # not before the next event arrives: applying it here keeps the window from
+    # being removed a second time on the way.
+    update_window(state, path, &%{&1 | state: :dismissed})
+  end
+
   ## Close
 
   # `reason` (set on done) and `message` (set on failure) both survive a later
@@ -712,6 +791,7 @@ defmodule Troupe.Session.Dispatcher do
       source: d.source,
       worktree: nil,
       diff_stat: nil,
+      cancelled: false,
       budget: Map.get(d, :budget) || %{},
       existing_worktree: Map.get(d, :existing_worktree)
     }
@@ -737,6 +817,10 @@ defmodule Troupe.Session.Dispatcher do
 
   defp fold(state, %{type: :branch_failed, agent_path: path, data: d}) do
     update_window(state, root(path), fn w -> %{w | state: :failed_unread, message: d[:message]} end)
+  end
+
+  defp fold(state, %{type: :cancelled, agent_path: path}) do
+    update_window(state, root(path), fn w -> %{w | cancelled: true} end)
   end
 
   defp fold(state, %{type: :window_dismissed, agent_path: path}) do

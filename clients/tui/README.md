@@ -111,7 +111,8 @@ Inside the TUI, everything starts with `/`:
 | `/plan <prompt>` | investigate and write a task list; read-only |
 | `/ask <question>` | answer across finished branches with the cheap model |
 | `/watch` | toggle AI-comment watch mode |
-| `/cancel`, `/dismiss`, `/merge`, `/discard` `[path]` | act on the activated window or the given path |
+| `/cancel [n]` | stop branch `n` and remove it: the window goes, and so does the worktree Troupe made for it |
+| `/dismiss`, `/merge`, `/discard` `[n]` | act on the activated window or the one on tile `n` (a path works too) |
 | `/agents`, `/sessions` | list agents / persisted sessions |
 | `/settings`, `/help` | settings page: tweak settings and read the curated help |
 | `/models` | pick the default model from every model Troupe detected |
@@ -120,8 +121,8 @@ Inside the TUI, everything starts with `/`:
 Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
 Enter sends input or answers a question; Tab switches the window's profile
-(`/plan` → Tab to `code` → "go" is plan-then-build); `x` cancels; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `d`
-dismisses a finished window; `e` expands tool output; `@file` completes paths;
+(`/plan` → Tab to `code` → "go" is plan-then-build); `x` cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `d`
+dismisses a finished window, keeping its worktree; `e` expands tool output; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <id>` and `/todo add <text>` edit the
 activated branch's task list.
 

@@ -117,8 +117,21 @@ defmodule Troupe do
   def edit_todo(sid, agent_path, change),
     do: send_agent(sid, agent_path, {:input, :tui_todo_edit, change})
 
+  @doc """
+  Stops an agent mid-turn (the `:cancel` message): tasks and children die, the
+  branch comes to rest as `done_unread` and its window stays, so it can be read
+  and continued. `cancel_branch/2` is the one that also removes the window.
+  """
   @spec cancel(session_id(), String.t()) :: :ok | {:error, :not_running}
   def cancel(sid, agent_path), do: send_agent(sid, agent_path, :cancel)
+
+  @doc """
+  Cancels a branch and removes its window: stops it, discards the Troupe-managed
+  worktree it was working in, and dismisses the window. This is what `/cancel`
+  does in the TUI.
+  """
+  @spec cancel_branch(session_id(), String.t()) :: :ok | {:error, String.t()}
+  def cancel_branch(sid, agent_path), do: Dispatcher.cancel(sid, agent_path)
 
   @spec dismiss(session_id(), String.t()) :: :ok | {:error, String.t()}
   def dismiss(sid, agent_path), do: Dispatcher.dismiss(sid, agent_path)

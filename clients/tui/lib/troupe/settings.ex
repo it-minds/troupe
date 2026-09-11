@@ -459,13 +459,17 @@ defmodule Troupe.Settings do
          "1-9 or click          activate a window (Enter picks the one needing input)",
          "Esc                   back to the command line",
          "y / n / a             approve once / deny / approve that tool all session",
-         "x                     cancel the branch      d   dismiss a resting branch",
+         "x                     stop the branch and remove its window (see /cancel)",
+         "d                     dismiss a resting branch, keeping its worktree",
          "e                     expand tool output in the transcript",
          "Tab                   switch the branch's agent profile (plan → build)",
          "type + Enter          answer a question, or send follow-up input"
        ]},
       {"Isolation and review",
        [
+         "/cancel <n>           stop branch n and remove it: the window goes and so",
+         "                      does the worktree Troupe made for it",
+         "/dismiss <n>          remove a resting window, keeping its worktree",
          "/merge <branch>       merge a finished worktree branch into your checkout",
          "/discard <branch>     throw the worktree away",
          "Shared-checkout branches write straight into your files; worktree branches",

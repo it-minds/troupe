@@ -76,6 +76,31 @@ defmodule Troupe.IsolationTest do
     refute run_git!(ws, ["branch", "--list", "troupe/worktree-2"]) =~ "worktree-2"
     assert File.read!(Path.join([ws, ".git", "info", "exclude"])) =~ ".troupe/worktrees/"
   end
+
+  # Decision 57
+  test "cancelling a worktree branch discards its worktree and branch with the window" do
+    ws = tmp_workspace() |> git_init!()
+
+    scripts = %{
+      "worktree-1" => [
+        {:tool, "write_file", %{"path" => "half.txt", "content" => "unfinished\n"}},
+        {:delay, 20_000, {:finish, "never"}}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts, auto_approve: true)
+    {:ok, p} = Troupe.dispatch(sid, "worktree", "start something")
+    tree = Path.join([ws, ".troupe", "worktrees", "worktree-1"])
+    eventually(fn -> File.exists?(Path.join(tree, "half.txt")) end)
+
+    :ok = Troupe.cancel_branch(sid, p)
+    await_event(p, :window_dismissed)
+
+    assert window(sid, p).state == :dismissed
+    refute File.exists?(tree)
+    refute run_git!(ws, ["branch", "--list", "troupe/worktree-1"]) =~ "worktree-1"
+    assert [_] = events_of(sid, p, :worktree_discarded)
+  end
 end
 
 defmodule Troupe.ExistingWorktreeTest do

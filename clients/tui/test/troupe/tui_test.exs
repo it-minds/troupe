@@ -396,8 +396,12 @@ defmodule Troupe.TUICompletionTest do
     assert user_state(pid).cmd_text == "discard worktree-2"
     press(pid, "esc")
 
-    # cancel completes only running windows
+    # cancel completes every window still on the strip, running or resting
     type(pid, "cancel w")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "cancel worktree-1"
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "cancel worktree-2"
     press(pid, "tab")
     assert user_state(pid).cmd_text == "cancel worktree-3"
     press(pid, "esc")
@@ -452,6 +456,33 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     assert user_state(pid).cmd_text == "worktree feat-auth: "
     type(pid, "carry on")
     assert user_state(pid).cmd_text == "worktree feat-auth: carry on"
+  end
+
+  # Decision 57
+  test "/cancel <n> stops the branch on tile n and takes its window off the strip" do
+    ws = tmp_workspace()
+    fallback = fn _ -> {:delay, 20_000, {:finish, "never"}} end
+    {sid, _, _} = start_session!(workspace: ws, fallback: fallback)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "keep this one")
+    {:ok, "code-2"} = Troupe.dispatch(sid, "code", "cancel this one")
+    eventually(fn -> map_size(user_state(pid).model.windows) == 2 end)
+
+    type(pid, "/cancel 2")
+    press(pid, "enter")
+    await_event("code-2", :window_dismissed)
+    eventually(fn -> map_size(user_state(pid).model.windows) == 1 end)
+
+    text = screen_text(pid, session)
+    assert text =~ "1 code-1 · running"
+    refute text =~ "code-2"
+
+    # a path still works, and so does the number of a window that is already resting
+    type(pid, "/cancel code-1")
+    press(pid, "enter")
+    await_event("code-1", :window_dismissed)
+    eventually(fn -> map_size(user_state(pid).model.windows) == 0 end)
   end
 
   test "a multi-line tool argument renders on one row instead of aborting the frame" do
