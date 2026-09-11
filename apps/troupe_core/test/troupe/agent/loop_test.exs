@@ -31,10 +31,13 @@ defmodule Troupe.Agent.LoopTest do
       types = event_types(session.id)
 
       # `session_created` is the first durable event now: it is what lets a listing —
-      # and a dormant session — be rebuilt from the log alone.
+      # and a dormant session — be rebuilt from the log alone. `input_accepted` carries
+      # the author and the client's own `command_id`, and comes before the content so an
+      # optimistic render reconciles before it has anything to reconcile against.
       assert [
                "agent_started",
                "session_created",
+               "input_accepted",
                "user_input",
                "llm_request",
                "llm_response",

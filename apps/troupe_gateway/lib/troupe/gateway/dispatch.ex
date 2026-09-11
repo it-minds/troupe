@@ -73,6 +73,15 @@ defmodule Troupe.Gateway.Dispatch do
     "watch.set" => :admin
   }
 
+  # Every way a registration can fail for want of consent. All three answer with a fresh
+  # challenge rather than an explanation, because the harness's next move is the same in
+  # each case: show the words and ask again.
+  @unconsented [
+    :consent_required,
+    :consent_belongs_to_another_client,
+    :consent_covers_other_tools
+  ]
+
   @type outcome ::
           {:ok, map()}
           | {:ok, map(), {:subscribed, Subscription.t()} | {:unsubscribed, String.t()}}
@@ -347,7 +356,7 @@ defmodule Troupe.Gateway.Dispatch do
         {:ok, registered} ->
           {:ok, %{"registered" => registered, "taint" => "personal_connector"}}
 
-        {:error, reason} when reason in [:consent_required, :consent_belongs_to_another_client, :consent_covers_other_tools] ->
+        {:error, reason} when reason in @unconsented ->
           challenge(session_id, context, specs, reason)
 
         {:error, reason} ->
@@ -609,15 +618,17 @@ defmodule Troupe.Gateway.Dispatch do
   defp tool_specs(params, context) do
     case Map.get(params, "tools") do
       tools when is_list(tools) and tools != [] ->
-        Enum.reduce_while(tools, {:ok, []}, fn tool, {:ok, acc} ->
-          case tool_spec(tool, context) do
-            {:ok, spec} -> {:cont, {:ok, acc ++ [spec]}}
-            {:error, error} -> {:halt, {:error, error}}
-          end
-        end)
+        Enum.reduce_while(tools, {:ok, []}, &collect_spec(&1, &2, context))
 
       _other ->
         {:error, Error.new(:invalid_params, %{field: "tools"})}
+    end
+  end
+
+  defp collect_spec(tool, {:ok, acc}, context) do
+    case tool_spec(tool, context) do
+      {:ok, spec} -> {:cont, {:ok, acc ++ [spec]}}
+      {:error, error} -> {:halt, {:error, error}}
     end
   end
 

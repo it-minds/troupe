@@ -46,12 +46,10 @@ defmodule Troupe.Gateway.ClientTool do
   defp content(%{"content" => text}) when is_binary(text), do: text
 
   defp content(%{"content" => blocks}) when is_list(blocks) do
-    blocks
-    |> Enum.map(fn
+    Enum.map_join(blocks, "\n", fn
       %{"text" => text} when is_binary(text) -> text
       other -> Jason.encode!(other)
     end)
-    |> Enum.join("\n")
   end
 
   defp content(result) when is_map(result), do: Jason.encode!(result)

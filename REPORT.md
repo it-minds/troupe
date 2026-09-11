@@ -550,3 +550,299 @@ Separated, and the fixtures now create the secret they name.
 Stage 4: several harnesses on one session, and client-hosted tools. The seams are in
 place — the gateway's connection can send requests as well as receive them, and
 `Troupe.Tool` already takes values as well as modules, which is what the MCP adapter uses.
+
+
+---
+
+# Stage 4 — report
+
+Stage 4 is **delivered**. All five done items pass.
+
+Several clients can now attach to one session and see one order; presence reaches them
+and cannot reach the log; a harness can offer tools that run on its own machine, after a
+consent step the person actually sees, and losing that harness costs the tools and not
+the turn.
+
+Two things had to be built underneath before the fifth done item could be attempted at
+all: the WebSocket transport `PROTOCOL.md` has promised since stage 0 and nothing served,
+and the configuration a worker release needs to boot into anything but an empty
+supervision tree.
+
+```
+$ scripts/kind-up && helm upgrade --install troupe charts/troupe -n troupe-system --create-namespace
+$ scripts/dev-up && MIX_ENV=test mix ecto.migrate
+$ scripts/build-images troupe_worker
+$ mix check
+4314 mods/funs, found no issues.
+boundaries ok: 4 app rule(s), 1 module rule(s), no violations
+Result: 83 passed     # troupe_protocol
+Result: 42 passed     # troupe_operator  (one of them five clients on a real pod)
+Result: 192 passed    # troupe_core
+Result: 55 passed     # troupe_gateway
+Result: 30 passed     # troupe_tui
+Result: 45 passed     # troupe_ctl
+Result: 190 passed    # troupe_plane
+Result: 83 passed     # troupe_worker
+```
+
+720 tests. Twenty-eight of them need infrastructure and say so loudly when it is absent:
+a kind cluster with the worker image loaded, PostgreSQL, MinIO, OpenBao, and a second OTP
+node.
+
+## The five done items
+
+### 1. Two harnesses, 100 inputs each, one order
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/collaboration_test.exs
+Result: 7 passed
+```
+
+Two clients with distinct principals each send a hundred inputs as fast as their
+connection allows, on separate connections, into one session. Each has a collector
+process of its own, because "both observe the identical order" is a claim about two
+independent receivers rather than one list read twice.
+
+All two hundred are accepted exactly once. The durable sequences the two clients
+collected agree over the prefix they have both reached — one client being a few events
+behind the other is lag, not disagreement — and the sequence numbers are one contiguous
+run, so neither is agreeing about an order it has holes in. Every `input_accepted` names
+the client that sent it, and every acknowledgement carries back the `command_id` the
+client rendered optimistically against.
+
+`input_queued` is a separate test, because the interesting case is the one that is easy
+to get wrong: an input sent while the agent is busy is announced **once**, not once per
+state transition.
+
+### 2. Presence reaches other clients and never appears in the durable log
+
+Same file. `presence.set` reaches the other attached client with the subject, the state
+and the agent; the event has no `seq` and is marked ephemeral; a fresh client replaying
+from the beginning sees presence events and every one of them has no `seq`, so no replay
+could contain one. The server's own log agrees.
+
+Joining and leaving are the connection's business and are announced where a subscription
+is taken out and dropped, so a client that crashes still leaves.
+
+The enforcement is structural: `Gateway.Presence` calls `Events.publish_ephemeral/4` and
+has no path to `Session.Log` at all.
+
+### 3. A client-hosted tool, served by its registrant, logged, tainting the session
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/client_tools_test.exs
+Result: 8 passed
+$ mix test apps/troupe_core/test/troupe/session/client_tools_test.exs
+Result: 14 passed
+```
+
+Harness A registers a tool. The first attempt has no consent and is refused with the
+challenge, the prompt and the tool names to show. The second carries what the person
+confirmed and is accepted. The agent's call arrives at A as a server-to-client
+`tool.invoke`, A answers, and `tool_call_completed` carries A's answer. B — attached to
+the same session, with the same scopes, and with a mailbox of its own so that "B was
+never asked" is a claim about B — never receives the request.
+
+B's **summary** shows the taint, which is the done item's own wording: a participant
+watching the summary stream rather than the detail stream still finds out.
+`tools_registered` and `session_tainted` are both in the log.
+
+Registration without consent is refused four ways, and each is a different way to have
+got it wrong: no challenge at all; an invented one; one issued to another connection; one
+issued to another subject; and one covering different tools than the registration names.
+
+### 4. A registrant that disconnects mid-call
+
+Same file. A disconnects without answering. The agent has an error result naming the
+disconnection **inside ten seconds** — the tool timeout is three minutes, and waiting it
+out for news that has already arrived would be a hung turn — and carries on to another
+model turn. `tools_unregistered` is logged with the reason, and there is no longer any
+such tool for B to invoke.
+
+The immediacy comes from `Connection.terminate/2` answering every outstanding
+`tool.invoke` with `:disconnected`. `ClientTools` hears about the registration through
+its own monitor, but it cannot unblock a tool task already waiting on an answer.
+
+### 5. Five clients over a WebSocket on kind
+
+```
+$ scripts/build-images troupe_worker
+$ mix test apps/troupe_operator/test/troupe/operator/latency_cluster_test.exs
+
+input.send -> input_accepted, 5 clients over a WebSocket on kind
+  samples 150
+  p50     6ms
+  p95     9ms
+  p99     11ms
+  max     11ms
+
+Result: 1 passed
+```
+
+A real worker pod on kind — the release image, a Service, a readiness probe — reached
+through `kubectl port-forward`, with five `Troupe.Protocol.Client`s attached over
+`ws://…/v1/socket`. What is measured is the path a person feels: the frame out, Bandit,
+the relay to the connection, the scope check, the session actor's mailbox, the durable
+append, the fan-out, and the frame home. **p95 of 9ms against a budget of 100.**
+
+Each client drives a session of its own with one input in flight. Five clients hammering
+one session would measure how long a queue behind a busy agent takes to drain, which is a
+property of the model's speed rather than of the transport.
+
+## What had to be built first
+
+**The WebSocket transport, on both ends.** `PROTOCOL.md` has specified
+`wss://<host>/v1/socket` since stage 0 and the operator's Ingress and both probes have
+pointed at port 4000 since stage 3. Nothing served it: every listener was raw NDJSON on
+4100. A client could not have attached to a pod through an Ingress and kubelet's probes
+were failing against a port with nothing behind them.
+
+`Gateway.Web` is the router — `/health/live`, `/health/ready`, and the upgrade — and
+`Gateway.Web.Socket` relays frames to an ordinary `Gateway.Connection`. On the client
+side `Protocol.Client.Transport` puts the same seam under `Protocol.Client`, so a laptop
+reaching a pod and a laptop reaching its own daemon are one client with one handshake.
+
+**A worker pod's configuration.** `runtime.exs` had blocks for the operator, the plane
+and the daemon and none for the worker, so the release booted an empty supervision tree.
+It now reads what the operator has been setting since stage 3, and the operator sets
+`TROUPE_WORKER_AUTOSTART` so that it means something.
+
+**The connection supervisor on a pod.** Both listeners hand sockets to
+`Gateway.Connections` and every command goes through `Gateway.Commands`; on a pod nobody
+started either, because they belong to `Gateway.Daemon`, which a pod does not run. The
+first real attach to a real pod found it immediately.
+
+**The Dockerfile.** It had never built. `mix deps.compile` in the dependency layer tries
+to compile `troupe_core` before any of its source has been copied — in an umbrella the
+siblings are path dependencies — and the base image tag was a year stale.
+
+## The harness side
+
+```
+$ mix test apps/troupe_tui/test/troupe/ui/tui_connectors_test.exs
+Result: 8 passed
+```
+
+The TUI reads personal MCP servers from `$XDG_CONFIG_HOME/troupe/mcp.json`, where a
+`credential_ref` names an environment variable so the file holds a reference and the value
+stays in the shell that started the client. Nothing is offered by attaching. `/connect`
+lists them; `/connect notes` prints what the session asked and registers nothing;
+`/connect yes` registers. A `tool.invoke` is served in a task against the person's own
+server, and the session's identity travels as `_meta` — an identifier for the server's
+logs — and never as an authorisation.
+
+The test runs a real MCP server on loopback and asserts on what that server was asked,
+because a stubbed client would prove only that the stub was called.
+
+## Measured
+
+```
+$ mix test apps/troupe_worker/test/troupe/worker/latency_test.exs
+
+measured against a real object store and key manager
+
+  seal lag        median 5ms     max 7ms     (5 turns)
+  activation warm median 296ms   max 671ms   (5 activations)
+  activation cold median 363ms   max 417ms   (5 activations)
+```
+
+**Seal lag** is how long a durable event exists only on a pod's volume — the window in
+which losing the volume loses the event, and therefore the size of the promise that a
+session survives its pod. Measured from the append that ends a turn to the sealer's
+report, which the sealer makes *after* the upload.
+
+**Activation** is measured twice. *Warm* has the workspace archive still on this pod's
+volume; *cold* has nothing, so every byte comes from object storage, is decrypted, and the
+log is replayed. Both are dominated by the key fetch and the manifest round trip rather
+than by the payload, which is why they are closer together than one might expect at this
+size; a large workspace would widen the gap.
+
+The **Bonny spike**, which the spec asked for before stage 2 began, came out in Bonny's
+favour: Bonny 1.5 and `k8s` 2.8 compile and run on Elixir 1.20 / OTP 28, so the fallback
+of hand-written watch-and-reconcile GenServers was never needed. The reconciler is still
+self-contained rather than a pipeline step, because a pass can be started by an event, by
+the resync, or by one of the operator's own objects being deleted, and all three want the
+same thing to happen (DECISIONS 37, 38).
+
+## Deviations
+
+Every judgment call in this stage is DECISIONS 175–198. The ones that change something a
+reader of the spec would otherwise expect:
+
+* **DECISIONS 177** — a `command_id` is generated for inputs that arrive without one (a
+  watch trigger, a seeded task), so every input in the log has the same shape.
+* **DECISIONS 182** — a client-hosted tool asks by default. The consent was to offering
+  the tool, not to every call the model makes with it.
+* **DECISIONS 186** — the taint is added to the summary projection by the fold rather than
+  declared in its empty map, so every recorded fixture hash still holds and no upcaster is
+  needed.
+* **DECISIONS 191** — a worker with no plane configured does not start the link at all.
+* **DECISIONS 196** — the latency done item gives each of its five clients a session of
+  its own, for the reason above.
+* **DECISIONS 197** — the latency probe reaches its pod through `kubectl port-forward`
+  rather than an Ingress; kind installs no ingress controller, and adding one would put
+  nginx's latency in the number.
+
+## What writing the tests found
+
+**`input_queued` would have fired three times per input.** `gen_statem` re-delivers a
+postponed event on *every* state change, and `thinking -> acting` is a state change.
+Everybody watching would have been told the same input was queued once per transition.
+
+**The 200-input test capped itself at forty.** A session's default turn budget is forty
+turns, which is a guard against a runaway agent and not against a busy conversation. The
+first run looked exactly like a throughput problem.
+
+**A close could discard what arrived with it.** A refused handshake writes the refusal and
+then closes, and both land in one read; the client threw the bytes away and reported
+`:closed`. Every rejected connection read as "closed" and said nothing about why — which
+is what it did when the cluster probe's token was refused for `lifetime_too_long`, a real
+refusal hidden behind a useless one.
+
+**A frame is not a line.** The connection waits for a newline and a WebSocket frame does
+not carry one, so the handshake sat in the read buffer until it timed out. The two
+framings now meet in exactly two places, symmetrically.
+
+**Nothing on a pod started the gateway's connection supervisor.** Both listeners have
+always handed their sockets to it. Nothing had ever attached to a real pod, so nothing
+had ever found out.
+
+**A test that subscribed after sending.** `PlaneDownTest` waited for an `agent_state` that
+had already been published: the turn was over before the subscription existed, and
+`agent_state` is ephemeral so there is no replay to catch up on. It passed until the extra
+durable append shifted the timing by a few milliseconds.
+
+## Known limitations
+
+**Stage 1.** The CI workflow is written and has never run; there is no remote to run it
+on. Everything in it that can run locally does.
+
+**Stage 2.** Live migration of an *active* session between pods is out of scope: a session
+moves by going dormant and coming back. A `NetworkPolicy` cannot express a hostname, so
+the FQDN egress rules are a wide standard policy plus a precise `CiliumNetworkPolicy`
+where Cilium is present — written down rather than hidden.
+
+**Stage 3.** Break-glass access to session content does not exist, by design. GitOps mode
+writes a commit and waits; nothing in Troupe applies it.
+
+**Stage 4.**
+
+* **Presence is per-connection, not per-person.** Somebody attached from two machines
+  appears twice and leaves once per connection. The protocol carries the subject, so a
+  client can collapse them; nothing here does it for them.
+* **A client-hosted tool does not survive dormancy.** The registration lives with the
+  connection, and a session that goes dormant and comes back has no connection to reach.
+  The harness re-offers on reattach, which is a client behaviour rather than a protocol
+  one, and the TUI does not do it yet.
+* **`tool.invoke` has one timeout, the tool's.** There is no per-connector budget, so a
+  slow personal server spends the full tool timeout before the agent hears about it. A
+  disconnection is immediate; slowness is not.
+* **The latency number is from one node.** kind on a laptop is one kubelet and one
+  network namespace; a real cluster adds an Ingress hop and a scheduler. The number is a
+  floor rather than a service level.
+* **The worker image runs with no plane in the probe.** The measured path is client to
+  session actor, which is what the done item asks about, but a pod that is also sealing,
+  uploading and reporting has work this does not account for.
+* **The GUI harness, remote triggers and A2A are not built.** Section 13 of
+  `ARCHITECTURE.md` says what each would cost; the client SDK works from any process that
+  can receive messages, and nothing in the protocol assumes a terminal.

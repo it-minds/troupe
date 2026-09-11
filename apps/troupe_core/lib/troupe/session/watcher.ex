@@ -14,6 +14,7 @@ defmodule Troupe.Session.Watcher do
 
   use GenServer
 
+  alias Troupe.Agent
   alias Troupe.{Events, Gitignore, Registry, Watch, Workspace}
   alias Troupe.Watch.{FileSystemBackend, Marker, PollBackend, Trigger}
 
@@ -283,7 +284,7 @@ defmodule Troupe.Session.Watcher do
         Logger.debug("troupe: watch trigger with no root agent to send it to")
 
       pid ->
-        Troupe.Agent.Server.input(pid, :watch, trigger)
+        Agent.Server.input(pid, :watch, trigger)
     end
   end
 

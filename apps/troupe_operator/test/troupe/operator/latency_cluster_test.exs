@@ -26,6 +26,7 @@ defmodule Troupe.Operator.LatencyClusterTest do
 
   alias Troupe.Operator.Conn
   alias Troupe.Protocol.Client
+  alias Troupe.Protocol.Token
 
   @moduletag timeout: 600_000
 
@@ -212,7 +213,7 @@ defmodule Troupe.Operator.LatencyClusterTest do
       "iat" => now,
       # A worker refuses a token that lives longer than fifteen minutes however well it
       # verifies, which is what makes a leaked one a short problem.
-      "exp" => now + Troupe.Protocol.Token.max_lifetime_seconds()
+      "exp" => now + Token.max_lifetime_seconds()
     }
 
     {_meta, jwt} =
@@ -329,9 +330,15 @@ defmodule Troupe.Operator.LatencyClusterTest do
       end
 
     cond do
-      ready -> :ok
-      System.monotonic_time(:millisecond) < deadline -> Process.sleep(1_000); do_await_ready(conn, deadline)
-      true -> {:error, :timeout}
+      ready ->
+        :ok
+
+      System.monotonic_time(:millisecond) < deadline ->
+        Process.sleep(1_000)
+        do_await_ready(conn, deadline)
+
+      true ->
+        {:error, :timeout}
     end
   end
 

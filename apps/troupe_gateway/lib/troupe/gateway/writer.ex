@@ -21,6 +21,8 @@ defmodule Troupe.Gateway.Writer do
     first casualty of its own arrival.
   """
 
+  alias Troupe.Gateway.Transport
+
   @type kind :: :durable | :ephemeral
 
   @doc """
@@ -100,7 +102,7 @@ defmodule Troupe.Gateway.Writer do
   end
 
   defp put(transport, owner, iodata, ack) do
-    case Troupe.Gateway.Transport.write(transport, iodata) do
+    case Transport.write(transport, iodata) do
       :ok ->
         send(owner, ack)
         loop(transport, owner)

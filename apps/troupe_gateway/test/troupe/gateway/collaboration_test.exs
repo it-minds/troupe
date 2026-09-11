@@ -16,6 +16,8 @@ defmodule Troupe.Gateway.CollaborationTest do
 
   use Troupe.Gateway.HarnessCase, async: false
 
+  alias Troupe.Session.Log
+
   @ada "ada@example.test"
   @bob "bob@example.test"
 
@@ -190,7 +192,7 @@ defmodule Troupe.Gateway.CollaborationTest do
       end
 
       # And from the server's own store, which is the log a new pod would read.
-      types = session.id |> Troupe.Session.Log.replay() |> Enum.map(& &1.type)
+      types = session.id |> Log.replay() |> Enum.map(& &1.type)
       refute "presence" in types, "presence reached the durable log, which the spec forbids"
     end
 

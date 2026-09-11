@@ -62,6 +62,11 @@ defmodule Troupe.Worker.PlaneDownTest do
     stop_supervised!(Connections)
     eventually(fn -> not Link.connected?(link) end)
 
+    # Subscribed before the input, not after: a turn against a scripted model can be over
+    # before a subscription taken out afterwards exists, and `agent_state` is ephemeral —
+    # there is no replay to catch up on.
+    Troupe.subscribe(context.session_id)
+
     # The harness carries on. Its connection is to the pod, and the pod has everything it
     # needs: the session, the key, the object store.
     assert {:ok, _} =
@@ -70,7 +75,6 @@ defmodule Troupe.Worker.PlaneDownTest do
                "text" => "carry on without them"
              })
 
-    Troupe.subscribe(context.session_id)
     await_done(context.session_id, 15_000)
 
     # And it sealed, with no plane to tell.

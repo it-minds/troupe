@@ -11,8 +11,10 @@ defmodule Troupe.Session.ClientToolsTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.Definition
-  alias Troupe.Session.ClientTools
+  alias Troupe.Protocol.Event
+  alias Troupe.Session.{ClientTools, Log, Summary}
   alias Troupe.Tool
+  alias Troupe.Tool.Ctx
   alias Troupe.Tools
 
   setup context do
@@ -89,7 +91,7 @@ defmodule Troupe.Session.ClientToolsTest do
 
   describe "registration" do
     test "taints the session, durably, and says who did it", %{session: session} do
-      actor = Troupe.Protocol.Event.Actor.user("ada@example.test", "Ada")
+      actor = Event.Actor.user("ada@example.test", "Ada")
       consent = consent!(session.id, self(), "ada@example.test", ["notes.search"])
 
       {:ok, _} =
@@ -99,7 +101,7 @@ defmodule Troupe.Session.ClientToolsTest do
           actor: actor
         )
 
-      events = Troupe.Session.Log.replay(session.id)
+      events = Log.replay(session.id)
 
       assert registered = Enum.find(events, &(&1.type == "tools_registered"))
       assert registered.data["tools"] == ["client.notes.search"]
@@ -124,7 +126,7 @@ defmodule Troupe.Session.ClientToolsTest do
     test "an untainted session's summary has no taint key at all", %{session: session} do
       # The projection gains the key only when the thing it describes has happened, so
       # every log written before this existed folds to exactly what it folded to before.
-      refute Map.has_key?(Troupe.Session.Summary.snapshot(session.id), "taint")
+      refute Map.has_key?(Summary.snapshot(session.id), "taint")
     end
   end
 
@@ -192,7 +194,7 @@ defmodule Troupe.Session.ClientToolsTest do
 
       unregistered =
         session.id
-        |> Troupe.Session.Log.replay()
+        |> Log.replay()
         |> Enum.filter(&(&1.type == "tools_unregistered"))
 
       assert Enum.any?(unregistered, &(&1.data["tools"] == ["client.mail.send"]))
@@ -207,7 +209,7 @@ defmodule Troupe.Session.ClientToolsTest do
   # -- helpers ----------------------------------------------------------------
 
   defp ctx(session_id) do
-    %Troupe.Tool.Ctx{
+    %Ctx{
       session_id: session_id,
       agent_path: ["root"],
       workspace: nil,
@@ -217,7 +219,7 @@ defmodule Troupe.Session.ClientToolsTest do
   end
 
   defp await_taint(session_id) do
-    eventually(fn -> Map.get(Troupe.Session.Summary.snapshot(session_id), "taint") end)
+    eventually(fn -> Map.get(Summary.snapshot(session_id), "taint") end)
   end
 
   defp eventually(fun, timeout \\ 2_000) do

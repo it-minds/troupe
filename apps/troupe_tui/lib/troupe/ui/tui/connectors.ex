@@ -114,20 +114,27 @@ defmodule Troupe.UI.TUI.Connectors do
   """
   @spec serve(pid(), [Server.t()], term(), map(), String.t()) :: pid()
   def serve(client, servers, id, params, session_id) do
-    spawn(fn ->
-      case resolve(servers, params["name"]) do
-        {:ok, server, tool} ->
-          meta = %{"troupe" => %{"session_id" => session_id}}
+    spawn(fn -> answer(client, servers, id, params, session_id) end)
+  end
 
-          case Client.call_tool(server, tool, params["arguments"] || %{}, meta) do
-            {:ok, result} -> Protocol.respond(client, id, result)
-            {:error, reason} -> Protocol.respond_error(client, id, describe(reason))
-          end
+  defp answer(client, servers, id, params, session_id) do
+    case resolve(servers, params["name"]) do
+      {:ok, server, tool} ->
+        # The session's identity travels as `_meta`, for the server's own logs, and never
+        # as an authorisation — the same rule a worker's system MCP servers follow.
+        meta = %{"troupe" => %{"session_id" => session_id}}
+        call(client, id, server, tool, params["arguments"] || %{}, meta)
 
-        :error ->
-          Protocol.respond_error(client, id, "no connector serves #{params["name"]}")
-      end
-    end)
+      :error ->
+        Protocol.respond_error(client, id, "no connector serves #{params["name"]}")
+    end
+  end
+
+  defp call(client, id, server, tool, arguments, meta) do
+    case Client.call_tool(server, tool, arguments, meta) do
+      {:ok, result} -> Protocol.respond(client, id, result)
+      {:error, reason} -> Protocol.respond_error(client, id, describe(reason))
+    end
   end
 
   # `client.notes.search` is this harness's `notes` server and its `search` tool. The

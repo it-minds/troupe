@@ -300,6 +300,19 @@ defmodule Troupe.Session.ClientTools do
     Map.put_new_lazy(monitors, connection, fn -> Process.monitor(connection) end)
   end
 
+  # Only stop watching once this connection has nothing left: a partial unregister must
+  # not blind us to the disconnect that would take the rest.
+  defp unwatch(monitors, tools, connection) do
+    if Enum.any?(tools, fn {_name, tool} -> tool.connection == connection end) do
+      monitors
+    else
+      case Map.pop(monitors, connection) do
+        {nil, rest} -> rest
+        {monitor, rest} -> Process.demonitor(monitor, [:flush]) && rest
+      end
+    end
+  end
+
   defp drop(state, connection, names, reason) do
     gone =
       state.tools
@@ -314,17 +327,7 @@ defmodule Troupe.Session.ClientTools do
     else
       tools = Map.drop(state.tools, gone)
 
-      # Only stop watching once this connection has nothing left; a partial unregister
-      # must not blind us to the disconnect that takes the rest.
-      monitors =
-        if Enum.any?(tools, fn {_name, tool} -> tool.connection == connection end) do
-          state.monitors
-        else
-          case Map.pop(state.monitors, connection) do
-            {nil, monitors} -> monitors
-            {monitor, monitors} -> Process.demonitor(monitor, [:flush]) && monitors
-          end
-        end
+      monitors = unwatch(state.monitors, tools, connection)
 
       Log.append(state.session_id, ["root"], :tools_unregistered, %{
         "tools" => gone,

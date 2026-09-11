@@ -21,6 +21,7 @@ defmodule Troupe.Gateway.ClientToolsTest do
   use Troupe.Gateway.HarnessCase, async: false
 
   alias Troupe.Protocol.Error
+  alias Troupe.Session.{ClientTools, Log}
 
   @ada "ada@example.test"
   @bob "bob@example.test"
@@ -49,7 +50,7 @@ defmodule Troupe.Gateway.ClientToolsTest do
       assert is_binary(error.data["prompt"])
 
       # And nothing was registered on the way past.
-      assert Troupe.Session.ClientTools.list(session.id) == []
+      assert ClientTools.list(session.id) == []
     end
 
     test "a made-up challenge is not consent", context do
@@ -123,7 +124,7 @@ defmodule Troupe.Gateway.ClientToolsTest do
       assert completed.data["content"] =~ "three notes"
 
       # Durable, so a replay tells the same story.
-      types = session.id |> Troupe.Session.Log.replay() |> Enum.map(& &1.type)
+      types = session.id |> Log.replay() |> Enum.map(& &1.type)
       assert "tools_registered" in types
       assert "session_tainted" in types
     end
@@ -153,7 +154,7 @@ defmodule Troupe.Gateway.ClientToolsTest do
                  "tools" => ["client.notes.search"]
                })
 
-      assert [%{name: "client.notes.search"}] = Troupe.Session.ClientTools.list(session.id)
+      assert [%{name: "client.notes.search"}] = ClientTools.list(session.id)
 
       {:ok, _} = input(ada, session.id, "search my notes", Client.command_id())
 
@@ -239,8 +240,8 @@ defmodule Troupe.Gateway.ClientToolsTest do
       assert unregistered.data["reason"] == "disconnected"
 
       # B cannot invoke A's tool, because there is no longer any such tool.
-      assert Troupe.Session.ClientTools.list(session.id) == []
-      assert Troupe.Session.ClientTools.owner(session.id, "client.notes.search") == :error
+      assert ClientTools.list(session.id) == []
+      assert ClientTools.owner(session.id, "client.notes.search") == :error
     end
   end
 

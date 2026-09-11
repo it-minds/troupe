@@ -22,7 +22,9 @@ defmodule Troupe.UI.TUIConnectorsTest do
   alias ExRatatui.Runtime
   alias Troupe.Gateway.Daemon
   alias Troupe.LLM.Fake
+  alias Troupe.MCP.Server, as: MCPServer
   alias Troupe.Protocol.Endpoint
+  alias Troupe.Session.{ClientTools, Log}
   alias Troupe.UI.TUI.{Connectors, Server}
 
   @moduletag timeout: 60_000
@@ -94,7 +96,7 @@ defmodule Troupe.UI.TUIConnectorsTest do
       tui = start_tui(context, session, connectors: [notes(context)])
 
       assert tui_state(tui).offered == []
-      assert Troupe.Session.ClientTools.list(session.id) == []
+      assert ClientTools.list(session.id) == []
     end
 
     test "/connect prints the consent prompt and registers nothing", context do
@@ -109,7 +111,7 @@ defmodule Troupe.UI.TUIConnectorsTest do
       assert last_notice(state) =~ "on your machine"
       assert last_notice(state) =~ "/connect yes"
 
-      assert Troupe.Session.ClientTools.list(session.id) == [],
+      assert ClientTools.list(session.id) == [],
              "a prompt is not consent, and must not register anything"
     end
 
@@ -124,9 +126,9 @@ defmodule Troupe.UI.TUIConnectorsTest do
       assert state.offered == ["notes"]
       assert last_notice(state) =~ "client.notes.search"
 
-      assert [%{name: "client.notes.search"}] = Troupe.Session.ClientTools.list(session.id)
+      assert [%{name: "client.notes.search"}] = ClientTools.list(session.id)
 
-      types = session.id |> Troupe.Session.Log.replay() |> Enum.map(& &1.type)
+      types = session.id |> Log.replay() |> Enum.map(& &1.type)
       assert "session_tainted" in types
     end
 
@@ -138,11 +140,11 @@ defmodule Troupe.UI.TUIConnectorsTest do
       submit(tui, "/connect no")
 
       assert tui_state(tui).pending_consent == nil
-      assert Troupe.Session.ClientTools.list(session.id) == []
+      assert ClientTools.list(session.id) == []
     end
 
     test "a connector that is down costs that connector and nothing else", context do
-      down = %Troupe.MCP.Server{name: "gone", url: "http://127.0.0.1:1/mcp"}
+      down = %MCPServer{name: "gone", url: "http://127.0.0.1:1/mcp"}
 
       %{session: session} = start_session(context, steps: [])
       tui = start_tui(context, session, connectors: [down])
@@ -187,7 +189,7 @@ defmodule Troupe.UI.TUIConnectorsTest do
   # -- helpers ----------------------------------------------------------------
 
   defp notes(context) do
-    Troupe.MCP.Server.from_config(%{
+    MCPServer.from_config(%{
       "name" => "notes",
       "url" => "http://127.0.0.1:#{context.mcp_port}/mcp"
     })

@@ -23,8 +23,8 @@ defmodule Troupe.Protocol.Client do
   use GenServer
 
   alias Troupe.Protocol
-  alias Troupe.Protocol.{Error, Event, JSONRPC}
   alias Troupe.Protocol.Client.Transport
+  alias Troupe.Protocol.{Error, Event, JSONRPC}
 
   @default_timeout 15_000
 
