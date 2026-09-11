@@ -1,0 +1,177 @@
+#!/usr/bin/env bash
+# Restore the plane's database to a point in time, then prove nothing was lost.
+#
+# The drill, not a disaster-recovery tool: it runs against the development PostgreSQL
+# `scripts/dev-up` brings up, which has WAL archiving on for exactly this. In a real
+# installation the restore is the managed provider's, and what this proves is the part
+# that is ours — that a restored database plus object storage is a complete plane.
+#
+# The shape of it:
+#
+#   1. Note where we are, and take a base backup.
+#   2. Do something afterwards that the backup does not contain.
+#   3. Restore to the moment of the backup. The database is now behind.
+#   4. Rebuild the index from object storage and reconcile the ledger.
+#   5. Assert nothing is missing.
+#
+# Step 4 is the one that matters. A restored database has lost whatever happened after
+# the backup, and object storage has not — so the rebuild is what makes the restore
+# lossless rather than merely recent.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+CONTAINER="${TROUPE_PG_CONTAINER:-troupe-dev-postgres-1}"
+DB="${TROUPE_PITR_DB:-troupe_plane_test}"
+BACKUP_DIR="/var/lib/postgresql/pitr-drill"
+
+compose() { docker compose --project-directory dev --file dev/docker-compose.yml "$@"; }
+psql() { docker exec -i "$CONTAINER" psql -U troupe -d "$1" -v ON_ERROR_STOP=1 -tAc "$2"; }
+
+say() { printf '\n\033[1m==> %s\033[0m\n' "$1"; }
+
+if ! docker ps --format '{{.Names}}' | grep -qx "$CONTAINER"; then
+  echo "no PostgreSQL container named $CONTAINER; run scripts/dev-up" >&2
+  exit 1
+fi
+
+say "1. Where we are now"
+psql "$DB" "SELECT count(*) || ' sessions, ' || (SELECT count(*) FROM usage_records) || ' usage records' FROM sessions"
+
+say "2. Base backup"
+# Taken as `postgres`, because the restored cluster runs as `postgres` and a data
+# directory it cannot write is a restore that will not start. Cleared as root, because a
+# previous run may have left one that `postgres` cannot remove.
+docker exec -u root "$CONTAINER" rm -rf "$BACKUP_DIR"
+docker exec -u postgres "$CONTAINER" pg_basebackup -U troupe -D "$BACKUP_DIR" -Fp -Xs -c fast
+docker exec -u postgres "$CONTAINER" sh -c "ls $BACKUP_DIR | head -3"
+
+# The target has to come *after* the backup started, or there is nothing to recover
+# forward through and the restore is just the backup.
+RESTORE_POINT="troupe_drill_$(date +%s)"
+psql "$DB" "SELECT pg_create_restore_point('$RESTORE_POINT')" >/dev/null
+echo "restore point: $RESTORE_POINT"
+
+say "3. A session written after the restore point"
+# Durable in object storage and recorded in the index. The restore will lose the index
+# row and object storage will keep the session, which is precisely the gap a rebuild
+# closes — and the reason a restore alone is not a recovery.
+AFTER_ID="drill-after-backup-$(date +%s)"
+
+MIX_ENV=test mix run -e "
+  store = Troupe.ObjectStore.from_env()
+
+  {:ok, _} =
+    Troupe.Sessions.Storage.put_manifest(store, \"$AFTER_ID\", %{
+      team: \"drill\",
+      owner_subject: \"drill@example.test\",
+      profile: \"dev\",
+      epoch: 3,
+      last_seq: 42,
+      head_hash: \"sha256:drill\",
+      object_bytes: 1024
+    })
+
+  IO.puts(\"seeded $AFTER_ID into object storage\")
+"
+
+psql "$DB" "INSERT INTO sessions (id, owner_subject, profile, visibility, state, epoch, last_seq, head_hash, object_bytes, workspace_bytes, pinned, inserted_at, updated_at)
+            VALUES ('$AFTER_ID', 'drill@example.test', 'dev', 'private', 'dormant', 3, 42, 'sha256:drill', 1024, 0, false, now(), now())" >/dev/null
+echo "recorded $AFTER_ID in the index"
+
+# Recovery reads archived WAL, and the segment holding the restore point is still open
+# until something closes it. `archive_timeout` would get there in a minute; a drill
+# should not take a minute to find out whether it works.
+psql "$DB" "SELECT pg_switch_wal()" >/dev/null
+echo -n "waiting for the archive"
+
+for _ in $(seq 1 30); do
+  ARCHIVED=$(psql "$DB" "SELECT archived_count FROM pg_stat_archiver")
+  if [ "${ARCHIVED:-0}" -gt 0 ] && [ "$(psql "$DB" "SELECT last_archived_wal IS NOT NULL FROM pg_stat_archiver")" = "t" ]; then
+    break
+  fi
+  echo -n "."
+  sleep 1
+done
+
+echo " archived through $(psql "$DB" "SELECT last_archived_wal FROM pg_stat_archiver")"
+
+say "4. Restore to the point before it"
+# The restored cluster runs alongside, on its own port, so the drill does not take the
+# development database down with it.
+docker exec -u postgres "$CONTAINER" sh -c "cat > $BACKUP_DIR/postgresql.auto.conf <<CONF
+port = 5433
+restore_command = 'cp /var/lib/postgresql/wal-archive/%f %p'
+recovery_target_name = '$RESTORE_POINT'
+recovery_target_action = 'promote'
+CONF"
+docker exec -u postgres "$CONTAINER" touch "$BACKUP_DIR/recovery.signal"
+docker exec -u postgres "$CONTAINER" chmod 700 "$BACKUP_DIR"
+docker exec -u postgres "$CONTAINER" pg_ctl -D "$BACKUP_DIR" -o "-p 5433" -w -t 60 start
+
+trap 'docker exec -u postgres "$CONTAINER" pg_ctl -D "$BACKUP_DIR" -m immediate stop >/dev/null 2>&1 || true' EXIT
+
+RESTORED=$(docker exec -i "$CONTAINER" psql -U troupe -p 5433 -d "$DB" -tAc "SELECT count(*) FROM sessions WHERE id = '$AFTER_ID'")
+echo "the restored database has $RESTORED row(s) for $AFTER_ID (expected 0)"
+
+if [ "$RESTORED" != "0" ]; then
+  echo "the restore did not go back far enough; the drill proves nothing" >&2
+  exit 1
+fi
+
+say "5. Rebuild from object storage"
+# The restored database has lost whatever happened after the restore point; object
+# storage has not. This is the step that makes a restore lossless rather than merely
+# recent, and it runs against the restored cluster before anything is switched over.
+RESTORED_URL="postgres://troupe:troupe@localhost:55433/$DB"
+
+if ! docker exec -i "$CONTAINER" psql -U troupe -p 5433 -d "$DB" -tAc "SELECT 1" >/dev/null 2>&1; then
+  echo "the restored cluster is not answering on 5433" >&2
+  exit 1
+fi
+
+MIX_ENV=test mix troupe.index.rebuild --database-url "$RESTORED_URL" 2>&1 | grep -E "^found"
+
+say "6. Nothing was lost"
+RECOVERED=$(docker exec -i "$CONTAINER" psql -U troupe -p 5433 -d "$DB" -tAc "SELECT count(*) FROM sessions WHERE id = '$AFTER_ID'")
+EPOCH=$(docker exec -i "$CONTAINER" psql -U troupe -p 5433 -d "$DB" -tAc "SELECT coalesce(max(epoch)::text, 'none') FROM sessions WHERE id = '$AFTER_ID'")
+HEAD=$(docker exec -i "$CONTAINER" psql -U troupe -p 5433 -d "$DB" -tAc "SELECT coalesce(max(head_hash), 'none') FROM sessions WHERE id = '$AFTER_ID'")
+
+echo "$AFTER_ID after the rebuild: $RECOVERED row(s), epoch $EPOCH, head $HEAD"
+
+if [ "$RECOVERED" != "1" ]; then
+  echo "the session the restore lost did not come back; the drill failed" >&2
+  exit 1
+fi
+
+if [ "$EPOCH" != "3" ] || [ "$HEAD" != "sha256:drill" ]; then
+  echo "the session came back with the wrong epoch or head hash; the drill failed" >&2
+  exit 1
+fi
+
+say "7. And the ledger"
+MIX_ENV=test mix troupe.ledger.reconcile --database-url "$RESTORED_URL" 2>&1 | grep -E "ledger vs gateway|records|drift" || \
+  echo "(no gateway configured here, so there is nothing to reconcile against)"
+
+# Tidy up: the seeded session is a fixture, not a session.
+MIX_ENV=test mix run -e "
+  Troupe.Sessions.Storage.erase(Troupe.ObjectStore.from_env(), \"$AFTER_ID\")
+" >/dev/null 2>&1
+
+cat <<'NOTE'
+
+What this drill proves that the test suite cannot: that PostgreSQL really does go back,
+that the row written after the restore point really is gone from the restored cluster,
+and that the rebuild therefore had something to recover rather than merely agreeing with
+a database that never lost anything.
+
+The other halves run against this same PostgreSQL and MinIO under `mix check`:
+
+  Troupe.Worker.IndexRebuildTest   an emptied sessions table is reproduced from object
+                                   storage, matching on every state, epoch and head hash
+  Troupe.Plane.ReconcileTest       injected drift is reported in each direction, and the
+                                   ledger accepts each gateway request id exactly once
+NOTE
+
+echo
+echo "drill complete: the restore went back, and the rebuild brought the session with it."

@@ -7,8 +7,21 @@
 name: troupe-dev
 
 services:
+  # A named volume is created root-owned, and PostgreSQL archives WAL as `postgres` — so
+  # without this every archive_command fails silently and point-in-time recovery has
+  # nothing to recover *through*. Found by `scripts/pitr-drill`, which is what a drill is
+  # for.
+  wal-archive-permissions:
+    image: busybox:1.36
+    command: sh -c "mkdir -p /wal-archive && chown 70:70 /wal-archive && chmod 700 /wal-archive"
+    volumes:
+      - wal-archive:/wal-archive
+
   postgres:
     image: postgres:16-alpine
+    depends_on:
+      wal-archive-permissions:
+        condition: service_completed_successfully
     environment:
       POSTGRES_USER: troupe
       POSTGRES_PASSWORD: troupe
@@ -27,6 +40,9 @@ services:
       - archive_timeout=60
     ports:
       - "55432:5432"
+      # Where `scripts/pitr-drill` brings a restored cluster up, beside the live one, so
+      # a rebuild can be run against it before anything is switched over.
+      - "55433:5433"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - wal-archive:/var/lib/postgresql/wal-archive

@@ -114,9 +114,10 @@ defmodule Troupe.Plane.TeamBudget do
       {:ok, record} ->
         {:reply, {:ok, record}, %{state | spent_micros: state.spent_micros + record.cost_micros}}
 
-      # Already recorded: the same gateway request reported twice is one charge.
-      {:error, :duplicate} ->
-        {:reply, {:ok, :already_recorded}, state}
+      # Already recorded: the same gateway request reported twice is one charge, so the
+      # running total is not moved.
+      {:duplicate, record} ->
+        {:reply, {:ok, record}, state}
 
       error ->
         {:reply, error, state}

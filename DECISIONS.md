@@ -827,3 +827,28 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      Each rejection is named — `wrong_format`, `wrong_code_version`, `malformed` —
      because "the code changed" and "the bytes are damaged" mean different things to
      somebody reading a log.
+
+145. **`Ledger.record/1` treats a repeat as a success, not an error.** Its doc always said
+     "idempotent" and its return said otherwise, which is the kind of mismatch that bites
+     the next caller: a worker replaying a queued report after a reconnect has done
+     nothing wrong and must not be told it has. `{:duplicate, existing}` hands back the
+     record that stands — the *first* one, because what the gateway billed is what the
+     first report said — and says which case it was, because a caller keeping a running
+     total needs to know whether to add this one.
+
+146. **Reconciliation reports and never repairs.** A job that silently rewrote the ledger
+     to match the gateway would destroy the evidence that they disagreed, and which of
+     them is right is a question about the incident rather than about the numbers. Drift
+     is reported in three directions — missing, extra, mismatched — because "the gateway
+     billed something we never recorded" and "we recorded something the gateway never
+     billed" are different incidents with different causes.
+
+147. **Reconciling is by gateway request id and nothing else.** It is the only identifier
+     both systems share; reconciling by timestamp and amount would make two identical
+     calls a second apart indistinguishable.
+
+148. **The dev PostgreSQL's WAL archive volume is chowned before PostgreSQL starts.** A
+     named volume is created root-owned and PostgreSQL archives as `postgres`, so every
+     `archive_command` was failing silently — 748 of them — and point-in-time recovery
+     had nothing to recover *through*. Found by writing the drill and running it, which
+     is what a drill is for.

@@ -19,8 +19,18 @@ defmodule Troupe.Plane.Ledger do
   alias Troupe.Plane.Ledger.{Reservation, UsageRecord}
   alias Troupe.Plane.Repo
 
-  @doc "Record what one model call cost. Idempotent on the gateway's request id."
-  @spec record(map()) :: {:ok, UsageRecord.t()} | {:error, :duplicate | Ecto.Changeset.t()}
+  @doc """
+  Record what one model call cost.
+
+  Idempotent on the gateway's request id, and a repeat is a *success* rather than an
+  error: a worker replaying a queued report after a reconnect has done nothing wrong and
+  must not be told it has. `{:duplicate, existing}` says which case it was, because a
+  caller keeping a running total needs to know whether to add this one — and hands back
+  the record that stands, which is the first one. What the gateway billed is what the
+  first report said; a second report with different numbers does not overwrite it.
+  """
+  @spec record(map()) ::
+          {:ok, UsageRecord.t()} | {:duplicate, UsageRecord.t()} | {:error, Ecto.Changeset.t()}
   def record(attrs) do
     attrs = Map.put_new(attrs, :occurred_at, DateTime.utc_now())
 
@@ -32,8 +42,12 @@ defmodule Troupe.Plane.Ledger do
         {:ok, record}
 
       {:error, changeset} ->
-        if duplicate?(changeset), do: {:error, :duplicate}, else: {:error, changeset}
+        if duplicate?(changeset), do: {:duplicate, existing(attrs)}, else: {:error, changeset}
     end
+  end
+
+  defp existing(attrs) do
+    Repo.get_by(UsageRecord, gateway_request_id: attrs[:gateway_request_id] || attrs["gateway_request_id"])
   end
 
   defp duplicate?(changeset) do

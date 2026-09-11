@@ -78,8 +78,10 @@ defmodule Troupe.Plane.TeamBudgetTest do
 
     # A worker that lost the plane replays its reports when it comes back. Counting the
     # same request twice would make a team look over budget for having survived an
-    # outage.
-    assert {:ok, :already_recorded} = TeamBudget.record(team, attrs)
+    # outage — so the repeat succeeds, hands back the record that stands, and moves
+    # nothing.
+    assert {:ok, again} = TeamBudget.record(team, attrs)
+    assert again.id == record.id
     assert Ledger.spent_micros(team.id) == 250
   end
 
