@@ -476,7 +476,31 @@ file, and a pod by a signed token whose audience names it — so the endpoint ca
 authenticator and a guard, and there is one protocol implementation rather than two that
 drift.
 
-### 9.5 Erasure
+### 9.5 Draining
+
+Scaling down, restarting for a new image, and an admin drain are the same sequence.
+The plane marks the pod draining — in the database, so every replica stops placing on
+it, including the ones that never hear about this drain — and pushes. The worker waits
+for running turns rather than killing them: a turn halfway through a tool call has an OS
+process attached and a model call already paid for. The wait is bounded by the drain
+timeout, the same number the pod's `terminationGracePeriodSeconds` comes from, and a turn
+still running at the deadline is cancelled — costing the turn in flight and nothing
+before it, because everything before it is sealed.
+
+The plane then checks its own index before agreeing the pod is empty. A pod reporting
+success while sessions are still assigned to it is exactly the case where believing it
+would lose them.
+
+### 9.6 Disk
+
+A pod's caches are the only thing on its volume that grows without bound, so they are the
+only thing given up when it fills: least recently used first, above the low watermark,
+until back under. **Active workspaces are never evicted** — a cache is a copy of
+something already in object storage and an active workspace is the only copy of work in
+progress — and a pod that cannot get under the watermark says so and stays above it
+rather than reaching for something it must not touch.
+
+### 9.7 Erasure
 
 The plane drives it and does not do it. It holds no credential that can read a session
 key and none for object storage; a pod of the session's profile has both, so the plane
@@ -488,7 +512,31 @@ before serving anything.
 
 ---
 
-## 10. Stages 3–4
+## 10. Reading old logs
+
+Every durable event carries a schema version. `Troupe.Log.Upcast` brings an old one up
+to the current version a step at a time — `1 -> 2 -> 3`, never `1 -> 3` — so adding a
+version is one function rather than a revision of every older one. An upcaster may add
+and rename, never drop: a replay has to produce what the session actually did.
+
+The hash chain is not recomputed. `prev_hash` covers the event as it was written, and
+upcasting changes the in-memory shape rather than the bytes, so a log from an old release
+still verifies against what sealed it.
+
+Each released version records fixtures under `test/fixtures/logs/<version>/` with the
+fold each produces, and every build replays all of them. The hash is over a *witness* of
+the durable event types the agent's replay acts on, because rebuilding an agent needs
+things a log does not contain. A test reads the agent's replay clauses out of the source
+and asserts the witness still covers them — a blind spot nobody knows about is worse than
+a missing test.
+
+Snapshots are cache and are treated like it: one carrying a format this build does not
+write, a fold computed by a different build, or bytes that will not decode is discarded
+for a full replay, which produces exactly the same fold.
+
+---
+
+## 11. Stages 3–4
 
 * **Stage 3 — admin panel and self-service.** The plane grows a LiveView panel whose
   every action goes through `Plane.Admin`, the same context the admin JSON-RPC and the
