@@ -2,14 +2,17 @@ defmodule Troupe.TUIHelpers do
   @moduledoc "Starts the TUI on a headless CellSession and reads the screen back as text."
 
   alias ExRatatui.CellSession
-  alias ExRatatui.Event.Key
+  alias ExRatatui.Event.{Key, Mouse, Resize}
   alias Troupe.UI.TUI
 
   @width 220
   @height 40
 
+  @doc "Server options on a headless CellSession; `width:`/`height:` size it (default 220x40)."
   def tui_opts(sid, extra \\ []) do
-    session = CellSession.new(@width, @height)
+    {width, extra} = Keyword.pop(extra, :width, @width)
+    {height, extra} = Keyword.pop(extra, :height, @height)
+    session = CellSession.new(width, height)
 
     opts =
       Keyword.merge(
@@ -53,6 +56,22 @@ defmodule Troupe.TUIHelpers do
   end
 
   def type(pid, text), do: text |> String.graphemes() |> Enum.each(&press(pid, &1))
+
+  @doc "Turns the mouse wheel one notch (`:up` or `:down`) at a screen position."
+  def wheel(pid, direction, x \\ 50, y \\ 20) do
+    kind = if direction == :up, do: "scroll_up", else: "scroll_down"
+    :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: kind, button: "", x: x, y: y})
+  end
+
+  @doc "Resizes the headless screen and tells the app about it."
+  def resize(pid, session, width, height) do
+    _ = CellSession.resize(session, width, height)
+    :ok = ExRatatui.Runtime.inject_event(pid, %Resize{width: width, height: height})
+  end
+
+  @doc "Clicks the left mouse button at a screen position."
+  def click(pid, x, y),
+    do: :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "down", button: "left", x: x, y: y})
 
   def user_state(pid), do: :sys.get_state(pid).user_state
 end

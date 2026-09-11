@@ -8,7 +8,7 @@ defmodule Troupe do
   """
 
   alias Troupe.Agent.Server
-  alias Troupe.{Agents, Config, Paths, Session}
+  alias Troupe.{Agents, Config, Paths, Session, Settings}
   alias Troupe.LLM.Provider
   alias Troupe.Session.{Approvals, Dispatcher, Log, Watcher}
 
@@ -144,6 +144,54 @@ defmodule Troupe do
 
   @spec events(session_id()) :: [Troupe.Event.t()]
   def events(sid), do: Log.all(sid)
+
+  @doc "The session's live config and its workspace."
+  @spec config(session_id()) :: {String.t(), Config.t()}
+  def config(sid), do: Dispatcher.context(sid)
+
+  @doc """
+  Changes one `Troupe.Settings` key: applies it to the running session and
+  writes it to the config file that owns it. Settings whose effect is
+  `:new_branches` reach branches dispatched from now on, not running ones.
+
+  Returns the updated config with the file written to, or `{:error, message}`
+  when the value was applied to the session but could not be persisted.
+  """
+  @spec put_setting(session_id(), String.t(), term()) ::
+          {:ok, Config.t(), String.t()} | {:error, String.t()}
+  def put_setting(sid, key, value) do
+    case Settings.fetch(key) do
+      :error ->
+        {:error, "unknown setting #{key}"}
+
+      {:ok, _field} ->
+        {workspace, cfg} = Dispatcher.context(sid)
+        updated = Settings.put(cfg, key, value)
+        :ok = Dispatcher.put_config(sid, updated)
+        :ok = apply_live(sid, key, updated)
+
+        case Settings.persist(workspace, key, value) do
+          {:ok, path} -> {:ok, updated, path}
+          {:error, msg} -> {:error, "applied to this session only: " <> msg}
+        end
+    end
+  end
+
+  defp apply_live(sid, "auto_approve", cfg), do: Approvals.set_auto_approve(sid, cfg.auto_approve)
+
+  defp apply_live(sid, "watch.enabled", cfg) do
+    :ok = Watcher.put_config(sid, cfg)
+
+    if cfg.watch.enabled do
+      {:ok, _backend} = Watcher.enable(sid)
+      :ok
+    else
+      Watcher.disable(sid)
+    end
+  end
+
+  defp apply_live(sid, "watch." <> _, cfg), do: Watcher.put_config(sid, cfg)
+  defp apply_live(_sid, _key, _cfg), do: :ok
 
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok
   def watch(sid, true), do: Watcher.enable(sid)

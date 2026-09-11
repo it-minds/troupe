@@ -143,7 +143,9 @@ defmodule Troupe.CLI.Runner do
   defp tui(sid) do
     spec = %{
       id: TUI.Server,
-      start: {TUI.Server, :start_link, [[session_id: sid, name: TUI.Server.via(sid)]]},
+      start:
+        {TUI.Server, :start_link,
+         [[session_id: sid, name: TUI.Server.via(sid), mouse_capture: true]]},
       # a crash restarts and redraws; a deliberate quit (normal exit) does not come back
       restart: :transient
     }

@@ -38,6 +38,11 @@ defmodule Troupe.Session.Watcher do
   @spec status(String.t()) :: %{enabled: boolean(), backend: atom() | nil}
   def status(sid), do: GenServer.call(Session.via(sid, :watcher), :status)
 
+  @doc "Replaces the config the watcher reads its debounce and poll interval from."
+  @spec put_config(String.t(), Troupe.Config.t()) :: :ok
+  def put_config(sid, config),
+    do: GenServer.call(Session.via(sid, :watcher), {:put_config, config})
+
   @doc "Tells the watcher an upcoming write is ours so it does not retrigger."
   @spec expect_write(String.t(), String.t(), String.t()) :: :ok
   def expect_write(sid, abs_path, content) do
@@ -81,6 +86,9 @@ defmodule Troupe.Session.Watcher do
 
   def handle_call(:status, _from, state),
     do: {:reply, %{enabled: state.enabled, backend: state.backend}, state}
+
+  def handle_call({:put_config, config}, _from, %__MODULE__{} = state),
+    do: {:reply, :ok, %__MODULE__{state | config: config}}
 
   @impl true
   def handle_info({:file_changed, path}, %{enabled: true} = state) do

@@ -5,26 +5,43 @@ defmodule Troupe.Tool.Diff do
   def unified(path, old, new) do
     old_lines = String.split(old, ~r/\r?\n/)
     new_lines = String.split(new, ~r/\r?\n/)
+    ops = List.myers_difference(old_lines, new_lines)
+    last = length(ops) - 1
 
     body =
-      List.myers_difference(old_lines, new_lines)
+      ops
+      |> Enum.with_index()
       |> Enum.flat_map(fn
-        {:eq, lines} -> context(lines)
-        {:del, lines} -> Enum.map(lines, &("-" <> &1))
-        {:ins, lines} -> Enum.map(lines, &("+" <> &1))
+        {{:eq, lines}, i} -> context(lines, i == 0, i == last)
+        {{:del, lines}, _} -> Enum.map(lines, &("-" <> &1))
+        {{:ins, lines}, _} -> Enum.map(lines, &("+" <> &1))
       end)
       |> Enum.join("\n")
 
     "--- #{path}\n+++ #{path}\n#{body}"
   end
 
-  defp context(lines) when length(lines) <= 6, do: Enum.map(lines, &(" " <> &1))
+  # Context around a change: the lines just before it and just after it. An unchanged run
+  # at the top of the file has nothing before it worth showing, one at the bottom nothing
+  # after it — printing those only pushes the change off the reader's screen.
+  defp context(lines, _first?, _last?) when length(lines) <= 6,
+    do: Enum.map(lines, &(" " <> &1))
 
-  defp context(lines) do
+  defp context(lines, true, true), do: [omitted(length(lines))]
+
+  defp context(lines, true, false),
+    do: [omitted(length(lines) - 3)] ++ Enum.map(Enum.take(lines, -3), &(" " <> &1))
+
+  defp context(lines, false, true),
+    do: Enum.map(Enum.take(lines, 3), &(" " <> &1)) ++ [omitted(length(lines) - 3)]
+
+  defp context(lines, false, false) do
     Enum.map(Enum.take(lines, 3), &(" " <> &1)) ++
-      ["@@ #{length(lines) - 6} unchanged lines @@"] ++
+      [omitted(length(lines) - 6)] ++
       Enum.map(Enum.take(lines, -3), &(" " <> &1))
   end
+
+  defp omitted(n), do: "@@ #{n} unchanged lines @@"
 
   @spec stat(String.t(), String.t()) :: String.t()
   def stat(old, new) do

@@ -16,7 +16,25 @@ defmodule Troupe.Session.Worktree do
     branch = git_branch(branch_id)
     File.mkdir_p!(Path.dirname(wt))
 
-    case git(workspace, ["worktree", "add", wt, "-b", branch]) do
+    cond do
+      registered?(workspace, wt) ->
+        add_exclude(workspace)
+        {:ok, %{path: wt, git_branch: branch}}
+
+      File.exists?(wt) ->
+        {:error, "#{wt} exists but is not a git worktree; remove it or use another name"}
+
+      # A named worktree that was discarded as a directory but whose branch survived.
+      branch_exists?(workspace, branch) ->
+        add(workspace, wt, branch, [wt, branch])
+
+      true ->
+        add(workspace, wt, branch, [wt, "-b", branch])
+    end
+  end
+
+  defp add(workspace, wt, branch, args) do
+    case git(workspace, ["worktree", "add" | args]) do
       {:ok, _, 0} ->
         add_exclude(workspace)
         {:ok, %{path: wt, git_branch: branch}}
@@ -27,6 +45,31 @@ defmodule Troupe.Session.Worktree do
       {:error, :timeout, out} ->
         {:error, "git worktree add timed out: #{out}"}
     end
+  end
+
+  @doc "True when `git worktree list` already knows this directory."
+  @spec registered?(String.t(), String.t()) :: boolean()
+  def registered?(workspace, wt) do
+    expanded = Path.expand(wt)
+    Enum.any?(all(workspace), &(&1.path == expanded))
+  end
+
+  defp branch_exists?(workspace, branch) do
+    match?(
+      {:ok, _, 0},
+      git(workspace, ["rev-parse", "--verify", "--quiet", "refs/heads/" <> branch])
+    )
+  end
+
+  @doc "Names of the worktrees Troupe manages under `.troupe/worktrees`."
+  @spec managed(String.t()) :: [String.t()]
+  def managed(workspace) do
+    workspace
+    |> Path.join(".troupe/worktrees/*")
+    |> Path.wildcard()
+    |> Enum.filter(&File.dir?/1)
+    |> Enum.map(&Path.basename/1)
+    |> Enum.sort()
   end
 
   @doc "Commits everything in the worktree on its branch; returns a diff stat (or empty string if nothing changed)."
@@ -71,6 +114,80 @@ defmodule Troupe.Session.Worktree do
     {:ok, out2, s2} = ok(git(workspace, ["branch", "-D", git_branch(branch_id)]))
     File.rm_rf(wt)
     if s2 == 0, do: {:ok, out1 <> out2}, else: {:error, out1 <> out2}
+  end
+
+  @doc """
+  Worktrees the user has checked out (from `git worktree list`), excluding the
+  workspace itself and Troupe's own `.troupe/worktrees`. Each has `path`,
+  `rel` (relative to the workspace when inside it) and `branch`.
+  """
+  @spec list(String.t()) :: [%{path: String.t(), rel: String.t(), branch: String.t() | nil}]
+  def list(workspace) do
+    root = Path.expand(workspace)
+
+    workspace
+    |> all()
+    |> Enum.reject(&(&1.path in [nil, root] or String.contains?(&1.path, "/.troupe/worktrees/")))
+    |> Enum.map(fn wt ->
+      rel =
+        if String.starts_with?(wt.path, root <> "/"),
+          do: Path.relative_to(wt.path, root),
+          else: wt.path
+
+      %{wt | rel: rel}
+    end)
+  end
+
+  # Every worktree git knows about, Troupe's own included.
+  defp all(workspace) do
+    case git(workspace, ["worktree", "list", "--porcelain"]) do
+      {:ok, out, 0} ->
+        out
+        |> String.split(~r/\n\s*\n/, trim: true)
+        |> Enum.map(&parse_worktree/1)
+
+      _ ->
+        []
+    end
+  end
+
+  defp parse_worktree(block) do
+    lines = String.split(block, "\n", trim: true)
+
+    path =
+      lines
+      |> Enum.find_value(fn
+        "worktree " <> p -> p
+        _ -> nil
+      end)
+
+    branch =
+      lines
+      |> Enum.find_value(fn
+        "branch refs/heads/" <> b -> b
+        _ -> nil
+      end)
+
+    %{path: path && Path.expand(path), rel: path, branch: branch}
+  end
+
+  @doc "Finds a user worktree by relative path, absolute path or branch name."
+  @spec find(String.t(), String.t()) ::
+          %{path: String.t(), rel: String.t(), branch: String.t() | nil} | nil
+  def find(workspace, name) do
+    name = String.trim_trailing(name, "/")
+    Enum.find(list(workspace), fn wt -> name in [wt.rel, wt.path, wt.branch] end)
+  end
+
+  @doc "Uncommitted change summary of a user-managed worktree (nothing is committed)."
+  @spec diff_stat(String.t()) :: String.t()
+  def diff_stat(wt) do
+    with {:ok, _, 0} <- git(wt, ["add", "-N", "-A"]),
+         {:ok, stat, 0} <- git(wt, ["diff", "--stat"]) do
+      String.trim(stat)
+    else
+      _ -> ""
+    end
   end
 
   @spec exists?(String.t(), String.t()) :: boolean()

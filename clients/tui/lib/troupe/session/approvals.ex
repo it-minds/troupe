@@ -42,6 +42,11 @@ defmodule Troupe.Session.Approvals do
   def session_allowed?(sid, tool),
     do: GenServer.call(Session.via(sid, :approvals), {:allowed?, tool})
 
+  @doc "Turns blanket approval on or off for the rest of the session."
+  @spec set_auto_approve(String.t(), boolean()) :: :ok
+  def set_auto_approve(sid, value) when is_boolean(value),
+    do: GenServer.call(Session.via(sid, :approvals), {:auto_approve, value})
+
   ## Server
 
   @impl true
@@ -88,6 +93,9 @@ defmodule Troupe.Session.Approvals do
   def handle_call({:allowed?, tool}, _from, state) do
     {:reply, state.auto_approve or MapSet.member?(state.session_allowed, tool), state}
   end
+
+  def handle_call({:auto_approve, value}, _from, %__MODULE__{} = state),
+    do: {:reply, :ok, %__MODULE__{state | auto_approve: value}}
 
   @impl true
   def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do

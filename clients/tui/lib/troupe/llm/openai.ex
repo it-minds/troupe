@@ -133,6 +133,12 @@ defmodule Troupe.LLM.OpenAI do
             a
         end
 
+      # reasoning / thinking tokens (vLLM, LiteLLM, Mistral, GLM...): shown live, not kept
+      case Map.get(delta, "reasoning_content") || Map.get(delta, "reasoning") do
+        r when is_binary(r) and r != "" -> send(a.reply_to, {:llm_delta, a.ref, r})
+        _ -> :ok
+      end
+
       Enum.reduce(Map.get(delta, "tool_calls") || [], a, fn tc, a2 ->
         idx = Map.get(tc, "index", 0)
         existing = Map.get(a2.calls, idx, %{id: nil, name: "", args: ""})

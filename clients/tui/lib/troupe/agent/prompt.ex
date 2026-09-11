@@ -4,15 +4,16 @@ defmodule Troupe.Agent.Prompt do
   alias Troupe.Agent.State
   alias Troupe.{Config, OS, Tools}
   alias Troupe.LLM.{Message, Request}
+  alias Troupe.Workspace.Survey
 
-  @spec request(State.t()) :: Request.t()
-  def request(%State{} = s) do
+  @spec request(State.t(), Survey.t() | nil) :: Request.t()
+  def request(%State{} = s, survey \\ nil) do
     def = s.definition
     cfg = s.spec.config
 
     %Request{
       model: Config.resolve_model(cfg, def.model),
-      system: system(s),
+      system: system(s, survey),
       messages: State.conversation(s),
       tools: Tools.specs(def, s.spec.definitions),
       max_tokens: 8192,
@@ -39,8 +40,8 @@ defmodule Troupe.Agent.Prompt do
     }
   end
 
-  @spec system(State.t()) :: String.t()
-  def system(%State{} = s) do
+  @spec system(State.t(), Survey.t() | nil) :: String.t()
+  def system(%State{} = s, survey \\ nil) do
     {_shell, os_info} = OS.Process.shell_info()
 
     todo =
@@ -55,6 +56,12 @@ defmodule Troupe.Agent.Prompt do
         text -> "\n\n# Context from AI comments in the workspace\n#{text}"
       end
 
+    workspace =
+      case survey do
+        %Survey{} = sv -> Survey.render(sv)
+        nil -> ""
+      end
+
     """
     #{s.definition.prompt}
 
@@ -66,7 +73,7 @@ defmodule Troupe.Agent.Prompt do
     All paths are relative to the workspace root and confined to it.
 
     # Current task list
-    #{todo}#{watch}
+    #{todo}#{workspace}#{watch}
     """
   end
 end

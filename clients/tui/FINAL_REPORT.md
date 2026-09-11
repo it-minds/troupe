@@ -63,6 +63,9 @@ Legend: ✅ passes locally with output shown · 📝 written, cannot run on this
 | 28 | focus never stolen; Esc, 2, y, Esc | ✅ `tui_test.exs` "focus" |
 | 29 | kill TUI mid-stream: branches unaffected, TUI restarts and redraws from log | ✅ `tui_test.exs` "killing the TUI" |
 | 30 | 10k deltas over four branches with a slow renderer: no turn-latency increase, bounded mailbox | ✅ `tui_test.exs` "backpressure" |
+| — | Decision 52: markdown and syntax-highlighted transcript rendering (segmented lines, code rails, numbered source) | ✅ `test/troupe/tui_scroll_test.exs` (`TUIRichTextTest`) |
+| — | Decision 51: every configured model detected (`Config.models/1`), listed by `troupe config`, and pickable from a menu via `/models` | ✅ `test/troupe/settings_test.exs` (`ModelMenuTest`) |
+| — | Decisions 45–50: scrolling pane that follows the tail, pre-wrapped rows (no bottom clipping, indentation and tabs kept), full tool results with outcome summaries and diffs, subagent transcripts via ←/→, tray layout, trimmed diff context | ✅ `test/troupe/tui_scroll_test.exs` (`TUIScrollTest`, `TUIModelTextTest`, `TUIPaneRegressionTest`) |
 
 ### Packaging
 
@@ -109,6 +112,6 @@ The reaper helper is 13–66 KB per target (`priv/reaper/<target>/`), all five c
 * Windows behaviour (Git-for-Windows bash / pwsh / powershell selection, Job Object reaper, junction and drive-letter confinement) compiles (`x86_64-windows-gnu` reaper) and the pure path rules are unit-tested, but nothing was run on Windows.
 * The real providers (`Troupe.LLM.Anthropic`, `Troupe.LLM.OpenAI`) are exercised only through their request encoders and SSE parser paths in review, not against live endpoints in this run; all tests use the Fake.
 * `/resume` inside the TUI only prints the shell command (Decision 24).
-* The TUI transcript is plain text (tool calls collapsible with `e`), not rendered markdown; ExRatatui's `Markdown` widget can replace the `Paragraph` in `Troupe.UI.TUI.View` without touching the model.
+* The TUI transcript is rendered in Elixir (pre-wrapped `Text.Line`s of tagged segments: markdown structure, inline code and bold, syntect highlighting for fenced blocks and file reads). It is not a full markdown implementation — tables, nested emphasis, links and reference definitions are shown as written, and highlighting stops at 400 lines a block (Decision 52).
 * At-least-once re-execution of tool calls that started but never completed is by design (documented in ARCHITECTURE.md §2); a `shell` command that is not idempotent can therefore run twice after a crash mid-call.
 * Compaction keeps the last `keep_last_turns` turns and summarizes the rest with the cheap model; unresolved tool calls are always in the kept region because the boundary is chosen at a plain user message.

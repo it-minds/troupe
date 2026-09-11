@@ -45,7 +45,7 @@ defmodule Troupe.Agent.State do
           started_at: integer() | nil,
           child_counters: %{optional(String.t()) => pos_integer()},
           watch_context: String.t() | nil,
-          worktree: %{path: String.t(), git_branch: String.t()} | nil
+          worktree: %{path: String.t(), git_branch: String.t() | nil, managed: boolean()} | nil
         }
 
   defstruct spec: nil,
@@ -184,8 +184,12 @@ defmodule Troupe.Agent.State do
   defp do_apply(s, :cancelled, _), do: %{s | status: :done, done_reason: :cancelled}
   defp do_apply(s, :llm_error, _), do: %{s | status: :done, done_reason: :llm_error}
 
-  defp do_apply(s, :worktree_created, %{path: path, git_branch: branch}),
-    do: %{s | workspace: path, worktree: %{path: path, git_branch: branch}}
+  defp do_apply(s, :worktree_created, %{path: path, git_branch: branch} = d),
+    do: %{
+      s
+      | workspace: path,
+        worktree: %{path: path, git_branch: branch, managed: Map.get(d, :managed, true)}
+    }
 
   defp do_apply(s, :watch_context, %{text: text}), do: %{s | watch_context: text}
   defp do_apply(s, _type, _data), do: s

@@ -245,13 +245,212 @@ defmodule Troupe.TUITest do
     Process.exit(sampler, :normal)
 
     assert flooded < baseline * 3 + 1_500, "baseline #{baseline}ms, flooded #{flooded}ms"
-    assert max_queue < 8_000, "TUI mailbox peaked at #{max_queue}"
+    # bounded: whatever the burst queued is collapsed and drained within 3 s
+    t0 = System.monotonic_time(:millisecond)
 
     eventually(
       fn -> match?({:message_queue_len, n} when n < 50, Process.info(pid, :message_queue_len)) end,
-      15_000
+      3_000,
+      20
     )
 
+    drain_ms = System.monotonic_time(:millisecond) - t0
+    assert drain_ms < 3_000, "mailbox peaked at #{max_queue} and took #{drain_ms}ms to drain"
+
     assert Process.alive?(pid)
+  end
+end
+
+defmodule Troupe.TUIActivityTest do
+  use ExUnit.Case, async: true
+
+  import Troupe.TestHelpers
+  import Troupe.TUIHelpers
+
+  test "a working window shows what it is doing: thinking, then the running tool, then waiting for you" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      "code-1" => [
+        {:delay, 1_500, {:tool, "shell", %{"command" => "sleep 1.5; echo hi"}}},
+        {:tool, "write_file", %{"path" => "a", "content" => "b"}},
+        {:finish, "ok"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "do something slow")
+
+    eventually(fn -> screen_text(pid, session) =~ ~r/thinking \(00:0\d\)/ end)
+
+    req = await_event("code-1", :approval_requested, 10_000)
+    :ok = Troupe.approve(sid, req.data.call_id, :allow)
+
+    assert_receive {:troupe_event,
+                    %{type: :tool_call_started, agent_path: "code-1", data: %{name: "shell"}}},
+                   5_000
+
+    eventually(fn -> screen_text(pid, session) =~ "running shell sleep 1.5; echo hi (00:0" end)
+    await_state("code-1", :needs_input, 10_000)
+    eventually(fn -> screen_text(pid, session) =~ "waiting for you" end)
+  end
+end
+
+defmodule Troupe.TUIMouseTest do
+  use ExUnit.Case, async: true
+
+  import Troupe.TestHelpers
+  import Troupe.TUIHelpers
+
+  alias ExRatatui.Event.Mouse
+
+  test "clicking a tile activates that window; the status line says which key answers a waiting window" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      "code-1" => [{:delay, 60_000, {:finish, "never"}}],
+      "code-2" => [{:tool, "write_file", %{"path" => "a", "content" => "b"}}, {:finish, "x"}]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "one")
+    {:ok, "code-2"} = Troupe.dispatch(sid, "code", "two")
+    await_state("code-2", :needs_input)
+    eventually(fn -> user_state(pid).model.windows["code-2"].pending != [] end)
+
+    assert screen_text(pid, session) =~ "press 2 (or Enter, or click the window) to answer"
+
+    # two tiles across a 220-wide screen: x=5 is the first, x=150 the second
+    :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "down", button: "left", x: 150, y: 3})
+    assert user_state(pid).focus == {:window, "code-2"}
+    assert screen_text(pid, session) =~ "APPROVAL: write_file"
+
+    :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "down", button: "left", x: 5, y: 3})
+    assert user_state(pid).focus == {:window, "code-1"}
+
+    # a click below the strip changes nothing
+    :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "down", button: "left", x: 5, y: 39})
+    assert user_state(pid).focus == {:window, "code-1"}
+
+    # Enter on the empty command line jumps to the window that needs input
+    press(pid, "esc")
+    press(pid, "enter")
+    assert user_state(pid).focus == {:window, "code-2"}
+  end
+end
+
+defmodule Troupe.TUICompletionTest do
+  use ExUnit.Case, async: true
+
+  import Troupe.TestHelpers
+  import Troupe.TUIHelpers
+
+  test "Tab completes command names and worktree paths for /merge and /discard, cycling on repeat" do
+    ws = tmp_workspace() |> git_init!()
+
+    scripts = %{
+      "worktree-1" => [
+        {:tool, "write_file", %{"path" => "a.txt", "content" => "a"}},
+        {:finish, "a"}
+      ],
+      "worktree-2" => [
+        {:tool, "write_file", %{"path" => "b.txt", "content" => "b"}},
+        {:finish, "b"}
+      ],
+      "worktree-3" => [{:delay, 60_000, {:finish, "never"}}],
+      "code-1" => [{:finish, "plain"}]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts, auto_approve: true)
+    {pid, _session} = start_tui(sid)
+    for _ <- 1..3, do: {:ok, _} = Troupe.dispatch(sid, "worktree", "w")
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "c")
+    for p <- ["worktree-1", "worktree-2", "code-1"], do: await_state(p, :done_unread, 15_000)
+    eventually(fn -> user_state(pid).model.windows["code-1"].state == :done_unread end)
+
+    type(pid, "wor")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "worktree "
+    press(pid, "esc")
+
+    # only finished worktree branches are offered; the running one and the shared one are not
+    type(pid, "merge ")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "merge worktree-1"
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "merge worktree-2"
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "merge worktree-1"
+    press(pid, "enter")
+    eventually(fn -> File.exists?(Path.join(ws, "a.txt")) end)
+
+    # a merged worktree drops out of the candidates
+    eventually(fn ->
+      get_in(user_state(pid).model.windows, ["worktree-1", :worktree, :merged]) == true
+    end)
+
+    type(pid, "discard ")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "discard worktree-2"
+    press(pid, "esc")
+
+    # cancel completes only running windows
+    type(pid, "cancel w")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "cancel worktree-3"
+    press(pid, "esc")
+
+    # @file completion still works
+    type(pid, "code look at @REA")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "code look at @README.md"
+  end
+end
+
+defmodule Troupe.TUIWorktreeCompletionTest do
+  use ExUnit.Case, async: true
+
+  import Troupe.TestHelpers
+  import Troupe.TUIHelpers
+
+  test "/worktree <Tab> completes the user's checked-out worktrees by path or branch" do
+    ws = tmp_workspace() |> git_init!()
+    run_git!(ws, ["worktree", "add", "feature/design", "-b", "design"])
+    run_git!(ws, ["worktree", "add", "feature/api", "-b", "api"])
+    {sid, _, _} = start_session!(workspace: ws)
+    {pid, _} = start_tui(sid)
+
+    type(pid, "worktree fe")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "worktree feature/api "
+    press(pid, "backspace")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "worktree feature/design "
+    press(pid, "esc")
+
+    type(pid, "worktree des")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "worktree design "
+    type(pid, "add docs")
+    assert user_state(pid).cmd_text == "worktree design add docs"
+  end
+
+  # Decision 42
+  test "/worktree <Tab> offers a Troupe-managed worktree as <name>:" do
+    ws = tmp_workspace() |> git_init!()
+    scripts = %{"worktree-1" => [{:finish, "ok"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts, auto_approve: true)
+    {pid, _} = start_tui(sid)
+
+    {:ok, "worktree-1"} = Troupe.dispatch(sid, "worktree", "feat-auth: start it")
+    await_state("worktree-1", :done_unread, 15_000)
+
+    type(pid, "worktree feat")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "worktree feat-auth: "
+    type(pid, "carry on")
+    assert user_state(pid).cmd_text == "worktree feat-auth: carry on"
   end
 end

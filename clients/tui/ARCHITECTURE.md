@@ -185,6 +185,9 @@ a timeout.
 | `{:approval, call_id, :allow | :deny | :allow_session}`     | Approvals (call)   | `:ok | {:error, :unknown_call}`         |
 | `{:answer, call_id, text}`                                  | Approvals (call)   | `:ok | {:error, :unknown_call}`         |
 | `{:merge, agent_path}` / `{:discard, agent_path}`           | Dispatcher (call)  | `{:ok, info} | {:error, reason}`        |
+| `:context` / `{:put_config, config}`                        | Dispatcher (call)  | `{workspace, config}` / `:ok`           |
+| `{:auto_approve, bool}`                                     | Approvals (call)   | `:ok`                                   |
+| `{:put_config, config}`                                     | Watcher (call)     | `:ok`                                   |
 
 ### 4.2 Into `Agent.Server` (always async `send`)
 
@@ -267,6 +270,16 @@ Persisted event types and data:
 | `watch_trigger`        | `"watcher"`     | `%{kind, markers}`                                                   |
 
 Transient: `llm_delta %{ref, text}`, `agent_state %{from, to}`, `notice %{text}`.
+
+## 4.6 Workspace survey
+
+`Troupe.Workspace.Survey.build/2` is called once in `Agent.Server.init/1`, after
+`ensure_worktree/1`, and the result is held on the server's `Data` (never on
+`Agent.State`, which stays a pure fold over events). `Prompt.request/2` renders
+it into a `# Workspace` section of the system prompt: project markers with
+package names, language mix by file count, and the file list — or per-directory
+counts when the list is too large. It is a derived cache: nothing persists it,
+replay ignores it, and `list_files` remains the authority on current contents.
 
 ## 5. Tools
 

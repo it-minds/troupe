@@ -17,7 +17,8 @@ defmodule Troupe.Agent.Spec do
           parent: {pid(), reference()} | nil,
           initial_input: String.t() | nil,
           budget: Budget.t(),
-          source: :user | :watch | :cli
+          source: :user | :watch | :cli,
+          existing_worktree: %{path: String.t(), git_branch: String.t() | nil} | nil
         }
 
   @enforce_keys [
@@ -43,7 +44,8 @@ defmodule Troupe.Agent.Spec do
             parent: nil,
             initial_input: nil,
             budget: %Budget{},
-            source: :user
+            source: :user,
+            existing_worktree: nil
 
   @spec definition(t()) :: Troupe.Agents.Definition.t()
   def definition(%__MODULE__{} = spec), do: Map.fetch!(spec.definitions, spec.definition_name)

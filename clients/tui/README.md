@@ -106,19 +106,83 @@ Inside the TUI, everything starts with `/`:
 |---|---|
 | `/code <prompt>` | edit in your checkout (all tools) |
 | `/worktree <prompt>` | same, in its own git worktree; then `/merge` or `/discard` |
+| `/worktree <name>: <prompt>` | run in a Troupe worktree of that name, created the first time and reused after |
+| `/worktree <existing> <prompt>` | run in a worktree you already checked out (Tab completes them); nothing is committed for you |
 | `/plan <prompt>` | investigate and write a task list; read-only |
 | `/ask <question>` | answer across finished branches with the cheap model |
 | `/watch` | toggle AI-comment watch mode |
 | `/cancel`, `/dismiss`, `/merge`, `/discard` `[path]` | act on the activated window or the given path |
 | `/agents`, `/sessions` | list agents / persisted sessions |
+| `/settings`, `/help` | settings page: tweak settings and read the curated help |
+| `/models` | pick the default model from every model Troupe detected |
+| `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
 
-Keys: `1`–`9` or Enter activate a window; Esc returns to the command line;
+Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
 Enter sends input or answers a question; Tab switches the window's profile
-(`/plan` → Tab to `code` → "go" is plan-then-build); `x` cancels; `d`
+(`/plan` → Tab to `code` → "go" is plan-then-build); `x` cancels; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `d`
 dismisses a finished window; `e` expands tool output; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <id>` and `/todo add <text>` edit the
 activated branch's task list.
+
+Reading a transcript: replies are rendered rather than printed raw. Headings,
+bullets, quotes and rules read as such, `inline code` and **bold** keep their
+emphasis without their markers, and a fenced code block gets a rule with its
+language on it, a rail down its left and full syntax highlighting. A file an
+agent read is shown as numbered source, its line numbers in their own column
+and its indentation intact. The same colours run through diffs (green and red)
+and tool calls (green, red or amber by outcome).
+
+The activated pane follows the tail until you scroll —
+PgUp/PgDn, Home/End, ↑/↓ (while nothing is typed) or the mouse wheel; the
+title says where you are (`↕ 120–150/400 · 12 new`) and End (or scrolling to
+the bottom, sending input, answering) follows again. Tool output keeps its
+indentation, tabs included; a collapsed tool line says what came back
+(`· 300 lines`, `· +3 -1`, `· exit 1 (12 lines)`) and `e` opens it in full,
+with the diff for an edit you were asked to approve. Whatever a branch is
+waiting on is the last thing in the transcript, diff and all, so it can be
+read at any width. `←`/`→` switch between the branch's agents so a subagent's
+transcript can be read; input still goes to the branch root. With a pane open
+the window strip shrinks to a tray; clicking the active tile jumps back to
+the latest output.
+
+### Observer
+
+`/observer` is the overview across branches: every root agent with the
+subagents it delegated to, nested under it, each with what it is doing right
+now (`thinking`, the tool it is running, `needs you`), how long it has been at
+it and what it has spent. The panel beside the tree details the selected agent:
+its definition and depth, the branch it belongs to, whether that branch is in
+your checkout or a worktree (and which), the model it called, its task list,
+anything it is waiting on, and its recent tool calls. `↑`/`↓` moves, Enter opens
+that agent's branch window, Esc goes back.
+
+### Models
+
+Troupe detects every model it can address: the ones each provider declares in
+`config.yaml`, the ones opencode's config declares, and whatever `models.default`
+and `models.cheap` already name. `troupe config` prints the list with each
+model's context window, where it came from, and whether a key was found.
+
+`/models` opens that list as a menu in the TUI, with the model in use first;
+`↑`/`↓` move, Enter picks one and writes it to the config file that owns the
+setting, Esc goes back. The last entry types a model by hand for anything the
+config does not mention. The cheap model has the same menu on the settings page.
+
+### Settings page
+
+`/settings` (or `/help`) opens a page listing every tweakable setting with its
+current value, and a curated help text next to it: what the selected setting
+does, plus the commands, keys and concepts worth knowing. `↑`/`↓` moves, Enter
+toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the
+wheel scrolls the help, Esc goes back.
+
+A change applies to the running session immediately (`auto_approve`, watch mode
+and its timings, `max_branches`) or to branches dispatched from then on (models,
+compaction, timeouts, delegation depth), and is written to the config file that
+owns it: the project's `.troupe/config.yaml` when the project has one, else the
+global `config.yaml`. Environment variables still win over both, so a setting
+masked by `TROUPE_MODEL` is saved but not in effect.
 
 ### Watch mode
 
@@ -161,6 +225,7 @@ Pinned toolchain in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir
 ```sh
 mix deps.get
 mix check                 # compile --warnings-as-errors, format, credo --strict, test
+scripts/dev [args]        # run the CLI/TUI from source without a build (dev loop)
 scripts/build-local       # Burrito binary for this host into burrito_out/
 TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/fake_scripts/smoke.json \
   burrito_out/troupe_linux_x86_64 run code smoke --headless --auto-approve

@@ -119,6 +119,91 @@ defmodule Troupe.Config do
     end
   end
 
+  @typedoc """
+  One model Troupe can address: `id` is what goes in `models.default` (a bare
+  model id for the session provider, or `provider/model` for a named one).
+  `model` is nil for a provider that lists no models — its id ends in `/` and
+  the rest has to be typed.
+  """
+  @type model_choice :: %{
+          id: String.t(),
+          provider: String.t() | nil,
+          model: String.t() | nil,
+          context: pos_integer() | nil,
+          source: atom(),
+          key?: boolean()
+        }
+
+  @doc """
+  Every model this configuration can address, in menu order: the models each
+  named provider declares (from `config.yaml` or from opencode), any model with
+  a context window of its own, and whatever `models.default` and `models.cheap`
+  currently name, so the value in use is always in the list.
+  """
+  @spec models(t()) :: [model_choice()]
+  def models(%__MODULE__{} = cfg) do
+    from_providers =
+      Enum.flat_map(cfg.providers, fn {name, p} ->
+        key? = p.api_key not in [nil, ""]
+
+        case Enum.sort(p.windows) do
+          [] ->
+            [choice(name <> "/", name, nil, nil, p.source, key?)]
+
+          windows ->
+            Enum.map(windows, fn {id, ctx} ->
+              choice(name <> "/" <> id, name, id, ctx, p.source, key?)
+            end)
+        end
+      end)
+
+    session_key? = cfg.api_key not in [nil, ""]
+
+    bare =
+      Enum.map(Enum.sort(cfg.models.windows), fn {id, ctx} ->
+        choice(id, nil, id, ctx, :config, session_key?)
+      end)
+
+    current =
+      Enum.map([cfg.models.default, cfg.models.cheap], fn id ->
+        {provider, model} = split_model(cfg, id)
+
+        choice(
+          id,
+          provider && id |> String.split("/", parts: 2) |> hd(),
+          model,
+          context_window(cfg, id),
+          (provider && provider.source) || :config,
+          (provider && provider.api_key not in [nil, ""]) || session_key?
+        )
+      end)
+
+    (from_providers ++ bare ++ current)
+    |> Enum.sort_by(&{&1.provider || "", &1.model || ""})
+    |> Enum.uniq_by(& &1.id)
+  end
+
+  defp choice(id, provider, model, context, source, key?),
+    do: %{id: id, provider: provider, model: model, context: context, source: source, key?: key?}
+
+  @doc """
+  How a model reads in a menu: its context window, where it came from, and
+  whether a key was found. Narrower forms drop the source and then the word
+  "ctx" — a missing key is the part worth keeping to the last column.
+  """
+  @spec describe_model(model_choice(), :long | :short | :minimal) :: String.t()
+  def describe_model(model, form \\ :long)
+
+  def describe_model(%{context: context, source: source, key?: key?}, form) do
+    [
+      context && "#{div(context, 1000)}k" <> if(form == :minimal, do: "", else: " ctx"),
+      form == :long && to_string(source),
+      if(key?, do: nil, else: "no key")
+    ]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.join(" · ")
+  end
+
   @doc "Resolved providers and models with keys masked, for `troupe config`."
   @spec describe(t()) :: String.t()
   def describe(%__MODULE__{} = cfg) do
@@ -138,8 +223,29 @@ defmodule Troupe.Config do
     models: default=#{cfg.models.default} cheap=#{cfg.models.cheap}
     named providers (use as <name>/<model>):
     #{if providers == "", do: "  (none; add `providers:` to config.yaml or set up opencode)", else: providers}
+    models Troupe can address (use one as models.default):
+    #{models_list(cfg)}
     config dir: #{Paths.config_dir()}   opencode: #{Troupe.Config.OpenCode.config_path()}
     """
+  end
+
+  defp models_list(cfg) do
+    case models(cfg) do
+      [] ->
+        "  (none detected; set models.default or configure a provider)"
+
+      list ->
+        Enum.map_join(list, "\n", fn m ->
+          in_use =
+            cond do
+              m.id == cfg.models.default -> "  <- default"
+              m.id == cfg.models.cheap -> "  <- cheap"
+              true -> ""
+            end
+
+          "  #{String.pad_trailing(m.id, 44)} #{describe_model(m)}#{in_use}"
+        end)
+    end
   end
 
   defp mask(nil), do: "(none)"
@@ -199,6 +305,7 @@ defmodule Troupe.Config do
           windows: Map.get(models, "windows", cfg.models.windows)
         },
         max_branches: Map.get(yaml, "max_branches", cfg.max_branches),
+        auto_approve: Map.get(yaml, "auto_approve", cfg.auto_approve),
         compaction: %{
           fraction: Map.get(compaction, "fraction", cfg.compaction.fraction) / 1,
           keep_last_turns: Map.get(compaction, "keep_last_turns", cfg.compaction.keep_last_turns)

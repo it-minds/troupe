@@ -82,6 +82,15 @@ defmodule Troupe.Session.Dispatcher do
   @spec commands(String.t()) :: [String.t()]
   def commands(sid), do: GenServer.call(Session.via(sid, :dispatcher), :commands)
 
+  @doc "The session's config and workspace, as the Dispatcher currently holds them."
+  @spec context(String.t()) :: {String.t(), Troupe.Config.t()}
+  def context(sid), do: GenServer.call(Session.via(sid, :dispatcher), :context)
+
+  @doc "Replaces the config used for branches dispatched from now on."
+  @spec put_config(String.t(), Troupe.Config.t()) :: :ok
+  def put_config(sid, config),
+    do: GenServer.call(Session.via(sid, :dispatcher), {:put_config, config})
+
   ## Server
 
   @impl true
@@ -121,6 +130,11 @@ defmodule Troupe.Session.Dispatcher do
   def handle_call(:commands, _from, state) do
     {:reply, state.definitions |> Agents.primaries() |> Enum.map(& &1.name), state}
   end
+
+  def handle_call(:context, _from, state), do: {:reply, {state.workspace, state.config}, state}
+
+  def handle_call({:put_config, config}, _from, %__MODULE__{} = state),
+    do: {:reply, :ok, %__MODULE__{state | config: config}}
 
   def handle_call({:dismiss, path}, _from, state) do
     case Map.get(state.ledger, path) do
@@ -295,42 +309,17 @@ defmodule Troupe.Session.Dispatcher do
           path = "#{name}-#{n}"
           isolation = Map.get(opts, :isolation) || def.isolation
 
-          window = %{
-            agent_path: path,
-            name: name,
-            branch_id: path,
-            state: :running,
-            isolation: isolation,
-            prompt: prompt,
-            reason: nil,
-            summary: nil,
-            message: nil,
-            created_seq: 0,
-            source: source,
-            worktree: nil,
-            diff_stat: nil,
-            budget: Map.get(opts, :budget, %{})
-          }
-
-          event =
-            Log.append(state.session_id, path, :branch_spawned, %{
-              branch_id: path,
-              name: name,
-              prompt: prompt,
+          with {:ok, prompt, branch_id, existing} <-
+                 worktree_target(state, isolation, path, prompt) do
+            spawn_window(state, name, path, n, %{
               isolation: isolation,
+              prompt: prompt,
+              branch_id: branch_id,
+              existing: existing,
               source: source,
               budget: Map.get(opts, :budget, %{})
             })
-
-          window = %{window | created_seq: event.seq}
-
-          state = %{
-            state
-            | counters: Map.put(state.counters, name, n),
-              ledger: Map.put(state.ledger, path, window)
-          }
-
-          {:ok, path, spawn_node(state, window, prompt)}
+          end
         end
 
       _ ->
@@ -338,6 +327,120 @@ defmodule Troupe.Session.Dispatcher do
           state.definitions |> Agents.primaries() |> Enum.map_join(", ", &("/" <> &1.name))
 
         {:error, "unknown command /#{name}; available: #{available}"}
+    end
+  end
+
+  defp spawn_window(state, name, path, n, o) do
+    window = %{
+      agent_path: path,
+      name: name,
+      branch_id: o.branch_id,
+      state: :running,
+      isolation: o.isolation,
+      prompt: o.prompt,
+      reason: nil,
+      summary: nil,
+      message: nil,
+      created_seq: 0,
+      source: o.source,
+      worktree: nil,
+      diff_stat: nil,
+      budget: o.budget,
+      existing_worktree: o.existing
+    }
+
+    event =
+      Log.append(state.session_id, path, :branch_spawned, %{
+        branch_id: o.branch_id,
+        name: name,
+        prompt: o.prompt,
+        isolation: o.isolation,
+        source: o.source,
+        budget: o.budget,
+        existing_worktree: o.existing
+      })
+
+    window = %{window | created_seq: event.seq}
+
+    state = %{
+      state
+      | counters: Map.put(state.counters, name, n),
+        ledger: Map.put(state.ledger, path, window)
+    }
+
+    {:ok, path, spawn_node(state, window, o.prompt)}
+  end
+
+  @worktree_name ~r{^[A-Za-z0-9][A-Za-z0-9._/-]*$}
+
+  # Which worktree a `/worktree` command works in: `<name>: <prompt>` is a Troupe-managed
+  # worktree of that name, created the first time and reused after (Decision 42);
+  # `<existing> <prompt>` is a worktree the user checked out themselves (Decision 39);
+  # anything else is all prompt and gets the automatic `<agent>-<n>` worktree.
+  defp worktree_target(state, :worktree, default_id, prompt) do
+    case named_worktree(prompt) do
+      {:ok, wt_name, rest} ->
+        named_target(state, wt_name, rest)
+
+      {:error, msg} ->
+        {:error, msg}
+
+      :none ->
+        {prompt, existing} = existing_worktree(state, prompt)
+        {:ok, prompt, default_id, existing}
+    end
+  end
+
+  defp worktree_target(_state, _isolation, default_id, prompt),
+    do: {:ok, prompt, default_id, nil}
+
+  defp named_target(state, wt_name, prompt) do
+    in_use =
+      state.ledger
+      |> Map.values()
+      |> Enum.find(&(&1.state in @active and &1.branch_id == wt_name))
+
+    cond do
+      not Regex.match?(@worktree_name, wt_name) or String.contains?(wt_name, "..") ->
+        {:error, "#{wt_name} is not a usable worktree name"}
+
+      in_use ->
+        {:error, "worktree #{wt_name} is already in use by #{in_use.agent_path}"}
+
+      true ->
+        {:ok, prompt, wt_name, nil}
+    end
+  end
+
+  # `<name>:` as the first word names a worktree; a bare colon or no prompt is a mistake.
+  defp named_worktree(prompt) do
+    case String.split(String.trim(prompt), ~r/\s+/, parts: 2) do
+      [word, rest] ->
+        if String.ends_with?(word, ":"),
+          do: {:ok, String.trim_trailing(word, ":"), rest},
+          else: :none
+
+      [word] ->
+        if String.ends_with?(word, ":"),
+          do: {:error, "give a prompt after the worktree name: /worktree #{word} <prompt>"},
+          else: :none
+
+      _ ->
+        :none
+    end
+  end
+
+  # `/worktree <existing-worktree> <prompt>` runs in a worktree the user already checked out.
+  defp existing_worktree(state, prompt) do
+    case String.split(String.trim(prompt), ~r/\s+/, parts: 2) do
+      [name, rest] ->
+        case Worktree.find(state.workspace, name) do
+          nil -> {prompt, nil}
+          wt -> {rest, %{path: wt.path, git_branch: wt.branch}}
+        end
+
+      _ ->
+        {prompt, nil}
     end
   end
 
@@ -362,7 +465,8 @@ defmodule Troupe.Session.Dispatcher do
       parent: nil,
       initial_input: initial_input,
       budget: Budget.from_definition(def, Map.get(window, :budget) || %{}),
-      source: window.source
+      source: window.source,
+      existing_worktree: Map.get(window, :existing_worktree)
     }
 
     case Branches.start_branch(state.session_id, spec) do
@@ -414,10 +518,20 @@ defmodule Troupe.Session.Dispatcher do
 
   defp worktree_window(state, path) do
     case Map.get(state.ledger, path) do
-      nil -> {:error, "no window #{path}"}
-      %{isolation: :shared} -> {:error, "#{path} is not a worktree branch"}
-      %{state: s} when s not in @resting -> {:error, "#{path} is still #{s}"}
-      window -> {:ok, window}
+      nil ->
+        {:error, "no window #{path}"}
+
+      %{isolation: :shared} ->
+        {:error, "#{path} is not a worktree branch"}
+
+      %{worktree: %{managed: false, path: wt}} ->
+        {:error, "#{path} worked in your own worktree #{wt}; review and commit there yourself"}
+
+      %{state: s} when s not in @resting ->
+        {:error, "#{path} is still #{s}"}
+
+      window ->
+        {:ok, window}
     end
   end
 
@@ -440,7 +554,8 @@ defmodule Troupe.Session.Dispatcher do
       source: d.source,
       worktree: nil,
       diff_stat: nil,
-      budget: Map.get(d, :budget) || %{}
+      budget: Map.get(d, :budget) || %{},
+      existing_worktree: Map.get(d, :existing_worktree)
     }
 
     n = path |> String.split("-") |> List.last() |> String.to_integer()
@@ -472,7 +587,16 @@ defmodule Troupe.Session.Dispatcher do
 
   defp fold(state, %{type: :worktree_created, agent_path: path, data: d}) do
     update_window(state, root(path), fn w ->
-      %{w | worktree: %{path: d.path, git_branch: d.git_branch, merged: false, discarded: false}}
+      %{
+        w
+        | worktree: %{
+            path: d.path,
+            git_branch: d.git_branch,
+            merged: false,
+            discarded: false,
+            managed: Map.get(d, :managed, true)
+          }
+      }
     end)
   end
 

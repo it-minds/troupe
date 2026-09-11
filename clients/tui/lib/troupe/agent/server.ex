@@ -16,6 +16,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Telemetry
   alias Troupe.Tool.{Context, Runner}
   alias Troupe.Tools
+  alias Troupe.Workspace.Survey
 
   defmodule Data do
     @moduledoc false
@@ -24,7 +25,8 @@ defmodule Troupe.Agent.Server do
               stream: nil,
               tasks: %{},
               children: %{},
-              compaction: nil
+              compaction: nil,
+              survey: nil
   end
 
   ## API
@@ -54,6 +56,7 @@ defmodule Troupe.Agent.Server do
     events = Log.events(spec.session_id, spec.agent_path)
     data = %Data{spec: spec, state: State.replay(spec, events)}
     data = ensure_worktree(data)
+    data = %Data{data | survey: Survey.build(data.state.workspace)}
 
     fresh? = not Enum.any?(events, &(&1.type == :input))
 
@@ -341,7 +344,7 @@ defmodule Troupe.Agent.Server do
         st.finish_summary || "Budget exhausted before the task was finished."
       )
     else
-      request = Prompt.request(st)
+      request = Prompt.request(st, data.survey)
       data = spawn_stream(data, request, :turn)
       {:next_state, :thinking, data}
     end
@@ -813,15 +816,25 @@ defmodule Troupe.Agent.Server do
   ## Worktree
 
   defp ensure_worktree(%Data{spec: spec, state: st} = data) do
-    if spec.isolation == :worktree and Spec.root?(spec) and st.worktree == nil do
-      case Worktree.create(spec.workspace, spec.branch_id) do
-        {:ok, info} -> log(data, :worktree_created, info)
-        {:error, msg} -> raise "worktree creation failed: #{msg}"
-      end
-    else
-      data
+    cond do
+      spec.isolation != :worktree or not Spec.root?(spec) or st.worktree != nil ->
+        data
+
+      # a worktree the user checked out themselves: work there, never commit for them
+      spec.existing_worktree ->
+        log(data, :worktree_created, Map.put(spec.existing_worktree, :managed, false))
+
+      true ->
+        case Worktree.create(spec.workspace, spec.branch_id) do
+          {:ok, info} -> log(data, :worktree_created, Map.put(info, :managed, true))
+          {:error, msg} -> raise "worktree creation failed: #{msg}"
+        end
     end
   end
+
+  defp maybe_commit(%Data{spec: spec, state: %{worktree: %{path: path, managed: false}}}, _summary)
+       when spec.parent == nil,
+       do: Worktree.diff_stat(path)
 
   defp maybe_commit(%Data{spec: spec, state: %{worktree: %{path: path}}}, summary)
        when spec.parent == nil do
