@@ -176,19 +176,54 @@ defmodule Troupe.Tool do
 
   @optional_callbacks mode: 0, describe: 1
 
+  @typedoc """
+  A tool, as the harness holds one.
+
+  A module for everything built in, and a value for tools discovered at runtime — an
+  MCP server's, today. The accessors below take either, so the allowlist, the permission
+  map, the approval gate and the agent loop are one code path rather than two. That is
+  what makes "their tools appear under the same allowlists, permissions, and approvals as
+  built-ins" true by construction instead of by care.
+  """
+  @type handle :: module() | struct()
+
+  @doc "A tool's name, as the model calls it."
+  @spec name(handle()) :: String.t()
+  def name(module) when is_atom(module), do: module.name()
+  def name(%{name: name}), do: name
+
+  @doc "A tool's argument schema."
+  @spec schema(handle()) :: map()
+  def schema(module) when is_atom(module), do: module.schema()
+  def schema(%{schema: schema}), do: schema
+
+  @doc "What a tool does when the profile says nothing about it."
+  @spec default_permission(handle()) :: :auto | :ask | :deny
+  def default_permission(module) when is_atom(module), do: module.default_permission()
+  def default_permission(%{default_permission: permission}), do: permission
+
   @doc "A tool's execution mode, defaulting to `:task`."
-  @spec mode(module()) :: :task | :inline
-  def mode(module) do
+  @spec mode(handle()) :: :task | :inline
+  def mode(module) when is_atom(module) do
     if function_exported?(module, :mode, 0), do: module.mode(), else: :task
   end
 
+  def mode(%{}), do: :task
+
   @doc "A tool's description for this session, context-sensitive when the tool asks."
-  @spec describe(module(), Ctx.t()) :: String.t()
-  def describe(module, %Ctx{} = ctx) do
+  @spec describe(handle(), Ctx.t()) :: String.t()
+  def describe(module, %Ctx{} = ctx) when is_atom(module) do
     if function_exported?(module, :describe, 1),
       do: module.describe(ctx),
       else: module.description()
   end
+
+  def describe(%{description: description}, %Ctx{}), do: description
+
+  @doc "Run a tool, whichever kind it is."
+  @spec invoke(handle(), map(), Ctx.t()) :: result()
+  def invoke(module, args, %Ctx{} = ctx) when is_atom(module), do: module.run(args, ctx)
+  def invoke(%{run: run}, args, %Ctx{} = ctx) when is_function(run, 2), do: run.(args, ctx)
 
   @doc """
   Fetch a required string argument, or an `:invalid_args` error the model can read.

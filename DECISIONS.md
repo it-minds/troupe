@@ -685,3 +685,32 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 119. **The plane's policy has no rule for the data path at all — not a deny.** OpenBao
      denies by default, and an explicit deny invites somebody to "fix" it later by
      narrowing it into an allow.
+
+120. **A tool is a module or a value, and the harness takes either.** Which MCP tools
+     exist is a property of a running server rather than of the code, so they cannot be
+     modules — and generating modules at runtime would leave them in the code server
+     forever. `Troupe.Tool` gained accessors that take both, so the allowlist, the
+     permission map, the approval gate and the agent loop are one code path. That is what
+     makes "their tools appear under the same allowlists, permissions, and approvals as
+     built-ins" true by construction rather than by care.
+
+121. **An MCP server sees the service credential and nothing else.** Not the session
+     token, not the user's refresh token, not the subject as an authorisation. The
+     session's identity travels as MCP `_meta` — an identifier the server can log — never
+     as something it could present elsewhere, because a server holding a user token could
+     act as that user against anything else trusting the same issuer.
+
+122. **A secret reference is not a secret.** What a profile configures is the *name* of a
+     secret the pod was given; the value is read from the pod's environment and never
+     leaves it. `Troupe.MCP.Server` overrides `inspect/1` for the same reason: a crash
+     report with a bearer token in it is a leaked credential.
+
+123. **MCP tools ask by default.** A built-in tool's blast radius is known and written
+     down in this repository; a tool on somebody else's server is whatever that server
+     decided this morning. A profile can lower it to `auto` for servers an operator
+     trusts.
+
+124. **Discovery happens per pod, not per session.** A pod runs one profile and its MCP
+     servers are a property of that profile; asking four servers for their tool list at
+     the start of every session would put somebody else's latency on the path of every
+     create. A server that cannot be reached costs its tools and nothing else.

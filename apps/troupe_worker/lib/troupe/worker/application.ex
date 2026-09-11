@@ -24,6 +24,7 @@ defmodule Troupe.Worker.Application do
     [
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
+      Troupe.Worker.MCP,
       Troupe.Worker.Disk.Watch,
       Troupe.Worker.Plane.Link,
       Troupe.Worker.Harness

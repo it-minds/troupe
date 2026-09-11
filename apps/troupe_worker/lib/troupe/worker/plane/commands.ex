@@ -15,6 +15,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Error
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
+  alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.Session.{Manager, Reader, Sealer, Workspace}
   alias Troupe.Worker.Sessions
@@ -170,6 +171,22 @@ defmodule Troupe.Worker.Plane.Commands do
        "objects_deleted" => objects,
        "pod" => System.get_env("HOSTNAME")
      }}
+  end
+
+  # A new config bundle. The MCP servers it names are re-discovered; running sessions
+  # keep the tools they started with, because a session's config is the version recorded
+  # in `session_created`.
+  defp dispatch("config.updated", params) do
+    servers = params["mcp_servers"] || []
+
+    case Process.whereis(MCP) do
+      nil ->
+        {:ok, %{"applied" => false, "reason" => "no MCP registry on this pod"}}
+
+      pid ->
+        {:ok, names} = MCP.put_servers(pid, servers)
+        {:ok, %{"applied" => true, "bundle_hash" => params["bundle_hash"], "tools" => names}}
+    end
   end
 
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}

@@ -38,24 +38,34 @@ defmodule Troupe.Tools do
   ordinary `Troupe.Tool` implementations without touching the agent loop, and the
   test suite uses it to install tools that misbehave on purpose.
   """
-  @spec all() :: [module()]
-  def all, do: @builtins ++ extra()
+  @spec all() :: [Tool.handle()]
+  def all, do: @builtins ++ extra() ++ remote()
 
   defp extra, do: Application.get_env(:troupe_core, :extra_tools, [])
 
-  @spec fetch(String.t()) :: {:ok, module()} | {:error, {:unknown_tool, String.t()}}
+  # Tools discovered from MCP servers, as values rather than modules. They go through
+  # everything below exactly as a built-in does — which is the point.
+  defp remote do
+    case Application.get_env(:troupe_core, :remote_tools) do
+      nil -> []
+      fun when is_function(fun, 0) -> fun.()
+      tools when is_list(tools) -> tools
+    end
+  end
+
+  @spec fetch(String.t()) :: {:ok, Tool.handle()} | {:error, {:unknown_tool, String.t()}}
   def fetch(name) do
-    case Enum.find(all(), &(&1.name() == name)) do
+    case Enum.find(all(), &(Tool.name(&1) == name)) do
       nil -> {:error, {:unknown_tool, name}}
-      module -> {:ok, module}
+      tool -> {:ok, tool}
     end
   end
 
   @doc "The tools a profile may use, in a stable order."
-  @spec for_definition(Definition.t()) :: [module()]
+  @spec for_definition(Definition.t()) :: [Tool.handle()]
   def for_definition(%Definition{} = definition) do
-    Enum.filter(all(), fn module ->
-      Definition.permission(definition, module.name(), module.default_permission()) != :deny
+    Enum.filter(all(), fn tool ->
+      Definition.permission(definition, Tool.name(tool), Tool.default_permission(tool)) != :deny
     end)
   end
 
@@ -66,8 +76,8 @@ defmodule Troupe.Tools do
   def specs(%Definition{} = definition, %Ctx{} = ctx) do
     definition
     |> for_definition()
-    |> Enum.map(fn module ->
-      %{name: module.name(), description: Tool.describe(module, ctx), schema: module.schema()}
+    |> Enum.map(fn tool ->
+      %{name: Tool.name(tool), description: Tool.describe(tool, ctx), schema: Tool.schema(tool)}
     end)
   end
 
@@ -78,22 +88,22 @@ defmodule Troupe.Tools do
   model without running anything.
   """
   @spec authorize(String.t(), Definition.t(), Ctx.t()) ::
-          {:run, module(), :task | :inline} | {:reject, Result.t()}
+          {:run, Tool.handle(), :task | :inline} | {:reject, Result.t()}
   def authorize(name, %Definition{} = definition, %Ctx{} = ctx) do
     case fetch(name) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}
 
-      {:ok, module} ->
+      {:ok, tool} ->
         cond do
           not Definition.allows_tool?(definition, name) ->
             {:reject, Result.error(ctx.call_id, name, {:not_allowed, name})}
 
-          Definition.permission(definition, name, module.default_permission()) == :deny ->
+          Definition.permission(definition, name, Tool.default_permission(tool)) == :deny ->
             {:reject, Result.error(ctx.call_id, name, {:denied_by_policy, name})}
 
           true ->
-            {:run, module, Tool.mode(module)}
+            {:run, tool, Tool.mode(tool)}
         end
     end
   end
@@ -104,19 +114,19 @@ defmodule Troupe.Tools do
   Called from inside a task under the agent's `Agent.Tasks` supervisor, never from
   the agent process: it can block for a human, and it must be killable.
   """
-  @spec run_task(module(), map(), Definition.t(), Ctx.t()) :: Result.t()
-  def run_task(module, args, %Definition{} = definition, %Ctx{} = ctx) do
-    name = module.name()
+  @spec run_task(Tool.handle(), map(), Definition.t(), Ctx.t()) :: Result.t()
+  def run_task(tool, args, %Definition{} = definition, %Ctx{} = ctx) do
+    name = Tool.name(tool)
 
-    case Definition.permission(definition, name, module.default_permission()) do
+    case Definition.permission(definition, name, Tool.default_permission(tool)) do
       :ask ->
         case ask(ctx, name, args) do
-          :allow -> execute(module, args, ctx)
+          :allow -> execute(tool, args, ctx)
           :deny -> Result.error(ctx.call_id, name, {:denied, name})
         end
 
       :auto ->
-        execute(module, args, ctx)
+        execute(tool, args, ctx)
 
       :deny ->
         Result.error(ctx.call_id, name, {:denied_by_policy, name})
@@ -139,12 +149,12 @@ defmodule Troupe.Tools do
   "let it crash" rule is deliberately suspended, because the model needs the failure
   as feedback in order to correct itself.
   """
-  @spec execute(module(), map(), Ctx.t()) :: Result.t()
-  def execute(module, args, %Ctx{} = ctx) do
-    name = module.name()
+  @spec execute(Tool.handle(), map(), Ctx.t()) :: Result.t()
+  def execute(tool, args, %Ctx{} = ctx) do
+    name = Tool.name(tool)
 
     try do
-      case module.run(args, ctx) do
+      case Tool.invoke(tool, args, ctx) do
         {:ok, content} ->
           Result.ok(ctx.call_id, name, content)
 
