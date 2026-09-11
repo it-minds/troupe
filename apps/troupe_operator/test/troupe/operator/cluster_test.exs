@@ -119,8 +119,20 @@ defmodule Troupe.Operator.ClusterTest do
           name: "troupe-worker-profile-policy")
 
         on_exit(fn ->
-          restored = binding |> Map.delete("status") |> update_in(["metadata"], &Map.drop(&1, ~w(resourceVersion uid creationTimestamp generation managedFields)))
+          restored =
+            binding
+            |> Map.delete("status")
+            |> update_in(
+              ["metadata"],
+              &Map.drop(&1, ~w(resourceVersion uid creationTimestamp generation managedFields))
+            )
+
           K8s.Client.run(conn, K8s.Client.create(restored))
+
+          # Restoring the object is not restoring the enforcement: the API server picks
+          # a policy up on its own schedule, and the next test in this file expects a
+          # refusal. Waiting here is what keeps that from being a coin flip.
+          await_admission(conn)
         end)
 
         eventually(
@@ -251,6 +263,37 @@ defmodule Troupe.Operator.ClusterTest do
   end
 
   # -- helpers ----------------------------------------------------------------
+
+  # Create something the policy forbids until it is actually forbidden.
+  defp await_admission(conn, timeout_ms \\ 30_000) do
+    probe = profile_resource("admission-probe", replicas: 99)
+    deadline = System.monotonic_time(:millisecond) + timeout_ms
+
+    do_await_admission(conn, probe, deadline)
+  end
+
+  defp do_await_admission(conn, probe, deadline) do
+    case K8s.Client.run(conn, K8s.Client.create(probe)) do
+      {:error, %K8s.Client.APIError{reason: "Forbidden"}} ->
+        :ok
+
+      other ->
+        # It was admitted, which means the policy is not in force yet. Tidy up and wait.
+        if match?({:ok, _}, other) do
+          delete(conn, "troupe.dev/v1alpha1", "WorkerProfile",
+            namespace: "troupe-system",
+            name: "admission-probe"
+          )
+        end
+
+        if System.monotonic_time(:millisecond) < deadline do
+          Process.sleep(500)
+          do_await_admission(conn, probe, deadline)
+        else
+          :ok
+        end
+    end
+  end
 
   defp fetch_profile(conn, name) do
     fetch(conn, "troupe.dev/v1alpha1", "WorkerProfile", namespace: "troupe-system", name: name)

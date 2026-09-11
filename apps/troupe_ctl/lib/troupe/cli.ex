@@ -25,6 +25,7 @@ defmodule Troupe.CLI do
   use Task
 
   alias Troupe.CLI.Options
+  alias Troupe.Ctl.Verify
   alias Troupe.Protocol.{Client, Daemon, Endpoint}
   alias Troupe.UI.Headless
 
@@ -107,6 +108,21 @@ defmodule Troupe.CLI do
             1
         end
     end
+  end
+
+  def dispatch(%Options{command: :verify, log: path}, _opts) when is_binary(path) do
+    path |> Verify.file() |> report()
+  end
+
+  def dispatch(%Options{command: :verify, session_id: nil}, _opts) do
+    IO.puts(:stderr, "troupe: verify needs a session id, or --log PATH")
+    2
+  end
+
+  def dispatch(%Options{command: :verify} = options, opts) do
+    with_client(options, opts, fn client ->
+      client |> Verify.session(options.session_id) |> report()
+    end)
   end
 
   def dispatch(%Options{command: :hq}, opts) do
@@ -286,6 +302,12 @@ defmodule Troupe.CLI do
     [quiet: options.quiet, timeout_ms: options.timeout_ms, task: options.task]
   end
 
+  defp report(outcome) do
+    {message, code} = Verify.describe(outcome)
+    if code == 0, do: IO.puts(message), else: IO.puts(:stderr, "troupe: " <> message)
+    code
+  end
+
   defp session_line(session) do
     "  #{session["id"]}  #{session["state"]}  #{session["last_active_at"] || "(empty)"}"
   end
@@ -340,10 +362,12 @@ defmodule Troupe.CLI.Options do
             watch: nil,
             auto_approve: nil,
             worktree: "auto",
+            log: nil,
             timeout_ms: 30 * 60 * 1000,
             idle_ms: 10 * 60 * 1000
 
-  @type command :: :tui | :run | :resume | :sessions | :hq | :daemon | :version | :help
+  @type command ::
+          :tui | :run | :resume | :sessions | :hq | :daemon | :verify | :version | :help
   @type t :: %__MODULE__{
           command: command(),
           workspace: Path.t(),
@@ -355,6 +379,7 @@ defmodule Troupe.CLI.Options do
           watch: boolean() | nil,
           auto_approve: boolean() | nil,
           worktree: String.t(),
+          log: Path.t() | nil,
           timeout_ms: pos_integer(),
           idle_ms: pos_integer()
         }
@@ -367,6 +392,7 @@ defmodule Troupe.CLI.Options do
     agent: :string,
     workspace: :string,
     worktree: :string,
+    log: :string,
     timeout: :integer,
     idle: :integer,
     version: :boolean,
@@ -408,6 +434,7 @@ defmodule Troupe.CLI.Options do
         watch: switches[:watch],
         auto_approve: switches[:auto_approve],
         worktree: worktree,
+        log: switches[:log],
         timeout_ms: (switches[:timeout] || 1_800) * 1_000,
         idle_ms: (switches[:idle] || 600) * 1_000
       }
@@ -433,6 +460,11 @@ defmodule Troupe.CLI.Options do
 
   defp with_command(base, ["sessions"]), do: %{base | command: :sessions}
   defp with_command(base, ["hq"]), do: %{base | command: :hq}
+  defp with_command(base, ["verify"]), do: %{base | command: :verify}
+
+  defp with_command(base, ["verify", session_id | _]) do
+    %{base | command: :verify, session_id: session_id}
+  end
   defp with_command(base, ["daemon"]), do: %{base | command: :daemon}
   defp with_command(_base, [other | _]), do: {:error, "unknown command #{inspect(other)}"}
 
@@ -448,6 +480,8 @@ defmodule Troupe.CLI.Options do
       troupe resume [SESSION_ID]      reopen a session (the newest, if unnamed)
       troupe sessions                 list sessions recorded for this workspace
       troupe hq                       every session, and everything waiting on you
+      troupe verify SESSION_ID        walk a session's hash chain and name the first break
+      troupe verify --log PATH        ... offline, from a log file or a decrypted segment
       troupe daemon                   run the daemon in the foreground
       troupe --version
 
