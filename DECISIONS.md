@@ -259,3 +259,47 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     periodic resync would eventually notice a deleted Ingress — that is what a resync is
     for — but "eventually" is a minute of a profile being unreachable. A watch on the
     objects turns that into a reconcile that starts as the deletion lands.
+
+## Stage 2 — the plane
+
+44. **Two things in the plane are decided by one process, not by a lock.** Capacity per
+    profile and budget per team are both read-decide-write, and two replicas doing
+    either at once is exactly how you overbook. Each is an actor registered with
+    `:global`, so the question is serialised by a mailbox; callers on other replicas
+    reach it by name. When the node holding one dies, `:global` forgets the name and the
+    next caller starts it on a survivor.
+
+45. **Every reservation is written before it is granted.** That is what makes respawning
+    on a survivor safe: the new actor reloads from PostgreSQL and reads back exactly what
+    was handed out. A reservation that lived only in a process would be lost with the
+    replica that made it, and the next actor would hand the same slot out again.
+
+46. **The placement actor re-reads the pod list on every call but not the session
+    counts.** It is the only thing that grants a slot, so its own numbers are the
+    authority between reloads; counting sessions again per reserve would put a group-by
+    in front of every create. A pod it has never seen is the exception — that pod's
+    sessions were placed by an earlier incarnation, so its count has to come from the
+    database.
+
+47. **SCIM and the JIT groups claim end in the same three functions.** A done item
+    requires both to yield the same teams, and two parallel implementations would drift
+    the first time one grew a rule. Membership is *replaced* on every push and every
+    login, never merged, because both carry the whole list and a group's absence is a
+    departure.
+
+48. **A login creates groups it has never seen.** A group is not access — a team is, and
+    only an admin makes one — so learning that one exists costs nothing, and it is what
+    lets an admin enable a team without first asking the identity provider for a list.
+
+49. **A budget of zero means no limit, not no money.** A team that has not been given a
+    budget should be able to work; a team that has one of zero would be a team nobody
+    could use, which is what disabling it is for.
+
+50. **Reservations are not spending.** What a session promised and what its model calls
+    cost are separate tables. The ledger is unique on the gateway's request id, so a
+    worker replaying its reports after an outage is not a second charge — and that
+    uniqueness is what makes the nightly reconciliation against the gateway meaningful.
+
+51. **The two-replica tests use a real second node.** `:peer`, Erlang distribution, and
+    its own connection pool against the same database. Faking the second replica would
+    not exercise `:global` at all, and `:global` is the entire mechanism.

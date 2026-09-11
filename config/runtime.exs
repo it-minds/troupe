@@ -8,8 +8,6 @@ presence = fn
   value -> value
 end
 
-_ = presence
-
 # Read at boot, not at build: an image is built once and run in several clusters, and
 # everything here is a property of the cluster rather than of the code.
 
@@ -28,13 +26,13 @@ if config_env() == :prod do
         System.get_env("TROUPE_OBJECT_ENDPOINT", "http://minio.troupe-system.svc:9000"),
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
       ingress_class_name: System.get_env("TROUPE_INGRESS_CLASS", "nginx"),
-      tls_secret_name: presence(System.get_env("TROUPE_WORKERS_TLS_SECRET")),
+      tls_secret_name: presence.(System.get_env("TROUPE_WORKERS_TLS_SECRET")),
       cilium_available: System.get_env("TROUPE_CILIUM_AVAILABLE") == "true",
-      drain_timeout_seconds: String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300"))
+      drain_timeout_seconds:
+        String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300"))
     ]
 
   # -- the local daemon -----------------------------------------------------
 
   config :troupe_gateway, autostart: System.get_env("TROUPE_DAEMON_AUTOSTART") == "true"
 end
-

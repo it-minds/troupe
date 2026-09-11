@@ -1,0 +1,17 @@
+#!/usr/bin/env bash
+# Bring up the services the plane and workers talk to.
+#
+# Named `troupe-dev` and on its own ports, so a machine that already runs a Postgres or
+# a MinIO does not notice this one.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+compose() { docker compose --project-directory dev --file dev/docker-compose.yml "$@"; }
+
+compose up --detach --wait --wait-timeout 180
+
+echo
+echo "postgres  postgres://troupe:troupe@localhost:55432/troupe_plane_dev"
+echo "minio     http://localhost:59000  (console :59001, troupe / troupe-secret)"
+echo "openbao   http://localhost:58200  (dev root token: troupe-dev-root)"

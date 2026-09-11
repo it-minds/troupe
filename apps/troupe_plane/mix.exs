@@ -19,7 +19,8 @@ defmodule Troupe.Plane.MixProject do
 
   def application do
     [
-      extra_applications: [:logger]]
+      extra_applications: [:logger, :crypto],
+      mod: {Troupe.Plane.Application, []}]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
@@ -27,6 +28,19 @@ defmodule Troupe.Plane.MixProject do
 
   defp deps do
     [
-      {:troupe_protocol, in_umbrella: true}]
+      {:troupe_protocol, in_umbrella: true},
+      {:phoenix, "~> 1.8"},
+      {:bandit, "~> 1.12"},
+      {:ecto_sql, "~> 3.14"},
+      {:postgrex, "~> 0.22"},
+      # Replicas find each other through the Kubernetes API; Erlang distribution
+      # between them is confined to plane pods by NetworkPolicy.
+      {:libcluster, "~> 3.5"},
+      {:oidcc, "~> 3.9"},
+      # JWTs are signed by OpenBao's transit engine, but the header and payload are
+      # assembled here and clients verify against the published JWKS.
+      {:jose, "~> 1.11"},
+      {:req, "~> 0.7"},
+      {:jason, "~> 1.4"}]
   end
 end

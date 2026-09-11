@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Stop the development services. `--purge` also removes their data.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+if [ "${1:-}" = "--purge" ]; then
+  docker compose --project-directory dev --file dev/docker-compose.yml down --volumes
+else
+  docker compose --project-directory dev --file dev/docker-compose.yml down
+fi
