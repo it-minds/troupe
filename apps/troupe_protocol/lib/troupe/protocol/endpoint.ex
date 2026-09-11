@@ -54,6 +54,20 @@ defmodule Troupe.Protocol.Endpoint do
   """
   @spec unix_sockets_available?() :: boolean()
   def unix_sockets_available? do
+    # Asked once per VM: it is a property of the build, and the answer is wanted on a
+    # poll loop while a daemon is starting.
+    case :persistent_term.get({__MODULE__, :af_unix}, nil) do
+      nil ->
+        answer = probe_unix_socket()
+        :persistent_term.put({__MODULE__, :af_unix}, answer)
+        answer
+
+      answer ->
+        answer
+    end
+  end
+
+  defp probe_unix_socket do
     path = Path.join(System.tmp_dir!(), "troupe-afunix-probe-#{:erlang.unique_integer([:positive])}")
 
     try do

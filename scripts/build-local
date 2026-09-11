@@ -65,7 +65,9 @@ echo "build-local: building $target"
 mix deps.get
 mix release --overwrite
 
-version="$(mix run --no-start -e 'IO.write(Mix.Project.config()[:version])' 2>/dev/null || echo dev)"
+# `--no-compile`: everything was just built, and a recompile here would print its
+# progress onto stdout and end up in the filename.
+version="$(mix run --no-start --no-compile -e 'IO.write(Mix.Project.config()[:version])' 2>/dev/null || echo dev)"
 built="burrito_out/troupe_${target}"
 suffix=""
 case "$target" in windows_*) suffix=".exe" ;; esac

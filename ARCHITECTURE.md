@@ -272,11 +272,16 @@ the only copy.
 
 ## 6. Blobs
 
-A tool result over 16 KiB becomes `{"blob": "sha256:…", "preview": …}` and is fetched
-with `blob.get`, which supports byte ranges. Blobs are stored under the session
-directory and deduplicated **within a session only** — never across sessions. Cross
--session dedup would make one session's storage a probe for another's content, which
-is exactly the property the remote stages must not have.
+A tool result over 16 KiB becomes `{"blob": "sha256:…", "size", "preview",
+"truncated"}` and is fetched with `blob.get`, which supports byte ranges. Both the
+`tool_call_completed` a client renders and the `tool_results` the model is sent carry
+the reference; replay resolves it back to text, because the conversation a restarted
+agent rebuilds has to be the one the model actually saw.
+
+Blobs are stored under the session directory and deduplicated **within a session
+only** — never across sessions. Cross-session dedup would make one session's storage a
+probe for another's content, which is exactly the property the remote stages must not
+have.
 
 ---
 

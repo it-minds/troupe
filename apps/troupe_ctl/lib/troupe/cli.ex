@@ -18,14 +18,14 @@ defmodule Troupe.CLI do
   `troupe daemon` is the exception and is handled by the application rather than
   here, because a daemon must be supervised and must not block application start-up.
 
-  Arguments come from `Burrito.Util.Args.argv/0` so they survive the Zig wrapper.
+  Inside a packaged binary the arguments arrive as the VM's *plain* arguments, because
+  the Zig wrapper hands them over that way and `System.argv/0` would be empty.
   """
 
   use Task
 
-  alias Burrito.Util.Args
   alias Troupe.CLI.Options
-  alias Troupe.Protocol.{Client, Daemon}
+  alias Troupe.Protocol.{Client, Daemon, Endpoint}
   alias Troupe.UI.Headless
 
   @version Mix.Project.config()[:version]
@@ -66,24 +66,6 @@ defmodule Troupe.CLI do
     :ok
   end
 
-  @doc """
-  What the application should supervise for this invocation.
-
-  `troupe daemon` is a long-running supervised tree, not a command that finishes, so
-  it is started here rather than from `dispatch/2`: blocking inside an application's
-  `start/2` would leave the release half-booted for as long as the daemon ran.
-  """
-  @spec boot_children() :: [Supervisor.child_spec() | {module(), term()} | module()]
-  def boot_children do
-    with true <- standalone?(),
-         %Options{command: :daemon} = options <- Options.parse(argv()),
-         module when not is_nil(module) <- daemon_module() do
-      [{module, daemon_opts(options)}]
-    else
-      _ -> [__MODULE__]
-    end
-  end
-
   @doc "Dispatch a parsed command. Public so tests can drive it without halting."
   @spec dispatch(Options.t() | {:error, term()}, keyword()) :: non_neg_integer()
   def dispatch(parsed, opts \\ [])
@@ -114,7 +96,10 @@ defmodule Troupe.CLI do
       module ->
         case module.start_link(daemon_opts(options)) do
           {:ok, _pid} ->
-            IO.puts("troupe daemon running")
+            IO.puts("troupe daemon listening on #{Endpoint.describe(Endpoint.default())}")
+            # Never returns. The daemon is linked to this process, so if it goes down
+            # the command ends with it, which is what anything supervising this binary
+            # from outside expects.
             Process.sleep(:infinity)
 
           {:error, reason} ->
@@ -329,7 +314,14 @@ defmodule Troupe.CLI do
   defp daemon_opts(%Options{} = options), do: [idle_shutdown_ms: options.idle_ms]
 
   defp argv do
-    if standalone?(), do: Args.argv(), else: System.argv()
+    if standalone?() do
+      # What the Zig wrapper passed through. Read directly rather than through
+      # Burrito's helper so that nothing in this app depends on Burrito at runtime —
+      # a release that did would have to carry it, and this is two lines.
+      Enum.map(:init.get_plain_arguments(), &to_string/1)
+    else
+      System.argv()
+    end
   end
 
   defp standalone?, do: System.get_env("__BURRITO") != nil

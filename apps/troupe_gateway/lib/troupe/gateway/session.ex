@@ -30,7 +30,7 @@ defmodule Troupe.Gateway.Session do
   @lifecycle ~w(
     session_created agent_started agent_restarted agent_done session_dormant
     session_activated session_resumed session_archived session_erased
-    budget_exhausted cancelled approval_requested approval_decided
+    budget_exhausted cancelled approval_requested approval_decided approval_resolved
   )
 
   @doc "Event types that reach a `fleet` or `summary` subscriber."

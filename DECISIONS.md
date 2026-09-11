@@ -184,3 +184,33 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 32. **A second answer to a decided approval is an event, not an error.** Two people
     watching one session is the normal case, not a fault. The late responder gets
     `approval_resolved` naming who got there first, and nothing else happens.
+
+## Stage 1 — blobs
+
+33. **A large tool result is stored once and referenced twice.** Over 16 KiB it goes to
+    content-addressed storage in the session directory, and both the
+    `tool_call_completed` a client renders and the `tool_results` the model is sent
+    carry `{"blob", "size", "preview", "truncated"}` instead of the bytes. Replay
+    resolves the reference back to text, because the conversation a restarted agent
+    rebuilds has to be the one the model actually saw — a pointer it cannot follow is
+    not the same conversation.
+
+34. **Blobs are deduplicated within a session and never across sessions.** Sharing them
+    would put one session's content under another session's key, which is exactly the
+    property that makes per-session erasure mean anything — and in the remote stages,
+    the property that keeps one team's storage from being a probe for another's.
+
+## Stage 1 — packaging
+
+35. **Arguments are read from `:init.get_plain_arguments/0`, not from Burrito.** The
+    Zig wrapper hands them to the VM as plain arguments, so `System.argv/0` is empty
+    inside a packaged binary — but reading them through `Burrito.Util.Args` would make
+    `burrito` a runtime dependency of `troupe_ctl` that the release then has to carry.
+    It is two lines.
+
+36. **`troupe daemon` blocks in `Troupe.CLI`, and `troupe_ctl` is listed last in the
+    release.** Two things forced this. Elixir's CLI treats the first plain argument as
+    a script to run, so a boot that *completes* with `daemon` still on the command line
+    prints "No file named daemon" and halts — the command has to never return.
+    And a command that never returns must not run before the applications it depends on
+    have started, which is what the ordering in `releases/0` guarantees.

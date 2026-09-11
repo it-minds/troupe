@@ -31,7 +31,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.{Budget, Config, Events, Registry, Todo, Tools}
   alias Troupe.LLM.{Delta, Message, Provider, Request, Response, ToolResult, ToolUse, Usage}
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{Approvals, Log}
+  alias Troupe.Session.{Approvals, Blobs, Log}
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Watch.Trigger
 
@@ -189,7 +189,7 @@ defmodule Troupe.Agent.Server do
         }
 
       "tool_results" ->
-        results = Enum.map(data["results"], &Message.from_json/1)
+        results = Enum.map(data["results"], &resolve_results(state, &1))
         %{state | conversation: state.conversation ++ results}
 
       "todo_updated" ->
@@ -891,7 +891,7 @@ defmodule Troupe.Agent.Server do
       "call_id" => call.id,
       "name" => call.name,
       "ok" => result.ok?,
-      "content" => result.content
+      "content" => store_payload(state, result.content)
     })
 
     :telemetry.execute(
@@ -957,7 +957,11 @@ defmodule Troupe.Agent.Server do
 
     message = Message.tool_results(blocks)
 
-    log(state, :tool_results, %{"results" => [Message.to_json(message)]})
+    # The logged copy carries blob references for anything large; the in-memory copy
+    # keeps the text, because that is what the next request has to contain. Replay
+    # resolves them back, so the conversation a restarted agent rebuilds is the one it
+    # had.
+    log(state, :tool_results, %{"results" => [store_results(state, message)]})
 
     state
     |> State.clear_calls()
@@ -966,6 +970,38 @@ defmodule Troupe.Agent.Server do
 
   defp result_content(%Result{content: ""}), do: "(no output)"
   defp result_content(%Result{content: content}), do: content
+
+  # Anything over the inline limit goes to content-addressed storage and travels as a
+  # reference. A 40 MB test log belongs in the session directory, not in every
+  # subscriber's socket and not in the log line that every replay reads.
+  defp store_payload(state, content) when is_binary(content) do
+    Blobs.maybe_store(state.session_id, state.workspace.root_real, content)
+  end
+
+  defp store_payload(_state, content), do: content
+
+  defp store_results(state, %Message{} = message) do
+    json = Message.to_json(message)
+    update_in(json, ["content"], fn blocks -> Enum.map(blocks, &store_block(state, &1)) end)
+  end
+
+  defp store_block(state, %{"type" => "tool_result", "content" => content} = block) do
+    %{block | "content" => store_payload(state, content)}
+  end
+
+  defp store_block(_state, block), do: block
+
+  defp resolve_results(state, json) do
+    json
+    |> update_in(["content"], fn blocks -> Enum.map(blocks, &resolve_block(state, &1)) end)
+    |> Message.from_json()
+  end
+
+  defp resolve_block(state, %{"type" => "tool_result", "content" => content} = block) do
+    %{block | "content" => Blobs.resolve(state.session_id, state.workspace.root_real, content)}
+  end
+
+  defp resolve_block(_state, block), do: block
 
   # -- delegation -------------------------------------------------------------
 

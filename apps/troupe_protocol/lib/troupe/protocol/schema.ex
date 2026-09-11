@@ -14,7 +14,14 @@ defmodule Troupe.Protocol.Schema do
 
   @type shape :: %{String.t() => %{type: type(), required: boolean()}}
   @type type ::
-          :string | :integer | :number | :boolean | :object | :array | {:array, type()}
+          :string
+          | :integer
+          | :number
+          | :boolean
+          | :object
+          | :array
+          | :text_or_blob
+          | {:array, type()}
 
   defp required(type), do: %{type: type, required: true}
   defp optional(type), do: %{type: type, required: false}
@@ -68,7 +75,9 @@ defmodule Troupe.Protocol.Schema do
         "call_id" => required(:string),
         "name" => required(:string),
         "ok" => required(:boolean),
-        "content" => required(:string)
+        # Text, or `{"blob", "size", "preview", "truncated"}` when it was too large to
+        # put on the wire.
+        "content" => required(:text_or_blob)
       },
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
@@ -275,6 +284,7 @@ defmodule Troupe.Protocol.Schema do
   end
 
   defp json_type({:array, inner}), do: %{"type" => "array", "items" => json_type(inner)}
+  defp json_type(:text_or_blob), do: %{"type" => ["string", "object"]}
   defp json_type(:object), do: %{"type" => "object"}
   defp json_type(type), do: %{"type" => Atom.to_string(type)}
 
@@ -380,6 +390,7 @@ defmodule Troupe.Protocol.Schema do
   defp matches?(:boolean, value), do: is_boolean(value)
   defp matches?(:object, value), do: is_map(value)
   defp matches?(:array, value), do: is_list(value)
+  defp matches?(:text_or_blob, value), do: is_binary(value) or is_map(value)
 
   defp matches?({:array, inner}, value) do
     is_list(value) and Enum.all?(value, &matches?(inner, &1))

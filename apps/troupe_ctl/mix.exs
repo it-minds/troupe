@@ -33,9 +33,6 @@ defmodule Troupe.Ctl.MixProject do
       # never a dependency outside the test environment, and `mix troupe.boundaries` reads the compiled
       # beams rather than this file, so it would still catch a call from `lib/`.
       {:troupe_gateway, in_umbrella: true, only: :test},
-      {:jason, "~> 1.4"},
-      # For `Burrito.Util.Args.argv/0`: the Zig wrapper hands arguments over out of
-      # band, so a packaged binary cannot read them from `System.argv/0`.
-      {:burrito, "~> 1.6", runtime: false}]
+      {:jason, "~> 1.4"}]
   end
 end

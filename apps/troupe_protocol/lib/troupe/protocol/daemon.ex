@@ -198,11 +198,18 @@ defmodule Troupe.Protocol.Daemon do
     end
   end
 
-  @doc "Where the start-up lock lives. Next to the socket, so it shares its lifetime."
+  @doc """
+  Where the start-up lock lives. Next to the socket, so it shares its lifetime.
+
+  Derived from the endpoint this machine *would* use rather than from one it found,
+  because the whole job of the lock is to serialise clients that have just found
+  nothing there — and two of them computing different lock paths would serialise
+  neither.
+  """
   @spec lock_path([option()]) :: Path.t()
   def lock_path(opts \\ []) do
-    case discover(opts) do
-      {:ok, %Endpoint{kind: :unix, path: path}} -> path <> ".lock"
+    case Keyword.get_lazy(opts, :endpoint, &Endpoint.default/0) do
+      %Endpoint{kind: :unix, path: path} -> path <> ".lock"
       _ -> Path.join(Path.dirname(Endpoint.discovery_path()), "daemon.lock")
     end
   end

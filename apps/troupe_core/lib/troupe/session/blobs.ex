@@ -48,6 +48,26 @@ defmodule Troupe.Session.Blobs do
     }
   end
 
+  @doc """
+  Turn a stored payload back into its bytes, or pass a plain one through.
+
+  The inverse of `maybe_store/3`, for a replay that has to rebuild the conversation
+  the model saw. A blob whose file has gone comes back as a note saying so rather than
+  an error: a conversation with a missing tool result is recoverable, a crash during
+  replay is not.
+  """
+  @spec resolve(String.t(), Path.t(), binary() | map()) :: binary()
+  def resolve(_session_id, _workspace_root, content) when is_binary(content), do: content
+
+  def resolve(session_id, workspace_root, %{"blob" => digest} = reference) do
+    case read(session_id, workspace_root, digest) do
+      {:ok, content, _size} -> content
+      {:error, :not_found} -> Map.get(reference, "preview", "(the stored output is gone)")
+    end
+  end
+
+  def resolve(_session_id, _workspace_root, other), do: to_string(other)
+
   @doc "Read a blob, optionally a byte range as `[first, last]` inclusive."
   @spec read(String.t(), Path.t(), String.t(), [integer()] | nil) ::
           {:ok, binary(), non_neg_integer()} | {:error, :not_found}
