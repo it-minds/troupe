@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.Storage do
+defmodule Troupe.Sessions.Storage do
   @moduledoc """
   A session in object storage: the layout, and what may be read without a key.
 
@@ -23,7 +23,8 @@ defmodule Troupe.Worker.Storage do
   nothing that was said.
   """
 
-  alias Troupe.Worker.{Cipher, ObjectStore}
+  alias Troupe.ObjectStore
+  alias Troupe.Sessions.Cipher
 
   @type key :: binary()
 
@@ -92,7 +93,12 @@ defmodule Troupe.Worker.Storage do
       |> :ezstd.compress()
       |> then(&Cipher.seal(data_key, session_id, &1))
 
-    case ObjectStore.put(store, key, body, metadata: %{"epoch" => epoch, "last-seq" => last}) do
+    # Plaintext metadata, and deliberately: a rebuild reads the epoch, the last sequence
+    # number and the head hash without a key it is not allowed to have. None of the three
+    # is content.
+    metadata = %{"epoch" => epoch, "last-seq" => last, "head-hash" => attrs[:head_hash] || ""}
+
+    case ObjectStore.put(store, key, body, metadata: metadata) do
       {:ok, result} ->
         {:ok,
          %Segment{
@@ -112,6 +118,39 @@ defmodule Troupe.Worker.Storage do
   defp seq_of(%{"seq" => seq}), do: seq
   defp seq_of(%{seq: seq}), do: seq
   defp seq_of(_event), do: 0
+
+  @doc """
+  What a sealed segment says about itself, without opening it.
+
+  Epoch, last sequence number and head hash from the object's own metadata. This is the
+  whole of how the plane rebuilds an index from storage it cannot decrypt.
+  """
+  @spec segment_head(ObjectStore.t(), String.t()) :: {:ok, map()} | {:error, term()}
+  def segment_head(store, key) do
+    with {:ok, %{metadata: metadata, bytes: bytes}} <- ObjectStore.head(store, key) do
+      {:ok,
+       %{
+         key: key,
+         bytes: bytes,
+         epoch: to_integer(metadata["epoch"]),
+         last_seq: to_integer(metadata["last-seq"]),
+         head_hash: presence(metadata["head-hash"])
+       }}
+    end
+  end
+
+  defp to_integer(nil), do: nil
+
+  defp to_integer(value) do
+    case Integer.parse(value) do
+      {number, _} -> number
+      :error -> nil
+    end
+  end
+
+  defp presence(nil), do: nil
+  defp presence(""), do: nil
+  defp presence(value), do: value
 
   @doc "Read a sealed segment back into the events it holds."
   @spec read_segment(ObjectStore.t(), String.t(), key(), String.t()) ::

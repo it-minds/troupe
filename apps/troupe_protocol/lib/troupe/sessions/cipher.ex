@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.Cipher do
+defmodule Troupe.Sessions.Cipher do
   @moduledoc """
   AES-256-GCM with the session's data key.
 

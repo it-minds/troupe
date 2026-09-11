@@ -68,14 +68,16 @@ config :troupe_worker, autostart: false
 if Mix.env() in [:dev, :test] do
   # `scripts/dev-up` brings these up on ports of their own, so a machine that already
   # runs a MinIO or an OpenBao does not notice.
-  config :troupe_worker,
+  config :troupe_protocol,
     object_store: [
       endpoint: "http://localhost:59000",
       bucket: "troupe-sessions",
       access_key_id: "troupe",
       secret_access_key: "troupe-secret",
       region: "us-east-1"
-    ],
+    ]
+
+  config :troupe_worker,
     kms: [
       address: "http://localhost:58200",
       token: "troupe-dev-root",

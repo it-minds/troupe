@@ -12,7 +12,7 @@ defmodule Troupe.Worker.Session.Context do
   """
 
   alias Troupe.KMS
-  alias Troupe.Worker.ObjectStore
+  alias Troupe.ObjectStore
 
   @enforce_keys [:session_id, :team, :epoch, :data_key, :store]
   defstruct [
@@ -32,7 +32,7 @@ defmodule Troupe.Worker.Session.Context do
           team: String.t(),
           epoch: pos_integer(),
           data_key: binary(),
-          store: Troupe.Worker.ObjectStore.t(),
+          store: Troupe.ObjectStore.t(),
           owner_subject: String.t() | nil,
           profile: String.t() | nil,
           state_dir: Path.t() | nil,

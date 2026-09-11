@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.ObjectStoreCase do
+defmodule Troupe.ObjectStoreCase do
   @moduledoc """
   A test that needs object storage.
 
@@ -12,13 +12,13 @@ defmodule Troupe.Worker.ObjectStoreCase do
 
   use ExUnit.CaseTemplate
 
-  alias Troupe.Worker.ObjectStore
+  alias Troupe.ObjectStore
 
   using do
     quote do
-      import Troupe.Worker.ObjectStoreCase
+      import Troupe.ObjectStoreCase
 
-      alias Troupe.Worker.ObjectStore
+      alias Troupe.ObjectStore
     end
   end
 

@@ -11,13 +11,13 @@ defmodule Troupe.Worker.Plane.Commands do
   lookup and putting a dormant session to sleep is a no-op.
   """
 
+  alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
+  alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
-  alias Troupe.Worker.ObjectStore
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.Session.{Manager, Sealer, Workspace}
   alias Troupe.Worker.Sessions
-  alias Troupe.Worker.Storage
 
   require Logger
 

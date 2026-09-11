@@ -26,9 +26,9 @@ defmodule Troupe.Worker.Session.Manager do
 
   alias Troupe.Session.Log
   alias Troupe.Session.Summary
+  alias Troupe.Sessions.Storage
   alias Troupe.Worker.Session.{Context, Restore, Sealer, Workspace}
   alias Troupe.Worker.Sessions
-  alias Troupe.Worker.Storage
 
   require Logger
 

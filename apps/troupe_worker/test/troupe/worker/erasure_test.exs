@@ -20,7 +20,7 @@ defmodule Troupe.Worker.ErasureTest do
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.{Erasure, Identity, Repo}
   alias Troupe.Plane.Sessions, as: PlaneSessions
-  alias Troupe.Worker.Cipher
+  alias Troupe.Sessions.Cipher
   alias Troupe.Worker.Plane.Link
 
   @moduletag timeout: 180_000

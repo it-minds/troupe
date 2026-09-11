@@ -18,8 +18,8 @@ defmodule Troupe.Worker.Session.Sealer do
   use GenServer
 
   alias Troupe.Protocol.Event
+  alias Troupe.Sessions.Storage
   alias Troupe.Worker.Session.Context
-  alias Troupe.Worker.Storage
 
   require Logger
 

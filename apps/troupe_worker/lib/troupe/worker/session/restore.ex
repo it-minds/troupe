@@ -13,10 +13,11 @@ defmodule Troupe.Worker.Session.Restore do
   history.
   """
 
+  alias Troupe.ObjectStore
   alias Troupe.Paths
   alias Troupe.Protocol.Event
   alias Troupe.Session.Log
-  alias Troupe.Worker.{ObjectStore, Storage}
+  alias Troupe.Sessions.Storage
   alias Troupe.Worker.Session.{Context, Workspace}
 
   @doc """
@@ -144,7 +145,10 @@ defmodule Troupe.Worker.Session.Restore do
 
     Troupe.resume(context.session_id,
       workspace: root,
-      agent: Keyword.get(opts, :profile) || context.profile,
+      # The *agent* profile, which is a session's configuration. `context.profile` is the
+      # worker profile — the Kubernetes one — and the two are different things that
+      # happen to share a word.
+      agent: Keyword.get(opts, :agent),
       fake: Keyword.get(opts, :fake),
       config_overrides: overrides
     )

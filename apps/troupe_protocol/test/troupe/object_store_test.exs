@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.ObjectStoreTest do
+defmodule Troupe.ObjectStoreTest do
   @moduledoc """
   S3, against a real one.
 
@@ -8,7 +8,7 @@ defmodule Troupe.Worker.ObjectStoreTest do
   and a double would have agreed with whatever this code believed.
   """
 
-  use Troupe.Worker.ObjectStoreCase, async: false
+  use Troupe.ObjectStoreCase, async: false
 
   @moduletag timeout: 120_000
 

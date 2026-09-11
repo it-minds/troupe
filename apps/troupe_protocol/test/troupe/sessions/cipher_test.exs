@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.CipherTest do
+defmodule Troupe.Sessions.CipherTest do
   @moduledoc """
   What the object tier is encrypted with.
 
@@ -9,7 +9,7 @@ defmodule Troupe.Worker.CipherTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.Worker.Cipher
+  alias Troupe.Sessions.Cipher
 
   setup do
     %{key: :crypto.strong_rand_bytes(32), session: "s-#{System.unique_integer([:positive])}"}

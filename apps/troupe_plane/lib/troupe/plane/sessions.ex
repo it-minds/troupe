@@ -124,6 +124,21 @@ defmodule Troupe.Plane.Sessions do
   @spec read_only(String.t()) :: {:ok, Session.t()} | {:error, term()}
   def read_only(session_id), do: put_fields(session_id, %{state: "read_only", worker_id: nil})
 
+  @doc """
+  Overwrite a row from a rebuild.
+
+  Unlike `put_fields/2`, a nil here *is* the answer: a rebuild reconstructs the whole
+  row from storage, and a field storage does not have is a field the index should not
+  claim to know.
+  """
+  @spec put_rebuilt(String.t(), map()) :: {:ok, Session.t()} | {:error, term()}
+  def put_rebuilt(session_id, attrs) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      session -> session |> Session.changeset(attrs) |> Repo.update()
+    end
+  end
+
   @doc "Set a session's lifecycle state directly. Erasure is the only caller."
   @spec put_state(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
   def put_state(session_id, state), do: put_fields(session_id, %{state: state})

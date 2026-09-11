@@ -527,3 +527,29 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 91. **A tombstone keeps the final head hash.** It is the last link of the audit chain, and
     an erasure that also erased the proof that the session existed would be
     indistinguishable from a session tampered out of the index.
+
+92. **The object store and the session layout live in `troupe_protocol`, not in
+    `troupe_worker`.** They are a contract both sides hold, for the same reason the KMS
+    behaviour is: `troupe admin index rebuild` reconstructs the plane's index from
+    storage, and the plane cannot depend on the worker. What the plane can read there is
+    bounded not by where the code lives but by what it has a key for — and it has none.
+
+93. **A segment's epoch, last sequence number and head hash are plaintext object
+    metadata.** That is the whole of how a rebuild works without a key: the key names the
+    epoch and the range, and `x-amz-meta-head-hash` names the head. None of the three is
+    content.
+
+94. **A rebuild trusts segments over the manifest.** The manifest is one key and a pod
+    that was presumed lost can overwrite it under a stale epoch; the segments are what a
+    worker would actually replay. Where they disagree the highest epoch's contiguous
+    chain wins — the same rule a worker follows on restore, and the reason a stale pod's
+    events never enter the index. A tombstone beats both, so an erased session cannot be
+    resurrected by a stray object.
+
+95. **A rebuild keeps the identity fields of a row it is overwriting.** Storage is
+    authoritative about where a session *got to*, not about whose it is, and a manifest a
+    ghost pod rewrote can be missing an owner the index still has.
+
+96. **A session that cannot be indexed is reported, not skipped quietly.** A rebuild that
+    silently dropped sessions would be worse than one that failed: the whole point of it
+    is being able to say the index is complete.

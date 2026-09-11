@@ -32,8 +32,17 @@ defmodule Troupe.Protocol.MixProject do
       # JWT shape — and the rules about audience and expiry — belong where both can see
       # them. The plane signs through OpenBao; nothing here holds a private key.
       {:jose, "~> 1.11"},
-      # For the key manager, which is a contract both the plane and the workers hold
-      # and therefore has to live where both can see it. See DECISIONS.md.
-      {:req, "~> 0.7"}]
+      # For the key manager and the object store, which are contracts both the plane
+      # and the workers hold and therefore have to live where both can see them. See
+      # DECISIONS.md.
+      {:req, "~> 0.7"},
+      # SigV4 only. The HTTP is Req's, which the rest of Troupe already uses, and an S3
+      # client with its own opinions about retries and streaming would be a second HTTP
+      # stack to reason about.
+      {:aws_signature, "~> 0.4"},
+      # Segments are zstd JSONL, as the spec says. A NIF rather than gzip because a
+      # session log is highly repetitive and the ratio is what keeps the object tier
+      # affordable.
+      {:ezstd, "~> 1.2"}]
   end
 end

@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.StorageTest do
+defmodule Troupe.Sessions.StorageTest do
   @moduledoc """
   A session in object storage, against a real one.
 
@@ -8,9 +8,9 @@ defmodule Troupe.Worker.StorageTest do
   session's history — is the mechanism that keeps a pod presumed lost from rewriting one.
   """
 
-  use Troupe.Worker.ObjectStoreCase, async: false
+  use Troupe.ObjectStoreCase, async: false
 
-  alias Troupe.Worker.Storage
+  alias Troupe.Sessions.Storage
 
   @moduletag timeout: 120_000
 

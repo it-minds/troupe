@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.ObjectStore do
+defmodule Troupe.ObjectStore do
   @moduledoc """
   S3, as much of it as Troupe needs.
 
@@ -21,7 +21,7 @@ defmodule Troupe.Worker.ObjectStore do
   @doc "The store this worker was configured with."
   @spec from_env() :: t()
   def from_env do
-    config = Application.get_env(:troupe_worker, :object_store, [])
+    config = Application.get_env(:troupe_protocol, :object_store, [])
 
     %__MODULE__{
       endpoint: Keyword.get(config, :endpoint, "http://localhost:59000"),
@@ -66,6 +66,48 @@ defmodule Troupe.Worker.ObjectStore do
   @spec exists?(t(), String.t()) :: boolean()
   def exists?(%__MODULE__{} = store, key) do
     match?({:ok, %{status: status}} when status in 200..299, request(store, :head, key, [], "", []))
+  end
+
+  @doc """
+  An object's metadata without its body.
+
+  A rebuild reads what it can *without a key*: the `x-amz-meta-` headers a worker set
+  when it sealed the segment carry the epoch, the last sequence number and the head
+  hash, none of which is content. That is what lets the plane reconstruct its index
+  from storage it is not allowed to decrypt.
+  """
+  @spec head(t(), String.t()) :: {:ok, map()} | {:error, :not_found | term()}
+  def head(%__MODULE__{} = store, key) do
+    case request(store, :head, key, [], "", []) do
+      {:ok, %{status: status} = response} when status in 200..299 ->
+        {:ok, %{key: key, bytes: content_length(response), metadata: metadata_of(response)}}
+
+      {:ok, %{status: 404}} ->
+        {:error, :not_found}
+
+      {:ok, response} ->
+        {:error, {:unexpected_status, response.status, response.body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp content_length(response) do
+    case header(response, "content-length") do
+      nil -> 0
+      value -> String.to_integer(value)
+    end
+  end
+
+  defp metadata_of(response) do
+    response.headers
+    |> Enum.flat_map(fn
+      {"x-amz-meta-" <> name, [value | _]} -> [{name, value}]
+      {"x-amz-meta-" <> name, value} when is_binary(value) -> [{name, value}]
+      _ -> []
+    end)
+    |> Map.new()
   end
 
   @doc """

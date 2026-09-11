@@ -12,16 +12,20 @@ defmodule Troupe.Worker.SessionCase do
 
   alias Troupe.KMS
   alias Troupe.LLM.Fake
+  alias Troupe.ObjectStore
   alias Troupe.Protocol.Event
-  alias Troupe.Worker.{ObjectStore, Sessions, Storage}
+  alias Troupe.Sessions.Storage
+  alias Troupe.Worker.Sessions
 
   using do
     quote do
       import Troupe.Worker.SessionCase
 
+      alias Troupe.ObjectStore
       alias Troupe.Protocol.Event
-      alias Troupe.Worker.{ObjectStore, Sessions, Storage}
+      alias Troupe.Sessions.Storage
       alias Troupe.Worker.Session.{Context, Manager, Sealer}
+      alias Troupe.Worker.Sessions
     end
   end
 
@@ -89,7 +93,21 @@ defmodule Troupe.Worker.SessionCase do
   """
   @spec activate(map(), keyword()) :: {:ok, map()} | {:error, term()}
   def activate(context, opts \\ []) do
-    Sessions.activate(context.session_id, activation(context, opts))
+    result = Sessions.activate(context.session_id, activation(context, opts))
+
+    # Stop the tree before the scripted model goes away. A test that ends with a turn
+    # still running leaves an agent calling a `Fake` that ExUnit has already shut down,
+    # which is a crash report about the test harness rather than about Troupe.
+    ExUnit.Callbacks.on_exit(fn -> quieten(context.session_id) end)
+
+    result
+  end
+
+  defp quieten(session_id) do
+    Troupe.cancel(session_id)
+    Troupe.stop_session(session_id)
+  catch
+    :exit, _ -> :ok
   end
 
   @doc """
@@ -127,7 +145,8 @@ defmodule Troupe.Worker.SessionCase do
         model: "fake-model",
         state_dir: state_dir
       ]
-    ] ++ Keyword.take(opts, [:seal_interval_ms, :snapshot_every, :dormant_after_ms])
+    ] ++
+      Keyword.take(opts, [:seal_interval_ms, :snapshot_every, :dormant_after_ms, :owner_subject, :profile])
   end
 
   @doc "A reporter that posts every sealed head to the calling process."

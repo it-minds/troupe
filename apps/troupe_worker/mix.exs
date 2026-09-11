@@ -37,14 +37,6 @@ defmodule Troupe.Worker.MixProject do
       # calls it, which is what `mix troupe.boundaries` checks.
       {:troupe_plane, in_umbrella: true, only: :test},
       {:req, "~> 0.7"},
-      # SigV4 only. The HTTP is Req's, which the rest of Troupe already uses, and an
-      # S3 client with its own opinions about retries and streaming would be a second
-      # HTTP stack to reason about.
-      {:aws_signature, "~> 0.4"},
-      # Segments are zstd JSONL, as the spec says. A NIF rather than gzip because a
-      # session log is highly repetitive and the ratio is what keeps the object tier
-      # affordable.
-      {:ezstd, "~> 1.2"},
       {:jason, "~> 1.4"}]
   end
 end
