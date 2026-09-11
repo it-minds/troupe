@@ -1,0 +1,21 @@
+#!/usr/bin/env sh
+# Builds the Burrito binary for the current host into burrito_out/.
+# Requires the toolchain pinned in .tool-versions (erlang, elixir, zig).
+set -eu
+cd "$(dirname "$0")/.."
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)   TARGET=linux_x86_64;   export TARGET_ABI=musl ;;
+  Linux-aarch64)  TARGET=linux_aarch64;  export TARGET_ABI=musl ;;
+  Darwin-x86_64)  TARGET=macos_x86_64 ;;
+  Darwin-arm64)   TARGET=macos_aarch64 ;;
+  *) echo "unsupported host: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+
+export MIX_ENV=prod
+export BURRITO_TARGET="$TARGET"
+export TROUPE_REAPER_TARGETS=all
+
+mix deps.get
+mix release --overwrite
+ls -la burrito_out/

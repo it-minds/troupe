@@ -1,0 +1,318 @@
+# Troupe architecture
+
+Troupe is a local coding-agent harness built on the actor model. Every agent,
+LLM stream, tool run, subagent, watcher and UI is a process; they share nothing
+and talk only by message passing. This document is the contract the code
+implements: supervision tree, agent state machine, window state machine, the
+complete message protocol, the persisted event schema, and the failure matrix.
+
+## 1. Supervision tree
+
+```
+Troupe.Application (one_for_one)
+├── Troupe.Registry            Registry, :unique. Every actor: {:via, Registry, {Troupe.Registry, {session_id, key}}}
+├── Troupe.Events              Registry, :duplicate. Pub/sub fan-out keyed by session_id
+├── Troupe.Sessions            DynamicSupervisor
+│   └── Troupe.Session         Supervisor, rest_for_one, one per session
+│       ├── Session.Log        GenServer, single-writer append-only JSONL event store + publisher
+│       ├── Session.Approvals  GenServer, permission gate and user-question broker
+│       ├── Session.Locks      GenServer, advisory per-path write locks
+│       ├── Session.Branches   DynamicSupervisor, one_for_one; children are :temporary Agent.Node
+│       │   └── Agent.Node     Supervisor, one_for_all, max_restarts 3 / 5s
+│       │       ├── Agent.Tasks     Task.Supervisor (LLM stream tasks, tool tasks)
+│       │       ├── Agent.Children  DynamicSupervisor (nested Agent.Node, recursively)
+│       │       └── Agent.Server    :gen_statem, the agent
+│       ├── Session.Dispatcher GenServer, command parser + window ledger, no model
+│       └── Session.Watcher    GenServer, watch mode (AI comments), started last
+└── Troupe.UI.Supervisor (one_for_one)
+    └── Troupe.UI.TUI.Server | Troupe.UI.Headless.Printer | (nothing under `mix test`)
+```
+
+Registry keys (all under `{session_id, key}`):
+
+| key                       | process            |
+|---------------------------|--------------------|
+| `:session`                | Troupe.Session     |
+| `:log`                    | Session.Log        |
+| `:approvals`              | Session.Approvals  |
+| `:locks`                  | Session.Locks      |
+| `:branches`               | Session.Branches   |
+| `:dispatcher`             | Session.Dispatcher |
+| `:watcher`                | Session.Watcher    |
+| `{:node, agent_path}`     | Agent.Node         |
+| `{:tasks, agent_path}`    | Agent.Tasks        |
+| `{:children, agent_path}` | Agent.Children     |
+| `{:agent, agent_path}`    | Agent.Server       |
+
+`agent_path` is `"<name>-<n>"` for a branch (`code-1`) and
+`"<parent>/<name>-<n>"` for a nested subagent (`code-1/explore-1`). `n` is a
+per-parent counter folded from the log, so paths are stable across restarts.
+
+Ordering guarantees that matter:
+
+* `Session.Branches` starts before `Session.Dispatcher`; under `rest_for_one` a
+  Dispatcher crash restarts only Dispatcher and Watcher. Branches keep running.
+* `Session.Watcher` is last; its crash restarts nothing else.
+* `Agent.Node` children are `:temporary` in `Session.Branches`: once a Node
+  exhausts its own restart intensity it is gone, and the Dispatcher (which
+  monitors it) records `:failed_unread`. Siblings are untouched.
+* `Agent.Node` is `one_for_all`: an `Agent.Server` crash also restarts
+  `Agent.Tasks` and `Agent.Children`, which kills the in-flight LLM stream,
+  every tool task (and through the reaper, every OS process), and every nested
+  subagent subtree. The server then rebuilds its state from the log.
+* Finished branches release their Node (Decision 6): when the Dispatcher sees
+  `branch_state: :done_unread` it terminates the Node. A `:done_unread` window
+  therefore has no live processes; "continue" re-spawns a Node for the same
+  `agent_path` and the fold over the log restores the conversation.
+* The UI is a subscriber of `Troupe.Events`. Sessions never call it.
+
+## 2. Agent state machine (`Agent.Server`, `:gen_statem`)
+
+States: `:idle`, `:thinking`, `:acting`, `:compacting`, `:done`.
+
+```
+              input                    llm_done(tool calls)
+   idle ───────────────▶ thinking ─────────────────────────▶ acting
+    ▲                      │  ▲                                │
+    │  llm_done(text only) │  │ all tool_results in, no finish │
+    │  = implicit finish   │  └────────────────────────────────┘
+    │                      │        (budget ok)          finish called │ budget exhausted
+    │                      ▼                                          ▼
+    │                   done ◀────────────────────────────────────── done
+    │                      │
+    └──── input ───────────┘  (continue: done -> idle -> thinking)
+
+  thinking ──llm_done, context over threshold──▶ compacting ──llm_done──▶ (acting | thinking)
+  any state ──:cancel──▶ done(:cancelled)
+```
+
+Events and transitions:
+
+| state        | event                                          | action                                                                                        | next        |
+|--------------|------------------------------------------------|-----------------------------------------------------------------------------------------------|-------------|
+| idle         | `{:input, source, content}`                    | log `input`; apply pending profile; budget check; start stream task                           | thinking / done(:budget_exhausted) |
+| idle         | `{:switch_profile, name}`                      | log `profile_switched` (applied at next request)                                              | idle        |
+| idle         | `{:input, :tui_todo_edit, change}`             | log `todo_updated`                                                                            | idle        |
+| thinking     | `{:llm_delta, ref, delta}`                     | publish transient `llm_delta`                                                                 | thinking    |
+| thinking     | `{:llm_done, ref, response}`                   | log `assistant_message`; if over compaction threshold -> compacting; tool calls -> acting; text only -> done(:finished) | acting / compacting / done |
+| thinking     | `{:llm_error, ref, reason}`                    | log `llm_error`                                                                               | done(:llm_error) |
+| thinking     | `{:input, _, _}`, `{:switch_profile, _}`       | **postpone**                                                                                  | thinking    |
+| acting       | (entry) for each tool_use in order             | allowlist/permission check -> error result, or `approval_requested` + `branch_state needs_input`, or log `tool_call_started` and start task / run inline | acting |
+| acting       | `{:approval, call_id, :allow}`                 | log `approval_answered`; start task                                                           | acting      |
+| acting       | `{:approval, call_id, :deny}`                  | log `approval_answered`; synthesize denial tool_result                                        | acting      |
+| acting       | `{:answer, call_id, text}`                     | log `question_answered`; tool_result = text                                                   | acting      |
+| acting       | `{:tool_result, call_id, result}`              | log `tool_call_completed`; when none outstanding -> `branch_state running`; next turn         | acting / thinking / done |
+| acting       | `{:child_result, ref, result}`                 | log `delegation_completed` + `tool_call_completed`                                            | acting      |
+| acting       | `{:DOWN, ref, :process, pid, reason}` (child)  | error tool_result for that delegation only                                                    | acting      |
+| acting       | `{:DOWN, ...}` (tool task crashed)             | error tool_result for that call                                                               | acting      |
+| acting       | `{:input, _, _}`, `{:switch_profile, _}`       | **postpone**                                                                                  | acting      |
+| compacting   | `{:llm_done, ref, summary}`                    | log `compaction`; continue with the turn that was interrupted                                 | acting / thinking |
+| compacting   | `{:llm_error, ref, _}`                         | log `llm_error`; continue without compacting                                                  | acting / thinking |
+| compacting   | anything from the user                         | **postpone**                                                                                  | compacting  |
+| done         | `{:input, :user, content}`                     | log `branch_state running`; log `input`; -> idle -> thinking                                  | thinking    |
+| done         | `{:switch_profile, name}`                      | log `profile_switched`                                                                        | done        |
+| any          | `:cancel`                                      | kill tasks + children; log `cancelled`; `branch_state done_unread`                            | done(:cancelled) |
+| any          | unknown message                                | `Logger.warning`, drop                                                                        | same        |
+
+Postponement uses `{:next_event, ...}`/`:postpone` from `:gen_statem`; nothing
+is queued by hand. Every tool task and stream task is monitored; every message
+from them carries the ref/call_id of the work it belongs to and stale refs are
+dropped.
+
+Budgets: `max_turns` (LLM calls), `max_input_tokens`, `max_output_tokens`,
+`max_wall_clock_ms`, checked before every stream start. A child receives
+`budget_share` (a fraction) of the parent's remaining turns and tokens and
+reports its usage in `child_result`.
+
+Replay: on start the server folds its own events (`Troupe.Agent.State.apply/2`)
+then decides where it is:
+
+* status done -> `:done`;
+* last assistant message has tool calls not completed -> `:acting`, re-running
+  started-but-not-completed calls (at-least-once; documented) and re-registering
+  pending approvals/questions with `Session.Approvals`, and re-spawning
+  outstanding delegations as fresh children;
+* otherwise the last message is user input or a completed tool turn ->
+  `:thinking` (new stream);
+* no events at all -> log the spec's initial input and start.
+
+Completed tool calls are never re-executed: the fold keeps their results.
+
+## 3. Window state machine (`Session.Dispatcher` ledger)
+
+```
+   dispatch          approval/question        answered
+  ─────────▶ running ────────────────▶ needs_input ───────▶ running
+               │  finish / budget / cancel / llm_error              d
+               ▼                                                 ─────▶ dismissed
+           done_unread ──── input (continue) ────▶ running
+               ▲
+   Node exceeds restart intensity
+  running ───────────────────────────▶ failed_unread ──── d ────▶ dismissed
+```
+
+The ledger is a fold over persisted events:
+
+| event                              | transition                                   |
+|------------------------------------|----------------------------------------------|
+| `branch_spawned`                   | (new) -> `:running`                          |
+| `branch_state %{state: s}`         | -> `s` (`:running`, `:needs_input`, `:done_unread`) |
+| `branch_failed`                    | -> `:failed_unread`                          |
+| `window_dismissed`                 | -> `:dismissed`                              |
+
+`:done_unread` and `:failed_unread` are resting states. Nothing is removed
+without a `window_dismissed` event, and that event is only written when the
+user asks. On (re)start the Dispatcher folds the log, re-monitors live Nodes,
+re-spawns branches whose ledger state is `:running` or `:needs_input` and
+which have no live Node, and terminates Nodes of `:done_unread` windows.
+
+## 4. Message protocol
+
+All tuples are matched in function heads with guards. Unknown messages are
+logged and dropped. `ref` is a `reference()`; `call_id` is the provider's
+tool_use id (string). Every request the agent sends to a task carries a ref and
+a timeout.
+
+### 4.1 Into the session (public client API, synchronous calls allowed)
+
+| message / call                                              | to                 | reply                                   |
+|-------------------------------------------------------------|--------------------|-----------------------------------------|
+| `{:command, name, args, source}` `source :: :user | :watch | :cli` | Dispatcher   | `{:ok, agent_path} | {:error, reason}`  |
+| `{:input, source, content}` `source :: :user | :watch | :tui_todo_edit` | Agent.Server (send) | none                          |
+| `{:switch_profile, name}`                                   | Agent.Server (send)| none                                    |
+| `:cancel`                                                   | Agent.Server (send)| none                                    |
+| `{:dismiss, agent_path}`                                    | Dispatcher (call)  | `:ok | {:error, reason}`                |
+| `{:approval, call_id, :allow | :deny | :allow_session}`     | Approvals (call)   | `:ok | {:error, :unknown_call}`         |
+| `{:answer, call_id, text}`                                  | Approvals (call)   | `:ok | {:error, :unknown_call}`         |
+| `{:merge, agent_path}` / `{:discard, agent_path}`           | Dispatcher (call)  | `{:ok, info} | {:error, reason}`        |
+
+### 4.2 Into `Agent.Server` (always async `send`)
+
+| message                                              | from                     |
+|------------------------------------------------------|--------------------------|
+| `{:input, source, content}`                          | client API, Watcher, TUI |
+| `{:switch_profile, name}`                            | client API / TUI         |
+| `:cancel`                                            | client API / TUI         |
+| `{:llm_delta, ref, delta}`                           | stream task (provider)   |
+| `{:llm_done, ref, response}`                         | stream task              |
+| `{:llm_error, ref, reason}`                          | stream task              |
+| `{:tool_result, call_id, result}`                    | tool task                |
+| `{:approval, call_id, :allow | :deny}`               | Approvals                |
+| `{:answer, call_id, text}`                           | Approvals                |
+| `{:child_result, ref, result}`                       | child Agent.Server       |
+| `{:DOWN, ref, :process, pid, reason}`                | monitors (tasks, children) |
+
+`response :: %{content: [block], usage: %{input_tokens, output_tokens}, stop_reason: atom, model: binary}`
+`result :: {:ok, binary} | {:error, binary}`
+
+### 4.3 From agents to session actors (synchronous call allowed; they never call back)
+
+| call                                                       | to         |
+|------------------------------------------------------------|------------|
+| `Log.append(session, agent_path, type, data)`              | Log        |
+| `Log.events(session, agent_path)` / `Log.all(session)`     | Log        |
+| `Approvals.register(session, call_id, agent_pid, agent_path, kind, payload)` | Approvals |
+| `Approvals.session_allowed?(session, tool)`                | Approvals  |
+| `Locks.acquire(session, path, agent_path)` / `release`     | Locks      |
+
+### 4.4 Between agents and the dispatcher (async only)
+
+| message                                   | from -> to                                       |
+|-------------------------------------------|--------------------------------------------------|
+| `{:child_result, ref, result}`            | child Agent.Server -> parent Agent.Server        |
+| `{:input, :user, prompt}`                 | parent -> child (initial prompt is in the Node spec instead, so the child logs it itself) |
+| `{:DOWN, ...}`                            | Node monitors -> Dispatcher / parent             |
+| `{:expect_write, path, content_hash}`     | write/edit tools -> Watcher                      |
+| `{:command, "code" | "plan", payload, :watch}` | Watcher -> Dispatcher (cast)                |
+
+### 4.5 Published events (`Troupe.Events`)
+
+Subscribers receive `{:troupe_event, %Troupe.Event{}}`. Persisted events are
+published by `Session.Log` after the write succeeds, so a subscriber never sees
+something that is not on disk. Transient events (`llm_delta`, `agent_state`,
+`notice`) are published directly and never persisted.
+
+```
+%Troupe.Event{session_id, seq, ts, agent_path, type, data, transient?}
+```
+
+Persisted event types and data:
+
+| type                   | agent_path      | data                                                                 |
+|------------------------|-----------------|----------------------------------------------------------------------|
+| `session_started`      | `"session"`     | `%{workspace, session_id}`                                           |
+| `branch_spawned`       | branch          | `%{branch_id, name, prompt, isolation, source, definition_name}`     |
+| `branch_state`         | branch          | `%{state, reason, summary}`                                          |
+| `branch_failed`        | branch          | `%{reason}`                                                          |
+| `window_dismissed`     | branch          | `%{}`                                                                |
+| `worktree_created`     | branch          | `%{path, git_branch}`                                                |
+| `worktree_merged`      | branch          | `%{output, conflicts}`                                               |
+| `worktree_discarded`   | branch          | `%{}`                                                                |
+| `input`                | agent           | `%{source, content}`                                                 |
+| `assistant_message`    | agent           | `%{content, usage, model, stop_reason}`                              |
+| `tool_call_started`    | agent           | `%{call_id, name, input}`                                            |
+| `tool_call_completed`  | agent           | `%{call_id, ok, content}`                                            |
+| `approval_requested`   | agent           | `%{call_id, name, input, preview}`                                   |
+| `approval_answered`    | agent           | `%{call_id, decision}`                                               |
+| `question_asked`       | agent           | `%{call_id, question}`                                               |
+| `question_answered`    | agent           | `%{call_id, text}`                                                   |
+| `delegation_started`   | agent           | `%{call_id, child_path, agent, prompt}`                              |
+| `delegation_completed` | agent           | `%{call_id, child_path, ok, content, usage}`                         |
+| `todo_updated`         | agent           | `%{items, source}`                                                   |
+| `profile_switched`     | agent           | `%{name}`                                                            |
+| `compaction`           | agent           | `%{summary, dropped_messages}`                                       |
+| `llm_error`            | agent           | `%{reason}`                                                          |
+| `cancelled`            | agent           | `%{}`                                                                |
+| `finished`             | agent           | `%{summary, reason, diff_stat}`                                      |
+| `watch_trigger`        | `"watcher"`     | `%{kind, markers}`                                                   |
+
+Transient: `llm_delta %{ref, text}`, `agent_state %{from, to}`, `notice %{text}`.
+
+## 5. Tools
+
+`Troupe.Tool` behaviour: `name/0`, `description/0`, `schema/0`,
+`default_permission/0`, `run(args, ctx)`. `ctx` is `%Troupe.Tool.Context{}`
+with `workspace`, `isolation`, `session_id`, `agent_path`, `call_id`,
+`definition`, `definitions`, `depth`. Tool tasks run under `Agent.Tasks`; the
+runner (`Troupe.Tool.Runner`) is the one place `rescue`/`catch` is used: a
+raise, exit or timeout becomes `{:error, text}`. Every OS process runs under
+`reaper` through `Troupe.OS.Process`, whose Port is owned by the tool task.
+
+## 6. Failure matrix
+
+| process             | what kills it                                   | what restarts                                                             | user observes                                  | model observes                                   |
+|---------------------|-------------------------------------------------|---------------------------------------------------------------------------|------------------------------------------------|--------------------------------------------------|
+| Tool task           | raise / exit / timeout in a tool                | nothing (task is `:temporary`); agent gets DOWN or timeout                 | tool call shown as error in transcript         | error `tool_result`, keeps running               |
+| LLM stream task     | provider crash after retries, network failure   | nothing; agent gets `llm_error` or DOWN                                    | window `:done_unread` with reason `:llm_error` | nothing (no further calls)                       |
+| Agent.Server        | bug, `Process.exit(:kill)`                      | Agent.Node (one_for_all) restarts Server, Tasks, Children; state from log  | window stays `:running`; tail resumes          | started-not-completed tool calls re-run          |
+| Agent.Node          | > 3 restarts in 5 s                             | nothing (`:temporary` in Branches); Dispatcher marks `:failed_unread`      | window `:failed_unread` with reason            | nothing                                          |
+| Nested Agent.Node   | same                                            | nothing; parent gets DOWN                                                 | delegation shows error in parent window        | error `tool_result` for that delegation only     |
+| Session.Branches    | bug (very unlikely; it holds no logic)          | rest_for_one restarts Branches, Dispatcher, Watcher; Dispatcher re-spawns `:running` branches from the log | running windows restart | in-flight tool calls re-run |
+| Session.Dispatcher  | bug, `Process.exit(:kill)`                      | Dispatcher and Watcher restart; ledger folded from log; branches untouched | nothing (ledger identical)                     | nothing                                          |
+| Session.Watcher     | backend crash                                   | Watcher only                                                              | one-line notice                                | nothing                                          |
+| Session.Approvals   | bug                                             | rest_for_one: Approvals, Locks, Branches, Dispatcher, Watcher restart; pending questions re-registered by agents on replay | running windows restart | in-flight calls re-run |
+| Session.Locks       | bug                                             | as above from Locks                                                       | as above                                       | as above                                         |
+| Session.Log         | disk error                                      | whole session restarts (rest_for_one from the first child)                | all windows restart from log                   | in-flight calls re-run                           |
+| TUI.Server          | render bug                                      | UI.Supervisor restarts it; screen rebuilt from `Log.all/1`                | brief flicker, same windows                    | nothing                                          |
+| Whole VM            | SIGKILL / taskkill                              | nothing; `troupe resume` replays                                          | on resume: running branches continue           | in-flight calls re-run                           |
+| Reaper child tree   | Port closed for any reason                      | n/a; reaper kills the process tree                                        | tool call ends with error/cancelled            | error `tool_result` (if agent still alive)       |
+
+## 7. Persistence
+
+`$TROUPE_STATE_DIR` or the platform state dir, then
+`sessions/<workspace-hash>/<session-id>/events.jsonl`, one JSON object per
+line, `seq` monotonic per session. `Session.Log` is the only writer; `append`
+is a synchronous call that returns after `IO.binwrite` succeeded and the event
+was published. On start the Log reads the file to restore `seq` and its
+in-memory copy.
+
+## 8. Concurrency rules
+
+* No synchronous call between agents, or from a session actor into an agent.
+* `GenServer.call` only from the client API into session actors and from an
+  agent into Log/Approvals/Locks.
+* Top-level concurrency is the user's (commands). In-turn concurrency is the
+  model's (multiple tool calls, `delegate` fan-out) and is bounded by the turn.
+* The TUI coalesces deltas and redraws at most 30 times per second; when its
+  mailbox exceeds a threshold it collapses queued deltas. It never applies
+  backpressure to a session.

@@ -1,0 +1,174 @@
+defmodule Troupe.LLM.OpenAI do
+  @moduledoc """
+  OpenAI-compatible Chat Completions adapter (function calling, SSE) working
+  against any base URL: LiteLLM, vLLM, Mistral and similar.
+  Config: `%{api_key, base_url}`; `OPENAI_API_KEY` is the fallback key.
+  """
+
+  @behaviour Troupe.LLM.Provider
+
+  alias Troupe.LLM.{HTTP, Message, Provider, Request}
+
+  @impl true
+  def stream(config, %Request{} = request, reply_to, ref) do
+    url =
+      (config[:base_url] || "https://api.openai.com/v1")
+      |> String.trim_trailing("/")
+      |> Kernel.<>("/chat/completions")
+
+    key = config[:api_key] || System.get_env("OPENAI_API_KEY") || ""
+    headers = [{"authorization", "Bearer " <> key}, {"content-type", "application/json"}]
+    body = encode(request)
+
+    acc0 = %{
+      text: "",
+      calls: %{},
+      usage: %{input_tokens: 0, output_tokens: 0},
+      finish: nil,
+      model: request.model,
+      reply_to: reply_to,
+      ref: ref
+    }
+
+    case Provider.with_retries(fn ->
+           HTTP.stream_post(url, headers, body, acc0, &handle_event/3)
+         end) do
+      {:ok, acc} -> send(reply_to, {:llm_done, ref, finalize(acc)})
+      {:error, reason} -> send(reply_to, {:llm_error, ref, reason})
+    end
+
+    :ok
+  end
+
+  @doc false
+  def encode(%Request{} = r) do
+    messages = [%{role: "system", content: r.system} | Enum.flat_map(r.messages, &encode_message/1)]
+
+    base = %{
+      model: r.model,
+      max_tokens: r.max_tokens,
+      stream: true,
+      stream_options: %{include_usage: true},
+      messages: messages
+    }
+
+    if r.tools == [] do
+      base
+    else
+      Map.put(
+        base,
+        :tools,
+        Enum.map(
+          r.tools,
+          &%{
+            type: "function",
+            function: %{name: &1.name, description: &1.description, parameters: &1.input_schema}
+          }
+        )
+      )
+    end
+  end
+
+  defp encode_message(%{role: :user, content: blocks}) do
+    {results, texts} = Enum.split_with(blocks, &match?(%{type: :tool_result}, &1))
+
+    Enum.map(results, fn r -> %{role: "tool", tool_call_id: r.tool_use_id, content: r.content} end) ++
+      case Message.text(texts) do
+        "" -> []
+        text -> [%{role: "user", content: text}]
+      end
+  end
+
+  defp encode_message(%{role: :assistant, content: blocks}) do
+    calls =
+      blocks
+      |> Message.tool_uses()
+      |> Enum.map(
+        &%{
+          id: &1.id,
+          type: "function",
+          function: %{name: &1.name, arguments: Jason.encode!(&1.input)}
+        }
+      )
+
+    msg = %{role: "assistant", content: Message.text(blocks)}
+    [if(calls == [], do: msg, else: Map.put(msg, :tool_calls, calls))]
+  end
+
+  @doc false
+  def handle_event(_event, "[DONE]", acc), do: acc
+
+  def handle_event(_event, data, acc) do
+    case Jason.decode(data) do
+      {:ok, json} -> apply_chunk(json, acc)
+      {:error, _} -> acc
+    end
+  end
+
+  defp apply_chunk(json, acc) do
+    acc =
+      case Map.get(json, "usage") do
+        %{"prompt_tokens" => p, "completion_tokens" => c} ->
+          %{acc | usage: %{input_tokens: p, output_tokens: c}}
+
+        _ ->
+          acc
+      end
+
+    acc = if m = Map.get(json, "model"), do: %{acc | model: m}, else: acc
+
+    json
+    |> Map.get("choices", [])
+    |> Enum.reduce(acc, fn choice, a ->
+      delta = Map.get(choice, "delta", %{})
+      a = if fr = Map.get(choice, "finish_reason"), do: %{a | finish: fr}, else: a
+
+      a =
+        case Map.get(delta, "content") do
+          t when is_binary(t) and t != "" ->
+            send(a.reply_to, {:llm_delta, a.ref, t})
+            %{a | text: a.text <> t}
+
+          _ ->
+            a
+        end
+
+      Enum.reduce(Map.get(delta, "tool_calls") || [], a, fn tc, a2 ->
+        idx = Map.get(tc, "index", 0)
+        existing = Map.get(a2.calls, idx, %{id: nil, name: "", args: ""})
+        fun = Map.get(tc, "function", %{})
+
+        updated = %{
+          existing
+          | id: Map.get(tc, "id") || existing.id,
+            name: existing.name <> (Map.get(fun, "name") || ""),
+            args: existing.args <> (Map.get(fun, "arguments") || "")
+        }
+
+        %{a2 | calls: Map.put(a2.calls, idx, updated)}
+      end)
+    end)
+  end
+
+  defp finalize(acc) do
+    calls =
+      acc.calls
+      |> Enum.sort_by(fn {i, _} -> i end)
+      |> Enum.map(fn {i, c} ->
+        Message.tool_use(c.id || "call_#{i}", c.name, decode_args(c.args))
+      end)
+
+    text = if acc.text == "", do: [], else: [Message.text_block(acc.text)]
+    stop = if calls == [], do: :end_turn, else: :tool_use
+    %{content: text ++ calls, usage: acc.usage, stop_reason: stop, model: acc.model}
+  end
+
+  defp decode_args(""), do: %{}
+
+  defp decode_args(json) do
+    case Jason.decode(json) do
+      {:ok, map} when is_map(map) -> map
+      _ -> %{"_raw" => json}
+    end
+  end
+end

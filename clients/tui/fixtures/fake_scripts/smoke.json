@@ -1,0 +1,5 @@
+[
+  {"tool": "write_file", "input": {"path": "hello.txt", "content": "hello from troupe\n"}},
+  {"tool": "shell", "input": {"command": "cat hello.txt"}},
+  {"finish": "smoke test complete: wrote hello.txt and read it back through reaper"}
+]

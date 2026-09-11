@@ -1,0 +1,13 @@
+tmp = Path.join(System.tmp_dir!(), "troupe-test-#{System.system_time(:millisecond)}")
+File.mkdir_p!(Path.join(tmp, "state"))
+File.mkdir_p!(Path.join(tmp, "config"))
+System.put_env("TROUPE_STATE_DIR", Path.join(tmp, "state"))
+System.put_env("TROUPE_CONFIG_DIR", Path.join(tmp, "config"))
+System.delete_env("TROUPE_PROVIDER")
+System.delete_env("TROUPE_MODEL")
+System.delete_env("TROUPE_API_KEY")
+System.delete_env("TROUPE_BASE_URL")
+System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(tmp, "no-opencode.jsonc"))
+System.put_env("TROUPE_OPENCODE_AUTH", Path.join(tmp, "no-auth.json"))
+
+ExUnit.start(exclude: [:manual, :slow], timeout: 60_000, capture_log: true)

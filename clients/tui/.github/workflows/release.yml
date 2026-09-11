@@ -1,0 +1,200 @@
+name: Release
+
+# One native runner per target (the precompiled ExRatatui NIF and file_system's
+# macOS backend resolve against the build host). Produces five binaries plus
+# SHA256SUMS. GitHub Actions syntax; Forgejo Actions runs it unchanged.
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+
+env:
+  MIX_ENV: prod
+  TROUPE_REAPER_TARGETS: all
+
+jobs:
+  build:
+    name: ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux_x86_64
+            target_abi: musl
+          - os: ubuntu-24.04-arm
+            target: linux_aarch64
+            target_abi: musl
+          - os: macos-15-intel
+            target: macos_x86_64
+          - os: macos-14
+            target: macos_aarch64
+          - os: windows-2022
+            target: windows_x86_64
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.20.4"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Install xz and 7z
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then sudo apt-get update && sudo apt-get install -y xz-utils p7zip-full; fi
+          if [[ "$RUNNER_OS" == "macOS" ]]; then brew install xz p7zip || true; fi
+
+      - name: Get deps
+        run: mix deps.get
+
+      - name: Build release
+        env:
+          BURRITO_TARGET: ${{ matrix.target }}
+          MATRIX_TARGET_ABI: ${{ matrix.target_abi }}
+        run: |
+          if [ -n "${MATRIX_TARGET_ABI}" ]; then export TARGET_ABI="${MATRIX_TARGET_ABI}"; fi
+          mix release --overwrite
+          ls -la burrito_out
+
+      - name: Name artifact
+        id: art
+        run: |
+          VERSION=$(grep -m1 '@version' mix.exs | sed -E 's/.*"([^"]+)".*/\1/')
+          EXT=""; [[ "${{ matrix.target }}" == windows* ]] && EXT=".exe"
+          NAME="troupe-${VERSION}-${{ matrix.target }}${EXT}"
+          mv "burrito_out/troupe_${{ matrix.target }}${EXT}" "burrito_out/${NAME}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test (--version and a headless Fake run through reaper)
+        env:
+          TROUPE_PROVIDER: fake
+          TROUPE_FAKE_SCRIPT: ${{ github.workspace }}/fixtures/fake_scripts/smoke.json
+        run: |
+          BIN="burrito_out/${{ steps.art.outputs.name }}"
+          chmod +x "$BIN" || true
+          START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
+          echo "cold first run (extraction + --version): $(( (END-START)/1000000 )) ms"
+          START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
+          echo "warm --version: $(( (END-START)/1000000 )) ms"
+          ls -la "$BIN"
+          mkdir -p /tmp/smoke && cd /tmp/smoke
+          "$GITHUB_WORKSPACE/$BIN" run code "smoke" --headless --auto-approve
+          test -f hello.txt && cat hello.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.name }}
+          path: burrito_out/${{ steps.art.outputs.name }}
+
+  containers:
+    name: Linux binary in clean containers
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-linux_x86_64
+          merge-multiple: true
+          path: dist
+      - name: ubuntu:24.04 and alpine (no Erlang, no Elixir, no inotify-tools)
+        run: |
+          chmod +x dist/troupe-*-linux_x86_64
+          for img in ubuntu:24.04 alpine:3.20; do
+            docker run --rm -v "$PWD/dist:/dist" -v "$PWD/fixtures:/fixtures" -e TROUPE_PROVIDER=fake -e TROUPE_FAKE_SCRIPT=/fixtures/fake_scripts/smoke.json "$img" sh -c '
+              set -e; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work && cd /work
+              $BIN --version
+              $BIN run code "smoke" --headless --auto-approve --watch 2>&1 | tee out.log
+              grep -q polling out.log && echo "watch fell back to polling"
+              test -f hello.txt'
+          done
+
+  installers:
+    name: install.sh in ubuntu:24.04 (zsh user)
+    needs: build
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-linux_x86_64
+          merge-multiple: true
+          path: dist
+      - name: Serve artifacts and run install / upgrade / uninstall / corrupted
+        run: |
+          cd dist && sha256sum troupe-* > SHA256SUMS && cd ..
+          docker run --rm -v "$PWD:/src" ubuntu:24.04 bash -c '
+            set -e; apt-get update -q && apt-get install -y -q curl zsh python3 >/dev/null
+            useradd -m -s /bin/zsh tester; touch /home/tester/.zshrc; chown tester /home/tester/.zshrc
+            (cd /src/dist && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
+            export TROUPE_RELEASE_URL=http://localhost:8000
+            su tester -c "TROUPE_RELEASE_URL=$TROUPE_RELEASE_URL sh /src/install.sh"
+            su tester -c "~/.local/bin/troupe --version"
+            grep -q troupe /home/tester/.zshrc
+            su tester -c "TROUPE_RELEASE_URL=$TROUPE_RELEASE_URL sh /src/install.sh"   # clean upgrade
+            test -f /home/tester/.local/bin/troupe.previous
+            su tester -c "sh /src/install.sh --uninstall"
+            test ! -e /home/tester/.local/bin/troupe
+            ! grep -q troupe /home/tester/.zshrc
+            find /home/tester -newer /src/install.sh -type f ! -path "*/.config/*" ! -path "*/.local/state/*" ! -name ".zshrc" | tee leftovers.txt
+            test ! -s leftovers.txt
+            echo corrupt > /src/dist/corrupt && cd /src/dist && cp $(ls troupe-*-linux_x86_64) bad && mv bad $(ls troupe-*-linux_x86_64) && cd /
+            su tester -c "TROUPE_RELEASE_URL=$TROUPE_RELEASE_URL sh /src/install.sh" && exit 1 || echo "corrupted artifact rejected"
+            test ! -e /home/tester/.local/bin/troupe'
+
+  windows-installer:
+    name: install.ps1 on Windows
+    needs: build
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-windows_x86_64.exe
+          merge-multiple: true
+          path: dist
+      - shell: pwsh
+        run: |
+          Set-Location dist
+          Get-ChildItem troupe-* | ForEach-Object { "$((Get-FileHash $_).Hash.ToLower())  $($_.Name)" } | Set-Content SHA256SUMS
+          $job = Start-Job { Set-Location $using:PWD; python -m http.server 8000 }
+          Start-Sleep 2
+          $env:TROUPE_RELEASE_URL = "http://localhost:8000"
+          Set-Location ..
+          .\install.ps1
+          & "$env:LOCALAPPDATA\Programs\troupe\troupe.exe" --version
+          .\install.ps1                                      # clean upgrade
+          Test-Path "$env:LOCALAPPDATA\Programs\troupe\troupe.exe.previous" | ForEach-Object { if (-not $_) { throw "no rollback copy" } }
+          .\install.ps1 -Uninstall
+          if (Test-Path "$env:LOCALAPPDATA\Programs\troupe") { throw "not removed" }
+          "corrupt" | Set-Content (Get-ChildItem dist\troupe-*.exe).FullName
+          try { .\install.ps1; throw "corrupted artifact accepted" } catch { if ($_.Exception.Message -match "corrupted artifact accepted") { throw } else { "corrupted artifact rejected" } }
+          if (Test-Path "$env:LOCALAPPDATA\Programs\troupe\troupe.exe") { throw "installed despite bad checksum" }
+          Stop-Job $job
+
+  release:
+    name: Publish
+    needs: [build]
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*
+          merge-multiple: true
+          path: dist
+      - name: SHA256SUMS
+        run: cd dist && sha256sum troupe-* > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
