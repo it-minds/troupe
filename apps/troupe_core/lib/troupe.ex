@@ -1,0 +1,272 @@
+defmodule Troupe do
+  @moduledoc """
+  The client API: start a session, feed it input, watch what happens.
+
+  These are the only synchronous calls into a session from outside. Everything the
+  agents do among themselves is async `send` plus monitors — see `ARCHITECTURE.md`
+  for why (mutual calls between a parent and a child deadlock the moment both are
+  busy).
+
+      {:ok, session} = Troupe.start_session(workspace: ".")
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "add a test for Foo.bar/1")
+
+  """
+
+  alias Troupe.Agent.Server, as: Agent
+  alias Troupe.{Events, Registry, Session, Sessions}
+  alias Troupe.Session.{Approvals, Blobs, Log, Watcher}
+  alias Troupe.Sessions.Index
+
+  @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
+
+  @doc """
+  Start a session over a workspace directory.
+
+  Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
+  `:session_id`, `:config_overrides`, `:definitions`, `:fake`.
+  """
+  @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
+  def start_session(opts \\ []) do
+    with {:ok, session_opts} <- Session.build_opts(opts),
+         {:ok, pid} <- Sessions.start_session(session_opts) do
+      session_id = Keyword.fetch!(session_opts, :session_id)
+      workspace = Keyword.fetch!(session_opts, :workspace)
+      profile = Keyword.fetch!(session_opts, :profile)
+
+      Index.register(session_id, %{workspace: workspace.root_real, profile: profile})
+
+      # The first durable event says what this session is, so a listing can be
+      # rebuilt from the log alone — which is what makes a dormant session visible.
+      Log.append(session_id, Session.root_path(), :session_created, %{
+        "workspace" => workspace.root_real,
+        "profile" => profile,
+        "visibility" => "private"
+      })
+
+      {:ok, %{id: session_id, pid: pid, workspace: workspace}}
+    end
+  end
+
+  @doc """
+  Send the root agent a message. Async: it is postponed if the agent is busy.
+
+  `actor` records *who* asked, which is what lets several clients share one session
+  and still see who did what.
+  """
+  @spec send_input(
+          String.t(),
+          String.t() | struct(),
+          :user | :watch | :tui_todo_edit,
+          Troupe.Protocol.Event.Actor.t() | nil
+        ) :: :ok | {:error, :no_session}
+  def send_input(session_id, content, source \\ :user, actor \\ nil) do
+    with_root(session_id, &Agent.input(&1, source, content, actor))
+  end
+
+  @doc "Cancel whatever the root agent is doing. Valid from any state."
+  @spec cancel(String.t()) :: :ok | {:error, :no_session}
+  def cancel(session_id), do: with_root(session_id, &Agent.cancel/1)
+
+  @doc "Switch the root agent's primary profile, applied at the next turn boundary."
+  @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
+  def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
+
+  @doc "Answer an outstanding approval. First response wins."
+  @spec approve(
+          String.t(),
+          String.t(),
+          :allow | :deny | :allow_session,
+          Troupe.Protocol.Event.Actor.t() | nil
+        ) :: :ok
+  def approve(session_id, call_id, decision, actor \\ nil) do
+    Approvals.decide(session_id, call_id, decision, actor)
+  end
+
+  @doc "Receive `{:troupe_event, session_id, event}` for everything the session does."
+  @spec subscribe(String.t()) :: :ok
+  def subscribe(session_id), do: Events.subscribe(session_id)
+
+  @spec unsubscribe(String.t()) :: :ok
+  def unsubscribe(session_id), do: Events.unsubscribe(session_id)
+
+  @doc "A read-only snapshot of one agent. Never used inside the loop."
+  @spec snapshot(String.t(), [String.t()]) :: map() | {:error, :no_agent}
+  def snapshot(session_id, agent_path \\ ["root"]) do
+    case Registry.agent_pid(session_id, agent_path) do
+      nil -> {:error, :no_agent}
+      pid -> Agent.snapshot(pid)
+    end
+  end
+
+  @doc "Every live agent path in a session, root first."
+  @spec agent_tree(String.t()) :: [[String.t()]]
+  def agent_tree(session_id) do
+    session_id
+    |> Registry.agent_paths_under(["root"])
+    |> Enum.sort_by(&{length(&1), &1})
+  end
+
+  @doc "The session's persisted events, oldest first."
+  @spec events(String.t()) :: [map()]
+  def events(session_id), do: Log.replay(session_id)
+
+  @doc "Turn watch mode on or off, reporting which backend took over."
+  @spec watch(String.t(), boolean()) :: {:ok, :native | :poll | :off}
+  def watch(session_id, enabled?), do: Watcher.set_enabled(session_id, enabled?)
+
+  @doc "Stop a session. Its agents, tasks and OS process trees go with it."
+  @spec stop_session(String.t()) :: :ok | {:error, :not_found}
+  def stop_session(session_id), do: Sessions.stop_session(session_id)
+
+  @doc "Sessions recorded on disk for a workspace, newest first."
+  @spec list_sessions(Path.t(), Path.t() | nil) :: [map()]
+  def list_sessions(workspace_root, state_dir \\ nil) do
+    Log.list_sessions(workspace_root, state_dir)
+  end
+
+  @doc """
+  Resume a session from its log.
+
+  Starting a session with an existing id is all it takes: every agent rebuilds its
+  own state by replaying its own events.
+  """
+  @spec resume(String.t(), keyword()) :: {:ok, session()} | {:error, term()}
+  def resume(session_id, opts \\ []) do
+    start_session(Keyword.merge(opts, session_id: session_id, task: nil))
+  end
+
+  @doc "Every session this daemon knows about, running or not."
+  @spec list_live_sessions(map()) :: [map()]
+  def list_live_sessions(filter \\ %{}), do: Index.list(filter)
+
+  @doc "One session's metadata, or `nil`."
+  @spec get_session(String.t()) :: map() | nil
+  def get_session(session_id), do: Index.get(session_id)
+
+  @doc "Session ids with a running actor tree."
+  @spec session_ids() :: [String.t()]
+  def session_ids, do: Index.live_ids()
+
+  @doc "Whether anything is running. The daemon's idle watch asks this."
+  @spec any_active_sessions?() :: boolean()
+  def any_active_sessions?, do: session_ids() != []
+
+  @doc "The highest sequence number in a session's log."
+  @spec head_seq(String.t()) :: non_neg_integer()
+  def head_seq(session_id) do
+    Log.head_seq(session_id)
+  catch
+    :exit, _ -> 0
+  end
+
+  @doc "Durable events after a cursor. `0` replays everything."
+  @spec replay_from(String.t(), non_neg_integer()) :: [Troupe.Protocol.Event.t()]
+  def replay_from(session_id, from_seq) do
+    Log.replay_from(session_id, from_seq)
+  catch
+    :exit, _ -> []
+  end
+
+  @doc "Read a stored blob, optionally a byte range."
+  @spec read_blob(String.t(), String.t(), [integer()] | nil) ::
+          {:ok, binary(), non_neg_integer()} | {:error, :not_found}
+  def read_blob(session_id, digest, range \\ nil) do
+    case get_session(session_id) do
+      nil -> {:error, :not_found}
+      session -> Blobs.read(session_id, session.workspace, digest, range)
+    end
+  end
+
+  @doc "Workspaces this daemon has seen, most recently used first."
+  @spec recent_workspaces(pos_integer()) :: [map()]
+  def recent_workspaces(limit \\ 20), do: Index.recent_workspaces(limit)
+
+  @doc """
+  Directories matching a query, for a launcher.
+
+  Ranks recent workspaces above the filesystem, because the thing you want is nearly
+  always somewhere you have already been.
+  """
+  @spec search_workspaces(String.t(), pos_integer()) :: [map()]
+  def search_workspaces(query, limit \\ 20) do
+    recent =
+      recent_workspaces(200)
+      |> Enum.filter(&String.contains?(String.downcase(&1["path"]), String.downcase(query)))
+      |> Enum.map(&%{"path" => &1["path"], "score" => 1.0})
+
+    Enum.take(recent, limit)
+  end
+
+  @doc "Mark a session exempt from retention, or not."
+  @spec pin_session(String.t(), boolean()) :: :ok
+  def pin_session(session_id, pinned?), do: Index.update(session_id, %{pinned: pinned?})
+
+  @doc """
+  Erase a session: stop it, delete its stored events and blobs, forget it.
+
+  Local sessions have no key to destroy — the user's disk encryption is the boundary —
+  so erasure here is deletion. The remote tier destroys the session key instead, which
+  is what makes erasure survive a backup.
+  """
+  @spec erase_session(String.t()) :: :ok
+  def erase_session(session_id) do
+    session = get_session(session_id)
+    stop_session(session_id)
+    Index.forget(session_id)
+
+    if session do
+      session.workspace
+      |> Troupe.Paths.session_dir(session_id)
+      |> File.rm_rf()
+    end
+
+    :ok
+  end
+
+  @doc """
+  Turn watch mode on or off for a workspace.
+
+  Watch is exclusive per workspace: two sessions watching the same files would both
+  act on the same marker.
+  """
+  @spec set_watch(Path.t(), boolean()) ::
+          {:ok, :native | :poll | :off} | {:error, :already_watching | :no_session}
+  def set_watch(workspace, enabled?) do
+    sessions =
+      %{}
+      |> list_live_sessions()
+      |> Enum.filter(&(&1.workspace == workspace and &1.state == :active))
+
+    case sessions do
+      [] ->
+        {:error, :no_session}
+
+      [session] ->
+        watch(session.id, enabled?)
+
+      [session | _rest] when enabled? ->
+        if Enum.any?(sessions, &watching?(&1.id)) do
+          {:error, :already_watching}
+        else
+          watch(session.id, enabled?)
+        end
+
+      [session | _rest] ->
+        watch(session.id, enabled?)
+    end
+  end
+
+  defp watching?(session_id) do
+    Watcher.enabled?(session_id)
+  catch
+    :exit, _ -> false
+  end
+
+  defp with_root(session_id, fun) do
+    case Registry.agent_pid(session_id, Session.root_path()) do
+      nil -> {:error, :no_session}
+      pid -> fun.(pid)
+    end
+  end
+end

@@ -1,0 +1,1 @@
+{application,sample,[{modules,['Elixir.Inventory']},{optional_applications,[]},{applications,[kernel,stdlib,elixir,logger]},{description,"sample"},{registered,[]},{vsn,"0.1.0"}]}.

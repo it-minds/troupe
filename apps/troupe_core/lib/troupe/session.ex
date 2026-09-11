@@ -1,0 +1,190 @@
+defmodule Troupe.Session do
+  @moduledoc """
+  One session: a log, an approval gate, a root agent, and a watcher.
+
+  `rest_for_one` orders those by dependency. `Log` first, because everything persists
+  through it and everything after it must replay if it restarts. `Approvals` next.
+  Then the root `Agent.Node`. Then `Session.Watcher` **last**, so a watch-mode crash
+  restarts nothing above it — the guarantee that file watching can never disturb a
+  running agent comes from this ordering, not from care inside the watcher.
+  """
+
+  use Supervisor
+
+  alias Troupe.Agent.Definitions
+  alias Troupe.{Config, Registry, Workspace}
+  alias Troupe.LLM.Fake
+
+  @root_path ["root"]
+
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts) do
+    session_id = Keyword.fetch!(opts, :session_id)
+    Supervisor.start_link(__MODULE__, opts, name: Registry.session(session_id))
+  end
+
+  @doc "The root agent's path. Everything else hangs below it."
+  @spec root_path() :: [String.t()]
+  def root_path, do: @root_path
+
+  @impl Supervisor
+  def init(opts) do
+    session_id = Keyword.fetch!(opts, :session_id)
+    workspace = Keyword.fetch!(opts, :workspace)
+    config = Keyword.fetch!(opts, :config)
+    definitions = Keyword.fetch!(opts, :definitions)
+
+    Process.set_label("troupe session #{session_id}")
+
+    agent_opts = [
+      session_id: session_id,
+      agent_path: @root_path,
+      workspace: workspace,
+      config: config,
+      definitions: definitions,
+      profile: Keyword.get(opts, :profile, config.default_agent),
+      task: Keyword.get(opts, :task),
+      fake: fake_server(session_id, config, opts),
+      restart: :permanent
+    ]
+
+    children =
+      [
+        {Troupe.Session.Log,
+         session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
+        {Troupe.Session.Approvals, session_id: session_id, auto_approve: config.auto_approve}
+      ] ++
+        fake_child(session_id, config, opts) ++
+        [
+          {Troupe.Agent.Node, agent_opts},
+          {Troupe.Session.Watcher,
+           session_id: session_id,
+           workspace: workspace,
+           agent_path: @root_path,
+           enabled: config.watch,
+           debounce_ms: config.watch_debounce_ms,
+           poll_interval_ms: config.watch_poll_interval_ms}
+        ]
+
+    Supervisor.init(children, strategy: :rest_for_one, max_restarts: 3, max_seconds: 10)
+  end
+
+  # A caller that passed its own scripted model (the test suite) keeps it. Otherwise
+  # `provider: "fake"` plus a script file starts one per session, which is how a
+  # packaged binary is smoke-tested with no model behind it.
+  defp fake_child(session_id, config, opts) do
+    if own_fake?(config, opts) do
+      [{Fake, name: Registry.fake(session_id), steps: fake_steps(config)}]
+    else
+      []
+    end
+  end
+
+  defp fake_server(session_id, config, opts) do
+    cond do
+      Keyword.get(opts, :fake) -> Keyword.fetch!(opts, :fake)
+      own_fake?(config, opts) -> Registry.fake(session_id)
+      true -> nil
+    end
+  end
+
+  defp own_fake?(config, opts) do
+    config.provider in ["fake", :fake] and is_nil(Keyword.get(opts, :fake))
+  end
+
+  defp fake_steps(%{fake_script: nil}), do: []
+
+  defp fake_steps(%{fake_script: path}) do
+    if File.regular?(path) do
+      Fake.load_script!(path)
+    else
+      raise ArgumentError, "TROUPE_FAKE_SCRIPT points at #{path}, which does not exist"
+    end
+  end
+
+  @doc """
+  Assemble the options a session needs from a workspace path and user overrides.
+
+  Kept here rather than in the client API so the CLI, the tests and `resume` all
+  build a session the same way.
+  """
+  @spec build_opts(keyword()) :: {:ok, keyword()} | {:error, term()}
+  def build_opts(opts) do
+    workspace_path = Keyword.get(opts, :workspace, File.cwd!())
+
+    with {:ok, workspace} <- Workspace.new(workspace_path) do
+      config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, []))
+
+      definitions =
+        Keyword.get_lazy(opts, :definitions, fn -> Definitions.load(workspace.root_real) end)
+
+      {:ok,
+       [
+         session_id: Keyword.get_lazy(opts, :session_id, &generate_id/0),
+         workspace: workspace,
+         config: config,
+         definitions: definitions,
+         profile: Keyword.get(opts, :agent) || config.default_agent,
+         task: Keyword.get(opts, :task),
+         fake: Keyword.get(opts, :fake)
+       ]}
+    end
+  end
+
+  @doc "A sortable, readable session id: a timestamp plus enough randomness to be unique."
+  @spec generate_id() :: String.t()
+  def generate_id do
+    stamp =
+      DateTime.utc_now()
+      |> Calendar.strftime("%Y%m%dT%H%M%S")
+
+    suffix = 4 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    stamp <> "-" <> suffix
+  end
+end
+
+defmodule Troupe.Sessions do
+  @moduledoc """
+  The DynamicSupervisor sessions live under.
+
+  Sessions are `:transient`: one that finished normally must not be restarted, and one
+  whose root Node exceeded its restart intensity is left down for `troupe resume`
+  rather than looped.
+  """
+
+  use DynamicSupervisor
+
+  @spec start_link(keyword()) :: Supervisor.on_start()
+  def start_link(opts), do: DynamicSupervisor.start_link(__MODULE__, opts, name: __MODULE__)
+
+  @impl DynamicSupervisor
+  def init(_opts), do: DynamicSupervisor.init(strategy: :one_for_one)
+
+  @spec start_session(keyword()) :: {:ok, pid()} | {:error, term()}
+  def start_session(opts) do
+    spec = %{
+      id: {Troupe.Session, Keyword.fetch!(opts, :session_id)},
+      start: {Troupe.Session, :start_link, [opts]},
+      type: :supervisor,
+      restart: :transient,
+      shutdown: 30_000
+    }
+
+    DynamicSupervisor.start_child(__MODULE__, spec)
+  end
+
+  @spec stop_session(String.t()) :: :ok | {:error, :not_found}
+  def stop_session(session_id) do
+    case Troupe.Registry.whereis({:session, session_id}) do
+      nil -> {:error, :not_found}
+      pid -> DynamicSupervisor.terminate_child(__MODULE__, pid)
+    end
+  end
+
+  @spec list() :: [pid()]
+  def list do
+    __MODULE__
+    |> DynamicSupervisor.which_children()
+    |> Enum.flat_map(fn {_, pid, _, _} -> if is_pid(pid), do: [pid], else: [] end)
+  end
+end

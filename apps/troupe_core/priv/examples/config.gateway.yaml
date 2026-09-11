@@ -1,0 +1,23 @@
+# An OpenAI-compatible gateway (LiteLLM, vLLM, an internal proxy).
+#
+# Copy to `$XDG_CONFIG_HOME/troupe/config.yaml` for every project, or to
+# `.troupe/config.yaml` inside one project to override the global settings there.
+#
+# Keep the key out of the file: set TROUPE_API_KEY in the environment, which wins
+# over both files.
+
+provider: openai
+
+# With or without the /v1 suffix; both resolve to the same endpoint.
+base_url: https://your-gateway.example/v1
+
+# Whichever model you choose must support tool calling — a text-only model will
+# discuss editing files without ever doing it.
+model: code-default
+
+# Used for conversation summarisation, where a cheaper model is usually enough.
+small_model: chat-fast
+
+max_turns: 40
+compact_at: 0.75
+context_window: 200000

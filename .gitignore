@@ -1,0 +1,8 @@
+/_build/
+/cover/
+/deps/
+/doc/
+/burrito_out/
+erl_crash.dump
+*.ez
+/apps/*/priv/reaper/
