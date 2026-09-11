@@ -12,7 +12,9 @@ defmodule Troupe.Operator.Resources do
   with it.
   """
 
-  alias Troupe.Operator.{Names, Policy, Profile, Settings}
+  alias Troupe.Operator.{Names, Settings}
+  alias Troupe.Policy
+  alias Troupe.WorkerProfile, as: Profile
 
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]

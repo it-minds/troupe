@@ -19,7 +19,8 @@ defmodule Troupe.Plane.Web.Router do
 
   use Plug.Router
 
-  alias Troupe.Plane.{Harness, Identity, OIDC, SCIM, Tokens}
+  alias Troupe.Plane.{Admin, Harness, Identity, OIDC, SCIM, Tokens}
+  alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
   require Logger
@@ -95,10 +96,19 @@ defmodule Troupe.Plane.Web.Router do
 
   defp answer(%{"method" => method} = request, user) do
     params = Map.get(request, "params", %{})
-    context = %{user: user, platform_admin?: platform_admin?(user)}
 
-    case Harness.call(method, params, context) do
-      {:ok, result} -> encoded({:result, request["id"], result})
+    # One endpoint, two contexts. An admin method is answered by `Plane.Admin` with an
+    # admin actor; everything else by `Plane.Harness` as the person. A client that used
+    # `/rpc` for both is a client using public APIs for both, which is the rule.
+    result =
+      if AdminAPI.admin_method?(method) do
+        AdminAPI.call(method, params, Admin.actor_for(user))
+      else
+        Harness.call(method, params, %{user: user, platform_admin?: platform_admin?(user)})
+      end
+
+    case result do
+      {:ok, answer} -> encoded({:result, request["id"], answer})
       {:error, %Error{} = error} -> encoded({:error, request["id"], error})
     end
   end
@@ -138,12 +148,7 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
-  defp platform_admin?(user) do
-    group = Application.get_env(:troupe_plane, :platform_admin_group)
-
-    group != nil and
-      user |> Identity.teams_for() |> Enum.any?(&(&1.name == group))
-  end
+  defp platform_admin?(user), do: Admin.actor_for(user).role == :platform_admin
 
   # -- SCIM -------------------------------------------------------------------
 

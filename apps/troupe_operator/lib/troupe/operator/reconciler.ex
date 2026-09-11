@@ -20,7 +20,9 @@ defmodule Troupe.Operator.Reconciler do
 
   use GenServer
 
-  alias Troupe.Operator.{Names, Policy, Profile, Resources, Settings, Status}
+  alias Troupe.Operator.{Names, Resources, Settings, Status}
+  alias Troupe.Policy
+  alias Troupe.WorkerProfile, as: Profile
 
   require Logger
 

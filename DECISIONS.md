@@ -868,3 +868,44 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 151. **An anchor for a session that no longer exists is dropped, not fatal.** A session
      erased between the plane's check and its insert is an ordinary race, and taking a
      control connection down over it would turn a tidy-up into an outage.
+
+152. **`Troupe.Plane.Admin` is the only administrative surface, and a test enumerates it.**
+     The panel, the admin JSON-RPC and `troupe admin` are three renderings of one context.
+     Left to care alone that lasts about a release: somebody adds a button, the CLI does
+     not get it, and an operator who works over SSH finds out months later that the thing
+     they need is only in a browser. So the parity test asserts every context function has
+     both a method and a command, that no method names a function that does not exist, and
+     that the arities line up.
+
+153. **The admin context has no function that could return session content.** Not a check
+     applied at the edge — the function does not exist, and a test asserts no function is
+     even *named* as though it might. No admin role grants access to what a session said;
+     reading it requires being on the ACL, and break-glass is out of scope, so there is
+     nothing to bypass.
+
+154. **`platform_admin` comes from an identity-provider group; `team_admin` is the one
+     role Troupe assigns.** An admin role Troupe could grant would be a way to escalate
+     inside Troupe. A team admin is deliberately narrower — one team, and no ability to
+     create or remove other team admins, because a team admin who could remove the others
+     could make themselves the only one.
+
+155. **A team a `team_admin` may not see is `not_found`, not `forbidden`** — the same rule
+     sessions already follow, for the same reason.
+
+156. **`Troupe.Policy` and `Troupe.WorkerProfile` moved into `troupe_protocol`.** The panel
+     validates against `TroupePolicy` for fast feedback and admission remains
+     authoritative, but the fast check has to be *the same check* or it is confident
+     nonsense — so both the plane and the operator parse the same document with the same
+     code, exactly as they already share the KMS behaviour and the object store.
+
+157. **Provisioning is best effort; the grant is not.** A grant is the plane's own record
+     and is already made when the custom resource is rewritten. A cluster that cannot be
+     reached leaves the projection stale until the operator's next resync, which is the
+     right cost — failing the grant would make the plane's own state depend on the cluster
+     being up. What happened is reported rather than swallowed, because "saved but not
+     applied" is a state a person needs to see and is the normal one in GitOps mode.
+
+158. **Asking who is connected answers "nobody" when the listener is not running.** A
+     plane publishing a config bundle must not crash because nothing was attached, and a
+     registry lookup is not a reasonable place for a caller to have to know whether the
+     control listener is up.

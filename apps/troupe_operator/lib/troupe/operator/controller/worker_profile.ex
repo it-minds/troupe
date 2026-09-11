@@ -14,7 +14,8 @@ defmodule Troupe.Operator.Controller.WorkerProfile do
 
   use Bonny.ControllerV2
 
-  alias Troupe.Operator.{Names, Policy, Reconcilers}
+  alias Troupe.Operator.{Names, Reconcilers}
+  alias Troupe.Policy
 
   require Logger
 

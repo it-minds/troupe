@@ -536,7 +536,57 @@ for a full replay, which produces exactly the same fold.
 
 ---
 
-## 11. Stages 3–4
+## 11. The admin panel
+
+### 11.1 One context, three surfaces
+
+Every administrative action goes through `Troupe.Plane.Admin`, and the panel, the admin
+JSON-RPC and `troupe admin` are three renderings of that one context. This is the
+Forbidden list's "any client, including our own TUI and panel, using anything but public
+APIs" made structural: a LiveView that reached into `Fleet` or `Identity` directly would
+be a private path into the plane, and a panel with a button the CLI cannot press would be
+a feature only one kind of operator has.
+
+A test enumerates the context and asserts every function has both an API method and a CLI
+command; the boundary checker asserts LiveViews call nothing else. Parity is checked
+rather than remembered.
+
+### 11.2 Two roles, and what neither can do
+
+`platform_admin` comes from an IdP group named in configuration — not assigned in Troupe,
+because an admin role that Troupe could grant would be a way to escalate inside Troupe.
+`team_admin` is assigned per team by a platform admin, and sees only that team.
+
+Neither reads session content. Administration is about profiles, teams, budgets and
+lifecycle state; reading what a session *said* requires being on its ACL, and there is no
+break-glass. That is why the admin context has no method that returns events, and why the
+session views it does have are the same metadata `sessions.list` returns.
+
+### 11.3 Provisioning, two ways
+
+**Direct** — the plane's ServiceAccount may create, update and delete `WorkerProfile` and
+`TeamVolume` in `troupe-system`, and read `TroupePolicy`. Nothing else, which
+`kubectl auth can-i` is asked to confirm rather than the RBAC being read and believed.
+
+**GitOps** — the plane commits the same manifests to a repository and Flux applies them.
+The panel shows `Pending` until the CR's `observedGeneration` catches up with the
+generation that was committed, because a commit is not a deployment and showing it as one
+would make a failed apply invisible.
+
+Both modes use the same form, the same validation and the same audit trail. The panel
+validates against `TroupePolicy` for fast feedback; admission and the operator remain
+authoritative, because a panel that was the only check would be a check anyone could
+bypass with `kubectl`.
+
+### 11.4 Secrets
+
+The panel stores and shows secret *references* — the name of a secret the cluster holds —
+and never a value. A reference to a secret that is not there surfaces as `SecretMissing`
+rather than as a pod that will not start for reasons nobody can see.
+
+---
+
+## 12. Stages 3–4
 
 * **Stage 3 — admin panel and self-service.** The plane grows a LiveView panel whose
   every action goes through `Plane.Admin`, the same context the admin JSON-RPC and the

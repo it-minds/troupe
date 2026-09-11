@@ -1,4 +1,4 @@
-defmodule Troupe.Operator.Profile do
+defmodule Troupe.WorkerProfile do
   @moduledoc """
   A `WorkerProfile`, parsed.
 

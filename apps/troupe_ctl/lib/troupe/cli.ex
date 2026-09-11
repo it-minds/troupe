@@ -25,7 +25,7 @@ defmodule Troupe.CLI do
   use Task
 
   alias Troupe.CLI.Options
-  alias Troupe.Ctl.{Credentials, Login, Verify}
+  alias Troupe.Ctl.{Admin, Credentials, Login, Verify}
   alias Troupe.Protocol.{Client, Daemon, Endpoint}
   alias Troupe.UI.Headless
 
@@ -137,6 +137,8 @@ defmodule Troupe.CLI do
         1
     end
   end
+
+  def dispatch(%Options{command: :admin, args: args}, _opts), do: Admin.safe(args)
 
   def dispatch(%Options{command: :logout, plane: nil}, _opts) do
     case Credentials.default() do
@@ -417,6 +419,7 @@ defmodule Troupe.CLI.Options do
             worktree: "auto",
             log: nil,
             plane: nil,
+            args: [],
             timeout_ms: 30 * 60 * 1000,
             idle_ms: 10 * 60 * 1000
 
@@ -430,6 +433,7 @@ defmodule Troupe.CLI.Options do
           | :verify
           | :login
           | :logout
+          | :admin
           | :version
           | :help
   @type t :: %__MODULE__{
@@ -445,6 +449,7 @@ defmodule Troupe.CLI.Options do
           worktree: String.t(),
           log: Path.t() | nil,
           plane: String.t() | nil,
+          args: [String.t()],
           timeout_ms: pos_integer(),
           idle_ms: pos_integer()
         }
@@ -536,6 +541,7 @@ defmodule Troupe.CLI.Options do
   defp with_command(base, ["login", plane | _]), do: %{base | command: :login, plane: plane}
   defp with_command(base, ["logout"]), do: %{base | command: :logout}
   defp with_command(base, ["logout", plane | _]), do: %{base | command: :logout, plane: plane}
+  defp with_command(base, ["admin" | args]), do: %{base | command: :admin, args: args}
   defp with_command(_base, [other | _]), do: {:error, "unknown command #{inspect(other)}"}
 
   @spec usage() :: String.t()
@@ -554,6 +560,7 @@ defmodule Troupe.CLI.Options do
       troupe verify --log PATH        ... offline, from a log file or a decrypted segment
       troupe login PLANE_URL          log in to a remote plane
       troupe logout [PLANE_URL]       forget a plane's credentials
+      troupe admin ...                administer a plane (`troupe admin` for the list)
       troupe daemon                   run the daemon in the foreground
       troupe --version
 

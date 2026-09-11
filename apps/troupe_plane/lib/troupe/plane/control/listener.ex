@@ -151,16 +151,23 @@ defmodule Troupe.Plane.Control.Connections do
   @doc "The connection for one pod, or `nil`."
   @spec for_pod(String.t(), String.t()) :: pid() | nil
   def for_pod(namespace, pod_name) do
-    case Registry.lookup(@registry, {:pod, namespace, pod_name}) do
-      [{pid, _}] -> pid
-      [] -> nil
+    case lookup({:pod, namespace, pod_name}) do
+      [{pid, _value}] -> pid
+      _none -> nil
     end
   end
 
   @doc "Every connected pod of a profile."
   @spec for_profile(String.t()) :: [pid()]
-  def for_profile(profile) do
-    Registry.lookup(@registry, {:profile, profile}) |> Enum.map(&elem(&1, 0))
+  def for_profile(profile), do: {:profile, profile} |> lookup() |> Enum.map(&elem(&1, 0))
+
+  # A plane whose control listener is not running has no workers attached, which is the
+  # same answer as "none are". Asking who is connected must not be a way to crash a
+  # caller that had no reason to care whether the listener was up.
+  defp lookup(key) do
+    Registry.lookup(@registry, key)
+  rescue
+    ArgumentError -> []
   end
 
   @doc "How many workers are attached to this replica."

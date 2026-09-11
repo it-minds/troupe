@@ -12,7 +12,9 @@ defmodule Troupe.Operator.ResourcesTest do
 
   import Troupe.Operator.Fixtures
 
-  alias Troupe.Operator.{Names, Policy, Profile, Resources, Settings}
+  alias Troupe.Operator.{Names, Resources, Settings}
+  alias Troupe.Policy
+  alias Troupe.WorkerProfile, as: Profile
 
   setup do
     profile = Profile.from_resource(profile())

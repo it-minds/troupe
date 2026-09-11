@@ -41,6 +41,13 @@ defmodule Troupe.Plane.Fleet do
   @spec list_profiles() :: [Profile.t()]
   def list_profiles, do: Repo.all(from p in Profile, order_by: p.name)
 
+  @doc "Remove a profile's record. The custom resource is the operator's business."
+  @spec delete_profile(String.t()) :: :ok
+  def delete_profile(name) do
+    Repo.delete_all(from p in Profile, where: p.name == ^name)
+    :ok
+  end
+
   @doc "The profiles following a config bundle channel."
   @spec profiles_on_channel(String.t()) :: [String.t()]
   def profiles_on_channel(channel) do

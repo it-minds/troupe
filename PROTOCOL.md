@@ -566,7 +566,49 @@ receives an error tool result and keeps running, and `tools_unregistered` is log
 
 ---
 
-## 9. Errors
+## 9. Admin methods
+
+*(Stage 3.)*
+
+Administration is a separate surface from a session: it runs against the **plane**, and
+every method goes through one context that the panel and `troupe admin` also go through.
+There is no admin method that returns session content — administration is about profiles,
+teams, budgets and lifecycle state, and reading what a session said requires being on its
+ACL.
+
+Two roles. `platform_admin` comes from an identity-provider group named in the plane's
+configuration; `team_admin` is assigned per team by a platform admin and is scoped to
+that team.
+
+| method | role | answers |
+| --- | --- | --- |
+| `admin.overview` | either | fleet health, active sessions, spend per team |
+| `admin.profiles.list` | either | profiles with conditions, pods, load and versions |
+| `admin.profile.get` | platform | the CR spec, the policy verdict, published vs reported bundle hash |
+| `admin.profile.put` | platform | creates or updates a `WorkerProfile`, returning the diff that was applied |
+| `admin.profile.delete` | platform | removes one |
+| `admin.pod.drain` | platform | drains a pod, returning what it held |
+| `admin.teams.list` | either | teams, with grants, budgets, volumes and retention |
+| `admin.team.enable` | platform | makes an IdP group a team |
+| `admin.team.update` | either | budget, retention, default visibility |
+| `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
+| `admin.sessions.list` | either | session *metadata*, never content |
+| `admin.session.erase` | either | erases one, for authorised roles |
+| `admin.bundles.list` / `admin.bundle.publish` / `admin.bundle.retire` | platform | config bundles |
+| `admin.audit.list` | either | who changed what, with diffs |
+
+Membership is never editable: it comes from the identity provider, and a method to change
+it would be a second source of truth for who is in a team.
+
+### Errors
+
+`forbidden` with `data.required_role` when the caller's role is not enough, and
+`not_found` for a team a `team_admin` may not see — because whether a team exists is
+itself something a person who cannot see it should not learn.
+
+---
+
+## 10. Errors
 
 ```json
 {"code": -32004, "message": "forbidden", "data": {"required_scope": "control"}}
@@ -598,7 +640,7 @@ Transport-level framing faults close the connection after a best-effort error.
 
 ---
 
-## 10. Schemas and compatibility
+## 11. Schemas and compatibility
 
 Machine-readable JSON Schema for every message and event lives in
 [`protocol/schema/v1/`](protocol/schema/v1/) and is committed to the repository. It is
@@ -616,7 +658,7 @@ definitions and fails CI on any breaking change.
 
 ---
 
-## 11. Worked example
+## 12. Worked example
 
 ```
 → {"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocol_version":"1",
@@ -648,7 +690,7 @@ definitions and fails CI on any breaking change.
 
 ---
 
-## 12. Writing a client
+## 13. Writing a client
 
 1. Connect and send `initialize`. Keep the negotiated `scopes`.
 2. `subscribe` to `fleet` for the session list, and to `session:<id>` at `detail`

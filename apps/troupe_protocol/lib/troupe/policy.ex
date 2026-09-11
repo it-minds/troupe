@@ -1,4 +1,4 @@
-defmodule Troupe.Operator.Policy do
+defmodule Troupe.Policy do
   @moduledoc """
   What a `WorkerProfile` is allowed to ask for, and what to say when it asks for more.
 
@@ -14,7 +14,7 @@ defmodule Troupe.Operator.Policy do
   is absent. Neither check covers the other's case.
   """
 
-  alias Troupe.Operator.Profile
+  alias Troupe.WorkerProfile, as: Profile
 
   defstruct allowed_image_repositories: [],
             max_replicas: 10,

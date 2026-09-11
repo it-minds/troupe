@@ -15,7 +15,7 @@ defmodule Troupe.Plane.Identity do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias Troupe.Plane.Identity.{Grant, Group, Membership, Team, User}
+  alias Troupe.Plane.Identity.{Grant, Group, Membership, Team, TeamAdmin, User}
   alias Troupe.Plane.{Repo, Sessions}
 
   require Logger
@@ -249,6 +249,82 @@ defmodule Troupe.Plane.Identity do
   @spec grants_for_profile(String.t()) :: [Grant.t()]
   def grants_for_profile(profile) do
     Repo.all(from g in Grant, where: g.profile == ^profile, preload: [:team])
+  end
+
+  @doc "Change a team's budget, retention or default visibility."
+  @spec update_team(Team.t(), map()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
+  def update_team(%Team{} = team, attrs), do: team |> Team.changeset(attrs) |> Repo.update()
+
+  @doc "A team's grants."
+  @spec grants_for_team(Team.t()) :: [Grant.t()]
+  def grants_for_team(%Team{} = team) do
+    Repo.all(from g in Grant, where: g.team_id == ^team.id, order_by: g.profile)
+  end
+
+  @doc """
+  Everyone in a team, through the identity provider's group.
+
+  Read-only everywhere: membership comes from the provider, and Troupe having a way to
+  change it would be a second source of truth for who is in a team.
+  """
+  @spec members_of_team(Team.t()) :: [User.t()]
+  def members_of_team(%Team{} = team) do
+    Repo.all(
+      from u in User,
+        join: m in Membership,
+        on: m.user_id == u.id,
+        where: m.group_id == type(^team.group_id, :binary_id),
+        order_by: u.subject
+    )
+  end
+
+  # -- team administrators ----------------------------------------------------
+
+  @doc """
+  Make somebody an administrator of one team.
+
+  By subject rather than by user, so a platform admin can name a person who has not
+  logged in yet and have the role waiting when they do.
+  """
+  @spec add_team_admin(Team.t(), String.t(), String.t()) :: {:ok, TeamAdmin.t()} | {:error, term()}
+  def add_team_admin(%Team{} = team, subject, granted_by) do
+    %TeamAdmin{}
+    |> TeamAdmin.changeset(%{
+      team_id: team.id,
+      subject: subject,
+      granted_by: granted_by,
+      granted_at: DateTime.utc_now()
+    })
+    |> Repo.insert(on_conflict: :nothing, conflict_target: [:team_id, :subject])
+    |> case do
+      {:ok, %TeamAdmin{id: nil}} -> {:ok, Repo.get_by(TeamAdmin, team_id: team.id, subject: subject)}
+      other -> other
+    end
+  end
+
+  @doc "Take the role away."
+  @spec remove_team_admin(Team.t(), String.t()) :: :ok
+  def remove_team_admin(%Team{} = team, subject) do
+    Repo.delete_all(from a in TeamAdmin, where: a.team_id == ^team.id and a.subject == ^subject)
+    :ok
+  end
+
+  @doc "The teams this user administers, which may be none."
+  @spec teams_administered_by(User.t()) :: [Team.t()]
+  def teams_administered_by(%User{} = user) do
+    Repo.all(
+      from t in Team,
+        join: a in TeamAdmin,
+        on: a.team_id == t.id,
+        where: a.subject == ^user.subject,
+        order_by: t.name
+    )
+  end
+
+  @doc "Who administers a team."
+  @spec admins_of(Team.t()) :: [String.t()]
+  def admins_of(%Team{} = team) do
+    Repo.all(from a in TeamAdmin, where: a.team_id == ^team.id, select: a.subject, order_by: a.subject)
   end
 
   @doc """

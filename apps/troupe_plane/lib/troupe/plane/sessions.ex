@@ -341,6 +341,41 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  Sessions an administrator may see: metadata, never content.
+
+  A platform admin sees every session; a team admin sees their teams'. Ordered by last
+  activity, because the question an admin asks a session list is almost always "what is
+  happening now" rather than "what exists".
+  """
+  @spec for_admin(map(), [Ecto.UUID.t()], keyword()) :: [Session.t()]
+  def for_admin(actor, team_ids, opts \\ []) do
+    Session
+    |> admin_scope(actor, team_ids)
+    |> filter(opts)
+    |> order_by([s], desc: s.last_active_at)
+    |> limit(^Keyword.get(opts, :limit, 200))
+    |> Repo.all()
+  end
+
+  @doc "How many sessions in a state an administrator can see."
+  @spec count_for_admin([Ecto.UUID.t()], boolean(), String.t()) :: non_neg_integer()
+  def count_for_admin(team_ids, platform_admin?, state) do
+    Session
+    |> admin_scope(%{role: if(platform_admin?, do: :platform_admin, else: :team_admin)}, team_ids)
+    |> where([s], s.state == ^state)
+    |> select([s], count(s.id))
+    |> Repo.one()
+  end
+
+  defp admin_scope(query, %{role: :platform_admin}, _team_ids) do
+    from s in query, where: s.state != "erased"
+  end
+
+  defp admin_scope(query, _actor, team_ids) do
+    from s in query, where: s.state != "erased" and s.team_id in ^team_ids
+  end
+
+  @doc """
   What a user may do with one session, or `nil` when they may not see it.
 
   Owner administers, collaborator steers, viewer watches. Team visibility gives observe,

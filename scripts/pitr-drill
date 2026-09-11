@@ -153,10 +153,13 @@ say "7. And the ledger"
 MIX_ENV=test mix troupe.ledger.reconcile --database-url "$RESTORED_URL" 2>&1 | grep -E "ledger vs gateway|records|drift" || \
   echo "(no gateway configured here, so there is nothing to reconcile against)"
 
-# Tidy up: the seeded session is a fixture, not a session.
+# Tidy up. The seeded session is a fixture, not a session: leaving it behind would put a
+# phantom into the index every test run afterwards reads.
 MIX_ENV=test mix run -e "
   Troupe.Sessions.Storage.erase(Troupe.ObjectStore.from_env(), \"$AFTER_ID\")
 " >/dev/null 2>&1
+
+psql "$DB" "DELETE FROM sessions WHERE id = '$AFTER_ID'" >/dev/null
 
 cat <<'NOTE'
 

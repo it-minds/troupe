@@ -1,4 +1,4 @@
-defmodule Troupe.Operator.PolicyTest do
+defmodule Troupe.PolicyTest do
   @moduledoc """
   What a profile may ask for.
 
@@ -11,7 +11,8 @@ defmodule Troupe.Operator.PolicyTest do
 
   import Troupe.Operator.Fixtures
 
-  alias Troupe.Operator.{Policy, Profile}
+  alias Troupe.Policy
+  alias Troupe.WorkerProfile, as: Profile
 
   defp check(profile_overrides \\ [], policy_overrides \\ []) do
     Policy.violations(
