@@ -453,4 +453,22 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     type(pid, "carry on")
     assert user_state(pid).cmd_text == "worktree feat-auth: carry on"
   end
+
+  test "a multi-line tool argument renders on one row instead of aborting the frame" do
+    ws = tmp_workspace()
+    question = "Which of these?\n\n1. the first one\n2. the second one"
+    scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => question}}, {:finish, "ok"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me something")
+    await_state("code-1", :needs_input)
+
+    text = screen_text(pid, session)
+    assert text =~ "ask_user Which of these? 1. the first one 2. the second one"
+
+    press(pid, "1")
+    text = screen_text(pid, session)
+    assert text =~ "QUESTION: Which of these? 1. the first one 2. the second one"
+  end
 end

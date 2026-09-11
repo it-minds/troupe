@@ -218,7 +218,14 @@ defmodule Troupe.UI.TUI.Model do
       :question_asked ->
         pending =
           w.pending ++
-            [%{kind: :question, call_id: d.call_id, agent_path: path, question: d.question}]
+            [
+              %{
+                kind: :question,
+                call_id: d.call_id,
+                agent_path: path,
+                question: one_line(d.question)
+              }
+            ]
 
         %{w | pending: pending}
 
@@ -323,7 +330,7 @@ defmodule Troupe.UI.TUI.Model do
     %{
       id: id,
       name: name,
-      input: sanitize(input),
+      input: one_line(input),
       status: :running,
       result: "",
       lines: [],
@@ -951,6 +958,17 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   def sanitize(other), do: sanitize(to_string(other))
+
+  @doc """
+  Sanitises text that has to fit on one row — a tool head's argument, a pending
+  question. Model output is routinely multi-line (an `ask_user` question, a
+  heredoc in a `shell` command), and a newline inside a rendered span aborts the
+  frame, so the whole screen stays blank until the text scrolls away.
+  """
+  @spec one_line(String.t()) :: String.t()
+  def one_line(text) do
+    text |> sanitize() |> String.replace(~r/\s*\n\s*/, " ") |> String.trim()
+  end
 
   defp clean_line(line) do
     line
