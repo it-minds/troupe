@@ -211,30 +211,31 @@ smoke test of the resulting binary.
 
 # Stage 2 — progress
 
-Stage 2 is **partly delivered**. Seven of its thirty-five criteria pass, with the
-infrastructure and the plane↔worker contract they rest on. This section says which,
-and what is left.
+Stage 2 is **largely delivered**. Thirty-two of its thirty-five criteria pass in full
+and one in part; three are not built yet. This section says which, and what is left.
 
-`mix check` is green: 354 tests, zero warnings, formatted, credo clean, boundaries
-clean. Two of the test suites need real infrastructure and say so loudly when it is
-absent — a kind cluster for the operator and enrolment tests, and PostgreSQL for the
-plane's.
+`mix check` is green: 553 tests, zero warnings, formatted, credo clean, boundaries
+clean. Four of the suites need real infrastructure and say so loudly when it is absent —
+a kind cluster for the operator and enrolment tests, PostgreSQL for the plane's, and
+MinIO and OpenBao for the worker's.
 
 ```
 $ scripts/kind-up && helm upgrade --install troupe charts/troupe -n troupe-system --create-namespace
 $ scripts/dev-up && MIX_ENV=test mix ecto.migrate
 $ mix check
+3531 mods/funs, found no issues.
 boundaries ok: 4 rules, no violations
-Result: 31 passed     # troupe_protocol
+Result: 66 passed     # troupe_protocol  (13 against real OpenBao and MinIO)
 Result: 51 passed     # troupe_operator  (6 against a real cluster)
-Result: 68 passed     # troupe_plane     (9 against a real API server, 3 across two nodes)
-Result: 127 passed    # troupe_core
-Result: 35 passed     # troupe_gateway
+Result: 109 passed    # troupe_plane     (9 against a real API server, 3 across two nodes)
+Result: 168 passed    # troupe_core
+Result: 40 passed     # troupe_gateway
+Result: 62 passed     # troupe_worker    (all against real MinIO, OpenBao and PostgreSQL)
 Result: 22 passed     # troupe_tui
-Result: 20 passed     # troupe_ctl
+Result: 35 passed     # troupe_ctl
 ```
 
-## Passing
+## The platform
 
 **1. `helm install` on kind, and two profiles Ready.** `charts/troupe` ships the three
 CRDs, the operator, its RBAC, a default `TroupePolicy` and the admission policies. The
@@ -273,28 +274,98 @@ makes it a team; the same person arriving at login with SCIM off gets the same t
 the same profiles. Membership is replaced on both paths, so leaving a group at login
 removes the team it gave.
 
+**7. `troupe login`, and exactly what you may see.** The device grant runs against the
+identity provider; a test reads every request that crossed and asserts the plane received
+the provider's token and nothing else — no refresh token, no device code. The refresh
+token lands in a `0600` file; the session token is never written down. `sessions.list`
+then returns exactly the sessions owned, shared by ACL, or visible through a team, and a
+user in no enabled team sees an empty fleet and cannot create.
+
 **8 and 9. Capacity and budget are decided once, across replicas.** Against a real second
 node started with `:peer`: fifty creates split across two replicas fill a profile with
 room for twenty exactly once, thirty get a capacity error, and no pod exceeds its cap.
 Concurrent reservations never exceed a team's budget. Killing the replica holding an
 actor loses nothing it had granted.
 
-Partly, ahead of the items they belong to: a seal report from a stale epoch is rejected
-(19), and a marker string sent as session input does not appear in the plane's database
-(23).
+**11 and 29. Config bundles.** Publishing assigns the next version, hashes the content
+canonically, and announces to every pod on that channel and no others; adoption is the
+mismatch between the published hash and what each pod reports. A session is pinned at
+creation and keeps its version while v2 is published around it. Activating on a retired
+version upgrades, moves the pin, and appends `config_upgraded`. Revoking a team's grant
+makes its sessions read-only: reads still work, activation is refused.
 
-## Not yet built
+## Tokens and access
 
-- **Tokens and the harness API** (5, 7, 12, 13, 14). JWTs signed through OpenBao's
-  transit engine, JWKS, `auth.expiring`/`auth.refresh`, the plane's fleet-level JSON-RPC,
-  and `troupe login`.
-- **The worker runtime** (10, 11, 15–18, 20–22, 24–32). The object storage tier, session
-  keys in OpenBao, sealing and snapshots, dormancy and relocation, the mount table and
-  the bubblewrap sandbox, `fs.*`, MCP, and config bundles.
-- **Operations** (19 in full, 33, 34, 35). Index rebuild from object storage, the PITR
-  drill, ledger reconciliation, and erasure.
+**12, 13 and 14.** Tokens are assembled by the plane and signed through OpenBao's transit
+engine, so the plane holds no signing key and cannot export one. `aud` is the pod's
+worker id: a token minted for a `ux` pod fails on audience at a `dev` pod. Workers verify
+offline against a cached JWKS. `auth.expiring` warns two minutes out, `auth.refresh`
+renews on the connection that is already open, and the next command past `exp` is
+refused and the connection closes. A viewer's `input.send` and `approval.respond` are
+forbidden while events keep flowing; a collaborator revoked by the plane is refused on
+their next command, with the same token still in their hand.
 
-The foundations those need are in place: the schema they write to, the control channel
-they speak over, the images they ship in (`docker/Dockerfile`, `scripts/build-images`),
-and the development services they talk to (`scripts/dev-up` — PostgreSQL with WAL
-archiving, MinIO with a versioned bucket, OpenBao).
+**35. What each credential cannot do.** Against a real OpenBao with real tokens carrying
+the policies the chart installs: the plane cannot read a session key of any team and
+cannot write one, but can destroy metadata so erasure works; a profile's credential
+reaches only its granted teams; a pod cannot destroy a key even of its own team.
+
+## The worker runtime
+
+**15, 16 and 17.** A session's roots are a mount table — `session:/`, `team:<name>/`,
+`org:/` — recorded as a durable event and resolved by every file tool. The same table is
+the bind list for the sandbox: `shell` runs under bubblewrap, and ten tests run real
+commands to check that a read-only team volume fails a write with a read-only filesystem
+error, that another team's volume and another session's workspace do not exist, that
+`/tmp` is private, and that the process table has twenty entries rather than the host's
+hundreds. `publish` and `import` are the only tools that cross, they ask by default, and
+each copy is a durable event with source, destination and hash. A file written by `shell`
+reaches subscribers as `fs_changed` in well under the second the done item allows, and
+`fs.read` returns the same hash.
+
+**18, 19, 24 and 33.** Sealing happens at every turn completion and at least every sixty
+seconds, upload before report. `troupe verify` walks the chain offline and names the
+first bad `seq`; the plane holds every sealed head as an anchor, contiguous. A pod whose
+epoch has been passed refuses to activate — checked against the plaintext manifest before
+anything is decrypted — and a running session that is fenced kills its sealer, stops and
+discards its cache. Deleting a volume mid-session costs the unsealed tail and nothing
+else; the session comes back elsewhere from object storage with its history and its
+workspace. `Troupe.Plane.Index` rebuilds the whole index from storage with no key at all,
+trusting segments over a manifest a ghost pod may have rewritten.
+
+**20, 21 and 22.** Every LLM request carries owner, team, session and agent, checked
+against a mock gateway that reads the bytes. With the plane stopped, an attached harness
+completes its turn and sealing continues while the reports queue; creating and activating
+fail with a named reason. An MCP server receives the service credential and nothing else
+— the session travels as `_meta`, an identifier rather than a bearer of anything.
+
+**25, 26, 27, 28, 31 and 32.** Ten thousand dormant sessions on one pod add zero
+processes and no process memory. Reading a dormant session serves its full history with
+zero `Agent.Server` processes and zero model calls. An approval asked before dormancy and
+answered three days later brings the session back and continues from the call that was
+waiting. Eight simultaneous activations produce one tree and one epoch. Above the low
+watermark the pod evicts dormant caches least-recently-used and never an active
+workspace. After `session.erase` the key is gone from OpenBao, nothing under the prefix
+survives including prior versions in the versioned bucket, and a pod that was offline
+applies the erasure when it enrols.
+
+**23. No session content anywhere it should not be.** A recording TCP relay sits between
+a worker and the plane; a marker string sent as session input appears nowhere in the
+captured traffic, nor in the plane's row, nor in its anchors.
+
+## Not yet, and why
+
+- **5 in full.** A listener killed and restarted brings the worker's control link back in
+  well under ten seconds, and reports made meanwhile are delivered. The two-replica form
+  — kill one of two plane pods behind a Service — needs the cluster test rather than a
+  single BEAM.
+- **10.** Drain and scale-down with a live session: the plane stops placing, the turn
+  finishes, the session goes dormant, the pod is removed, and deleting the PVC loses
+  nothing. Every piece it rests on exists — draining is a `Fleet` flag, dormancy is
+  proven, and activation elsewhere from object storage is proven — but the sequence is
+  not yet driven end to end.
+- **30.** Fixture logs from prior releases replaying to a recorded fold hash, and a
+  corrupted snapshot falling back to a full replay.
+- **34.** A PITR restore of the plane database followed by an index rebuild and a ledger
+  reconcile. The database is configured for it (`scripts/dev-up` runs PostgreSQL with WAL
+  archiving) and the rebuild half is proven; the drill is not.
