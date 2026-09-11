@@ -180,9 +180,18 @@ spec:
             - name: RELEASE_DISTRIBUTION
               value: {{ .Values.plane.distribution | quote }}
             {{- if eq .Values.plane.distribution "name" }}
-            - name: RELEASE_NODE
+            # `<basename>@<pod ip>`, which is what libcluster's `mode: :ip` forms and
+            # therefore what the other replicas will try to connect to. The cookie comes
+            # baked into the release, so every replica of one image already shares it.
+            - name: POD_IP
               valueFrom:
                 fieldRef: {fieldPath: status.podIP}
+            - name: TROUPE_NODE_BASENAME
+              value: troupe-plane
+            - name: RELEASE_NODE
+              value: "troupe-plane@$(POD_IP)"
+            - name: TROUPE_PLANE_SELECTOR
+              value: "app.kubernetes.io/component=plane,app.kubernetes.io/instance={{ .Release.Name }}"
             {{- end }}
             # Secrets are referenced, never rendered. Troupe creates none of these.
             - name: DATABASE_URL

@@ -1216,3 +1216,30 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 216. **`--auto-approve` is answered by the client, over the protocol.** Not by telling the
      session to stop asking: a session on somebody else's pod is not one a client gets to
      disarm, and the approval stays in the log with the name of whoever gave it.
+
+## Deploying
+
+217. **The plane's `topologies` are built in `runtime.exs` when `RELEASE_DISTRIBUTION` is
+     `name`.** `libcluster` was a dependency, the RBAC for it was in the chart, and nothing
+     ever configured it — so the chart's default of two replicas produced two *planes*, each
+     placing sessions and reserving budget as if it were alone. Distribution is the switch
+     because it is the honest one: a node that is not distributed cannot cluster, and a
+     single replica should not open a distribution port for nothing.
+
+218. **`kubernetes_ip_lookup_mode: :pods`.** libcluster defaults to `:endpoints`, which
+     applies the selector to *Services* — and a Service carries `component=plane` as its
+     selector rather than as a label of its own, so the default matched nothing, found no
+     peers, and logged nothing about it. Verified by `:global.whereis_name/1` resolving to
+     the same node from both replicas, which is the property that was actually wanted.
+
+219. **Team volumes go on Scaleway File Storage, worker disks on Block Storage.** The team
+     volume is the only `ReadWriteMany` claim Troupe makes, and File Storage supports it
+     natively with a CSI driver preinstalled on Kapsule — so the alternative, running a
+     distributed filesystem, buys nothing. It costs a regional pin to PAR until AMS lands
+     in 2026, and it is the only component with that restriction.
+
+220. **OpenBao is the one thing not moved to a managed service.** Troupe uses KV v2 for
+     session keys and the transit engine to sign plane tokens, and Scaleway's Key Manager is
+     neither of those APIs; moving would mean a second KMS adapter and a second signer, for
+     a managed service holding the keys that protect every session. Their Key Manager is
+     used for what it is good at instead: auto-unsealing it.

@@ -1,0 +1,136 @@
+# Troupe on Scaleway: Kapsule, Managed PostgreSQL, Object Storage, File Storage.
+#
+# Copy this, fill in the four placeholders marked CHANGE ME, and install:
+#
+#     helm upgrade --install troupe charts/troupe \
+#       --namespace troupe-system --create-namespace \
+#       --values charts/troupe/values.scaleway.yaml
+#
+# Troupe creates no secrets. The four it reads must exist in `troupe-system` before the
+# chart is installed, and one of them must also exist in every worker namespace — see
+# `docs/deploying-on-scaleway.md`, which lists them with the commands that create them.
+
+namespace: troupe-system
+
+operator:
+  image:
+    repository: rg.fr-par.scw.cloud/troupe/troupe-operator   # CHANGE ME: your registry
+    tag: "0.2.0"
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  # Kapsule's Cilium CNI. With it the operator writes real FQDN egress rules per profile;
+  # without it, egress to a named host is a wide CIDR rule and a documented gap.
+  ciliumAvailable: true
+  ingressClassName: nginx
+  # Workers are reached at `wss://<ordinal>.<profile>.workers.<domain>` on 443, which is
+  # the default, so no port here.
+  workersScheme: wss
+  workersPort: ""
+  # A wildcard certificate for `*.workers.<domain>`, issued by cert-manager with DNS-01.
+  # One certificate covers every pod of every profile.
+  tlsSecretName: troupe-workers-tls
+  drainTimeoutSeconds: 300
+  maxPorts: 65536
+
+plane:
+  enabled: true
+  image:
+    repository: rg.fr-par.scw.cloud/troupe/troupe-plane      # CHANGE ME: your registry
+    tag: "0.2.0"
+  # Two, and `distribution: name` with them. The cluster-unique actors are registered
+  # with `:global`, so replicas that do not form an Erlang cluster are not two replicas
+  # of one plane but two planes, each placing sessions as if it were alone.
+  replicas: 2
+  distribution: name
+  host: troupe.example.com                                   # CHANGE ME: your plane host
+  baseUrl: https://troupe.example.com                        # CHANGE ME: the same, with scheme
+  ingressClassName: nginx
+  tlsSecretName: troupe-plane-tls
+  ingress:
+    enabled: true
+  resources:
+    requests: {cpu: 200m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  controlPort: 4001
+  httpPort: 4000
+  maxPorts: 65536
+  provisioningMode: direct
+  # The identity-provider group whose members administer the platform. Membership is the
+  # provider's business: it is never edited in Troupe.
+  platformAdminGroup: troupe-platform-admins
+  groupsClaim: groups
+  database:
+    secretName: troupe-plane-database
+    secretKey: url
+  secretKeyBase:
+    secretName: troupe-plane-secret-key-base
+    secretKey: value
+  # Your own identity provider. Troupe is a plain relying party and needs four things
+  # from it: a discovery document, a JWKS, the **device authorization grant**, and a
+  # `groups` claim. The device grant is not optional — `troupe login` runs in a terminal
+  # and has no redirect URI to come back to.
+  oidc:
+    issuer: https://login.example.com                        # CHANGE ME
+    clientId: troupe
+    authorizeUrl: https://login.example.com/oauth2/v2.0/authorize
+    deviceUrl: https://login.example.com/oauth2/v2.0/devicecode
+    tokenUrl: https://login.example.com/oauth2/v2.0/token
+    # A public client running the device grant has no secret. Leave empty unless your
+    # provider insists on one.
+    secretName: ""
+  scim:
+    enabled: false
+
+# OpenBao, in-cluster. Not a managed service, and deliberately: Troupe uses KV v2 for
+# per-session data keys and the transit engine to sign plane tokens, and Scaleway's Key
+# Manager is neither of those APIs. Run it with Raft storage and auto-unseal *via*
+# Scaleway Key Manager, which is what that product is good at.
+bao:
+  address: http://openbao.troupe-system.svc:8200
+  authPath: kubernetes
+  planeRole: troupe-plane
+  # Empty: the plane and the workers authenticate as their ServiceAccounts. A static
+  # token belongs in a development cluster and nowhere else.
+  tokenSecretName: ""
+
+# Scaleway Object Storage, S3-compatible.
+#
+# **Turn bucket versioning on.** Erasure removes every version of an object, and a bucket
+# without versioning makes that promise vacuous rather than false — which is worse.
+objectStore:
+  endpoint: https://s3.fr-par.scw.cloud
+  bucket: troupe-sessions                                    # CHANGE ME if you like
+  region: fr-par
+  secretName: troupe-object-store
+
+policy:
+  install: true
+  name: default
+  allowedImageRepositories:
+    - rg.fr-par.scw.cloud/troupe/troupe-worker               # CHANGE ME: your registry
+  maxReplicas: 8
+  maxSessionsPerPod: 8
+  maxResources:
+    cpu: "4"
+    memory: 8Gi
+  # Every host a profile may reach, as exact names or one-label wildcards. A bare `*` is
+  # not a pattern this accepts, and should not be: a profile that could name any endpoint
+  # could send a team's code anywhere.
+  allowedEgress:
+    - llm-gw.itmindsinternal.dk
+    - github.com
+    - "*.github.com"
+  # `scw-bssd` is Scaleway Block Storage (ReadWriteOnce), which is what a worker's own
+  # PVC uses. A *team* volume is ReadWriteMany and needs `scw-sfs` — Scaleway File
+  # Storage, whose CSI driver is preinstalled on Kapsule. Listing both is what lets a
+  # profile ask for either; listing only block storage would refuse every team volume.
+  allowedStorageClasses:
+    - scw-bssd
+    - scw-sfs
+  orgVolume: {}
+  namespacePrefix: troupe-w-
+  workersDomain: workers.example.com                         # CHANGE ME: your wildcard
+admission:
+  install: true

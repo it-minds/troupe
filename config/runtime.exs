@@ -155,6 +155,38 @@ if config_env() == :prod do
       ],
       url: [host: System.get_env("TROUPE_HOST", "localhost"), scheme: "https", port: 443]
 
+    # Erlang distribution, without which `replicas: 2` is not two replicas of one plane
+    # but two planes. The cluster-unique actors — one `Placement` per profile, one
+    # `TeamBudget` per team — are registered with `:global`, and `:global` spans a
+    # cluster. Unclustered, each replica would place sessions and reserve budget as if it
+    # were the only one.
+    #
+    # `mode: :ip` rather than a headless service: a pod's IP is what the API server
+    # already knows, and the plane's RBAC grants exactly `pods` and `endpoints`.
+    #
+    # `kubernetes_ip_lookup_mode: :pods` is load-bearing. libcluster defaults to
+    # `:endpoints`, which applies the selector to *Services* — and a Service carries
+    # `component=plane` as its selector rather than as a label of its own, so the default
+    # matches nothing, finds no peers, and says nothing about it. The pods are what we
+    # want the selector applied to.
+    if System.get_env("RELEASE_DISTRIBUTION") == "name" do
+      config :troupe_plane,
+        topologies: [
+          plane: [
+            strategy: Cluster.Strategy.Kubernetes,
+            config: [
+              mode: :ip,
+              kubernetes_ip_lookup_mode: :pods,
+              kubernetes_node_basename: System.get_env("TROUPE_NODE_BASENAME", "troupe-plane"),
+              kubernetes_selector:
+                System.get_env("TROUPE_PLANE_SELECTOR", "app.kubernetes.io/component=plane"),
+              kubernetes_namespace: System.get_env("TROUPE_PLANE_NAMESPACE", "troupe-system"),
+              polling_interval: 5_000
+            ]
+          ]
+        ]
+    end
+
     config :troupe_plane,
       autostart: true,
       base_url: System.get_env("TROUPE_BASE_URL"),
