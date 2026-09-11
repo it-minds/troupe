@@ -120,6 +120,16 @@ defmodule Troupe.Protocol.Schema do
         "call_id" => required(:string),
         "resolved_by" => required(:string)
       },
+      # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
+      # creation, and recorded so that a replay can tell what was allowed at the time.
+      "mounts_resolved" => %{"mounts" => required(:array)},
+      "published" => %{
+        "source" => required(:string),
+        "destination" => required(:string),
+        "hash" => required(:string),
+        "bytes" => required(:integer),
+        "direction" => required(:string)
+      },
       "session_dormant" => %{"last_seq" => required(:integer)},
       "session_activated" => %{"epoch" => required(:string), "pod" => optional(:string)},
       "session_resumed" => %{

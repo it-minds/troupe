@@ -581,3 +581,40 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      cannot fill a developer's disk to prove what happens when a PVC fills, and the thing
      worth proving is the eviction policy; that `df` reports the truth is checked
      separately, against `df`.
+
+102. **The mount table is what the tools check *and* what the sandbox is built from.**
+     That is the point of having one: a read-only team volume is read-only to the kernel
+     because the same entry that makes `write_file` refuse it is the `--ro-bind` the
+     namespace is built with, so the two can never disagree. The Forbidden list says path
+     checks may not be the only enforcement for `shell`, and they cannot be — a shell
+     command can do anything a process can.
+
+103. **Another team's volume does not resolve, rather than being rejected.** There is
+     nothing to resolve it against: it is a path with no meaning in this session. The
+     sandbox then makes that literally true, because the volume is absent from the mount
+     namespace.
+
+104. **A mount prefix is `session:`, `org:`, or `team:<name>` — and nothing else is one.**
+     An unrecognised head is a session-relative path, which keeps every existing tool
+     call meaning what it meant and stops a Windows drive letter being read as a mount.
+     An absolute path stays absolute and is checked: reinterpreting `/etc/passwd` as a
+     file inside the root would be an escape dressed as a convenience.
+
+105. **`mounts_resolved` is recorded only when there is something to say.** A local
+     session has `session:/` and nothing else, which is the default and not worth a line
+     in every log. A session with a team or org volume records the table, so what it was
+     allowed to see is part of its history after the pod that resolved it is gone.
+
+106. **`publish` and `import` are tools of their own, and both ask by default.** Copying a
+     file onto a volume the whole team can see is a different act from editing one in a
+     scratch directory: it should look different in a log, and the person it becomes
+     visible to cannot see what led to it. A copy that does not cross a mount boundary is
+     refused, because `write_file` already does that and a durable record should mean one
+     thing.
+
+107. **Sandboxing is off by default outside a pod.** A laptop session has one mount, no
+     team volumes, and a user who already owns every file the agent can reach, so a
+     namespace would buy nothing and cost a dependency. Where it is *required* and
+     bubblewrap is missing or mis-pathed, the command fails rather than running
+     unconfined — the difference between a confined shell and an unconfined one is not
+     something to fall back from quietly.

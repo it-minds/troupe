@@ -48,7 +48,7 @@ defmodule Troupe.Tools.EditFile do
     with {:ok, path} <- Tool.fetch_string(args, "path"),
          {:ok, old} <- Tool.fetch_string(args, "old_string"),
          {:ok, new} <- Tool.fetch_string(args, "new_string"),
-         {:ok, resolved} <- Workspace.resolve(ctx.workspace, path),
+         {:ok, resolved} <- Workspace.resolve(ctx.workspace, path, :write),
          {:ok, contents} <- read(resolved),
          {:ok, updated} <- replace(contents, old, new) do
       Watch.expect_write(ctx.watcher, resolved, updated)

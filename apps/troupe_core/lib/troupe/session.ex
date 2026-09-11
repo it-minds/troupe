@@ -118,6 +118,15 @@ defmodule Troupe.Session do
     with {:ok, workspace} <- Workspace.new(workspace_path) do
       config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, []))
 
+      # A local session has only `session:/` and this is exactly what `Workspace.new/1`
+      # already gave it. A session on a pod arrives with its team volume and possibly
+      # the org volume, resolved by the plane from the team's grant.
+      workspace =
+        case Keyword.get(opts, :mounts) do
+          nil -> workspace
+          mounts -> Workspace.with_mounts(workspace, mounts)
+        end
+
       definitions =
         Keyword.get_lazy(opts, :definitions, fn -> Definitions.load(workspace.root_real) end)
 

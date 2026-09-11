@@ -14,7 +14,7 @@ defmodule Troupe do
   """
 
   alias Troupe.Agent.Server, as: Agent
-  alias Troupe.{Events, Registry, Session, Sessions}
+  alias Troupe.{Events, Mounts, Registry, Session, Sessions}
   alias Troupe.Session.{Approvals, Blobs, Log, Watcher}
   alias Troupe.Sessions.Index
 
@@ -44,9 +44,27 @@ defmodule Troupe do
         "visibility" => "private"
       })
 
+      # What this session may touch, and at what mode, recorded once — but only when
+      # there is something to say. A local session has `session:/` and nothing else,
+      # which is the default and not worth a line in every log; a session with a team or
+      # org volume records it, so that what it was allowed to see is part of its history
+      # even after the pod that resolved it has been replaced.
+      if shared_mounts?(workspace.mounts) do
+        Log.append(
+          session_id,
+          Session.root_path(),
+          :mounts_resolved,
+          Mounts.to_json(workspace.mounts)
+        )
+      end
+
       {:ok, %{id: session_id, pid: pid, workspace: workspace}}
     end
   end
+
+  defp shared_mounts?(nil), do: false
+
+  defp shared_mounts?(%Mounts{entries: entries}), do: Enum.any?(entries, &(&1.kind != :session))
 
   @doc """
   Send the root agent a message. Async: it is postponed if the agent is busy.

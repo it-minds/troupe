@@ -36,7 +36,7 @@ defmodule Troupe.Tools.WriteFile do
   def run(args, ctx) do
     with {:ok, path} <- Tool.fetch_string(args, "path"),
          {:ok, content} <- Tool.fetch_string(args, "content"),
-         {:ok, resolved} <- Workspace.resolve(ctx.workspace, path) do
+         {:ok, resolved} <- Workspace.resolve(ctx.workspace, path, :write) do
       # Tell the watcher before touching disk, or our own write triggers us.
       Watch.expect_write(ctx.watcher, resolved, content)
 

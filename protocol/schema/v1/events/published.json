@@ -1,0 +1,31 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/published.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "bytes": {
+      "type": "integer"
+    },
+    "destination": {
+      "type": "string"
+    },
+    "direction": {
+      "type": "string"
+    },
+    "hash": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "bytes",
+    "destination",
+    "direction",
+    "hash",
+    "source"
+  ],
+  "title": "published",
+  "type": "object"
+}

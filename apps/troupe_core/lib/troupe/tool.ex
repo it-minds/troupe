@@ -86,6 +86,11 @@ defmodule Troupe.Tool.Result do
   def describe({:outside_workspace, path}),
     do: "Path #{path} is outside the workspace and was rejected. Use a path inside the project."
 
+  def describe({:read_only_mount, name}),
+    do:
+      "#{name} is mounted read-only for this session and cannot be written to. " <>
+        "Write to session:/ instead, and use `publish` if it needs to go to #{name}."
+
   def describe({:not_allowed, tool}),
     do: "The tool #{tool} is not available in the current profile."
 

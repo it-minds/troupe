@@ -20,6 +20,11 @@ defmodule Troupe.Tools do
     Troupe.Tools.ListFiles,
     Troupe.Tools.Grep,
     Troupe.Tools.Shell,
+    # The only two tools that copy between `session:/` and a shared root. They are in
+    # the built-in set rather than added by the worker so that a profile's allowlist can
+    # name them whether or not the session turns out to have a team volume.
+    Troupe.Tools.Publish,
+    Troupe.Tools.Import,
     Troupe.Tools.TodoWrite,
     Troupe.Tools.TodoRead,
     Troupe.Tools.Delegate,

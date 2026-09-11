@@ -15,9 +15,14 @@ defmodule Troupe.Workspace do
   """
 
   @enforce_keys [:root, :root_real, :root_key]
-  defstruct [:root, :root_real, :root_key]
+  defstruct [:root, :root_real, :root_key, :mounts]
 
-  @type t :: %__MODULE__{root: Path.t(), root_real: Path.t(), root_key: String.t()}
+  @type t :: %__MODULE__{
+          root: Path.t(),
+          root_real: Path.t(),
+          root_key: String.t(),
+          mounts: Troupe.Mounts.t() | nil
+        }
 
   @max_link_hops 40
 
@@ -34,12 +39,28 @@ defmodule Troupe.Workspace do
 
     if File.dir?(expanded) do
       with {:ok, real} <- real_path(expanded) do
-        {:ok, %__MODULE__{root: expanded, root_real: real, root_key: compare_key(real)}}
+        {:ok,
+         %__MODULE__{
+           root: expanded,
+           root_real: real,
+           root_key: compare_key(real),
+           mounts: Troupe.Mounts.local(real)
+         }}
       end
     else
       {:error, {:not_a_directory, expanded}}
     end
   end
+
+  @doc """
+  Give a workspace the session's mount table.
+
+  A local session has only `session:/` and this changes nothing. A session on a pod has
+  its team volume and possibly the org volume, and from here on every path a tool is
+  given resolves against the table rather than against one root.
+  """
+  @spec with_mounts(t(), Troupe.Mounts.t()) :: t()
+  def with_mounts(%__MODULE__{} = ws, mounts), do: %{ws | mounts: mounts}
 
   @doc "Same as `new/1` but raises, for callers that treat a bad workspace as fatal."
   @spec new!(Path.t()) :: t()
@@ -56,8 +77,11 @@ defmodule Troupe.Workspace do
   Returns the resolved absolute path on success. Relative paths are taken from the
   workspace root; absolute ones are allowed only when they resolve back inside it.
   """
-  @spec resolve(t(), String.t()) :: {:ok, Path.t()} | {:error, {:outside_workspace, String.t()}}
-  def resolve(%__MODULE__{} = ws, path) when is_binary(path) do
+  @spec resolve(t(), String.t(), :read | :write) ::
+          {:ok, Path.t()} | {:error, {:outside_workspace, String.t()} | {:read_only_mount, String.t()}}
+  def resolve(ws, path, mode \\ :read)
+
+  def resolve(%__MODULE__{mounts: nil} = ws, path, _mode) when is_binary(path) do
     candidate =
       if absolute?(path) do
         Path.expand(path)
@@ -74,12 +98,32 @@ defmodule Troupe.Workspace do
     end
   end
 
+  def resolve(%__MODULE__{} = ws, path, mode) when is_binary(path) do
+    case Troupe.Mounts.resolve(ws.mounts, path, mode) do
+      {:ok, real, _entry} -> {:ok, real}
+      # A read-only mount is a different answer from a path that does not exist here,
+      # and a model that is told so can pick a different destination instead of retrying.
+      {:error, {:read_only_mount, name}} -> {:error, {:read_only_mount, name}}
+      {:error, _reason} -> {:error, {:outside_workspace, path}}
+    end
+  end
+
   @doc "The path as the model should see it: relative to the workspace root."
   @spec relative(t(), Path.t()) :: String.t()
-  def relative(%__MODULE__{} = ws, path) do
+  def relative(%__MODULE__{mounts: nil} = ws, path) do
     case Path.relative_to(path, ws.root_real) do
       ^path -> path
       rel -> rel
+    end
+  end
+
+  def relative(%__MODULE__{} = ws, path) do
+    case Troupe.Mounts.owner(ws.mounts, path) do
+      # Inside the session's own root a plain relative path is what a model expects and
+      # what every existing log says. Outside it, the mount has to be named.
+      %{kind: :session} -> Path.relative_to(path, ws.root_real)
+      nil -> path
+      _entry -> Troupe.Mounts.display(ws.mounts, path)
     end
   end
 
@@ -166,7 +210,15 @@ defmodule Troupe.Workspace do
 
   defp join(prefix, components), do: prefix <> "/" <> Enum.join(components, "/")
 
-  defp absolute?(path) do
+  @doc """
+  Whether a path is absolute, in the Windows sense as well as the POSIX one.
+
+  A drive letter and a UNC share are both absolute, and both have to be recognised even
+  on Linux: a path that looks absolute must never be silently reinterpreted as relative
+  to a root, because that turns `/etc/passwd` into a file inside the workspace.
+  """
+  @spec absolute?(Path.t()) :: boolean()
+  def absolute?(path) do
     normalized = String.replace(path, "\\", "/")
 
     String.starts_with?(normalized, "/") or

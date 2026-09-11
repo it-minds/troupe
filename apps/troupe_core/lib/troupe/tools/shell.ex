@@ -16,7 +16,7 @@ defmodule Troupe.Tools.Shell do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Reaper, Tool}
+  alias Troupe.{Reaper, Sandbox, Tool}
   alias Troupe.Tools.Output
 
   @impl Troupe.Tool
@@ -65,11 +65,19 @@ defmodule Troupe.Tools.Shell do
 
   @impl Troupe.Tool
   def run(args, ctx) do
-    with {:ok, command} <- Tool.fetch_string(args, "command") do
+    with {:ok, command} <- Tool.fetch_string(args, "command"),
+         :ok <- Sandbox.check() do
       timeout = Tool.fetch_int(args, "timeout_ms", ctx.timeout_ms) || 120_000
       {shell, flag} = shell()
 
-      case Reaper.open(ctx.workspace.root_real, [shell, flag, command]) do
+      # Path checks are not the enforcement here and cannot be: a shell command can do
+      # anything a process can. The mount table the file tools resolve against is also
+      # the bind list for the sandbox, so a read-only team volume is read-only to the
+      # kernel and another team's volume is absent from the namespace entirely.
+      argv =
+        Sandbox.wrap([shell, flag, command], ctx.workspace.mounts, cwd: ctx.workspace.root_real)
+
+      case Reaper.open(ctx.workspace.root_real, argv) do
         {:ok, port} -> collect(port, timeout, cap(ctx))
         {:error, :reaper_missing} -> {:error, reaper_missing_message()}
       end
