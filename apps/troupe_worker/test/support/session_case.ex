@@ -149,12 +149,11 @@ defmodule Troupe.Worker.SessionCase do
       workspace: Keyword.get(opts, :workspace, context.workspace),
       fake: fake,
       report: Keyword.get(opts, :report, fn _ -> :ok end),
-      config_overrides: [
-        provider: "fake",
-        auto_approve: true,
-        model: "fake-model",
-        state_dir: state_dir
-      ]
+      config_overrides:
+        Keyword.merge(
+          [provider: "fake", auto_approve: true, model: "fake-model", state_dir: state_dir],
+          Keyword.get(opts, :config_overrides, [])
+        )
     ] ++
       Keyword.take(opts, [:seal_interval_ms, :snapshot_every, :dormant_after_ms, :owner_subject, :profile])
   end

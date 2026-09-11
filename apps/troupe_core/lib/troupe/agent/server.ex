@@ -160,7 +160,7 @@ defmodule Troupe.Agent.Server do
       _ ->
         state = Enum.reduce(events, state, &fold_event/2)
         incomplete = incomplete_calls(events)
-        action = resume_action(state, incomplete, cold_start?)
+        action = resume_action(state, incomplete, awaiting_approval(events), cold_start?)
 
         log(state, :agent_restarted, %{
           "replayed_events" => length(events),
@@ -248,19 +248,48 @@ defmodule Troupe.Agent.Server do
   # `resume_on_restart: true` opts back into the old behaviour: incomplete tool calls
   # are re-run (at-least-once, documented in ARCHITECTURE.md) and a turn the model owes
   # is taken.
-  defp resume_action(state, incomplete, cold_start?) do
+  defp resume_action(state, incomplete, awaiting, cold_start?) do
     cond do
       state.done_reason != nil -> :none
       not cold_start? or state.config.resume_on_restart -> carry_on(state, incomplete)
-      true -> interrupt(state, incomplete)
+      true -> interrupt(state, incomplete, awaiting)
     end
   end
 
   defp carry_on(state, []), do: if(needs_turn?(state), do: :turn, else: :none)
   defp carry_on(_state, incomplete), do: {:rerun, incomplete}
 
-  defp interrupt(state, []), do: if(needs_turn?(state), do: :interrupted, else: :none)
-  defp interrupt(_state, incomplete), do: {:interrupted, incomplete}
+  defp interrupt(state, [], _awaiting), do: if(needs_turn?(state), do: :interrupted, else: :none)
+
+  # A call that never finished because it was waiting for a person is not an interrupted
+  # call. A session can go dormant with an approval outstanding and be answered three
+  # days later, and closing it off as an error on the way back would throw away the turn
+  # the person is about to say yes to. It is re-dispatched instead, which puts the
+  # request back in front of whoever is watching — and if the answer is already in the
+  # log, the gate replies with it immediately.
+  defp interrupt(_state, incomplete, awaiting) do
+    {pending, stopped} = Enum.split_with(incomplete, fn {id, _name, _args} -> id in awaiting end)
+
+    cond do
+      pending == [] -> {:interrupted, stopped}
+      stopped == [] -> {:rerun, pending}
+      true -> {:resume, pending, stopped}
+    end
+  end
+
+  # Calls with an approval request and no decision. Both events are durable, which is
+  # what makes this answerable from the log alone after any amount of time.
+  defp awaiting_approval(events) do
+    decided =
+      for %Event{type: "approval_decided", data: %{"call_id" => id}} <- events,
+          into: MapSet.new(),
+          do: id
+
+    for %Event{type: "approval_requested", data: %{"call_id" => id}} <- events,
+        not MapSet.member?(decided, id),
+        into: MapSet.new(),
+        do: id
+  end
 
   defp incomplete_calls(events) do
     completed =
@@ -317,6 +346,18 @@ defmodule Troupe.Agent.Server do
     # Replay handed us calls that started but never completed. Re-dispatching them
     # here rather than in init keeps one code path for tool dispatch.
     dispatch_reruns(state, calls)
+  end
+
+  # Some were waiting for a person and some were not. The ones that were not are closed
+  # off first, so the model has a `tool_result` for every `tool_use` it emitted, and then
+  # the waiting ones go back out.
+  def idle(:internal, {:resume, pending, stopped}, state) do
+    actions = [
+      {:next_event, :internal, {:interrupted, stopped}},
+      {:next_event, :internal, {:rerun, pending}}
+    ]
+
+    {:keep_state, state, actions}
   end
 
   def idle({:call, from}, :snapshot, state), do: reply_snapshot(from, :idle, state)

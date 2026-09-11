@@ -639,3 +639,26 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      confined by exactly the rules the agent was. `fs.upload` needs `control`, because
      putting a file into a session's workspace is steering it, and the event names the
      person who did it rather than the session.
+
+112. **A collaborator's input is billed to the owner's team budget.** The budget belongs
+     to the session and a session has one owner, so `user` and `metadata.troupe_owner` on
+     every gateway request name the owner rather than whoever is typing. Recorded here
+     because it is a policy choice with a plausible alternative — billing the speaker —
+     and the alternative would make a session's cost depend on who happened to answer.
+
+113. **A call waiting for an approval is not an interrupted call.** A session can go
+     dormant with a question outstanding and be answered three days later; closing the
+     call off as an error on the way back would throw away the turn the person is about
+     to say yes to. It is re-dispatched instead, which puts the request back in front of
+     whoever is watching.
+
+114. **The approval gate replays its decisions from the log.** Approvals are durable
+     events precisely so they survive dormancy, and a gate that forgot them on the way
+     back would be the half of that promise nobody kept — a re-dispatched call would ask
+     the same person the same question again.
+
+115. **The ten-thousand-dormant-sessions bound is measured as processes and process
+     memory, not as total VM memory.** Those are the two things a regression would move:
+     one process per dormant session would show in the count, and reading a cache into
+     memory to index it would show in the bytes. Total VM memory in a test run measures
+     the test suite as much as the pod.

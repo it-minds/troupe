@@ -26,6 +26,10 @@ defmodule Troupe.Session.Approvals do
     auto_approve: false,
     pending: %{},
     resolved: %{},
+    # Decisions read back from the log at start-up. A session that went dormant with an
+    # approval answered but its tool not yet finished comes back, re-dispatches the call,
+    # and must not ask the same person the same question again.
+    decided: %{},
     session_allows: MapSet.new()
   ]
 
@@ -77,12 +81,51 @@ defmodule Troupe.Session.Approvals do
     session_id = Keyword.fetch!(opts, :session_id)
     Process.set_label("troupe approvals #{session_id}")
 
-    {:ok,
-     %__MODULE__{
-       session_id: session_id,
-       auto_approve: Keyword.get(opts, :auto_approve, false)
-     }}
+    state = %__MODULE__{
+      session_id: session_id,
+      auto_approve: Keyword.get(opts, :auto_approve, false)
+    }
+
+    # Approvals are durable events precisely so they survive dormancy, and a gate that
+    # forgot them on the way back would be the half of that promise nobody kept.
+    {:ok, replay(state)}
   end
+
+  defp replay(state) do
+    state.session_id
+    |> Log.replay()
+    |> Enum.reduce(state, &fold/2)
+  rescue
+    # A session with no log yet — the very first start — has nothing to replay.
+    _exception -> state
+  catch
+    :exit, _reason -> state
+  end
+
+  defp fold(%{type: "approval_decided", data: data} = event, state) do
+    decision = data["decision"]
+
+    state = %{
+      state
+      | decided: Map.put(state.decided, data["call_id"], answer_for(decision)),
+        resolved:
+          Map.put(state.resolved, data["call_id"], %{
+            agent_path: event.agent || data["agent_path"],
+            by: describe_actor(event.actor)
+          })
+    }
+
+    if decision == "allow_session" do
+      %{state | session_allows: MapSet.put(state.session_allows, data["tool"])}
+    else
+      state
+    end
+  end
+
+  defp fold(_event, state), do: state
+
+  defp answer_for("deny"), do: :deny
+  defp answer_for(_decision), do: :allow
 
   @impl GenServer
   def handle_call({:request, req}, from, state) do
@@ -92,6 +135,12 @@ defmodule Troupe.Session.Approvals do
 
       MapSet.member?(state.session_allows, req.tool) ->
         {:reply, :allow, state}
+
+      # Already answered, and the tool is only asking again because the session came back
+      # and re-dispatched it. Asking a second time would be a question the person has
+      # already answered.
+      Map.has_key?(state.decided, req.call_id) ->
+        {:reply, Map.fetch!(state.decided, req.call_id), state}
 
       true ->
         {caller, _tag} = from
@@ -143,9 +192,10 @@ defmodule Troupe.Session.Approvals do
         )
 
         resolved = Map.put(state.resolved, call_id, resolved_by(entry.req, actor))
+        decided = Map.put(state.decided, call_id, answer)
 
         {:noreply,
-         %{state | pending: pending, resolved: resolved, session_allows: allows}}
+         %{state | pending: pending, resolved: resolved, decided: decided, session_allows: allows}}
     end
   end
 
