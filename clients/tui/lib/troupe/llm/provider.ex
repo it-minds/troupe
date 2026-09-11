@@ -9,12 +9,45 @@ defmodule Troupe.LLM.Provider do
 
   alias Troupe.LLM.Request
 
+  @typedoc """
+  Token counts, normalised across providers. `input_tokens` is input the provider
+  charged in full; `cache_read` is input it served from its prompt cache (a
+  fraction of the price) and `cache_write` input it charged a premium to cache.
+  The three are disjoint, so the prompt was `input_tokens + cache_read +
+  cache_write` tokens long. Providers report this differently — Anthropic's own
+  `input_tokens` already excludes both cache figures, OpenAI's `prompt_tokens`
+  includes the cached ones — so each adapter converts to this shape.
+  """
+  @type usage :: %{
+          input_tokens: non_neg_integer(),
+          output_tokens: non_neg_integer(),
+          cache_read: non_neg_integer(),
+          cache_write: non_neg_integer()
+        }
+
   @type response :: %{
           content: [Troupe.LLM.Message.block()],
-          usage: %{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()},
+          usage: usage(),
           stop_reason: atom(),
           model: String.t()
         }
+
+  @doc "A zero usage in the normalised shape."
+  @spec empty_usage() :: usage()
+  def empty_usage,
+    do: %{input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0}
+
+  @doc """
+  What a response cost at close to full price: fresh input plus what it paid a
+  premium to cache. Cache reads are deliberately not in it.
+  """
+  @spec billed_input(map()) :: non_neg_integer()
+  def billed_input(usage),
+    do: Map.get(usage, :input_tokens, 0) + Map.get(usage, :cache_write, 0)
+
+  @doc "Every input token the prompt contained, cached or not."
+  @spec total_input(map()) :: non_neg_integer()
+  def total_input(usage), do: billed_input(usage) + Map.get(usage, :cache_read, 0)
 
   @callback stream(config :: term(), Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
 

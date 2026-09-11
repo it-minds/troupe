@@ -214,7 +214,11 @@ a timeout.
 | `{:child_result, ref, result}`                       | child Agent.Server       |
 | `{:DOWN, ref, :process, pid, reason}`                | monitors (tasks, children) |
 
-`response :: %{content: [block], usage: %{input_tokens, output_tokens}, stop_reason: atom, model: binary}`
+`response :: %{content: [block], usage: usage, stop_reason: atom, model: binary}`, where
+`usage :: %{input_tokens, output_tokens, cache_read, cache_write}`. The three input
+figures are disjoint and normalised by each adapter, so the prompt was
+`input_tokens + cache_read + cache_write` tokens long whatever the provider
+reports natively (Decision 59). A budget spends `input_tokens + cache_write`.
 `result :: {:ok, binary} | {:error, binary}`
 
 ### 4.3 From agents to session actors (synchronous call allowed; they never call back)
@@ -261,7 +265,7 @@ Persisted event types and data:
 | `worktree_merged`      | branch          | `%{output, conflicts}`                                               |
 | `worktree_discarded`   | branch          | `%{}`                                                                |
 | `input`                | agent           | `%{source, content}`                                                 |
-| `assistant_message`    | agent           | `%{content, usage, model, stop_reason}`                              |
+| `assistant_message`    | agent           | `%{content, usage, model, stop_reason}` (usage as above; an event written before Decision 59 has no cache keys and folds as zero) |
 | `tool_call_started`    | agent           | `%{call_id, name, input}`                                            |
 | `tool_call_completed`  | agent           | `%{call_id, ok, content}`                                            |
 | `approval_requested`   | agent           | `%{call_id, name, input, preview}`                                   |

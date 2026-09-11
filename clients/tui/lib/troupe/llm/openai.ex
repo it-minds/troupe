@@ -23,7 +23,7 @@ defmodule Troupe.LLM.OpenAI do
     acc0 = %{
       text: "",
       calls: %{},
-      usage: %{input_tokens: 0, output_tokens: 0},
+      usage: Provider.empty_usage(),
       finish: nil,
       model: request.model,
       reply_to: reply_to,
@@ -108,8 +108,20 @@ defmodule Troupe.LLM.OpenAI do
   defp apply_chunk(json, acc) do
     acc =
       case Map.get(json, "usage") do
-        %{"prompt_tokens" => p, "completion_tokens" => c} ->
-          %{acc | usage: %{input_tokens: p, output_tokens: c}}
+        %{"prompt_tokens" => p, "completion_tokens" => c} = u ->
+          # `prompt_tokens` counts the cached tokens too, so the cached ones come
+          # back out of it: `Provider.usage` keeps the three input figures disjoint.
+          cached = get_in(u, ["prompt_tokens_details", "cached_tokens"]) || 0
+
+          %{
+            acc
+            | usage: %{
+                input_tokens: max(p - cached, 0),
+                output_tokens: c,
+                cache_read: cached,
+                cache_write: 0
+              }
+          }
 
         _ ->
           acc

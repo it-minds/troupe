@@ -85,7 +85,12 @@ defmodule Troupe.LLM.Fake do
 
     response =
       response
-      |> Map.put_new(:usage, %{input_tokens: estimate(request), output_tokens: 20})
+      |> Map.put_new(:usage, %{
+        input_tokens: estimate(request),
+        output_tokens: 20,
+        cache_read: 0,
+        cache_write: 0
+      })
       |> Map.put_new(
         :stop_reason,
         if(Message.tool_uses(content) == [], do: :end_turn, else: :tool_use)

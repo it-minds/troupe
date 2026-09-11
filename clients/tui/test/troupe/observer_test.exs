@@ -141,7 +141,15 @@ defmodule Troupe.ObserverTest do
     assert Model.agent_elapsed(child, System.system_time(:millisecond)) =~ ~r/^\d\d:\d\d$/
 
     # the Fake reports usage, so each agent carries its own tokens and they sum to the window's
-    assert child.agent.tokens > 0
-    assert root.agent.tokens + child.agent.tokens == root.window.tokens
+    assert Model.total_tokens(child.agent) > 0
+
+    assert Model.total_tokens(root.agent) + Model.total_tokens(child.agent) ==
+             Model.total_tokens(root.window)
+
+    # sent and received are counted apart, and the Fake caches nothing
+    assert child.agent.usage.input > 0
+    assert child.agent.usage.output > 0
+    assert child.agent.usage.cache_read == 0
+    assert Model.tokens(child.agent) =~ ~r/^↑[\d.]+k? ↓\d+$/
   end
 end

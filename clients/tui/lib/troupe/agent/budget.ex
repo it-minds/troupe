@@ -60,11 +60,18 @@ defmodule Troupe.Agent.Budget do
   @spec empty_usage() :: usage()
   def empty_usage, do: %{turns: 0, input_tokens: 0, output_tokens: 0}
 
+  @doc """
+  Adds one response's usage. `input_tokens` counts what the provider billed at
+  close to full price — fresh input plus what it charged a premium to cache —
+  and not what it served from the cache at a fraction of that, which on a long
+  conversation is most of the prompt and would exhaust the budget for work the
+  user is barely paying for.
+  """
   @spec add_usage(usage(), map()) :: usage()
   def add_usage(usage, %{} = u) do
     %{
       turns: usage.turns + Map.get(u, :turns, 0),
-      input_tokens: usage.input_tokens + Map.get(u, :input_tokens, 0),
+      input_tokens: usage.input_tokens + Troupe.LLM.Provider.billed_input(u),
       output_tokens: usage.output_tokens + Map.get(u, :output_tokens, 0)
     }
   end

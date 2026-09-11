@@ -29,7 +29,7 @@ defmodule Troupe.LLM.Anthropic do
 
     acc0 = %{
       blocks: %{},
-      usage: %{input_tokens: 0, output_tokens: 0},
+      usage: Provider.empty_usage(),
       stop_reason: :end_turn,
       model: request.model,
       reply_to: reply_to,
@@ -85,11 +85,9 @@ defmodule Troupe.LLM.Anthropic do
   end
 
   defp apply_event(%{"type" => "message_start", "message" => msg}, acc) do
-    usage = Map.get(msg, "usage", %{})
-
     %{
       acc
-      | usage: %{acc.usage | input_tokens: Map.get(usage, "input_tokens", 0)},
+      | usage: merge_usage(acc.usage, Map.get(msg, "usage", %{})),
         model: Map.get(msg, "model", acc.model)
     }
   end
@@ -131,12 +129,11 @@ defmodule Troupe.LLM.Anthropic do
 
   defp apply_event(%{"type" => "message_delta"} = ev, acc) do
     stop = get_in(ev, ["delta", "stop_reason"])
-    out = get_in(ev, ["usage", "output_tokens"]) || acc.usage.output_tokens
 
     %{
       acc
       | stop_reason: stop_reason(stop || acc.stop_reason),
-        usage: %{acc.usage | output_tokens: out}
+        usage: merge_usage(acc.usage, Map.get(ev, "usage") || %{})
     }
   end
 
@@ -146,6 +143,27 @@ defmodule Troupe.LLM.Anthropic do
   end
 
   defp apply_event(_other, acc), do: acc
+
+  # Anthropic reports the cache figures beside `input_tokens` and not inside it,
+  # which is already the shape `Provider.usage` wants. They arrive on
+  # `message_start`; `message_delta` carries the final output count and, on some
+  # models, corrected input counts, so both go through here and a key that is
+  # absent leaves what was already counted alone.
+  defp merge_usage(usage, reported) do
+    %{
+      input_tokens: count(reported, "input_tokens", usage.input_tokens),
+      output_tokens: count(reported, "output_tokens", usage.output_tokens),
+      cache_read: count(reported, "cache_read_input_tokens", usage.cache_read),
+      cache_write: count(reported, "cache_creation_input_tokens", usage.cache_write)
+    }
+  end
+
+  defp count(reported, key, default) do
+    case Map.get(reported, key) do
+      n when is_integer(n) and n >= 0 -> n
+      _ -> default
+    end
+  end
 
   defp stop_reason("tool_use"), do: :tool_use
   defp stop_reason("max_tokens"), do: :max_tokens

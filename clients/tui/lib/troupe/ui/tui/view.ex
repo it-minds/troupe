@@ -217,7 +217,7 @@ defmodule Troupe.UI.TUI.View do
   defp observer_totals(rows) do
     by_state = Enum.frequencies_by(rows, &Model.agent_state/1)
     branches = rows |> Enum.count(& &1.root?)
-    tokens = rows |> Enum.map(& &1.agent.tokens) |> Enum.sum()
+    usage = rows |> Enum.map(& &1.agent.usage) |> Enum.reduce(Model.empty_usage(), &Model.add/2)
 
     counts =
       [:needs_input, :thinking, :acting, :compacting, :delegating, :done]
@@ -225,7 +225,7 @@ defmodule Troupe.UI.TUI.View do
       |> Enum.map_join(" · ", &"#{Map.fetch!(by_state, &1)} #{&1}")
 
     "#{length(rows)} agents in #{branches} branches" <>
-      if(counts == "", do: "", else: " · " <> counts) <> " · #{Model.tokens(%{tokens: tokens})}"
+      if(counts == "", do: "", else: " · " <> counts) <> " · #{Model.tokens(%{usage: usage})}"
   end
 
   defp tree_line(row, state) do
@@ -245,7 +245,7 @@ defmodule Troupe.UI.TUI.View do
       String.pad_trailing("(#{name})", 10),
       String.pad_trailing(state_text(st, state.tick), 12),
       String.pad_trailing(Model.agent_elapsed(row, state.now), 6),
-      String.pad_leading(Model.tokens(row.agent), 9),
+      String.pad_leading(Model.tokens(row.agent), 15),
       detail
     ]
     |> Enum.join(" ")
@@ -281,7 +281,7 @@ defmodule Troupe.UI.TUI.View do
        field("isolation", isolation_text(w)),
        field("working in", Model.working_dir(w, state.model.workspace)),
        field("model", a.model || "(not called yet)"),
-       field("tokens", Model.tokens(a)),
+       field("tokens", Model.token_detail(a)),
        field("running", Model.agent_elapsed(row, state.now)),
        present(prompt) && field("prompt", String.slice(prompt, 0, 300)),
        row.root? && present(w.summary) && field("summary", w.summary),
@@ -594,7 +594,7 @@ defmodule Troupe.UI.TUI.View do
           {%Paragraph{
              text: styled(Model.rows(lines, inner_w, 0, max(g.side.height - 2, 1))),
              wrap: false,
-             block: %Block{title: " tasks · agents · pending ", borders: [:all]}
+             block: %Block{title: " tokens · tasks · agents · pending ", borders: [:all]}
            }, g.side}
         ]
       else
@@ -745,7 +745,9 @@ defmodule Troupe.UI.TUI.View do
             end)
       end
 
-    [{:system, "Tasks:"}] ++
+    [{:system, "Tokens:"}] ++
+      Enum.map(Model.token_lines(w), &{:text, "  " <> &1}) ++
+      [{:blank, ""}, {:system, "Tasks:"}] ++
       if(todos == [], do: [{:text, "  (none)"}], else: todos) ++
       agents ++ pending
   end

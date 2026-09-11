@@ -147,6 +147,14 @@ transcript can be read; input still goes to the branch root. With a pane open
 the window strip shrinks to a tray; clicking the active tile jumps back to
 the latest output.
 
+Tokens are counted sent and received, not as one number: a tile reads
+`↑4.4k ↓3.1k`, and `↑` is what the provider billed at close to full price.
+Input it served from its prompt cache — most of a long conversation's prompt,
+at a fraction of the price — is reported separately, in the activated pane's
+side panel (`⟳ 148.0k from cache`) and in the observer's detail. Budgets spend
+the billed part, so re-reading a cached prompt does not exhaust
+`max_input_tokens`.
+
 ### Observer
 
 `/observer` is the overview across branches: every root agent with the

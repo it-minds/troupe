@@ -47,13 +47,26 @@ defmodule Troupe.UI.TUI.Model do
   """
   @type line :: {atom(), String.t() | [segment()]}
 
+  @typedoc """
+  Tokens a window or agent has used, in `Troupe.LLM.Provider`'s normalised shape:
+  `input` is input billed in full, `cache_read` input served from the provider's
+  prompt cache at a fraction of the price, `cache_write` input charged a premium
+  to put there. The three are disjoint.
+  """
+  @type usage :: %{
+          input: non_neg_integer(),
+          output: non_neg_integer(),
+          cache_read: non_neg_integer(),
+          cache_write: non_neg_integer()
+        }
+
   @type agent :: %{
           transcript: [entry()],
           streaming: String.t(),
           todos: [map()],
           name: String.t() | nil,
           model: String.t() | nil,
-          tokens: non_neg_integer(),
+          usage: usage(),
           started_at: integer() | nil,
           ended_at: integer() | nil
         }
@@ -75,7 +88,7 @@ defmodule Troupe.UI.TUI.Model do
           isolation: atom(),
           started_at: integer(),
           ended_at: integer() | nil,
-          tokens: non_neg_integer(),
+          usage: usage(),
           agents: %{optional(String.t()) => agent()},
           pending: [map()],
           badge: boolean(),
@@ -121,7 +134,7 @@ defmodule Troupe.UI.TUI.Model do
           isolation: e.data.isolation,
           started_at: e.ts,
           ended_at: nil,
-          tokens: 0,
+          usage: empty_usage(),
           agents: %{e.agent_path => new_agent(%{name: e.data.name, started_at: e.ts})},
           pending: [],
           badge: false,
@@ -174,21 +187,19 @@ defmodule Troupe.UI.TUI.Model do
 
       :assistant_message ->
         text = Message.text(d.content)
-        usage = Map.get(d, :usage) || %{}
-        used = Map.get(usage, :input_tokens, 0) + Map.get(usage, :output_tokens, 0)
-        tokens = w.tokens + used
+        used = used(Map.get(d, :usage) || %{})
 
         w =
           w
           |> ensure_agent(path)
           |> update_agent(path, fn a ->
-            %{a | streaming: "", tokens: a.tokens + used, model: Map.get(d, :model) || a.model}
+            %{a | streaming: "", usage: add(a.usage, used), model: Map.get(d, :model) || a.model}
           end)
           |> then(fn w ->
             if text == "", do: w, else: push(w, path, {:assistant, markdown(sanitize(text))})
           end)
 
-        Enum.reduce(Message.tool_uses(d.content), %{w | tokens: tokens}, fn tu, acc ->
+        Enum.reduce(Message.tool_uses(d.content), %{w | usage: add(w.usage, used)}, fn tu, acc ->
           push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
         end)
 
@@ -413,7 +424,7 @@ defmodule Troupe.UI.TUI.Model do
         todos: [],
         name: nil,
         model: nil,
-        tokens: 0,
+        usage: empty_usage(),
         started_at: nil,
         ended_at: nil
       },
@@ -622,10 +633,65 @@ defmodule Troupe.UI.TUI.Model do
   def working_dir(%{worktree: %{path: path}}, _workspace), do: path
   def working_dir(_window, workspace), do: workspace
 
-  @doc "Token count of a window or a single agent."
-  @spec tokens(window() | agent()) :: String.t()
-  def tokens(%{tokens: t}) when t >= 1000, do: "#{Float.round(t / 1000, 1)}k tok"
-  def tokens(%{tokens: t}), do: "#{t} tok"
+  @doc "A zero usage."
+  @spec empty_usage() :: usage()
+  def empty_usage, do: %{input: 0, output: 0, cache_read: 0, cache_write: 0}
+
+  @doc "Sums two usages."
+  @spec add(usage(), usage()) :: usage()
+  def add(a, b) do
+    %{
+      input: a.input + b.input,
+      output: a.output + b.output,
+      cache_read: a.cache_read + b.cache_read,
+      cache_write: a.cache_write + b.cache_write
+    }
+  end
+
+  # An `assistant_message` written before the cache figures existed simply has none.
+  defp used(reported) do
+    %{
+      input: Map.get(reported, :input_tokens, 0),
+      output: Map.get(reported, :output_tokens, 0),
+      cache_read: Map.get(reported, :cache_read, 0),
+      cache_write: Map.get(reported, :cache_write, 0)
+    }
+  end
+
+  @doc """
+  Compact token counts for a tile or a tree row: `↑12.4k ↓3.1k`, sent and
+  received. `↑` is what was billed in full — input read back from the provider's
+  prompt cache is most of a long conversation's prompt and a fraction of its
+  price, so it is left to `token_detail/1` rather than inflating the headline.
+  """
+  @spec tokens(%{usage: usage()}) :: String.t()
+  def tokens(%{usage: u}), do: "↑#{short(u.input + u.cache_write)} ↓#{short(u.output)}"
+
+  @doc "The same counts spelled out, with what the prompt cache served."
+  @spec token_detail(%{usage: usage()}) :: String.t()
+  def token_detail(%{usage: u}) do
+    "↑ #{short(u.input + u.cache_write)} sent · ↓ #{short(u.output)} received" <>
+      if u.cache_read > 0 or u.cache_write > 0,
+        do: " · #{short(u.cache_read)} of the prompt came from cache",
+        else: ""
+  end
+
+  @doc """
+  The same counts as one short line each, for the side panel, which is too narrow
+  for `token_detail/1`. The cache line is only there when the provider cached.
+  """
+  @spec token_lines(%{usage: usage()}) :: [String.t()]
+  def token_lines(%{usage: u}) do
+    ["↑ #{short(u.input + u.cache_write)} sent", "↓ #{short(u.output)} received"] ++
+      if u.cache_read > 0, do: ["⟳ #{short(u.cache_read)} from cache"], else: []
+  end
+
+  @doc "Every token a window or agent has accounted for, cached input included."
+  @spec total_tokens(%{usage: usage()}) :: non_neg_integer()
+  def total_tokens(%{usage: u}), do: u.input + u.output + u.cache_read + u.cache_write
+
+  defp short(n) when n >= 1000, do: "#{Float.round(n / 1000, 1)}k"
+  defp short(n), do: "#{n}"
 
   ## Transcript lines
 
