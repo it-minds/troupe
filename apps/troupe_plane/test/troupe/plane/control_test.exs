@@ -220,7 +220,10 @@ defmodule Troupe.Plane.ControlTest do
   # -- a worker, as a socket --------------------------------------------------
 
   defp connect(port) do
-    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
+    # `packet: :line`, so one `recv` is one message. With `:raw` two messages arriving in
+    # one segment meant the second was read and thrown away — which is exactly what
+    # happens now that the plane pushes `jwks.updated` the moment a worker enrols.
+    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :line])
     %{socket: socket, id: :counters.new(1, [])}
   end
 
