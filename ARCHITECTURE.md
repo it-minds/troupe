@@ -582,15 +582,30 @@ bypass with `kubectl`.
 
 The panel stores and shows secret *references* — the name of a secret the cluster holds —
 and never a value. A reference to a secret that is not there surfaces as `SecretMissing`
-rather than as a pod that will not start for reasons nobody can see.
+rather than as a pod that will not start for reasons nobody can see. It is reported and
+not refused: the reference may be right and the secret on its way, and a profile that
+would not reconcile until every secret existed could not be created before them.
+
+### 11.5 Audit
+
+Every administrative change writes a row with the actor and a diff over the fields that
+moved. Not a log line — a row, queryable, because the question an audit answers is asked
+months later by somebody who was not there. A refused change writes nothing.
+
+The diff is computed by the same function the profile editor renders its preview with, so
+what the form promised and what the trail says cannot differ.
 
 ---
 
-## 12. Stages 3–4
+## 12. Stage 4
 
-* **Stage 3 — admin panel and self-service.** The plane grows a LiveView panel whose
-  every action goes through `Plane.Admin`, the same context the admin JSON-RPC and the
-  `troupe admin` CLI use. A test enumerates that context and asserts each function has
-  both; xref asserts LiveViews call nothing else.
-* **Stage 4 — client-hosted tools.** Server-to-client requests, so a tool can run on
-  the user's machine while the agent runs in a pod.
+**Client-hosted tools.** A harness offers locally hosted tools — typically personal MCP
+connections — to a session it is attached to. Registration needs `control` and a consent
+step; invocation is a server-to-client `tool.invoke` over the registering connection,
+owned by that connection's process, so a dropped registrant is a dropped tool rather than
+a hung agent. Every registration taints the session visibly, because a tool running on
+somebody's laptop is a thing the other participants are entitled to know about.
+
+The seam is already there: the gateway's connection can send requests as well as
+receive them, and `Troupe.Tool` takes values as well as modules — which is what MCP
+tools already use.
