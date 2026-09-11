@@ -34,6 +34,11 @@ defmodule Troupe.Config do
             watch: false,
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
+            # Durable `fs_changed` events for everything that happens in the workspace.
+            # Off locally, where the user can see their own files; on in a pod, where a
+            # client has no other way to know that `shell` wrote something.
+            fs_events: false,
+            fs_debounce_ms: 100,
             auto_approve: false,
             # What a session does when its tree comes back after a restart. `false` —
             # the default — means it comes back interrupted and makes no model call

@@ -29,6 +29,10 @@ defmodule Troupe.Registry do
   @spec watcher(String.t()) :: GenServer.name()
   def watcher(session_id), do: via({:watcher, session_id})
 
+  @doc "The process that turns filesystem changes into durable `fs_changed` events."
+  @spec files(String.t()) :: GenServer.name()
+  def files(session_id), do: via({:files, session_id})
+
   @doc "The session's compact projection, for fleet and summary subscribers."
   @spec summary(String.t()) :: GenServer.name()
   def summary(session_id), do: via({:summary, session_id})

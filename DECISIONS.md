@@ -618,3 +618,24 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      bubblewrap is missing or mis-pathed, the command fails rather than running
      unconfined — the difference between a confined shell and an unconfined one is not
      something to fall back from quietly.
+
+108. **`fs_changed` is separate from watch mode.** Watch mode turns AI comments into
+     agent input and is a feature a user switches on. `fs_changed` is how a client
+     attached to a remote session learns the working tree changed, including when the
+     change was made by `shell` — which no tool call announces, because `shell` runs
+     arbitrary commands and cannot say in advance what they will touch. Off locally,
+     where the user can see their own files; on in a pod.
+
+109. **A deletion is an `fs_changed` with a null hash, not a second event type.** A client
+     rendering a tree folds one stream, and a separate `fs_removed` would mean every
+     client had to handle two orders of arrival instead of one.
+
+110. **Files over eight megabytes are identified by size and mtime, not hashed.** Hashing
+     a gigabyte on every save would make the watcher the slowest thing in the pod. The
+     value says what it is — `size-mtime:` — so nobody reads it as a content hash.
+
+111. **`fs.*` resolves through the session's mount table, live or dormant.** A dormant
+     session still has a table, recorded in its log, and a client reading one must be
+     confined by exactly the rules the agent was. `fs.upload` needs `control`, because
+     putting a file into a session's workspace is steering it, and the event names the
+     person who did it rather than the session.

@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/fs.read.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "path",
+    "session_id"
+  ],
+  "title": "fs.read",
+  "type": "object"
+}

@@ -16,9 +16,13 @@ defmodule Troupe.Gateway.Dispatch do
 
   alias Troupe.Gateway.{Commands, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
+  alias Troupe.Mounts
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Session.Log
   alias Troupe.Todo.Edit
+  alias Troupe.Tool.Result
+  alias Troupe.Workspace
 
   defmodule Context do
     @moduledoc "Who is calling, and what they are allowed to do."
@@ -42,6 +46,9 @@ defmodule Troupe.Gateway.Dispatch do
     "session.get" => :observe,
     "blob.get" => :observe,
     "fleet.get" => :observe,
+    "fs.list" => :observe,
+    "fs.read" => :observe,
+    "fs.upload" => :control,
     "workspace.recent" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
@@ -110,6 +117,67 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("fleet.get", _params, _context) do
     {:ok, %{"sessions" => Enum.map(Troupe.list_live_sessions(%{}), &session_json/1)}}
+  end
+
+  # -- files ------------------------------------------------------------------
+  #
+  # Resolved through the session's mount table, like every file tool, so a client is
+  # confined to exactly what the agent is. `fs.upload` needs `control` because putting a
+  # file into a session's workspace is steering it.
+
+  defp handle("fs.list", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, workspace} <- workspace_of(session_id),
+         {:ok, root} <- resolve_path(workspace, Map.get(params, "path") || ".", :read) do
+      entries =
+        root
+        |> list_entries()
+        |> Enum.map(&entry_json(workspace, &1))
+
+      {:ok, %{"path" => Workspace.relative(workspace, root), "entries" => entries}}
+    end
+  end
+
+  defp handle("fs.read", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, path} <- fetch(params, "path"),
+         {:ok, workspace} <- workspace_of(session_id),
+         {:ok, resolved} <- resolve_path(workspace, path, :read),
+         {:ok, contents} <- read_file(resolved) do
+      {:ok,
+       %{
+         "path" => Workspace.relative(workspace, resolved),
+         "content" => contents,
+         "size" => byte_size(contents),
+         # The same hash `fs_changed` carries, so a client can check the two agree.
+         "hash" => "sha256:" <> (:sha256 |> :crypto.hash(contents) |> Base.encode16(case: :lower))
+       }}
+    end
+  end
+
+  defp handle("fs.upload", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, path} <- fetch(params, "path"),
+         {:ok, content} <- fetch(params, "content"),
+         {:ok, workspace} <- workspace_of(session_id),
+         {:ok, resolved} <- resolve_path(workspace, path, :write),
+         :ok <- write_file(resolved, content) do
+      # Recorded by the actor who uploaded it, not by the session: a file that appeared
+      # in a workspace should name the person who put it there.
+      Log.append(
+        session_id,
+        ["root"],
+        :fs_changed,
+        %{
+          "path" => Workspace.relative(workspace, resolved),
+          "hash" => "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
+          "size" => byte_size(content)
+        },
+        actor(context)
+      )
+
+      {:ok, %{"path" => Workspace.relative(workspace, resolved), "bytes" => byte_size(content)}}
+    end
   end
 
   defp handle("blob.get", params, _context) do
@@ -321,6 +389,77 @@ defmodule Troupe.Gateway.Dispatch do
     case Map.get(params, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, Error.new(:invalid_params, %{missing: key})}
+    end
+  end
+
+  defp workspace_of(session_id) do
+    case Troupe.get_session(session_id) do
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: session_id})}
+
+      meta ->
+        case Workspace.new(meta.workspace) do
+          {:ok, workspace} -> {:ok, mounted(session_id, workspace)}
+          {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+        end
+    end
+  end
+
+  # The live session's table where there is one, and the log's `mounts_resolved` where
+  # there is not — a dormant session still has a mount table, and a client reading one
+  # must be confined by the same rules the agent was.
+  defp mounted(session_id, workspace) do
+    case Troupe.replay_from(session_id, 0) |> Enum.reverse() |> Enum.find(&(&1.type == "mounts_resolved")) do
+      nil -> workspace
+      event -> Workspace.with_mounts(workspace, Mounts.from_json(event.data))
+    end
+  end
+
+  defp resolve_path(workspace, path, mode) do
+    case Workspace.resolve(workspace, path, mode) do
+      {:ok, resolved} -> {:ok, resolved}
+      {:error, reason} -> {:error, Error.new(:forbidden, %{reason: Result.describe(reason)})}
+    end
+  end
+
+  defp list_entries(root) do
+    case File.ls(root) do
+      {:ok, names} -> names |> Enum.sort() |> Enum.map(&Path.join(root, &1))
+      {:error, _reason} -> []
+    end
+  end
+
+  defp entry_json(workspace, path) do
+    stat = File.stat(path, time: :posix)
+
+    %{
+      "path" => Workspace.relative(workspace, path),
+      "name" => Path.basename(path),
+      "kind" => kind_of(stat),
+      "size" => size_of(stat)
+    }
+  end
+
+  defp size_of({:ok, %File.Stat{size: size}}), do: size
+  defp size_of(_stat), do: 0
+
+  defp kind_of({:ok, %File.Stat{type: :directory}}), do: "directory"
+  defp kind_of({:ok, %File.Stat{type: :regular}}), do: "file"
+  defp kind_of(_stat), do: "other"
+
+  defp read_file(path) do
+    case File.read(path) do
+      {:ok, contents} -> {:ok, contents}
+      {:error, reason} -> {:error, Error.new(:not_found, %{reason: to_string(reason)})}
+    end
+  end
+
+  defp write_file(path, content) do
+    File.mkdir_p!(Path.dirname(path))
+
+    case File.write(path, content) do
+      :ok -> :ok
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: to_string(reason)})}
     end
   end
 

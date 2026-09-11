@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/fs.upload.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "content",
+    "path",
+    "session_id"
+  ],
+  "title": "fs.upload",
+  "type": "object"
+}

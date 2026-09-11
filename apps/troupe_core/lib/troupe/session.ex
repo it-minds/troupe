@@ -64,6 +64,14 @@ defmodule Troupe.Session do
            enabled: config.watch,
            debounce_ms: config.watch_debounce_ms,
            poll_interval_ms: config.watch_poll_interval_ms},
+          # Separate from watch mode, and not optional where it is on: this is how a
+          # client attached to a remote session learns that `shell` wrote something.
+          {Troupe.Session.Files,
+           session_id: session_id,
+           workspace: workspace,
+           agent_path: @root_path,
+           enabled: config.fs_events,
+           debounce_ms: config.fs_debounce_ms},
           # Last, and deliberately so: a projection is a subscriber, and one that could
           # restart an agent by crashing would be worse than no projection at all.
           {Troupe.Session.Summary, session_id: session_id}

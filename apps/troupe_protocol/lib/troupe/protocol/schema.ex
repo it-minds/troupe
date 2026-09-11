@@ -237,6 +237,23 @@ defmodule Troupe.Protocol.Schema do
         "id" => optional(:string),
         "content" => optional(:string)
       },
+      # Files, resolved through the session's mount table and scope-checked like every
+      # other command. Reading is `observe`; putting a file into a workspace is steering
+      # the session and needs `control`.
+      "fs.list" => %{
+        "session_id" => required(:string),
+        "path" => optional(:string)
+      },
+      "fs.read" => %{
+        "session_id" => required(:string),
+        "path" => required(:string)
+      },
+      "fs.upload" => %{
+        "session_id" => required(:string),
+        "path" => required(:string),
+        "content" => required(:string),
+        "command_id" => optional(:string)
+      },
       "blob.get" => %{
         "session_id" => required(:string),
         "blob" => required(:string),
