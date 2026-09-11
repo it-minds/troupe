@@ -119,7 +119,8 @@ defmodule Troupe.MemoryTest do
 
     text = Memory.to_prompt(brief)
     assert text =~ "# Project brief"
-    assert text =~ "authoritative"
+    assert text =~ "Start from it and treat it as correct"
+    refute text =~ "authoritative", "the preamble must not invite re-exploration"
     assert text =~ "## Overview"
 
     assert Memory.to_prompt(brief, max_chars: 40) =~ "(brief truncated)"

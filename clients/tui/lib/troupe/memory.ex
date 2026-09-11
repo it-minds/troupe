@@ -36,7 +36,17 @@ defmodule Troupe.Memory do
   @drift 0.10
   @min_drift 10
 
-  @preamble "Written down during earlier work in this repository. It may be out of date: `list_files`, `grep` and `read_file` are authoritative about what is there now."
+  @preamble """
+  What earlier agents in this repository already worked out, so that you do not
+  have to. Start from it and treat it as correct: do not survey the layout,
+  re-derive the build or test commands, or spend a subagent discovering anything
+  it already tells you. Go straight to the files it points you at.
+
+  It describes the shape of the project, not its exact current contents, so
+  check an individual fact with `read_file` or `grep` when you are about to
+  change the thing it describes, or when what you see contradicts it. That is a
+  targeted check, not a reason to explore the repository again.
+  """
 
   @doc "An empty brief. Sections are added as they are written."
   @spec empty() :: t()

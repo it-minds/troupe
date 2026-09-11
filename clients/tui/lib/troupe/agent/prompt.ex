@@ -63,7 +63,7 @@ defmodule Troupe.Agent.Prompt do
       end
 
     """
-    #{s.definition.prompt}
+    #{s.definition.prompt}#{brief}
 
     # Harness
     Agent: #{s.spec.agent_path} (profile #{s.definition.name})
@@ -73,7 +73,7 @@ defmodule Troupe.Agent.Prompt do
     All paths are relative to the workspace root and confined to it.
 
     # Current task list
-    #{todo}#{brief}#{workspace}#{watch}
+    #{todo}#{workspace}#{watch}
     """
   end
 end

@@ -123,6 +123,11 @@ defmodule Troupe.MemorySessionTest do
     [with_brief_prompt] = system_prompts(with_fake, path)
 
     assert with_brief_prompt =~ "# Project brief"
+
+    assert :binary.match(with_brief_prompt, "# Project brief") <
+             :binary.match(with_brief_prompt, "# Harness"),
+           "the brief must come before the harness block, where it is most salient"
+
     assert with_brief_prompt =~ "A fixture project used by the memory tests."
     assert with_brief_prompt =~ "mise exec -- mix test"
 
