@@ -662,3 +662,11 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      one process per dormant session would show in the count, and reading a cache into
      memory to index it would show in the bytes. Total VM memory in a test run measures
      the test suite as much as the pod.
+
+116. **A running session's workspace is archived on its own interval, not only at
+     dormancy.** The seal interval bounds what a lost volume costs in *history*; without
+     this nothing bounded what it cost in *files*, and a pod deleted mid-session came back
+     with a full log and an empty tree. Five minutes rather than sixty seconds, because an
+     archive is the whole tree rather than the events since the last one, and skipped
+     entirely when a cheap fingerprint — file count, total bytes, newest mtime — says
+     nothing has changed.

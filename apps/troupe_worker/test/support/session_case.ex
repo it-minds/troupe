@@ -155,7 +155,14 @@ defmodule Troupe.Worker.SessionCase do
           Keyword.get(opts, :config_overrides, [])
         )
     ] ++
-      Keyword.take(opts, [:seal_interval_ms, :snapshot_every, :dormant_after_ms, :owner_subject, :profile])
+      Keyword.take(opts, [
+        :seal_interval_ms,
+        :snapshot_every,
+        :dormant_after_ms,
+        :archive_every_ms,
+        :owner_subject,
+        :profile
+      ])
   end
 
   @doc "A reporter that posts every sealed head to the calling process."

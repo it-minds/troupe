@@ -37,6 +37,12 @@ defmodule Troupe.Worker.Session.Manager do
   # Long enough that a person who stepped away finds their session where they left it,
   # short enough that a pod full of abandoned sessions empties itself.
   @dormant_after_ms 10 * 60 * 1000
+  # How often a running session's workspace is archived. The event log is sealed every
+  # sixty seconds, which bounds what a lost volume costs in *history*; this bounds what
+  # it costs in *files*. Less often than sealing because a workspace archive is the whole
+  # tree rather than the events since the last one, and skipped entirely when nothing has
+  # changed.
+  @archive_every_ms 5 * 60 * 1000
 
   defstruct [
     :session_id,
@@ -49,6 +55,8 @@ defmodule Troupe.Worker.Session.Manager do
     :idle_timer,
     :error,
     :restored,
+    :archive_timer,
+    :archived_fingerprint,
     status: :new,
     activated_at: nil,
     dormant_after_ms: @dormant_after_ms
@@ -113,7 +121,7 @@ defmodule Troupe.Worker.Session.Manager do
     case restore(state) do
       {:ok, state} ->
         Troupe.subscribe(state.session_id)
-        state = touch(state)
+        state = state |> touch() |> schedule_archive()
         {:reply, {:ok, summary(state)}, state}
 
       {:error, reason} ->
@@ -162,6 +170,26 @@ defmodule Troupe.Worker.Session.Manager do
   end
 
   def handle_info({:troupe_event, _session_id, _event}, state), do: {:noreply, touch(state)}
+
+  # A periodic workspace archive, so losing the volume costs at most one interval of
+  # files rather than every file. Skipped when the tree has not changed, which is the
+  # common case for a session somebody is reading rather than working in.
+  def handle_info(:archive, %__MODULE__{status: :active} = state) do
+    fingerprint = fingerprint(state.workspace)
+
+    state =
+      if fingerprint == state.archived_fingerprint do
+        state
+      else
+        sealed = Sealer.status(state.sealer)
+        archive(state, sealed.sealed_through)
+        %{state | archived_fingerprint: fingerprint}
+      end
+
+    {:noreply, schedule_archive(state)}
+  end
+
+  def handle_info(:archive, state), do: {:noreply, state}
 
   def handle_info({:EXIT, pid, _reason}, %__MODULE__{sealer: pid} = state) do
     {:noreply, %{state | sealer: nil}}
@@ -350,6 +378,28 @@ defmodule Troupe.Worker.Session.Manager do
       case Troupe.snapshot(session_id, path) do
         %{state: agent_state} -> agent_state not in [:idle, :done]
         _ -> false
+      end
+    end)
+  end
+
+  defp schedule_archive(state) do
+    if state.archive_timer, do: Process.cancel_timer(state.archive_timer)
+    interval = Keyword.get(state.opts, :archive_every_ms, @archive_every_ms)
+    %{state | archive_timer: Process.send_after(self(), :archive, interval)}
+  end
+
+  # Cheap enough to run every few minutes on a large tree, and it moves whenever a file
+  # is written, added or removed — which is all this needs to decide.
+  defp fingerprint(nil), do: nil
+
+  defp fingerprint(root) do
+    root
+    |> Path.join("**/*")
+    |> Path.wildcard(match_dot: true)
+    |> Enum.reduce({0, 0, 0}, fn path, {count, bytes, newest} ->
+      case File.stat(path, time: :posix) do
+        {:ok, %File.Stat{size: size, mtime: mtime}} -> {count + 1, bytes + size, max(newest, mtime)}
+        _ -> {count, bytes, newest}
       end
     end)
   end
