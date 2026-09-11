@@ -206,3 +206,95 @@ The CI workflow is written and has never run — there is no remote to run it on
 parts of it that can run locally have: `mix check`, `mix troupe.boundaries`,
 `mix troupe.schema.diff`, the Python conformance test, and a local Burrito build with a
 smoke test of the resulting binary.
+
+---
+
+# Stage 2 — progress
+
+Stage 2 is **partly delivered**. Seven of its thirty-five criteria pass, with the
+infrastructure and the plane↔worker contract they rest on. This section says which,
+and what is left.
+
+`mix check` is green: 354 tests, zero warnings, formatted, credo clean, boundaries
+clean. Two of the test suites need real infrastructure and say so loudly when it is
+absent — a kind cluster for the operator and enrolment tests, and PostgreSQL for the
+plane's.
+
+```
+$ scripts/kind-up && helm upgrade --install troupe charts/troupe -n troupe-system --create-namespace
+$ scripts/dev-up && MIX_ENV=test mix ecto.migrate
+$ mix check
+boundaries ok: 4 rules, no violations
+Result: 31 passed     # troupe_protocol
+Result: 51 passed     # troupe_operator  (6 against a real cluster)
+Result: 68 passed     # troupe_plane     (9 against a real API server, 3 across two nodes)
+Result: 127 passed    # troupe_core
+Result: 35 passed     # troupe_gateway
+Result: 22 passed     # troupe_tui
+Result: 20 passed     # troupe_ctl
+```
+
+## Passing
+
+**1. `helm install` on kind, and two profiles Ready.** `charts/troupe` ships the three
+CRDs, the operator, its RBAC, a default `TroupePolicy` and the admission policies. The
+cluster test creates `dev` and `ux`, waits for `Ready`, and asserts every object the
+architecture lists — namespace, ServiceAccount with automount disabled, StatefulSet on
+`OnDelete`, headless Service, a Service and an Ingress per pod at
+`<ordinal>.<profile>.workers.<domain>`, NetworkPolicy, PodDisruptionBudget, and a claim
+per granted team volume.
+
+**2. A profile outside policy is refused, and nothing is created.**
+
+```
+$ kubectl apply -f bad-image.yaml
+Error from server (Forbidden): ValidatingAdmissionPolicy 'troupe-worker-profile-policy'
+denied request: image repository docker.io/someone/whatever is not allowed by TroupePolicy
+```
+
+The same for replicas, sessionsPerPod, CPU, memory, a declared FQDN, an LLM endpoint, an
+MCP server, a storage class, and `orgMount` without an org volume. With the admission
+binding removed, the operator refuses it instead, marks `PolicyViolation`, and creates
+no namespace.
+
+**3. Killing the operator mid-reconcile converges.** Three kills during a reconcile, then
+exactly one of everything. Deleting a managed Service brings it back in under 30
+seconds — the operator watches the objects it created, so the repair starts as the
+deletion lands rather than at the next resync.
+
+**4. A pod enrols as its own profile.** Enrolment is a `TokenReview` against a real API
+server. A token from `troupe-w-ux` enrols as `ux` and cannot claim `dev`; a token minted
+for the API server's audience is refused; so is one for another ServiceAccount, or from
+outside a worker namespace. A pod past its fifteen-second lease is swept unhealthy and
+stops being placed on.
+
+**6. SCIM and a login agree.** A SCIM push creates users and groups and enabling a group
+makes it a team; the same person arriving at login with SCIM off gets the same teams and
+the same profiles. Membership is replaced on both paths, so leaving a group at login
+removes the team it gave.
+
+**8 and 9. Capacity and budget are decided once, across replicas.** Against a real second
+node started with `:peer`: fifty creates split across two replicas fill a profile with
+room for twenty exactly once, thirty get a capacity error, and no pod exceeds its cap.
+Concurrent reservations never exceed a team's budget. Killing the replica holding an
+actor loses nothing it had granted.
+
+Partly, ahead of the items they belong to: a seal report from a stale epoch is rejected
+(19), and a marker string sent as session input does not appear in the plane's database
+(23).
+
+## Not yet built
+
+- **Tokens and the harness API** (5, 7, 12, 13, 14). JWTs signed through OpenBao's
+  transit engine, JWKS, `auth.expiring`/`auth.refresh`, the plane's fleet-level JSON-RPC,
+  and `troupe login`.
+- **The worker runtime** (10, 11, 15–18, 20–22, 24–32). The object storage tier, session
+  keys in OpenBao, sealing and snapshots, dormancy and relocation, the mount table and
+  the bubblewrap sandbox, `fs.*`, MCP, and config bundles.
+- **Operations** (19 in full, 33, 34, 35). Index rebuild from object storage, the PITR
+  drill, ledger reconciliation, and erasure.
+
+The foundations those need are in place: the schema they write to, the control channel
+they speak over, the images they ship in (`docker/Dockerfile`, `scripts/build-images`),
+and the development services they talk to (`scripts/dev-up` — PostgreSQL with WAL
+archiving, MinIO with a versioned bucket, OpenBao).
