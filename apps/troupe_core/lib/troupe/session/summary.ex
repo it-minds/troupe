@@ -42,6 +42,16 @@ defmodule Troupe.Session.Summary do
     GenServer.start_link(__MODULE__, opts, name: Troupe.Registry.summary(session_id))
   end
 
+  @doc """
+  The projection a session starts from, before any event.
+
+  Public because the fold is also run outside this process: `Troupe.Log.Fold` replays a
+  log without starting a session, and a second empty map defined there would be a second
+  thing to keep in step.
+  """
+  @spec empty() :: map()
+  def empty, do: @empty
+
   @doc "The current projection, for a client that asks rather than subscribes."
   @spec snapshot(String.t()) :: map()
   def snapshot(session_id) do
@@ -116,12 +126,20 @@ defmodule Troupe.Session.Summary do
 
   # -- the fold ---------------------------------------------------------------
 
-  defp fold(snapshot, %Event{type: "agent_state", agent: path, data: data}) do
+  @doc """
+  Apply one event to a projection.
+
+  The whole of what a session's state *means*, and therefore the thing the fixture
+  hashes protect: a clause that stops handling an event type changes what every old log
+  folds to.
+  """
+  @spec fold(map(), Event.t()) :: map()
+  def fold(snapshot, %Event{type: "agent_state", agent: path, data: data}) do
     agent = %{"state" => data["state"], "profile" => data["profile"]}
     put_in(snapshot, ["agents", Enum.join(path, "/")], agent)
   end
 
-  defp fold(snapshot, %Event{type: "todo_updated", agent: ["root"], data: data}) do
+  def fold(snapshot, %Event{type: "todo_updated", agent: ["root"], data: data}) do
     current =
       data
       |> Map.get("items", [])
@@ -134,30 +152,30 @@ defmodule Troupe.Session.Summary do
     Map.put(snapshot, "todo", current)
   end
 
-  defp fold(snapshot, %Event{type: "tool_call_started", data: data}) do
+  def fold(snapshot, %Event{type: "tool_call_started", data: data}) do
     Map.put(snapshot, "tool", data["name"])
   end
 
-  defp fold(snapshot, %Event{type: "tool_call_completed"}), do: Map.put(snapshot, "tool", nil)
+  def fold(snapshot, %Event{type: "tool_call_completed"}), do: Map.put(snapshot, "tool", nil)
 
-  defp fold(snapshot, %Event{type: "llm_response", data: data}) do
+  def fold(snapshot, %Event{type: "llm_response", data: data}) do
     usage = Map.get(data, "usage") || %{}
     tokens = Map.get(usage, "input_tokens", 0) + Map.get(usage, "output_tokens", 0)
     Map.update(snapshot, "tokens", tokens, &(&1 + tokens))
   end
 
-  defp fold(snapshot, %Event{type: "llm_error", data: data}) do
+  def fold(snapshot, %Event{type: "llm_error", data: data}) do
     Map.put(snapshot, "error", data["reason"])
   end
 
-  defp fold(snapshot, %Event{type: "approval_requested", data: data}) do
+  def fold(snapshot, %Event{type: "approval_requested", data: data}) do
     Map.update(snapshot, "approvals", [data["call_id"]], &Enum.uniq(&1 ++ [data["call_id"]]))
   end
 
-  defp fold(snapshot, %Event{type: type, data: data})
+  def fold(snapshot, %Event{type: type, data: data})
        when type in ["approval_decided", "approval_resolved"] do
     Map.update(snapshot, "approvals", [], &List.delete(&1, data["call_id"]))
   end
 
-  defp fold(snapshot, %Event{}), do: snapshot
+  def fold(snapshot, %Event{}), do: snapshot
 end

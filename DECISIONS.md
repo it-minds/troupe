@@ -784,3 +784,46 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 138. **Draining takes the highest ordinals first.** A StatefulSet removes them in that
      order, and draining a pod Kubernetes is not about to remove would be a session moved
      for no reason.
+
+139. **The upcaster chain exists before there is anything to upcast.** Version 1 is the
+     first released shape, so every clause is currently the identity — but retrofitting an
+     upcaster to a log format already in the field is the part that goes wrong, and the
+     fixtures are what keep the empty chain honest. Each step goes `n -> n + 1` and never
+     `1 -> 3`, so adding a version means writing one function rather than revisiting every
+     older one.
+
+140. **An upcaster may add and rename, never drop.** A replay has to produce what the
+     session actually did, and an upcaster that discarded a field would be rewriting
+     history to suit today's code. The hash chain is not recomputed either: `prev_hash`
+     covers the event as it was written, and upcasting changes the in-memory shape rather
+     than the bytes — so a log from an old release still verifies against what sealed it,
+     and `troupe verify` reads the raw file rather than coming through the chain.
+
+141. **An event from a *newer* version is read, not rejected.** A client one release
+     behind should degrade to ignoring fields it does not understand, which is what the
+     fold does anyway. `from_the_future/1` names the versions seen, because a pod running
+     an old image against a session a newer one wrote is a deployment mistake worth
+     saying out loud.
+
+142. **The fixture hash is taken over a *witness*, not over the agent's own state.**
+     Rebuilding an agent needs things a log does not contain — the blob store its tool
+     results spilled to, the definitions its profile names refer to — so replaying one
+     outside a session would be testing the scaffolding. The witness projects every
+     durable event type the agent's replay acts on into a shape that moves whenever their
+     meaning moves, and a test reads the agent's replay clauses out of the source to
+     assert the witness still covers them. A blind spot that nobody knows about is worse
+     than a missing test.
+
+143. **A recorded fixture hash is evidence, not a number to update.** If a hash moves,
+     an old session would now come back as something different; if that is deliberate it
+     needs a new schema version and an upcaster, with new fixtures beside the old ones
+     rather than instead of them. `mix troupe.fixtures.record` refuses to overwrite a
+     version already recorded for exactly that reason.
+
+144. **A snapshot carries its format version *and* the build that computed it, and any
+     mismatch discards it.** That is the design rather than a failure path to minimise: a
+     snapshot that was wrong and was trusted would be a session silently looking like
+     something it is not, and a full replay costs time and produces the right answer.
+     Each rejection is named — `wrong_format`, `wrong_code_version`, `malformed` —
+     because "the code changed" and "the bytes are damaged" mean different things to
+     somebody reading a log.

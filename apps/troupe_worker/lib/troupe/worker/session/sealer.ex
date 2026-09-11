@@ -18,7 +18,7 @@ defmodule Troupe.Worker.Session.Sealer do
   use GenServer
 
   alias Troupe.Protocol.Event
-  alias Troupe.Sessions.Storage
+  alias Troupe.Sessions.{Snapshot, Storage}
   alias Troupe.Worker.Session.Context
 
   require Logger
@@ -200,8 +200,11 @@ defmodule Troupe.Worker.Session.Sealer do
       context = state.context
 
       case state.snapshot.() do
-        {:ok, snapshot} ->
-          Storage.put_snapshot(context.store, context.session_id, context.data_key, state.sealed_through, snapshot)
+        {:ok, fold} ->
+          # Stamped with the format and the build that computed it, so a later Troupe
+          # can tell a fold it can use from one it merely recognises the shape of.
+          wrapped = Snapshot.wrap(fold, state.sealed_through)
+          Storage.put_snapshot(context.store, context.session_id, context.data_key, state.sealed_through, wrapped)
           %{state | last_snapshot_at: state.sealed_through}
 
         _ ->

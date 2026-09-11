@@ -16,8 +16,8 @@ defmodule Troupe.Worker.Session.Restore do
   alias Troupe.ObjectStore
   alias Troupe.Paths
   alias Troupe.Protocol.Event
-  alias Troupe.Session.Log
-  alias Troupe.Sessions.{Cipher, Storage}
+  alias Troupe.Session.{Log, Summary}
+  alias Troupe.Sessions.{Cipher, Snapshot, Storage}
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.{Context, Workspace}
 
@@ -145,6 +145,58 @@ defmodule Troupe.Worker.Session.Restore do
     case key |> Path.basename() |> Integer.parse() do
       {seq, "." <> extension} -> [{seq, extension}]
       _ -> []
+    end
+  end
+
+  @doc """
+  The projection for a session, from the newest usable snapshot plus the tail.
+
+  A snapshot is pure cache: anything wrong with it — a format this build does not write,
+  a fold computed by a different build, bytes that will not decode — discards it and
+  replays everything. The result is the same either way, which is the property that
+  makes discarding it the safe choice rather than a loss.
+
+  `:from` says where the answer came from, because "this took four seconds because the
+  snapshot was rejected" is worth being able to see.
+  """
+  @spec projection(Context.t(), keyword()) :: {:ok, map()} | {:error, term()}
+  def projection(%Context{} = context, opts \\ []) do
+    with {:ok, all} <- Storage.list_segments(context.store, context.session_id) do
+      live = Storage.live_segments(all)
+
+      case usable_snapshot(context, opts) do
+        {:ok, fold, seq} -> fold_tail(context, live, fold, seq, :snapshot)
+        {:error, reason} -> fold_tail(context, live, Summary.empty(), 0, {:replayed, reason})
+      end
+    end
+  end
+
+  defp usable_snapshot(context, opts) do
+    case Storage.latest_snapshot_seq(context.store, context.session_id) do
+      nil ->
+        {:error, :none}
+
+      seq ->
+        case Storage.get_snapshot(context.store, context.session_id, context.data_key, seq) do
+          {:ok, stored} -> Snapshot.open(stored, opts)
+          {:error, reason} -> {:error, reason}
+        end
+    end
+  end
+
+  # Only the segments after the snapshot. With no snapshot that is every segment, which
+  # is the full replay the fallback promises.
+  defp fold_tail(context, segments, fold, from_seq, source) do
+    tail = Enum.filter(segments, &(&1.last_seq > from_seq))
+
+    with {:ok, events} <- read_all(context, tail) do
+      folded =
+        events
+        |> Enum.map(&Event.from_json/1)
+        |> Enum.filter(&(&1.seq > from_seq))
+        |> Enum.reduce(fold, &Summary.fold(&2, &1))
+
+      {:ok, %{fold: folded, from: source, from_seq: from_seq, segments: length(tail)}}
     end
   end
 
