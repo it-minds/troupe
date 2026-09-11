@@ -20,5 +20,5 @@ defmodule Troupe.Worker.Application do
 
   defp autostart?, do: Application.get_env(:troupe_worker, :autostart, false)
 
-  defp children, do: []
+  defp children, do: [Troupe.Worker.Sessions]
 end

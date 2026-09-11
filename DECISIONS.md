@@ -364,3 +364,52 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     second HTTP stack to reason about. Two things had to be got right by hand: `host`
     must be among the signed headers, and S3 is the service that does *not* double-encode
     the path.
+
+64. **A dormant session costs no process on the worker.** A pod is expected to be
+    responsible for tens of thousands of sessions and to have almost all of them asleep,
+    so dormancy stops the manager rather than parking it. Everything a dormant session
+    *is* lives in object storage, and activation is the only path back — which is also
+    what makes relocation and PVC loss the same operation, since neither has anything
+    local to start from.
+
+65. **Turn completion is an ephemeral event, so the sealer reads ephemerals for their
+    timing and seals none of them.** An ordinary reply leaves the root agent idle and
+    logs nothing to say so; `agent_done` is only written when an agent actually finishes.
+    Sealing on the ephemeral transition is what makes "at every turn completion" true,
+    and dropping the ephemerals themselves is what keeps the object tier the size of the
+    session rather than the size of its typing.
+
+66. **Seal, then report — never the other way round.** A segment the plane has been told
+    about but that is not in storage would let a rebuild claim history it cannot produce.
+    A segment in storage the plane has not heard of is merely un-anchored, and the next
+    report fixes it. The same reasoning makes sealing carry on when the plane is
+    unreachable: durability must not depend on the plane being up.
+
+67. **Dormancy erases the event log as well as the workspace.** The Forbidden list names
+    the plaintext workspace, but `events.jsonl` is plaintext session content on the same
+    PVC and the durable copy of it is already encrypted in object storage. Both go, and
+    the erase is checked rather than assumed: a file the pod cannot delete would leave
+    plaintext behind while the code reported success.
+
+68. **The restore runs inside the `await` call that asked for it, not in `init` or a
+    continue.** A manager that failed before anyone called it could only report
+    `:noproc`, and "why" is the difference between a storage blip worth retrying and a
+    stale epoch that must never be retried. Concurrent activations queue behind that one
+    call, which is where "one tree, one epoch" comes from inside a pod.
+
+69. **A manager gives up its registered name in `terminate/2`.** The registry would do it
+    on its own when it gets round to the monitor message, but a caller that has just put
+    a session to sleep and is about to place it elsewhere would see the corpse in the
+    meantime. `dormant/1` and `fence/2` wait for the process to be gone before returning,
+    so the registry is authoritative the moment they do.
+
+70. **A fenced pod uploads nothing and keeps nothing.** Its events belong to an epoch the
+    session has moved past and its workspace is a copy of a tree somebody else now owns,
+    so the sealer is killed rather than flushed and the local cache is erased. The
+    cheaper check comes first: the manifest is plaintext, so a stale epoch is caught
+    before anything is decrypted.
+
+71. **Sealing before stopping, stopping before archiving, erasing last.** Sealing first
+    keeps the last turn; stopping the tree before archiving keeps the archive from being
+    torn halfway through a file write; erasing last means every byte is already in object
+    storage under a key the plane cannot read by the time the plaintext goes.
