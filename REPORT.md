@@ -689,6 +689,8 @@ Each client drives a session of its own with one input in flight. Five clients h
 one session would measure how long a queue behind a busy agent takes to drain, which is a
 property of the model's speed rather than of the transport.
 
+Reproduced on a second consecutive `mix check`: p50 6ms, p95 10ms, p99 14ms.
+
 ## What had to be built first
 
 **The WebSocket transport, on both ends.** `PROTOCOL.md` has specified
@@ -745,6 +747,9 @@ measured against a real object store and key manager
   activation warm median 296ms   max 671ms   (5 activations)
   activation cold median 363ms   max 417ms   (5 activations)
 ```
+
+A second run gave 4ms, 312ms and 357ms. The warm maximum is the first sample of the run
+and is noise; the medians are the numbers to read.
 
 **Seal lag** is how long a durable event exists only on a pod's volume — the window in
 which losing the volume loses the event, and therefore the size of the promise that a
