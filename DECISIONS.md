@@ -936,3 +936,33 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      router behind the panel's meant every request the panel answered still ran through
      the API's router, which then tried to 404 a response that had already been sent —
      found by the first test that loaded a page without a session.
+
+164. **The plane's RBAC is confirmed with `kubectl auth can-i`, not by reading the file.**
+     A claim about RBAC is a claim about what the API server will allow, and only it can
+     answer that. Writing the test found that the plane could not read `TroupePolicy` at
+     all — which the panel's fast-feedback check needs — so the chart gained a ClusterRole
+     for it. Read only: a plane that could write the policy could raise its own limits,
+     which would make the policy a suggestion.
+
+165. **`kubectl auth can-i get pods/log` does not ask about `pods/log`.** The slash form is
+     answered as though it said `pods`, which the plane *can* get, so the test would have
+     passed while proving nothing. Subresources need `--subresource`, and the answer is
+     the *last* line of the output because `kubectl` writes its warnings to the same
+     stream.
+
+166. **An image is a string in the plane's record and a `{repository, tag}` in the custom
+     resource.** The policy matches on the repository, so the resource splits it; the
+     plane records what a person typed. Converted at the boundary rather than stored
+     twice, because two fields that have to agree eventually will not. The last colon
+     separates the tag, so a registry with a port is not read as a repository with a very
+     odd tag.
+
+167. **A missing secret is reported, not refused.** The reference may be right and the
+     secret on its way, and a profile that would not reconcile until every secret existed
+     could not be created before them. What it must not be is invisible — a pod that will
+     not start because a `Secret` is missing is a mystery unless the condition says so.
+
+168. **A test that restores something Helm owns must restore its field manager too.**
+     Recreating the admission binding with a default manager left `helm upgrade` unable to
+     apply it — the object was there and `.spec.matchResources` belonged to somebody else
+     — which is a cluster the test quietly broke for everything after it.

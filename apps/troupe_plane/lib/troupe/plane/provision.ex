@@ -91,11 +91,34 @@ defmodule Troupe.Plane.Provision do
 
   defp base_spec(source) do
     %{
-      "image" => get(source, :image),
+      "image" => image_spec(get(source, :image)),
       "replicas" => get(source, :replicas),
       "sessionsPerPod" => get(source, :sessions_per_pod)
     }
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
+
+  # The plane records an image as the string a person types; the custom resource splits
+  # it into a repository and a tag or digest, because that is what a policy matches
+  # against. Converted here rather than stored twice: two fields that had to agree would
+  # eventually not.
+  defp image_spec(nil), do: nil
+  defp image_spec(%{} = already), do: already
+
+  defp image_spec(image) when is_binary(image) do
+    case String.split(image, "@", parts: 2) do
+      [repository, digest] -> %{"repository" => repository, "digest" => digest}
+      [_image] -> tagged(image)
+    end
+  end
+
+  # The last colon, so a registry with a port — `registry:5000/troupe/worker:1` — is not
+  # read as a repository called `registry` with a very odd tag.
+  defp tagged(image) do
+    case String.split(image, ":") do
+      [repository] -> %{"repository" => repository}
+      parts -> %{"repository" => parts |> Enum.drop(-1) |> Enum.join(":"), "tag" => List.last(parts)}
+    end
   end
 
   defp get(%Profile{} = profile, key), do: Map.get(profile, key)

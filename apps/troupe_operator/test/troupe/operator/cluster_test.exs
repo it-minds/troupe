@@ -127,7 +127,11 @@ defmodule Troupe.Operator.ClusterTest do
               &Map.drop(&1, ~w(resourceVersion uid creationTimestamp generation managedFields))
             )
 
-          K8s.Client.run(conn, K8s.Client.create(restored))
+          # Restored as Helm would apply it, field manager and all. Recreating it with a
+          # default manager leaves Helm unable to upgrade the chart afterwards — the
+          # object is there, and `.spec.matchResources` belongs to somebody else — which
+          # is a cluster this test quietly broke for everything after it.
+          K8s.Client.run(conn, K8s.Client.apply(restored, field_manager: "helm", force: true))
 
           # Restoring the object is not restoring the enforcement: the API server picks
           # a policy up on its own schedule, and the next test in this file expects a

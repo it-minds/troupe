@@ -120,6 +120,8 @@ defmodule Troupe.Operator.Reconciler do
   defp apply_profile(conn, resource, profile, policy) do
     settings = Settings.from_env()
     desired = Resources.for_profile(profile, policy, settings)
+    missing = missing_secrets(conn, profile, settings)
+    behind = pods_behind(conn, policy, profile)
 
     # The namespace first and on its own: nothing else in the list can be created
     # before it exists. Everything after that is independent and goes out together.
@@ -130,7 +132,12 @@ defmodule Troupe.Operator.Reconciler do
     failures = Enum.filter(applied, &match?({_resource, {:error, _}}, &1))
     pruned = prune(conn, profile, policy, desired)
 
-    status = status_for(resource, desired, failures, pruned, namespace_of(desired))
+    status =
+      resource
+      |> status_for(desired, failures, pruned, namespace_of(desired))
+      |> secret_status(missing, generation(resource))
+      |> upgrade_status(behind, generation(resource))
+
     write_status(conn, resource, status)
 
     if failures == [] do
@@ -167,6 +174,84 @@ defmodule Troupe.Operator.Reconciler do
     |> current_status()
     |> Map.put("namespace", namespace)
     |> Status.put("Ready", false, "ApplyFailed", message, generation(resource))
+  end
+
+  # A secret the profile refers to and the cluster does not have. Reported rather than
+  # refused: the reference may be right and the secret on its way, and a profile that
+  # would not reconcile until every secret existed could not be created before them.
+  # What it must not be is invisible — a pod that will not start because a Secret is
+  # missing is a mystery unless somebody says so here.
+  defp missing_secrets(conn, profile, settings) do
+    namespace = settings.plane_namespace
+
+    profile
+    |> Profile.secret_names()
+    |> Enum.reject(&secret_exists?(conn, namespace, &1))
+  end
+
+  defp secret_exists?(conn, namespace, name) do
+    operation = K8s.Client.get("v1", "Secret", namespace: namespace, name: name)
+    match?({:ok, _secret}, K8s.Client.run(conn, operation))
+  end
+
+  defp secret_status(status, [], generation) do
+    Status.put(status, "SecretMissing", false, "SecretsPresent", "every referenced secret exists", generation)
+  end
+
+  defp secret_status(status, missing, generation) do
+    message = "missing secret(s): #{Enum.join(missing, ", ")}"
+
+    status
+    |> Status.put("SecretMissing", true, "SecretsMissing", message, generation)
+    |> Status.put("Ready", false, "SecretsMissing", message, generation)
+  end
+
+  # A pod restarts for an image, config or volume change only when it has no active
+  # sessions, so a profile whose pods are on an older revision is *waiting* rather than
+  # broken. Saying which is the difference between "give it a minute" and "something is
+  # wrong".
+  defp upgrade_status(status, [], generation) do
+    Status.put(status, "UpgradePending", false, "UpToDate", "every pod is on the current revision", generation)
+  end
+
+  defp upgrade_status(status, behind, generation) do
+    message = "#{length(behind)} pod(s) waiting to restart idle: #{Enum.join(behind, ", ")}"
+    Status.put(status, "UpgradePending", true, "WaitingForIdle", message, generation)
+  end
+
+  # A StatefulSet on `OnDelete` reports the revision it wants and the one each pod has.
+  # Comparing them is how the operator knows a restart is outstanding without tracking
+  # one itself.
+  defp pods_behind(conn, policy, profile) do
+    namespace = Names.namespace(policy.namespace_prefix, profile.name)
+    name = Names.workload(policy.namespace_prefix, profile.name)
+    operation = K8s.Client.get("apps/v1", "StatefulSet", namespace: namespace, name: name)
+
+    with {:ok, set} <- K8s.Client.run(conn, operation),
+         wanted when is_binary(wanted) <- get_in(set, ["status", "updateRevision"]),
+         current when is_binary(current) <- get_in(set, ["status", "currentRevision"]),
+         true <- wanted != current do
+      pods_on_old_revision(conn, namespace, wanted)
+    else
+      _ -> []
+    end
+  end
+
+  defp pods_on_old_revision(conn, namespace, wanted) do
+    operation =
+      "v1"
+      |> K8s.Client.list("Pod", namespace: namespace)
+      |> K8s.Operation.put_selector(K8s.Selector.label({Names.managed_label(), "operator"}))
+
+    case K8s.Client.run(conn, operation) do
+      {:ok, %{"items" => pods}} ->
+        for pod <- pods,
+            get_in(pod, ["metadata", "labels", "controller-revision-hash"]) != wanted,
+            do: get_in(pod, ["metadata", "name"])
+
+      _ ->
+        []
+    end
   end
 
   defp pruned_suffix([]), do: ""
