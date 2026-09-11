@@ -51,9 +51,15 @@ defmodule Troupe.Plane.Control.Connection do
      %__MODULE__{
        socket: Keyword.fetch!(opts, :socket),
        # Injectable so the tests can drive enrolment without a cluster; in a pod this
-       # is a TokenReview against the API server and nothing else.
-       verify: Keyword.get(opts, :verify, &Enrolment.verify/1)
+       # is a TokenReview against the API server and nothing else. Configuration is the
+       # third way in, for a replica started as a whole application rather than as a
+       # listener with options — which is what a second node in a failover test is.
+       verify: Keyword.get_lazy(opts, :verify, &default_verifier/0)
      }}
+  end
+
+  defp default_verifier do
+    Application.get_env(:troupe_plane, :enrolment_verifier, &Enrolment.verify/1)
   end
 
   @impl GenServer

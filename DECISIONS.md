@@ -852,3 +852,19 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `archive_command` was failing silently — 748 of them — and point-in-time recovery
      had nothing to recover *through*. Found by writing the drill and running it, which
      is what a drill is for.
+
+149. **The failover test runs a real second replica behind a real Service.** A test that
+     faked either would not exercise the thing under test: `:global` is how two replicas
+     agree there is one placement actor, and a Service is why losing one is a reconnect
+     rather than an outage. The Service picks a backend *per connection* and does not move
+     connections already established — because a real one does not either, and the worker
+     noticing its socket broke and dialling again is the behaviour being checked.
+
+150. **The enrolment verifier can come from configuration, not only from options.** A
+     replica started as a whole application has a listener the supervision tree started,
+     with no place to pass a function — and a test module does not exist on a second OTP
+     node, so the stub is a compiled module both nodes share.
+
+151. **An anchor for a session that no longer exists is dropped, not fatal.** A session
+     erased between the plane's check and its insert is an ordinary race, and taking a
+     control connection down over it would turn a tidy-up into an outage.

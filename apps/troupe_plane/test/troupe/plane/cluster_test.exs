@@ -15,15 +15,15 @@ defmodule Troupe.Plane.ClusterTest do
   use ExUnit.Case, async: false
 
   alias Ecto.Adapters.SQL.Sandbox
-  alias Troupe.Plane.{Fleet, Identity, Ledger, Placement, Repo, Sessions, Singleton, TeamBudget}
+  alias Troupe.Plane.{Fleet, Identity, Ledger, Placement, Replica, Repo, Sessions, Singleton, TeamBudget}
 
   @moduletag timeout: 180_000
 
   setup_all do
     # No sandbox here: the peer node needs its own connections to the same database, and
     # a transaction on this node is invisible to it. The test cleans up what it made.
-    Sandbox.mode(Repo, :auto)
-    on_exit(fn -> Sandbox.mode(Repo, :manual) end)
+    Replica.share_database()
+    on_exit(&Replica.unshare_database/0)
 
     case start_peer() do
       {:ok, peer, node} ->
@@ -171,67 +171,10 @@ defmodule Troupe.Plane.ClusterTest do
   defp requires_peer(%{peer_node: _} = context), do: context
   defp requires_peer(_context), do: flunk("no second node; see the message from setup_all")
 
-  defp stop_peer(peer) do
-    :peer.stop(peer)
-  catch
-    :exit, _ -> :ok
-  end
-
   # -- the second node --------------------------------------------------------
 
-  defp start_peer do
-    with :ok <- ensure_epmd(),
-         {:ok, _} <- ensure_distributed(),
-         {:ok, peer, node} <-
-           :peer.start_link(%{
-             name: :"troupe_plane_peer_#{System.unique_integer([:positive])}",
-             host: ~c"127.0.0.1",
-             longnames: true,
-             args: [~c"-setcookie", Atom.to_charlist(:erlang.get_cookie())]
-           }) do
-      :ok = :erpc.call(node, :code, :add_paths, [:code.get_path()])
-
-      # A peer node starts with no application environment of its own. It needs the
-      # same database configuration this node has, because a second replica is a second
-      # connection pool against one database, not a second database.
-      config =
-        :troupe_plane
-        |> Application.get_all_env()
-        |> Keyword.put(:autostart, true)
-        |> Keyword.update(Repo, [pool_size: 5], fn repo_config ->
-          repo_config |> Keyword.put(:pool_size, 5) |> Keyword.delete(:pool)
-        end)
-
-      :ok = :erpc.call(node, Application, :put_all_env, [[troupe_plane: config]])
-
-      # The *application*, not the pieces: a supervisor started through `:erpc` is
-      # linked to the call's own process and dies with it, and what this is testing is
-      # a replica that keeps running.
-      {:ok, _} = :erpc.call(node, Application, :ensure_all_started, [:troupe_plane], 30_000)
-
-      {:ok, peer, node}
-    end
-  end
-
-  # Erlang distribution needs EPMD, and a machine that has never run a distributed node
-  # has none. Starting it is a one-liner; skipping the only test of the mechanism
-  # because of it would not be.
-  defp ensure_epmd do
-    case System.cmd("epmd", ["-daemon"], stderr_to_stdout: true) do
-      {_output, 0} -> :ok
-      {output, status} -> {:error, {:epmd, status, String.trim(output)}}
-    end
-  rescue
-    error -> {:error, {:epmd, error}}
-  end
-
-  defp ensure_distributed do
-    case :net_kernel.start([:"troupe_plane_test@127.0.0.1", :longnames]) do
-      {:ok, pid} -> {:ok, pid}
-      {:error, {:already_started, pid}} -> {:ok, pid}
-      error -> error
-    end
-  end
+  defp start_peer, do: Replica.start()
+  defp stop_peer(peer), do: Replica.stop(peer)
 
   # -- fixtures ---------------------------------------------------------------
 

@@ -48,5 +48,9 @@ defmodule Troupe.Plane.Sessions.Anchor do
     ])
     |> validate_required([:session_id, :epoch, :first_seq, :last_seq, :head_hash, :object_key, :sealed_at])
     |> unique_constraint([:session_id, :epoch, :last_seq])
+    # A session erased between the check and the insert is an ordinary race, not a
+    # reason to take a control connection down: the anchor belongs to a session that no
+    # longer exists, and the right answer is to drop it.
+    |> foreign_key_constraint(:session_id)
   end
 end
