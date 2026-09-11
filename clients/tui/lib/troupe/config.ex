@@ -20,6 +20,13 @@ defmodule Troupe.Config do
           max_branches: pos_integer(),
           compaction: %{fraction: float(), keep_last_turns: pos_integer()},
           watch: %{debounce_ms: pos_integer(), poll_interval_ms: pos_integer(), enabled: boolean()},
+          memory: %{
+            enabled: boolean(),
+            auto_refresh: boolean(),
+            max_age_days: pos_integer(),
+            max_chars: pos_integer(),
+            survey_chars: pos_integer()
+          },
           tool_timeout_ms: pos_integer(),
           auto_approve: boolean(),
           max_delegation_depth: pos_integer(),
@@ -45,6 +52,13 @@ defmodule Troupe.Config do
             max_branches: 8,
             compaction: %{fraction: 0.8, keep_last_turns: 4},
             watch: %{debounce_ms: 300, poll_interval_ms: 500, enabled: false},
+            memory: %{
+              enabled: true,
+              auto_refresh: true,
+              max_age_days: 7,
+              max_chars: 6_000,
+              survey_chars: 1_500
+            },
             tool_timeout_ms: 120_000,
             auto_approve: false,
             max_delegation_depth: 3,
@@ -293,6 +307,7 @@ defmodule Troupe.Config do
     providers = yaml |> Map.get("providers", %{}) |> parse_providers()
     compaction = Map.get(yaml, "compaction", %{})
     watch = Map.get(yaml, "watch", %{})
+    memory = Map.get(yaml, "memory", %{})
 
     %__MODULE__{
       cfg
@@ -314,6 +329,13 @@ defmodule Troupe.Config do
           debounce_ms: Map.get(watch, "debounce_ms", cfg.watch.debounce_ms),
           poll_interval_ms: Map.get(watch, "poll_interval_ms", cfg.watch.poll_interval_ms),
           enabled: Map.get(watch, "enabled", cfg.watch.enabled)
+        },
+        memory: %{
+          enabled: Map.get(memory, "enabled", cfg.memory.enabled),
+          auto_refresh: Map.get(memory, "auto_refresh", cfg.memory.auto_refresh),
+          max_age_days: Map.get(memory, "max_age_days", cfg.memory.max_age_days),
+          max_chars: Map.get(memory, "max_chars", cfg.memory.max_chars),
+          survey_chars: Map.get(memory, "survey_chars", cfg.memory.survey_chars)
         },
         tool_timeout_ms: Map.get(yaml, "tool_timeout_ms", cfg.tool_timeout_ms),
         max_delegation_depth: Map.get(yaml, "max_delegation_depth", cfg.max_delegation_depth),
@@ -377,6 +399,9 @@ defmodule Troupe.Config do
 
       {:watch, w}, acc when is_map(w) ->
         %{acc | watch: Map.merge(acc.watch, w)}
+
+      {:memory, m}, acc when is_map(m) ->
+        %{acc | memory: Map.merge(acc.memory, m)}
 
       {k, v}, acc when is_map_key(acc, k) ->
         Map.put(acc, k, v)

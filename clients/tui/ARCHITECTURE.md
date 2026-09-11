@@ -15,6 +15,7 @@ Troupe.Application (one_for_one)
 ├── Troupe.Sessions            DynamicSupervisor
 │   └── Troupe.Session         Supervisor, rest_for_one, one per session
 │       ├── Session.Log        GenServer, single-writer append-only JSONL event store + publisher
+│       ├── Session.Memory     GenServer, owns .troupe/memory.md (the project brief)
 │       ├── Session.Approvals  GenServer, permission gate and user-question broker
 │       ├── Session.Locks      GenServer, advisory per-path write locks
 │       ├── Session.Branches   DynamicSupervisor, one_for_one; children are :temporary Agent.Node
@@ -34,6 +35,7 @@ Registry keys (all under `{session_id, key}`):
 |---------------------------|--------------------|
 | `:session`                | Troupe.Session     |
 | `:log`                    | Session.Log        |
+| `:memory`                 | Session.Memory     |
 | `:approvals`              | Session.Approvals  |
 | `:locks`                  | Session.Locks      |
 | `:branches`               | Session.Branches   |
@@ -282,6 +284,39 @@ package names, language mix by file count, and the file list — or per-director
 counts when the list is too large. It is a derived cache: nothing persists it,
 replay ignores it, and `list_files` remains the authority on current contents.
 
+## 4.7 Project brief (codebase memory)
+
+`.troupe/memory.md` in the workspace is a durable, human-editable brief: YAML
+frontmatter (`built_at`, `head`, `files`) plus ordered `## ` sections
+(`Overview`, `Layout`, `Commands`, `Conventions`, `Notes`). `Troupe.Memory` is
+the pure format module — parse, render, `put_section/3`, `add_note/3`,
+`stale?/2`, `to_prompt/2` — and parsing is lossless, so unknown headings and
+text before the first heading survive a rewrite.
+
+`Session.Memory` owns the file: single writer within a session, each mutation
+re-reads from disk before merging and replaces by rename. Its path comes from
+the *session* workspace, so a worktree branch reads and writes the user's
+checkout rather than a copy of its own: one brief per repository.
+
+`Agent.Server.init/1` fetches the rendered block once, beside `Survey.build/2`,
+and `Prompt.system/3` renders it as `# Project brief` ahead of `# Workspace`.
+Once a brief is present the survey's listing budget drops to
+`memory.survey_chars`, so its `Layout` section supersedes the raw file dump.
+Fetched once, never per turn, for the same reason as the survey: the system
+prompt must stay byte-stable or the provider's prompt cache stops hitting — so a
+`remember` during a branch reaches the *next* agent, not the current turn.
+
+The `remember` tool (`:auto`; the only file it can reach is the brief) writes a
+section or appends a dated note. The `librarian` profile rebuilds the brief and
+is dispatched once per session by the Dispatcher when `Session.Memory.status/2`
+is `:absent` or `:stale`, as a `source: :memory` window that dismisses itself on
+completion; the guard is `counters["librarian"]`, folded from the log, so it
+survives a restart and a resume.
+
+Like the survey, the brief is derived and never authoritative: it is not an
+event, replay ignores it, and `list_files`/`grep`/`read_file` remain the truth
+about current contents.
+
 ## 5. Tools
 
 `Troupe.Tool` behaviour: `name/0`, `description/0`, `schema/0`,
@@ -333,7 +368,7 @@ replay is unaffected and it reaches the TUI model through the same inert path as
 
 * No synchronous call between agents, or from a session actor into an agent.
 * `GenServer.call` only from the client API into session actors and from an
-  agent into Log/Approvals/Locks.
+  agent into Log/Approvals/Locks/Memory.
 * Top-level concurrency is the user's (commands). In-turn concurrency is the
   model's (multiple tool calls, `delegate` fan-out) and is bounded by the turn.
 * The TUI coalesces deltas and redraws at most 30 times per second; when its

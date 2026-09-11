@@ -15,3 +15,5 @@ Work autonomously. Read before you edit. Make minimal, correct changes and verif
 When you were triggered by an `AI!` or `AI?` comment in a file, remove the processed marker comments as part of your edit.
 
 When done, call `finish` with a concise summary of what changed and how it was verified.
+
+When you learn something durable about this codebase that was expensive to work out — an architectural rule, a build incantation, a non-obvious invariant, where a subsystem lives — call `remember` once before you finish. Record only what outlives your task, and never anything you have not verified.

@@ -177,6 +177,9 @@ defmodule Troupe.SettingsTest do
       press(pid, "down")
       press(pid, "down")
       press(pid, "down")
+      press(pid, "down")
+      press(pid, "down")
+      press(pid, "down")
       text = screen_text(pid, session)
       assert text =~ "max branches  (max_branches)"
       assert text =~ "How many branches may be running"
@@ -206,6 +209,9 @@ defmodule Troupe.SettingsTest do
 
       type(pid, "settings")
       press(pid, "enter")
+      press(pid, "down")
+      press(pid, "down")
+      press(pid, "down")
       press(pid, "down")
       press(pid, "down")
       press(pid, "down")

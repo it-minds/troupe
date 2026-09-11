@@ -16,11 +16,12 @@ defmodule Troupe.Tools do
     Troupe.Tools.Delegate,
     Troupe.Tools.Finish,
     Troupe.Tools.AskUser,
-    Troupe.Tools.ReadBranch
+    Troupe.Tools.ReadBranch,
+    Troupe.Tools.Remember
   ]
 
   @inline ~w(todo_write todo_read finish ask_user delegate)
-  @read_only ~w(read_file list_files grep todo_write todo_read finish ask_user delegate)
+  @read_only ~w(read_file list_files grep todo_write todo_read finish ask_user delegate remember)
 
   @spec all() :: %{String.t() => module()}
   def all, do: Map.new(@modules, &{&1.name(), &1})

@@ -3,6 +3,8 @@ defmodule Troupe.Agents.Definition do
   An agent definition: YAML frontmatter plus a markdown body (the system prompt).
   """
 
+  alias Troupe.Frontmatter
+
   @type t :: %__MODULE__{
           name: String.t(),
           description: String.t(),
@@ -39,8 +41,7 @@ defmodule Troupe.Agents.Definition do
   @spec parse(String.t(), String.t(), :builtin | :global | :project) ::
           {:ok, t()} | {:error, term()}
   def parse(name, content, source) do
-    with {:ok, front, body} <- split_frontmatter(content),
-         {:ok, meta} <- parse_yaml(front) do
+    with {:ok, meta, body} <- Frontmatter.split(content) do
       {:ok,
        %__MODULE__{
          name: name,
@@ -58,26 +59,6 @@ defmodule Troupe.Agents.Definition do
          prompt: String.trim(body),
          source: source
        }}
-    end
-  end
-
-  defp split_frontmatter("---" <> rest) do
-    case String.split(rest, ~r/\r?\n---[ \t]*(\r?\n|$)/, parts: 2) do
-      [front, body] -> {:ok, front, body}
-      _ -> {:error, :unterminated_frontmatter}
-    end
-  end
-
-  defp split_frontmatter(content), do: {:ok, "", content}
-
-  defp parse_yaml(""), do: {:ok, %{}}
-
-  defp parse_yaml(front) do
-    case YamlElixir.read_from_string(front) do
-      {:ok, map} when is_map(map) -> {:ok, map}
-      {:ok, nil} -> {:ok, %{}}
-      {:ok, _} -> {:error, :frontmatter_not_a_map}
-      {:error, reason} -> {:error, reason}
     end
   end
 

@@ -85,6 +85,57 @@ defmodule Troupe.Settings do
       """
     },
     %{
+      key: "memory.enabled",
+      label: "project brief",
+      type: :bool,
+      path: [:memory, :enabled],
+      yaml: ["memory", "enabled"],
+      effect: :new_branches,
+      help: """
+      Open every agent's prompt with the project brief kept in
+      `.troupe/memory.md`: what this project is, where things live, how to build
+      and test it, and the conventions that matter.
+
+      The point is the first question. An agent that already knows the layout
+      does not spend turns and tokens rediscovering it, and what one agent
+      learns with `remember` the next one starts with. Off means no brief is
+      read or written, and the file is left alone.
+      """
+    },
+    %{
+      key: "memory.auto_refresh",
+      label: "refresh brief automatically",
+      type: :bool,
+      path: [:memory, :auto_refresh],
+      yaml: ["memory", "auto_refresh"],
+      effect: :new_branches,
+      help: """
+      Dispatch the `librarian` agent once per session when the brief is missing
+      or stale, so it is written without you asking.
+
+      It runs on the cheap model, reads only, and dismisses its own window when
+      it finishes. Off means the brief changes only when you run
+      `/memory refresh` or an agent calls `remember`.
+      """
+    },
+    %{
+      key: "memory.max_age_days",
+      label: "brief goes stale after (days)",
+      type: :int,
+      path: [:memory, :max_age_days],
+      yaml: ["memory", "max_age_days"],
+      effect: :new_branches,
+      help: """
+      How old the brief may get before an automatic refresh rewrites it. A
+      refresh also triggers when the repository's tracked-file count has drifted
+      by more than a tenth.
+
+      A new commit deliberately does not make the brief stale: every commit
+      would, and the brief describes the shape of the project rather than its
+      current contents.
+      """
+    },
+    %{
       key: "max_branches",
       label: "max branches",
       type: :int,

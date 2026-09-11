@@ -26,7 +26,8 @@ defmodule Troupe.Agent.Server do
               tasks: %{},
               children: %{},
               compaction: nil,
-              survey: nil
+              survey: nil,
+              brief: ""
   end
 
   ## API
@@ -48,6 +49,15 @@ defmodule Troupe.Agent.Server do
 
   ## gen_statem
 
+  # With a brief in the prompt its Layout section supersedes the file dump, so the
+  # survey is given a smaller budget and degrades to per-directory counts.
+  defp survey_opts(%Spec{}, ""), do: []
+
+  defp survey_opts(%Spec{} = spec, _brief) do
+    memory = Map.get(spec.config || %{}, :memory) || %{}
+    [max_chars: Map.get(memory, :survey_chars, 1_500)]
+  end
+
   @impl true
   def callback_mode, do: [:handle_event_function, :state_enter]
 
@@ -56,7 +66,9 @@ defmodule Troupe.Agent.Server do
     events = Log.events(spec.session_id, spec.agent_path)
     data = %Data{spec: spec, state: State.replay(spec, events)}
     data = ensure_worktree(data)
-    data = %Data{data | survey: Survey.build(data.state.workspace)}
+    brief = Session.Memory.prompt_section(spec.session_id)
+    survey = Survey.build(data.state.workspace, survey_opts(spec, brief))
+    data = %Data{data | survey: survey, brief: brief}
 
     fresh? = not Enum.any?(events, &(&1.type == :input))
 
@@ -344,7 +356,7 @@ defmodule Troupe.Agent.Server do
         st.finish_summary || "Budget exhausted before the task was finished."
       )
     else
-      request = Prompt.request(st, data.survey)
+      request = Prompt.request(st, data.survey, data.brief)
       data = spawn_stream(data, request, :turn)
       {:next_state, :thinking, data}
     end

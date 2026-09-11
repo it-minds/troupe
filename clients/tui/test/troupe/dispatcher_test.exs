@@ -142,7 +142,9 @@ defmodule Troupe.DispatcherTest do
     :ok = Troupe.stop_session(sid)
     eventually(fn -> Session.whereis(sid, :session) == nil end)
 
-    {:ok, ^sid} = Troupe.resume(sid, provider: {Fake, fake})
+    {:ok, ^sid} =
+      Troupe.resume(sid, provider: {Fake, fake}, config: %{memory: %{auto_refresh: false}})
+
     :ok = Troupe.subscribe(sid)
     on_exit(fn -> Troupe.stop_session(sid) end)
 

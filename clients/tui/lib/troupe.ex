@@ -10,7 +10,7 @@ defmodule Troupe do
   alias Troupe.Agent.Server
   alias Troupe.{Agents, Config, Paths, Session, Settings}
   alias Troupe.LLM.Provider
-  alias Troupe.Session.{Approvals, Dispatcher, Log, Watcher}
+  alias Troupe.Session.{Approvals, Dispatcher, Log, Memory, Watcher}
 
   @type session_id :: String.t()
 
@@ -191,6 +191,7 @@ defmodule Troupe do
   end
 
   defp apply_live(sid, "watch." <> _, cfg), do: Watcher.put_config(sid, cfg)
+  defp apply_live(sid, "memory." <> _, cfg), do: Memory.put_config(sid, cfg)
   defp apply_live(_sid, _key, _cfg), do: :ok
 
   @spec watch(session_id(), boolean()) :: {:ok, atom()} | :ok

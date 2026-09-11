@@ -51,10 +51,21 @@ defmodule Troupe.TestHelpers do
       |> Keyword.drop([:workspace, :fake, :script, :scripts, :fallback])
       |> Keyword.merge(workspace: ws, provider: {Fake, fake})
 
+    # Every temp workspace lacks a brief, so a session would dispatch a librarian
+    # into the Fake's script. Tests that want one pass `auto_refresh: true`.
+    session_opts =
+      Keyword.update(session_opts, :config, %{memory: %{auto_refresh: false}}, &no_auto_refresh/1)
+
     {:ok, sid} = Troupe.start_session(session_opts)
     :ok = Troupe.subscribe(sid)
     on_exit(fn -> Troupe.stop_session(sid) end)
     {sid, fake, ws}
+  end
+
+  defp no_auto_refresh(config) do
+    config
+    |> Map.new()
+    |> Map.update(:memory, %{auto_refresh: false}, &Map.put_new(&1, :auto_refresh, false))
   end
 
   @doc "Waits for the window `path` to publish `branch_state` = `state`."

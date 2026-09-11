@@ -135,6 +135,7 @@ defmodule Troupe.Session.Dispatcher do
       Log.append(sid, "session", :session_started, %{workspace: opts.workspace, session_id: sid})
     end
 
+    send(self(), :maybe_refresh_memory)
     {:ok, reconcile(state)}
   end
 
@@ -314,8 +315,12 @@ defmodule Troupe.Session.Dispatcher do
         state
       end
 
+    dismiss_when_internal(state, after_w)
+
     {:noreply, state}
   end
+
+  def handle_info(:maybe_refresh_memory, state), do: {:noreply, maybe_refresh_memory(state)}
 
   def handle_info({:DOWN, ref, :process, _pid, reason}, state) do
     case Map.pop(state.monitors, ref) do
@@ -582,6 +587,50 @@ defmodule Troupe.Session.Dispatcher do
         {:ok, window}
     end
   end
+
+  ## Project brief
+
+  # The librarian is dispatched at most once per session: `counters` is folded
+  # from `branch_spawned`, so the guard survives a Dispatcher restart and resume.
+  defp maybe_refresh_memory(%__MODULE__{} = state) do
+    memory = Map.get(state.config || %{}, :memory) || %{}
+
+    with true <- Map.get(memory, :auto_refresh, true),
+         true <- Map.has_key?(state.definitions, "librarian"),
+         nil <- Map.get(state.counters, "librarian"),
+         status when status in [:absent, :stale] <- Session.Memory.status(state.session_id) do
+      refresh(state, status)
+    else
+      _not_now -> state
+    end
+  end
+
+  defp refresh(state, status) do
+    prompt =
+      case status do
+        :absent -> "Write the project brief for this repository."
+        :stale -> "The project brief is out of date. Revise it against the repository as it is now."
+      end
+
+    case dispatch(state, "librarian", prompt, :memory) do
+      {:ok, _path, state} ->
+        state
+
+      {:error, msg} ->
+        Logger.debug("memory: skipping brief refresh: #{msg}")
+        state
+    end
+  end
+
+  # A window the harness raised for itself reports to nobody, so it clears itself
+  # away rather than sitting unread in the strip.
+  defp dismiss_when_internal(state, %{source: :memory, state: s, agent_path: path})
+       when s in @resting do
+    Log.append(state.session_id, path, :window_dismissed, %{})
+    state
+  end
+
+  defp dismiss_when_internal(state, _window), do: state
 
   ## Close
 

@@ -11,7 +11,7 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event.{Key, Mouse, Resize}
   alias Troupe.Events
-  alias Troupe.Session.{Dispatcher, Log, Watcher}
+  alias Troupe.Session.{Dispatcher, Log, Memory, Watcher}
   alias Troupe.Settings
   alias Troupe.UI.TUI.{Model, View}
 
@@ -367,6 +367,9 @@ defmodule Troupe.UI.TUI.Server do
         "resume" ->
           {:notice, "resume from the shell: troupe resume #{args}"}
 
+        "memory" ->
+          memory_command(sid, String.trim(args))
+
         cmd ->
           Troupe.dispatch(sid, cmd, args)
       end
@@ -384,6 +387,38 @@ defmodule Troupe.UI.TUI.Server do
       {:error, msg} when is_binary(msg) -> notice(state, msg)
       {:error, other} -> notice(state, inspect(other))
     end
+  end
+
+  ## Project brief
+
+  defp memory_command(sid, "refresh") do
+    Troupe.dispatch(
+      sid,
+      "librarian",
+      "The project brief is out of date. Revise it against the repository as it is now."
+    )
+  end
+
+  defp memory_command(sid, "forget") do
+    :ok = Memory.forget(sid)
+    {:notice, "project brief forgotten; /memory refresh writes a new one"}
+  end
+
+  defp memory_command(sid, "") do
+    case Memory.brief(sid) do
+      nil -> {:notice, "no project brief yet; /memory refresh writes one"}
+      brief -> {:notice, brief_summary(sid, brief)}
+    end
+  end
+
+  defp memory_command(_sid, other) do
+    {:notice, "unknown /memory #{other}; use /memory, /memory refresh or /memory forget"}
+  end
+
+  defp brief_summary(sid, brief) do
+    titles = brief.sections |> Enum.map(&elem(&1, 0)) |> Enum.reject(&(&1 == ""))
+    built = if brief.built_at, do: DateTime.to_date(brief.built_at), else: "never"
+    "project brief (#{Memory.status(sid)}, built #{built}): " <> Enum.join(titles, ", ")
   end
 
   ## Observer page
@@ -804,7 +839,8 @@ defmodule Troupe.UI.TUI.Server do
         complete_name(
           text,
           state.commands ++
-            @path_commands ++ ~w(settings help observer models watch agents sessions quit)
+            @path_commands ++
+            ~w(settings help observer models watch agents sessions memory quit)
         )
 
       true ->
