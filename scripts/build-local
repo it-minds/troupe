@@ -63,7 +63,9 @@ export TROUPE_REAPER_TARGETS=all
 
 echo "build-local: building $target"
 mix deps.get
-mix release --overwrite
+# Named, because the umbrella has four releases and only one of them is the client
+# binary. Without the name `mix release` refuses rather than guessing.
+mix release troupe --overwrite
 
 # `--no-compile`: everything was just built, and a recompile here would print its
 # progress onto stdout and end up in the filename.
