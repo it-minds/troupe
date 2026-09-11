@@ -1,0 +1,208 @@
+# Stage 1 — report
+
+Sessions have moved out of the TUI process and into a daemon. Every client reaches
+them through one protocol and nothing reaches them any other way.
+
+`mix check` — compile with warnings as errors, format, credo strict, boundaries, the
+whole suite — is green, and the suite ran five consecutive times without a flake.
+
+```
+$ mix check
+boundaries ok: 4 rules, no violations
+Result: 31 passed (2 doctests, 29 tests)          # troupe_protocol
+Result: 127 passed (3 doctests, 1 property, 123 tests)   # troupe_core
+Result: 35 passed (2 properties, 33 tests)        # troupe_gateway
+Result: 22 passed                                 # troupe_tui
+Result: 20 passed                                 # troupe_ctl
+```
+
+235 tests. The packaged binary builds and runs: `scripts/build-local` produces a 19 MB
+`troupe-0.2.0-linux_x86_64`, and a headless run through it spawns a daemon on demand,
+writes its file through the tool, runs its shell command through `reaper`, and a second
+client lists the session from the same daemon.
+
+---
+
+## The ten criteria
+
+### 1. The xref boundary checks fail CI on violation
+
+```
+$ mix troupe.boundaries
+boundaries ok: 4 rules, no violations
+
+$ # with one line added to troupe_tui: `def peek(id), do: Troupe.events(id)`
+$ mix troupe.boundaries
+troupe_tui must not depend on troupe_core (the TUI is a protocol client and gets no private access)
+    Troupe.UI.BoundaryProbe calls Troupe
+troupe_tui must not depend on troupe_core (not declared in mix.exs)
+    Troupe.UI.BoundaryProbe calls Troupe
+** (Mix) 2 boundary violation(s)
+exit=1
+```
+
+The task reads the compiled beams' import chunks, so it sees what an app *calls*, not
+what its `mix.exs` claims. Both are checked.
+
+### 2. The Python stdlib client, in CI, against a daemon with the Fake provider
+
+`clients/python/conformance.py` initializes, lists the fleet, subscribes from `seq` 0,
+sends input, answers an approval, and verifies the hash chain with `hashlib` — in the
+standard library, with no access to this source.
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
+  * test the Python reference client initializes, lists the fleet, replays, steers, and approves (371.2ms)
+Result: 1 passed
+```
+
+What the client reported:
+
+```json
+{"server": "troupe-daemon", "principal": "user",
+ "scopes": ["observe", "control", "admin"],
+ "fleet": ["20260911T091340-IGc-rQ"], "head_seq": 5, "replayed": 5,
+ "approval": {"call_id": "call_1", "tool": "needs_approval"},
+ "tool": "needs_approval", "chain_ok": true}
+```
+
+### 3. `mix troupe.schema.diff`
+
+Compatible on an added field; fails on each of the four breaking changes.
+
+```
+$ mix troupe.schema.diff                     # added optional field
+schema compatible: 0 new document(s), 1 with added fields
+
+$ mix troupe.schema.diff                     # removed field
+  events/user_input.json: field dialect was removed or renamed
+** (Mix) 1 breaking schema change(s).                                    exit=1
+
+$ mix troupe.schema.diff                     # renamed field
+  events/user_input.json: field source is now required; older clients do not send it
+  events/user_input.json: field origin was removed or renamed
+** (Mix) 2 breaking schema change(s).                                    exit=1
+
+$ mix troupe.schema.diff                     # changed type
+  events/user_input.json: field source changed type from %{"type" => "integer"} to %{"type" => "string"}
+** (Mix) 1 breaking schema change(s).                                    exit=1
+
+$ mix troupe.schema.diff                     # newly required field
+  events/agent_done.json: field reason is now required; older clients do not send it
+** (Mix) 1 breaking schema change(s).                                    exit=1
+```
+
+A separate test folds a real session's log and validates every event against the
+schema its type claims, so the published table cannot drift from the code that emits
+the events.
+
+### 4. Property: random disconnects and reconnects yield the log exactly
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/replay_property_test.exs --trace
+Result: 2 passed
+```
+
+One fixed log, cut at randomly generated points; each time the client reconnects from
+the last `seq` it actually *processed* and the reassembled stream must equal the log,
+seq for seq and hash for hash.
+
+### 5. A detail subscriber that never reads
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/backpressure_test.exs --trace
+  * test a detail subscriber that never reads costs the agent nothing (489.6ms)
+  * test a subscriber far enough behind on durable events is told to resync (3581.4ms)
+Result: 2 passed
+```
+
+A raw socket, subscribed at `detail` and then never read from. The test waits until
+ephemerals are actually being dropped before it measures, then requires turn latency
+within 10% of baseline, the connection's memory and mailbox bounded, and the
+subscription still live. With a small durable bound it receives `resync_required`
+naming the topic and the last `seq` delivered.
+
+### 6. `kill -9` with three sessions, and dormancy
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/restart_test.exs --trace
+  * test kill -9 with three sessions: all come back, the mid-turn one interrupted (3851.3ms)
+  * test an idle session stops its tree, and subscribing serves history without starting one (2727.3ms)
+Result: 2 passed
+```
+
+A real daemon in a real OS process, killed with a real `SIGKILL` while one of three
+sessions is inside a tool call. After the restart all three are listed, the mid-turn
+one reports `"status": "interrupted"` — read from the log, before anything has been
+restarted — and the `llm_request` count does not move while the session is listed,
+fetched and replayed. It moves when new input arrives, and the interrupted tool call
+is closed off as an error rather than re-run.
+
+### 7. Ten concurrent clients spawn exactly one daemon
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/autospawn_test.exs --trace
+  * test ten concurrent clients spawn exactly one daemon (759.9ms)
+  * test a client that asks not to spawn one gets told there isn't one (1.2ms)
+  * test a stale lock left by a killed client does not block start-up forever (869.9ms)
+Result: 3 passed
+```
+
+Ten clients race for an `O_EXCL` lock; the launcher script counts its own invocations
+from outside the VM (exactly one), and all ten report the same `server_info.instance_id`
+— which the counter alone would not prove.
+
+### 8. Worktrees
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/worktrees_test.exs --trace
+  * test a second session in a live workspace gets its own worktree on troupe/<slug> (166.6ms)
+  * test worktree.remove refuses a dirty tree without force, and obeys it with force (125.0ms)
+  * test a clean worktree is removed without force (151.2ms)
+  * test worktree: never keeps the second session in the repository itself (250.4ms)
+Result: 4 passed
+```
+
+Real `git` against a real repository, and `git rev-parse --abbrev-ref HEAD` in the new
+worktree agrees with what `session.create` said.
+
+### 9. Approvals in three sessions, through HQ
+
+```
+$ mix test apps/troupe_tui/test/troupe/ui/hq_test.exs --trace
+  * test three sessions blocked on approvals all show up in HQ, and answering resolves them (1456.4ms)
+  * test a second client answering an already-decided approval gets approval_resolved (76.3ms)
+  * test the fold drops an approval once the session says it was resolved (2.4ms)
+Result: 3 passed
+```
+
+HQ never opens a session: it lists all three approvals from `fleet` plus the history it
+replays at start-up. A second client answering an already-decided approval gets an
+`approval_resolved` event naming who got there first, and the session records one
+decision and one tool run.
+
+### 10. The same `command_id` twice
+
+```
+$ mix test apps/troupe_gateway/test/troupe/gateway/daemon_test.exs --only describe:idempotency
+  * test idempotency the same command_id twice produces exactly one effect (46.0ms)
+  * test idempotency a replayed command is honoured across connections (253.2ms)
+Result: 2 passed, 19 excluded
+```
+
+The ledger claims the id *before* running the command, so two concurrent deliveries of
+the same retry cannot both pass the check.
+
+---
+
+## What is not in this stage
+
+Stages 2–4 are untouched: `troupe_worker`, `troupe_plane` and `troupe_operator` exist
+as empty applications with their boundaries already enforced. Remote transport is
+specified in `PROTOCOL.md` and not implemented; `initialize` reports
+`"capabilities": {"remote": false}`.
+
+The CI workflow is written and has never run — there is no remote to run it on. The
+parts of it that can run locally have: `mix check`, `mix troupe.boundaries`,
+`mix troupe.schema.diff`, the Python conformance test, and a local Burrito build with a
+smoke test of the resulting binary.
