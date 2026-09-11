@@ -95,29 +95,5 @@ defmodule Troupe.CLI.OptionsTest do
       assert output =~ "Usage:"
     end
 
-    test "a workspace that is not a directory fails cleanly" do
-      missing =
-        Path.join(System.tmp_dir!(), "troupe-not-here-#{System.unique_integer([:positive])}")
-
-      output =
-        ExUnit.CaptureIO.capture_io(:stderr, fn ->
-          assert CLI.dispatch(Options.parse(["run", "x", "--workspace", missing])) == 1
-        end)
-
-      assert output =~ "is not a directory"
-    end
-
-    test "sessions lists nothing for a fresh workspace" do
-      workspace = Path.join(System.tmp_dir!(), "troupe-cli-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(workspace)
-      on_exit(fn -> File.rm_rf!(workspace) end)
-
-      output =
-        ExUnit.CaptureIO.capture_io(fn ->
-          assert CLI.dispatch(Options.parse(["sessions", "--workspace", workspace])) == 0
-        end)
-
-      assert output =~ "No sessions recorded"
-    end
   end
 end

@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/todo.edit.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "action": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "command_id",
+    "session_id"
+  ],
+  "title": "todo.edit",
+  "type": "object"
+}

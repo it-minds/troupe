@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_resumed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "dormant_ms": {
+      "type": "integer"
+    },
+    "moved": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "dormant_ms",
+    "moved"
+  ],
+  "title": "session_resumed",
+  "type": "object"
+}

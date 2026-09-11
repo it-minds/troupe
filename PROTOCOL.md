@@ -70,7 +70,7 @@ Three message kinds, all with `"jsonrpc": "2.0"`.
 
 ```json
 {"jsonrpc": "2.0", "method": "event",
- "params": {"topic": "session:s-9f", "event": { … }}}
+ "params": {"topic": "session:s-9f", "session_id": "s-9f", "event": { … }}}
 ```
 
 `id` is a client-chosen integer or string, unique while in flight. The server may
@@ -107,13 +107,18 @@ The response:
 ```json
 {"jsonrpc": "2.0", "id": 1, "result": {
   "protocol_version": "1",
-  "server_info": {"name": "troupe-daemon", "version": "0.2.0"},
+  "server_info": {"name": "troupe-daemon", "version": "0.2.0", "instance_id": "kP3u_2fQ8xA"},
   "capabilities": {"worktrees": true, "watch": true, "remote": false},
   "principal": {"subject": "local:martin", "display_name": "martin", "kind": "user"},
   "scopes": ["observe", "control", "admin"],
   "limits": {"max_message_bytes": 67108864, "outbound_queue": 10000}
 }}
 ```
+
+`server_info.instance_id` identifies the running daemon and changes when it restarts.
+A client that reconnects and finds a different one is talking to a daemon that has been
+restarted: its own view of any session is stale and it must replay rather than resume.
+Without it a restart is indistinguishable from a very quiet session.
 
 **Version negotiation.** `protocol_version` is a major version as a decimal string.
 The server answers with the version it will speak. If the client's version is one the
@@ -131,8 +136,13 @@ Events flow as `event` notifications:
 
 ```json
 {"jsonrpc": "2.0", "method": "event",
- "params": {"topic": "session:s-9f", "event": {…}}}
+ "params": {"topic": "session:s-9f", "session_id": "s-9f", "event": {…}}}
 ```
+
+The envelope names the session as well as the topic. An event does not carry its own
+session id — in the log, the file it lives in says which session it belongs to — and a
+`fleet` subscriber receives events from every session on one subscription, so it needs
+the envelope to tell them apart.
 
 ### Durable events
 
@@ -191,18 +201,19 @@ Durable:
 | `user_input` | `source` (`user`/`watch`/`tui_todo_edit`), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
-| `llm_request` | `model`, `messages`, `tools`, `profile` |
+| `llm_request` | `model`, `message_count`, `tools`, `profile` |
 | `llm_response` | `message`, `usage`, `stop_reason` |
 | `llm_error` | `reason` |
 | `tool_call_started` | `call_id`, `name`, `args` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
 | `tool_results` | `results` |
-| `todo_updated` | `items` |
+| `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary` |
 | `budget_exhausted` | `limit` |
-| `agent_done` | `reason`, `summary` |
+| `agent_done` | `reason`, `summary`, `limit` |
+| `input_after_done` | `source` |
 | `cancelled` | — |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
@@ -322,14 +333,20 @@ This makes every command safe to retry after a disconnect.
 
 #### `session.create`
 ```json
-{"workspace": "/home/me/project", "profile": "build", "prompt": "fix the test",
- "visibility": "private", "worktree": "auto"}
+{"command_id": "c-0", "workspace": "/home/me/project", "profile": "build",
+ "prompt": "fix the test", "visibility": "private", "worktree": "auto",
+ "config": {"auto_approve": false, "watch": true}}
 ```
 → `{"session_id": "s-9f", "workspace": "/home/me/project", "worktree": null, "branch": null}`
 
 `worktree`: `"auto"` (default) creates a git worktree on `troupe/<slug>` when the
 workspace already has a live session; `"never"` reuses the directory; `"always"`
 always branches.
+
+`config` carries the session settings a client may choose, and only those:
+`auto_approve`, `watch`, `profile`. Everything else in the configuration — where state
+is written, which provider is used, what a key is — belongs to the machine the daemon
+runs on, and a client cannot move it.
 
 #### `session.list`
 ```json
@@ -406,6 +423,43 @@ Refuses a dirty tree with `conflict` unless `force` is true.
 #### `watch.set` → `{"command_id", "workspace", "enabled": true}`. Watch mode is
 **exclusive per workspace**; enabling it where another session already watches returns
 `conflict`.
+
+### Session states, dormancy, and activation
+
+| `state` | actor tree | what a client can do |
+| --- | --- | --- |
+| `active` | running | everything |
+| `dormant` | stopped | read it; an activating command brings the tree back |
+| `read_only` | stopped | read it; activating commands return `forbidden` |
+| `erased` | gone | `not_found` |
+
+A session goes `dormant` on its own idle timeout, or on `session.archive`. Its log
+stays, and so does everything a client can learn from it: `session.list`,
+`session.get`, `blob.get` and `subscribe` all work on a dormant session and start
+nothing. That is deliberate — a session that woke up because somebody looked at it
+would never stay dormant.
+
+The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
+`approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
+folding its log before taking effect, and the session logs `session_activated`.
+
+### After a restart
+
+A daemon restart is not visible as an event, because nothing was running to write one.
+What a client sees is this:
+
+- every session it could see before is still listed, `dormant`;
+- a session that was mid-turn reports `"status": "interrupted"`, which is read from
+  the log — a tool call that started and never completed, or a request the model never
+  answered — and is therefore true before anything has been restarted;
+- **no model call is made.** A session comes back interrupted and stays that way until
+  an activating command arrives. Resuming instead would mean a crash loop spends money
+  and re-runs shell commands nobody is watching. A daemon may be configured to resume,
+  and then it re-runs unfinished tool calls and takes the turn it owed.
+
+When an interrupted session is activated, the tool calls that never finished are
+closed off as errors naming the interruption, so the conversation the model sees has a
+result for every call it made.
 
 ---
 
@@ -517,9 +571,9 @@ definitions and fails CI on any breaking change.
 → {"jsonrpc":"2.0","id":3,"method":"subscribe","params":{"command_id":"c-2",
     "topic":"session:s-1","level":"detail","from_seq":0}}
 ← {"jsonrpc":"2.0","id":3,"result":{"subscription_id":"sub-1","head_seq":2}}
-← {"jsonrpc":"2.0","method":"event","params":{"topic":"session:s-1",
+← {"jsonrpc":"2.0","method":"event","params":{"topic":"session:s-1","session_id":"s-1",
     "event":{"seq":1,"prev_hash":null,"type":"session_created", …}}}
-← {"jsonrpc":"2.0","method":"event","params":{"topic":"session:s-1",
+← {"jsonrpc":"2.0","method":"event","params":{"topic":"session:s-1","session_id":"s-1",
     "event":{"seq":2,"prev_hash":"sha256:…","type":"agent_started", …}}}
 
 → {"jsonrpc":"2.0","id":4,"method":"input.send","params":{"command_id":"c-3",

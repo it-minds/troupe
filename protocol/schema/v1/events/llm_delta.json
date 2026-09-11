@@ -1,0 +1,27 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/llm_delta.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "fragment": {
+      "type": "string"
+    },
+    "id": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "kind"
+  ],
+  "title": "llm_delta",
+  "type": "object"
+}

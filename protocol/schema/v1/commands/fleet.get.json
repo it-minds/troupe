@@ -1,0 +1,9 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/fleet.get.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {},
+  "required": [],
+  "title": "fleet.get",
+  "type": "object"
+}

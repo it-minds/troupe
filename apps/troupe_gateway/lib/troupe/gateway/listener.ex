@@ -14,12 +14,13 @@ defmodule Troupe.Gateway.Listener do
 
   use GenServer
 
-  alias Troupe.Gateway.{Connections, Endpoint}
+  alias Troupe.Gateway.Connections
+  alias Troupe.Protocol.Endpoint
 
   require Logger
 
   @enforce_keys [:socket, :endpoint]
-  defstruct [:socket, :endpoint, :acceptor]
+  defstruct [:socket, :endpoint, :acceptor, connection_opts: []]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
@@ -37,7 +38,11 @@ defmodule Troupe.Gateway.Listener do
 
     case listen(endpoint) do
       {:ok, socket} ->
-        state = %__MODULE__{socket: socket, endpoint: endpoint}
+        state = %__MODULE__{
+          socket: socket,
+          endpoint: endpoint,
+          connection_opts: Keyword.take(opts, [:outbound_bound, :durable_bound])
+        }
         Endpoint.publish!(endpoint)
         {:ok, %{state | acceptor: spawn_acceptor(socket)}}
 
@@ -58,12 +63,26 @@ defmodule Troupe.Gateway.Listener do
 
   @impl GenServer
   def handle_info({:accepted, socket}, state) do
-    case Connections.attach(socket: socket, endpoint: state.endpoint) do
+    attach_opts = [socket: socket, endpoint: state.endpoint] ++ state.connection_opts
+
+    case Connections.attach(attach_opts) do
       {:ok, pid} ->
         # The connection must own the socket before it can read from it: a passive
         # socket read by a process that does not own it is not guaranteed to deliver.
-        :ok = :gen_tcp.controlling_process(socket, pid)
-        send(pid, :socket_ready)
+        #
+        # The hand-off can fail, and routinely does: a client probing whether anyone
+        # is listening connects and closes immediately, so by the time we get here the
+        # port may already be gone. That is an ordinary event, not a listener fault —
+        # crashing on it would let anyone take the daemon down by knocking on the door
+        # five times.
+        case :gen_tcp.controlling_process(socket, pid) do
+          :ok ->
+            send(pid, :socket_ready)
+
+          {:error, _reason} ->
+            :gen_tcp.close(socket)
+            GenServer.stop(pid, :normal)
+        end
 
       {:error, reason} ->
         Logger.warning("troupe: refusing a connection: #{inspect(reason)}")
@@ -88,6 +107,9 @@ defmodule Troupe.Gateway.Listener do
   defp accept_loop(parent, socket) do
     case :gen_tcp.accept(socket) do
       {:ok, client} ->
+        # The acceptor owns what it accepts, so it hands the socket to the listener
+        # before announcing it; otherwise the listener cannot pass it on again.
+        :ok = :gen_tcp.controlling_process(client, parent)
         send(parent, {:accepted, client})
         accept_loop(parent, socket)
 
@@ -103,13 +125,20 @@ defmodule Troupe.Gateway.Listener do
   # Reads are raw and buffered by the connection rather than framed by `packet: :line`,
   # because a line may legitimately be megabytes and `:line` splits those across
   # deliveries anyway — buffering once, in one place, is simpler than reassembling.
+  # No `send_timeout`: writes happen in `Gateway.Writer`, which can afford to block on
+  # a client that has stopped reading, and a timed-out send leaves an unspecified
+  # amount of a message on the wire — a half-written line that the next write would
+  # append to. Blocking one writer process costs nothing; a corrupted stream costs the
+  # client its session view. A peer that is truly gone reaches the connection as
+  # `tcp_closed` instead.
   @socket_opts [
     :binary,
     active: false,
     packet: :raw,
     reuseaddr: true,
-    send_timeout: 5_000,
-    send_timeout_close: false
+    # Ten terminals starting at once is a normal morning, and the default backlog of
+    # five turns the eleventh into a reset connection rather than a queued one.
+    backlog: 256
   ]
 
   defp listen(%Endpoint{kind: :unix, path: path}) do

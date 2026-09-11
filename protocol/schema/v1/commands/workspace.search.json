@@ -1,0 +1,18 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/workspace.search.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "limit": {
+      "type": "integer"
+    },
+    "query": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "query"
+  ],
+  "title": "workspace.search",
+  "type": "object"
+}

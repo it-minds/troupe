@@ -1,24 +1,28 @@
 defmodule Troupe.UI.TUI.Server do
   @moduledoc """
-  The terminal UI: an `ExRatatui.App` subscribed to `Troupe.Events`.
+  The terminal UI: an `ExRatatui.App` holding one `Troupe.Protocol.Client`.
 
-  Two properties matter as much as what it draws.
+  Three properties matter as much as what it draws.
 
-  **It can never slow an agent down.** Events arrive by `send/2` from
-  `Troupe.Events`; nothing in a session ever waits on this process. Rendering is
-  capped at 30 frames per second, and when the mailbox passes a threshold the whole
-  backlog is drained and collapsed in one pass rather than handled message by
-  message — a flood of deltas costs one fold, not one render each.
+  **It has no private access.** Everything on the screen arrived as a protocol event,
+  and every key that changes something sends a command. There is no call into a
+  session from here, and `mix troupe.boundaries` makes sure there never is.
 
-  **It owns no session state.** The transcript is a projection of the event log, so a
-  crash costs nothing: the supervisor restarts it, `mount/1` replays the log, and the
-  screen comes back while the session carries on untouched.
+  **It can never slow an agent down.** Events arrive by `send/2` from the client
+  process; nothing in a session ever waits on this one. Rendering is capped at 30
+  frames per second, and when the mailbox passes a threshold the whole backlog is
+  drained and collapsed in one pass rather than handled message by message — a flood
+  of deltas costs one fold, not one render each.
+
+  **It owns no session state.** The transcript is a fold over the event stream, so a
+  crash costs nothing: `mount/1` subscribes from `seq` 0 and the screen comes back
+  while the session carries on untouched.
   """
 
   use ExRatatui.App
 
-  alias ExRatatui.Event
-  alias Troupe.Session.Approvals
+  alias ExRatatui.Event, as: Key
+  alias Troupe.Protocol.{Client, Daemon}
   alias Troupe.UI.TUI.{State, View}
 
   @frame_ms 33
@@ -33,21 +37,30 @@ defmodule Troupe.UI.TUI.Server do
   @impl ExRatatui.App
   def mount(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
-    workspace = Keyword.fetch!(opts, :workspace)
 
-    Troupe.Events.subscribe(session_id)
+    with {:ok, client} <- connect(opts),
+         {:ok, session} <- Client.call(client, "session.get", %{"session_id" => session_id}),
+         {:ok, _} <- Client.subscribe(client, "session:" <> session_id, from_seq: 0) do
+      state =
+        session_id
+        |> State.new(session["workspace"], client: client, watch: Keyword.get(opts, :watch, false))
 
-    state =
-      session_id
-      |> State.new(workspace, watch: Keyword.get(opts, :watch, false))
-      |> rebuild_from_log()
+      schedule_frame()
 
-    schedule_frame()
+      {:ok,
+       state
+       |> Map.put(:owner, Keyword.get(opts, :owner))
+       |> Map.put(:test_pid, Keyword.get(opts, :test_pid))}
+    else
+      {:error, reason} -> {:stop, reason}
+    end
+  end
 
-    {:ok,
-     state
-     |> Map.put(:owner, Keyword.get(opts, :owner))
-     |> Map.put(:test_pid, Keyword.get(opts, :test_pid))}
+  defp connect(opts) do
+    case Keyword.get(opts, :client) do
+      nil -> Daemon.connect(Keyword.get(opts, :connect, []))
+      client -> {:ok, client}
+    end
   end
 
   @impl ExRatatui.App
@@ -56,7 +69,7 @@ defmodule Troupe.UI.TUI.Server do
   # -- input ------------------------------------------------------------------
 
   @impl ExRatatui.App
-  def handle_event(%Event.Key{code: "c", modifiers: modifiers} = event, state)
+  def handle_event(%Key.Key{code: "c", modifiers: modifiers} = event, state)
       when is_list(modifiers) do
     if "ctrl" in modifiers do
       if state.quit_armed?, do: quit(state), else: {:noreply, arm_quit(state), render?: true}
@@ -65,74 +78,71 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  def handle_event(%Event.Key{code: "esc"}, state) do
-    Troupe.cancel(state.session_id)
+  def handle_event(%Key.Key{code: "esc"}, state) do
+    command(state, "turn.cancel", %{})
     {:noreply, disarm(state)}
   end
 
-  def handle_event(%Event.Key{code: "tab"}, state) do
+  def handle_event(%Key.Key{code: "tab"}, state) do
     next = if state.profile == "plan", do: "build", else: "plan"
-    Troupe.switch_profile(state.session_id, next)
+    command(state, "profile.switch", %{"profile" => next})
     {:noreply, disarm(state)}
   end
 
-  def handle_event(%Event.Key{code: "enter"}, %{approvals: [approval | _]} = state) do
-    decide(state, approval, :allow)
+  def handle_event(%Key.Key{code: "enter"}, %{approvals: [approval | _]} = state) do
+    decide(state, approval, "allow")
   end
 
-  def handle_event(%Event.Key{code: code}, %{approvals: [approval | _]} = state)
+  def handle_event(%Key.Key{code: code}, %{approvals: [approval | _]} = state)
       when code in ["y", "a", "n"] do
-    decision = %{"y" => :allow, "a" => :allow_session, "n" => :deny}[code]
-    decide(state, approval, decision)
+    decide(state, approval, %{"y" => "allow", "a" => "allow_session", "n" => "deny"}[code])
   end
 
-  def handle_event(%Event.Key{code: "enter"}, state) do
+  def handle_event(%Key.Key{code: "enter"}, state) do
     {:noreply, submit(disarm(state)), render?: true}
   end
 
-  def handle_event(%Event.Key{code: "backspace"}, state) do
+  def handle_event(%Key.Key{code: "backspace"}, state) do
     {:noreply, %{disarm(state) | input: String.slice(state.input, 0..-2//1)}, render?: true}
   end
 
-  def handle_event(%Event.Key{code: "up"}, state) do
+  def handle_event(%Key.Key{code: "up"}, state) do
     {:noreply, move_selection(disarm(state), -1), render?: true}
   end
 
-  def handle_event(%Event.Key{code: "down"}, state) do
+  def handle_event(%Key.Key{code: "down"}, state) do
     {:noreply, move_selection(disarm(state), 1), render?: true}
   end
 
-  def handle_event(%Event.Key{code: "page_up"}, state) do
-    {:noreply, %{disarm(state) | follow?: false, scroll: max(state.scroll - 10, 0)},
-     render?: true}
+  def handle_event(%Key.Key{code: "page_up"}, state) do
+    {:noreply, %{disarm(state) | follow?: false, scroll: max(state.scroll - 10, 0)}, render?: true}
   end
 
-  def handle_event(%Event.Key{code: "page_down"}, state) do
-    scrolled = state.scroll + 10
-    {:noreply, %{disarm(state) | scroll: scrolled, follow?: false}, render?: true}
+  def handle_event(%Key.Key{code: "page_down"}, state) do
+    {:noreply, %{disarm(state) | scroll: state.scroll + 10, follow?: false}, render?: true}
   end
 
-  def handle_event(%Event.Key{code: "end"}, state) do
+  def handle_event(%Key.Key{code: "end"}, state) do
     {:noreply, %{disarm(state) | follow?: true, scroll: 0}, render?: true}
   end
 
-  def handle_event(%Event.Key{code: "f5"}, state) do
-    {:noreply, rebuild_from_log(state), render?: true}
+  def handle_event(%Key.Key{code: "f5"}, state) do
+    {:noreply, State.focus(state, state.focus), render?: true}
   end
 
-  def handle_event(%Event.Key{} = event, state), do: handle_text_key(event, state)
+  def handle_event(%Key.Key{} = event, state), do: handle_text_key(event, state)
 
-  def handle_event(%Event.Paste{content: content}, state) do
+  def handle_event(%Key.Paste{content: content}, state) do
     {:noreply, %{disarm(state) | input: state.input <> content}, render?: true}
   end
 
-  def handle_event(%Event.Resize{}, state), do: {:noreply, State.mark_dirty(state), render?: true}
+  def handle_event(%Key.Resize{}, state), do: {:noreply, State.mark_dirty(state), render?: true}
 
   # Unmatched events must never crash the app; ExRatatui's own guidance, and the same
   # rule the agent follows for unknown messages.
   def handle_event(_event, state), do: {:noreply, state, render?: false}
 
-  defp handle_text_key(%Event.Key{code: code}, state) when byte_size(code) <= 4 do
+  defp handle_text_key(%Key.Key{code: code}, state) when byte_size(code) <= 4 do
     if printable?(code) do
       {:noreply, %{disarm(state) | input: state.input <> code}, render?: true}
     else
@@ -144,14 +154,12 @@ defmodule Troupe.UI.TUI.Server do
 
   # Key codes for character keys are the character itself; named keys ("enter",
   # "f1") are longer words that must not be typed into the input.
-  defp printable?(code) do
-    String.length(code) == 1 and String.printable?(code)
-  end
+  defp printable?(code), do: String.length(code) == 1 and String.printable?(code)
 
   # -- session events ---------------------------------------------------------
 
   @impl ExRatatui.App
-  def handle_info({:troupe_event, _session_id, event}, state) do
+  def handle_info({:troupe_event, _topic, _session_id, event}, state) do
     state = State.apply_event(state, event)
 
     # One `receive` pass over whatever else is already queued. Under a flood this
@@ -161,6 +169,19 @@ defmodule Troupe.UI.TUI.Server do
 
     notify_test(state, event)
     {:noreply, state, render?: false}
+  end
+
+  # The daemon gave up on this subscription because we fell too far behind on
+  # *durable* events. Re-subscribing from the last seq we actually folded is the
+  # whole recovery, and it is why the last seq is tracked rather than the last one
+  # that arrived.
+  def handle_info({:troupe_resync, _id, topic, _last_seq}, state) do
+    Client.subscribe(state.client, topic, from_seq: state.last_seq)
+    {:noreply, State.notice(state, "reconnected the event stream"), render?: true}
+  end
+
+  def handle_info({:troupe_disconnected, reason}, state) do
+    {:noreply, State.notice(state, "lost the daemon: #{inspect(reason)}"), render?: true}
   end
 
   def handle_info(:frame, state) do
@@ -197,19 +218,23 @@ defmodule Troupe.UI.TUI.Server do
 
   defp drain(state, budget) do
     receive do
-      {:troupe_event, _session_id, event} -> drain(State.apply_event(state, event), budget - 1)
+      {:troupe_event, _t, _s, event} -> drain(State.apply_event(state, event), budget - 1)
     after
       0 -> state
     end
   end
 
-  defp rebuild_from_log(state) do
-    events = Troupe.events(state.session_id)
-
-    state
-    |> Map.put(:transcript, [])
-    |> State.rebuild(events)
-    |> State.mark_dirty()
+  # Every command carries a fresh `command_id`: this is a first attempt, never a
+  # retry, and reusing one would make a second keystroke a no-op.
+  defp command(state, method, params) do
+    Client.call(
+      state.client,
+      method,
+      Map.merge(params, %{
+        "command_id" => Client.command_id(),
+        "session_id" => state.session_id
+      })
+    )
   end
 
   defp submit(%{input: ""} = state), do: state
@@ -218,14 +243,14 @@ defmodule Troupe.UI.TUI.Server do
     state = %{state | input: "", follow?: true, scroll: 0}
 
     cond do
-      String.starts_with?(input, "/") -> command(state, input)
+      String.starts_with?(input, "/") -> slash(state, input)
       String.starts_with?(input, "@") -> address_agent(state, input)
       true -> send_input(state, input)
     end
   end
 
   defp send_input(state, text) do
-    Troupe.send_input(state.session_id, text)
+    command(state, "input.send", %{"text" => text})
     State.mark_dirty(state)
   end
 
@@ -242,79 +267,85 @@ defmodule Troupe.UI.TUI.Server do
         )
 
       _ ->
-        State.apply_event(state, %{
-          type: :watch_notice,
-          agent_path: state.focus,
-          data: %{message: "usage: @agent then what you want it to do"}
-        })
+        State.notice(state, "usage: @agent then what you want it to do")
     end
   end
 
-  defp command(state, input) do
+  defp slash(state, input) do
     trimmed = String.trim(input)
 
-    case Map.fetch(command_handlers(), trimmed) do
+    case Map.fetch(slash_commands(), trimmed) do
       {:ok, handler} -> handler.(state)
-      :error -> notice(state, "unknown command #{trimmed} — try /help")
+      :error -> State.notice(state, "unknown command #{trimmed} — try /help")
     end
   end
 
-  defp command_handlers do
+  defp slash_commands do
     %{
       "/plan" => &switch_to(&1, "plan"),
       "/build" => &switch_to(&1, "build"),
       "/cancel" => &cancel_turn/1,
       "/watch" => &toggle_watch/1,
-      "/agents" => &notice(&1, agents_help(&1)),
-      "/sessions" => &notice(&1, sessions_help(&1)),
-      "/resume" => &notice(&1, "resume from the shell: troupe resume <session-id>"),
-      "/help" => &notice(&1, "commands: " <> Enum.join(@commands, " ")),
-      "/quit" => &stop_session/1
+      "/agents" => &State.notice(&1, agents_help(&1)),
+      "/sessions" => &sessions_help/1,
+      "/resume" => &State.notice(&1, "resume from the shell: troupe resume <session-id>"),
+      "/help" => &State.notice(&1, "commands: " <> Enum.join(@commands, " ")),
+      "/quit" => &detach/1
     }
   end
 
   defp switch_to(state, profile) do
-    Troupe.switch_profile(state.session_id, profile)
+    command(state, "profile.switch", %{"profile" => profile})
     state
   end
 
   defp cancel_turn(state) do
-    Troupe.cancel(state.session_id)
+    command(state, "turn.cancel", %{})
     state
   end
 
   defp toggle_watch(state) do
-    {:ok, backend} = Troupe.watch(state.session_id, not state.watch?)
-    notice(%{state | watch?: backend != :off}, "watch: #{backend}")
+    params = %{
+      "command_id" => Client.command_id(),
+      "workspace" => state.workspace,
+      "enabled" => not state.watch?
+    }
+
+    case Client.call(state.client, "watch.set", params) do
+      {:ok, %{"backend" => backend, "enabled" => enabled}} ->
+        State.notice(%{state | watch?: enabled and backend != "off"}, "watch: #{backend}")
+
+      {:error, error} ->
+        State.notice(state, "watch: #{error.message}")
+    end
   end
 
-  defp stop_session(state) do
-    Troupe.stop_session(state.session_id)
+  # Closing the view no longer ends the session — that is the point of the daemon.
+  defp detach(state) do
+    if owner = Map.get(state, :owner), do: send(owner, {:tui_exit, 0})
     state
   end
 
-  defp notice(state, message) do
-    State.apply_event(state, %{
-      type: :watch_notice,
-      agent_path: state.focus,
-      data: %{message: message}
-    })
-  end
-
   defp agents_help(state) do
-    state.session_id
-    |> Troupe.agent_tree()
-    |> Enum.map_join(", ", &Enum.join(&1, "/"))
-    |> case do
-      "" -> "no agents running"
-      list -> "live agents: " <> list
+    case State.agent_rows(state) do
+      [] -> "no agents running"
+      rows -> "live agents: " <> Enum.map_join(rows, ", ", fn {path, _} -> Enum.join(path, "/") end)
     end
   end
 
   defp sessions_help(state) do
-    case Troupe.list_sessions(state.workspace.root_real) do
-      [] -> "no sessions recorded for this workspace"
-      sessions -> "sessions: " <> Enum.map_join(Enum.take(sessions, 5), ", ", & &1.id)
+    params = %{"filter" => %{"workspace" => state.workspace}}
+
+    case Client.call(state.client, "session.list", params) do
+      {:ok, %{"sessions" => []}} ->
+        State.notice(state, "no sessions recorded for this workspace")
+
+      {:ok, %{"sessions" => sessions}} ->
+        ids = sessions |> Enum.take(5) |> Enum.map_join(", ", & &1["id"])
+        State.notice(state, "sessions: " <> ids)
+
+      {:error, error} ->
+        State.notice(state, "sessions: #{error.message}")
     end
   end
 
@@ -329,12 +360,18 @@ defmodule Troupe.UI.TUI.Server do
       index = state.selected_agent + delta
       index = index |> max(0) |> min(length(rows) - 1)
       {path, _agent} = Enum.at(rows, index)
-      %{state | selected_agent: index} |> State.focus(path) |> rebuild_from_log()
+      State.focus(%{state | selected_agent: index}, path)
     end
   end
 
   defp decide(state, approval, decision) do
-    Approvals.decide(state.session_id, approval.call_id, decision)
+    command(state, "approval.respond", %{
+      "call_id" => approval.call_id,
+      "decision" => decision
+    })
+
+    # Removed locally as well as on the `approval_decided` event: the popup should
+    # close on the keystroke, not a round trip later.
     approvals = Enum.reject(state.approvals, &(&1.call_id == approval.call_id))
     {:noreply, %{disarm(state) | approvals: approvals}, render?: true}
   end
@@ -351,9 +388,6 @@ defmodule Troupe.UI.TUI.Server do
     {:stop, state}
   end
 
-  defp notify_test(%{test_pid: pid}, event) when is_pid(pid) do
-    send(pid, {:tui_event, event.type})
-  end
-
+  defp notify_test(%{test_pid: pid}, event) when is_pid(pid), do: send(pid, {:tui_event, event.type})
   defp notify_test(_state, _event), do: :ok
 end

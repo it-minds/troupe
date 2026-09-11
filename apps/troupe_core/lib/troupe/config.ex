@@ -35,6 +35,11 @@ defmodule Troupe.Config do
             watch_debounce_ms: 300,
             watch_poll_interval_ms: 1_000,
             auto_approve: false,
+            # What a session does when its tree comes back after a restart. `false` —
+            # the default — means it comes back interrupted and makes no model call
+            # until someone asks it to carry on, because a crash loop that resumes
+            # spends money and re-runs shell commands nobody is watching.
+            resume_on_restart: false,
             default_agent: "build",
             # Where session logs go. `nil` means the platform state directory; an explicit
             # path lets an embedding caller isolate state without touching the environment.

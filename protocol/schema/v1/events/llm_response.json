@@ -1,0 +1,21 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/llm_response.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "message": {
+      "type": "object"
+    },
+    "stop_reason": {
+      "type": "string"
+    },
+    "usage": {
+      "type": "object"
+    }
+  },
+  "required": [
+    "message"
+  ],
+  "title": "llm_response",
+  "type": "object"
+}

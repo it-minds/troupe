@@ -29,6 +29,10 @@ defmodule Troupe.Registry do
   @spec watcher(String.t()) :: GenServer.name()
   def watcher(session_id), do: via({:watcher, session_id})
 
+  @doc "The session's compact projection, for fleet and summary subscribers."
+  @spec summary(String.t()) :: GenServer.name()
+  def summary(session_id), do: via({:summary, session_id})
+
   @doc "The scripted model, when the fake provider is selected."
   @spec fake(String.t()) :: GenServer.name()
   def fake(session_id), do: via({:fake, session_id})

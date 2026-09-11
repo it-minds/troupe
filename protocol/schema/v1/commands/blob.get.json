@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/blob.get.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "blob": {
+      "type": "string"
+    },
+    "range": {
+      "type": "array"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "blob",
+    "session_id"
+  ],
+  "title": "blob.get",
+  "type": "object"
+}

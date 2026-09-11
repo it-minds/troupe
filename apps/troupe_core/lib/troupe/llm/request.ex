@@ -61,6 +61,25 @@ defmodule Troupe.LLM.Delta do
 
   @spec text(String.t()) :: t()
   def text(chunk), do: %__MODULE__{kind: :text, text: chunk}
+
+  @doc """
+  The delta as the JSON a subscriber receives.
+
+  Absent fields are dropped rather than sent as `null`: a delta is the highest-volume
+  thing on the wire, and a client that has to distinguish "missing" from "null" for no
+  reason is a client that will get it wrong.
+  """
+  @spec to_json(t()) :: map()
+  def to_json(%__MODULE__{} = delta) do
+    %{"kind" => Atom.to_string(delta.kind)}
+    |> put_present("text", delta.text)
+    |> put_present("id", delta.id)
+    |> put_present("name", delta.name)
+    |> put_present("fragment", delta.fragment)
+  end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
 end
 
 defmodule Troupe.LLM.Response do

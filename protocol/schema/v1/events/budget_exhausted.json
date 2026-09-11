@@ -1,0 +1,15 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/budget_exhausted.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "limit": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "limit"
+  ],
+  "title": "budget_exhausted",
+  "type": "object"
+}

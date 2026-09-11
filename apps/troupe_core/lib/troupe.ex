@@ -34,7 +34,7 @@ defmodule Troupe do
       workspace = Keyword.fetch!(session_opts, :workspace)
       profile = Keyword.fetch!(session_opts, :profile)
 
-      Index.register(session_id, %{workspace: workspace.root_real, profile: profile})
+      Index.register(session_id, pid, %{workspace: workspace.root_real, profile: profile})
 
       # The first durable event says what this session is, so a listing can be
       # rebuilt from the log alone — which is what makes a dormant session visible.
@@ -107,17 +107,40 @@ defmodule Troupe do
     |> Enum.sort_by(&{length(&1), &1})
   end
 
-  @doc "The session's persisted events, oldest first."
-  @spec events(String.t()) :: [map()]
-  def events(session_id), do: Log.replay(session_id)
+  @doc """
+  The session's persisted events, oldest first.
+
+  Works whether or not the session is running: a dormant session is only its log, and
+  reading one must never bring an actor tree back.
+  """
+  @spec events(String.t()) :: [Troupe.Protocol.Event.t()]
+  def events(session_id) do
+    Log.replay(session_id)
+  catch
+    :exit, _ -> Log.read_session(session_id)
+  end
 
   @doc "Turn watch mode on or off, reporting which backend took over."
   @spec watch(String.t(), boolean()) :: {:ok, :native | :poll | :off}
   def watch(session_id, enabled?), do: Watcher.set_enabled(session_id, enabled?)
 
-  @doc "Stop a session. Its agents, tasks and OS process trees go with it."
+  @doc """
+  Stop a session's actor tree. Its agents, tasks and OS process trees go with it.
+
+  The session itself is not gone: it becomes dormant, which is a state its log
+  records, so a client that reconnects can tell "stopped on purpose" from "the daemon
+  died".
+  """
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
-  def stop_session(session_id), do: Sessions.stop_session(session_id)
+  def stop_session(session_id) do
+    if Registry.whereis({:session, session_id}) do
+      Log.append(session_id, Session.root_path(), :session_dormant, %{
+        "last_seq" => head_seq(session_id)
+      })
+    end
+
+    Sessions.stop_session(session_id)
+  end
 
   @doc "Sessions recorded on disk for a workspace, newest first."
   @spec list_sessions(Path.t(), Path.t() | nil) :: [map()]
@@ -134,6 +157,43 @@ defmodule Troupe do
   @spec resume(String.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def resume(session_id, opts \\ []) do
     start_session(Keyword.merge(opts, session_id: session_id, task: nil))
+  end
+
+  @doc """
+  Bring a dormant session's actor tree back, or confirm it is already up.
+
+  This is what an *activating* command does before it takes effect. Reading a session —
+  listing it, replaying it, subscribing to it — deliberately does not come through
+  here: a dormant session that woke up because someone looked at it would never stay
+  dormant.
+  """
+  @spec activate(String.t()) :: {:ok, pid()} | {:error, :not_found | term()}
+  def activate(session_id) do
+    case Registry.whereis({:session, session_id}) do
+      pid when is_pid(pid) ->
+        {:ok, pid}
+
+      nil ->
+        case Index.get(session_id) do
+          nil -> {:error, :not_found}
+          meta -> restore(session_id, meta)
+        end
+    end
+  end
+
+  defp restore(session_id, meta) do
+    case resume(session_id, workspace: meta.workspace, agent: meta.profile) do
+      {:ok, session} ->
+        Log.append(session_id, Session.root_path(), :session_activated, %{
+          "epoch" => DateTime.utc_now() |> DateTime.to_iso8601(),
+          "pod" => nil
+        })
+
+        {:ok, session.pid}
+
+      error ->
+        error
+    end
   end
 
   @doc "Every session this daemon knows about, running or not."
@@ -157,7 +217,11 @@ defmodule Troupe do
   def head_seq(session_id) do
     Log.head_seq(session_id)
   catch
-    :exit, _ -> 0
+    :exit, _ ->
+      case Log.read_session(session_id) do
+        [] -> 0
+        events -> List.last(events).seq || 0
+      end
   end
 
   @doc "Durable events after a cursor. `0` replays everything."
@@ -165,7 +229,8 @@ defmodule Troupe do
   def replay_from(session_id, from_seq) do
     Log.replay_from(session_id, from_seq)
   catch
-    :exit, _ -> []
+    :exit, _ ->
+      session_id |> Log.read_session() |> Enum.filter(&(&1.seq && &1.seq > from_seq))
   end
 
   @doc "Read a stored blob, optionally a byte range."

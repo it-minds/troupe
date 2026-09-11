@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/input_queued.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "author": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "author",
+    "command_id",
+    "text"
+  ],
+  "title": "input_queued",
+  "type": "object"
+}

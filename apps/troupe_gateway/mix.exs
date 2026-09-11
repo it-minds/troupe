@@ -31,6 +31,7 @@ defmodule Troupe.Gateway.MixProject do
       {:troupe_core, in_umbrella: true},
       {:troupe_protocol, in_umbrella: true},
       {:jason, "~> 1.4"},
-      {:telemetry, "~> 1.3"}]
+      {:telemetry, "~> 1.3"},
+      {:stream_data, "~> 1.4", only: [:dev, :test]}]
   end
 end

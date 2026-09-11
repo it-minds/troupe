@@ -1,0 +1,15 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_dormant.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "last_seq": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "last_seq"
+  ],
+  "title": "session_dormant",
+  "type": "object"
+}

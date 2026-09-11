@@ -1,0 +1,18 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/compacted.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "conversation": {
+      "type": "array"
+    },
+    "summary": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "summary"
+  ],
+  "title": "compacted",
+  "type": "object"
+}

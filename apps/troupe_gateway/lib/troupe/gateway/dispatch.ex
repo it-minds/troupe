@@ -18,6 +18,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Todo.Edit
 
   defmodule Context do
     @moduledoc "Who is calling, and what they are allowed to do."
@@ -188,7 +189,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("input.send", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, text} <- fetch(params, "text"),
-         {:ok, _session} <- lookup(session_id) do
+         :ok <- activate(session_id) do
       Troupe.send_input(session_id, text, :user, actor(context))
       {:ok, %{"accepted" => true}}
     end
@@ -196,7 +197,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("turn.cancel", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
-         {:ok, _session} <- lookup(session_id) do
+         :ok <- activate(session_id) do
       Troupe.cancel(session_id)
       {:ok, %{"accepted" => true}}
     end
@@ -205,7 +206,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("profile.switch", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, profile} <- fetch(params, "profile"),
-         {:ok, _session} <- lookup(session_id) do
+         :ok <- activate(session_id) do
       Troupe.switch_profile(session_id, profile)
       {:ok, %{"accepted" => true}}
     end
@@ -216,7 +217,7 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, call_id} <- fetch(params, "call_id"),
          {:ok, decision} <- fetch(params, "decision"),
          {:ok, decision} <- parse_decision(decision),
-         {:ok, _session} <- lookup(session_id) do
+         :ok <- activate(session_id) do
       Troupe.approve(session_id, call_id, decision, actor(context))
       {:ok, %{"accepted" => true}}
     end
@@ -226,7 +227,7 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, action} <- fetch(params, "action"),
          {:ok, edit} <- build_edit(action, params),
-         {:ok, _session} <- lookup(session_id) do
+         :ok <- activate(session_id) do
       Troupe.send_input(session_id, edit, :tui_todo_edit)
       {:ok, %{"accepted" => true}}
     end
@@ -240,6 +241,7 @@ defmodule Troupe.Gateway.Dispatch do
       opts =
         [workspace: resolved.path, agent: Map.get(params, "profile")]
         |> maybe_put(:task, Map.get(params, "prompt"))
+        |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
 
       case Troupe.start_session(opts) do
         {:ok, session} ->
@@ -252,7 +254,7 @@ defmodule Troupe.Gateway.Dispatch do
            }}
 
         {:error, reason} ->
-          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+          {:error, Error.new(:invalid_params, %{field: "workspace", reason: start_error(reason)})}
       end
     end
   end
@@ -302,6 +304,12 @@ defmodule Troupe.Gateway.Dispatch do
 
   # -- helpers ----------------------------------------------------------------
 
+  # A client cannot see this machine's filesystem, so "it did not work" is useless to
+  # it — say which of the things it asked for was impossible.
+  defp start_error({:not_a_directory, path}), do: "#{path} is not a directory"
+  defp start_error({:unknown_provider, name}), do: "unknown provider #{inspect(name)}"
+  defp start_error(other), do: inspect(other)
+
   defp pin(params, pinned?) do
     with {:ok, session_id} <- fetch(params, "session_id") do
       Troupe.pin_session(session_id, pinned?)
@@ -332,6 +340,17 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # An *activating* command brings a dormant session's tree back before it takes
+  # effect. Reads deliberately do not: a session that woke up because someone looked at
+  # it would never stay dormant, which is the point of dormancy.
+  defp activate(session_id) do
+    case Troupe.activate(session_id) do
+      {:ok, _pid} -> :ok
+      {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
+      {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+    end
+  end
+
   defp lookup(session_id) do
     case Troupe.get_session(session_id) do
       nil -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
@@ -349,16 +368,16 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp build_edit("add", params) do
     with {:ok, content} <- fetch(params, "content") do
-      {:ok, Troupe.Todo.Edit.add(content)}
+      {:ok, Edit.add(content)}
     end
   end
 
   defp build_edit("cancel", params) do
-    with {:ok, id} <- fetch(params, "id"), do: {:ok, Troupe.Todo.Edit.cancel(id)}
+    with {:ok, id} <- fetch(params, "id"), do: {:ok, Edit.cancel(id)}
   end
 
   defp build_edit("complete", params) do
-    with {:ok, id} <- fetch(params, "id"), do: {:ok, Troupe.Todo.Edit.complete(id)}
+    with {:ok, id} <- fetch(params, "id"), do: {:ok, Edit.complete(id)}
   end
 
   defp build_edit(other, _params) do
@@ -387,4 +406,26 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)
+
+  # Session settings a client may choose, and only those. Everything else in the
+  # configuration — where state is written, which provider is used, what a key is —
+  # belongs to the machine the daemon runs on, and a client must not be able to move
+  # it.
+  @client_settable ~w(watch auto_approve profile)a
+
+  defp overrides(config) when is_map(config) do
+    case Enum.flat_map(@client_settable, &setting(config, &1)) do
+      [] -> nil
+      settings -> settings
+    end
+  end
+
+  defp overrides(_config), do: nil
+
+  defp setting(config, key) do
+    case Map.fetch(config, Atom.to_string(key)) do
+      {:ok, value} -> [{key, value}]
+      :error -> []
+    end
+  end
 end

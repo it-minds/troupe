@@ -19,6 +19,9 @@ defmodule Troupe.Release do
   @spec verify_linux_nif(Mix.Release.t()) :: Mix.Release.t()
   def verify_linux_nif(%Mix.Release{} = release) do
     if linux_target?() do
+      # Called by name because `ex_ratatui` is the TUI's dependency, not the core's:
+      # this runs at release time, when every app's beams are on the path anyway.
+      # credo:disable-for-next-line Credo.Check.Refactor.Apply
       {_otp_app, relative_path} = apply(ExRatatui.Native, :load_from, [])
 
       release.path

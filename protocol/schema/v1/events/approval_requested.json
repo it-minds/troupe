@@ -1,0 +1,30 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/approval_requested.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "agent_path": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "args": {
+      "type": "object"
+    },
+    "call_id": {
+      "type": "string"
+    },
+    "tool": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent_path",
+    "args",
+    "call_id",
+    "tool"
+  ],
+  "title": "approval_requested",
+  "type": "object"
+}

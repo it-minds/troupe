@@ -1,0 +1,364 @@
+# Continuous integration: the quality gate on one runner, then a build matrix with
+# one target per native runner.
+#
+# GitHub Actions syntax, which Forgejo Actions also runs. Nothing here depends on
+# github.com specifically except the marketplace actions, which Forgejo resolves from
+# its own configured registry.
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+env:
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "28.5.0.5"
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  check:
+    name: compile, format, credo, boundaries, test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # The native watch backend needs this; without it those tests skip and the
+      # polling backend is all that gets covered.
+      - name: Install inotify-tools
+        run: sudo apt-get update && sudo apt-get install -y inotify-tools
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      - name: Compile with warnings as errors
+        run: MIX_ENV=test mix compile --force --warnings-as-errors
+
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+
+      # The architecture is a claim about coupling, and claims like that decay
+      # silently. This is the thing that makes it fail loudly instead.
+      - name: Boundaries
+        run: MIX_ENV=test mix troupe.boundaries
+
+      # Ten runs, because the suite is concurrent and a race that shows up one time
+      # in five is a bug this project cares about.
+      - name: Test (10 consecutive runs)
+        run: for i in $(seq 10); do mix test || exit 1; done
+
+  protocol:
+    name: schema compatibility and the Python client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      # Fields may be added; they may not be removed, renamed, retyped, or newly made
+      # required. A published protocol is a promise to people who are not in this
+      # repository, and this is what keeps it.
+      - name: Schema compatibility
+        run: mix troupe.schema.diff
+
+      - name: Committed schema is current
+        run: |
+          mix troupe.schema.gen
+          git diff --exit-code protocol/schema/v1 \
+            || { echo "protocol/schema/v1 is stale: run mix troupe.schema.gen and commit"; exit 1; }
+
+      # A client written against PROTOCOL.md in another language, with no access to
+      # this source. It is the only check that actually proves the built-in clients
+      # have no private access.
+      - name: Python reference client, end to end
+        run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
+
+  build:
+    name: build ${{ matrix.target }}
+    needs: [check, protocol]
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # One target per native runner. Cross-building is possible for the Zig
+          # wrapper but not for the payload: rustler_precompiled resolves the
+          # ExRatatui NIF against the build host, so a macOS binary built on Linux
+          # would carry a Linux .so and fail at NIF load.
+          - { os: ubuntu-latest, target: linux_x86_64, ext: "" }
+          - { os: ubuntu-24.04-arm, target: linux_aarch64, ext: "" }
+          - { os: macos-15-intel, target: macos_x86_64, ext: "" }
+          - { os: macos-14, target: macos_aarch64, ext: "" }
+          - { os: windows-latest, target: windows_x86_64, ext: ".exe" }
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: mlugg/setup-zig@v1
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install xz (macOS)
+        if: startsWith(matrix.os, 'macos')
+        run: brew install xz || true
+
+      - name: Install xz and 7zip (Windows)
+        if: startsWith(matrix.os, 'windows')
+        run: choco install -y xz 7zip
+
+      - run: mix deps.get
+
+      - name: Build the release
+        shell: bash
+        env:
+          MIX_ENV: prod
+          BURRITO_TARGET: ${{ matrix.target }}
+          TROUPE_REAPER_TARGETS: all
+        run: |
+          # Burrito's Linux wrapper carries a musl ERTS, so the bundled NIF must be
+          # the musl variant; a glibc .so cannot load there.
+          case "${{ matrix.target }}" in
+            linux_*) export TARGET_ABI=musl ;;
+          esac
+
+          # Zig 0.16 uses renameat2 flags that some filesystems reject with EINVAL,
+          # which it treats as a programmer bug and aborts on.
+          export ZIG_LOCAL_CACHE_DIR="${RUNNER_TEMP}/zig-local"
+          export ZIG_GLOBAL_CACHE_DIR="${RUNNER_TEMP}/zig-global"
+          mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
+
+          mix release --overwrite
+
+      - name: Name the artifact
+        id: artifact
+        shell: bash
+        run: |
+          version=$(mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')
+          name="troupe-${version}-${{ matrix.target }}${{ matrix.ext }}"
+          mv "burrito_out/troupe_${{ matrix.target }}${{ matrix.ext }}" "burrito_out/${name}"
+          chmod +x "burrito_out/${name}" || true
+          echo "name=${name}" >> "$GITHUB_OUTPUT"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test the artifact
+        shell: bash
+        run: |
+          set -euo pipefail
+          binary="burrito_out/${{ steps.artifact.outputs.name }}"
+
+          "./$binary" --version
+
+          mkdir -p smoke/ws
+          cat > smoke/script.json <<'JSON'
+          {"steps": [
+            {"tools": [{"name": "write_file", "input": {"path": "hello.txt", "content": "packaged\n"}}]},
+            {"tools": [{"name": "shell", "input": {"command": "echo shell-ran-ok"}}]},
+            {"text": "Both tools worked."}
+          ]}
+          JSON
+
+          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/smoke/script.json" \
+            "./$binary" run "smoke" --headless --workspace smoke/ws --auto-approve
+
+          # write_file went through the tool; shell went through reaper.
+          grep -q packaged smoke/ws/hello.txt
+
+          # And the same binary is the daemon: a client run finds or starts one, and
+          # `troupe sessions` then lists what it did.
+          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/smoke/script.json" \
+            "./$binary" sessions --workspace smoke/ws | grep -q "Sessions for\|No sessions" 
+
+      - name: Report size and start-up cost
+        shell: bash
+        run: |
+          binary="burrito_out/${{ steps.artifact.outputs.name }}"
+          size=$(wc -c < "$binary")
+          echo "### ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
+          echo "- binary size: $((size / 1024 / 1024)) MiB ($size bytes)" >> "$GITHUB_STEP_SUMMARY"
+
+          # The first run pays for extraction; the second is the warm path.
+          "./$binary" maintenance uninstall >/dev/null 2>&1 <<< "y" || true
+          cold_start=$(date +%s%N)
+          "./$binary" --version > /dev/null
+          cold_end=$(date +%s%N)
+          warm_start=$(date +%s%N)
+          "./$binary" --version > /dev/null
+          warm_end=$(date +%s%N)
+
+          echo "- cold start: $(( (cold_end - cold_start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
+          echo "- warm start: $(( (warm_end - warm_start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: burrito_out/${{ steps.artifact.outputs.name }}
+          if-no-files-found: error
+
+  containers:
+    name: clean-container check (linux x86_64)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-linux_x86_64
+          merge-multiple: true
+          path: dist
+
+      - name: Run in glibc and musl containers with nothing installed
+        run: |
+          set -euo pipefail
+          binary=$(ls dist/troupe-*-linux_x86_64)
+          chmod +x "$binary"
+          cp "$binary" ./troupe
+
+          cat > check.sh <<'SH'
+          #!/bin/sh
+          set -e
+          cd /work
+          for c in erl elixir mix inotifywait; do
+            command -v $c >/dev/null 2>&1 && { echo "$c unexpectedly present"; exit 1; }
+          done
+          ./troupe --version
+          rm -rf ws && mkdir ws
+          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
+            ./troupe run "smoke" --headless --workspace ws --auto-approve
+          grep -q packaged ws/hello.txt
+          # Watch mode has to fall back to polling with no inotify-tools installed.
+          rm -rf wws && mkdir wws
+          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
+            ./troupe run "watch" --headless --watch --workspace wws --auto-approve | grep -q "polling for changes"
+          SH
+          chmod +x check.sh
+
+          cat > script.json <<'JSON'
+          {"steps": [
+            {"tools": [{"name": "write_file", "input": {"path": "hello.txt", "content": "packaged\n"}}]},
+            {"tools": [{"name": "shell", "input": {"command": "echo ok"}}]},
+            {"text": "done"}
+          ]}
+          JSON
+
+          for image in ubuntu:24.04 alpine:latest; do
+            echo "=== $image"
+            docker run --rm -v "$PWD:/work" "$image" /work/check.sh
+          done
+
+  installer-sh:
+    name: install.sh (clean ubuntu container, zsh user)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-linux_x86_64
+          merge-multiple: true
+          path: dist
+
+      - name: Install, upgrade, reject a corrupt artifact, uninstall
+        run: |
+          set -euo pipefail
+          mkdir -p release
+          cp dist/troupe-*-linux_x86_64 release/
+          (cd release && sha256sum troupe-* > SHA256SUMS)
+
+          docker run --rm -v "$PWD:/src" ubuntu:24.04 /src/scripts/test-install.sh
+
+  installer-ps1:
+    name: install.ps1 (windows runner)
+    needs: build
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-windows_x86_64.exe
+          merge-multiple: true
+          path: dist
+
+      - name: Install, upgrade, reject a corrupt artifact, uninstall
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path release -Force | Out-Null
+          Copy-Item dist/troupe-*-windows_x86_64.exe release/
+          Push-Location release
+          Get-ChildItem troupe-* | ForEach-Object {
+            "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
+          } | Set-Content SHA256SUMS
+          Pop-Location
+
+          ./scripts/test-install.ps1 -ReleaseDir release
+
+  release:
+    name: publish
+    needs: [build, containers, installer-sh, installer-ps1]
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*
+          merge-multiple: true
+          path: dist
+
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum troupe-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/troupe-*
+            dist/SHA256SUMS

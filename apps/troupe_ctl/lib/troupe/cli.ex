@@ -2,13 +2,21 @@ defmodule Troupe.CLI do
   @moduledoc """
   The command line, and the entry point of a packaged binary.
 
-  Started as a supervised `Task` from `Troupe.Application`. Inside a Burrito-wrapped
+  Every command here is a **protocol client**. `troupe run` does not start a session
+  in its own VM any more; it finds or starts the daemon, asks it to create a session,
+  subscribes, and renders what comes back. That is the whole point of the stage: if
+  this file can do something, a third-party client can do it too, because there is no
+  other door — `troupe_ctl` cannot even see `troupe_core`, and `mix troupe.boundaries`
+  fails the build if that ever stops being true.
+
+  Started as a supervised `Task` from `Troupe.Ctl.Application`. Inside a Burrito
   binary it runs **synchronously**, blocking application start-up for the life of the
   command, then halts the VM with the command's exit code — Burrito boots the release
-  with `:elixir.start_cli`, which halts the node the moment the boot call returns, so
-  work spawned into a background task would be killed before it drew a frame. Outside
-  a wrapped binary (`mix test`, `iex -S mix`) it is an async no-op, so it never takes
-  over a development session.
+  with `:elixir.start_cli`, which halts the node the moment the boot call returns.
+  Outside a wrapped binary (`mix test`, `iex -S mix`) it is an async no-op.
+
+  `troupe daemon` is the exception and is handled by the application rather than
+  here, because a daemon must be supervised and must not block application start-up.
 
   Arguments come from `Burrito.Util.Args.argv/0` so they survive the Zig wrapper.
   """
@@ -16,10 +24,9 @@ defmodule Troupe.CLI do
   use Task
 
   alias Burrito.Util.Args
-
   alias Troupe.CLI.Options
-  alias Troupe.Session.Watcher
-  alias Troupe.UI.{Headless, TUI}
+  alias Troupe.Protocol.{Client, Daemon}
+  alias Troupe.UI.Headless
 
   @version Mix.Project.config()[:version]
 
@@ -27,7 +34,7 @@ defmodule Troupe.CLI do
   @spec start_link(term()) :: {:ok, pid()} | :ignore
   def start_link(_arg) do
     if standalone?() do
-      main(Args.argv())
+      main(argv())
       :ignore
     else
       Task.start_link(fn -> :ok end)
@@ -46,7 +53,7 @@ defmodule Troupe.CLI do
 
     code =
       try do
-        argv |> Options.parse() |> dispatch()
+        argv |> Options.parse() |> dispatch(opts)
       rescue
         exception ->
           # A raise here would otherwise leave a wrapped binary sitting on an idle
@@ -59,146 +66,271 @@ defmodule Troupe.CLI do
     :ok
   end
 
+  @doc """
+  What the application should supervise for this invocation.
+
+  `troupe daemon` is a long-running supervised tree, not a command that finishes, so
+  it is started here rather than from `dispatch/2`: blocking inside an application's
+  `start/2` would leave the release half-booted for as long as the daemon ran.
+  """
+  @spec boot_children() :: [Supervisor.child_spec() | {module(), term()} | module()]
+  def boot_children do
+    with true <- standalone?(),
+         %Options{command: :daemon} = options <- Options.parse(argv()),
+         module when not is_nil(module) <- daemon_module() do
+      [{module, daemon_opts(options)}]
+    else
+      _ -> [__MODULE__]
+    end
+  end
+
   @doc "Dispatch a parsed command. Public so tests can drive it without halting."
-  @spec dispatch(Options.t() | {:error, term()}) :: non_neg_integer()
-  def dispatch({:error, message}) do
+  @spec dispatch(Options.t() | {:error, term()}, keyword()) :: non_neg_integer()
+  def dispatch(parsed, opts \\ [])
+
+  def dispatch({:error, message}, _opts) do
     IO.puts(:stderr, "troupe: " <> message)
     IO.puts(:stderr, "")
     IO.puts(:stderr, Options.usage())
     2
   end
 
-  def dispatch(%Options{command: :version}) do
+  def dispatch(%Options{command: :version}, _opts) do
     IO.puts("troupe #{@version}")
     0
   end
 
-  def dispatch(%Options{command: :help}) do
+  def dispatch(%Options{command: :help}, _opts) do
     IO.puts(Options.usage())
     0
   end
 
-  def dispatch(%Options{command: :sessions} = options) do
-    case Troupe.list_sessions(Path.expand(options.workspace)) do
-      [] ->
-        IO.puts("No sessions recorded for #{Path.expand(options.workspace)}.")
-
-      sessions ->
-        IO.puts("Sessions for #{Path.expand(options.workspace)}:")
-
-        Enum.each(sessions, fn session ->
-          IO.puts("  #{session.id}  #{session.started_at || "(empty)"}")
-        end)
-    end
-
-    0
-  end
-
-  def dispatch(%Options{command: :run} = options) do
-    with {:ok, session} <- start_session(options) do
-      Headless.attach(session.id, quiet: options.quiet)
-      announce_watch(session, options)
-      Troupe.send_input(session.id, options.task)
-      code = Headless.await_completion(session.id, options.timeout_ms)
-      Troupe.stop_session(session.id)
-      code
-    end
-  end
-
-  def dispatch(%Options{command: :resume} = options) do
-    workspace = Path.expand(options.workspace)
-
-    case resolve_session(options, workspace) do
+  def dispatch(%Options{command: :daemon} = options, _opts) do
+    case daemon_module() do
       nil ->
-        IO.puts(:stderr, "troupe: no session to resume in #{workspace}")
+        IO.puts(:stderr, "troupe: this build has no daemon in it")
         1
 
-      session_id ->
-        case Troupe.resume(session_id, session_opts(options)) do
-          {:ok, session} -> interact(session, options)
-          {:error, reason} -> fail(reason)
+      module ->
+        case module.start_link(daemon_opts(options)) do
+          {:ok, _pid} ->
+            IO.puts("troupe daemon running")
+            Process.sleep(:infinity)
+
+          {:error, reason} ->
+            IO.puts(:stderr, "troupe: the daemon could not start: #{inspect(reason)}")
+            1
         end
     end
   end
 
-  def dispatch(%Options{command: :tui} = options) do
-    with {:ok, session} <- start_session(options) do
-      interact(session, options)
+  def dispatch(%Options{command: :hq}, opts) do
+    case fleet_view() do
+      nil ->
+        IO.puts(:stderr, "troupe: this build has no fleet view in it")
+        1
+
+      module ->
+        module.run(connect_opts(opts))
     end
   end
 
-  defp start_session(options) do
-    case Troupe.start_session(session_opts(options)) do
-      {:ok, session} -> {:ok, session}
-      {:error, reason} -> fail(reason)
+  def dispatch(%Options{command: :sessions} = options, opts) do
+    with_client(options, opts, fn client ->
+      workspace = Path.expand(options.workspace)
+
+      case Client.call(client, "session.list", %{"filter" => %{"workspace" => workspace}}) do
+        {:ok, %{"sessions" => []}} ->
+          IO.puts("No sessions recorded for #{workspace}.")
+          0
+
+        {:ok, %{"sessions" => sessions}} ->
+          IO.puts("Sessions for #{workspace}:")
+          Enum.each(sessions, &IO.puts(session_line(&1)))
+          0
+
+        {:error, error} ->
+          fail(error)
+      end
+    end)
+  end
+
+  def dispatch(%Options{command: :run} = options, opts) do
+    with_client(options, opts, fn client ->
+      case create(client, options) do
+        {:ok, session_id} ->
+          code = Headless.run(client, session_id, headless_opts(options))
+          archive(client, session_id)
+          code
+
+        {:error, error} ->
+          fail(error)
+      end
+    end)
+  end
+
+  def dispatch(%Options{command: :resume} = options, opts) do
+    with_client(options, opts, fn client ->
+      case resolve_session(client, options) do
+        {:ok, session_id} ->
+          interact(client, session_id, options, opts)
+
+        :error ->
+          IO.puts(:stderr, "troupe: no session to resume in #{Path.expand(options.workspace)}")
+          1
+      end
+    end)
+  end
+
+  def dispatch(%Options{command: :tui} = options, opts) do
+    with_client(options, opts, fn client ->
+      case create(client, options) do
+        {:ok, session_id} -> interact(client, session_id, options, opts)
+        {:error, error} -> fail(error)
+      end
+    end)
+  end
+
+  # -- talking to the daemon --------------------------------------------------
+
+  defp with_client(options, opts, fun) do
+    case connect(options, opts) do
+      {:ok, client} ->
+        try do
+          fun.(client)
+        after
+          Client.close(client)
+        end
+
+      {:error, reason} ->
+        IO.puts(:stderr, "troupe: could not reach the daemon: #{describe(reason)}")
+        1
     end
   end
 
-  defp session_opts(options) do
-    [
-      workspace: Path.expand(options.workspace),
-      agent: options.agent,
-      config_overrides:
-        [
-          watch: options.watch,
-          auto_approve: options.auto_approve
-        ]
-        |> Enum.reject(fn {_key, value} -> value == nil end)
-    ]
+  defp connect(_options, opts) do
+    case Keyword.fetch(opts, :client) do
+      {:ok, client} -> {:ok, client}
+      :error -> Daemon.connect(connect_opts(opts))
+    end
   end
 
-  defp resolve_session(%Options{session_id: id}, _workspace) when is_binary(id), do: id
+  defp connect_opts(opts) do
+    [client_info: %{"name" => "troupe-cli", "version" => @version}] ++
+      Keyword.take(opts, [:endpoint, :command, :spawn, :startup_timeout])
+  end
 
-  defp resolve_session(_options, workspace) do
-    case Troupe.list_sessions(workspace) do
-      [%{id: id} | _] -> id
-      [] -> nil
+  defp create(client, options) do
+    params =
+      %{
+        "command_id" => Client.command_id(),
+        "workspace" => Path.expand(options.workspace),
+        "worktree" => options.worktree
+      }
+      |> put_unless_nil("profile", options.agent)
+      |> put_config(options)
+
+    case Client.call(client, "session.create", params) do
+      {:ok, %{"session_id" => id} = result} ->
+        announce_worktree(result)
+        {:ok, id}
+
+      {:error, error} ->
+        {:error, error}
+    end
+  end
+
+  defp put_config(params, options) do
+    config =
+      %{}
+      |> put_unless_nil("watch", options.watch)
+      |> put_unless_nil("auto_approve", options.auto_approve)
+
+    if config == %{}, do: params, else: Map.put(params, "config", config)
+  end
+
+  defp put_unless_nil(map, _key, nil), do: map
+  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
+
+  # A session that quietly went to a different directory than the one the user typed
+  # is the kind of surprise that costs an afternoon.
+  defp announce_worktree(%{"worktree" => path, "branch" => branch}) when is_binary(path) do
+    IO.puts("working in a new worktree on #{branch}: #{path}")
+  end
+
+  defp announce_worktree(_result), do: :ok
+
+  defp archive(client, session_id) do
+    Client.call(client, "session.archive", %{
+      "command_id" => Client.command_id(),
+      "session_id" => session_id
+    })
+  end
+
+  defp resolve_session(_client, %Options{session_id: id}) when is_binary(id), do: {:ok, id}
+
+  defp resolve_session(client, options) do
+    workspace = Path.expand(options.workspace)
+
+    case Client.call(client, "session.list", %{"filter" => %{"workspace" => workspace}}) do
+      {:ok, %{"sessions" => [%{"id" => id} | _]}} -> {:ok, id}
+      _ -> :error
     end
   end
 
   # The TUI owns the terminal until it exits; headless mode renders the same event
   # stream as plain lines, which is what CI and scripting want.
-  defp interact(session, %Options{headless: true} = options) do
-    Headless.attach(session.id, quiet: options.quiet)
-    announce_watch(session, options)
-    if options.task, do: Troupe.send_input(session.id, options.task)
-    Headless.await_completion(session.id, options.timeout_ms)
+  defp interact(client, session_id, %Options{headless: true} = options, _opts) do
+    Headless.run(client, session_id, headless_opts(options))
   end
 
-  defp interact(session, options) do
-    TUI.run(session, options)
+  defp interact(_client, session_id, options, opts) do
+    case frontend() do
+      nil ->
+        IO.puts(:stderr, "troupe: this build has no terminal UI in it")
+        1
+
+      module ->
+        # The view connects for itself: events have to reach the process that draws
+        # them, and a client's owner is fixed when it connects.
+        module.run(session_id, options, connect_opts(opts))
+    end
   end
 
-  # The watcher publishes its backend choice from `init`, before any UI has
-  # subscribed, so it is republished here — which backend is running is something
-  # the user needs to know, since polling explains both the latency and the CPU.
-  defp announce_watch(_session, %Options{watch: watch}) when watch != true, do: :ok
-
-  defp announce_watch(session, _options) do
-    backend = Watcher.backend(session.id)
-
-    Troupe.Events.publish(session.id, %{
-      type: :watch_notice,
-      agent_path: ["root"],
-      data: %{message: watch_message(backend)}
-    })
+  defp headless_opts(options) do
+    [quiet: options.quiet, timeout_ms: options.timeout_ms, task: options.task]
   end
 
-  defp watch_message(:native), do: "watch: on, using the native file watcher"
+  defp session_line(session) do
+    "  #{session["id"]}  #{session["state"]}  #{session["last_active_at"] || "(empty)"}"
+  end
 
-  defp watch_message(:poll),
-    do: "watch: on, polling for changes (no native file watcher on this machine)"
-
-  defp watch_message(:off), do: "watch: could not start"
-
-  defp fail(reason) do
-    IO.puts(:stderr, "troupe: could not start a session: #{describe(reason)}")
+  defp fail(error) do
+    IO.puts(:stderr, "troupe: " <> describe(error))
     1
   end
 
-  defp describe({:not_a_directory, path}), do: "#{path} is not a directory"
-  defp describe({:unknown_provider, name}), do: "unknown provider #{inspect(name)}"
+  defp describe(%{message: message, data: data}) when is_map(data) and map_size(data) > 0 do
+    message <> " (" <> Enum.map_join(data, ", ", fn {k, v} -> "#{k}: #{inspect(v)}" end) <> ")"
+  end
+
+  defp describe(%{message: message}), do: message
+  defp describe(:no_daemon_command), do: "there is no daemon running, and no way to start one"
+  defp describe(:daemon_did_not_start), do: "the daemon did not come up in time"
+  defp describe(:not_running), do: "no daemon is running"
   defp describe(other), do: inspect(other)
+
+  # Runtime lookups, not compile-time references: `troupe_ctl` may not depend on the
+  # daemon or on any particular view, but the packaged binary contains both.
+  defp daemon_module, do: Application.get_env(:troupe_ctl, :daemon)
+  defp frontend, do: Application.get_env(:troupe_ctl, :frontend)
+  defp fleet_view, do: Application.get_env(:troupe_ctl, :fleet_view)
+
+  defp daemon_opts(%Options{} = options), do: [idle_shutdown_ms: options.idle_ms]
+
+  defp argv do
+    if standalone?(), do: Args.argv(), else: System.argv()
+  end
 
   defp standalone?, do: System.get_env("__BURRITO") != nil
 end
@@ -215,9 +347,11 @@ defmodule Troupe.CLI.Options do
             quiet: false,
             watch: nil,
             auto_approve: nil,
-            timeout_ms: 30 * 60 * 1000
+            worktree: "auto",
+            timeout_ms: 30 * 60 * 1000,
+            idle_ms: 10 * 60 * 1000
 
-  @type command :: :tui | :run | :resume | :sessions | :version | :help
+  @type command :: :tui | :run | :resume | :sessions | :hq | :daemon | :version | :help
   @type t :: %__MODULE__{
           command: command(),
           workspace: Path.t(),
@@ -228,7 +362,9 @@ defmodule Troupe.CLI.Options do
           quiet: boolean(),
           watch: boolean() | nil,
           auto_approve: boolean() | nil,
-          timeout_ms: pos_integer()
+          worktree: String.t(),
+          timeout_ms: pos_integer(),
+          idle_ms: pos_integer()
         }
 
   @switches [
@@ -238,12 +374,16 @@ defmodule Troupe.CLI.Options do
     auto_approve: :boolean,
     agent: :string,
     workspace: :string,
+    worktree: :string,
     timeout: :integer,
+    idle: :integer,
     version: :boolean,
     help: :boolean
   ]
 
   @aliases [v: :version, h: :help, w: :watch, a: :agent, C: :workspace]
+
+  @worktree_modes ~w(auto never always)
 
   @spec parse([String.t()]) :: t() | {:error, String.t()}
   def parse(argv) do
@@ -265,17 +405,25 @@ defmodule Troupe.CLI.Options do
   end
 
   defp build_command(switches, positional) do
-    base = %__MODULE__{
-      workspace: switches[:workspace] || ".",
-      agent: switches[:agent],
-      headless: switches[:headless] || false,
-      quiet: switches[:quiet] || false,
-      watch: switches[:watch],
-      auto_approve: switches[:auto_approve],
-      timeout_ms: (switches[:timeout] || 1_800) * 1_000
-    }
+    worktree = switches[:worktree] || "auto"
 
-    with_command(base, positional)
+    if worktree in @worktree_modes do
+      base = %__MODULE__{
+        workspace: switches[:workspace] || ".",
+        agent: switches[:agent],
+        headless: switches[:headless] || false,
+        quiet: switches[:quiet] || false,
+        watch: switches[:watch],
+        auto_approve: switches[:auto_approve],
+        worktree: worktree,
+        timeout_ms: (switches[:timeout] || 1_800) * 1_000,
+        idle_ms: (switches[:idle] || 600) * 1_000
+      }
+
+      with_command(base, positional)
+    else
+      {:error, "--worktree must be one of #{Enum.join(@worktree_modes, ", ")}"}
+    end
   end
 
   defp with_command(base, []), do: %{base | command: :tui}
@@ -292,6 +440,8 @@ defmodule Troupe.CLI.Options do
   end
 
   defp with_command(base, ["sessions"]), do: %{base | command: :sessions}
+  defp with_command(base, ["hq"]), do: %{base | command: :hq}
+  defp with_command(base, ["daemon"]), do: %{base | command: :daemon}
   defp with_command(_base, [other | _]), do: {:error, "unknown command #{inspect(other)}"}
 
   @spec usage() :: String.t()
@@ -305,16 +455,23 @@ defmodule Troupe.CLI.Options do
       troupe run "TASK"               run one task and exit
       troupe resume [SESSION_ID]      reopen a session (the newest, if unnamed)
       troupe sessions                 list sessions recorded for this workspace
+      troupe hq                       every session, and everything waiting on you
+      troupe daemon                   run the daemon in the foreground
       troupe --version
+
+    Sessions live in the daemon, not in this command. Closing a TUI leaves its
+    session running; `troupe resume` reattaches to it.
 
     Options:
       -C, --workspace PATH   directory to work in (default: the current one)
       -a, --agent NAME       starting profile (build, plan, or your own)
       -w, --watch            act on AI comments in files as they are saved
+          --worktree MODE    auto (the default), never, or always
           --headless         render as plain lines instead of a TUI
           --quiet            headless: print only the final answer
           --auto-approve     skip approval prompts (use with care)
           --timeout SECONDS  give up on a headless run after this long
+          --idle SECONDS     daemon: shut down after this long with nothing to do
       -h, --help
     """
     |> String.trim_trailing()

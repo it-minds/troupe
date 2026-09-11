@@ -26,7 +26,7 @@ defmodule Troupe.Session.Log do
   require Logger
 
   @enforce_keys [:session_id, :path, :device]
-  defstruct [:session_id, :path, :device, seq: 0, last: nil]
+  defstruct [:session_id, :path, :device, seq: 0, last: nil, started: MapSet.new()]
 
   @type event_type :: atom()
 
@@ -75,9 +75,50 @@ defmodule Troupe.Session.Log do
   @spec head_seq(String.t()) :: non_neg_integer()
   def head_seq(session_id), do: GenServer.call(Troupe.Registry.log(session_id), :head_seq)
 
+  @doc """
+  Whether this is the first time an agent has started under this session tree.
+
+  It answers "did the whole session come back, or did just this agent crash?", and the
+  two need different behaviour: a crashed agent inside a live session finishes what it
+  started, while a session tree coming back after a daemon restart must not quietly
+  resume work nobody is watching.
+
+  The log process is the right place to ask because its lifetime *is* the session
+  tree's: it is the first child, and anything that takes it down takes the agents with
+  it. True exactly once per agent path per tree.
+  """
+  @spec cold_start?(String.t(), [String.t()]) :: boolean()
+  def cold_start?(session_id, agent_path) do
+    GenServer.call(Troupe.Registry.log(session_id), {:cold_start, agent_path})
+  end
+
   @doc "The log file's path, for diagnostics and `troupe resume`."
   @spec path(String.t()) :: Path.t()
   def path(session_id), do: GenServer.call(Troupe.Registry.log(session_id), :path)
+
+  @doc """
+  Find a session's log on disk, with nothing running.
+
+  A dormant session is only its log, and serving one — listing it, replaying it,
+  telling a client where its head is — must not start an actor tree. Searching is
+  cheap and keeps the caller from having to know the workspace hash.
+  """
+  @spec locate(String.t(), Path.t() | nil) :: Path.t() | nil
+  def locate(session_id, state_dir \\ nil) do
+    [Paths.state_dir(state_dir), "sessions", "*", session_id, "events.jsonl"]
+    |> Path.join()
+    |> Path.wildcard()
+    |> List.first()
+  end
+
+  @doc "Every event for a session, running or not."
+  @spec read_session(String.t(), Path.t() | nil) :: [Event.t()]
+  def read_session(session_id, state_dir \\ nil) do
+    case locate(session_id, state_dir) do
+      nil -> []
+      path -> read_file(path)
+    end
+  end
 
   @doc """
   Read a session's events straight off disk, without a running session.
@@ -201,6 +242,11 @@ defmodule Troupe.Session.Log do
   end
 
   def handle_call(:head_seq, _from, state), do: {:reply, state.seq, state}
+
+  def handle_call({:cold_start, agent_path}, _from, state) do
+    {:reply, not MapSet.member?(state.started, agent_path),
+     %{state | started: MapSet.put(state.started, agent_path)}}
+  end
 
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
 

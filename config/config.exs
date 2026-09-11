@@ -1,8 +1,13 @@
 import Config
 
-# The CLI reaches a full-screen client through a behaviour rather than a compile-time
-# dependency, so that `troupe_ctl` and `troupe_tui` both depend only on the protocol.
-config :troupe_ctl, frontend: Troupe.TUI
+# The CLI reaches the terminal UI and the daemon through configuration rather than a
+# compile-time dependency: `troupe_ctl` and `troupe_tui` may each depend only on the
+# protocol, and the packaged binary is all three at once. Both are looked up at
+# runtime, so a build that leaves one out simply has no such command.
+config :troupe_ctl,
+  frontend: Troupe.UI.TUI,
+  fleet_view: Troupe.UI.HQ,
+  daemon: Troupe.Gateway.Daemon
 
 if Mix.env() == :test do
   # Tools that raise, exit, block on approval, or record their calls. Registered

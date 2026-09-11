@@ -1,0 +1,27 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/approval.respond.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "call_id": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "decision": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "call_id",
+    "command_id",
+    "decision",
+    "session_id"
+  ],
+  "title": "approval.respond",
+  "type": "object"
+}

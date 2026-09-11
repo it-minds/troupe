@@ -1,0 +1,15 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/input_after_done.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "source"
+  ],
+  "title": "input_after_done",
+  "type": "object"
+}

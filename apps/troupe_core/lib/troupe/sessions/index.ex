@@ -36,15 +36,28 @@ defmodule Troupe.Sessions.Index do
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
-  @doc "Record a session that has just started."
-  @spec register(String.t(), map()) :: :ok
-  def register(session_id, meta), do: GenServer.cast(__MODULE__, {:register, session_id, meta})
+  @doc """
+  Record a session that has just started.
+
+  `pid` is the session's supervisor. The index monitors it, so "live" means a tree
+  that is actually running rather than one this process was once told about — a
+  distinction that matters the moment a session crashes.
+  """
+  @spec register(String.t(), pid(), map()) :: :ok
+  def register(session_id, pid, meta) do
+    GenServer.cast(__MODULE__, {:register, session_id, pid, meta})
+  end
 
   @doc "Update fields on a live session."
   @spec update(String.t(), map()) :: :ok
   def update(session_id, changes), do: GenServer.cast(__MODULE__, {:update, session_id, changes})
 
-  @doc "Mark a session as no longer running. Its history stays."
+  @doc """
+  Drop a session from the live view. Its history stays and it is listed from its log.
+
+  Called when a tree stops on purpose; a tree that stops by crashing gets here through
+  the monitor instead.
+  """
   @spec dormant(String.t()) :: :ok
   def dormant(session_id), do: GenServer.cast(__MODULE__, {:dormant, session_id})
 
@@ -72,14 +85,39 @@ defmodule Troupe.Sessions.Index do
   @spec recent_workspaces(pos_integer()) :: [map()]
   def recent_workspaces(limit \\ 20), do: GenServer.call(__MODULE__, {:recent, limit}, 15_000)
 
+  # How long a session may sit with nothing to do before its actor tree is stopped.
+  # Its log stays; subscribing to it still serves history; the next activating command
+  # brings the tree back.
+  @default_idle_ms 30 * 60 * 1000
+  @sweep_ms 15_000
+
   @impl GenServer
   def init(opts) do
     Process.set_label("troupe session index")
-    {:ok, %{live: %{}, state_dir: Keyword.get(opts, :state_dir)}}
+
+    idle_ms =
+      Keyword.get_lazy(opts, :session_idle_ms, fn ->
+        Application.get_env(:troupe_core, :session_idle_ms, @default_idle_ms)
+      end)
+
+    sweep_ms =
+      Keyword.get_lazy(opts, :sweep_ms, fn ->
+        Application.get_env(:troupe_core, :session_sweep_ms, @sweep_ms)
+      end)
+    if idle_ms != :infinity, do: Process.send_after(self(), :sweep, sweep_ms)
+
+    {:ok,
+     %{
+       live: %{},
+       monitors: %{},
+       state_dir: Keyword.get(opts, :state_dir),
+       idle_ms: idle_ms,
+       sweep_ms: sweep_ms
+     }}
   end
 
   @impl GenServer
-  def handle_cast({:register, session_id, meta}, state) do
+  def handle_cast({:register, session_id, pid, meta}, state) do
     entry =
       meta
       |> Map.put(:id, session_id)
@@ -90,8 +128,16 @@ defmodule Troupe.Sessions.Index do
       |> Map.put_new(:pinned, false)
       |> Map.put_new(:created_at, timestamp())
       |> Map.put(:last_active_at, timestamp())
+      # Idle from the moment it exists: a session created and never spoken to is the
+      # commonest way one sits there holding an actor tree for nothing.
+      |> Map.put(:idle_since, now_ms())
 
-    {:noreply, put_in(state.live[session_id], entry)}
+    ref = Process.monitor(pid)
+
+    {:noreply,
+     state
+     |> put_in([:live, session_id], entry)
+     |> put_in([:monitors, ref], session_id)}
   end
 
   def handle_cast({:update, session_id, changes}, state) do
@@ -105,15 +151,72 @@ defmodule Troupe.Sessions.Index do
     end
   end
 
-  def handle_cast({:dormant, session_id}, state) do
-    case Map.fetch(state.live, session_id) do
-      {:ok, entry} -> {:noreply, put_in(state.live[session_id], %{entry | state: :dormant})}
-      :error -> {:noreply, state}
+  def handle_cast({:dormant, session_id}, state), do: {:noreply, drop(state, session_id)}
+
+  def handle_cast({:forget, session_id}, state), do: {:noreply, drop(state, session_id)}
+
+  @impl GenServer
+  def handle_info(:sweep, state) do
+    Process.send_after(self(), :sweep, state.sweep_ms)
+    {:noreply, Enum.reduce(Map.keys(state.live), state, &sweep_session/2)}
+  end
+
+  def handle_info({:DOWN, ref, :process, _pid, _reason}, state) do
+    case Map.pop(state.monitors, ref) do
+      {nil, _} -> {:noreply, state}
+      {session_id, monitors} -> {:noreply, drop(%{state | monitors: monitors}, session_id)}
     end
   end
 
-  def handle_cast({:forget, session_id}, state) do
-    {:noreply, %{state | live: Map.delete(state.live, session_id)}}
+  def handle_info(_message, state), do: {:noreply, state}
+
+  # A session with nothing to do for long enough gives its actor tree back. Idleness
+  # is asked of the agent rather than inferred from events, because "nothing has been
+  # logged lately" is also true of an agent waiting on a twenty-minute test run.
+  defp sweep_session(session_id, state) do
+    case Map.fetch(state.live, session_id) do
+      :error ->
+        state
+
+      {:ok, entry} ->
+        sweep_live(state, session_id, entry, agent_state(session_id))
+    end
+  end
+
+  defp sweep_live(state, session_id, entry, :busy) do
+    put_in(state.live[session_id], Map.put(entry, :idle_since, nil))
+  end
+
+  defp sweep_live(state, session_id, _entry, :gone), do: drop(state, session_id)
+
+  defp sweep_live(state, session_id, entry, :idle) do
+    idle_since = Map.get(entry, :idle_since) || now_ms()
+
+    if now_ms() - idle_since >= state.idle_ms do
+      Troupe.stop_session(session_id)
+      drop(state, session_id)
+    else
+      put_in(state.live[session_id], Map.put(entry, :idle_since, idle_since))
+    end
+  end
+
+  defp agent_state(session_id) do
+    case Troupe.snapshot(session_id) do
+      %{state: state} when state in [:idle, :done] -> :idle
+      %{state: _} -> :busy
+      _ -> :gone
+    end
+  catch
+    :exit, _ -> :gone
+  end
+
+  defp now_ms, do: System.monotonic_time(:millisecond)
+
+  # A session that is no longer running is no longer live, full stop. Its metadata
+  # comes back from its log on the next listing, which is the only copy that survives
+  # a restart anyway — so there is nothing here worth keeping stale.
+  defp drop(state, session_id) do
+    %{state | live: Map.delete(state.live, session_id)}
   end
 
   @impl GenServer
@@ -214,7 +317,7 @@ defmodule Troupe.Sessions.Index do
             branch: get_data(created, "branch", nil),
             profile: get_data(created, "profile", "build"),
             state: :dormant,
-            status: :idle,
+            status: status_from_log(events),
             tokens: total_tokens(events),
             cost: 0.0,
             created_at: first.ts,
@@ -222,6 +325,44 @@ defmodule Troupe.Sessions.Index do
             pinned: false
           }
         ]
+    end
+  end
+
+  # What a session was in the middle of when it stopped, read from the log alone. A
+  # tool call that started and never finished, or a request the model never answered,
+  # is a session that was interrupted — and a client has to be able to see that before
+  # anything has been restarted.
+  defp status_from_log(events) do
+    cond do
+      Enum.any?(events, &(&1.type == "agent_done")) -> :done
+      incomplete_tool_call?(events) -> :interrupted
+      unanswered_request?(events) -> :interrupted
+      true -> :idle
+    end
+  end
+
+  defp incomplete_tool_call?(events) do
+    completed =
+      for %Event{type: "tool_call_completed", data: %{"call_id" => id}} <- events,
+          into: MapSet.new(),
+          do: id
+
+    Enum.any?(events, fn
+      %Event{type: "tool_call_started", data: %{"call_id" => id}} ->
+        not MapSet.member?(completed, id)
+
+      _ ->
+        false
+    end)
+  end
+
+  defp unanswered_request?(events) do
+    events
+    |> Enum.filter(&(&1.type in ["llm_request", "llm_response", "llm_error", "cancelled"]))
+    |> List.last()
+    |> case do
+      %Event{type: "llm_request"} -> true
+      _ -> false
     end
   end
 

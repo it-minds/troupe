@@ -1,0 +1,27 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/tool_call_completed.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "call_id": {
+      "type": "string"
+    },
+    "content": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "ok": {
+      "type": "boolean"
+    }
+  },
+  "required": [
+    "call_id",
+    "content",
+    "name",
+    "ok"
+  ],
+  "title": "tool_call_completed",
+  "type": "object"
+}

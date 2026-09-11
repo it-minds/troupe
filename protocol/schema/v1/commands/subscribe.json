@@ -1,0 +1,25 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/subscribe.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "from_seq": {
+      "type": "integer"
+    },
+    "level": {
+      "type": "string"
+    },
+    "topic": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "topic"
+  ],
+  "title": "subscribe",
+  "type": "object"
+}

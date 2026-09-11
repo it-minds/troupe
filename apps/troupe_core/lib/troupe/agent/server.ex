@@ -29,10 +29,10 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Agent.{Call, Definition, Definitions, State}
   alias Troupe.{Budget, Config, Events, Registry, Todo, Tools}
-  alias Troupe.LLM.{Message, Provider, Request, Response, ToolResult, ToolUse, Usage}
+  alias Troupe.LLM.{Delta, Message, Provider, Request, Response, ToolResult, ToolUse, Usage}
+  alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log}
   alias Troupe.Tool.{Ctx, Result}
-  alias Troupe.Protocol.Event
   alias Troupe.Watch.Trigger
 
   require Logger
@@ -140,6 +140,9 @@ defmodule Troupe.Agent.Server do
   end
 
   defp replay(state, task) do
+    # Asked first and unconditionally: it is "have I started before under this tree",
+    # and an agent whose log is empty on its first start has still started.
+    cold_start? = Log.cold_start?(state.session_id, state.agent_path)
     events = Log.replay(state.session_id, state.agent_path)
 
     case events do
@@ -156,8 +159,16 @@ defmodule Troupe.Agent.Server do
 
       _ ->
         state = Enum.reduce(events, state, &fold_event/2)
-        log(state, :agent_restarted, %{"replayed_events" => length(events)})
-        {state, resume_action(state, events)}
+        incomplete = incomplete_calls(events)
+        action = resume_action(state, incomplete, cold_start?)
+
+        log(state, :agent_restarted, %{
+          "replayed_events" => length(events),
+          "interrupted" => match?({:interrupted, _}, action) or action == :interrupted,
+          "incomplete_calls" => Enum.map(incomplete, fn {id, _name, _args} -> id end)
+        })
+
+        {state, action}
     end
   end
 
@@ -221,17 +232,35 @@ defmodule Troupe.Agent.Server do
     }
   end
 
-  # What to do after replay. Tool calls that started but never completed are re-run —
-  # at-least-once, documented in ARCHITECTURE.md — and outstanding delegations are
-  # re-spawned as fresh children.
-  defp resume_action(state, events) do
+  # What to do after replay.
+  #
+  # `cold_start?` separates "the whole session came back" from "this one agent
+  # crashed". A crashed agent inside a live session finishes what it started, which is
+  # the at-least-once behaviour tools are written for and what the user watching it
+  # expects.
+  #
+  # By default: **nothing**. A session that was mid-turn when the daemon died comes
+  # back interrupted and makes no model call until someone asks it to carry on. The
+  # alternative — picking up where it left off — means a crash loop spends money and
+  # re-runs shell commands nobody is watching, which is a worse failure than a session
+  # that waits.
+  #
+  # `resume_on_restart: true` opts back into the old behaviour: incomplete tool calls
+  # are re-run (at-least-once, documented in ARCHITECTURE.md) and a turn the model owes
+  # is taken.
+  defp resume_action(state, incomplete, cold_start?) do
     cond do
       state.done_reason != nil -> :none
-      (incomplete = incomplete_calls(events)) != [] -> {:rerun, incomplete}
-      needs_turn?(state) -> :turn
-      true -> :none
+      not cold_start? or state.config.resume_on_restart -> carry_on(state, incomplete)
+      true -> interrupt(state, incomplete)
     end
   end
+
+  defp carry_on(state, []), do: if(needs_turn?(state), do: :turn, else: :none)
+  defp carry_on(_state, incomplete), do: {:rerun, incomplete}
+
+  defp interrupt(state, []), do: if(needs_turn?(state), do: :interrupted, else: :none)
+  defp interrupt(_state, incomplete), do: {:interrupted, incomplete}
 
   defp incomplete_calls(events) do
     completed =
@@ -259,6 +288,30 @@ defmodule Troupe.Agent.Server do
   end
 
   def idle(:internal, :turn, state), do: start_turn(state)
+
+  # Came back from a restart with work half-done. The calls that never finished are
+  # closed off as errors rather than left dangling: the model needs a `tool_result` for
+  # every `tool_use` it emitted, and a log with a `tool_call_started` and nothing after
+  # it would look incomplete again on the next restart, forever.
+  def idle(:internal, :interrupted, state), do: {:keep_state, state}
+
+  def idle(:internal, {:interrupted, calls}, state) do
+    results =
+      Enum.map(calls, fn {call_id, name, _args} ->
+        Result.error(call_id, name, "interrupted: the session stopped before this finished")
+      end)
+
+    Enum.each(results, fn result ->
+      log(state, :tool_call_completed, %{
+        "call_id" => result.call_id,
+        "name" => result.name,
+        "ok" => false,
+        "content" => result.content
+      })
+    end)
+
+    {:keep_state, fold_results(state, results)}
+  end
 
   def idle(:internal, {:rerun, calls}, state) do
     # Replay handed us calls that started but never completed. Re-dispatching them
@@ -295,7 +348,7 @@ defmodule Troupe.Agent.Server do
   end
 
   def thinking(:info, {:llm_delta, ref, delta}, %State{llm_ref: ref} = state) do
-    publish(state, %{type: :llm_delta, data: delta})
+    publish(state, %{type: :llm_delta, data: Delta.to_json(delta)})
     {:keep_state, accumulate_delta(state, delta)}
   end
 
@@ -565,7 +618,10 @@ defmodule Troupe.Agent.Server do
 
         log(state, :llm_request, %{
           "model" => request.model,
-          "messages" => length(request.messages),
+          # The count, not the messages: the whole conversation is already in the log
+          # once, and writing it again on every turn makes the log grow with the square
+          # of the turns.
+          "message_count" => length(request.messages),
           "tools" => Enum.map(request.tools, & &1.name),
           "profile" => definition.name
         })

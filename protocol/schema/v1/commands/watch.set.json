@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/watch.set.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "workspace"
+  ],
+  "title": "watch.set",
+  "type": "object"
+}

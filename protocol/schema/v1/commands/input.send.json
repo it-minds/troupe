@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/input.send.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "session_id",
+    "text"
+  ],
+  "title": "input.send",
+  "type": "object"
+}

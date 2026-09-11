@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_created.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "bundle_version": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "visibility": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "profile",
+    "visibility",
+    "workspace"
+  ],
+  "title": "session_created",
+  "type": "object"
+}

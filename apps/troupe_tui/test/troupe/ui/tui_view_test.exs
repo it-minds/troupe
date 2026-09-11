@@ -5,24 +5,23 @@ defmodule Troupe.UI.TUIViewTest do
   `View.scene/2` is a pure function of state, so these render it directly rather than
   driving a supervised app — the split ExRatatui's testing guide recommends, since a
   supervised app's buffer is not exposed.
+
+  The events fed in are `%Troupe.Protocol.Event{}` records exactly as they arrive over
+  a socket. There is no test-only shape: if the screen can be built from these, it can
+  be built by any client.
   """
 
   use ExUnit.Case, async: true
 
   alias ExRatatui.Layout.Rect
-  alias Troupe.{Budget, Todo, Workspace}
+  alias Troupe.Protocol.Event
   alias Troupe.UI.TUI.{State, View}
 
   @width 120
   @height 32
 
   setup do
-    root = Path.join(System.tmp_dir!(), "troupe-tui-#{System.unique_integer([:positive])}")
-    File.mkdir_p!(root)
-    on_exit(fn -> File.rm_rf!(root) end)
-
-    {:ok, workspace} = Workspace.new(root)
-    %{state: State.new("session-1", workspace)}
+    %{state: State.new("session-1", "/tmp/workspace")}
   end
 
   defp draw(state, width \\ @width, height \\ @height) do
@@ -43,41 +42,33 @@ defmodule Troupe.UI.TUIViewTest do
     test "renders the header, a question, an answer and tool calls", %{state: state} do
       state =
         state
-        |> State.apply_event(%{
-          type: :agent_state,
-          agent_path: ["root"],
-          data: agent_state(:acting, "build")
-        })
-        |> State.apply_event(%{
-          type: :user_input,
-          agent_path: ["root"],
-          data: %{"source" => "user", "text" => "make the tests pass"}
-        })
-        |> State.apply_event(%{
-          type: :tool_call_started,
-          agent_path: ["root"],
-          data: %{call_id: "c1", name: "read_file", args: %{"path" => "lib/math.ex"}}
-        })
-        |> State.apply_event(%{
-          type: :tool_call_completed,
-          agent_path: ["root"],
-          data: %{call_id: "c1", name: "read_file", ok?: true, content: "1\tdefmodule Math do"}
-        })
-        |> State.apply_event(%{
-          type: :tool_call_started,
-          agent_path: ["root"],
-          data: %{call_id: "c2", name: "shell", args: %{"command" => "mix test"}}
-        })
-        |> State.apply_event(%{
-          type: :tool_call_completed,
-          agent_path: ["root"],
-          data: %{call_id: "c2", name: "shell", ok?: false, content: "1 test, 1 failure"}
-        })
-        |> State.apply_event(%{
-          type: :llm_delta,
-          agent_path: ["root"],
-          data: %{kind: :text, text: "One test still fails."}
-        })
+        |> apply_all([
+          event("agent_state", agent_state("acting", "build")),
+          event("user_input", %{"source" => "user", "text" => "make the tests pass"}),
+          event("tool_call_started", %{
+            "call_id" => "c1",
+            "name" => "read_file",
+            "args" => %{"path" => "lib/math.ex"}
+          }),
+          event("tool_call_completed", %{
+            "call_id" => "c1",
+            "name" => "read_file",
+            "ok" => true,
+            "content" => "1\tdefmodule Math do"
+          }),
+          event("tool_call_started", %{
+            "call_id" => "c2",
+            "name" => "shell",
+            "args" => %{"command" => "mix test"}
+          }),
+          event("tool_call_completed", %{
+            "call_id" => "c2",
+            "name" => "shell",
+            "ok" => false,
+            "content" => "1 test, 1 failure"
+          }),
+          event("llm_delta", %{"kind" => "text", "text" => "One test still fails."})
+        ])
 
       content = draw(state)
 
@@ -95,19 +86,37 @@ defmodule Troupe.UI.TUIViewTest do
       assert content =~ "input"
     end
 
+    test "an llm_response settles the streamed answer rather than repeating it", %{state: state} do
+      state =
+        apply_all(state, [
+          event("llm_delta", %{"kind" => "text", "text" => "One test "}),
+          event("llm_delta", %{"kind" => "text", "text" => "still fails."}),
+          event("llm_response", %{
+            "message" => %{
+              "role" => "assistant",
+              "content" => [%{"type" => "text", "text" => "One test still fails."}]
+            }
+          })
+        ])
+
+      assert [{:assistant, "One test still fails."}] = state.transcript
+    end
+
     test "a collapsed tool call hides its output until expanded", %{state: state} do
       state =
-        state
-        |> State.apply_event(%{
-          type: :tool_call_started,
-          agent_path: ["root"],
-          data: %{call_id: "c1", name: "grep", args: %{"pattern" => "defmodule"}}
-        })
-        |> State.apply_event(%{
-          type: :tool_call_completed,
-          agent_path: ["root"],
-          data: %{call_id: "c1", name: "grep", ok?: true, content: "lib/a.ex:1:defmodule A do"}
-        })
+        apply_all(state, [
+          event("tool_call_started", %{
+            "call_id" => "c1",
+            "name" => "grep",
+            "args" => %{"pattern" => "defmodule"}
+          }),
+          event("tool_call_completed", %{
+            "call_id" => "c1",
+            "name" => "grep",
+            "ok" => true,
+            "content" => "lib/a.ex:1:defmodule A do"
+          })
+        ])
 
       collapsed = draw(state)
       assert collapsed =~ "grep"
@@ -121,15 +130,15 @@ defmodule Troupe.UI.TUIViewTest do
   describe "task panel" do
     test "renders every status with its own marker", %{state: state} do
       todos = [
-        %Todo{id: "a", content: "read the failing test", status: :completed},
-        %Todo{id: "b", content: "fix the function", status: :in_progress},
-        %Todo{id: "c", content: "run the suite", status: :pending},
-        %Todo{id: "d", content: "abandoned idea", status: :cancelled}
+        todo("a", "read the failing test", "completed"),
+        todo("b", "fix the function", "in_progress"),
+        todo("c", "run the suite", "pending"),
+        todo("d", "abandoned idea", "cancelled")
       ]
 
       content =
         state
-        |> State.apply_event(%{type: :todo_updated, agent_path: ["root"], data: %{items: todos}})
+        |> State.apply_event(event("todo_updated", %{"items" => todos}))
         |> draw()
 
       assert content =~ "tasks"
@@ -144,21 +153,11 @@ defmodule Troupe.UI.TUIViewTest do
     test "nests subagents under their parent with state and budget", %{state: state} do
       content =
         state
-        |> State.apply_event(%{
-          type: :agent_state,
-          agent_path: ["root"],
-          data: agent_state(:acting, "build")
-        })
-        |> State.apply_event(%{
-          type: :agent_state,
-          agent_path: ["root", "explore#1"],
-          data: agent_state(:thinking, "explore")
-        })
-        |> State.apply_event(%{
-          type: :agent_state,
-          agent_path: ["root", "general#2"],
-          data: agent_state(:done, "general")
-        })
+        |> apply_all([
+          event("agent_state", agent_state("acting", "build")),
+          event("agent_state", agent_state("thinking", "explore"), agent: ["root", "explore#1"]),
+          event("agent_state", agent_state("done", "general"), agent: ["root", "general#2"])
+        ])
         |> draw()
 
       assert content =~ "agents"
@@ -174,20 +173,18 @@ defmodule Troupe.UI.TUIViewTest do
     test "shows a diff for an edit", %{state: state} do
       content =
         state
-        |> State.apply_event(%{
-          type: :approval_requested,
-          agent_path: ["root"],
-          data: %{
-            call_id: "c9",
-            tool: "edit_file",
-            agent_path: ["root"],
-            args: %{
+        |> State.apply_event(
+          event("approval_requested", %{
+            "call_id" => "c9",
+            "tool" => "edit_file",
+            "agent_path" => ["root"],
+            "args" => %{
               "path" => "lib/math.ex",
               "old_string" => "def answer, do: 0",
               "new_string" => "def answer, do: 42"
             }
-          }
-        })
+          })
+        )
         |> draw()
 
       assert content =~ "approve edit_file?"
@@ -201,16 +198,14 @@ defmodule Troupe.UI.TUIViewTest do
     test "shows the whole command for shell", %{state: state} do
       content =
         state
-        |> State.apply_event(%{
-          type: :approval_requested,
-          agent_path: ["root"],
-          data: %{
-            call_id: "c9",
-            tool: "shell",
-            agent_path: ["root"],
-            args: %{"command" => "mix test --failed"}
-          }
-        })
+        |> State.apply_event(
+          event("approval_requested", %{
+            "call_id" => "c9",
+            "tool" => "shell",
+            "agent_path" => ["root"],
+            "args" => %{"command" => "mix test --failed"}
+          })
+        )
         |> draw()
 
       assert content =~ "approve shell?"
@@ -240,22 +235,18 @@ defmodule Troupe.UI.TUIViewTest do
         terminal = ExRatatui.init_test_terminal(width, height)
         scene = View.scene(state, %ExRatatui.Frame{width: width, height: height})
 
-        assert :ok = ExRatatui.draw(terminal, scene),
-               "drawing failed at #{width}x#{height}"
+        assert :ok = ExRatatui.draw(terminal, scene), "drawing failed at #{width}x#{height}"
       end
     end
   end
 
   describe "layout" do
     test "a narrow terminal drops the side panel rather than overflowing", %{state: state} do
-      todos = [%Todo{id: "a", content: "something", status: :pending}]
-
       state =
-        State.apply_event(state, %{
-          type: :todo_updated,
-          agent_path: ["root"],
-          data: %{items: todos}
-        })
+        State.apply_event(
+          state,
+          event("todo_updated", %{"items" => [todo("a", "something", "pending")]})
+        )
 
       wide = draw(state, 120, 30)
       narrow = draw(state, 70, 30)
@@ -267,13 +258,36 @@ defmodule Troupe.UI.TUIViewTest do
     end
   end
 
+  # -- helpers ----------------------------------------------------------------
+
+  defp apply_all(state, events), do: Enum.reduce(events, state, &State.apply_event(&2, &1))
+
+  defp event(type, data, opts \\ []) do
+    %Event{
+      type: type,
+      agent: Keyword.get(opts, :agent, ["root"]),
+      data: data,
+      seq: Keyword.get(opts, :seq),
+      ts: "2026-01-01T00:00:00Z"
+    }
+  end
+
+  defp todo(id, content, status) do
+    %{"id" => id, "content" => content, "status" => status}
+  end
+
   defp agent_state(state, profile) do
     %{
-      state: state,
-      profile: profile,
-      todos: [],
-      budget: %Budget{turns: 3, max_turns: 40, input_tokens: 1_200, output_tokens: 300},
-      done_reason: nil
+      "state" => state,
+      "profile" => profile,
+      "todos" => [],
+      "budget" => %{
+        "turns" => 3,
+        "max_turns" => 40,
+        "input_tokens" => 1_200,
+        "output_tokens" => 300
+      },
+      "done_reason" => nil
     }
   end
 end

@@ -28,6 +28,10 @@ defmodule Troupe.TUI.MixProject do
   defp deps do
     [
       {:troupe_protocol, in_umbrella: true},
+      # Test only, and deliberately so: to test a client you need a server. It is
+      # never a dependency outside the test environment, and `mix troupe.boundaries` reads the compiled
+      # beams rather than this file, so it would still catch a call from `lib/`.
+      {:troupe_gateway, in_umbrella: true, only: :test},
       {:ex_ratatui, "~> 0.13"}]
   end
 end

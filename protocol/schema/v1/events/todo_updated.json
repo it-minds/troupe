@@ -1,0 +1,18 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/todo_updated.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "items": {
+      "type": "array"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "items"
+  ],
+  "title": "todo_updated",
+  "type": "object"
+}

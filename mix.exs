@@ -15,6 +15,11 @@ defmodule Troupe.Umbrella.MixProject do
     ]
   end
 
+  # `check` runs the test suite, so the whole of it belongs in the test environment —
+  # otherwise `compile --warnings-as-errors` checks a different set of files than the
+  # one the tests then run against.
+  def cli, do: [preferred_envs: [check: :test]]
+
   # Umbrella-wide dependencies. Each app declares the ones it actually uses; these
   # are the tools that run across all of them.
   defp deps do

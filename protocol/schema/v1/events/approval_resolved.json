@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/approval_resolved.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "call_id": {
+      "type": "string"
+    },
+    "resolved_by": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "call_id",
+    "resolved_by"
+  ],
+  "title": "approval_resolved",
+  "type": "object"
+}

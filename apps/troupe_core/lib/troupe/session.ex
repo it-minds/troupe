@@ -63,7 +63,10 @@ defmodule Troupe.Session do
            agent_path: @root_path,
            enabled: config.watch,
            debounce_ms: config.watch_debounce_ms,
-           poll_interval_ms: config.watch_poll_interval_ms}
+           poll_interval_ms: config.watch_poll_interval_ms},
+          # Last, and deliberately so: a projection is a subscriber, and one that could
+          # restart an agent by crashing would be worse than no projection at all.
+          {Troupe.Session.Summary, session_id: session_id}
         ]
 
     Supervisor.init(children, strategy: :rest_for_one, max_restarts: 3, max_seconds: 10)

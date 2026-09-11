@@ -1,0 +1,30 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/llm_request.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "message_count": {
+      "type": "integer"
+    },
+    "model": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "message_count",
+    "model",
+    "profile",
+    "tools"
+  ],
+  "title": "llm_request",
+  "type": "object"
+}

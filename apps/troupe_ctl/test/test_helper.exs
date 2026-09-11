@@ -12,6 +12,6 @@ System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 # Logger output is noise here: the suite asserts on events and telemetry, never on
 # log lines, and the crashing-agent tests would otherwise print stacktraces that
 # look like failures.
-Logger.configure(level: :critical)
+Logger.configure(level: if(System.get_env("TROUPE_TEST_LOGS"), do: :debug, else: :critical))
 
-ExUnit.start(capture_log: true)
+ExUnit.start(capture_log: System.get_env("TROUPE_TEST_LOGS") == nil)

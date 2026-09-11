@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/input_accepted.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "author": {
+      "type": "string"
+    },
+    "command_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "author",
+    "command_id"
+  ],
+  "title": "input_accepted",
+  "type": "object"
+}

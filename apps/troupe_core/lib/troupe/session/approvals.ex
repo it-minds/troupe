@@ -9,6 +9,11 @@ defmodule Troupe.Session.Approvals do
 
   Callers are monitored: a tool task killed by a cancel or an agent crash is dropped
   from the pending set instead of leaving a reply nobody will ever read.
+
+  Several clients may be watching one session, so two people can answer the same
+  prompt a second apart. **First response wins**, and the second gets an
+  `approval_resolved` event naming who got there first — silence would leave them
+  believing they decided it.
   """
 
   use GenServer
@@ -16,7 +21,13 @@ defmodule Troupe.Session.Approvals do
   alias Troupe.Session.Log
 
   @enforce_keys [:session_id]
-  defstruct [:session_id, auto_approve: false, pending: %{}, session_allows: MapSet.new()]
+  defstruct [
+    :session_id,
+    auto_approve: false,
+    pending: %{},
+    resolved: %{},
+    session_allows: MapSet.new()
+  ]
 
   @type decision :: :allow | :deny | :allow_session
 
@@ -111,7 +122,7 @@ defmodule Troupe.Session.Approvals do
   def handle_cast({:decide, call_id, decision, actor}, state) do
     case Map.pop(state.pending, call_id) do
       {nil, _} ->
-        {:noreply, state}
+        {:noreply, already_resolved(state, call_id)}
 
       {entry, pending} ->
         Process.demonitor(entry.monitor, [:flush])
@@ -131,9 +142,38 @@ defmodule Troupe.Session.Approvals do
           actor
         )
 
-        {:noreply, %{state | pending: pending, session_allows: allows}}
+        resolved = Map.put(state.resolved, call_id, resolved_by(entry.req, actor))
+
+        {:noreply,
+         %{state | pending: pending, resolved: resolved, session_allows: allows}}
     end
   end
+
+  # A second answer to a decided prompt is not an error — two people watching one
+  # session is the normal case — so it is reported as an event and changes nothing.
+  defp already_resolved(state, call_id) do
+    case Map.fetch(state.resolved, call_id) do
+      {:ok, %{agent_path: agent_path, by: by}} ->
+        Log.append(state.session_id, agent_path, :approval_resolved, %{
+          "call_id" => call_id,
+          "resolved_by" => by
+        })
+
+        state
+
+      :error ->
+        state
+    end
+  end
+
+  defp resolved_by(req, actor) do
+    %{agent_path: req.agent_path, by: describe_actor(actor)}
+  end
+
+  defp describe_actor(nil), do: "system"
+  defp describe_actor(%{display_name: name}) when is_binary(name) and name != "", do: name
+  defp describe_actor(%{subject: subject}) when is_binary(subject), do: subject
+  defp describe_actor(_actor), do: "system"
 
   @impl GenServer
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do

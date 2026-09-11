@@ -124,17 +124,19 @@ defmodule Troupe.Gateway.Worktrees do
   defp parse_porcelain(output) do
     output
     |> String.split("\n\n", trim: true)
-    |> Enum.map(fn block ->
-      block
-      |> String.split("\n", trim: true)
-      |> Map.new(fn line ->
-        case String.split(line, " ", parts: 2) do
-          [key, value] -> {key, value}
-          [key] -> {key, true}
-        end
-      end)
-    end)
+    |> Enum.map(&parse_block/1)
     |> Enum.filter(&Map.has_key?(&1, "worktree"))
+  end
+
+  defp parse_block(block) do
+    block |> String.split("\n", trim: true) |> Map.new(&parse_field/1)
+  end
+
+  defp parse_field(line) do
+    case String.split(line, " ", parts: 2) do
+      [key, value] -> {key, value}
+      [key] -> {key, true}
+    end
   end
 
   defp git_repository?(path) do

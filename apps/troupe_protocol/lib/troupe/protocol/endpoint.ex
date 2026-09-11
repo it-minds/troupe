@@ -1,4 +1,4 @@
-defmodule Troupe.Gateway.Endpoint do
+defmodule Troupe.Protocol.Endpoint do
   @moduledoc """
   Where the daemon listens, and how a client finds it.
 

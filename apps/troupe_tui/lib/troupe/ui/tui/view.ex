@@ -12,7 +12,6 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Style
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Clear, List, Paragraph}
-  alias Troupe.Todo
   alias Troupe.UI.TUI.State
 
   @side_width 34
@@ -91,15 +90,16 @@ defmodule Troupe.UI.TUI.View do
     }
   end
 
-  defp state_label(:idle), do: "ready"
-  defp state_label(:thinking), do: "thinking"
-  defp state_label(:acting), do: "acting"
-  defp state_label(:compacting), do: "compacting"
-  defp state_label(:done), do: "done"
+  # Agent states arrive as the strings a client sees on the wire, not as atoms: the
+  # screen renders what the protocol says, including a state this build has never
+  # heard of.
+  defp state_label("idle"), do: "ready"
+  defp state_label(nil), do: "ready"
   defp state_label(other), do: to_string(other)
 
-  defp state_style(:idle), do: %Style{fg: :green}
-  defp state_style(:done), do: %Style{fg: :dark_gray}
+  defp state_style("idle"), do: %Style{fg: :green}
+  defp state_style(nil), do: %Style{fg: :green}
+  defp state_style("done"), do: %Style{fg: :dark_gray}
   defp state_style(_), do: %Style{fg: :yellow, modifiers: [:bold]}
 
   defp watch_label(%State{watch?: true}), do: " · watch"
@@ -236,25 +236,27 @@ defmodule Troupe.UI.TUI.View do
     }
   end
 
-  defp todo_line(%Todo{} = todo) do
+  defp todo_line(todo) when is_map(todo) do
+    status = Map.get(todo, "status", "pending")
+
     Line.new([
-      Span.new(todo_marker(todo.status), style: todo_style(todo.status)),
-      Span.new(todo.content, style: todo_text_style(todo.status))
+      Span.new(todo_marker(status), style: todo_style(status)),
+      Span.new(Map.get(todo, "content", ""), style: todo_text_style(status))
     ])
   end
 
-  defp todo_marker(:pending), do: "[ ] "
-  defp todo_marker(:in_progress), do: "[~] "
-  defp todo_marker(:completed), do: "[x] "
-  defp todo_marker(:cancelled), do: "[-] "
+  defp todo_marker("in_progress"), do: "[~] "
+  defp todo_marker("completed"), do: "[x] "
+  defp todo_marker("cancelled"), do: "[-] "
+  defp todo_marker(_), do: "[ ] "
 
-  defp todo_style(:in_progress), do: %Style{fg: :yellow, modifiers: [:bold]}
-  defp todo_style(:completed), do: %Style{fg: :green}
-  defp todo_style(:cancelled), do: %Style{fg: :dark_gray}
+  defp todo_style("in_progress"), do: %Style{fg: :yellow, modifiers: [:bold]}
+  defp todo_style("completed"), do: %Style{fg: :green}
+  defp todo_style("cancelled"), do: %Style{fg: :dark_gray}
   defp todo_style(_), do: %Style{fg: :white}
 
-  defp todo_text_style(:completed), do: %Style{fg: :dark_gray, modifiers: [:crossed_out]}
-  defp todo_text_style(:cancelled), do: %Style{fg: :dark_gray, modifiers: [:crossed_out]}
+  defp todo_text_style("completed"), do: %Style{fg: :dark_gray, modifiers: [:crossed_out]}
+  defp todo_text_style("cancelled"), do: %Style{fg: :dark_gray, modifiers: [:crossed_out]}
   defp todo_text_style(_), do: %Style{}
 
   defp agent_tree(state) do
@@ -287,8 +289,8 @@ defmodule Troupe.UI.TUI.View do
     Line.new([
       Span.new(String.duplicate("  ", depth)),
       Span.new(name <> " ", style: focus_style(state, path)),
-      Span.new(state_label(Map.get(agent, :state, :idle)) <> " ",
-        style: state_style(Map.get(agent, :state, :idle))
+      Span.new(state_label(Map.get(agent, "state")) <> " ",
+        style: state_style(Map.get(agent, "state"))
       ),
       Span.new(State.budget_summary(agent), style: %Style{fg: :dark_gray})
     ])

@@ -29,9 +29,34 @@ defmodule Troupe.Gateway.Daemon do
     Supervisor.start_link(__MODULE__, opts, name: __MODULE__)
   end
 
+  @instance_key {__MODULE__, :instance_id}
+
+  @doc """
+  This daemon's identity for as long as it is running.
+
+  A client that reconnects and finds a different one is talking to a daemon that has
+  been restarted, which means its own view of any session is stale and it must replay
+  rather than resume. Without this the client cannot tell a reconnection from a
+  restart, and a restart looks exactly like a very quiet session.
+  """
+  @spec instance_id() :: String.t()
+  def instance_id do
+    case :persistent_term.get(@instance_key, nil) do
+      nil ->
+        id = 8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+        :persistent_term.put(@instance_key, id)
+        id
+
+      id ->
+        id
+    end
+  end
+
   @impl Supervisor
   def init(opts) do
     Process.set_label("troupe daemon")
+    :persistent_term.erase(@instance_key)
+    _ = instance_id()
 
     children = [
       {Commands, opts},

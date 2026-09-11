@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/agent_started.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "mode": {
+      "type": "string"
+    },
+    "profile": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "mode",
+    "profile"
+  ],
+  "title": "agent_started",
+  "type": "object"
+}

@@ -1,5 +1,11 @@
 defmodule Troupe.CLI.RunTest do
-  @moduledoc "The `run --headless` path end to end, driven by a scripted model."
+  @moduledoc """
+  The `run --headless` path end to end, driven by a scripted model.
+
+  The CLI is a protocol client now, so these start a real daemon on a real socket and
+  drive the command against it. Nothing here reaches into a session: if the CLI can do
+  it, so can anyone else's client.
+  """
 
   # Not async: these drive the CLI, which configures itself from the environment, and
   # `System.put_env/2` is process-global. Running them serially is what makes the
@@ -10,6 +16,8 @@ defmodule Troupe.CLI.RunTest do
 
   alias Troupe.CLI
   alias Troupe.CLI.Options
+  alias Troupe.Gateway.Daemon
+  alias Troupe.Protocol.Endpoint
 
   setup do
     unique = System.unique_integer([:positive])
@@ -24,12 +32,15 @@ defmodule Troupe.CLI.RunTest do
     previous_state = System.get_env("TROUPE_STATE_HOME")
     System.put_env("TROUPE_STATE_HOME", state)
 
+    endpoint = %Endpoint{kind: :unix, path: Path.join(base, "daemon.sock")}
+    start_supervised!({Daemon, endpoint: endpoint, idle_shutdown_ms: :timer.hours(1)})
+
     on_exit(fn ->
       restore("TROUPE_STATE_HOME", previous_state)
       File.rm_rf!(base)
     end)
 
-    %{workspace: workspace, base: base, state: state}
+    %{workspace: workspace, base: base, state: state, endpoint: endpoint}
   end
 
   test "run --headless writes a file, reports each step, and exits 0", context do
@@ -105,9 +116,52 @@ defmodule Troupe.CLI.RunTest do
     assert output =~ "Sessions for"
   end
 
-  # The session's state directory is passed through config rather than the
-  # environment, so this drives `dispatch/1` with an overridden workspace and reads
-  # the log from a per-test directory.
+  test "a workspace that is not a directory fails cleanly, in the daemon's words", context do
+    script = Path.join(context.base, "script.json")
+    File.write!(script, Jason.encode!(%{"steps" => [%{"text" => "done"}]}))
+    missing = Path.join(context.base, "not-here")
+
+    output =
+      capture_io(:stderr, fn ->
+        assert CLI.dispatch(Options.parse(["run", "x", "--workspace", missing]),
+                 endpoint: context.endpoint,
+                 spawn: false
+               ) == 1
+      end)
+
+    # The client cannot see this machine's filesystem, so the daemon has to say what
+    # was wrong rather than just refusing.
+    assert output =~ "is not a directory"
+  end
+
+  test "sessions lists nothing for a fresh workspace", context do
+    fresh = Path.join(context.base, "fresh")
+    File.mkdir_p!(fresh)
+
+    output =
+      capture_io(fn ->
+        assert CLI.dispatch(Options.parse(["sessions", "--workspace", fresh]),
+                 endpoint: context.endpoint,
+                 spawn: false
+               ) == 0
+      end)
+
+    assert output =~ "No sessions recorded"
+  end
+
+  test "closing a run leaves the session listed as dormant, not gone", context do
+    script = Path.join(context.base, "script.json")
+    File.write!(script, Jason.encode!(%{"steps" => [%{"text" => "done"}]}))
+
+    {_output, 0} = run_cli(context, script, ["run", "something", "--headless", "--auto-approve"])
+
+    {output, 0} = run_cli(context, script, ["sessions"])
+    assert output =~ "dormant"
+  end
+
+  # The endpoint is passed in rather than discovered: the daemon under test listens on
+  # a socket of its own, and `spawn: false` makes sure a missing one fails the test
+  # instead of quietly launching a second daemon.
   defp run_cli(context, script, argv) do
     previous = System.get_env("TROUPE_FAKE_SCRIPT")
     previous_provider = System.get_env("TROUPE_PROVIDER")
@@ -119,7 +173,12 @@ defmodule Troupe.CLI.RunTest do
 
     output =
       capture_io(fn ->
-        result = CLI.dispatch(Options.parse(argv ++ ["--workspace", context.workspace]))
+        result =
+          CLI.dispatch(Options.parse(argv ++ ["--workspace", context.workspace]),
+            endpoint: context.endpoint,
+            spawn: false
+          )
+
         send(parent, {code, result})
       end)
 

@@ -2,34 +2,37 @@ defmodule Troupe.UI.TUI do
   @moduledoc """
   Entry point for the terminal UI.
 
-  Owns the terminal for the life of the session and returns an exit code when the
-  user quits. The UI itself is `Troupe.UI.TUI.Server`, an `ExRatatui.App` subscribed
-  to `Troupe.Events` — it is only a subscriber, so it can crash and restart without
-  the session noticing.
+  Owns the terminal for the life of the command and returns an exit code when the
+  user quits. The UI itself is `Troupe.UI.TUI.Server`, an `ExRatatui.App` that holds
+  its own `Troupe.Protocol.Client` — it is a protocol client with no private access to
+  anything, and quitting it leaves the session running in the daemon.
   """
 
   alias Troupe.UI.TUI.Server
 
-  @doc "Run the TUI against a session. Blocks until the user quits."
-  @spec run(map(), struct()) :: non_neg_integer()
-  def run(session, options) do
-    case Troupe.UI.Supervisor.attach({Server, session_opts(session, options)}) do
+  @doc """
+  Run the TUI against a session in the daemon. Blocks until the user quits.
+
+  `connect_opts` are passed to `Troupe.Protocol.Daemon.connect/1`; the view connects
+  for itself, because events have to arrive at the process that draws them.
+  """
+  @spec run(String.t(), struct(), keyword()) :: non_neg_integer()
+  def run(session_id, options, connect_opts \\ []) do
+    opts = [
+      session_id: session_id,
+      connect: connect_opts,
+      watch: Map.get(options, :watch) || false,
+      owner: self(),
+      # Unnamed so a second session in the same VM cannot collide with the first.
+      name: nil
+    ]
+
+    case Server.start_link(opts) do
       {:ok, pid} -> await(pid)
       # A UI that declined to start (no terminal, for instance) is not a crash.
       :ignore -> fail(:no_terminal)
       {:error, reason} -> fail(reason)
     end
-  end
-
-  defp session_opts(session, options) do
-    [
-      session_id: session.id,
-      workspace: session.workspace,
-      watch: options.watch || false,
-      owner: self(),
-      # Unnamed so a second session in the same VM cannot collide with the first.
-      name: nil
-    ]
   end
 
   defp await(pid) do

@@ -14,16 +14,20 @@ defmodule Troupe.Gateway.Connection do
   `llm_response`.
   """
 
-  use GenServer
+  # A connection is never restarted: its socket died with it, and a replacement
+  # process would sit holding a closed port waiting for a client that has gone.
+  use GenServer, restart: :temporary
 
-  alias Troupe.Gateway.{Dispatch, Session}
+  alias Troupe.Gateway.{Daemon, Dispatch, Session, Writer}
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
-
 
   # Above this many queued messages the connection stops handling events one at a
   # time and drains its mailbox in one pass, collapsing what it can.
   @drain_threshold 64
+  # Bytes handed to the writer but not yet on the wire. Past this the client is not
+  # reading, and the connection stops adding to the pile.
+  @outbound_bound 4 * 1024 * 1024
   # Durable events that could not be delivered before the subscription is abandoned.
   @durable_bound 10_000
   @max_message_bytes 64 * 1024 * 1024
@@ -33,6 +37,7 @@ defmodule Troupe.Gateway.Connection do
     :socket,
     :endpoint,
     :principal,
+    :writer,
     buffer: "",
     initialized?: false,
     scopes: [],
@@ -40,7 +45,11 @@ defmodule Troupe.Gateway.Connection do
     client_info: %{},
     subscriptions: %{},
     next_subscription: 1,
-    dropped_ephemerals: 0
+    dropped_ephemerals: 0,
+    outstanding: 0,
+    backlog: 0,
+    outbound_bound: @outbound_bound,
+    durable_bound: @durable_bound
   ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -57,15 +66,28 @@ defmodule Troupe.Gateway.Connection do
     {:ok,
      %__MODULE__{
        socket: Keyword.fetch!(opts, :socket),
-       endpoint: Keyword.fetch!(opts, :endpoint)
+       endpoint: Keyword.fetch!(opts, :endpoint),
+       outbound_bound: Keyword.get(opts, :outbound_bound, @outbound_bound),
+       durable_bound: Keyword.get(opts, :durable_bound, @durable_bound)
      }}
   end
 
   @impl GenServer
   def handle_info(:socket_ready, state) do
+    {:ok, writer} = Writer.start_link(state.socket, self())
     :ok = :inet.setopts(state.socket, active: :once)
+    {:noreply, %{state | writer: writer}}
+  end
+
+  # The writer got another message onto the wire, so that many bytes — and, for a
+  # durable event, one more of the backlog — come back off this connection's budget.
+  def handle_info({:written, kind, bytes}, state) do
+    state = %{state | outstanding: max(state.outstanding - bytes, 0)}
+    state = if kind == :durable, do: %{state | backlog: max(state.backlog - 1, 0)}, else: state
     {:noreply, state}
   end
+
+  def handle_info({:write_failed, _reason}, state), do: {:stop, :normal, state}
 
   def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
     case consume(state.buffer <> data, state) do
@@ -102,6 +124,8 @@ defmodule Troupe.Gateway.Connection do
        scopes: state.scopes,
        subscriptions: map_size(state.subscriptions),
        dropped_ephemerals: state.dropped_ephemerals,
+       outstanding: state.outstanding,
+       backlog: state.backlog,
        queue_len: queue_len()
      }, state}
   end
@@ -109,6 +133,9 @@ defmodule Troupe.Gateway.Connection do
   @impl GenServer
   def terminate(_reason, state) do
     Enum.each(state.subscriptions, fn {_id, sub} -> Session.unsubscribe(sub.topic) end)
+    # The last thing written is often the reason the connection is ending, so the
+    # socket is not closed until the writer has had a chance to put it on the wire.
+    if state.writer && Process.alive?(state.writer), do: Writer.flush(state.writer)
     :gen_tcp.close(state.socket)
     :ok
   end
@@ -119,8 +146,8 @@ defmodule Troupe.Gateway.Connection do
     case String.split(buffer, "\n", parts: 2) do
       [partial] ->
         if byte_size(partial) > @max_message_bytes do
-          send_message(state, {:error, nil, Error.new(:payload_too_large, %{limit: @max_message_bytes})})
-          {:stop, state}
+          error = Error.new(:payload_too_large, %{limit: @max_message_bytes})
+          {:stop, send_control(state, {:error, nil, error})}
         else
           {:ok, %{state | buffer: partial}}
         end
@@ -141,8 +168,7 @@ defmodule Troupe.Gateway.Connection do
         handle_message(message, state)
 
       {:error, %Error{} = error} ->
-        send_message(state, {:error, nil, error})
-        {:ok, state}
+        {:ok, send_control(state, {:error, nil, error})}
     end
   end
 
@@ -150,43 +176,35 @@ defmodule Troupe.Gateway.Connection do
 
   defp handle_message({:request, id, "initialize", params}, %{initialized?: false} = state) do
     case initialize(params, state) do
-      {:ok, result, state} ->
-        send_message(state, {:result, id, result})
-        {:ok, state}
-
-      {:error, error} ->
-        send_message(state, {:error, id, error})
-        {:stop, state}
+      {:ok, result, state} -> {:ok, send_control(state, {:result, id, result})}
+      {:error, error} -> {:stop, send_control(state, {:error, id, error})}
     end
   end
 
   defp handle_message({:request, id, "initialize", _params}, state) do
-    send_message(state, {:error, id, Error.new(:invalid_request, %{reason: "already initialized"})})
-    {:ok, state}
+    error = Error.new(:invalid_request, %{reason: "already initialized"})
+    {:ok, send_control(state, {:error, id, error})}
   end
 
   defp handle_message({:request, id, _method, _params}, %{initialized?: false} = state) do
-    send_message(state, {:error, id, Error.new(:not_initialized)})
-    {:stop, state}
+    {:stop, send_control(state, {:error, id, Error.new(:not_initialized)})}
   end
 
   defp handle_message({:request, id, method, params}, state) do
     case Dispatch.call(method, params, context(state)) do
       {:ok, result} ->
-        send_message(state, {:result, id, result})
-        {:ok, state}
+        {:ok, send_control(state, {:result, id, result})}
 
       {:ok, result, {:subscribed, subscription}} ->
-        send_message(state, {:result, id, result})
+        state = send_control(state, {:result, id, result})
         {:ok, replay_and_follow(state, subscription)}
 
       {:ok, result, {:unsubscribed, subscription_id}} ->
-        send_message(state, {:result, id, result})
+        state = send_control(state, {:result, id, result})
         {:ok, drop_subscription(state, subscription_id)}
 
       {:error, %Error{} = error} ->
-        send_message(state, {:error, id, error})
-        {:ok, state}
+        {:ok, send_control(state, {:error, id, error})}
     end
   end
 
@@ -222,7 +240,11 @@ defmodule Troupe.Gateway.Connection do
         {:ok,
          %{
            "protocol_version" => Protocol.version(),
-           "server_info" => %{"name" => "troupe-daemon", "version" => version_string()},
+           "server_info" => %{
+             "name" => "troupe-daemon",
+             "version" => version_string(),
+             "instance_id" => Daemon.instance_id()
+           },
            "capabilities" => %{"worktrees" => true, "watch" => true, "remote" => false},
            "principal" => principal,
            "scopes" => Enum.map(scopes, &Atom.to_string/1),
@@ -309,7 +331,7 @@ defmodule Troupe.Gateway.Connection do
 
       subscriptions ->
         Enum.reduce(subscriptions, state, fn subscription, acc ->
-          write_event(acc, subscription, event)
+          write_event(acc, subscription, session_id, event)
         end)
     end
   end
@@ -320,15 +342,19 @@ defmodule Troupe.Gateway.Connection do
     |> Enum.filter(&Session.interested?(&1, session_id, event))
   end
 
-  defp write_event(state, subscription, event) do
+  # The envelope names the session as well as the topic: a `fleet` subscriber sees
+  # events from every session on one subscription, and an event does not carry its own
+  # session id — in the log, the file it is in says which session it belongs to.
+  defp write_event(state, subscription, session_id, event) do
     payload = %{
       "topic" => subscription.topic,
+      "session_id" => session_id,
       "event" => Event.to_json(event)
     }
 
-    case send_message(state, {:notification, "event", payload}) do
-      :ok -> advance(state, subscription, event)
-      {:error, _reason} -> backpressure(state, subscription, event)
+    case send_event(state, event, {:notification, "event", payload}) do
+      {:ok, state} -> advance(state, subscription, event)
+      {:error, state} -> backpressure(state, subscription, event)
     end
   end
 
@@ -339,8 +365,9 @@ defmodule Troupe.Gateway.Connection do
     %{state | subscriptions: Map.put(state.subscriptions, subscription.id, updated)}
   end
 
-  # The socket would not take it. An ephemeral is dropped and counted; a durable event
-  # means the client is beyond saving on this subscription.
+  # The client is not reading. An ephemeral is dropped and counted — dropping deltas
+  # costs smoothness and nothing else — and a durable event means this subscription
+  # cannot be kept whole, which is what `resync_required` is for.
   defp backpressure(state, _subscription, %Event{ephemeral?: true}) do
     %{state | dropped_ephemerals: state.dropped_ephemerals + 1}
   end
@@ -350,7 +377,12 @@ defmodule Troupe.Gateway.Connection do
   end
 
   defp resync(state, subscription) do
-    send_message(state, {
+    # Everything queued for this client is about to be replayed from its own cursor,
+    # so the queue is dead weight — and it is the memory we need back in order to tell
+    # it so.
+    if state.writer, do: Writer.discard(state.writer)
+
+    send_control(state, {
       :notification,
       "resync_required",
       %{
@@ -369,21 +401,18 @@ defmodule Troupe.Gateway.Connection do
   # in order. If more durable events are backed up than the bound allows, every
   # subscription they belong to is resynced rather than delivered late.
   defp drain(state, collected) do
-    case drain_mailbox(collected, 0) do
-      {events, dropped} ->
-        durable = Enum.reject(events, fn {_id, event} -> event.ephemeral? end)
+    {events, dropped} = drain_mailbox(collected, 0)
+    durable = Enum.reject(events, fn {_id, event} -> event.ephemeral? end)
+    state = %{state | dropped_ephemerals: state.dropped_ephemerals + dropped}
 
-        state = %{state | dropped_ephemerals: state.dropped_ephemerals + dropped}
-
-        if length(durable) > @durable_bound do
-          Enum.reduce(Map.values(state.subscriptions), state, &resync(&2, &1))
-        else
-          Enum.reduce(durable, state, fn {session_id, event}, acc ->
-            deliver(acc, session_id, event)
-          end)
-        end
+    if length(durable) > state.durable_bound do
+      Enum.reduce(Map.values(state.subscriptions), state, &resync(&2, &1))
+    else
+      Enum.reduce(durable, state, &deliver_pair/2)
     end
   end
+
+  defp deliver_pair({session_id, event}, state), do: deliver(state, session_id, event)
 
   defp drain_mailbox(collected, dropped) do
     receive do
@@ -405,7 +434,51 @@ defmodule Troupe.Gateway.Connection do
 
   # -- writing ----------------------------------------------------------------
 
-  defp send_message(state, message) do
-    :gen_tcp.send(state.socket, [JSONRPC.encode(message), ?\n])
+  # A response the client asked for, or a notice it needs in order to recover. Always
+  # written: a client that is not reading is also not asking, so this is bounded by
+  # the client's own behaviour.
+  defp send_control(state, message) do
+    write(state, message, fn writer, line -> Writer.write_urgent(writer, line) end)
+  end
+
+  # The two budgets, and the difference between them is the whole backpressure policy.
+  #
+  # An **ephemeral** is refused once the client has more bytes outstanding than the
+  # byte bound allows. That is the memory guarantee: the queue in front of a client
+  # that will not read cannot grow past it. Dropping deltas costs smoothness and
+  # nothing else.
+  #
+  # A **durable** event is never dropped to save memory — the client would be silently
+  # missing part of its session — so it is queued regardless of bytes, and counted.
+  # Once more of them are queued than the backlog bound allows, the subscription
+  # cannot be kept whole and `resync_required` is the honest answer.
+  defp send_event(state, %Event{ephemeral?: true}, message) do
+    if state.outstanding >= state.outbound_bound do
+      {:error, state}
+    else
+      {:ok, write(state, message, &Writer.write(&1, :ephemeral, &2))}
+    end
+  end
+
+  defp send_event(state, %Event{}, message) do
+    if state.backlog >= state.durable_bound do
+      {:error, state}
+    else
+      state = write(state, message, &Writer.write(&1, :durable, &2))
+      {:ok, %{state | backlog: state.backlog + 1}}
+    end
+  end
+
+  defp write(state, message, writer_fun) do
+    line = [JSONRPC.encode(message), ?\n]
+
+    if state.writer do
+      %{state | outstanding: state.outstanding + writer_fun.(state.writer, line)}
+    else
+      # Only before `:socket_ready`, which nothing reaches in practice; kept so the
+      # write path has no state in which it silently does nothing.
+      :gen_tcp.send(state.socket, line)
+      state
+    end
   end
 end
