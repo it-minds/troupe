@@ -61,15 +61,27 @@ defmodule Troupe.Plane.Audit do
   """
   @spec diff(map(), map()) :: map()
   def diff(before, now) do
+    before = stringify(before)
+    now = stringify(now)
     keys = MapSet.union(MapSet.new(Map.keys(before)), MapSet.new(Map.keys(now)))
 
-    for key <- keys,
-        was = Map.get(before, key),
-        is = Map.get(now, key),
-        was != is,
-        into: %{},
-        do: {to_string(key), %{"from" => was, "to" => is}}
+    # Deliberately not a comprehension with `was = …` as a filter: an assignment used as
+    # a filter drops the element when the value is `nil`, which would silently hide every
+    # field being set from nothing or cleared to nothing — the two changes somebody
+    # reading an audit trail most wants to see.
+    keys
+    |> Enum.flat_map(fn key ->
+      was = Map.get(before, key)
+      is = Map.get(now, key)
+
+      if was == is, do: [], else: [{key, %{"from" => was, "to" => is}}]
+    end)
+    |> Map.new()
   end
+
+  # Both sides keyed the same way, so a caller comparing a struct's atom keys with a
+  # form's string ones gets a diff rather than a list of everything.
+  defp stringify(map), do: Map.new(map, fn {key, value} -> {to_string(key), value} end)
 
   @doc """
   Replace anything that looks like a secret value with a marker.

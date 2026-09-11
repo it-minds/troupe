@@ -19,6 +19,7 @@ defmodule Troupe.Plane.Admin.API do
     "admin.profiles.list" => {:profiles_list, []},
     "admin.profile.get" => {:profile_get, ["name"]},
     "admin.profile.put" => {:profile_put, ["profile"]},
+    "admin.profile.preview" => {:preview, ["profile"]},
     "admin.profile.delete" => {:profile_delete, ["name"]},
     "admin.pod.drain" => {:pod_drain, ["worker_id"]},
     "admin.teams.list" => {:teams_list, []},
@@ -33,7 +34,8 @@ defmodule Troupe.Plane.Admin.API do
     "admin.bundles.list" => {:bundles_list, ["channel"]},
     "admin.bundle.publish" => {:bundle_publish, ["channel", "content"]},
     "admin.bundle.retire" => {:bundle_retire, ["channel", "version"]},
-    "admin.audit.list" => {:audit_list, ["filter"]}
+    "admin.audit.list" => {:audit_list, ["filter"]},
+    "admin.provisioning.mode" => {:provisioning_mode, []}
   }
 
   @doc "Every admin method, and the `Admin` function it renames."

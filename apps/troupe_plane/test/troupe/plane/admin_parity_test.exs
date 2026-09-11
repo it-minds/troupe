@@ -18,10 +18,10 @@ defmodule Troupe.Plane.AdminParityTest do
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.API
 
-  # Not administrative actions: `actor_for/1` works out who is asking and `admin?/1`
-  # answers a question about them. Listed rather than filtered by a naming rule, because
-  # a rule would silently exempt whatever a future name happened to match.
-  @not_actions [actor_for: 1, admin?: 1]
+  # Not administrative actions: these work out *who is asking* rather than doing anything
+  # on their behalf. Listed one by one rather than filtered by a naming rule, because a
+  # rule would silently exempt whatever a future name happened to match.
+  @not_actions [actor_for: 1, actor_for_subject: 1, admin?: 1]
 
   describe "every action has three surfaces" do
     test "each context function has an admin API method" do

@@ -32,6 +32,46 @@ if config_env() == :prod do
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300"))
     ]
 
+  # -- the plane ------------------------------------------------------------
+
+  if System.get_env("TROUPE_PLANE_AUTOSTART") == "true" do
+    secret =
+      System.get_env("TROUPE_SECRET_KEY_BASE") ||
+        raise """
+        TROUPE_SECRET_KEY_BASE is not set.
+
+        It signs the admin panel's session cookies. There is a development default in
+        config.exs and using it in a cluster would mean anybody who has read this
+        repository can forge one, so a plane that is actually serving refuses to start
+        without its own.
+        """
+
+    config :troupe_plane, Troupe.Plane.Web.Endpoint,
+      server: true,
+      secret_key_base: secret,
+      http: [
+        ip: {0, 0, 0, 0},
+        port: String.to_integer(System.get_env("TROUPE_HTTP_PORT", "4000"))
+      ],
+      url: [host: System.get_env("TROUPE_HOST", "localhost"), scheme: "https", port: 443]
+
+    config :troupe_plane,
+      autostart: true,
+      base_url: System.get_env("TROUPE_BASE_URL"),
+      platform_admin_group: System.get_env("TROUPE_PLATFORM_ADMIN_GROUP"),
+      audience: System.get_env("TROUPE_PLANE_AUDIENCE", "troupe-plane-api"),
+      provisioning_mode:
+        String.to_existing_atom(System.get_env("TROUPE_PROVISIONING_MODE", "direct")),
+      oidc: [
+        issuer: System.get_env("TROUPE_OIDC_ISSUER"),
+        client_id: System.get_env("TROUPE_OIDC_CLIENT_ID"),
+        client_secret: System.get_env("TROUPE_OIDC_CLIENT_SECRET"),
+        authorization_endpoint: System.get_env("TROUPE_OIDC_AUTHORIZE_URL"),
+        device_authorization_endpoint: System.get_env("TROUPE_OIDC_DEVICE_URL"),
+        token_endpoint: System.get_env("TROUPE_OIDC_TOKEN_URL")
+      ]
+  end
+
   # -- the local daemon -----------------------------------------------------
 
   config :troupe_gateway, autostart: System.get_env("TROUPE_DAEMON_AUTOSTART") == "true"

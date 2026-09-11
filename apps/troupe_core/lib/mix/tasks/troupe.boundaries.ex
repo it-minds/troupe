@@ -37,15 +37,67 @@ defmodule Mix.Tasks.Troupe.Boundaries do
      "the operator holds cluster privileges and has no public surface"}
   ]
 
+  # A rule about *modules* rather than apps: every module under the first prefix may call
+  # only the listed modules among those under the second.
+  #
+  # The app-level rules say what an app may know about; this says what a part of an app
+  # may. The panel is inside the plane and could reach anything in it, and the whole
+  # arrangement of `Plane.Admin` rests on it not doing so: a LiveView that called `Fleet`
+  # directly would be a private path into the plane that no other client has.
+  @module_rules [
+    {"Elixir.Troupe.Plane.Web.Live.", [Troupe.Plane.Admin], "Elixir.Troupe.Plane.",
+     "a LiveView is an admin API client and gets no private access"}
+  ]
+
   @impl Mix.Task
   def run(_args) do
     apps = umbrella_apps()
     owners = module_owners(apps)
 
     violations =
-      Enum.flat_map(@rules, fn rule -> check(rule, apps, owners) end) ++ undeclared(apps, owners)
+      Enum.flat_map(@rules, fn rule -> check(rule, apps, owners) end) ++
+        Enum.flat_map(@module_rules, &check_modules(&1, apps)) ++
+        undeclared(apps, owners)
 
     report(violations)
+  end
+
+  # Read the same way as the app rules: from the compiled beams, because what a module
+  # declares it uses and what it calls are different questions and only the second one
+  # matters.
+  defp check_modules({prefix, allowed, scope, why}, apps) do
+    allowed = MapSet.new(allowed)
+
+    apps
+    |> Enum.flat_map(&beams/1)
+    |> Enum.flat_map(&module_calls(&1, prefix, scope))
+    |> Enum.reject(fn {_from, to} -> MapSet.member?(allowed, to) end)
+    |> Enum.map(fn {from, to} -> %{app: module_app(from), other: to, from: from, to: to, why: why} end)
+    |> Enum.uniq()
+  end
+
+  # Reported as the app the calling module is in, so a violation reads like every other
+  # one rather than like a different kind of thing.
+  defp module_app(module), do: module |> Atom.to_string() |> String.split(".") |> Enum.take(3) |> Enum.join(".")
+
+  defp module_calls(beam, prefix, scope) do
+    with {:ok, {module, [imports: imports]}} <- :beam_lib.chunks(beam, [:imports]),
+         true <- String.starts_with?(Atom.to_string(module), prefix) do
+      imports
+      |> Enum.map(fn {called, _fun, _arity} -> called end)
+      |> Enum.uniq()
+      |> Enum.filter(&in_scope?(&1, prefix, scope))
+      |> Enum.map(&{module, &1})
+    else
+      _ -> []
+    end
+  end
+
+  # Within the scope but not within the prefix itself: a LiveView calling another
+  # LiveView is the panel talking to itself, which is not the coupling this is about.
+  defp in_scope?(called, prefix, scope) do
+    name = Atom.to_string(called)
+    String.starts_with?(name, scope) and not String.starts_with?(name, prefix)
   end
 
   defp check({app, kind, others, why}, apps, owners) do
@@ -115,7 +167,9 @@ defmodule Mix.Tasks.Troupe.Boundaries do
   end
 
   defp report([]) do
-    Mix.shell().info("boundaries ok: #{length(@rules)} rules, no violations")
+    Mix.shell().info(
+      "boundaries ok: #{length(@rules)} app rule(s), #{length(@module_rules)} module rule(s), no violations"
+    )
   end
 
   defp report(violations) do

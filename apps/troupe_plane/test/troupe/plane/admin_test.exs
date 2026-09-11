@@ -185,6 +185,28 @@ defmodule Troupe.Plane.AdminTest do
       assert Enum.all?(narrowed, &(&1.subject_id == "engineering"))
     end
 
+    test "a field set from nothing, or cleared to nothing, is in the diff", _context do
+      # The case an assignment-as-filter silently dropped: both directions of nil.
+      assert Audit.diff(%{"image" => nil}, %{"image" => "ghcr.io/x:1"}) == %{
+               "image" => %{"from" => nil, "to" => "ghcr.io/x:1"}
+             }
+
+      assert Audit.diff(%{"image" => "ghcr.io/x:1"}, %{"image" => nil}) == %{
+               "image" => %{"from" => "ghcr.io/x:1", "to" => nil}
+             }
+
+      # And a key only one side has at all.
+      assert Audit.diff(%{}, %{"replicas" => 3}) == %{"replicas" => %{"from" => nil, "to" => 3}}
+      assert Audit.diff(%{"replicas" => 3}, %{}) == %{"replicas" => %{"from" => 3, "to" => nil}}
+    end
+
+    test "atom keys and string keys are the same field", _context do
+      # A struct on one side and a form's params on the other is the normal case, and a
+      # diff that called those different fields would report every field as changed.
+      assert Audit.diff(%{replicas: 2}, %{"replicas" => 2}) == %{}
+      assert Audit.diff(%{replicas: 2}, %{"replicas" => 5}) == %{"replicas" => %{"from" => 2, "to" => 5}}
+    end
+
     test "a secret value that reached a detail is redacted", _context do
       # The plane does not hold secret values, so this should never fire. It firing is a
       # bug report — and it is better for it to be a redacted one.

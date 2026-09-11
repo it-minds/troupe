@@ -36,6 +36,24 @@ config :troupe_plane,
   # laptop binary, and booting it should not try to reach a database.
   autostart: false
 
+# The panel and the API are served from one endpoint. `server: false` by default for the
+# same reason `autostart` is: the same umbrella compiles into a laptop binary, and
+# booting it should not open a port.
+config :troupe_plane, Troupe.Plane.Web.Endpoint,
+  # Bandit rather than Phoenix's default Cowboy: the control listener and the daemon are
+  # already plain `:gen_tcp` and Bandit is the one that does not bring a second HTTP
+  # implementation into the release for the sake of one endpoint.
+  adapter: Bandit.PhoenixAdapter,
+  server: false,
+  http: [ip: {0, 0, 0, 0}, port: 4000],
+  # Overridden at boot in a cluster. A default exists so a test or a laptop can start the
+  # endpoint without one; a production release that used it would be signing cookies with
+  # a value printed in this repository, which `runtime.exs` refuses to let happen.
+  secret_key_base: String.duplicate("troupe-development-secret-not-for-a-cluster", 3),
+  live_view: [signing_salt: "troupe-plane-live"],
+  pubsub_server: Troupe.Plane.PubSub,
+  render_errors: [formats: [html: Troupe.Plane.Web.ErrorHTML], layout: false]
+
 config :troupe_plane, Troupe.Plane.Repo,
   migration_primary_key: [type: :binary_id],
   migration_timestamps: [type: :utc_datetime_usec]

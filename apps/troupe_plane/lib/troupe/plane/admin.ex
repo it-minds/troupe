@@ -73,6 +73,23 @@ defmodule Troupe.Plane.Admin do
   @spec admin?(actor()) :: boolean()
   def admin?(%{role: role}), do: role in [:platform_admin, :team_admin]
 
+  @doc """
+  The actor for a subject, or `nil` if that subject administers nothing.
+
+  What a surface calls when all it has is a name — a cookie, a token — rather than a
+  loaded user. The lookup is here rather than in each surface so that a LiveView, the API
+  and the CLI cannot disagree about who somebody is.
+  """
+  @spec actor_for_subject(String.t() | nil) :: actor() | nil
+  def actor_for_subject(subject) when is_binary(subject) do
+    case Identity.get_user(subject) do
+      nil -> nil
+      user -> user |> actor_for() |> then(&if admin?(&1), do: &1, else: nil)
+    end
+  end
+
+  def actor_for_subject(_subject), do: nil
+
   # -- overview ---------------------------------------------------------------
 
   @doc "Fleet health, active sessions and spend per team, scoped to what the actor sees."
@@ -280,6 +297,41 @@ defmodule Troupe.Plane.Admin do
         {:ok, tombstone} -> {:ok, %{session_id: session_id, head_hash: tombstone.head_hash}}
         {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  # -- provisioning -----------------------------------------------------------
+
+  @doc """
+  How this plane puts profiles into the cluster: `:direct` or `:gitops`.
+
+  A panel shows it because the two mean different things when a change does not appear:
+  in direct mode that is a failure, and in GitOps mode it is the normal state until Flux
+  catches up.
+  """
+  @spec provisioning_mode(actor()) :: result()
+  def provisioning_mode(actor) do
+    with :ok <- require_admin(actor), do: {:ok, Provision.mode()}
+  end
+
+  @doc """
+  What the cluster policy makes of a profile that has not been saved yet.
+
+  The panel's fast feedback, and deliberately the same function admission's check comes
+  from: an approximation that disagreed would be worse than no check at all, because a
+  person would trust it.
+  """
+  @spec preview(actor(), map()) :: result()
+  def preview(actor, attrs) do
+    with :ok <- require_platform_admin(actor) do
+      current = attrs |> Map.get("name", Map.get(attrs, :name)) |> then(&(&1 && Fleet.get_profile(&1)))
+
+      {:ok,
+       %{
+         policy: Provision.verdict(attrs),
+         changes: Audit.diff(comparable(current), comparable_attrs(attrs)),
+         mode: Provision.mode()
+       }}
     end
   end
 
@@ -596,4 +648,11 @@ defmodule Troupe.Plane.Admin do
   end
 
   defp comparable(other), do: other
+
+  # The same fields as `comparable/1`, from the loose map a form produces.
+  defp comparable_attrs(attrs) do
+    attrs
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> Map.drop(["__verdict__", "__preview__"])
+  end
 end

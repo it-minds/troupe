@@ -25,6 +25,9 @@ defmodule Troupe.Plane.Application do
   defp children do
     [
       Troupe.Plane.Repo,
+      # LiveView needs one, and it is the plane's own rather than a shared cluster topic:
+      # what it carries is one browser's view of one page.
+      {Phoenix.PubSub, name: Troupe.Plane.PubSub},
       # Where the cluster-unique actors live. One per node; the actors themselves are
       # registered with `:global`, so exactly one of each exists across all of them.
       Troupe.Plane.Singleton,
@@ -32,11 +35,9 @@ defmodule Troupe.Plane.Application do
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
       Troupe.Plane.Control.Listener,
-      {Bandit, plug: Troupe.Plane.Web.Router, scheme: :http, port: http_port()}
+      Troupe.Plane.Web.Endpoint
     ] ++ cluster()
   end
-
-  defp http_port, do: Application.get_env(:troupe_plane, :http_port, 4000)
 
   defp cluster do
     case Application.get_env(:troupe_plane, :topologies) do

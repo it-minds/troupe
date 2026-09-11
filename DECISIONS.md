@@ -909,3 +909,30 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      plane publishing a config bundle must not crash because nothing was attached, and a
      registry lookup is not a reasonable place for a caller to have to know whether the
      control listener is up.
+
+159. **`mix troupe.boundaries` grew module-level rules, and the first one is the panel.**
+     The app rules say what an app may know about; this says what a *part* of an app may.
+     The panel is inside the plane and could reach anything in it, and the whole
+     arrangement of `Plane.Admin` rests on it not doing so. Read from the compiled beams
+     like everything else, because what a module declares and what it calls are different
+     questions and only the second matters. It found three real violations the moment it
+     was written.
+
+160. **The panel's session cookie carries a subject and nothing else.** Not the role, not
+     the teams: those are derived on every LiveView mount, so an administrator whose role
+     was taken away loses the panel at their next page rather than at the expiry of a
+     cookie they are still holding. A cookie carrying the role would be a capability that
+     outlived the decision to grant it.
+
+161. **The profile editor renders the diff before applying, and it is the same diff the
+     audit records.** Computed by the same function, so what the form promised and what
+     the trail says cannot differ. A panel that applied on submit would turn a typo in a
+     field nobody was looking at into a fleet-wide change.
+
+162. **Erasing from the panel takes two clicks.** It is irreversible, and a misclick
+     should not be enough.
+
+163. **One port, two surfaces, split by path rather than chained.** Chaining the API
+     router behind the panel's meant every request the panel answered still ran through
+     the API's router, which then tried to 404 a response that had already been sent —
+     found by the first test that loaded a page without a session.

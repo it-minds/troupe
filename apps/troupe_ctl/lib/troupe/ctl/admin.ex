@@ -20,6 +20,7 @@ defmodule Troupe.Ctl.Admin do
     {~w(profiles), "admin.profiles.list", [], "every profile, with its pods and load"},
     {~w(profile show), "admin.profile.get", ["name"], "one profile: spec, policy verdict, bundle state"},
     {~w(profile put), "admin.profile.put", ["file"], "create or update a profile from a JSON file"},
+    {~w(profile check), "admin.profile.preview", ["file"], "what policy makes of a profile, and what would change"},
     {~w(profile delete), "admin.profile.delete", ["name"], "remove a profile"},
     {~w(pod drain), "admin.pod.drain", ["worker_id"], "drain a pod, and say what it held"},
     {~w(teams), "admin.teams.list", [], "teams, with grants, budgets and retention"},
@@ -34,7 +35,8 @@ defmodule Troupe.Ctl.Admin do
     {~w(bundles), "admin.bundles.list", ["channel"], "every version of a channel"},
     {~w(bundle publish), "admin.bundle.publish", ["channel", "file"], "publish a new version"},
     {~w(bundle retire), "admin.bundle.retire", ["channel", "version"], "retire one"},
-    {~w(audit), "admin.audit.list", [], "who changed what, newest first"}
+    {~w(audit), "admin.audit.list", [], "who changed what, newest first"},
+    {~w(provisioning), "admin.provisioning.mode", [], "whether this plane applies directly or through GitOps"}
   ]
 
   @doc "Every command, its method, its arguments and its one-line help."
