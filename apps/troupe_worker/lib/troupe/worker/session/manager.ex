@@ -24,9 +24,11 @@ defmodule Troupe.Worker.Session.Manager do
 
   use GenServer, restart: :temporary
 
+  alias Troupe.ObjectStore
   alias Troupe.Session.Log
   alias Troupe.Session.Summary
-  alias Troupe.Sessions.Storage
+  alias Troupe.Sessions.{Cipher, Storage}
+  alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.{Context, Restore, Sealer, Workspace}
   alias Troupe.Worker.Sessions
 
@@ -292,10 +294,25 @@ defmodule Troupe.Worker.Session.Manager do
 
     case Workspace.archive(state.workspace) do
       {:ok, compressed, plain_bytes} ->
-        case Storage.put_workspace(context.store, context.session_id, context.data_key, seq, compressed, "tar.zst") do
-          {:ok, _} -> %{seq: seq, bytes: byte_size(compressed), plain_bytes: plain_bytes}
-          {:error, reason} -> %{seq: nil, error: reason}
-        end
+        sealed = Cipher.seal(context.data_key, context.session_id, compressed)
+        upload(state, seq, sealed, plain_bytes)
+
+      {:error, reason} ->
+        %{seq: nil, error: reason}
+    end
+  end
+
+  # Uploaded first, cached second. The cache is a convenience and the upload is the
+  # durability, so a pod that ran out of disk while caching has still made the session
+  # safe; one that cached and failed to upload would only look as if it had.
+  defp upload(state, seq, sealed, plain_bytes) do
+    context = state.context
+    key = Storage.workspace_key(context.session_id, seq, "tar.zst")
+
+    case ObjectStore.put(context.store, key, sealed) do
+      {:ok, _} ->
+        Cache.put_workspace(context.session_id, context.state_dir, seq, sealed)
+        %{seq: seq, bytes: byte_size(sealed), plain_bytes: plain_bytes, cached: true}
 
       {:error, reason} ->
         %{seq: nil, error: reason}

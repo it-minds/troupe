@@ -16,7 +16,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.Session.{Manager, Sealer, Workspace}
+  alias Troupe.Worker.Session.{Manager, Reader, Sealer, Workspace}
   alias Troupe.Worker.Sessions
 
   require Logger
@@ -67,6 +67,31 @@ defmodule Troupe.Worker.Plane.Commands do
       {:error, :not_active} ->
         # Already asleep. The plane asked twice, which it is entitled to do.
         {:ok, %{"session_id" => params["session_id"], "already_dormant" => true}}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # Reading, which is deliberately not activating. A session that woke up because
+  # somebody looked at it would never stay dormant.
+  defp dispatch("session.read", params) do
+    options =
+      Enum.reject(
+        [team: params["team"], epoch: params["epoch"], owner_subject: params["owner_subject"]],
+        &match?({_key, nil}, &1)
+      )
+
+    case Reader.open(params["session_id"], Keyword.merge(defaults(), options)) do
+      {:ok, info} ->
+        {:ok,
+         %{
+           "session_id" => params["session_id"],
+           "source" => to_string(info.source),
+           "last_seq" => Map.get(info, :last_seq, 0),
+           "head_hash" => Map.get(info, :head_hash),
+           "agents" => info.agents
+         }}
 
       {:error, reason} ->
         {:error, Error.new(:internal_error, %{reason: inspect(reason)})}

@@ -17,7 +17,8 @@ defmodule Troupe.Worker.Session.Restore do
   alias Troupe.Paths
   alias Troupe.Protocol.Event
   alias Troupe.Session.Log
-  alias Troupe.Sessions.Storage
+  alias Troupe.Sessions.{Cipher, Storage}
+  alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.{Context, Workspace}
 
   @doc """
@@ -86,17 +87,50 @@ defmodule Troupe.Worker.Session.Restore do
   """
   @spec workspace(Context.t(), Path.t()) :: {:ok, map()} | {:error, term()}
   def workspace(%Context{} = context, root) do
-    case newest_archive(context) do
-      nil ->
+    case fetch_archive(context) do
+      :none ->
         File.mkdir_p!(root)
         {:ok, %{restored: false, seq: nil}}
 
-      {seq, extension} ->
-        with {:ok, archive} <-
-               Storage.get_workspace(context.store, context.session_id, context.data_key, seq, extension),
+      {:ok, source, seq, sealed} ->
+        with {:ok, archive} <- Cipher.open(context.data_key, context.session_id, sealed),
              :ok <- Workspace.restore(archive, root) do
-          {:ok, %{restored: true, seq: seq, bytes: byte_size(archive)}}
+          {:ok, %{restored: true, seq: seq, source: source, bytes: byte_size(sealed)}}
         end
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  # The pod's own cache first. It holds the same sealed bytes that went to object
+  # storage, so using it is a local read instead of a download and is not a different
+  # answer — and a cache that is behind what storage has is ignored rather than trusted.
+  defp fetch_archive(context) do
+    remote = newest_archive(context)
+    cached = Cache.get_workspace(context.session_id, context.state_dir)
+
+    case {remote, cached} do
+      {nil, :miss} ->
+        :none
+
+      {nil, {:ok, seq, sealed}} ->
+        {:ok, :cache, seq, sealed}
+
+      {{seq, _extension}, {:ok, seq, sealed}} ->
+        {:ok, :cache, seq, sealed}
+
+      {{seq, extension}, _stale_or_missing} ->
+        download(context, seq, extension)
+    end
+  end
+
+  defp download(context, seq, extension) do
+    key = Storage.workspace_key(context.session_id, seq, extension)
+
+    case ObjectStore.get(context.store, key) do
+      {:ok, sealed} -> {:ok, :storage, seq, sealed}
+      {:error, reason} -> {:error, reason}
     end
   end
 

@@ -553,3 +553,31 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 96. **A session that cannot be indexed is reported, not skipped quietly.** A rebuild that
     silently dropped sessions would be worse than one that failed: the whole point of it
     is being able to say the index is complete.
+
+97. **Reading a dormant session opens a reader, not a session.** A reader restores the
+    event log to the pod's disk and nothing else: no `Agent.Server`, no model call, no
+    workspace. It exits when its last subscriber leaves, which is what keeps a pod that
+    serves a thousand glances a day from accumulating a thousand processes. A session
+    that woke up because somebody looked at it would never stay dormant.
+
+98. **Readers share the session registry under `{:reader, id}`, and are deliberately not
+    counted as awake.** The heartbeat's `active_sessions` is what the plane places
+    against, and a glance must not consume capacity.
+
+99. **Dormancy keeps the encrypted archive and deletes the plaintext.** The cache is the
+    same sealed bytes that went to object storage, under a key the pod must fetch from
+    OpenBao to read, so keeping it turns reactivation on the same pod from a download
+    into a local read without leaving a plaintext workspace anywhere. Uploaded first,
+    cached second: a pod that ran out of disk while caching has still made the session
+    safe, and one that cached but failed to upload would only look as if it had.
+
+100. **Active workspaces are never evicted.** A cache is a copy of something already in
+     object storage, so losing it costs a download; an active workspace is the only copy
+     of work in progress. If eviction cannot get below the low watermark, the pod says so
+     and stays above it rather than reaching for something it must not touch.
+
+101. **The disk measurement is injectable.** `df` in a pod, because the number that
+     matters is the filesystem's and not the sum of files this code knows about. A test
+     cannot fill a developer's disk to prove what happens when a PVC fills, and the thing
+     worth proving is the eviction policy; that `df` reports the truth is checked
+     separately, against `df`.

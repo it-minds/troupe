@@ -150,13 +150,22 @@ defmodule Troupe.Worker.Sessions do
   @spec unregister(String.t()) :: :ok
   def unregister(session_id), do: Registry.unregister(@registry, session_id)
 
-  @doc "Every session awake on this pod."
+  @doc """
+  Every session awake on this pod.
+
+  Managers register under the bare session id; readers share this registry under
+  `{:reader, id}`, and a reader is deliberately not an awake session — that is the whole
+  point of it — so only the binaries count.
+  """
   @spec active_ids() :: [String.t()]
   def active_ids do
-    Registry.select(@registry, [{{:"$1", :_, :_}, [], [:"$1"]}]) |> Enum.sort()
+    @registry
+    |> Registry.select([{{:"$1", :_, :_}, [], [:"$1"]}])
+    |> Enum.filter(&is_binary/1)
+    |> Enum.sort()
   end
 
   @doc "How many, which is what the heartbeat reports."
   @spec active_count() :: non_neg_integer()
-  def active_count, do: Registry.count(@registry)
+  def active_count, do: length(active_ids())
 end

@@ -56,9 +56,19 @@ defmodule Troupe.Worker.SessionCase do
       session_id = "s-#{unique}"
       team = "team-#{unique}"
 
+      # In a pod this is set, and it is what the core falls back to when a session has
+      # no running `Session.Log` — which is exactly the case a reader serves. Safe here
+      # because every test in this app is `async: false`.
+      previous_state_home = System.get_env("TROUPE_STATE_HOME")
+      System.put_env("TROUPE_STATE_HOME", state_dir)
+
       start_supervised!(Sessions)
 
       on_exit(fn ->
+        if previous_state_home,
+          do: System.put_env("TROUPE_STATE_HOME", previous_state_home),
+          else: System.delete_env("TROUPE_STATE_HOME")
+
         Storage.erase(store, session_id)
         KMS.adapter().destroy(team, session_id)
         File.rm_rf!(base)

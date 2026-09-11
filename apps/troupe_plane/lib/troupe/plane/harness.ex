@@ -290,8 +290,23 @@ defmodule Troupe.Plane.Harness do
   # Reading never activates. That is the property the whole dormancy design rests on: a
   # session that woke up because somebody looked at it would never stay dormant.
   defp read(session, user, role) do
+    with {:ok, worker} <- reader_pod(session) do
+      # Asked to open a reader, not told: a pod that cannot is not a failure to open,
+      # because the client can still be handed the endpoint and ask again.
+      Router.push(worker, "session.read", %{
+        "session_id" => session.id,
+        "team" => team_name(session),
+        "epoch" => session.epoch,
+        "owner_subject" => session.owner_subject
+      })
+
+      {:ok, endpoint_for(session, worker, user, role, mode: "read")}
+    end
+  end
+
+  defp reader_pod(session) do
     case Placement.reader(session.profile, session.worker_id) do
-      {:ok, worker} -> {:ok, endpoint_for(session, worker, user, role, mode: "read")}
+      {:ok, worker} -> {:ok, worker}
       {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
     end
   end
