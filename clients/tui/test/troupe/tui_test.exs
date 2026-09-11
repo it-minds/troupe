@@ -502,4 +502,45 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     text = screen_text(pid, session)
     assert text =~ "QUESTION: Which of these? 1. the first one 2. the second one"
   end
+
+  test "bracketed paste inserts into the command line, a window input, and a settings field" do
+    ws = tmp_workspace()
+    scripts = %{
+      "code-1" => [
+        {:tool, "ask_user", %{"question" => "What do you want?"}},
+        {:finish, "ok"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    # Command line: paste a full command and run it.
+    paste(pid, "/settings")
+    assert user_state(pid).cmd_text == "/settings"
+    press(pid, "enter")
+
+    # Settings field: move to a non-bool field (watch debounce, an int), edit it and paste.
+    press(pid, "down")
+    press(pid, "enter")
+    assert is_binary(user_state(pid).settings.editing)
+    before_editing = user_state(pid).settings.editing
+    paste(pid, "42")
+    assert user_state(pid).settings.editing == before_editing <> "42"
+    press(pid, "esc")
+    press(pid, "esc")
+
+    # Active window: paste into its input box while an agent needs input.
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me something")
+    await_state("code-1", :needs_input)
+    press(pid, "1")
+
+    paste(pid, "a multi-\nline answer")
+    assert user_state(pid).win_text == "a multi-\nline answer"
+    press(pid, "enter")
+    await_state("code-1", :done_unread)
+
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "a multi-\nline answer"
+  end
 end

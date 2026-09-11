@@ -9,7 +9,7 @@ defmodule Troupe.UI.TUI.Server do
 
   use ExRatatui.App
 
-  alias ExRatatui.Event.{Key, Mouse, Resize}
+  alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
   alias Troupe.Events
   alias Troupe.Session.{Dispatcher, Log, Memory, Watcher}
   alias Troupe.Settings
@@ -206,6 +206,20 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_event(%Resize{width: w, height: h}, state), do: {:noreply, %{state | size: {w, h}}}
+
+  # Bracketed paste arrives as one %Paste{} event, not a stream of keys. Insert the
+  # raw text where the user is focused: the command line, an active window's input box,
+  # or a settings field.
+  def handle_event(%Paste{content: content}, state) do
+    state = %{state | quit_armed: false}
+
+    case state.focus do
+      :command -> {:noreply, %{state | cmd_text: state.cmd_text <> content}}
+      {:window, _} -> {:noreply, %{state | win_text: state.win_text <> content}}
+      :observer -> {:noreply, state, render?: false}
+      :settings -> {:noreply, paste_into_settings(state, content)}
+    end
+  end
 
   def handle_event(%Mouse{kind: "down"}, %{focus: focus} = state)
       when focus in [:settings, :observer],
@@ -577,6 +591,13 @@ defmodule Troupe.UI.TUI.Server do
 
   defp put_settings(state, changes),
     do: %{state | settings: Enum.into(changes, state.settings)}
+
+  # Paste into an open settings-edit field; if nothing is being edited, ignore it so
+  # an accidental paste doesn't clobber the page.
+  defp paste_into_settings(%{settings: %{editing: text} = s} = state, content) when is_binary(text),
+    do: put_settings(state, editing: text <> content)
+
+  defp paste_into_settings(state, _content), do: state
 
   defp toggle_watch(sid, true) do
     Watcher.disable(sid)

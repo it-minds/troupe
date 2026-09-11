@@ -55,6 +55,11 @@ defmodule Troupe.TUIHelpers do
     :ok = ExRatatui.Runtime.inject_event(pid, %Key{code: code, kind: "press", modifiers: mods})
   end
 
+  @doc "Injects a bracketed-paste event with the given content."
+  def paste(pid, content) do
+    :ok = ExRatatui.Runtime.inject_event(pid, %ExRatatui.Event.Paste{content: content})
+  end
+
   def type(pid, text), do: text |> String.graphemes() |> Enum.each(&press(pid, &1))
 
   @doc "Turns the mouse wheel one notch (`:up` or `:down`) at a screen position."
