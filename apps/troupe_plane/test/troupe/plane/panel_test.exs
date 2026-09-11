@@ -111,8 +111,13 @@ defmodule Troupe.Plane.PanelTest do
     test "a team admin sees only the profiles their team is granted", context do
       {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/workers")
 
-      assert html =~ "dev"
-      refute html =~ "ux"
+      # Against the profile links rather than the raw page. A page carries a base64
+      # LiveView session token, and a two-letter substring turns up inside it often
+      # enough to make a bare `refute html =~ "ux"` a coin toss.
+      links = Regex.scan(~r|/admin/workers/([\w-]+)|, html) |> Enum.map(&List.last/1) |> Enum.uniq()
+
+      assert "dev" in links
+      refute "ux" in links
     end
 
     test "only a platform admin is offered the drain button", context do
