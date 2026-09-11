@@ -33,6 +33,10 @@ defmodule Troupe.Registry do
   @spec files(String.t()) :: GenServer.name()
   def files(session_id), do: via({:files, session_id})
 
+  @doc "Tools an attached client hosts for this session, and who may invoke them."
+  @spec client_tools(String.t()) :: GenServer.name()
+  def client_tools(session_id), do: via({:client_tools, session_id})
+
   @doc "The session's compact projection, for fleet and summary subscribers."
   @spec summary(String.t()) :: GenServer.name()
   def summary(session_id), do: via({:summary, session_id})

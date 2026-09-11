@@ -28,8 +28,18 @@ defmodule Troupe.Gateway.Listener do
   end
 
   @doc "Where this daemon is listening."
-  @spec endpoint() :: Endpoint.t()
-  def endpoint, do: GenServer.call(__MODULE__, :endpoint)
+  @spec endpoint(GenServer.server()) :: Endpoint.t()
+  def endpoint(server \\ __MODULE__), do: GenServer.call(server, :endpoint)
+
+  @doc """
+  The port actually bound.
+
+  Not the configured one: a listener asked for port 0 — which is what a test suite asks
+  for, so that two runs on one machine do not fight — is bound to a port only the kernel
+  knows until it has been asked.
+  """
+  @spec port(GenServer.server()) :: :inet.port_number() | nil
+  def port(server \\ __MODULE__), do: GenServer.call(server, :port)
 
   @impl GenServer
   def init(opts) do
@@ -62,6 +72,13 @@ defmodule Troupe.Gateway.Listener do
 
   @impl GenServer
   def handle_call(:endpoint, _from, state), do: {:reply, state.endpoint, state}
+
+  def handle_call(:port, _from, state) do
+    case :inet.port(state.socket) do
+      {:ok, port} -> {:reply, port, state}
+      {:error, _reason} -> {:reply, nil, state}
+    end
+  end
 
   @impl GenServer
   def handle_info({:accepted, socket}, state) do

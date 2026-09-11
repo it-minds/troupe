@@ -18,7 +18,7 @@ defmodule Troupe.Gateway.Connection do
   # process would sit holding a closed port waiting for a client that has gone.
   use GenServer, restart: :temporary
 
-  alias Troupe.Gateway.{Daemon, Dispatch, Session, Writer}
+  alias Troupe.Gateway.{Daemon, Dispatch, Presence, Session, Transport, Writer}
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
 
@@ -32,9 +32,9 @@ defmodule Troupe.Gateway.Connection do
   @durable_bound 10_000
   @max_message_bytes 64 * 1024 * 1024
 
-  @enforce_keys [:socket, :endpoint]
+  @enforce_keys [:transport, :endpoint]
   defstruct [
-    :socket,
+    :transport,
     :endpoint,
     :principal,
     :writer,
@@ -51,6 +51,11 @@ defmodule Troupe.Gateway.Connection do
     dropped_ephemerals: 0,
     outstanding: 0,
     backlog: 0,
+    # Requests this server has sent *to* the client and is waiting on. `tool.invoke`
+    # is the only one so far; the map is what turns the client's answer back into a
+    # reply to whichever tool task is blocked on it.
+    outbound_requests: %{},
+    next_request: 1,
     outbound_bound: @outbound_bound,
     durable_bound: @durable_bound
   ]
@@ -62,13 +67,39 @@ defmodule Troupe.Gateway.Connection do
   @spec info(pid()) :: map()
   def info(pid), do: GenServer.call(pid, :info)
 
+  @doc """
+  Ask this connection's client to run a tool, and wait for its answer.
+
+  Called from an agent's tool task, never from the agent itself, so blocking here costs
+  one task and nothing else. The caller monitors this process for the length of the
+  call: a registrant that disappears mid-invocation is knowable immediately, and waiting
+  out the tool timeout for news that has already arrived would be a hung turn.
+  """
+  @spec invoke_tool(pid(), String.t(), String.t(), map(), timeout()) ::
+          {:ok, map()} | {:error, term()}
+  def invoke_tool(connection, call_id, name, arguments, timeout) do
+    GenServer.call(connection, {:invoke_tool, call_id, name, arguments}, timeout)
+  catch
+    :exit, {:noproc, _} -> {:error, :disconnected}
+    :exit, {:normal, _} -> {:error, :disconnected}
+    :exit, {:shutdown, _} -> {:error, :disconnected}
+    :exit, {:timeout, _} -> {:error, :timeout}
+    :exit, reason -> {:error, reason}
+  end
+
   @impl GenServer
   def init(opts) do
     Process.set_label("troupe connection")
 
+    transport =
+      case Keyword.fetch(opts, :transport) do
+        {:ok, transport} -> transport
+        :error -> {:tcp, Keyword.fetch!(opts, :socket)}
+      end
+
     {:ok,
      %__MODULE__{
-       socket: Keyword.fetch!(opts, :socket),
+       transport: transport,
        endpoint: Keyword.fetch!(opts, :endpoint),
        outbound_bound: Keyword.get(opts, :outbound_bound, @outbound_bound),
        durable_bound: Keyword.get(opts, :durable_bound, @durable_bound)
@@ -77,8 +108,8 @@ defmodule Troupe.Gateway.Connection do
 
   @impl GenServer
   def handle_info(:socket_ready, state) do
-    {:ok, writer} = Writer.start_link(state.socket, self())
-    :ok = :inet.setopts(state.socket, active: :once)
+    {:ok, writer} = Writer.start_link(state.transport, self())
+    :ok = Transport.activate(state.transport)
     {:noreply, %{state | writer: writer}}
   end
 
@@ -92,19 +123,22 @@ defmodule Troupe.Gateway.Connection do
 
   def handle_info({:write_failed, _reason}, state), do: {:stop, :normal, state}
 
-  def handle_info({:tcp, socket, data}, %{socket: socket} = state) do
-    case consume(state.buffer <> data, state) do
-      {:ok, state} ->
-        :ok = :inet.setopts(socket, active: :once)
-        {:noreply, state}
-
-      {:stop, state} ->
-        {:stop, :normal, state}
-    end
+  def handle_info({:tcp, socket, data}, %{transport: {:tcp, socket}} = state) do
+    read(data, state)
   end
 
-  def handle_info({:tcp_closed, socket}, %{socket: socket} = state), do: {:stop, :normal, state}
-  def handle_info({:tcp_error, socket, _}, %{socket: socket} = state), do: {:stop, :normal, state}
+  # The relay's read: one WebSocket text frame, already unframed by whoever owns the
+  # frames. The buffering below is a no-op for it — a frame is a whole message — and
+  # keeping one path rather than two is worth the redundant `<>`.
+  def handle_info({:transport_data, data}, state), do: read(data, state)
+
+  def handle_info({:tcp_closed, socket}, %{transport: {:tcp, socket}} = state),
+    do: {:stop, :normal, state}
+
+  def handle_info({:tcp_error, socket, _}, %{transport: {:tcp, socket}} = state),
+    do: {:stop, :normal, state}
+
+  def handle_info({:transport_closed, _reason}, state), do: {:stop, :normal, state}
 
   # A session event. Under load this is where the connection stops keeping up
   # gracefully and starts keeping up deliberately.
@@ -131,7 +165,32 @@ defmodule Troupe.Gateway.Connection do
 
   def handle_info(_message, state), do: {:noreply, state}
 
+  defp read(data, state) do
+    case consume(state.buffer <> data, state) do
+      {:ok, state} ->
+        :ok = Transport.activate(state.transport)
+        {:noreply, state}
+
+      {:stop, state} ->
+        {:stop, :normal, state}
+    end
+  end
+
   @impl GenServer
+  def handle_call({:invoke_tool, call_id, name, arguments}, from, state) do
+    id = "srv-#{state.next_request}"
+
+    params = %{"call_id" => call_id, "name" => name, "arguments" => arguments}
+    state = send_control(state, {:request, id, "tool.invoke", params})
+
+    {:noreply,
+     %{
+       state
+       | next_request: state.next_request + 1,
+         outbound_requests: Map.put(state.outbound_requests, id, from)
+     }}
+  end
+
   def handle_call(:info, _from, state) do
     {:reply,
      %{
@@ -148,11 +207,23 @@ defmodule Troupe.Gateway.Connection do
 
   @impl GenServer
   def terminate(_reason, state) do
+    # Everyone still attached is told this person has gone before the subscriptions
+    # that would have carried the news are dropped.
+    announce_presence(state, "left")
+
     Enum.each(state.subscriptions, fn {_id, sub} -> Session.unsubscribe(sub.topic) end)
+
+    # Tool calls this client was serving die with it. `ClientTools` hears about the
+    # registration through its own monitor; what it cannot do is unblock a task already
+    # waiting on an answer, so that is done here, where the answer was going to arrive.
+    Enum.each(state.outbound_requests, fn {_id, from} ->
+      GenServer.reply(from, {:error, :disconnected})
+    end)
+
     # The last thing written is often the reason the connection is ending, so the
-    # socket is not closed until the writer has had a chance to put it on the wire.
+    # transport is not closed until the writer has had a chance to put it on the wire.
     if state.writer && Process.alive?(state.writer), do: Writer.flush(state.writer)
-    :gen_tcp.close(state.socket)
+    Transport.close(state.transport)
     :ok
   end
 
@@ -230,8 +301,27 @@ defmodule Troupe.Gateway.Connection do
   end
 
   defp handle_message({:notification, _method, _params}, state), do: {:ok, state}
-  defp handle_message({:result, _id, _result}, state), do: {:ok, state}
-  defp handle_message({:error, _id, _error}, state), do: {:ok, state}
+
+  # An answer to something *this* server asked the client — `tool.invoke`. A result for
+  # an id nobody is waiting on is ignored rather than an error: a client that answered
+  # twice, or answered after the caller gave up, has done nothing the session needs to
+  # care about.
+  defp handle_message({:result, id, result}, state), do: {:ok, settle(state, id, {:ok, result})}
+
+  defp handle_message({:error, id, error}, state) do
+    {:ok, settle(state, id, {:error, error})}
+  end
+
+  defp settle(state, id, answer) do
+    case Map.pop(state.outbound_requests, id) do
+      {nil, _rest} ->
+        state
+
+      {from, rest} ->
+        GenServer.reply(from, answer)
+        %{state | outbound_requests: rest}
+    end
+  end
 
   defp dispatch_request(id, method, params, state) do
     case Dispatch.call(method, params, context(state)) do
@@ -458,11 +548,20 @@ defmodule Troupe.Gateway.Connection do
   # -- subscriptions ----------------------------------------------------------
 
   defp replay_and_follow(state, subscription) do
+    already? = subscribed_to?(state, subscription.session_id)
+
     state = %{
       state
       | subscriptions: Map.put(state.subscriptions, subscription.id, subscription),
         next_subscription: state.next_subscription + 1
     }
+
+    # Presence, not a log entry: the other clients want to know somebody arrived, and a
+    # session replayed a year from now does not. Announced once per session however many
+    # subscriptions this connection takes out on it.
+    if subscription.session_id && not already? do
+      Presence.publish(subscription.session_id, state.principal, "joined")
+    end
 
     # Replay first, then live: `Session.subscribe/1` registered this process before the
     # head was read, so an event arriving during the replay is delivered after it — one
@@ -479,8 +578,32 @@ defmodule Troupe.Gateway.Connection do
 
       {subscription, rest} ->
         Session.unsubscribe(subscription.topic)
-        %{state | subscriptions: rest}
+        state = %{state | subscriptions: rest}
+
+        if subscription.session_id && not subscribed_to?(state, subscription.session_id) do
+          Presence.publish(subscription.session_id, state.principal, "left")
+        end
+
+        state
     end
+  end
+
+  defp subscribed_to?(state, nil), do: map_size(state.subscriptions) > 0
+
+  defp subscribed_to?(state, session_id) do
+    Enum.any?(state.subscriptions, fn {_id, sub} -> sub.session_id == session_id end)
+  end
+
+  # Said once per session this connection was watching, on the way out. A connection
+  # that is ending because the client crashed reaches here too, which is the case that
+  # matters: nobody else can tell the difference between a quiet person and a dead one.
+  defp announce_presence(state, presence_state) do
+    state.subscriptions
+    |> Map.values()
+    |> Enum.map(& &1.session_id)
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
+    |> Enum.each(&Presence.publish(&1, state.principal, presence_state))
   end
 
   defp deliver(state, session_id, %Event{} = event) do
@@ -636,7 +759,7 @@ defmodule Troupe.Gateway.Connection do
     else
       # Only before `:socket_ready`, which nothing reaches in practice; kept so the
       # write path has no state in which it silently does nothing.
-      :gen_tcp.send(state.socket, line)
+      Transport.write(state.transport, line)
       state
     end
   end

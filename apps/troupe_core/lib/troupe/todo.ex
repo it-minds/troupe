@@ -122,7 +122,7 @@ defmodule Troupe.Todo.Edit do
   @moduledoc """
   A change to the task list made from the TUI rather than by the model.
 
-  Delivered as `{:input, :tui_todo_edit, edit}`. The agent applies it to its own list
+  Delivered as a `:tui_todo_edit` input. The agent applies it to its own list
   and mentions it in the next request context, so the model sees that the user
   cancelled or added something.
   """

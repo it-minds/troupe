@@ -1,12 +1,14 @@
 defmodule Troupe.Session do
   @moduledoc """
-  One session: a log, an approval gate, a root agent, and a watcher.
+  One session: a log, an approval gate, client-hosted tools, a root agent, and a watcher.
 
   `rest_for_one` orders those by dependency. `Log` first, because everything persists
-  through it and everything after it must replay if it restarts. `Approvals` next.
-  Then the root `Agent.Node`. Then `Session.Watcher` **last**, so a watch-mode crash
-  restarts nothing above it — the guarantee that file watching can never disturb a
-  running agent comes from this ordering, not from care inside the watcher.
+  through it and everything after it must replay if it restarts. `Approvals` next, then
+  `ClientTools` — both above the agent, so a restarted agent comes back to the same
+  answered approvals and the same registered client tools rather than asking again or
+  silently losing them. Then the root `Agent.Node`. Then `Session.Watcher` **last**, so a
+  watch-mode crash restarts nothing above it — the guarantee that file watching can never
+  disturb a running agent comes from this ordering, not from care inside the watcher.
   """
 
   use Supervisor
@@ -52,7 +54,11 @@ defmodule Troupe.Session do
       [
         {Troupe.Session.Log,
          session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
-        {Troupe.Session.Approvals, session_id: session_id, auto_approve: config.auto_approve}
+        {Troupe.Session.Approvals, session_id: session_id, auto_approve: config.auto_approve},
+        # Above the agent on purpose: a client's registration must survive an agent
+        # restart, because the connection that made it has not gone anywhere and would
+        # have no way of knowing it needed to offer its tools again.
+        {Troupe.Session.ClientTools, session_id: session_id}
       ] ++
         fake_child(session_id, config, opts) ++
         [

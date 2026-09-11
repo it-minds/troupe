@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/tools_registered.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "connection": {
+      "type": "string"
+    },
+    "consent": {
+      "type": "object"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "connection",
+    "consent",
+    "tools"
+  ],
+  "title": "tools_registered",
+  "type": "object"
+}

@@ -28,7 +28,10 @@ defmodule Troupe.Protocol.Error do
     resync_required: -32_009,
     unavailable: -32_010,
     rate_limited: -32_011,
-    payload_too_large: -32_012
+    payload_too_large: -32_012,
+    # Stage 4: a client-hosted tool may not be registered on somebody else's behalf.
+    # `data` carries the challenge to show them and the tools it covers.
+    consent_required: -32_013
   }
 
   @doc "Every error token and its code, for documentation and schema generation."

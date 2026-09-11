@@ -2,7 +2,7 @@ defmodule Troupe.Gateway.Writer do
   @moduledoc """
   The write side of one client socket, in its own process.
 
-  `:gen_tcp.send/2` blocks once the kernel and driver buffers fill, and they fill as
+  A transport write blocks once the kernel and driver buffers fill, and they fill as
   soon as a client stops reading. If the connection process did its own writing it
   would block there, its mailbox would grow without limit while it did, and the
   backpressure logic — which lives in that very process — would not run at all.
@@ -23,9 +23,13 @@ defmodule Troupe.Gateway.Writer do
 
   @type kind :: :durable | :ephemeral
 
-  @doc "Start a writer for a socket. Linked: neither half of a connection outlives the other."
-  @spec start_link(:gen_tcp.socket(), pid()) :: {:ok, pid()}
-  def start_link(socket, owner), do: {:ok, spawn_link(fn -> loop(socket, owner) end)}
+  @doc """
+  Start a writer for a transport.
+
+  Linked: neither half of a connection outlives the other.
+  """
+  @spec start_link(Troupe.Gateway.Transport.t(), pid()) :: {:ok, pid()}
+  def start_link(transport, owner), do: {:ok, spawn_link(fn -> loop(transport, owner) end)}
 
   @doc "Queue a droppable message. Never blocks, and never fails."
   @spec write(pid(), kind(), iodata()) :: non_neg_integer()
@@ -75,31 +79,31 @@ defmodule Troupe.Gateway.Writer do
     end
   end
 
-  defp loop(socket, owner) do
+  defp loop(transport, owner) do
     receive do
       {:write, kind, iodata, bytes} ->
-        put(socket, owner, iodata, {:written, kind, bytes})
+        put(transport, owner, iodata, {:written, kind, bytes})
 
       {:write_urgent, iodata, bytes} ->
-        put(socket, owner, iodata, {:written, :control, bytes})
+        put(transport, owner, iodata, {:written, :control, bytes})
 
       :discard ->
         # Only `{:write, ...}` is matched, so anything urgent already queued stays
         # where it is and goes out next.
         Enum.each(drop_queued(%{}), &send(owner, &1))
-        loop(socket, owner)
+        loop(transport, owner)
 
       {:flush, from, reference} ->
         send(from, {:flushed, reference})
-        loop(socket, owner)
+        loop(transport, owner)
     end
   end
 
-  defp put(socket, owner, iodata, ack) do
-    case :gen_tcp.send(socket, iodata) do
+  defp put(transport, owner, iodata, ack) do
+    case Troupe.Gateway.Transport.write(transport, iodata) do
       :ok ->
         send(owner, ack)
-        loop(socket, owner)
+        loop(transport, owner)
 
       {:error, reason} ->
         # A failed send says nothing about how much of it arrived, so the stream cannot

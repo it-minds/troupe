@@ -9,7 +9,7 @@ defmodule Troupe.Tools do
   """
 
   alias Troupe.Agent.Definition
-  alias Troupe.Session.Approvals
+  alias Troupe.Session.{Approvals, ClientTools}
   alias Troupe.Tool
   alias Troupe.Tool.{Ctx, Result}
 
@@ -37,9 +37,16 @@ defmodule Troupe.Tools do
   The extension point exists so a later MCP adapter can register remote tools as
   ordinary `Troupe.Tool` implementations without touching the agent loop, and the
   test suite uses it to install tools that misbehave on purpose.
+
+  A session id adds the tools an attached client hosts for *that* session. They are
+  per-session because the connection offering them is: a personal MCP connection belongs
+  to one person on one session, and a pod-wide list would hand it to everybody.
   """
-  @spec all() :: [Tool.handle()]
-  def all, do: @builtins ++ extra() ++ remote()
+  @spec all(String.t() | nil) :: [Tool.handle()]
+  def all(session_id \\ nil), do: @builtins ++ extra() ++ remote() ++ hosted(session_id)
+
+  defp hosted(nil), do: []
+  defp hosted(session_id), do: ClientTools.list(session_id)
 
   defp extra, do: Application.get_env(:troupe_core, :extra_tools, [])
 
@@ -53,18 +60,19 @@ defmodule Troupe.Tools do
     end
   end
 
-  @spec fetch(String.t()) :: {:ok, Tool.handle()} | {:error, {:unknown_tool, String.t()}}
-  def fetch(name) do
-    case Enum.find(all(), &(Tool.name(&1) == name)) do
+  @spec fetch(String.t(), String.t() | nil) ::
+          {:ok, Tool.handle()} | {:error, {:unknown_tool, String.t()}}
+  def fetch(name, session_id \\ nil) do
+    case Enum.find(all(session_id), &(Tool.name(&1) == name)) do
       nil -> {:error, {:unknown_tool, name}}
       tool -> {:ok, tool}
     end
   end
 
   @doc "The tools a profile may use, in a stable order."
-  @spec for_definition(Definition.t()) :: [Tool.handle()]
-  def for_definition(%Definition{} = definition) do
-    Enum.filter(all(), fn tool ->
+  @spec for_definition(Definition.t(), String.t() | nil) :: [Tool.handle()]
+  def for_definition(%Definition{} = definition, session_id \\ nil) do
+    Enum.filter(all(session_id), fn tool ->
       Definition.permission(definition, Tool.name(tool), Tool.default_permission(tool)) != :deny
     end)
   end
@@ -75,7 +83,7 @@ defmodule Troupe.Tools do
   @spec specs(Definition.t(), Ctx.t()) :: [Troupe.LLM.Request.tool_spec()]
   def specs(%Definition{} = definition, %Ctx{} = ctx) do
     definition
-    |> for_definition()
+    |> for_definition(ctx.session_id)
     |> Enum.map(fn tool ->
       %{name: Tool.name(tool), description: Tool.describe(tool, ctx), schema: Tool.schema(tool)}
     end)
@@ -90,7 +98,7 @@ defmodule Troupe.Tools do
   @spec authorize(String.t(), Definition.t(), Ctx.t()) ::
           {:run, Tool.handle(), :task | :inline} | {:reject, Result.t()}
   def authorize(name, %Definition{} = definition, %Ctx{} = ctx) do
-    case fetch(name) do
+    case fetch(name, ctx.session_id) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}
 

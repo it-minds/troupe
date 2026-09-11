@@ -60,7 +60,12 @@ defmodule Troupe.Agent.State do
     last_input_tokens: 0,
     compact_resume: :idle,
     finish_summary: nil,
-    fake: nil
+    fake: nil,
+    # Inputs that arrived mid-turn and have been announced as `input_queued`. Needed
+    # because `gen_statem` re-delivers a postponed event on *every* state change, and
+    # `thinking -> acting` is a state change: without this, one queued input would be
+    # announced once per transition until the agent finally took it.
+    queued: MapSet.new()
   ]
 
   @type t :: %__MODULE__{
@@ -91,7 +96,8 @@ defmodule Troupe.Agent.State do
           last_input_tokens: non_neg_integer(),
           compact_resume: :idle | :thinking,
           finish_summary: String.t() | nil,
-          fake: pid() | atom() | nil
+          fake: pid() | atom() | nil,
+          queued: MapSet.t(String.t())
         }
 
   @doc "This agent's name for logs and labels: `root` or `root/explore#1`."

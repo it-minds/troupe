@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/session_tainted.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "actor": {
+      "type": "string"
+    },
+    "kind": {
+      "type": "string"
+    },
+    "tools": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    }
+  },
+  "required": [
+    "actor",
+    "kind",
+    "tools"
+  ],
+  "title": "session_tainted",
+  "type": "object"
+}

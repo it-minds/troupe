@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/tool.invoke.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "arguments": {
+      "type": "object"
+    },
+    "call_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "arguments",
+    "call_id",
+    "name"
+  ],
+  "title": "tool.invoke",
+  "type": "object"
+}

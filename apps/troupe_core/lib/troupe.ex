@@ -70,16 +70,19 @@ defmodule Troupe do
   Send the root agent a message. Async: it is postponed if the agent is busy.
 
   `actor` records *who* asked, which is what lets several clients share one session
-  and still see who did what.
+  and still see who did what. `:command_id` in `opts` is the caller's own identifier for
+  the send, echoed in `input_queued` and `input_accepted`; one is generated when the
+  caller has none.
   """
   @spec send_input(
           String.t(),
           String.t() | struct(),
           :user | :watch | :tui_todo_edit,
-          Troupe.Protocol.Event.Actor.t() | nil
+          Troupe.Protocol.Event.Actor.t() | nil,
+          keyword()
         ) :: :ok | {:error, :no_session}
-  def send_input(session_id, content, source \\ :user, actor \\ nil) do
-    with_root(session_id, &Agent.input(&1, source, content, actor))
+  def send_input(session_id, content, source \\ :user, actor \\ nil, opts \\ []) do
+    with_root(session_id, &Agent.input(&1, source, content, actor, opts))
   end
 
   @doc "Cancel whatever the root agent is doing. Valid from any state."

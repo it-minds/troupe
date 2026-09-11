@@ -14,12 +14,12 @@ defmodule Troupe.Gateway.Dispatch do
   effect.
   """
 
-  alias Troupe.Gateway.{Commands, Session, Worktrees}
+  alias Troupe.Gateway.{ClientTool, Commands, Presence, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Mounts
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
-  alias Troupe.Session.Log
+  alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workspace
@@ -57,6 +57,13 @@ defmodule Troupe.Gateway.Dispatch do
     "profile.switch" => :control,
     "approval.respond" => :control,
     "todo.edit" => :control,
+    # Presence says who is here, which every attached client is entitled to say and to
+    # hear. It changes nothing, so it needs no more than a seat.
+    "presence.set" => :observe,
+    # Offering a tool that runs on somebody's machine is steering the session, so it
+    # takes the same scope as sending it input.
+    "tools.register" => :control,
+    "tools.unregister" => :control,
     "session.create" => :admin,
     "session.archive" => :admin,
     "session.pin" => :admin,
@@ -258,8 +265,14 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, text} <- fetch(params, "text"),
          :ok <- activate(session_id) do
-      Troupe.send_input(session_id, text, :user, actor(context))
-      {:ok, %{"accepted" => true}}
+      # The client's own id travels with the input, so `input_queued` and
+      # `input_accepted` name the very send an optimistic render is waiting on rather
+      # than something that merely looks like it.
+      command_id = Map.get(params, "command_id")
+      opts = if command_id, do: [command_id: command_id], else: []
+
+      Troupe.send_input(session_id, text, :user, actor(context), opts)
+      {:ok, %{"accepted" => true, "command_id" => command_id}}
     end
   end
 
@@ -298,6 +311,61 @@ defmodule Troupe.Gateway.Dispatch do
          :ok <- activate(session_id) do
       Troupe.send_input(session_id, edit, :tui_todo_edit)
       {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # -- presence ---------------------------------------------------------------
+
+  # Ephemeral, and structurally so: `Presence` has no path to the log. Deliberately not
+  # an activating command — a session must not be woken because somebody's cursor moved,
+  # and there is nobody to tell if it is asleep.
+  defp handle("presence.set", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, presence_state} <- fetch(params, "state") do
+      Presence.publish(session_id, context.principal, presence_state, Map.get(params, "agent"))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # -- client-hosted tools ----------------------------------------------------
+
+  # Two steps, always. Without consent the answer is the challenge to show the person;
+  # with it, the registration. A client cannot skip the first step by inventing the
+  # answer to it, because the challenge is issued by the session and spent once.
+  defp handle("tools.register", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, specs} <- tool_specs(params, context),
+         :ok <- activate(session_id) do
+      subject = subject(context)
+      consent = Map.get(params, "consent") || %{}
+
+      case ClientTools.register(session_id, context.connection, consent,
+             specs: specs,
+             subject: subject,
+             actor: actor(context)
+           ) do
+        {:ok, registered} ->
+          {:ok, %{"registered" => registered, "taint" => "personal_connector"}}
+
+        {:error, reason} when reason in [:consent_required, :consent_belongs_to_another_client, :consent_covers_other_tools] ->
+          challenge(session_id, context, specs, reason)
+
+        {:error, reason} ->
+          {:error, Error.new(:unavailable, %{reason: to_string(reason)})}
+      end
+    end
+  end
+
+  defp handle("tools.unregister", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id") do
+      names =
+        case Map.get(params, "tools") do
+          names when is_list(names) -> Enum.map(names, &prefixed/1)
+          _ -> :all
+        end
+
+      {:ok, gone} = ClientTools.unregister(session_id, context.connection, names)
+      {:ok, %{"unregistered" => gone}}
     end
   end
 
@@ -522,6 +590,62 @@ defmodule Troupe.Gateway.Dispatch do
   defp build_edit(other, _params) do
     {:error, Error.new(:invalid_params, %{field: "action", value: other})}
   end
+
+  defp challenge(session_id, context, specs, reason) do
+    names = Enum.map(specs, & &1.name)
+
+    case ClientTools.challenge(session_id, context.connection, subject(context), names) do
+      {:ok, challenge} ->
+        {:error, Error.new(:consent_required, Map.put(challenge, "reason", to_string(reason)))}
+
+      {:error, other} ->
+        {:error, Error.new(:unavailable, %{reason: to_string(other)})}
+    end
+  end
+
+  # A spec becomes a `Troupe.Tool` value whose `run/2` can reach this connection and no
+  # other. That is the whole ownership rule: there is no name here for any other client
+  # to call, and the closure dies with the connection it names.
+  defp tool_specs(params, context) do
+    case Map.get(params, "tools") do
+      tools when is_list(tools) and tools != [] ->
+        Enum.reduce_while(tools, {:ok, []}, fn tool, {:ok, acc} ->
+          case tool_spec(tool, context) do
+            {:ok, spec} -> {:cont, {:ok, acc ++ [spec]}}
+            {:error, error} -> {:halt, {:error, error}}
+          end
+        end)
+
+      _other ->
+        {:error, Error.new(:invalid_params, %{field: "tools"})}
+    end
+  end
+
+  defp tool_spec(%{"name" => name} = tool, context) when is_binary(name) and name != "" do
+    connection = context.connection
+
+    {:ok,
+     %{
+       name: name,
+       description: Map.get(tool, "description", "A tool hosted by an attached client."),
+       schema: Map.get(tool, "schema", %{"type" => "object"}),
+       default_permission: permission(Map.get(tool, "permission")),
+       run: fn args, ctx -> ClientTool.run(connection, name, args, ctx) end
+     }}
+  end
+
+  defp tool_spec(_tool, _context) do
+    {:error, Error.new(:invalid_params, %{field: "tools", reason: "each tool needs a name"})}
+  end
+
+  defp permission("auto"), do: :auto
+  defp permission("deny"), do: :deny
+  defp permission(_other), do: :ask
+
+  defp prefixed("client." <> _rest = name), do: name
+  defp prefixed(name), do: "client." <> name
+
+  defp subject(%Context{principal: principal}), do: principal["subject"]
 
   defp actor(%Context{principal: principal}) do
     Event.Actor.user(principal["subject"], principal["display_name"])

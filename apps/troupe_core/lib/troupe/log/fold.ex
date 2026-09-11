@@ -65,6 +65,7 @@ defmodule Troupe.Log.Fold do
       todo_updated profile_switched compacted
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
+      session_tainted
     )
   end
 

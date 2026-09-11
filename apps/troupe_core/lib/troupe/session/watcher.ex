@@ -5,7 +5,7 @@ defmodule Troupe.Session.Watcher do
   Started last in the session so its crashes never restart an agent — `rest_for_one`
   makes that a structural guarantee rather than a convention. It owns a backend
   process (native or polling), debounces bursts of change events into one scan, and
-  sends the root agent a single `{:input, :watch, trigger}` per scan.
+  sends the root agent a single `:watch` input per scan.
 
   Self-triggering is prevented by the write and edit tools announcing writes before
   they happen; a change event whose current content hash matches an announcement is
@@ -283,7 +283,7 @@ defmodule Troupe.Session.Watcher do
         Logger.debug("troupe: watch trigger with no root agent to send it to")
 
       pid ->
-        send(pid, {:input, :watch, trigger})
+        Troupe.Agent.Server.input(pid, :watch, trigger)
     end
   end
 

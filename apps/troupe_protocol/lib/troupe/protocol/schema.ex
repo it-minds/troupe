@@ -154,7 +154,25 @@ defmodule Troupe.Protocol.Schema do
         "size" => required(:integer)
       },
       "acl_granted" => %{"subject" => required(:string), "role" => required(:string)},
-      "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)}
+      "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)},
+      # Client-hosted tools. Durable, all three, because a tool that ran on somebody's
+      # laptop is part of what happened in this session and a replay that did not say so
+      # would be a transcript with a hole in it.
+      "tools_registered" => %{
+        "tools" => required({:array, :string}),
+        "connection" => required(:string),
+        "consent" => required(:object)
+      },
+      "tools_unregistered" => %{
+        "tools" => required({:array, :string}),
+        "connection" => required(:string),
+        "reason" => required(:string)
+      },
+      "session_tainted" => %{
+        "kind" => required(:string),
+        "tools" => required({:array, :string}),
+        "actor" => required(:string)
+      }
     }
   end
 
@@ -178,7 +196,14 @@ defmodule Troupe.Protocol.Schema do
         "done_reason" => optional(:string)
       },
       "progress" => %{"message" => required(:string)},
-      "presence" => %{"subject" => required(:string), "state" => required(:string)},
+      # Never durable, and not by a filter: presence is published through a function that
+      # has no path to the log at all. `state` is `joined`, `left`, `focused` or `typing`.
+      "presence" => %{
+        "subject" => required(:string),
+        "state" => required(:string),
+        "display_name" => optional(:string),
+        "agent" => optional({:array, :string})
+      },
       "summary_diff" => %{"changed" => required(:object)},
       "watch_notice" => %{"message" => required(:string)}
     }
@@ -282,6 +307,42 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "workspace" => required(:string),
         "enabled" => optional(:boolean)
+      },
+      # Presence. No `command_id`: it is not an effect to be replayed, and a client that
+      # retried one would be asserting something it no longer knows to be true.
+      "presence.set" => %{
+        "session_id" => required(:string),
+        "state" => required(:string),
+        "agent" => optional({:array, :string})
+      },
+      "tools.register" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "tools" => required(:array),
+        "consent" => optional(:object)
+      },
+      "tools.unregister" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "tools" => optional({:array, :string})
+      }
+    }
+  end
+
+  @doc """
+  Requests the **server** sends the client, and the shape of their params.
+
+  One so far. It exists because a client-hosted tool runs where the client is, so the
+  agent's call has to travel outwards over a connection the client already holds — there
+  is nothing to dial back to, and a laptop behind a NAT could not be dialled anyway.
+  """
+  @spec server_requests() :: %{String.t() => shape()}
+  def server_requests do
+    %{
+      "tool.invoke" => %{
+        "call_id" => required(:string),
+        "name" => required(:string),
+        "arguments" => required(:object)
       }
     }
   end
@@ -303,7 +364,18 @@ defmodule Troupe.Protocol.Schema do
           into: %{},
           do: {"commands/#{method}.json", document("commands", method, shape)}
 
-    Map.merge(durable, Map.merge(ephemeral, commands))
+    # Under `commands/` too, and deliberately: a client that has to *answer* one needs
+    # its shape published exactly as much as one it sends, and a second directory would
+    # only make it easier to publish one and forget the other.
+    server =
+      for {method, shape} <- server_requests(),
+          into: %{},
+          do: {"commands/#{method}.json", document("commands", method, shape)}
+
+    durable
+    |> Map.merge(ephemeral)
+    |> Map.merge(commands)
+    |> Map.merge(server)
   end
 
   defp document(kind, name, shape) do

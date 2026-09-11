@@ -58,13 +58,22 @@ defmodule Troupe.Agent.Server do
   Send input. Always async: this is how the client API, clients and the watcher talk.
 
   `actor` records who asked, so a session shared between several clients shows who
-  did what.
+  did what. `command_id` is the client's own identifier for the send, echoed back in
+  `input_queued` and `input_accepted` so an optimistic render can reconcile against what
+  actually happened rather than against what it hoped. One is generated for callers that
+  have none — the watcher, a seeded task — so every input in the log has the same shape.
   """
-  @spec input(pid(), :user | :watch | :tui_todo_edit, term(), Event.Actor.t() | nil) :: :ok
-  def input(pid, source, content, actor \\ nil) when is_pid(pid) do
-    send(pid, {:input, source, content, actor})
+  @spec input(pid(), :user | :watch | :tui_todo_edit, term(), Event.Actor.t() | nil, keyword()) ::
+          :ok
+  def input(pid, source, content, actor \\ nil, opts \\ []) when is_pid(pid) do
+    command_id = Keyword.get_lazy(opts, :command_id, &command_id/0)
+    send(pid, {:input, source, content, actor, %{command_id: command_id}})
     :ok
   end
+
+  @doc "An identifier for an input that arrived without one of its own."
+  @spec command_id() :: String.t()
+  def command_id, do: "in-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
 
   @doc "Cancel whatever is in flight and return to `:idle`. Valid from every state."
   @spec cancel(pid()) :: :ok
@@ -313,7 +322,7 @@ defmodule Troupe.Agent.Server do
 
   @doc false
   def idle(:internal, {:seed, text}, state) do
-    start_turn(accept_input(state, :user, text))
+    start_turn(accept_input(state, :user, text, nil, %{command_id: command_id()}))
   end
 
   def idle(:internal, :turn, state), do: start_turn(state)
@@ -362,12 +371,8 @@ defmodule Troupe.Agent.Server do
 
   def idle({:call, from}, :snapshot, state), do: reply_snapshot(from, :idle, state)
 
-  def idle(:info, {:input, source, content, actor}, state) do
-    start_turn(accept_input(state, source, content, actor))
-  end
-
-  def idle(:info, {:input, source, content}, state) do
-    start_turn(accept_input(state, source, content, nil))
+  def idle(:info, {:input, source, content, actor, meta}, state) do
+    start_turn(accept_input(state, source, content, actor, meta))
   end
 
   def idle(:info, {:switch_profile, name}, state) do
@@ -421,10 +426,8 @@ defmodule Troupe.Agent.Server do
 
   def thinking(:info, :cancel, state), do: cancel_everything(state)
 
-  def thinking(:info, {:input, _source, _content, _actor}, _state),
-    do: {:keep_state_and_data, :postpone}
-
-  def thinking(:info, {:input, _source, _content}, _state), do: {:keep_state_and_data, :postpone}
+  def thinking(:info, {:input, _source, _content, _actor, _meta} = event, state),
+    do: queue_input(state, event)
 
   def thinking(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
 
@@ -474,10 +477,8 @@ defmodule Troupe.Agent.Server do
 
   def acting(:info, :cancel, state), do: cancel_everything(state)
 
-  def acting(:info, {:input, _source, _content, _actor}, _state),
-    do: {:keep_state_and_data, :postpone}
-
-  def acting(:info, {:input, _source, _content}, _state), do: {:keep_state_and_data, :postpone}
+  def acting(:info, {:input, _source, _content, _actor, _meta} = event, state),
+    do: queue_input(state, event)
 
   def acting(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
 
@@ -511,8 +512,8 @@ defmodule Troupe.Agent.Server do
 
   def compacting(:info, :cancel, state), do: cancel_everything(state)
 
-  def compacting(:info, {:input, _source, _content}, _state),
-    do: {:keep_state_and_data, :postpone}
+  def compacting(:info, {:input, _source, _content, _actor, _meta} = event, state),
+    do: queue_input(state, event)
 
   def compacting(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
 
@@ -525,12 +526,7 @@ defmodule Troupe.Agent.Server do
 
   # Deliberately not postponed: this state never changes again, so a postponed event
   # would sit in the mailbox for the life of the process.
-  def done(:info, {:input, source, _content, _actor}, state) do
-    log(state, :input_after_done, %{"source" => Atom.to_string(source)})
-    {:keep_state_and_data, []}
-  end
-
-  def done(:info, {:input, source, _content}, state) do
+  def done(:info, {:input, source, _content, _actor, _meta}, state) do
     log(state, :input_after_done, %{"source" => Atom.to_string(source)})
     {:keep_state_and_data, []}
   end
@@ -611,14 +607,80 @@ defmodule Troupe.Agent.Server do
 
   # -- input ------------------------------------------------------------------
 
-  defp accept_input(state, source, content, actor \\ nil)
+  # An input that arrived mid-turn. `gen_statem` re-queues a postponed event on the next
+  # state change, so the wait costs nothing — but it re-queues it on *every* state change,
+  # and `thinking -> acting` is one. Announcing from here without remembering what has
+  # been announced would tell everybody watching that the same input was queued three
+  # times, which is worse than not telling them at all.
+  defp queue_input(state, {:input, source, content, actor, meta}) do
+    command_id = meta.command_id
 
-  defp accept_input(state, :user, text, actor) when is_binary(text) do
+    cond do
+      MapSet.member?(state.queued, command_id) ->
+        {:keep_state_and_data, :postpone}
+
+      not acceptable?(source, content) ->
+        {:keep_state_and_data, :postpone}
+
+      true ->
+        # Durable, and visible to everyone: somebody typed something and nothing
+        # happened, and they are entitled to know whether it was taken.
+        log(
+          state,
+          :input_queued,
+          %{
+            "command_id" => command_id,
+            "author" => author(actor, source),
+            "text" => rendered(source, content)
+          },
+          actor
+        )
+
+        {:keep_state, %{state | queued: MapSet.put(state.queued, command_id)}, [:postpone]}
+    end
+  end
+
+  defp accept_input(state, source, content, actor, meta) do
+    if acceptable?(source, content) do
+      # Before the content, and carrying the author and the command id, which is what a
+      # client's optimistic render reconciles against.
+      log(
+        state,
+        :input_accepted,
+        %{"command_id" => meta.command_id, "author" => author(actor, source)},
+        actor
+      )
+
+      state = %{state | queued: MapSet.delete(state.queued, meta.command_id)}
+      apply_input(state, source, content, actor)
+    else
+      Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
+      state
+    end
+  end
+
+  defp acceptable?(:user, text), do: is_binary(text)
+  defp acceptable?(:watch, %Trigger{}), do: true
+  defp acceptable?(:tui_todo_edit, %Todo.Edit{}), do: true
+  defp acceptable?(_source, _content), do: false
+
+  # What a person reading the log would call the author. A subject when there is one —
+  # several clients on one session is the whole point — and otherwise the source, because
+  # "watch" says more about who asked than "system" does.
+  defp author(%Event.Actor{subject: subject}, _source) when is_binary(subject), do: subject
+  defp author(_actor, source), do: Atom.to_string(source)
+
+  defp rendered(:watch, %Trigger{} = trigger), do: Trigger.render(trigger)
+  defp rendered(:tui_todo_edit, %Todo.Edit{} = edit), do: inspect(edit)
+  defp rendered(_source, text) when is_binary(text), do: text
+  defp rendered(_source, content), do: inspect(content)
+
+  defp apply_input(state, :user, text, actor) do
     log(state, :user_input, %{"source" => "user", "text" => text}, actor)
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: :normal}
   end
 
-  defp accept_input(state, :watch, %Trigger{} = trigger, _actor) do
+  defp apply_input(state, :watch, %Trigger{} = trigger, _actor) do
     text = Trigger.render(trigger)
     log(state, :user_input, %{"source" => "watch", "text" => text})
 
@@ -628,7 +690,7 @@ defmodule Troupe.Agent.Server do
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: mode}
   end
 
-  defp accept_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor) do
+  defp apply_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor) do
     {todos, note} = Todo.Edit.apply(edit, state.todos)
     log(state, :todo_updated, %{"items" => Enum.map(todos, &Todo.to_json/1), "source" => "tui"})
     log(state, :user_input, %{"source" => "tui_todo_edit", "text" => note})
@@ -639,11 +701,6 @@ defmodule Troupe.Agent.Server do
         conversation: state.conversation ++ [Message.user(note)],
         turn_mode: :normal
     }
-  end
-
-  defp accept_input(state, source, content, _actor) do
-    Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
-    state
   end
 
   # -- turns ------------------------------------------------------------------

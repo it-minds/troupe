@@ -575,7 +575,7 @@ Needs `control`.
 Without `consent`, the answer is an error carrying the challenge to show:
 
 ```json
-{"jsonrpc": "2.0", "id": 7, "error": {"code": -32010, "message": "consent_required",
+{"jsonrpc": "2.0", "id": 7, "error": {"code": -32013, "message": "consent_required",
   "data": {"challenge": "…", "prompt": "Let this session run 1 tool on your machine?",
            "tools": ["notes.search"]}}}
 ```
@@ -681,6 +681,7 @@ itself something a person who cannot see it should not learn.
 | -32010 | `unavailable` | a dependency is down; `data.component` |
 | -32011 | `rate_limited` | `data.retry_after_ms` |
 | -32012 | `payload_too_large` | `data.limit` |
+| -32013 | `consent_required` | `data.challenge`, `data.prompt`, `data.tools` |
 
 Transport-level framing faults close the connection after a best-effort error.
 

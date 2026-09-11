@@ -4,9 +4,9 @@ defmodule Troupe.Session.Summary do
 
   A fleet view watching twenty sessions cannot afford the detail stream of any of
   them, and does not want it: what it needs is a line per session — what each agent is
-  doing, what the current task is, what tool is running, what it has cost, and whether
-  anything is waiting on a person. That is what this folds, and it publishes only what
-  changed.
+  doing, what the current task is, what tool is running, what it has cost, whether
+  anything is waiting on a person, and whether anything outside the pod has been given a
+  say in it. That is what this folds, and it publishes only what changed.
 
   Throttled to at most four diffs a second. An agent streaming deltas changes this
   projection hundreds of times a second and the answer is the same each time at human
@@ -175,6 +175,23 @@ defmodule Troupe.Session.Summary do
   def fold(snapshot, %Event{type: type, data: data})
        when type in ["approval_decided", "approval_resolved"] do
     Map.update(snapshot, "approvals", [], &List.delete(&1, data["call_id"]))
+  end
+
+  # A tool running on somebody's laptop is something every other participant is entitled
+  # to know about, so it belongs in the one projection a fleet view reads.
+  #
+  # Added to the map rather than declared in `@empty`, and deliberately: a session that
+  # nothing has tainted folds to exactly the map it folded to before this clause existed,
+  # so every recorded fixture hash still holds. A client reads a missing key as "not
+  # tainted", which is the right default and the only one an old log can support.
+  def fold(snapshot, %Event{type: "session_tainted", data: data}) do
+    entry = %{
+      "kind" => data["kind"],
+      "tools" => data["tools"] || [],
+      "actor" => data["actor"]
+    }
+
+    Map.update(snapshot, "taint", [entry], &(&1 ++ [entry]))
   end
 
   def fold(snapshot, %Event{}), do: snapshot

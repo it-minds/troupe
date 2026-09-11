@@ -104,7 +104,7 @@ defmodule Troupe.Watch.WatcherTest do
     assert context_marker.file == "notes.md"
     assert context_marker.comment =~ "invariant"
 
-    refute_receive {:input, :watch, _}, 400
+    refute_receive {:input, :watch, _, _, _}, 400
   end
 
   defp assert_debounced(context) do
@@ -117,7 +117,7 @@ defmodule Troupe.Watch.WatcherTest do
     assert marker.file == "lib/burst.ex"
 
     # One scan for the burst, and nothing after it.
-    refute_receive {:input, :watch, _}, 500
+    refute_receive {:input, :watch, _, _, _}, 500
   end
 
   defp assert_no_self_trigger(context) do
@@ -129,7 +129,7 @@ defmodule Troupe.Watch.WatcherTest do
     Troupe.Watch.expect_write(context.watcher, path, contents)
     File.write!(path, contents)
 
-    refute_receive {:input, :watch, _}, 700
+    refute_receive {:input, :watch, _, _, _}, 700
 
     # A human editing the same file afterwards must still trigger: the expectation
     # is consumed by the write it described, not standing forever.
@@ -143,7 +143,7 @@ defmodule Troupe.Watch.WatcherTest do
     write(context, "secret/hidden.ex", "# do the thing AI!\n")
     write(context, "noisy.log", "# also this AI!\n")
 
-    refute_receive {:input, :watch, _}, 700
+    refute_receive {:input, :watch, _, _, _}, 700
 
     # Prove the watcher is alive and would have fired for a non-ignored file.
     write(context, "lib/visible.ex", "# this one counts AI!\n")
@@ -157,7 +157,7 @@ defmodule Troupe.Watch.WatcherTest do
 
   defp assert_trigger(timeout \\ 4_000) do
     receive do
-      {:input, :watch, trigger} -> trigger
+      {:input, :watch, trigger, _actor, _meta} -> trigger
     after
       timeout -> flunk("expected a watch trigger within #{timeout}ms")
     end
@@ -176,7 +176,7 @@ defmodule Troupe.Watch.WatcherTest do
       # The rule reaches the watcher through the .gitignore change event itself.
       write(context, "build_out/b.ex", "# should not trigger AI!\n")
 
-      refute_receive {:input, :watch, _}, 800
+      refute_receive {:input, :watch, _, _, _}, 800
     end
   end
 

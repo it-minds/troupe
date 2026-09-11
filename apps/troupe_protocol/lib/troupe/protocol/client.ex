@@ -117,6 +117,28 @@ defmodule Troupe.Protocol.Client do
     call(client, "unsubscribe", %{"subscription_id" => subscription_id})
   end
 
+  @doc """
+  Answer a server-to-client request.
+
+  The server sends these — `tool.invoke`, so far — and they arrive at the owner as
+  `{:troupe_request, id, method, params}`. Answering is a notification-shaped write
+  rather than a call: the server is the one waiting, and a client that answered twice
+  would be answering a request that is already closed.
+
+  A client that intends to serve requests must answer every one it receives. Silence is
+  indistinguishable from a hung laptop, and the server treats it as one.
+  """
+  @spec respond(pid(), JSONRPC.id(), map()) :: :ok
+  def respond(client, id, result) when is_map(result) do
+    GenServer.cast(client, {:respond, {:result, id, result}})
+  end
+
+  @doc "Answer a server-to-client request with a failure the server hands to the model."
+  @spec respond_error(pid(), JSONRPC.id(), String.t()) :: :ok
+  def respond_error(client, id, reason) when is_binary(reason) do
+    GenServer.cast(client, {:respond, {:error, id, Error.new(:internal_error, %{reason: reason})}})
+  end
+
   @doc "A fresh command id. Reuse one only to retry the *same* command."
   @spec command_id() :: String.t()
   def command_id, do: "c-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
@@ -252,6 +274,14 @@ defmodule Troupe.Protocol.Client do
       {:error, reason} ->
         {:reply, {:error, Error.new(:unavailable, %{reason: inspect(reason)})}, state}
     end
+  end
+
+  @impl GenServer
+  def handle_cast({:respond, message}, state) do
+    # A failed write is not worth crashing a client over: the connection is already
+    # gone, `tcp_closed` is on its way, and the owner is about to hear about it.
+    _ = :gen_tcp.send(state.socket, [JSONRPC.encode(message), ?\n])
+    {:noreply, state}
   end
 
   @impl GenServer

@@ -1,5 +1,5 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/presence.json",
+  "$id": "https://troupe.dev/schema/v1/commands/presence.set.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
@@ -9,20 +9,17 @@
       },
       "type": "array"
     },
-    "display_name": {
+    "session_id": {
       "type": "string"
     },
     "state": {
       "type": "string"
-    },
-    "subject": {
-      "type": "string"
     }
   },
   "required": [
-    "state",
-    "subject"
+    "session_id",
+    "state"
   ],
-  "title": "presence",
+  "title": "presence.set",
   "type": "object"
 }
