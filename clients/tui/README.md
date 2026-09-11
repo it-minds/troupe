@@ -199,6 +199,16 @@ the name and every `primary` one is a command. Project `.troupe/agents/`
 overrides the global `agents/` dir which overrides the built-ins (`code`,
 `worktree`, `plan`, `ask`, and the subagents `general` and `explore`).
 
+The tools a definition can list are `read_file`, `write_file`, `edit_file`,
+`list_files`, `grep`, `shell`, `web_fetch`, `todo_write` / `todo_read`,
+`delegate`, `remember`, `ask_user` and `finish` (`tools: all` is everything).
+`write_file`, `edit_file`, `shell` and `web_fetch` ask before they run — `y` /
+`n` / `a` in the window, or `auto_approve` for the session — and the rest run
+unattended; a definition can change either with a `permissions:` block.
+`web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
+with its links kept, so an agent can read the documentation it is pointed at
+instead of guessing; `explore` and `plan` have it as well.
+
 ```markdown
 ---
 description: Reviews a diff for security problems

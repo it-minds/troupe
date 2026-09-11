@@ -334,6 +334,11 @@ runner (`Troupe.Tool.Runner`) is the one place `rescue`/`catch` is used: a
 raise, exit or timeout becomes `{:error, text}`. Every OS process runs under
 `reaper` through `Troupe.OS.Process`, whose Port is owned by the tool task.
 
+`web_fetch` is the only tool that reaches the network: a GET, capped in what it
+reads off the socket and in what it returns, with the response reduced to text
+before the model sees it. It defaults to permission `ask`, so the URL is shown
+to the user before the request is made (Decision 58).
+
 ## 6. Failure matrix
 
 | process             | what kills it                                   | what restarts                                                             | user observes                                  | model observes                                   |

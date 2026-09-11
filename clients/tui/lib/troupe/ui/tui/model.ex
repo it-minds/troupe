@@ -394,6 +394,7 @@ defmodule Troupe.UI.TUI.Model do
   defp diff_stat(_), do: nil
 
   defp summarize_input("shell", %{"command" => c}), do: c
+  defp summarize_input("web_fetch", %{"url" => u}), do: u
 
   defp summarize_input("todo_write", %{"items" => items}) when is_list(items),
     do: "#{length(items)} items"
