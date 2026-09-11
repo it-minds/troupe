@@ -31,6 +31,11 @@ defmodule Troupe.Worker.MixProject do
       {:troupe_core, in_umbrella: true},
       {:troupe_protocol, in_umbrella: true},
       {:troupe_gateway, in_umbrella: true},
+      # Test-only, and in this direction only. The end-to-end control-channel test needs
+      # a real plane on the other end of the socket, and the worker is the client in
+      # that relationship — the plane never links against this app. No `lib` code here
+      # calls it, which is what `mix troupe.boundaries` checks.
+      {:troupe_plane, in_umbrella: true, only: :test},
       {:req, "~> 0.7"},
       # SigV4 only. The HTTP is Req's, which the rest of Troupe already uses, and an
       # S3 client with its own opinions about retries and streaming would be a second

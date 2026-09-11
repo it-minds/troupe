@@ -1,0 +1,155 @@
+defmodule Troupe.Worker.Plane.Commands do
+  @moduledoc """
+  What the plane may tell a worker to do.
+
+  A short list on purpose. The plane decides *where* a session runs and *when* it should
+  stop running here; it never says anything about what the session contains, and there
+  is no method here that could carry it.
+
+  Every one of these is idempotent. The plane retries on a reconnect without knowing
+  whether the first attempt landed, so activating a session that is already up is a
+  lookup and putting a dormant session to sleep is a no-op.
+  """
+
+  alias Troupe.Protocol.Error
+  alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.Session.{Manager, Sealer, Workspace}
+  alias Troupe.Worker.Sessions
+
+  require Logger
+
+  @doc "Run one pushed method and give back a JSON-RPC result or error."
+  @spec handle(String.t(), map()) :: {:ok, map()} | {:error, Error.t()}
+  def handle(method, params) do
+    dispatch(method, params)
+  rescue
+    exception ->
+      Logger.error("troupe worker: #{method} failed: #{Exception.message(exception)}")
+      {:error, Error.new(:internal_error, %{reason: Exception.message(exception)})}
+  end
+
+  # The plane mints the epoch and the worker carries it unchanged. A worker that
+  # invented one would be inventing the fence that protects the session from it.
+  defp dispatch("session.activate", params) do
+    session_id = params["session_id"]
+
+    from_plane =
+      Enum.reject(
+        [
+          team: params["team"],
+          epoch: params["epoch"],
+          owner_subject: params["owner_subject"],
+          profile: params["profile"]
+        ],
+        &match?({_key, nil}, &1)
+      )
+
+    case Sessions.activate(session_id, Keyword.merge(defaults(), from_plane)) do
+      {:ok, summary} ->
+        {:ok, %{"session_id" => session_id, "epoch" => summary.epoch, "activated" => true}}
+
+      {:error, {:stale_epoch, stored, ours}} ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch", stored: stored, offered: ours})}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp dispatch("session.dormant", params) do
+    case Sessions.dormant(params["session_id"]) do
+      {:ok, result} ->
+        {:ok, %{"session_id" => params["session_id"], "last_seq" => result.sealed_through}}
+
+      {:error, :not_active} ->
+        # Already asleep. The plane asked twice, which it is entitled to do.
+        {:ok, %{"session_id" => params["session_id"], "already_dormant" => true}}
+
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp dispatch("session.fence", params) do
+    :ok = Sessions.fence(params["session_id"], params["epoch"])
+    {:ok, %{"session_id" => params["session_id"], "fenced" => true}}
+  end
+
+  defp dispatch("drain", _params) do
+    # What a pod does when it is going away: everything it holds goes to sleep, in
+    # object storage, before the container stops. A session left behind would have to be
+    # rebuilt from its last seal, losing whatever came after it.
+    drained =
+      Sessions.active_ids()
+      |> Enum.map(fn session_id ->
+        case Sessions.dormant(session_id) do
+          {:ok, _} -> session_id
+          _ -> nil
+        end
+      end)
+      |> Enum.reject(&is_nil/1)
+
+    Logger.info("troupe worker: drained #{length(drained)} session(s)")
+    {:ok, %{"drained" => length(drained), "sessions" => drained}}
+  end
+
+  defp dispatch("session.index", _params) do
+    {:ok, %{"sessions" => index()}}
+  end
+
+  defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
+
+  defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
+
+  @doc """
+  What this pod is holding, as metadata.
+
+  Sequence numbers, hashes and byte counts. This is the whole of what the plane knows
+  about a session's contents, and it is the reason `troupe admin index rebuild` can
+  work from object storage without a key.
+  """
+  @spec index() :: [map()]
+  def index do
+    Enum.flat_map(Sessions.active_ids(), fn session_id ->
+      case Sessions.whereis(session_id) do
+        nil -> []
+        pid -> [entry(session_id, pid)]
+      end
+    end)
+  end
+
+  defp entry(session_id, pid) do
+    status = Manager.status(pid)
+
+    sealed =
+      case status.sealer && Sealer.status(status.sealer) do
+        %{} = sealed -> sealed
+        _ -> %{sealed_through: 0, head_hash: nil, object_bytes: 0}
+      end
+
+    %{
+      "id" => session_id,
+      "epoch" => status.epoch,
+      "last_seq" => sealed.sealed_through,
+      "head_hash" => sealed.head_hash,
+      "object_bytes" => sealed.object_bytes,
+      "workspace_bytes" => Workspace.size(status.workspace || "")
+    }
+  end
+
+  # What the pod knows about itself and the plane does not: where its object store is,
+  # where its state directory is, which key store to ask. Set once at boot; the plane
+  # supplies only the session's identity and its epoch.
+  defp defaults do
+    :troupe_worker
+    |> Application.get_env(:session_defaults, [])
+    |> Keyword.put_new_lazy(:report, &reporter/0)
+  end
+
+  defp reporter do
+    case Process.whereis(Link) do
+      nil -> fn _ -> :ok end
+      pid -> Link.reporter(pid)
+    end
+  end
+end

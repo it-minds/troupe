@@ -413,3 +413,45 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     keeps the last turn; stopping the tree before archiving keeps the archive from being
     torn halfway through a file write; erasing last means every byte is already in object
     storage under a key the plane cannot read by the time the plaintext goes.
+
+72. **The worker dials the plane, so reconnection is entirely the worker's business.** A
+    pod's address is a property of the cluster and a plane replica's is not, so a worker
+    needs one Service name and the plane learns where the worker is when it arrives.
+    That also makes losing a replica a sub-second event: the Service sends the next dial
+    to a survivor, with a 250 ms floor and a 2 s ceiling on the backoff and jitter on
+    top so a plane coming back does not take every worker's reconnect in the same
+    millisecond.
+
+73. **Enrolment is a blocking round trip on a socket that is not yet active.** Nothing
+    else may be sent until the plane has said which profile this pod is, and a queued
+    report sent before that would be refused and lost. The projected token is re-read on
+    every connect, because one cached at boot expires while the pod is still running.
+
+74. **A link that cannot reach the plane is not an error the rest of the worker hears
+    about.** Sealing carries on and the reports queue, bounded at ten thousand and
+    oldest-first — a worker out of touch for an hour has a session index that says
+    everything the dropped reports would have, and the plane asks for one on reconnect.
+
+75. **Pushed commands are handled off the link.** Activating a session can take seconds,
+    and the link has heartbeats to send and other pushes to receive in the meantime.
+    Every pushed method is idempotent, because the plane retries on a reconnect without
+    knowing whether the first attempt landed.
+
+76. **The "no session content" rule is tested by looking at the bytes.** A recording TCP
+    relay sits between the worker and the plane and keeps everything that crosses, and
+    the test sends a marker string as session input and greps the capture. Asserting on
+    the worker's own idea of what it sent would prove nothing: the question is precisely
+    whether the code is wrong about that.
+
+77. **`troupe_worker` test-depends on `troupe_plane`, and only in that direction.** An
+    end-to-end test of the control channel needs a real plane on the other end of the
+    socket, and the worker is the client in that relationship. No `lib` code crosses,
+    which is what `mix troupe.boundaries` checks — it reads compiled `imports` chunks,
+    not `mix.exs`.
+
+78. **Disk usage comes from `df`, not from summing the files this code knows about.** A
+    PVC shared with anything else, or holding a deleted-but-open file, would make the sum
+    a lie. Above the high watermark a worker puts its quietest sessions to sleep, which
+    reclaims only bytes that are already in object storage; above the critical one it
+    stops accepting placements, because a pod that runs out of disk mid-turn loses the
+    turn.
