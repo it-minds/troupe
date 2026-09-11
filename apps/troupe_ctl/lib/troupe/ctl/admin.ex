@@ -144,7 +144,6 @@ defmodule Troupe.Ctl.Admin do
     end
   end
 
-
   defp call(plane, token, method, params) do
     options = [
       method: :post,

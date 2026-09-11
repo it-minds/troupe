@@ -65,12 +65,17 @@ defmodule Troupe.Operator.ClusterTest do
         assert fetch(conn, "policy/v1", "PodDisruptionBudget", namespace: namespace, name: namespace)
         assert fetch(conn, "v1", "PersistentVolumeClaim", namespace: namespace, name: "team-dev")
 
-        # One Service and one Ingress per pod, addressed by ordinal.
+        # One Service and one Ingress per pod, addressed by ordinal. The domain comes
+        # from the installed `TroupePolicy` rather than from the chart's default: a
+        # cluster is allowed to have been given a different one, and a test that assumed
+        # otherwise would be asserting about `values.yaml` instead of about the operator.
+        domain = workers_domain(conn)
+
         for ordinal <- 0..1 do
           assert fetch(conn, "v1", "Service", namespace: namespace, name: "#{name}-#{ordinal}")
           ingress = fetch(conn, "networking.k8s.io/v1", "Ingress", namespace: namespace, name: "#{name}-#{ordinal}")
           assert ingress
-          assert get_in(ingress, ["spec", "rules", Access.at(0), "host"]) == "#{ordinal}.#{name}.workers.example.test"
+          assert get_in(ingress, ["spec", "rules", Access.at(0), "host"]) == "#{ordinal}.#{name}.#{domain}"
         end
       end
 
@@ -83,7 +88,15 @@ defmodule Troupe.Operator.ClusterTest do
       assert pod["automountServiceAccountToken"] == false
 
       token = Enum.find(pod["volumes"], &(&1["name"] == "enrolment-token"))
-      assert [%{"serviceAccountToken" => %{"audience" => "troupe-plane"}}] = get_in(token, ["projected", "sources"])
+      # Two audience-bound tokens: one the plane accepts and one the key manager does,
+      # and neither is usable where the other is.
+      audiences =
+        token
+        |> get_in(["projected", "sources"])
+        |> Enum.map(&get_in(&1, ["serviceAccountToken", "audience"]))
+        |> Enum.sort()
+
+      assert audiences == ["troupe-kms", "troupe-plane"]
     end
 
     @tag :cluster

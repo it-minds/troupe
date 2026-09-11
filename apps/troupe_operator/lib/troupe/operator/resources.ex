@@ -321,7 +321,6 @@ defmodule Troupe.Operator.Resources do
     }
   end
 
-
   defp cilium_network_policy(_namespace, _profile, %Settings{cilium_available: false}), do: []
 
   defp cilium_network_policy(namespace, profile, _settings) do

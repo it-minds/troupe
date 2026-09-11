@@ -278,6 +278,10 @@ defmodule Troupe.Operator.LatencyClusterTest do
         "template" => %{
           "metadata" => %{"labels" => %{"app" => @name}},
           "spec" => %{
+            # Kubernetes' Docker-links compatibility variables collide with the names
+            # this release reads its configuration from, and a pod that inherits them
+            # dies in its config provider before it logs a line.
+            "enableServiceLinks" => false,
             "containers" => [
               %{
                 "name" => "worker",
@@ -292,7 +296,10 @@ defmodule Troupe.Operator.LatencyClusterTest do
                   %{"name" => "TROUPE_PROVIDER", "value" => "fake"},
                   %{"name" => "TROUPE_MODEL", "value" => "fake"},
                   %{"name" => "TROUPE_STATE_HOME", "value" => "/workspace/.state"},
-                  %{"name" => "RELEASE_DISTRIBUTION", "value" => "none"}
+                  %{"name" => "RELEASE_DISTRIBUTION", "value" => "none"},
+                  # The BEAM sizes its port table from `RLIMIT_NOFILE`, which containerd
+                  # sets to a billion; left alone the table is 1.5GB.
+                  %{"name" => "ERL_FLAGS", "value" => "+Q 65536"}
                 ],
                 "volumeMounts" => [
                   %{"name" => "jwks", "mountPath" => "/etc/troupe", "readOnly" => true},

@@ -163,6 +163,20 @@ defmodule Troupe.Operator.ClusterCase do
     end
   end
 
+  @doc """
+  The workers domain the installed `TroupePolicy` names.
+
+  Read rather than assumed: a cluster may have been installed with values of its own, and
+  a test that hard-coded the chart's default would be asserting about `values.yaml`.
+  """
+  @spec workers_domain(K8s.Conn.t(), String.t()) :: String.t()
+  def workers_domain(conn, name \\ "default") do
+    case fetch(conn, "troupe.dev/v1alpha1", "TroupePolicy", name: name) do
+      %{"spec" => %{"workersDomain" => domain}} when is_binary(domain) -> domain
+      _other -> "workers.example.test"
+    end
+  end
+
   @doc "Delete a resource, tolerating its absence."
   @spec delete(K8s.Conn.t(), String.t(), String.t(), keyword()) :: :ok
   def delete(conn, api_version, kind, opts) do
