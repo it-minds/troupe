@@ -16,6 +16,13 @@ defmodule Troupe.UI.Headless do
             streaming?: false,
             started?: false,
             errored?: false,
+            # Set by `--auto-approve`. Answered by *this client*, over the protocol, and
+            # not by telling the session to stop asking: a session on somebody else's pod
+            # is not a session a client gets to disarm, and the approval is still in the
+            # log with the name of whoever gave it.
+            auto_approve: false,
+            client: nil,
+            session_id: nil,
             code: nil
 
   @doc """
@@ -31,7 +38,15 @@ defmodule Troupe.UI.Headless do
       {:ok, _result} ->
         deadline = System.monotonic_time(:millisecond) + Keyword.get(opts, :timeout_ms, 300_000)
         send_task(client, session_id, Keyword.get(opts, :task))
-        loop(%__MODULE__{quiet: Keyword.get(opts, :quiet, false)}, deadline)
+
+        state = %__MODULE__{
+          quiet: Keyword.get(opts, :quiet, false),
+          auto_approve: Keyword.get(opts, :auto_approve, false),
+          client: client,
+          session_id: session_id
+        }
+
+        loop(state, deadline)
 
       {:error, error} ->
         IO.puts(:stderr, "troupe: could not follow the session: #{error.message}")
@@ -117,6 +132,17 @@ defmodule Troupe.UI.Headless do
 
   defp render(state, %Event{type: "delegation_started", data: data}) do
     line(state, "  ⇢ delegate to #{data["agent"]}: #{first_line(data["task"])}")
+  end
+
+  defp render(%{auto_approve: true} = state, %Event{type: "approval_requested", data: data}) do
+    Client.call(state.client, "approval.respond", %{
+      "command_id" => Client.command_id(),
+      "session_id" => state.session_id,
+      "call_id" => data["call_id"],
+      "decision" => "allow"
+    })
+
+    line(state, "  ✓ approved #{data["tool"]} (--auto-approve)")
   end
 
   defp render(state, %Event{type: "approval_requested", data: data}) do

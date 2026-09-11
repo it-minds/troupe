@@ -16,6 +16,19 @@ defmodule Troupe.Operator.Settings do
             object_store_bucket: "troupe-sessions",
             ingress_class_name: "nginx",
             tls_secret_name: nil,
+            # How a pod is actually reached, which it tells the plane when it enrols and
+            # the plane hands to clients. `wss` on 443 is the deployment this is built
+            # for; a cluster reached through a port mapping says so here rather than
+            # every client guessing.
+            # The BEAM's port table is sized from `RLIMIT_NOFILE` unless `+Q` says
+            # otherwise, and a container runtime's default makes that 1.5GB.
+            max_ports: 65_536,
+            # The secret a pod reads its object-store credentials from, in the pod's own
+            # namespace. Troupe creates no secrets; this names the one somebody else put
+            # there, the same way a profile names its LLM secret.
+            object_store_secret_name: "troupe-object-store",
+            workers_scheme: "wss",
+            workers_port: nil,
             image_pull_secrets: [],
             cilium_available: false,
             drain_timeout_seconds: 300

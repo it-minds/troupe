@@ -38,6 +38,16 @@ defmodule Troupe.Operator.Names do
   @spec host(String.t(), non_neg_integer(), String.t()) :: String.t()
   def host(profile, ordinal, domain), do: "#{ordinal}.#{profile}.#{domain}"
 
+  @doc """
+  The audience a pod's key-manager token is projected for.
+
+  Separate from the enrolment audience on purpose: a token minted for the key manager
+  must not be presentable to the plane, and a token minted for the plane must not open
+  a session key. Each is good in exactly one place.
+  """
+  @spec kms_audience() :: String.t()
+  def kms_audience, do: "troupe-kms"
+
   @doc "The PVC a pod keeps its working copies on. One per pod, from the StatefulSet template."
   @spec data_volume() :: String.t()
   def data_volume, do: "data"

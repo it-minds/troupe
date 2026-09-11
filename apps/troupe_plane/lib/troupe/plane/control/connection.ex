@@ -16,7 +16,7 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.Control.Connections
-  alias Troupe.Plane.{Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget}
+  alias Troupe.Plane.{Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
   alias Troupe.Protocol.{Error, JSONRPC}
 
   require Logger
@@ -177,7 +177,11 @@ defmodule Troupe.Plane.Control.Connection do
            }}
         )
 
-        {:ok, %{state | worker: worker, identity: identity}}
+        # And the keys the pod verifies session tokens against. Pushed rather than
+        # fetched, because the plane is not in the data path of a live session: a pod
+        # that had to reach the plane to check a token would make every attach depend on
+        # the plane being up, which is exactly what this channel exists to avoid.
+        {:ok, push_jwks(%{state | worker: worker, identity: identity})}
 
       {:error, reason} ->
         write(state, {:error, id, error_for(reason)})
@@ -350,6 +354,21 @@ defmodule Troupe.Plane.Control.Connection do
     do: Error.new(:forbidden, %{reason: "#{namespace} is not a worker namespace"})
 
   defp error_for(reason), do: Error.new(:invalid_params, %{reason: inspect(reason)})
+
+  # A worker with no keys cannot verify a single session token, so a failure here is
+  # logged loudly rather than swallowed: the pod will enrol, heartbeat, look healthy, and
+  # refuse everybody.
+  defp push_jwks(state) do
+    case Tokens.jwks() do
+      {:ok, jwks} ->
+        write(state, {:notification, "jwks.updated", %{"jwks" => jwks}})
+        state
+
+      {:error, reason} ->
+        Logger.error("troupe plane: could not read its own JWKS to push: #{inspect(reason)}")
+        state
+    end
+  end
 
   defp write(state, message) do
     :gen_tcp.send(state.socket, [JSONRPC.encode(message), ?\n])

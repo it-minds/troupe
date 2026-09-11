@@ -60,7 +60,11 @@ defmodule Troupe.Plane.Admin do
     group = Application.get_env(:troupe_plane, :platform_admin_group)
 
     cond do
-      group && Enum.any?(teams, &(&1.name == group)) ->
+      # Against the provider's *groups*, not against enabled teams. A team is something
+      # this plane decided to do about a group — it has a budget, grants and a volume —
+      # and requiring the admin group to be one would mean a fresh plane could never have
+      # an administrator: enabling the first team is itself a platform-admin action.
+      group && group in Identity.group_ids_for(user) ->
         %{subject: user.subject, role: :platform_admin, teams: Enum.map(teams, & &1.name)}
 
       administered = Identity.teams_administered_by(user) ->

@@ -214,6 +214,25 @@ defmodule Troupe.Plane.Identity do
     )
   end
 
+  @doc """
+  The identity-provider groups a user is in, by external id.
+
+  Groups, not teams: a group is what the provider says about somebody, and a team is
+  what this plane has decided to do about a group. The platform-admin check needs the
+  first — a plane with no teams yet still has to have somebody who can make one.
+  """
+  @spec group_ids_for(User.t()) :: [String.t()]
+  def group_ids_for(%User{} = user) do
+    Repo.all(
+      from g in Group,
+        join: m in Membership,
+        on: m.group_id == g.id,
+        where: m.user_id == ^user.id,
+        select: g.external_id,
+        order_by: g.external_id
+    )
+  end
+
   # -- grants -----------------------------------------------------------------
 
   @doc "Let a team use a profile."

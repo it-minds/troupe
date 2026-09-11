@@ -25,7 +25,7 @@ defmodule Troupe.CLI do
   use Task
 
   alias Troupe.CLI.Options
-  alias Troupe.Ctl.{Admin, Credentials, Login, Verify}
+  alias Troupe.Ctl.{Admin, Credentials, Login, Remote, Verify}
   alias Troupe.Protocol.{Client, Daemon, Endpoint}
   alias Troupe.UI.Headless
 
@@ -170,6 +170,13 @@ defmodule Troupe.CLI do
     end
   end
 
+  # `--remote` takes precedence for everything that is about a session: the local daemon
+  # is not involved at all, and a session on a pod has no workspace on this machine.
+  def dispatch(%Options{remote: true, command: command} = options, opts)
+      when command in [:tui, :run, :resume, :sessions] do
+    dispatch_remote(options, opts)
+  end
+
   def dispatch(%Options{command: :sessions} = options, opts) do
     with_client(options, opts, fn client ->
       workspace = Path.expand(options.workspace)
@@ -224,6 +231,95 @@ defmodule Troupe.CLI do
         {:error, error} -> fail(error)
       end
     end)
+  end
+
+  # -- remote -----------------------------------------------------------------
+
+  # A remote session is not in this machine's daemon and never touches it. The plane
+  # says which pod, and the client dials that pod directly over a WebSocket — so from
+  # here on everything is the same protocol, the same events, the same TUI.
+  defp dispatch_remote(%Options{command: :sessions} = options, _opts) do
+    case Remote.list(remote_opts(options)) do
+      {:ok, []} ->
+        IO.puts("No sessions on #{plane_of(options)}.")
+        0
+
+      {:ok, sessions} ->
+        IO.puts("Sessions on #{plane_of(options)}:")
+        Enum.each(sessions, &IO.puts(remote_session_line(&1)))
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, "troupe: " <> reason)
+        1
+    end
+  end
+
+  defp dispatch_remote(options, opts) do
+    case Remote.attach(remote_opts(options)) do
+      {:ok, attachment} ->
+        announce_remote(attachment)
+        remote_interact(attachment, options, opts)
+
+      {:error, reason} ->
+        IO.puts(:stderr, "troupe: " <> reason)
+        1
+    end
+  end
+
+  defp remote_opts(%Options{} = options) do
+    [plane: options.plane, session_id: options.session_id, profile: options.agent]
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Keyword.merge(if(options.task, do: [task: options.task], else: []))
+  end
+
+  defp remote_interact(attachment, %Options{headless: true} = options, _opts) do
+    case Client.connect(remote_connect(attachment)) do
+      {:ok, client} ->
+        try do
+          Headless.run(client, attachment.session_id, headless_opts(options))
+        after
+          Client.close(client)
+        end
+
+      {:error, reason} ->
+        IO.puts(:stderr, "troupe: could not reach #{attachment.url}: #{describe(reason)}")
+        1
+    end
+  end
+
+  defp remote_interact(attachment, options, _opts) do
+    case frontend() do
+      nil ->
+        IO.puts(:stderr, "troupe: this build has no terminal UI in it")
+        1
+
+      module ->
+        module.run(attachment.session_id, options, remote_connect(attachment))
+    end
+  end
+
+  defp remote_connect(attachment) do
+    [
+      client_info: %{"name" => "troupe-cli", "version" => @version},
+      url: attachment.url,
+      token: attachment.token
+    ]
+  end
+
+  defp announce_remote(%{profile: nil} = attachment) do
+    IO.puts("#{attachment.session_id} on #{attachment.plane}")
+  end
+
+  defp announce_remote(attachment) do
+    IO.puts("#{attachment.session_id} on #{attachment.plane} (#{attachment.profile})")
+  end
+
+  defp plane_of(%Options{plane: nil}), do: "your plane"
+  defp plane_of(%Options{plane: plane}), do: plane
+
+  defp remote_session_line(session) do
+    "  #{session["id"]}  #{session["state"]}  #{session["profile"]}  #{session["title"] || session["last_active_at"] || ""}"
   end
 
   # -- talking to the daemon --------------------------------------------------
@@ -354,7 +450,12 @@ defmodule Troupe.CLI do
   end
 
   defp headless_opts(options) do
-    [quiet: options.quiet, timeout_ms: options.timeout_ms, task: options.task]
+    [
+      quiet: options.quiet,
+      timeout_ms: options.timeout_ms,
+      task: options.task,
+      auto_approve: options.auto_approve == true
+    ]
   end
 
   defp report(outcome) do
@@ -418,6 +519,7 @@ defmodule Troupe.CLI.Options do
             auto_approve: nil,
             worktree: "auto",
             log: nil,
+            remote: false,
             plane: nil,
             args: [],
             timeout_ms: 30 * 60 * 1000,
@@ -448,6 +550,7 @@ defmodule Troupe.CLI.Options do
           auto_approve: boolean() | nil,
           worktree: String.t(),
           log: Path.t() | nil,
+          remote: boolean(),
           plane: String.t() | nil,
           args: [String.t()],
           timeout_ms: pos_integer(),
@@ -463,6 +566,8 @@ defmodule Troupe.CLI.Options do
     workspace: :string,
     worktree: :string,
     log: :string,
+    remote: :boolean,
+    plane: :string,
     timeout: :integer,
     idle: :integer,
     version: :boolean,
@@ -504,6 +609,8 @@ defmodule Troupe.CLI.Options do
         watch: switches[:watch],
         auto_approve: switches[:auto_approve],
         worktree: worktree,
+        remote: switches[:remote] || false,
+        plane: switches[:plane],
         log: switches[:log],
         timeout_ms: (switches[:timeout] || 1_800) * 1_000,
         idle_ms: (switches[:idle] || 600) * 1_000
@@ -558,6 +665,8 @@ defmodule Troupe.CLI.Options do
       troupe hq                       every session, and everything waiting on you
       troupe verify SESSION_ID        walk a session's hash chain and name the first break
       troupe verify --log PATH        ... offline, from a log file or a decrypted segment
+      troupe --remote                 a session on a plane, not on this machine
+      troupe --remote sessions        what is running on the plane
       troupe login PLANE_URL          log in to a remote plane
       troupe logout [PLANE_URL]       forget a plane's credentials
       troupe admin ...                administer a plane (`troupe admin` for the list)
@@ -572,7 +681,9 @@ defmodule Troupe.CLI.Options do
       -a, --agent NAME       starting profile (build, plan, or your own)
       -w, --watch            act on AI comments in files as they are saved
           --worktree MODE    auto (the default), never, or always
-          --headless         render as plain lines instead of a TUI
+          --remote           run on a plane rather than on this machine
+      --plane URL        which plane, when logged in to more than one
+      --headless         render as plain lines instead of a TUI
           --quiet            headless: print only the final answer
           --auto-approve     skip approval prompts (use with care)
           --timeout SECONDS  give up on a headless run after this long

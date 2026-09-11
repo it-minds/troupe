@@ -19,6 +19,9 @@ defmodule Troupe.Plane.OIDC do
 
   require Logger
 
+  # How often a failed signature may send the plane back to the provider for new keys.
+  @refetch_floor_ms 60_000
+
   @doc """
   Exchange a provider token for a plane token.
 
@@ -85,8 +88,12 @@ defmodule Troupe.Plane.OIDC do
   end
 
   # The provider's discovery document names its JWKS, and that is what a token is checked
-  # against. Cached for the life of the VM: a provider that rotates keys publishes both
-  # for an overlap, and a plane that refetched on every login would be a load generator.
+  # against. Cached, because a plane that refetched on every login would be a load
+  # generator — but not forever: a provider that has rotated its keys publishes new ones,
+  # and a cache with no way to notice would refuse every login until the plane restarted.
+  # So a signature that does not verify refetches once and tries again, no more often
+  # than @refetch_floor_ms, which is what stops the retry becoming the load generator the
+  # cache exists to prevent.
   defp default_verifier do
     case Application.get_env(:troupe_plane, :oidc, [])[:issuer] do
       nil -> nil
@@ -95,8 +102,24 @@ defmodule Troupe.Plane.OIDC do
   end
 
   defp verify_against_provider(id_token, issuer) do
+    case attempt(id_token, issuer) do
+      {:error, reason} when reason in [:bad_signature, :no_keys] ->
+        if refetch(issuer), do: attempt(id_token, issuer), else: {:error, reason}
+
+      other ->
+        other
+    end
+  end
+
+  defp attempt(id_token, issuer) do
     with {:ok, jwks} <- provider_jwks(issuer) do
-      Token.verify(id_token, jwks, audience: client_id(), issuer: issuer)
+      # `max_lifetime: :any` because this is the *provider's* token, not one of ours. The
+      # fifteen-minute ceiling is a rule about what Troupe mints for a pod; applying it
+      # here would refuse every provider whose id_tokens last an hour, which is most of
+      # them. The signature, the issuer, the audience and `exp` are all still checked, and
+      # this token is exchanged once, immediately, for a plane token that does have the
+      # ceiling.
+      Token.verify(id_token, jwks, audience: client_id(), issuer: issuer, max_lifetime: :any)
     end
   end
 
@@ -104,6 +127,21 @@ defmodule Troupe.Plane.OIDC do
     case :persistent_term.get({__MODULE__, :jwks, issuer}, nil) do
       nil -> fetch_jwks(issuer)
       jwks -> {:ok, jwks}
+    end
+  end
+
+  # At most one refetch per floor, whatever else is happening: a burst of bad tokens must
+  # not become a burst of requests at somebody else's discovery endpoint.
+  defp refetch(issuer) do
+    now = System.monotonic_time(:millisecond)
+    last = :persistent_term.get({__MODULE__, :refetched, issuer}, 0)
+
+    if now - last < @refetch_floor_ms do
+      false
+    else
+      :persistent_term.put({__MODULE__, :refetched, issuer}, now)
+      :persistent_term.erase({__MODULE__, :jwks, issuer})
+      match?({:ok, _}, fetch_jwks(issuer))
     end
   end
 

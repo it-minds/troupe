@@ -21,35 +21,74 @@ operator:
   # real FQDN rules; without it, egress to named hosts is a CIDR rule and a documented
   # gap.
   ciliumAvailable: false
+  # The namespace running this controller must carry `troupe.dev/ingress=true`: a
+  # worker's NetworkPolicy admits traffic from namespaces with that label and from
+  # nowhere else, which is how "only the ingress may reach a pod" is expressed.
   ingressClassName: nginx
+  # How a client reaches a worker pod. `wss` on the default port is what an Ingress with
+  # a certificate gives you; a cluster reached through a port mapping sets both.
+  workersScheme: wss
+  workersPort: ""
+  # `+Q`, the BEAM's port table size. Left to itself it is taken from `RLIMIT_NOFILE`,
+  # which a container runtime sets absurdly high, and the table costs 1.5GB.
+  maxPorts: 65536
   # A wildcard certificate for *.workers.<domain>, issued out of band (cert-manager
   # with DNS-01 in the reference deployment).
   tlsSecretName: ""
   drainTimeoutSeconds: 300
 
 plane:
+  # A cluster that runs only workers, with its plane elsewhere, sets this to false.
+  enabled: true
   image:
     repository: ghcr.io/objective-mj/troupe-plane
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 2
   host: plane.example.test
+  # What the plane calls itself in the links it hands out — device-flow pages, the
+  # panel. Defaults to https://<host>.
+  baseUrl: ""
   ingressClassName: nginx
   tlsSecretName: ""
+  ingress:
+    enabled: true
   resources:
     requests: {cpu: 200m, memory: 256Mi}
     limits: {cpu: "1", memory: 1Gi}
   # The control listener workers dial. Never exposed through ingress.
   controlPort: 4001
   httpPort: 4000
+  # `+Q`, the BEAM's port table size. See `operator.maxPorts`.
+  maxPorts: 65536
+  # `direct` writes WorkerProfile straight to the API server; `gitops` writes a commit
+  # and waits for something else to apply it.
+  provisioningMode: direct
+  # The identity provider group whose members administer the platform. Membership is
+  # the provider's business and is never edited in Troupe.
+  platformAdminGroup: troupe-platform-admins
+  groupsClaim: groups
+  # `name` joins the replicas into an Erlang cluster for the `:global` singletons;
+  # `none` is correct for a single replica and keeps distribution off the network.
+  distribution: name
   database:
     # A reference to a secret created out of band or by External Secrets Operator.
     # Troupe never creates secrets.
     secretName: troupe-plane-database
     secretKey: url
+  # Signs the admin panel's session cookies. `runtime.exs` refuses to start a plane
+  # without one rather than using the development default.
+  secretKeyBase:
+    secretName: troupe-plane-secret-key-base
+    secretKey: value
   oidc:
     issuer: ""
     clientId: ""
+    # Published to clients at `/.well-known/troupe`, which is how `troupe login` finds
+    # the provider without the plane ever seeing the user's credentials.
+    authorizeUrl: ""
+    deviceUrl: ""
+    tokenUrl: ""
     secretName: troupe-plane-oidc
     secretKey: client-secret
   scim:
@@ -62,6 +101,10 @@ bao:
   # The Kubernetes auth mount and the role the plane authenticates with.
   authPath: kubernetes
   planeRole: troupe-plane
+  # A static token instead, for a development cluster with OpenBao in dev mode. Empty
+  # in any real deployment: the plane authenticates as its ServiceAccount.
+  tokenSecretName: ""
+  tokenSecretKey: token
 
 objectStore:
   endpoint: http://minio.troupe-system.svc:9000

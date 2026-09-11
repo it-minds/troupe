@@ -1120,3 +1120,99 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 198. **The 200-input ordering test raises `max_turns` to 1000.** The default forty is a
      guard against a runaway agent, not against a busy conversation; left alone it silently
      capped the first run at forty accepted inputs and looked like a throughput problem.
+
+## Running the remote locally
+
+199. **The plane's database is configured outside the autostart gate.** A migration is a
+     release that reaches its repo and serves nothing —
+     `bin/troupe_plane eval Troupe.Plane.Release.migrate()` — and gating the database on
+     "is this plane serving" made that impossible. The *raise* stays inside the gate,
+     because a plane that is actually serving must have a database and starting one
+     against a silent default would look like data loss.
+
+200. **Migrations are a Helm pre-upgrade hook, not the application's `start/2`.** Two
+     replicas starting at once would both migrate, and a migration that failed would look
+     like a plane that would not boot rather than like a migration that failed.
+
+201. **A worker publishes a whole URL when it enrols, not a bare host.** The scheme and
+     the port are how the pod's Ingress is actually reached, and the pod is told them by
+     the operator. A client that had to guess `wss://…:443` could not reach a cluster
+     behind a port mapping, and every client would have to guess the same way.
+
+202. **A `WorkerProfile` says which provider and which model.** It named an endpoint and
+     a secret and nothing else, which is a profile that cannot make a request: the pod
+     fell back to whatever the client default was. `llm.provider`, `llm.model` and
+     `llm.smallModel` are additions to the CRD, so an older profile still applies.
+
+203. **The dev dependencies are in `dev/kind/`, not in the chart.** PostgreSQL, MinIO,
+     OpenBao and Dex on `emptyDir` with static credentials are a laptop, not a
+     deployment. Keeping them out of the chart is what stops somebody installing them by
+     accident, and the chart continues to reference every secret rather than creating
+     one.
+
+204. **The local cluster uses Dex and the real device flow.** A bypass — a static token,
+     a "dev login" — would mean the thing being run locally was not the thing that ships.
+     The password is in a ConfigMap because the cluster is unreachable from anywhere
+     else, which is a property of kind rather than a choice about secrets.
+
+205. **Every container is told its scheduler count and its port-table size.** The BEAM
+     takes the first from the host's CPU count and the second from `RLIMIT_NOFILE`, and a
+     container runtime sets that to 1073741816 — so the port table alone was 1.5GB,
+     allocated before a module had loaded. `:erlang.memory(:system)` read 2073MB with the
+     default and 19MB with `+Q 65536`. Every Troupe pod was OOMKilled in one second with
+     nothing in its log.
+
+206. **`enableServiceLinks: false` on every Troupe pod.** Kubernetes injects
+     `<SERVICE>_PORT=tcp://ip:port` for every Service in the namespace, so
+     `troupe-plane-control` becomes `TROUPE_PLANE_CONTROL_PORT` — the name a release reads
+     a port *number* from. A pod that inherited it died in its config provider.
+
+207. **A worker's NetworkPolicy allows its key manager and its object store.** The rule
+     covered them only while they were outside the cluster, and the chart's own defaults
+     put them inside it. A pod that could reach neither could not activate a session at
+     all.
+
+208. **A pod gets two projected tokens, not one automounted one.** The enrolment token is
+     for the plane; a second, `troupe-kms`, is for the key manager. Audience-bound both
+     ways: the token the plane accepts cannot open a session key, and the one the key
+     manager accepts cannot enrol. Before this the worker had no credential for OpenBao at
+     all.
+
+209. **Object-store credentials reach worker pods.** The operator set the endpoint and the
+     bucket and nothing else, so a pod signed with `nil` and crashed inside the signer, a
+     long way from where the mistake was made.
+
+210. **The plane pushes its JWKS when a worker enrols.** The worker has always known how
+     to receive `jwks.updated`; nothing ever sent one, so every pod's key set was empty and
+     no session token could be verified. Pushed rather than fetched, because a pod that had
+     to reach the plane to check a token would make every attach depend on the plane being
+     up — which is what the control channel exists to avoid.
+
+211. **The plane refetches a provider's keys when a signature fails.** The cache had no
+     way to notice a rotation, so a provider that rolled its keys locked everybody out
+     until the plane restarted. Bounded to one refetch a minute, which is what stops the
+     retry becoming the load generator the cache exists to prevent.
+
+212. **A provider's id_token is not held to Troupe's fifteen-minute ceiling.** That rule is
+     about what Troupe mints for a pod. Applying it to an identity provider would refuse
+     every provider whose id_tokens last an hour, which is most of them; the signature, the
+     issuer, the audience and `exp` are all still checked, and the token is exchanged
+     immediately for a plane token that does have the ceiling.
+
+213. **Platform admin is decided by identity-provider *groups*, not by enabled teams.** A
+     team is something the plane decided to do about a group — it has a budget, grants and
+     a volume — and requiring the admin group to be one made a fresh plane
+     unadministerable: enabling the first team is itself a platform-admin action.
+
+214. **One implementation of "turn the stored refresh token into a plane token".** There
+     were two, and both had the same bug: a provider that rotates refresh tokens — which is
+     most of them — invalidates the stored one on first use, so everything worked once and
+     then asked you to log in again.
+
+215. **`troupe --remote` asks the plane which profiles are granted.** Reading the list
+     login happened to store meant a grant made this morning needed a fresh login to use
+     this afternoon.
+
+216. **`--auto-approve` is answered by the client, over the protocol.** Not by telling the
+     session to stop asking: a session on somebody else's pod is not one a client gets to
+     disarm, and the approval stays in the log with the name of whoever gave it.

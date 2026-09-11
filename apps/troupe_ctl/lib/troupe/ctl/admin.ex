@@ -13,7 +13,7 @@ defmodule Troupe.Ctl.Admin do
   release later.
   """
 
-  alias Troupe.Ctl.Credentials
+  alias Troupe.Ctl.{Credentials, Remote}
 
   @commands [
     {~w(overview), "admin.overview", [], "fleet health, active sessions, spend per team"},
@@ -130,44 +130,20 @@ defmodule Troupe.Ctl.Admin do
     end
   end
 
-  # A session token is minted from the stored refresh token rather than kept: short,
-  # audience-bound, and nothing to leave on disk.
+  # One implementation of "turn the stored refresh token into a plane token", shared with
+  # `troupe --remote`. There used to be two, and both had the same bug: a provider that
+  # rotates refresh tokens — which is most of them — invalidated the stored one on first
+  # use, so everything worked once and then asked you to log in again.
   defp refresh(%{"plane" => plane} = stored) do
-    with {:ok, provider_token} <- exchange_refresh(stored),
-         {:ok, %{status: 200, body: body}} <-
-           Req.request(
-             method: :post,
-             url: plane <> "/auth/exchange",
-             json: %{"id_token" => provider_token},
-             decode_body: true,
-             retry: false
-           ) do
-      {:ok, body["token"]}
-    else
-      _other -> {:error, "could not renew the session for #{plane} — run `troupe login #{plane}` again"}
+    case Remote.session_token(stored) do
+      {:ok, token} ->
+        {:ok, token}
+
+      {:error, _reason} ->
+        {:error, "could not renew the session for #{plane} — run `troupe login #{plane}` again"}
     end
   end
 
-  defp exchange_refresh(%{"token_endpoint" => endpoint, "client_id" => client, "refresh_token" => refresh})
-       when is_binary(endpoint) and is_binary(refresh) do
-    options = [
-      method: :post,
-      url: endpoint,
-      form: %{"grant_type" => "refresh_token", "refresh_token" => refresh, "client_id" => client},
-      decode_body: true,
-      retry: false
-    ]
-
-    case Req.request(options) do
-      {:ok, %{status: status, body: body}} when status in 200..299 ->
-        {:ok, body["id_token"] || body["access_token"]}
-
-      other ->
-        {:error, other}
-    end
-  end
-
-  defp exchange_refresh(_stored), do: {:error, :no_refresh_token}
 
   defp call(plane, token, method, params) do
     options = [

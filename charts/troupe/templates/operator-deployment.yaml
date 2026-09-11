@@ -16,6 +16,12 @@ spec:
       labels: {{- include "troupe.operator.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: troupe-operator
+      # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
+      # the namespace, for compatibility with Docker links. `troupe-plane-control`
+      # becomes `TROUPE_PLANE_CONTROL_PORT`, which is exactly the name this release reads
+      # a port number from — and a release whose config provider is handed
+      # "tcp://10.96.85.27:4001" does not start. Nothing here uses service links.
+      enableServiceLinks: false
       securityContext:
         runAsNonRoot: true
         runAsUser: 1000
@@ -25,6 +31,26 @@ spec:
           image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
           imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
           env:
+            # Two things a BEAM in a container gets wrong unless told, and both are
+            # measured rather than guessed.
+            #
+            # `+S` — the scheduler count is taken from the *host's* CPU count, which in a
+            # container is the node's. The downward API is the only thing that knows the
+            # real limit.
+            #
+            # `+Q` — the port table is sized from `RLIMIT_NOFILE`, and containerd sets it
+            # to 1073741816. The table is then 1.5GB, allocated before the release has
+            # loaded a module: `:erlang.memory(:system)` reads 2073MB with the default
+            # and 19MB with this. That is the whole difference between a pod that is
+            # OOMKilled in one second and one that runs in 64MB.
+            - name: TROUPE_SCHEDULERS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: operator
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: ERL_FLAGS
+              value: "+S $(TROUPE_SCHEDULERS):$(TROUPE_SCHEDULERS) +Q {{ .Values.operator.maxPorts }}"
             - name: TROUPE_OPERATOR_AUTOSTART
               value: "true"
             - name: TROUPE_PLANE_NAMESPACE
@@ -33,6 +59,16 @@ spec:
               value: "troupe-plane-control.{{ .Values.namespace }}.svc"
             - name: TROUPE_PLANE_CONTROL_PORT
               value: {{ .Values.plane.controlPort | quote }}
+            - name: TROUPE_OBJECT_SECRET_NAME
+              value: {{ .Values.objectStore.secretName | quote }}
+            - name: TROUPE_MAX_PORTS
+              value: {{ .Values.operator.maxPorts | quote }}
+            - name: TROUPE_WORKERS_SCHEME
+              value: {{ .Values.operator.workersScheme | quote }}
+            {{- if .Values.operator.workersPort }}
+            - name: TROUPE_WORKERS_PORT
+              value: {{ .Values.operator.workersPort | quote }}
+            {{- end }}
             - name: TROUPE_BAO_ADDR
               value: {{ .Values.bao.address | quote }}
             - name: TROUPE_OBJECT_ENDPOINT

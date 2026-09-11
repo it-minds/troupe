@@ -116,7 +116,7 @@ defmodule Troupe.Plane.ControlTest do
 
       Connection.notify(pid, "config.updated", %{"channel" => "stable", "version" => 2})
 
-      assert %{"method" => "config.updated", "params" => %{"version" => 2}} = read(worker)
+      assert %{"params" => %{"version" => 2}} = push(worker, "config.updated")
     end
   end
 
@@ -248,10 +248,34 @@ defmodule Troupe.Plane.ControlTest do
         "\n"
       ])
 
-    case read(worker) do
+    case answer(worker, id) do
       %{"result" => result} -> {:ok, result}
       %{"error" => error} -> {:error, error}
       other -> {:error, other}
+    end
+  end
+
+  # The next push of one kind, skipping the others. `jwks.updated` arrives the moment a
+  # worker enrols, so a test waiting for a different push has to read past it.
+  defp push(worker, method, attempts \\ 5)
+
+  defp push(_worker, method, 0), do: flunk("no #{method} push arrived")
+
+  defp push(worker, method, attempts) do
+    case read(worker) do
+      %{"method" => ^method} = message -> message
+      _other -> push(worker, method, attempts - 1)
+    end
+  end
+
+  # The plane pushes notifications down this channel — `jwks.updated` the moment a
+  # worker enrols — so a reply is the message carrying *this* id, not the next message
+  # to arrive. A client that assumed otherwise would read a push as its own answer.
+  defp answer(worker, id) do
+    case read(worker) do
+      %{"id" => ^id} = message -> message
+      %{"method" => _method} -> answer(worker, id)
+      other -> other
     end
   end
 

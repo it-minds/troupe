@@ -259,8 +259,8 @@ defmodule Troupe.Operator.Resources do
         "ports" => [%{"protocol" => "TCP", "port" => settings.plane_control_port}]
       },
       # Everything outside the cluster: the LLM endpoint, the MCP servers, the git
-      # hosts, OpenBao and object storage when they are external. Narrowed to the exact
-      # names by the Cilium policy where that is available.
+      # hosts, and OpenBao and object storage when they are external. Narrowed to the
+      # exact names by the Cilium policy where that is available.
       %{
         "to" => [
           %{
@@ -272,8 +272,55 @@ defmodule Troupe.Operator.Resources do
         ],
         "ports" => [%{"protocol" => "TCP", "port" => 443}, %{"protocol" => "TCP", "port" => 80}]
       }
-    ]
+    ] ++ in_cluster_rules(settings)
   end
+
+  # And when they are *not* external. A worker fetches its session key from the key
+  # manager and reads and writes sealed segments in object storage; a pod that could
+  # reach neither could not activate a session at all. The rule above covers them only
+  # while they are outside the cluster, which the chart's own defaults are not.
+  defp in_cluster_rules(%Settings{} = settings) do
+    [settings.bao_address, settings.object_store_endpoint]
+    |> Enum.flat_map(&in_cluster_rule/1)
+    |> Enum.uniq()
+  end
+
+  defp in_cluster_rule(nil), do: []
+
+  defp in_cluster_rule(url) do
+    # `URI.parse/1` fills the port in from the scheme, so by the time a host is in the
+    # cluster the port is known.
+    case URI.parse(url) do
+      %URI{host: host, port: port} when is_binary(host) and is_integer(port) ->
+        case cluster_namespace(host) do
+          nil -> []
+          namespace -> [namespace_rule(namespace, port)]
+        end
+
+      _other ->
+        []
+    end
+  end
+
+  # `openbao.troupe-system.svc` and `openbao.troupe-system.svc.cluster.local` both name
+  # a Service in `troupe-system`. Anything else is a name this cluster does not serve,
+  # and the ipBlock rule is what covers it.
+  defp cluster_namespace(host) do
+    case String.split(host, ".") do
+      [_service, namespace, "svc" | _rest] -> namespace
+      _other -> nil
+    end
+  end
+
+  defp namespace_rule(namespace, port) do
+    %{
+      "to" => [
+        %{"namespaceSelector" => %{"matchLabels" => %{"kubernetes.io/metadata.name" => namespace}}}
+      ],
+      "ports" => [%{"protocol" => "TCP", "port" => port}]
+    }
+  end
+
 
   defp cilium_network_policy(_namespace, _profile, %Settings{cilium_available: false}), do: []
 
@@ -355,6 +402,11 @@ defmodule Troupe.Operator.Resources do
         "fsGroup" => 1000,
         "seccompProfile" => %{"type" => "RuntimeDefault"}
       },
+      # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable per Service for
+      # Docker-links compatibility, and `troupe-plane-control` becomes
+      # `TROUPE_PLANE_CONTROL_PORT` — the name a release reads a port number from. A pod
+      # that inherited it would fail in its config provider before it logged anything.
+      "enableServiceLinks" => false,
       "terminationGracePeriodSeconds" => settings.drain_timeout_seconds,
       "containers" => [container(profile, policy, settings)],
       "volumes" => volumes(profile)
@@ -396,12 +448,35 @@ defmodule Troupe.Operator.Resources do
 
   defp env(profile, policy, settings) do
     base = [
+      # Two things a BEAM in a container gets wrong unless told.
+      #
+      # `+S` — the scheduler count comes from the host's CPU count, which in a container
+      # is the node's. Only the downward API knows the pod's real limit.
+      #
+      # `+Q` — the port table is sized from `RLIMIT_NOFILE`, which containerd sets to
+      # 1073741816. The table is then 1.5GB, allocated before a module is loaded, and the
+      # pod is OOMKilled in a second with nothing in its log.
+      %{
+        "name" => "TROUPE_SCHEDULERS",
+        "valueFrom" => %{
+          "resourceFieldRef" => %{
+            "containerName" => "worker",
+            "resource" => "limits.cpu",
+            "divisor" => "1"
+          }
+        }
+      },
+      %{
+        "name" => "ERL_FLAGS",
+        "value" => "+S $(TROUPE_SCHEDULERS):$(TROUPE_SCHEDULERS) +Q #{settings.max_ports}"
+      },
       # Without this the release boots an empty supervision tree, which is what the same
       # image does on a laptop and must not do here.
       %{"name" => "TROUPE_WORKER_AUTOSTART", "value" => "true"},
       %{"name" => "TROUPE_PROFILE", "value" => profile.name},
       %{"name" => "TROUPE_NAMESPACE", "value" => Names.namespace(policy.namespace_prefix, profile.name)},
       %{"name" => "TROUPE_WORKERS_DOMAIN", "value" => policy.workers_domain},
+      %{"name" => "TROUPE_WORKERS_SCHEME", "value" => settings.workers_scheme},
       %{"name" => "TROUPE_PLANE_CONTROL", "value" => "#{settings.plane_control_host}:#{settings.plane_control_port}"},
       %{"name" => "TROUPE_BAO_ADDR", "value" => settings.bao_address},
       %{"name" => "TROUPE_OBJECT_ENDPOINT", "value" => settings.object_store_endpoint},
@@ -414,13 +489,41 @@ defmodule Troupe.Operator.Resources do
       }
     ]
 
-    base ++ llm_env(profile)
+    base ++ workers_port_env(settings) ++ object_store_env(settings) ++ llm_env(profile)
+  end
+
+  # A pod that has an endpoint and a bucket but no credentials signs with `nil` and
+  # crashes inside the signer, which is a long way from where the mistake was made.
+  defp object_store_env(%Settings{object_store_secret_name: nil}), do: []
+
+  defp object_store_env(%Settings{object_store_secret_name: name}) do
+    [
+      {"TROUPE_OBJECT_ACCESS_KEY_ID", "access-key-id"},
+      {"TROUPE_OBJECT_SECRET_ACCESS_KEY", "secret-access-key"}
+    ]
+    |> Enum.map(fn {variable, key} ->
+      %{
+        "name" => variable,
+        "valueFrom" => %{"secretKeyRef" => %{"name" => name, "key" => key, "optional" => true}}
+      }
+    end)
+  end
+
+  defp workers_port_env(%Settings{workers_port: nil}), do: []
+
+  defp workers_port_env(%Settings{workers_port: port}) do
+    [%{"name" => "TROUPE_WORKERS_PORT", "value" => to_string(port)}]
   end
 
   defp llm_env(%Profile{llm_endpoint: nil}), do: []
 
   defp llm_env(profile) do
-    endpoint = [%{"name" => "TROUPE_BASE_URL", "value" => profile.llm_endpoint}]
+    endpoint =
+      [
+        %{"name" => "TROUPE_BASE_URL", "value" => profile.llm_endpoint},
+        %{"name" => "TROUPE_PROVIDER", "value" => profile.llm_provider}
+      ] ++ model_env("TROUPE_MODEL", profile.llm_model) ++
+        model_env("TROUPE_SMALL_MODEL", profile.llm_small_model)
 
     key =
       if profile.llm_secret_name do
@@ -439,8 +542,15 @@ defmodule Troupe.Operator.Resources do
     endpoint ++ key
   end
 
+  defp model_env(_name, nil), do: []
+  defp model_env(name, value), do: [%{"name" => name, "value" => value}]
+
   # The projected token is the pod's enrolment credential, and the only one it has.
   defp volumes(profile) do
+    # Two projected tokens rather than one automounted one. The default ServiceAccount
+    # token is good at the API server and lasts as long as the pod; these are audience
+    # -bound and short, so the one the plane accepts cannot open a session key and the one
+    # the key manager accepts cannot enrol.
     token = %{
       "name" => "enrolment-token",
       "projected" => %{
@@ -449,6 +559,13 @@ defmodule Troupe.Operator.Resources do
             "serviceAccountToken" => %{
               "path" => "token",
               "audience" => Names.enrolment_audience(),
+              "expirationSeconds" => 3600
+            }
+          },
+          %{
+            "serviceAccountToken" => %{
+              "path" => "kms-token",
+              "audience" => Names.kms_audience(),
               "expirationSeconds" => 3600
             }
           }

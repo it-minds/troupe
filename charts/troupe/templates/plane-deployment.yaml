@@ -1,0 +1,279 @@
+{{- if .Values.plane.enabled }}
+# The plane: the admin panel, the harness API, and the control listener workers dial.
+#
+# Two Services on purpose. `troupe-plane` is what the Ingress routes to, and it carries
+# HTTP only. `troupe-plane-control` is the port workers dial and is never exposed through
+# an Ingress — a control channel reachable from outside the cluster would be the plane
+# in the data path of every session, which the spec forbids.
+apiVersion: v1
+kind: Service
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "troupe.plane.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.plane.httpPort }}
+      targetPort: http
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: troupe-plane-control
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "troupe.plane.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: control
+      port: {{ .Values.plane.controlPort }}
+      targetPort: control
+---
+# Migrations run once per release, before the new pods start, and not from the
+# application's own boot: two replicas starting at once would both migrate, and a
+# migration that failed would look like a plane that would not start.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: troupe-plane-migrate
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-5"
+    # A failed migration is kept: deleting it would take its logs with it, and the logs
+    # are the only thing that says what went wrong.
+    "helm.sh/hook-delete-policy": before-hook-creation,hook-succeeded
+spec:
+  backoffLimit: 1
+  template:
+    metadata:
+      labels: {{- include "troupe.labels" . | nindent 8 }}
+    spec:
+      restartPolicy: Never
+      serviceAccountName: troupe-plane
+      # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
+      # the namespace, for compatibility with Docker links. `troupe-plane-control`
+      # becomes `TROUPE_PLANE_CONTROL_PORT`, which is exactly the name this release reads
+      # a port number from — and a release whose config provider is handed
+      # "tcp://10.96.85.27:4001" does not start. Nothing here uses service links.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: migrate
+          image: "{{ .Values.plane.image.repository }}:{{ .Values.plane.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.plane.image.pullPolicy }}
+          command: ["/app/bin/troupe_plane", "eval", "Troupe.Plane.Release.migrate()"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.plane.database.secretName }}
+                  key: {{ .Values.plane.database.secretKey }}
+            # `runtime.exs` refuses to configure a plane without one, and a migration is
+            # a plane booting far enough to reach its repo.
+            - name: TROUPE_PLANE_AUTOSTART
+              value: "false"
+            - name: RELEASE_DISTRIBUTION
+              value: "none"
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: {drop: ["ALL"]}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.plane.replicas }}
+  selector:
+    matchLabels: {{- include "troupe.plane.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "troupe.plane.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: troupe-plane
+      # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
+      # the namespace, for compatibility with Docker links. `troupe-plane-control`
+      # becomes `TROUPE_PLANE_CONTROL_PORT`, which is exactly the name this release reads
+      # a port number from — and a release whose config provider is handed
+      # "tcp://10.96.85.27:4001" does not start. Nothing here uses service links.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: plane
+          image: "{{ .Values.plane.image.repository }}:{{ .Values.plane.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.plane.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.plane.httpPort }}
+            - name: control
+              containerPort: {{ .Values.plane.controlPort }}
+          env:
+            # Two things a BEAM in a container gets wrong unless told, and both are
+            # measured rather than guessed.
+            #
+            # `+S` — the scheduler count is taken from the *host's* CPU count, which in a
+            # container is the node's. The downward API is the only thing that knows the
+            # real limit.
+            #
+            # `+Q` — the port table is sized from `RLIMIT_NOFILE`, and containerd sets it
+            # to 1073741816. The table is then 1.5GB, allocated before the release has
+            # loaded a module: `:erlang.memory(:system)` reads 2073MB with the default
+            # and 19MB with this. That is the whole difference between a pod that is
+            # OOMKilled in one second and one that runs in 64MB.
+            - name: TROUPE_SCHEDULERS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: plane
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: ERL_FLAGS
+              value: "+S $(TROUPE_SCHEDULERS):$(TROUPE_SCHEDULERS) +Q {{ .Values.plane.maxPorts }}"
+            - name: TROUPE_PLANE_AUTOSTART
+              value: "true"
+            - name: TROUPE_HTTP_PORT
+              value: {{ .Values.plane.httpPort | quote }}
+            - name: TROUPE_PLANE_CONTROL_PORT
+              value: {{ .Values.plane.controlPort | quote }}
+            - name: TROUPE_HOST
+              value: {{ .Values.plane.host | quote }}
+            - name: TROUPE_BASE_URL
+              value: {{ .Values.plane.baseUrl | default (printf "https://%s" .Values.plane.host) | quote }}
+            - name: TROUPE_PLANE_NAMESPACE
+              value: {{ .Values.namespace | quote }}
+            - name: TROUPE_PROVISIONING_MODE
+              value: {{ .Values.plane.provisioningMode | quote }}
+            - name: TROUPE_PLATFORM_ADMIN_GROUP
+              value: {{ .Values.plane.platformAdminGroup | quote }}
+            - name: TROUPE_GROUPS_CLAIM
+              value: {{ .Values.plane.groupsClaim | quote }}
+            - name: TROUPE_OIDC_ISSUER
+              value: {{ .Values.plane.oidc.issuer | quote }}
+            - name: TROUPE_OIDC_CLIENT_ID
+              value: {{ .Values.plane.oidc.clientId | quote }}
+            - name: TROUPE_OIDC_AUTHORIZE_URL
+              value: {{ .Values.plane.oidc.authorizeUrl | quote }}
+            - name: TROUPE_OIDC_DEVICE_URL
+              value: {{ .Values.plane.oidc.deviceUrl | quote }}
+            - name: TROUPE_OIDC_TOKEN_URL
+              value: {{ .Values.plane.oidc.tokenUrl | quote }}
+            - name: TROUPE_BAO_ADDR
+              value: {{ .Values.bao.address | quote }}
+            - name: TROUPE_OBJECT_ENDPOINT
+              value: {{ .Values.objectStore.endpoint | quote }}
+            - name: TROUPE_OBJECT_BUCKET
+              value: {{ .Values.objectStore.bucket | quote }}
+            - name: TROUPE_OBJECT_REGION
+              value: {{ .Values.objectStore.region | quote }}
+            - name: RELEASE_DISTRIBUTION
+              value: {{ .Values.plane.distribution | quote }}
+            {{- if eq .Values.plane.distribution "name" }}
+            - name: RELEASE_NODE
+              valueFrom:
+                fieldRef: {fieldPath: status.podIP}
+            {{- end }}
+            # Secrets are referenced, never rendered. Troupe creates none of these.
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.plane.database.secretName }}
+                  key: {{ .Values.plane.database.secretKey }}
+            - name: TROUPE_SECRET_KEY_BASE
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.plane.secretKeyBase.secretName }}
+                  key: {{ .Values.plane.secretKeyBase.secretKey }}
+            {{- if .Values.plane.oidc.secretName }}
+            - name: TROUPE_OIDC_CLIENT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.plane.oidc.secretName }}
+                  key: {{ .Values.plane.oidc.secretKey }}
+                  optional: true
+            {{- end }}
+            {{- if .Values.plane.scim.enabled }}
+            - name: TROUPE_SCIM_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.plane.scim.secretName }}
+                  key: {{ .Values.plane.scim.secretKey }}
+            {{- end }}
+            {{- if .Values.objectStore.secretName }}
+            - name: TROUPE_OBJECT_ACCESS_KEY_ID
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.objectStore.secretName }}
+                  key: access-key-id
+                  optional: true
+            - name: TROUPE_OBJECT_SECRET_ACCESS_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.objectStore.secretName }}
+                  key: secret-access-key
+                  optional: true
+            {{- end }}
+            {{- if .Values.bao.tokenSecretName }}
+            - name: TROUPE_BAO_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.bao.tokenSecretName }}
+                  key: {{ .Values.bao.tokenSecretKey }}
+            {{- end }}
+          resources: {{- toYaml .Values.plane.resources | nindent 12 }}
+          readinessProbe:
+            httpGet: {path: /.well-known/troupe, port: http}
+            initialDelaySeconds: 3
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /.well-known/troupe, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: {drop: ["ALL"]}
+{{- if .Values.plane.ingress.enabled }}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    # The admin panel is LiveView, so its socket is a long-lived WebSocket rather than
+    # a request.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: {{ .Values.plane.ingressClassName }}
+  {{- if .Values.plane.tlsSecretName }}
+  tls:
+    - hosts: [{{ .Values.plane.host | quote }}]
+      secretName: {{ .Values.plane.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.plane.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: troupe-plane
+                port:
+                  number: {{ .Values.plane.httpPort }}
+{{- end }}
+{{- end }}

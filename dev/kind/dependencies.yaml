@@ -1,0 +1,373 @@
+# Everything a local Troupe needs that Troupe does not ship: a database, an object
+# store, a key manager and an identity provider.
+#
+# Development shapes, and deliberately so. Single replicas, `emptyDir` volumes, static
+# credentials in plain `Secret`s, OpenBao in dev mode with a root token. None of it
+# survives a node restart and none of it belongs in a cluster anybody else can reach —
+# which is why it lives here rather than in the chart.
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: troupe-plane-database
+  namespace: troupe-system
+stringData:
+  url: ecto://troupe:troupe@postgres.troupe-system.svc:5432/troupe_plane
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: troupe-plane-secret-key-base
+  namespace: troupe-system
+stringData:
+  # Sixty-four bytes, as Phoenix requires. A development value: it signs panel session
+  # cookies on a cluster nobody else can reach.
+  value: troupe-local-remote-secret-key-base-not-for-anywhere-else-000000
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: troupe-object-store
+  namespace: troupe-system
+stringData:
+  access-key-id: troupe
+  secret-access-key: troupe-secret
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: troupe-bao-token
+  namespace: troupe-system
+stringData:
+  token: troupe-dev-root
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: llm-credentials
+  namespace: troupe-system
+stringData:
+  # Replaced by `scripts/remote-up` with the value of ITM_LLM_GW_KEY, so the real key
+  # is never written to a file in this repository.
+  api-key: replace-me
+---
+# -- PostgreSQL ---------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: postgres
+  namespace: troupe-system
+spec:
+  selector: {app: postgres}
+  ports: [{name: postgres, port: 5432, targetPort: 5432}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: postgres
+  namespace: troupe-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: postgres}}
+  template:
+    metadata: {labels: {app: postgres}}
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:18.1-bookworm
+          env:
+            - {name: POSTGRES_USER, value: troupe}
+            - {name: POSTGRES_PASSWORD, value: troupe}
+            - {name: POSTGRES_DB, value: troupe_plane}
+            - {name: PGDATA, value: /var/lib/postgresql/data/pgdata}
+          ports: [{containerPort: 5432}]
+          volumeMounts: [{name: data, mountPath: /var/lib/postgresql/data}]
+          readinessProbe:
+            exec: {command: ["pg_isready", "-U", "troupe", "-d", "troupe_plane"]}
+            initialDelaySeconds: 5
+            periodSeconds: 3
+      volumes: [{name: data, emptyDir: {}}]
+---
+# -- MinIO --------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: minio
+  namespace: troupe-system
+spec:
+  selector: {app: minio}
+  ports:
+    - {name: s3, port: 9000, targetPort: 9000}
+    - {name: console, port: 9001, targetPort: 9001}
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: minio
+  namespace: troupe-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: minio}}
+  template:
+    metadata: {labels: {app: minio}}
+    spec:
+      containers:
+        - name: minio
+          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          args: ["server", "/data", "--console-address", ":9001"]
+          env:
+            - {name: MINIO_ROOT_USER, value: troupe}
+            - {name: MINIO_ROOT_PASSWORD, value: troupe-secret}
+          ports: [{containerPort: 9000}, {containerPort: 9001}]
+          volumeMounts: [{name: data, mountPath: /data}]
+          readinessProbe:
+            httpGet: {path: /minio/health/live, port: 9000}
+            initialDelaySeconds: 5
+            periodSeconds: 3
+      volumes: [{name: data, emptyDir: {}}]
+---
+# Versioning is on because erasure has to remove prior versions too, and a bucket
+# without it would make that done item vacuous.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: minio-setup
+  namespace: troupe-system
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: mc
+          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              until mc alias set local http://minio.troupe-system.svc:9000 troupe troupe-secret; do sleep 2; done
+              mc mb --ignore-existing local/troupe-sessions
+              mc version enable local/troupe-sessions
+---
+# -- OpenBao ------------------------------------------------------------------
+apiVersion: v1
+kind: Service
+metadata:
+  name: openbao
+  namespace: troupe-system
+spec:
+  selector: {app: openbao}
+  ports: [{name: http, port: 8200, targetPort: 8200}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: openbao
+  namespace: troupe-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: openbao}}
+  template:
+    metadata: {labels: {app: openbao}}
+    spec:
+      containers:
+        - name: openbao
+          image: openbao/openbao:2.5.0
+          args: ["server", "-dev", "-dev-root-token-id=troupe-dev-root", "-dev-listen-address=0.0.0.0:8200"]
+          env:
+            - {name: BAO_DEV_ROOT_TOKEN_ID, value: troupe-dev-root}
+          ports: [{containerPort: 8200}]
+          readinessProbe:
+            httpGet: {path: /v1/sys/health, port: 8200}
+            initialDelaySeconds: 3
+            periodSeconds: 3
+---
+# OpenBao validates a pod's token by asking Kubernetes, and it needs its own credential
+# to ask with: without a reviewer JWT it tries to use the token being reviewed, which no
+# worker ServiceAccount is allowed to do.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: openbao-reviewer
+  namespace: troupe-system
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: openbao-reviewer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: openbao-reviewer
+    namespace: troupe-system
+---
+# The transit engine signs plane tokens; the KV engine holds session keys. Dev mode
+# mounts KV at `secret` already, so only transit has to be enabled.
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: openbao-setup
+  namespace: troupe-system
+spec:
+  backoffLimit: 10
+  template:
+    spec:
+      restartPolicy: OnFailure
+      serviceAccountName: openbao-reviewer
+      containers:
+        - name: bao
+          image: openbao/openbao:2.5.0
+          env:
+            - {name: BAO_ADDR, value: http://openbao.troupe-system.svc:8200}
+            - {name: BAO_TOKEN, value: troupe-dev-root}
+          command: ["/bin/sh", "-c"]
+          args:
+            - |
+              set -e
+              until bao status >/dev/null 2>&1; do sleep 2; done
+              bao secrets enable -path=transit transit 2>/dev/null || true
+              bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256 2>/dev/null || true
+
+              # Kubernetes auth, so a pod authenticates as its ServiceAccount rather than
+              # carrying a token. The policies are the ones `Troupe.KMS.Policy` writes:
+              # a worker creates and reads keys under its granted teams and can delete
+              # none, and the plane can destroy metadata and read no key at all.
+              bao auth enable kubernetes 2>/dev/null || true
+              bao write auth/kubernetes/config \
+                kubernetes_host=https://kubernetes.default.svc:443 \
+                kubernetes_ca_cert=@/var/run/secrets/kubernetes.io/serviceaccount/ca.crt \
+                token_reviewer_jwt=@/var/run/secrets/kubernetes.io/serviceaccount/token
+
+              bao policy write troupe-worker-dev - <<'POLICY'
+              path "secret/data/troupe/teams/+/sessions/*" {
+                capabilities = ["create", "read", "update"]
+              }
+              path "secret/metadata/troupe/teams/+/sessions/*" {
+                capabilities = ["read", "list"]
+              }
+              POLICY
+
+              bao policy write troupe-plane - <<'POLICY'
+              path "secret/metadata/troupe/teams/+/sessions/*" {
+                capabilities = ["delete", "list", "read"]
+              }
+              POLICY
+
+              # `audience` matches what the operator projects, so a token minted for the
+              # plane is refused here and vice versa.
+              bao write auth/kubernetes/role/troupe-worker \
+                bound_service_account_names=troupe-worker \
+                bound_service_account_namespaces='*' \
+                audience=troupe-kms \
+                policies=troupe-worker-dev \
+                ttl=1h
+
+              bao write auth/kubernetes/role/troupe-plane \
+                bound_service_account_names=troupe-plane \
+                bound_service_account_namespaces=troupe-system \
+                policies=troupe-plane \
+                ttl=1h
+
+              bao read transit/keys/troupe-session-tokens
+---
+# -- Dex ----------------------------------------------------------------------
+# An identity provider that speaks the device authorization grant, which is what
+# `troupe login` runs — against the provider, never against the plane.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: dex
+  namespace: troupe-system
+data:
+  config.yaml: |
+    issuer: http://dex.localtest.me:30080/dex
+    storage:
+      type: memory
+    web:
+      http: 0.0.0.0:5556
+    oauth2:
+      # The device flow needs no client secret and no browser redirect back to a
+      # terminal, which is the whole reason `troupe login` uses it.
+      skipApprovalScreen: true
+    staticClients:
+      - id: troupe
+        name: Troupe
+        public: true
+    enablePasswordDB: true
+    staticPasswords:
+      # bcrypt of "troupe". A development password on a cluster nobody else can reach.
+      - email: "ada@example.test"
+        hash: "$2b$10$HVE7poSm1BWDxR/XRkmfbucZb10p/q/n6d09eq33UTEKwnNzmDhgS"
+        username: "ada"
+        userID: "ada"
+        groups: ["troupe-platform-admins", "engineering"]
+    # Dex puts group membership in the `groups` claim, which is what the plane reads and
+    # what decides who administers the platform.
+    frontend:
+      issuer: Troupe (local)
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex
+  namespace: troupe-system
+spec:
+  selector: {app: dex}
+  ports: [{name: http, port: 5556, targetPort: 5556}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: dex
+  namespace: troupe-system
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: dex}}
+  template:
+    metadata: {labels: {app: dex}}
+    spec:
+      containers:
+        - name: dex
+          image: ghcr.io/dexidp/dex:v2.45.0
+          args: ["dex", "serve", "/etc/dex/config.yaml"]
+          ports: [{containerPort: 5556}]
+          volumeMounts: [{name: config, mountPath: /etc/dex}]
+          readinessProbe:
+            httpGet: {path: /dex/healthz, port: 5556}
+            initialDelaySeconds: 3
+            periodSeconds: 3
+      volumes: [{name: config, configMap: {name: dex}}]
+---
+# An issuer URL has to mean the same thing to the client on the laptop and to the plane
+# inside the cluster — it is in the `iss` claim, and both fetch keys from it.
+#
+# `dex.localtest.me:30080` does, given two things. From the laptop the name resolves to
+# 127.0.0.1 and kind maps 30080 onto the ingress controller. From inside the cluster a
+# CoreDNS rewrite (applied by `scripts/remote-up`) points the same name at this Service,
+# which is why it listens on 30080 rather than on Dex's own port.
+apiVersion: v1
+kind: Service
+metadata:
+  name: dex-public
+  namespace: troupe-system
+spec:
+  selector: {app: dex}
+  ports: [{name: http, port: 30080, targetPort: 5556}]
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: dex
+  namespace: troupe-system
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: dex.localtest.me
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend: {service: {name: dex, port: {number: 5556}}}

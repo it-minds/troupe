@@ -1,0 +1,80 @@
+# The chart, sized for one laptop.
+#
+# Every difference from the defaults is a development choice and is a reason not to run
+# this anywhere else: one replica each, no TLS, a static OpenBao token, and an identity
+# provider with a password in a ConfigMap.
+
+operator:
+  image: {tag: dev}
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: "1", memory: 512Mi}
+  ingressClassName: nginx
+  tlsSecretName: ""
+  # No certificate, and kind maps the host's 30080 onto the ingress controller's 80.
+  workersScheme: ws
+  workersPort: 30080
+
+plane:
+  enabled: true
+  image: {tag: dev}
+  # One, so the `:global` singletons need no Erlang cluster and distribution stays off
+  # the network entirely.
+  replicas: 1
+  distribution: none
+  host: plane.localtest.me
+  # `localtest.me` resolves to 127.0.0.1 everywhere, and kind maps the host's 30080 onto
+  # the ingress controller — so one URL works from the laptop and names the same thing
+  # the plane calls itself.
+  baseUrl: http://plane.localtest.me:30080
+  ingressClassName: nginx
+  tlsSecretName: ""
+  provisioningMode: direct
+  platformAdminGroup: troupe-platform-admins
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  oidc:
+    issuer: http://dex.localtest.me:30080/dex
+    clientId: troupe
+    authorizeUrl: http://dex.localtest.me:30080/dex/auth
+    deviceUrl: http://dex.localtest.me:30080/dex/device/code
+    tokenUrl: http://dex.localtest.me:30080/dex/token
+    # A public client runs the device flow with no secret, which is the whole reason
+    # `troupe login` uses that grant.
+    secretName: ""
+
+bao:
+  address: http://openbao.troupe-system.svc:8200
+  # Dev mode, so a root token rather than Kubernetes auth.
+  tokenSecretName: troupe-bao-token
+  tokenSecretKey: token
+
+objectStore:
+  endpoint: http://minio.troupe-system.svc:9000
+  bucket: troupe-sessions
+  region: us-east-1
+  secretName: troupe-object-store
+
+policy:
+  install: true
+  name: default
+  allowedImageRepositories:
+    - ghcr.io/objective-mj/troupe-worker
+  maxReplicas: 2
+  maxSessionsPerPod: 4
+  maxResources: {cpu: "2", memory: 4Gi}
+  # Named, not starred: a bare `*` is not a pattern the policy accepts, and it should
+  # not be — a profile that could name any endpoint could send a team's code anywhere.
+  allowedEgress:
+    - llm-gw.itmindsinternal.dk
+    - github.com
+    - "*.github.com"
+    # The operator's cluster suite runs against whatever cluster is there and its
+    # fixtures name this one. A development policy that refused it would make
+    # `scripts/remote-up` and `mix check` unable to share a cluster.
+    - "*.anthropic.com"
+  allowedStorageClasses:
+    - standard
+  namespacePrefix: troupe-w-
+  workersDomain: workers.localtest.me

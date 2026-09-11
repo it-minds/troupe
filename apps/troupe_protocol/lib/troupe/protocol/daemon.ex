@@ -44,13 +44,25 @@ defmodule Troupe.Protocol.Daemon do
   calling process unless `:owner` says otherwise.
   """
   @spec connect([option()]) :: {:ok, pid()} | {:error, term()}
+  @client_options [:owner, :client_info, :capabilities, :timeout, :token]
+
   def connect(opts \\ []) do
+    case Keyword.get(opts, :url) do
+      nil -> connect_local(opts)
+      url -> Client.connect([url: url] ++ Keyword.take(opts, @client_options))
+    end
+  end
+
+  # A URL is a worker pod, reached over a WebSocket through its own Ingress. There is no
+  # daemon to ensure and nothing to spawn: the session is somebody else's, running
+  # somewhere else, and this process is only a client of it.
+  defp connect_local(opts) do
     with {:ok, endpoint} <- ensure_running(opts) do
       {address, port} = Endpoint.connect_args(endpoint)
 
       Client.connect(
         [address: address, port: port, token: endpoint.token] ++
-          Keyword.take(opts, [:owner, :client_info, :capabilities, :timeout])
+          Keyword.take(opts, @client_options)
       )
     end
   end

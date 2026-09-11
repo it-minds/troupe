@@ -47,6 +47,15 @@ spec:
                   type: object
                   properties:
                     endpoint: {type: string}
+                    provider:
+                      type: string
+                      enum: [anthropic, openai, fake]
+                      default: openai
+                      description: Which adapter speaks to the endpoint. `openai` is plain Chat Completions, which is what a gateway serves.
+                    model: {type: string}
+                    smallModel:
+                      type: string
+                      description: Used only for conversation summarisation, where a cheaper model is enough.
                     secretRef:
                       type: object
                       properties:

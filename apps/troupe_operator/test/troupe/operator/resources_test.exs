@@ -148,17 +148,23 @@ defmodule Troupe.Operator.ResourcesTest do
       assert pod["serviceAccountName"] == "troupe-worker"
     end
 
-    test "the pod gets a projected token scoped to the plane, and nothing else",
-         %{resources: resources} do
+    test "the pod gets audience-scoped tokens and nothing else", %{resources: resources} do
       token = Enum.find(pod_spec(resources)["volumes"], &(&1["name"] == "enrolment-token"))
+      sources = Enum.map(get_in(token, ["projected", "sources"]), & &1["serviceAccountToken"])
 
-      assert [%{"serviceAccountToken" => source}] = get_in(token, ["projected", "sources"])
-      assert source["audience"] == Names.enrolment_audience()
-      assert source["audience"] == "troupe-plane"
+      by_audience = Map.new(sources, &{&1["audience"], &1})
+
+      # Two, and each good in exactly one place: the token the plane accepts cannot open
+      # a session key, and the one the key manager accepts cannot enrol.
+      assert Map.keys(by_audience) |> Enum.sort() ==
+               Enum.sort([Names.enrolment_audience(), Names.kms_audience()])
+
+      assert by_audience["troupe-plane"]["path"] == "token"
+      assert by_audience["troupe-kms"]["path"] == "kms-token"
 
       # A token scoped to one audience cannot be replayed against the Kubernetes API,
       # which is the point of not automounting the real one.
-      assert source["expirationSeconds"] <= 3600
+      for source <- sources, do: assert(source["expirationSeconds"] <= 3600)
     end
   end
 

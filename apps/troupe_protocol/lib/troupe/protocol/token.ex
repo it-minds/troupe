@@ -97,8 +97,23 @@ defmodule Troupe.Protocol.Token do
       not is_integer(claims["exp"]) -> {:error, :no_expiry}
       claims["exp"] + leeway < now -> {:error, :expired}
       is_integer(claims["nbf"]) and claims["nbf"] - leeway > now -> {:error, :not_yet_valid}
-      is_integer(claims["iat"]) and claims["exp"] - claims["iat"] > @max_lifetime_seconds -> {:error, :lifetime_too_long}
+      too_long?(claims, opts) -> {:error, :lifetime_too_long}
       true -> :ok
+    end
+  end
+
+  # The ceiling applies to tokens *Troupe* mints, which is what it is a rule about: a
+  # leaked worker token is a fifteen-minute problem and no longer. An identity provider's
+  # id_token is not one of those — its lifetime is the provider's policy, and a plane that
+  # refused every provider whose default is an hour would refuse almost all of them. Those
+  # callers pass `max_lifetime: :any` and rely on `exp`, the signature and the audience.
+  defp too_long?(claims, opts) do
+    case Keyword.get(opts, :max_lifetime, @max_lifetime_seconds) do
+      :any ->
+        false
+
+      seconds ->
+        is_integer(claims["iat"]) and claims["exp"] - claims["iat"] > seconds
     end
   end
 

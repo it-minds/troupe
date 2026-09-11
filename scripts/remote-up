@@ -1,0 +1,242 @@
+#!/usr/bin/env bash
+# A whole Troupe — plane, operator, workers, and the things they depend on — on one
+# laptop, in kind.
+#
+# This is the *remote* product running locally: `troupe login` against a real identity
+# provider, sessions created through the plane's public API, and a client attaching to a
+# worker pod over a WebSocket. Nothing here is a shortcut around the protocol; what is
+# shortened is the infrastructure, which runs as single replicas on `emptyDir` volumes
+# with development credentials.
+#
+# Not idempotent by accident: every step is an apply or an upgrade, so running it again
+# after a change is the way to pick the change up.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+context="kind-${cluster}"
+namespace="troupe-system"
+profile="${TROUPE_PROFILE_NAME:-dev}"
+
+require() {
+  command -v "$1" >/dev/null 2>&1 || { echo "remote-up: $1 is required but not on PATH" >&2; exit 1; }
+}
+require kind
+require kubectl
+require helm
+require docker
+
+kc() { kubectl --context "$context" "$@"; }
+
+step() { echo; echo "==> $*"; }
+
+# -- the cluster --------------------------------------------------------------
+
+if ! kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+  step "1. A cluster"
+  scripts/kind-up
+else
+  step "1. Cluster $cluster is already up"
+fi
+
+# -- ingress ------------------------------------------------------------------
+#
+# `kind-up` labels its node `ingress-ready` and maps the host's 30080 onto port 80,
+# which is exactly what ingress-nginx's kind manifest expects. Workers are reached
+# through an Ingress per pod, so this is not optional.
+
+step "2. An ingress controller"
+if kc get deployment -n ingress-nginx ingress-nginx-controller >/dev/null 2>&1; then
+  echo "ingress-nginx is already installed"
+else
+  kc apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/controller-v1.14.1/deploy/static/provider/kind/deploy.yaml
+fi
+
+# A worker's NetworkPolicy admits traffic only from namespaces carrying this label. It
+# is how "only the ingress may reach a pod" is said, and labelling whichever namespace
+# runs the controller is the cluster admin's half of it.
+kc label namespace ingress-nginx troupe.dev/ingress=true --overwrite >/dev/null
+
+kc wait --namespace ingress-nginx \
+  --for=condition=ready pod \
+  --selector=app.kubernetes.io/component=controller \
+  --timeout=180s
+
+# A ready controller pod is not a serving admission webhook: the webhook's certificate
+# is patched in by a Job and its endpoints appear a moment later. Every Ingress applied
+# in between is refused, so this waits for the thing that actually has to answer.
+echo "waiting for the admission webhook"
+for _ in $(seq 1 60); do
+  if kc get endpoints -n ingress-nginx ingress-nginx-controller-admission \
+      -o jsonpath='{.subsets[0].addresses[0].ip}' 2>/dev/null | grep -q .; then
+    break
+  fi
+  sleep 2
+done
+
+# -- images -------------------------------------------------------------------
+
+step "3. Images"
+if [ "${TROUPE_SKIP_BUILD:-}" = "1" ]; then
+  echo "skipping the build (TROUPE_SKIP_BUILD=1)"
+else
+  scripts/build-images
+fi
+
+# -- dependencies -------------------------------------------------------------
+
+step "4. A database, an object store, a key manager and an identity provider"
+kc create namespace "$namespace" --dry-run=client -o yaml | kc apply -f -
+retry_apply() {
+  for attempt in 1 2 3 4 5; do
+    if kc apply -f "$1"; then return 0; fi
+    echo "apply of $1 failed (attempt $attempt); retrying"
+    sleep 5
+  done
+  return 1
+}
+
+retry_apply dev/kind/dependencies.yaml
+
+# The gateway key is the one secret that is never written to a file in this repository.
+if [ -n "${ITM_LLM_GW_KEY:-}" ]; then
+  kc create secret generic llm-credentials \
+    --namespace "$namespace" \
+    --from-literal=api-key="$ITM_LLM_GW_KEY" \
+    --dry-run=client -o yaml | kc apply -f -
+  echo "llm-credentials carries ITM_LLM_GW_KEY from this shell"
+else
+  echo "ITM_LLM_GW_KEY is not set; workers will start but cannot reach a model" >&2
+fi
+
+# The issuer URL must resolve inside the cluster to the same Dex it resolves to outside.
+# `localtest.me` is 127.0.0.1 everywhere, which inside a pod is the pod — so CoreDNS is
+# told otherwise. Only for this one name.
+step "4b. Teaching the cluster where dex.localtest.me is"
+if kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' | grep -q "dex.localtest.me"; then
+  echo "the rewrite is already there"
+else
+  kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' > /tmp/troupe-corefile
+  awk '/^\s*kubernetes cluster\.local/ && !done {print "    rewrite name dex.localtest.me dex-public.troupe-system.svc.cluster.local"; done=1} {print}' \
+    /tmp/troupe-corefile > /tmp/troupe-corefile.new
+  kc create configmap coredns -n kube-system --from-file=Corefile=/tmp/troupe-corefile.new \
+    --dry-run=client -o yaml | kc apply -f -
+  kc rollout restart -n kube-system deployment/coredns
+  kc rollout status -n kube-system deployment/coredns --timeout=120s
+fi
+
+for deployment in postgres minio openbao dex; do
+  kc rollout status -n "$namespace" "deployment/$deployment" --timeout=180s
+done
+
+# -- Troupe -------------------------------------------------------------------
+
+# Helm installs `crds/` once and never upgrades them, which is a safety property: removing
+# a CRD removes every object of that kind, and for WorkerProfile that means the workers.
+# Changing one is therefore deliberate, and on a development cluster this is the deliberate
+# part.
+step "5. Custom resource definitions"
+kc apply -f charts/troupe/crds/
+
+step "6. The chart"
+helm --kube-context "$context" upgrade --install troupe charts/troupe \
+  --namespace "$namespace" \
+  --values dev/kind/values.yaml \
+  --wait --timeout 5m
+
+# A rebuilt image under the same tag changes nothing in the pod spec, so Kubernetes has
+# no reason to replace the pods. Restarting is the only way to pick one up, and skipping
+# it is how you spend an hour debugging the code you did not deploy.
+if [ "${TROUPE_SKIP_BUILD:-}" != "1" ]; then
+  kc rollout restart -n "$namespace" deployment/troupe-plane deployment/troupe-operator
+fi
+
+kc rollout status -n "$namespace" deployment/troupe-plane --timeout=180s
+kc rollout status -n "$namespace" deployment/troupe-operator --timeout=180s
+
+# -- a profile ----------------------------------------------------------------
+#
+# Created as a WorkerProfile rather than through the panel, because the panel needs a
+# platform admin and a platform admin needs somebody to have logged in. The plane learns
+# about it when a pod of it enrols.
+
+step "7. A worker profile"
+kc apply -f - <<YAML
+apiVersion: troupe.dev/v1alpha1
+kind: WorkerProfile
+metadata:
+  name: ${profile}
+  namespace: ${namespace}
+spec:
+  image:
+    repository: ghcr.io/objective-mj/troupe-worker
+    tag: dev
+  replicas: 1
+  sessionsPerPod: 2
+  resources:
+    requests: {cpu: 100m, memory: 512Mi}
+    limits: {cpu: "2", memory: 2Gi}
+  llm:
+    endpoint: ${TROUPE_GATEWAY_URL:-https://llm-gw.itmindsinternal.dk/v1}
+    provider: openai
+    model: ${TROUPE_GATEWAY_MODEL:-code-default}
+    smallModel: ${TROUPE_GATEWAY_SMALL_MODEL:-chat-fast}
+    secretRef:
+      name: llm-credentials
+      key: api-key
+YAML
+
+echo "waiting for the operator to reconcile ${profile}"
+for _ in $(seq 1 60); do
+  if kc get statefulset -n "troupe-w-${profile}" "troupe-w-${profile}" >/dev/null 2>&1; then break; fi
+  sleep 2
+done
+
+# A profile's pods run in their own namespace and Troupe creates no secrets, so the
+# gateway credential has to be put there by whoever owns it — External Secrets Operator
+# in a real cluster, and this line here. The operator makes the namespace; the secret in
+# it is somebody else's job on purpose.
+if [ -n "${ITM_LLM_GW_KEY:-}" ]; then
+  kc create secret generic llm-credentials \
+    --namespace "troupe-w-${profile}" \
+    --from-literal=api-key="$ITM_LLM_GW_KEY" \
+    --dry-run=client -o yaml | kc apply -f -
+fi
+
+# The object store is the same story: a pod reads sealed segments and writes them back,
+# and the credentials for that live in its own namespace.
+kc create secret generic troupe-object-store \
+  --namespace "troupe-w-${profile}" \
+  --from-literal=access-key-id=troupe \
+  --from-literal=secret-access-key=troupe-secret \
+  --dry-run=client -o yaml | kc apply -f -
+
+kc rollout status -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --timeout=300s || {
+  echo "remote-up: the worker did not become ready. Its logs:" >&2
+  kc logs -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --tail=60 >&2 || true
+  exit 1
+}
+
+# -- port-forwards ------------------------------------------------------------
+#
+# Dex publishes its issuer as a URL that has to mean the same thing inside the cluster
+# and out. `dex.localtest.me:30080` does: the name resolves to 127.0.0.1 on this machine
+# and reaches the ingress controller through kind's port mapping, and inside the cluster
+# the same Ingress serves it.
+
+step "8. Where things are"
+cat <<EOF
+
+  plane      http://plane.localtest.me:30080
+  panel      http://plane.localtest.me:30080/admin
+  identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
+  workers    ws://<n>.${profile}.workers.localtest.me:30080/v1/socket
+
+Log in and use it:
+
+  troupe login http://plane.localtest.me:30080
+  troupe --remote sessions
+  troupe --remote
+
+EOF
