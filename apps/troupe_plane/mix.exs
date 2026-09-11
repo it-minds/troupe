@@ -37,6 +37,10 @@ defmodule Troupe.Plane.MixProject do
       # between them is confined to plane pods by NetworkPolicy.
       {:libcluster, "~> 3.5"},
       {:oidcc, "~> 3.9"},
+      # For TokenReview at enrolment, and for writing the two custom resources the
+      # plane is allowed to write. Its RBAC is those two resources and its own
+      # endpoints; it cannot read a TroupePolicy, let alone write one.
+      {:k8s, "~> 2.8"},
       # JWTs are signed by OpenBao's transit engine, but the header and payload are
       # assembled here and clients verify against the published JWKS.
       {:jose, "~> 1.11"},

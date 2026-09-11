@@ -303,3 +303,23 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 51. **The two-replica tests use a real second node.** `:peer`, Erlang distribution, and
     its own connection pool against the same database. Faking the second replica would
     not exercise `:global` at all, and `:global` is the entire mechanism.
+
+52. **A pod's profile comes from its namespace, never from what it says.** Enrolment is
+    a `TokenReview` on the projected ServiceAccount token, and the namespace in the
+    answer decides the profile. A ux pod cannot enrol as dev because it cannot mint a
+    token from dev's ServiceAccount, and the audience — `troupe-plane` — is checked
+    explicitly, because a token valid for the API server comes back authenticated with
+    its own audiences listed rather than rejected.
+
+53. **A control connection that fails to enrol is closed.** It has no identity and
+    nothing it may say; leaving it open is an invitation to keep trying.
+
+54. **A field a worker did not report is a field that has not changed.** Casting the
+    nil would set the column to NULL, which for the byte counters is a constraint
+    violation and for the rest is losing what was there.
+
+55. **Presence is a lease, not a farewell.** A pod that fails cleanly closes its
+    connection and the plane knows at once; the failure that matters is the pod that
+    cannot tell anyone anything. So a heartbeat renews a fifteen-second lease and a
+    sweep marks what has gone quiet — on every replica, because marking a pod unhealthy
+    twice is the same as marking it once.

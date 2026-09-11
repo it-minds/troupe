@@ -27,7 +27,11 @@ defmodule Troupe.Plane.Application do
       Troupe.Plane.Repo,
       # Where the cluster-unique actors live. One per node; the actors themselves are
       # registered with `:global`, so exactly one of each exists across all of them.
-      Troupe.Plane.Singleton
+      Troupe.Plane.Singleton,
+      Troupe.Plane.Fleet.Sweeper,
+      {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
+      Troupe.Plane.Control.Connections,
+      Troupe.Plane.Control.Listener
     ] ++ cluster()
   end
 

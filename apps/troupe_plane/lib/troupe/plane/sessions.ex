@@ -13,7 +13,7 @@ defmodule Troupe.Plane.Sessions do
   alias Troupe.Plane.Fleet.Worker
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Repo
-  alias Troupe.Plane.Sessions.{ACL, Session}
+  alias Troupe.Plane.Sessions.{ACL, Anchor, Session}
 
   # -- creating and placing ---------------------------------------------------
 
@@ -130,11 +130,74 @@ defmodule Troupe.Plane.Sessions do
     put_fields(session_id, Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes]))
   end
 
+  # A field the worker did not report is a field that has not changed. Casting a nil
+  # would set the column to NULL instead, which for the counters means a constraint
+  # violation and for the rest means losing what was there.
   defp put_fields(session_id, attrs) do
+    attrs = Map.reject(attrs, fn {_key, value} -> is_nil(value) end)
+
     case Repo.get(Session, session_id) do
       nil -> {:error, :not_found}
       session -> session |> Session.changeset(attrs) |> Repo.update()
     end
+  end
+
+  @doc """
+  Record a sealed segment, refusing one from an epoch the session has moved past.
+
+  This is the fence. Epochs are minted by the plane alone and every segment's object key
+  carries the epoch it was written under, so a pod that was presumed lost and comes back
+  cannot append to a session that has been activated elsewhere — its report is refused
+  and the index never sees its events.
+  """
+  @spec record_anchor(map(), Troupe.Plane.Fleet.Worker.t() | nil) ::
+          {:ok, Anchor.t()} | {:error, :stale_epoch | term()}
+  def record_anchor(params, _worker \\ nil) do
+    session_id = params["session_id"]
+    epoch = params["epoch"]
+
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      %Session{epoch: current} when is_integer(epoch) and epoch < current ->
+        {:error, :stale_epoch}
+
+      session ->
+        insert_anchor(session, params)
+    end
+  end
+
+  defp insert_anchor(session, params) do
+    attrs = %{
+      session_id: session.id,
+      epoch: params["epoch"] || session.epoch,
+      first_seq: params["first_seq"],
+      last_seq: params["last_seq"],
+      head_hash: params["head_hash"],
+      object_key: params["object_key"],
+      bytes: params["bytes"] || 0,
+      sealed_at: DateTime.utc_now()
+    }
+
+    with {:ok, anchor} <-
+           %Anchor{}
+           |> Anchor.changeset(attrs)
+           |> Repo.insert(on_conflict: :nothing, conflict_target: [:session_id, :epoch, :last_seq]) do
+      seal(session.id, %{
+        last_seq: max(params["last_seq"] || 0, session.last_seq),
+        head_hash: params["head_hash"] || session.head_hash,
+        object_bytes: params["object_bytes"] || session.object_bytes
+      })
+
+      {:ok, anchor}
+    end
+  end
+
+  @doc "Every sealed segment head the plane holds for a session, oldest first."
+  @spec anchors(String.t()) :: [Anchor.t()]
+  def anchors(session_id) do
+    Repo.all(from a in Anchor, where: a.session_id == ^session_id, order_by: [a.epoch, a.last_seq])
   end
 
   @doc "One session, or `nil`."
