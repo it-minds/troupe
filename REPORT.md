@@ -209,28 +209,28 @@ smoke test of the resulting binary.
 
 ---
 
-# Stage 2 — progress
+# Stage 2 — report
 
-Stage 2 is **largely delivered**. Thirty-two of its thirty-five criteria pass in full
-and one in part; three are not built yet. This section says which, and what is left.
+Stage 2 is **delivered**. All thirty-five done items pass. This section says how each
+was checked, and what was found on the way.
 
-`mix check` is green: 553 tests, zero warnings, formatted, credo clean, boundaries
-clean. Four of the suites need real infrastructure and say so loudly when it is absent —
-a kind cluster for the operator and enrolment tests, PostgreSQL for the plane's, and
-MinIO and OpenBao for the worker's.
+`mix check` is green: 585 tests, zero warnings, formatted, credo clean, boundaries clean.
+Five of the suites need real infrastructure and say so loudly when it is absent — a kind
+cluster for the operator and enrolment tests, PostgreSQL for the plane's, MinIO and
+OpenBao for the worker's, and a second OTP node for the two-replica ones.
 
 ```
 $ scripts/kind-up && helm upgrade --install troupe charts/troupe -n troupe-system --create-namespace
 $ scripts/dev-up && MIX_ENV=test mix ecto.migrate
 $ mix check
-3531 mods/funs, found no issues.
+3695 mods/funs, found no issues.
 boundaries ok: 4 rules, no violations
 Result: 66 passed     # troupe_protocol  (13 against real OpenBao and MinIO)
 Result: 51 passed     # troupe_operator  (6 against a real cluster)
-Result: 109 passed    # troupe_plane     (9 against a real API server, 3 across two nodes)
-Result: 168 passed    # troupe_core
+Result: 119 passed    # troupe_plane     (9 against a real API server, 3 across two nodes)
+Result: 178 passed    # troupe_core
 Result: 40 passed     # troupe_gateway
-Result: 62 passed     # troupe_worker    (all against real MinIO, OpenBao and PostgreSQL)
+Result: 74 passed     # troupe_worker    (all against real MinIO, OpenBao and PostgreSQL)
 Result: 22 passed     # troupe_tui
 Result: 35 passed     # troupe_ctl
 ```
@@ -269,6 +269,14 @@ for the API server's audience is refused; so is one for another ServiceAccount, 
 outside a worker namespace. A pod past its fifteen-second lease is swept unhealthy and
 stops being placed on.
 
+**5. Killing one of two plane replicas.** Two real replicas — the second a separate OTP
+node — behind a Service that picks a backend per connection and does not move ones
+already established, because a real Service does not either. The worker's control link
+comes back on the survivor well inside ten seconds; the session attached to that worker
+keeps its tree, its epoch and its sealed head across the failure and runs another turn
+afterwards; and creates keep being placed by the same `:global` actor from the surviving
+replica.
+
 **6. SCIM and a login agree.** A SCIM push creates users and groups and enabling a group
 makes it a team; the same person arriving at login with SCIM off gets the same teams and
 the same profiles. Membership is replaced on both paths, so leaving a group at login
@@ -286,6 +294,15 @@ node started with `:peer`: fifty creates split across two replicas fill a profil
 room for twenty exactly once, thirty get a capacity error, and no pod exceeds its cap.
 Concurrent reservations never exceed a team's budget. Killing the replica holding an
 actor loses nothing it had granted.
+
+**10. Scaling down with a live session.** The plane marks the pod draining so every
+replica stops placing on it, the worker waits for the running turn rather than killing
+it — a turn halfway through a tool call has an OS process attached and a model call
+already paid for — and only then seals, archives, uploads and erases. The plane checks
+its own index before agreeing the pod is empty. Then the volume is deleted and the
+session comes back on ordinal 0 with its full history and its workspace, which is the
+moment a skipped step would have shown. A turn that will not finish is cancelled at the
+drain timeout and everything before it survives.
 
 **11 and 29. Config bundles.** Publishing assigns the next version, hashes the content
 canonically, and announces to every pod on that channel and no others; adoption is the
@@ -353,19 +370,64 @@ applies the erasure when it enrols.
 a worker and the plane; a marker string sent as session input appears nowhere in the
 captured traffic, nor in the plane's row, nor in its anchors.
 
-## Not yet, and why
+**30. Old logs still mean what they meant.** Every released version records log fixtures
+and the fold each produces, and every build replays all of them and compares. The hash is
+taken over a witness of the durable event types the agent's replay acts on — read out of
+the source by a test, so a clause added there without one here is caught rather than
+becoming a blind spot. Snapshots carry their format and the build that computed them, and
+one from another build, in an older format, that will not decode, or whose bytes are
+damaged is discarded for a full replay that produces exactly the same fold.
 
-- **5 in full.** A listener killed and restarted brings the worker's control link back in
-  well under ten seconds, and reports made meanwhile are delivered. The two-replica form
-  — kill one of two plane pods behind a Service — needs the cluster test rather than a
-  single BEAM.
-- **10.** Drain and scale-down with a live session: the plane stops placing, the turn
-  finishes, the session goes dormant, the pod is removed, and deleting the PVC loses
-  nothing. Every piece it rests on exists — draining is a `Fleet` flag, dormancy is
-  proven, and activation elsewhere from object storage is proven — but the sequence is
-  not yet driven end to end.
-- **30.** Fixture logs from prior releases replaying to a recorded fold hash, and a
-  corrupted snapshot falling back to a full replay.
-- **34.** A PITR restore of the plane database followed by an index rebuild and a ledger
-  reconcile. The database is configured for it (`scripts/dev-up` runs PostgreSQL with WAL
-  archiving) and the rebuild half is proven; the drill is not.
+**34. The restore drill.** `scripts/pitr-drill` takes a base backup, creates a restore
+point, writes a session that is durable in object storage and recorded in the index,
+restores PostgreSQL to before it, and rebuilds:
+
+```
+$ ./scripts/pitr-drill
+==> 3. A session written after the restore point
+seeded drill-after-backup-1789141447 into object storage
+recorded drill-after-backup-1789141447 in the index
+==> 4. Restore to the point before it
+LOG:  recovery stopping at restore point "troupe_drill_1789141447"
+the restored database has 0 row(s) for drill-after-backup-1789141447 (expected 0)
+==> 5. Rebuild from object storage
+found 1, rebuilt 1, skipped 0, failed 0
+==> 6. Nothing was lost
+drill-after-backup-1789141447 after the rebuild: 1 row(s), epoch 3, head sha256:drill
+```
+
+The ledger accepts each gateway request id exactly once and a repeat is a success rather
+than an error, because a worker replaying a queued report has done nothing wrong.
+Reconciliation compares by request id — the only identifier both systems share — and
+reports drift in three directions without ever repairing it.
+
+## What writing the tests found
+
+Four things that were wrong and would not have been found by reading the code.
+
+**A confinement bug, caught before it was committed.** The first mount-table resolver
+reinterpreted absolute paths relative to a mount root, turning `/etc/passwd` into a file
+inside the workspace. The existing workspace tests caught it; `Workspace.absolute?/1` is
+now public so both paths apply one rule.
+
+**A running session's workspace was never archived.** The seal interval bounded what a
+lost volume costs in *history*; nothing bounded what it cost in *files*, so a pod deleted
+mid-session came back with a full log and an empty tree. Now archived on its own interval,
+skipped when a cheap fingerprint says nothing changed.
+
+**Every WAL archive was failing silently.** The dev PostgreSQL's archive volume was
+root-owned and PostgreSQL archives as `postgres` — 748 failed archive commands, and
+point-in-time recovery with nothing to recover *through*. Found by writing the drill and
+running it, which is what a drill is for.
+
+**A flaky test that was reading a projection it had not waited for.** `SummaryTest` read
+the fold straight after seeing the agent go idle, but a projection is a subscriber like
+any other and the order `Events.publish/2` reaches subscribers in is not defined. It
+flaked twice in full runs before being fixed.
+
+## What is not in this stage
+
+Stage 3's admin panel and self-service provisioning, and stage 4's collaboration and
+client-hosted tools. The seams they need are in place: `Troupe.Plane.Harness` is the
+context an admin API and a `troupe admin` CLI will both go through, and the gateway's
+server-to-client request path is the one `tool.invoke` will use.
