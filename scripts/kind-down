@@ -1,0 +1,5 @@
+#!/usr/bin/env bash
+# Remove the local cluster. Nothing else on the machine is touched.
+set -euo pipefail
+cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+kind delete cluster --name "$cluster"

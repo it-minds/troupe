@@ -1,0 +1,62 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: troupe-operator
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  # More than one is fine — a Kubernetes Lease elects the leader and only the leader
+  # reconciles — but one is enough, because reconciliation is level-triggered and a
+  # restart costs a resync rather than a repair.
+  replicas: {{ .Values.operator.replicas }}
+  selector:
+    matchLabels: {{- include "troupe.operator.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "troupe.operator.selectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: troupe-operator
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: operator
+          image: "{{ .Values.operator.image.repository }}:{{ .Values.operator.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.operator.image.pullPolicy }}
+          env:
+            - name: TROUPE_OPERATOR_AUTOSTART
+              value: "true"
+            - name: TROUPE_PLANE_NAMESPACE
+              value: {{ .Values.namespace | quote }}
+            - name: TROUPE_PLANE_CONTROL_HOST
+              value: "troupe-plane-control.{{ .Values.namespace }}.svc"
+            - name: TROUPE_PLANE_CONTROL_PORT
+              value: {{ .Values.plane.controlPort | quote }}
+            - name: TROUPE_BAO_ADDR
+              value: {{ .Values.bao.address | quote }}
+            - name: TROUPE_OBJECT_ENDPOINT
+              value: {{ .Values.objectStore.endpoint | quote }}
+            - name: TROUPE_OBJECT_BUCKET
+              value: {{ .Values.objectStore.bucket | quote }}
+            - name: TROUPE_INGRESS_CLASS
+              value: {{ .Values.operator.ingressClassName | quote }}
+            - name: TROUPE_WORKERS_TLS_SECRET
+              value: {{ .Values.operator.tlsSecretName | quote }}
+            - name: TROUPE_CILIUM_AVAILABLE
+              value: {{ .Values.operator.ciliumAvailable | quote }}
+            - name: TROUPE_DRAIN_TIMEOUT_SECONDS
+              value: {{ .Values.operator.drainTimeoutSeconds | quote }}
+            - name: POD_NAME
+              valueFrom: {fieldRef: {fieldPath: metadata.name}}
+          resources: {{- toYaml .Values.operator.resources | nindent 12 }}
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: tmp
+          emptyDir: {}

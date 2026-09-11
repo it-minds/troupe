@@ -19,3 +19,13 @@ if Mix.env() == :test do
     Troupe.Test.CountingTool
   ]
 end
+
+# Bonny reads a handful of things from application configuration rather than from the
+# operator module. Only the name matters here — it labels the Kubernetes Events the
+# operator records — because the CRDs are hand-written in the Helm chart and the
+# connection is passed to the operator explicitly.
+config :bonny,
+  operator_name: "troupe-operator",
+  service_account_name: "troupe-operator",
+  group: "troupe.dev",
+  versions: [Bonny.API.Version.V1]

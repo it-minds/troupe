@@ -1,0 +1,129 @@
+# One pool of workers. Written by the plane; read by the operator, which never writes
+# its spec.
+apiVersion: apiextensions.k8s.io/v1
+kind: CustomResourceDefinition
+metadata:
+  name: workerprofiles.troupe.dev
+  labels:
+    app.kubernetes.io/name: troupe
+spec:
+  group: troupe.dev
+  scope: Namespaced
+  names:
+    kind: WorkerProfile
+    plural: workerprofiles
+    singular: workerprofile
+    shortNames: [wp]
+  versions:
+    - name: v1alpha1
+      served: true
+      storage: true
+      subresources:
+        status: {}
+      schema:
+        openAPIV3Schema:
+          type: object
+          required: [spec]
+          properties:
+            spec:
+              type: object
+              required: [image]
+              properties:
+                image:
+                  type: object
+                  required: [repository]
+                  properties:
+                    repository: {type: string}
+                    tag: {type: string}
+                    digest:
+                      type: string
+                      description: Wins over tag when both are given, because only a digest pins an image.
+                replicas: {type: integer, minimum: 0, default: 1}
+                sessionsPerPod: {type: integer, minimum: 1, default: 4}
+                resources:
+                  type: object
+                  x-kubernetes-preserve-unknown-fields: true
+                llm:
+                  type: object
+                  properties:
+                    endpoint: {type: string}
+                    secretRef:
+                      type: object
+                      properties:
+                        name: {type: string}
+                        key: {type: string, default: api-key}
+                mcpServers:
+                  type: array
+                  items:
+                    type: object
+                    required: [name, url]
+                    properties:
+                      name: {type: string}
+                      url: {type: string}
+                      secretRef:
+                        type: object
+                        properties:
+                          name: {type: string}
+                          key: {type: string, default: token}
+                egress:
+                  type: object
+                  properties:
+                    fqdns:
+                      type: array
+                      items: {type: string}
+                    gitHosts:
+                      type: array
+                      items: {type: string}
+                configBundleChannel: {type: string, default: stable}
+                orgMount:
+                  type: boolean
+                  default: false
+                  description: Mount the org volume from TroupePolicy. Always read-only.
+                teams:
+                  type: array
+                  description: >-
+                    A projection of the plane's grants, not a second source of truth.
+                    The plane derives and rewrites this; nothing else edits it.
+                  items:
+                    type: object
+                    required: [name]
+                    properties:
+                      name: {type: string}
+                      claimName: {type: string}
+                      storageClassName: {type: string}
+                      size: {type: string}
+                      mode:
+                        type: string
+                        enum: [ro, rw]
+                        default: ro
+            status:
+              type: object
+              properties:
+                observedGeneration: {type: integer}
+                readyReplicas: {type: integer}
+                namespace: {type: string}
+                conditions:
+                  type: array
+                  items:
+                    type: object
+                    required: [type, status]
+                    properties:
+                      type: {type: string}
+                      status: {type: string}
+                      reason: {type: string}
+                      message: {type: string}
+                      lastTransitionTime: {type: string, format: date-time}
+                      observedGeneration: {type: integer}
+      additionalPrinterColumns:
+        - name: Replicas
+          type: integer
+          jsonPath: .spec.replicas
+        - name: Ready
+          type: string
+          jsonPath: .status.conditions[?(@.type=="Ready")].status
+        - name: Violation
+          type: string
+          jsonPath: .status.conditions[?(@.type=="PolicyViolation")].status
+        - name: Age
+          type: date
+          jsonPath: .metadata.creationTimestamp

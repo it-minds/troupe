@@ -1,0 +1,56 @@
+# The plane is internet-facing, so its cluster access is exactly two resources: the
+# ones it is the writer of. It cannot read a TroupePolicy, let alone write one, and it
+# cannot touch a pod, a secret or a namespace.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["troupe.dev"]
+    resources: ["workerprofiles", "teamvolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Its own replicas, for libcluster's Kubernetes DNS strategy.
+  - apiGroups: [""]
+    resources: ["endpoints", "pods"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: troupe-plane
+subjects:
+  - kind: ServiceAccount
+    name: troupe-plane
+    namespace: {{ .Values.namespace }}
+---
+# Enrolment is a TokenReview: a worker presents its projected token and the plane asks
+# Kubernetes who it is. The namespace in the answer decides the profile, which is what
+# stops a pod enrolling as a profile it is not.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: troupe-plane-tokenreview
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: system:auth-delegator
+subjects:
+  - kind: ServiceAccount
+    name: troupe-plane
+    namespace: {{ .Values.namespace }}

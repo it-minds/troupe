@@ -285,17 +285,98 @@ have.
 
 ---
 
-## 7. Stages 2–4
+## 7. The operator
 
-Not built yet. The shape they assume:
+The operator is the only thing in Troupe with cluster privileges, and it has no public
+surface at all. That separation is the point: the plane is internet-facing and may
+write exactly two kinds of resource — `WorkerProfile` and `TeamVolume` — so
+compromising it gets an attacker requests that still have to pass policy, not a
+cluster.
 
-* **Stage 2 — workers.** The same daemon, in a pod, with a `Plane.Link` process
-  holding a control connection to the plane. Session content moves to object storage,
-  encrypted with a per-session key held only in the KMS; the PVC holds a disposable
-  working copy. Losing the link never affects a running session.
-* **Stage 3 — plane and operator.** The plane is Phoenix: harness API, admin panel,
-  worker control. Cluster-unique actors registered with `:global` serialise the two
-  things that must not overbook — one `Placement` per profile, one `TeamBudget` per
-  team. The operator reconciles Kubernetes and has no public surface.
+### 7.1 Three custom resources, three owners
+
+| Resource | Scope | Written by | Says |
+| --- | --- | --- | --- |
+| `TroupePolicy` | cluster | a cluster admin, never the plane | what any profile is *allowed* to ask for |
+| `WorkerProfile` | `troupe-system` | the plane | what one pool of workers should be |
+| `TeamVolume` | `troupe-system` | the plane | that a team has shared storage |
+
+`WorkerProfile.spec.teams` is a **projection** of the plane's grants, not a second
+source of truth: the plane derives it and rewrites it, and nothing else edits it.
+Organisational state lives in the plane; infrastructure desired state lives in
+Kubernetes; neither is authoritative for the other.
+
+### 7.2 Policy is checked twice, on purpose
+
+`TroupePolicy` is enforced at admission by a `ValidatingAdmissionPolicy` written in
+CEL — so a profile outside policy never enters the API server — **and** again by the
+operator, which marks it `PolicyViolation` and creates nothing.
+
+Two checks for two different failures. Admission is the one that gives a person an
+error at the moment they ask; the operator's is the one that still holds when
+admission is unavailable, when the policy tightened after a profile was already
+admitted, or when someone edits a resource with the policy CRD temporarily removed.
+Neither is redundant, because neither covers the other's case.
+
+### 7.3 What one profile becomes
+
+`Troupe.Operator.Resources.for_profile/2` is a **pure function** from a profile and a
+policy to the list of manifests that profile implies. That is where all the interesting
+decisions live — naming, addressing, what egress is allowed — so they can be tested
+without a cluster, and the reconciler is left with nothing but apply-and-compare.
+
+For profile `dev` in namespace `troupe-w-dev`:
+
+```
+Namespace              troupe-w-dev
+ServiceAccount         troupe-worker            automount disabled
+StatefulSet            troupe-w-dev             OnDelete, one PVC per pod
+Service (headless)     troupe-w-dev
+Service + Ingress      dev-0, dev-1, …          <ordinal>.<profile>.workers.<domain>
+NetworkPolicy          troupe-w-dev             default-deny, then exactly what is needed
+PodDisruptionBudget    troupe-w-dev
+PersistentVolumeClaim  team-<name>, org         one per granted team volume
+```
+
+The ServiceAccount's token is **not** automounted. The pod gets a *projected* token
+with audience `troupe-plane` instead, which is what it presents when it enrolls — a
+token scoped to one audience cannot be replayed against the Kubernetes API.
+
+`updateStrategy: OnDelete` because a pod holds live sessions. Rolling it on an image
+change would kill work in progress, so the profile reports `UpgradePending` and waits
+for a drain — see the pod lifecycle below.
+
+### 7.4 Egress
+
+The NetworkPolicy is default-deny in both directions. Ingress comes only from the
+ingress controller. Egress goes to exactly six places: the plane's control Service,
+OpenBao, the object storage endpoint, the LLM endpoint, the profile's MCP servers, and
+its git hosts — plus DNS.
+
+Standard `NetworkPolicy` cannot express an FQDN, so with plain Kubernetes those become
+CIDR rules and a documented gap. Where Cilium is present the operator additionally
+writes a `CiliumNetworkPolicy` with `toFQDNs`, which is the rule the profile actually
+asked for. The gap is recorded rather than hidden, because a policy that silently
+allows more than it says is worse than one that admits what it cannot do.
+
+### 7.5 Reconciliation
+
+One reconciler process per `WorkerProfile` and per `TeamVolume`, under a
+`DynamicSupervisor`, driven by watch events plus a periodic resync. Reconciliation is
+level-triggered and idempotent: it reads the world, computes what should exist, and
+applies the difference. A crash therefore means reconciling again from current state,
+never replaying a sequence — which is why killing the operator mid-reconcile converges
+instead of producing duplicates.
+
+Leadership is a Kubernetes `Lease`. Only the leader reconciles.
+
+---
+
+## 8. Stages 3–4
+
+* **Stage 3 — admin panel and self-service.** The plane grows a LiveView panel whose
+  every action goes through `Plane.Admin`, the same context the admin JSON-RPC and the
+  `troupe admin` CLI use. A test enumerates that context and asserts each function has
+  both; xref asserts LiveViews call nothing else.
 * **Stage 4 — client-hosted tools.** Server-to-client requests, so a tool can run on
   the user's machine while the agent runs in a pod.

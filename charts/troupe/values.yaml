@@ -1,0 +1,96 @@
+# The namespace everything lives in. Worker namespaces are created by the operator and
+# named from the policy's prefix, so they are not listed here.
+namespace: troupe-system
+
+# CRDs live under `charts/troupe/crds/`, which Helm installs before anything else and
+# never upgrades or deletes. That ordering is what lets the default TroupePolicy be an
+# ordinary template, and the not-deleting is a safety property: removing a CRD removes
+# every object of that kind, which for WorkerProfile means removing the workers.
+# Changing a CRD is therefore a deliberate `kubectl apply -f charts/troupe/crds/`.
+
+operator:
+  image:
+    repository: ghcr.io/objective-mj/troupe-operator
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 1
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+  # Whether Cilium is installed. With it the operator writes CiliumNetworkPolicy with
+  # real FQDN rules; without it, egress to named hosts is a CIDR rule and a documented
+  # gap.
+  ciliumAvailable: false
+  ingressClassName: nginx
+  # A wildcard certificate for *.workers.<domain>, issued out of band (cert-manager
+  # with DNS-01 in the reference deployment).
+  tlsSecretName: ""
+  drainTimeoutSeconds: 300
+
+plane:
+  image:
+    repository: ghcr.io/objective-mj/troupe-plane
+    tag: ""
+    pullPolicy: IfNotPresent
+  replicas: 2
+  host: plane.example.test
+  ingressClassName: nginx
+  tlsSecretName: ""
+  resources:
+    requests: {cpu: 200m, memory: 256Mi}
+    limits: {cpu: "1", memory: 1Gi}
+  # The control listener workers dial. Never exposed through ingress.
+  controlPort: 4001
+  httpPort: 4000
+  database:
+    # A reference to a secret created out of band or by External Secrets Operator.
+    # Troupe never creates secrets.
+    secretName: troupe-plane-database
+    secretKey: url
+  oidc:
+    issuer: ""
+    clientId: ""
+    secretName: troupe-plane-oidc
+    secretKey: client-secret
+  scim:
+    enabled: false
+    secretName: troupe-plane-scim
+    secretKey: token
+
+bao:
+  address: http://openbao.troupe-system.svc:8200
+  # The Kubernetes auth mount and the role the plane authenticates with.
+  authPath: kubernetes
+  planeRole: troupe-plane
+
+objectStore:
+  endpoint: http://minio.troupe-system.svc:9000
+  bucket: troupe-sessions
+  region: us-east-1
+  secretName: troupe-object-store
+
+# The default TroupePolicy. A cluster admin is expected to edit this; the plane cannot.
+policy:
+  install: true
+  name: default
+  allowedImageRepositories:
+    - ghcr.io/objective-mj/troupe-worker
+  maxReplicas: 8
+  maxSessionsPerPod: 8
+  maxResources:
+    cpu: "4"
+    memory: 8Gi
+  allowedEgress:
+    - "*.anthropic.com"
+    - github.com
+  allowedStorageClasses:
+    - standard
+  orgVolume: {}
+  namespacePrefix: troupe-w-
+  workersDomain: workers.example.test
+
+admission:
+  # ValidatingAdmissionPolicy is GA from Kubernetes 1.30. Where it is unavailable the
+  # operator's own check still refuses the profile and marks PolicyViolation, which is
+  # the documented fallback rather than a silent one.
+  install: true

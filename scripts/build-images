@@ -1,0 +1,24 @@
+#!/usr/bin/env bash
+# Build the three server images, and load them into the local kind cluster.
+#
+# The client binary is not built here: it is a Burrito executable for a laptop, and CI
+# builds it on a native runner per target.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+registry="${TROUPE_REGISTRY:-ghcr.io/objective-mj}"
+tag="${TROUPE_IMAGE_TAG:-dev}"
+cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+releases=("${@:-troupe_operator troupe_plane troupe_worker}")
+
+for release in ${releases[@]}; do
+  image="${registry}/${release//_/-}:${tag}"
+  echo "build-images: building $image"
+  docker build --file docker/Dockerfile --build-arg "RELEASE=${release}" --tag "$image" .
+
+  if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+    echo "build-images: loading $image into kind/$cluster"
+    kind load docker-image "$image" --name "$cluster"
+  fi
+done

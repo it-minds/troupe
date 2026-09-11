@@ -1,0 +1,136 @@
+{{- if .Values.admission.install }}
+# The same rules the operator checks, in CEL, at admission.
+#
+# Two checks for two different failures. This one gives the person who submitted a
+# profile an error at the moment they ask, and keeps the object out of the API server
+# entirely. The operator's copy is the one that still holds when admission is
+# unavailable, when the policy tightened after a profile was already admitted, or when
+# someone edits a resource while this policy is absent. Neither covers the other's case.
+#
+# `paramKind` points at TroupePolicy itself, so there is one place the limits are
+# written and the CEL reads them rather than repeating them.
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicy
+metadata:
+  name: troupe-worker-profile-policy
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  failurePolicy: Fail
+  paramKind:
+    apiVersion: troupe.dev/v1alpha1
+    kind: TroupePolicy
+  matchConstraints:
+    resourceRules:
+      - apiGroups: ["troupe.dev"]
+        apiVersions: ["v1alpha1"]
+        operations: ["CREATE", "UPDATE"]
+        resources: ["workerprofiles"]
+  variables:
+    - name: spec
+      expression: object.spec
+    - name: repository
+      expression: variables.spec.image.repository
+    # Every host the profile would reach: its declared FQDNs and git hosts, plus the
+    # LLM endpoint and every MCP server. A profile that could name any endpoint could
+    # send a team's code anywhere, so those count as egress too.
+    - name: endpoints
+      expression: >-
+        (has(variables.spec.llm) && has(variables.spec.llm.endpoint) && isURL(variables.spec.llm.endpoint)
+          ? [url(variables.spec.llm.endpoint).getHostname()] : []) +
+        (has(variables.spec.mcpServers)
+          ? variables.spec.mcpServers.filter(s, isURL(s.url)).map(s, url(s.url).getHostname()) : [])
+    - name: declared
+      expression: >-
+        (has(variables.spec.egress) && has(variables.spec.egress.fqdns) ? variables.spec.egress.fqdns : []) +
+        (has(variables.spec.egress) && has(variables.spec.egress.gitHosts) ? variables.spec.egress.gitHosts : [])
+    - name: hosts
+      expression: variables.endpoints + variables.declared
+    - name: allowedEgress
+      expression: "has(params.spec.allowedEgress) ? params.spec.allowedEgress : []"
+    - name: storageClasses
+      expression: >-
+        has(variables.spec.teams)
+          ? variables.spec.teams.filter(t, has(t.storageClassName)).map(t, t.storageClassName) : []
+  validations:
+    - expression: >-
+        has(params.spec.allowedImageRepositories) &&
+        params.spec.allowedImageRepositories.exists(r,
+          variables.repository == r || variables.repository.startsWith(r + '/'))
+      messageExpression: "'image repository ' + variables.repository + ' is not allowed by TroupePolicy'"
+      reason: Forbidden
+
+    - expression: "!has(variables.spec.replicas) || variables.spec.replicas <= params.spec.maxReplicas"
+      messageExpression: "'replicas is above the maximum of ' + string(params.spec.maxReplicas)"
+      reason: Forbidden
+
+    - expression: >-
+        !has(variables.spec.sessionsPerPod) ||
+        !has(params.spec.maxSessionsPerPod) ||
+        variables.spec.sessionsPerPod <= params.spec.maxSessionsPerPod
+      messageExpression: "'sessionsPerPod is above the maximum of ' + string(params.spec.maxSessionsPerPod)"
+      reason: Forbidden
+
+    - expression: >-
+        !has(variables.spec.resources) || !has(variables.spec.resources.limits) ||
+        !has(variables.spec.resources.limits.cpu) || !has(params.spec.maxResources) ||
+        !has(params.spec.maxResources.cpu) ||
+        quantity(string(variables.spec.resources.limits.cpu))
+          .isLessThan(quantity(string(params.spec.maxResources.cpu))) ||
+        quantity(string(variables.spec.resources.limits.cpu))
+          .compareTo(quantity(string(params.spec.maxResources.cpu))) == 0
+      messageExpression: "'cpu limit is above the maximum of ' + string(params.spec.maxResources.cpu)"
+      reason: Forbidden
+
+    - expression: >-
+        !has(variables.spec.resources) || !has(variables.spec.resources.limits) ||
+        !has(variables.spec.resources.limits.memory) || !has(params.spec.maxResources) ||
+        !has(params.spec.maxResources.memory) ||
+        quantity(string(variables.spec.resources.limits.memory))
+          .isLessThan(quantity(string(params.spec.maxResources.memory))) ||
+        quantity(string(variables.spec.resources.limits.memory))
+          .compareTo(quantity(string(params.spec.maxResources.memory))) == 0
+      messageExpression: "'memory limit is above the maximum of ' + string(params.spec.maxResources.memory)"
+      reason: Forbidden
+
+    # `*.example.com` matches exactly one label, as it does everywhere else that syntax
+    # appears: the host must end with the suffix and what is left in front of it must
+    # contain no dot of its own.
+    - expression: >-
+        variables.hosts.all(h,
+          variables.allowedEgress.exists(p,
+            h == p ||
+            (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
+             !h.substring(0, h.size() - (p.size() - 1)).contains('.'))))
+      messageExpression: >-
+        'egress to ' + variables.hosts.filter(h,
+          !variables.allowedEgress.exists(p,
+            h == p ||
+            (p.startsWith('*.') && h.endsWith(p.substring(1)) && h.size() > p.size() - 1 &&
+             !h.substring(0, h.size() - (p.size() - 1)).contains('.')))).join(', ') +
+        ' is outside the patterns allowed by TroupePolicy'
+      reason: Forbidden
+
+    - expression: >-
+        variables.storageClasses.all(c,
+          has(params.spec.allowedStorageClasses) && params.spec.allowedStorageClasses.exists(a, a == c))
+      messageExpression: "'a team volume asks for a storage class the TroupePolicy does not allow'"
+      reason: Forbidden
+
+    - expression: "!has(variables.spec.orgMount) || !variables.spec.orgMount || has(params.spec.orgVolume)"
+      message: "orgMount is set but the TroupePolicy offers no org volume"
+      reason: Forbidden
+---
+apiVersion: admissionregistration.k8s.io/v1
+kind: ValidatingAdmissionPolicyBinding
+metadata:
+  name: troupe-worker-profile-policy
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  policyName: troupe-worker-profile-policy
+  validationActions: [Deny]
+  paramRef:
+    name: {{ .Values.policy.name }}
+    parameterNotFoundAction: Deny
+  matchResources:
+    namespaceSelector: {}
+{{- end }}

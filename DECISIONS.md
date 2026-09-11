@@ -214,3 +214,48 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     prints "No file named daemon" and halts — the command has to never return.
     And a command that never returns must not run before the applications it depends on
     have started, which is what the ordering in `releases/0` guarantees.
+
+## Stage 2 — the operator
+
+37. **Bonny 1.5 was spiked on Elixir 1.20 / OTP 28 first, as the spec asks, and it
+    works.** It and `k8s` 2.8 compile and run there. It supplies the parts that are the
+    same in every operator and easy to get subtly wrong — a watch that resumes from the
+    right resource version, a periodic resync, leader election through a Kubernetes
+    `Lease` — so the fallback of hand-written watch-and-reconcile GenServers was not
+    needed.
+
+38. **The reconciler is self-contained rather than a Bonny pipeline step.** Bonny's
+    `register_descendant` + `ApplyDescendants` would have done the applying, but a pass
+    can also be started by the resync or by one of the operator's own objects being
+    deleted from under it, and all three want the same thing to happen. A reconciler
+    that applies for itself can be called from any of them; one that only works inside a
+    pipeline cannot. Bonny is left doing what it is good at: delivering events.
+
+39. **Nothing in a worker namespace carries an owner reference.** They may not cross
+    namespaces, and the `WorkerProfile` lives in `troupe-system` while its objects live
+    in `troupe-w-<profile>`. Kubernetes treats such an owner as missing and garbage
+    -collects the dependent — which it did, taking a whole StatefulSet seconds after the
+    operator created it. Instead the operator **prunes**: it lists what carries its own
+    marker and deletes whatever is no longer wanted. Deleting a profile deletes its
+    namespace, and Kubernetes takes the rest.
+
+40. **Pruning selects on a marker the operator writes, not on the profile label.** A
+    StatefulSet copies its selector onto the PVCs it creates from its volume claim
+    templates, so a pod's data volume — holding the working copies of live sessions —
+    carries the profile's labels too. Selecting on those alone offered one for pruning.
+
+41. **CRDs live in `charts/troupe/crds/`, not in `templates/`.** A custom resource
+    cannot be rendered in the same release as its own kind, and the chart ships a
+    default `TroupePolicy`. Helm installs `crds/` first, which resolves that, and never
+    upgrades or deletes it — which is also a safety property, since removing a CRD
+    removes every object of that kind. Changing one is a deliberate
+    `kubectl apply -f charts/troupe/crds/`.
+
+42. **The admission policy reads `TroupePolicy` through `paramKind`.** The limits are
+    written once, in the policy resource, and the CEL reads them. Two copies of the same
+    numbers would drift the first time an admin edited one.
+
+43. **The operator watches its own objects, not only the resources it owns.** The
+    periodic resync would eventually notice a deleted Ingress — that is what a resync is
+    for — but "eventually" is a minute of a profile being unreachable. A watch on the
+    objects turns that into a reconcile that starts as the deletion lands.

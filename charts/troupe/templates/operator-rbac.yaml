@@ -1,0 +1,60 @@
+# The operator holds every cluster privilege in Troupe and has no public surface.
+# The plane's own RBAC, further down, is two resources and nothing else.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: troupe-operator
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: troupe-operator
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+rules:
+  - apiGroups: ["troupe.dev"]
+    resources: ["workerprofiles", "teamvolumes", "troupepolicies"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["troupe.dev"]
+    resources: ["workerprofiles/status", "teamvolumes/status"]
+    verbs: ["get", "update", "patch"]
+  - apiGroups: [""]
+    resources: ["namespaces", "serviceaccounts", "services", "persistentvolumeclaims", "persistentvolumes"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["pods"]
+    verbs: ["get", "list", "watch", "delete"]
+  - apiGroups: [""]
+    resources: ["events"]
+    verbs: ["create", "patch"]
+  - apiGroups: ["apps"]
+    resources: ["statefulsets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["cilium.io"]
+    resources: ["ciliumnetworkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Leadership. Only the leader reconciles.
+  - apiGroups: ["coordination.k8s.io"]
+    resources: ["leases"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: troupe-operator
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: troupe-operator
+subjects:
+  - kind: ServiceAccount
+    name: troupe-operator
+    namespace: {{ .Values.namespace }}

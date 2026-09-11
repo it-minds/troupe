@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# A local Kubernetes cluster for the operator and the plane.
+#
+# Named `troupe-dev` and given its own ports on purpose: a developer's machine
+# usually has other things in Docker, and none of them should notice this.
+set -euo pipefail
+
+cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+
+command -v kind >/dev/null || { echo "kind-up: kind is required" >&2; exit 1; }
+command -v kubectl >/dev/null || { echo "kind-up: kubectl is required" >&2; exit 1; }
+
+if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+  echo "kind-up: $cluster already exists"
+else
+  # 30080/30443 rather than 80/443: binding the privileged ports would fight with
+  # whatever else the machine is already serving, and nothing here needs them.
+  kind create cluster --name "$cluster" --wait 120s --config=- <<'YAML'
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 30080
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 30443
+        protocol: TCP
+YAML
+fi
+
+kubectl --context "kind-${cluster}" version --output=yaml | head -20
+kubectl --context "kind-${cluster}" get nodes

@@ -1,0 +1,23 @@
+{{- if .Values.policy.install }}
+# The installation's policy. A cluster admin edits this; the plane's Role does not
+# include troupepolicies at all, in any verb.
+apiVersion: troupe.dev/v1alpha1
+kind: TroupePolicy
+metadata:
+  name: {{ .Values.policy.name }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    helm.sh/resource-policy: keep
+spec:
+  allowedImageRepositories: {{- toYaml .Values.policy.allowedImageRepositories | nindent 4 }}
+  maxReplicas: {{ .Values.policy.maxReplicas }}
+  maxSessionsPerPod: {{ .Values.policy.maxSessionsPerPod }}
+  maxResources: {{- toYaml .Values.policy.maxResources | nindent 4 }}
+  allowedEgress: {{- toYaml .Values.policy.allowedEgress | nindent 4 }}
+  allowedStorageClasses: {{- toYaml .Values.policy.allowedStorageClasses | nindent 4 }}
+  {{- if .Values.policy.orgVolume }}
+  orgVolume: {{- toYaml .Values.policy.orgVolume | nindent 4 }}
+  {{- end }}
+  namespacePrefix: {{ .Values.policy.namespacePrefix | quote }}
+  workersDomain: {{ .Values.policy.workersDomain | quote }}
+{{- end }}
