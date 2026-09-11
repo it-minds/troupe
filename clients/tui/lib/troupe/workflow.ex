@@ -29,8 +29,6 @@ defmodule Troupe.Workflow do
   whose JSON is invalid falls back to the default rather than failing the run.
   """
 
-  alias Troupe.Paths
-
   @type step :: %{name: String.t(), prompt: String.t()}
 
   @doc "The bundled default workflow: a generic engineering pipeline."
@@ -153,20 +151,30 @@ defmodule Troupe.Workflow do
 
   @doc """
   Resolves `<name> <task>` (or `name: task`) that arrived as the dispatch
-  prompt into `{workflow_name, task}`. Returns `{"default", task}` for a bare
-  task. A name that matches no workflow file still names the workflow (it just
-  falls back to the default steps).
+  prompt into `{workflow_name, task}`. A leading `name:` or a leading word that
+  names a workflow on disk (`.troupe/workflows/<name>.json`) selects that
+  workflow; anything else — including a bare first word with no matching file —
+  is the `"default"` workflow with the whole prompt as the task.
   """
-  @spec split(String.t()) :: {String.t(), String.t()}
-  def split(prompt) when is_binary(prompt) do
+  @spec split(String.t(), String.t()) :: {String.t(), String.t()}
+  def split(workspace, prompt) when is_binary(prompt) do
     prompt = String.trim(prompt)
+    available = available(workspace)
 
     case String.split(prompt, ~r/\s+/, parts: 2) do
       [word, rest] when byte_size(word) > 0 ->
-        if String.ends_with?(word, ":") do
-          {String.trim_trailing(word, ":"), String.trim(rest)}
-        else
-          {word, String.trim(rest)}
+        cond do
+          String.ends_with?(word, ":") ->
+            {String.trim_trailing(word, ":"), String.trim(rest)}
+
+          word == "default" ->
+            {"default", String.trim(rest)}
+
+          word in available ->
+            {word, String.trim(rest)}
+
+          true ->
+            {"default", prompt}
         end
 
       _ ->
@@ -180,10 +188,7 @@ defmodule Troupe.Workflow do
     workspace
     |> Path.join(".troupe/workflows/*.json")
     |> Path.wildcard()
-    |> Enum.map(&(Path.basename(&1, ".json")))
+    |> Enum.map(&Path.basename(&1, ".json"))
     |> Enum.sort()
   end
-
-  @doc false
-  def paths(), do: Paths.state_dir()
 end

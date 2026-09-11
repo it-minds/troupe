@@ -394,8 +394,25 @@ defmodule Troupe.Session.Dispatcher do
 
   ## Dispatch
 
+  # `/workflow <name> <task>` (or `<task>`) turns the task into a plan and
+  # dispatches the `workflow` agent in an isolated worktree. The prompt the
+  # user typed is translated, everything else is plain dispatch.
+  defp dispatch(state, "workflow", args, source) do
+    {prompt, opts} = normalize_args(args)
+    {wf_name, task} = Troupe.Workflow.split(state.workspace, prompt)
+    task = if task == "", do: prompt, else: task
+    steps = Troupe.Workflow.load(state.workspace, wf_name)
+    plan = Troupe.Workflow.plan(steps, task)
+    do_dispatch(state, "workflow", %{prompt: plan}, source, opts)
+  end
+
   defp dispatch(state, name, args, source) do
     {prompt, opts} = normalize_args(args)
+    do_dispatch(state, name, %{prompt: prompt}, source, opts)
+  end
+
+  defp do_dispatch(state, name, args, source, opts) do
+    prompt = Map.get(args, :prompt, "")
     active = state.ledger |> Map.values() |> Enum.count(&(&1.state in @active))
 
     case Map.get(state.definitions, name) do

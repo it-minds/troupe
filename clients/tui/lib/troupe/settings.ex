@@ -450,6 +450,9 @@ defmodule Troupe.Settings do
          "/worktree <prompt>    same, but in an isolated git worktree",
          "/worktree <name>: <p>  in a worktree of that name, created if it is new",
          "/worktree <wt> <p>    run in a worktree you already checked out",
+         "/workflow <task>      run the named engineering pipeline (branch, describe,",
+         "                      implement, test, verify) in a worktree it commits",
+         "/workflow plan: <t>   run the `plan` workflow from .troupe/workflows/*.json",
          "@path                 Tab-completes a file path into the prompt",
          "/agents               list the agents this workspace defines",
          "/observer             the agent tree: who is working, where, on what"
