@@ -84,8 +84,11 @@ defmodule Troupe.Worker.PlaneDownTest do
     {:ok, manifest} = Storage.get_manifest(context.store, context.session_id)
     assert manifest["last_seq"] == head
 
-    # The reports are not lost, only waiting.
-    assert Link.info(link).queued > 0
+    # The reports are not lost, only waiting. Polled, because a report is a cast from the
+    # sealer: the seal is visible in the sealer's own state a moment before the report it
+    # produced has reached the link.
+    assert eventually(fn -> Link.info(link).queued > 0 end),
+           "nothing was queued for the plane, so the reports went somewhere else"
   end
 
   test "creating and activating fail with a reason, not a timeout", context do
