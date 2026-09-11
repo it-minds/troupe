@@ -31,9 +31,12 @@ defmodule Troupe.Plane.Application do
       Troupe.Plane.Fleet.Sweeper,
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
-      Troupe.Plane.Control.Listener
+      Troupe.Plane.Control.Listener,
+      {Bandit, plug: Troupe.Plane.Web.Router, scheme: :http, port: http_port()}
     ] ++ cluster()
   end
+
+  defp http_port, do: Application.get_env(:troupe_plane, :http_port, 4000)
 
   defp cluster do
     case Application.get_env(:troupe_plane, :topologies) do

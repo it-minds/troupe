@@ -734,3 +734,31 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 128. **Losing a grant makes the team's sessions read-only, not erased.** History is
      history, and a team losing a grant is not a reason to hide what it already did.
      Reads keep working; nothing activates again.
+
+129. **The plane's HTTP surface is `Plug.Router`, not Phoenix.** Five routes and a SCIM
+     path; Phoenix arrives with stage 3's admin panel, which is what actually needs it.
+
+130. **Everything a client does goes through `/rpc`, and everything `/rpc` does goes
+     through `Troupe.Plane.Harness`.** That is the "any client, including our own, uses
+     nothing but public APIs" rule made structural rather than remembered: there is no
+     second path into the plane for the TUI to take.
+
+131. **The device grant runs against the identity provider, not through the plane.** The
+     plane is asked only where its provider is and which client id to use; the user's
+     credentials never pass through it, and what it receives afterwards is the token the
+     provider issued.
+
+132. **Two credentials, two homes.** The provider's refresh token goes to a `0600` file
+     because it is what lets `troupe` work tomorrow; the plane's session token is short,
+     audience-bound and never written down, because there is nothing to be gained by
+     storing one. The credentials file is written to a fresh file and renamed into place,
+     so a reader sees the old credentials or the new ones and never a half-written file.
+
+133. **`troupe login` says what the login actually gives you.** A person who logs in and
+     sees nothing has either no enabled team or no grant on it, and being told which is
+     the difference between a five-minute question and an afternoon one.
+
+134. **Tightening the credentials directory is best effort.** The directory Troupe made
+     is Troupe's to tighten; one it was pointed at may be somebody else's, and refusing to
+     store credentials because a parent has a different owner would be a failure for no
+     gain — the file itself is `0600` either way.

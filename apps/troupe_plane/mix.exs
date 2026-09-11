@@ -31,6 +31,9 @@ defmodule Troupe.Plane.MixProject do
       {:troupe_protocol, in_umbrella: true},
       {:phoenix, "~> 1.8"},
       {:bandit, "~> 1.12"},
+      # The plane's HTTP surface is a handful of routes, so it is `Plug.Router` rather
+      # than Phoenix. Stage 3's admin panel is what brings Phoenix in.
+      {:plug, "~> 1.16"},
       {:ecto_sql, "~> 3.14"},
       {:postgrex, "~> 0.22"},
       # Replicas find each other through the Kubernetes API; Erlang distribution

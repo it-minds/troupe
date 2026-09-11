@@ -25,7 +25,7 @@ defmodule Troupe.CLI do
   use Task
 
   alias Troupe.CLI.Options
-  alias Troupe.Ctl.Verify
+  alias Troupe.Ctl.{Credentials, Login, Verify}
   alias Troupe.Protocol.{Client, Daemon, Endpoint}
   alias Troupe.UI.Headless
 
@@ -125,6 +125,38 @@ defmodule Troupe.CLI do
     end)
   end
 
+  def dispatch(%Options{command: :login, plane: plane}, _opts) do
+    case Login.safe(plane) do
+      {:ok, session} ->
+        IO.puts("Logged in to #{plane} as #{session["display_name"] || session["subject"]}.")
+        report_access(session)
+        0
+
+      {:error, message} ->
+        IO.puts(:stderr, "troupe: #{message}")
+        1
+    end
+  end
+
+  def dispatch(%Options{command: :logout, plane: nil}, _opts) do
+    case Credentials.default() do
+      nil ->
+        IO.puts("Not logged in to anything.")
+        0
+
+      %{"plane" => plane} ->
+        Credentials.forget(plane)
+        IO.puts("Forgot #{plane}.")
+        0
+    end
+  end
+
+  def dispatch(%Options{command: :logout, plane: plane}, _opts) do
+    Credentials.forget(plane)
+    IO.puts("Forgot #{plane}.")
+    0
+  end
+
   def dispatch(%Options{command: :hq}, opts) do
     case fleet_view() do
       nil ->
@@ -193,6 +225,27 @@ defmodule Troupe.CLI do
   end
 
   # -- talking to the daemon --------------------------------------------------
+
+  # What this login actually gives you. A person who logs in and sees nothing has either
+  # no team enabled or no grant on it, and being told that is the difference between a
+  # five-minute question and an afternoon one.
+  defp report_access(session) do
+    teams = session["teams"] || []
+    profiles = session["profiles"] || []
+
+    cond do
+      teams == [] ->
+        IO.puts("\nYou are not in any team this plane has enabled. Ask a platform admin.")
+
+      profiles == [] ->
+        IO.puts("\nTeams: #{Enum.join(teams, ", ")}")
+        IO.puts("No profiles are granted to them yet, so there is nothing to create on.")
+
+      true ->
+        IO.puts("\nTeams:    #{Enum.join(teams, ", ")}")
+        IO.puts("Profiles: #{Enum.join(profiles, ", ")}")
+    end
+  end
 
   defp with_client(options, opts, fun) do
     case connect(options, opts) do
@@ -363,11 +416,22 @@ defmodule Troupe.CLI.Options do
             auto_approve: nil,
             worktree: "auto",
             log: nil,
+            plane: nil,
             timeout_ms: 30 * 60 * 1000,
             idle_ms: 10 * 60 * 1000
 
   @type command ::
-          :tui | :run | :resume | :sessions | :hq | :daemon | :verify | :version | :help
+          :tui
+          | :run
+          | :resume
+          | :sessions
+          | :hq
+          | :daemon
+          | :verify
+          | :login
+          | :logout
+          | :version
+          | :help
   @type t :: %__MODULE__{
           command: command(),
           workspace: Path.t(),
@@ -380,6 +444,7 @@ defmodule Troupe.CLI.Options do
           auto_approve: boolean() | nil,
           worktree: String.t(),
           log: Path.t() | nil,
+          plane: String.t() | nil,
           timeout_ms: pos_integer(),
           idle_ms: pos_integer()
         }
@@ -466,6 +531,11 @@ defmodule Troupe.CLI.Options do
     %{base | command: :verify, session_id: session_id}
   end
   defp with_command(base, ["daemon"]), do: %{base | command: :daemon}
+  defp with_command(_base, ["login"]), do: {:error, "login needs a plane: troupe login https://troupe.example.com"}
+
+  defp with_command(base, ["login", plane | _]), do: %{base | command: :login, plane: plane}
+  defp with_command(base, ["logout"]), do: %{base | command: :logout}
+  defp with_command(base, ["logout", plane | _]), do: %{base | command: :logout, plane: plane}
   defp with_command(_base, [other | _]), do: {:error, "unknown command #{inspect(other)}"}
 
   @spec usage() :: String.t()
@@ -482,6 +552,8 @@ defmodule Troupe.CLI.Options do
       troupe hq                       every session, and everything waiting on you
       troupe verify SESSION_ID        walk a session's hash chain and name the first break
       troupe verify --log PATH        ... offline, from a log file or a decrypted segment
+      troupe login PLANE_URL          log in to a remote plane
+      troupe logout [PLANE_URL]       forget a plane's credentials
       troupe daemon                   run the daemon in the foreground
       troupe --version
 
