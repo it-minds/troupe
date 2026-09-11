@@ -323,3 +323,44 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
     cannot tell anyone anything. So a heartbeat renews a fifteen-second lease and a
     sweep marks what has gone quiet — on every replica, because marking a pod unhealthy
     twice is the same as marking it once.
+
+## Stage 2 — the object tier
+
+56. **`Troupe.KMS` lives in `troupe_protocol`.** The spec fixes the umbrella's eight
+    apps, the plane may not depend on `troupe_core`, and both the plane and the workers
+    hold this contract — the plane destroys keys and the workers create and read them.
+    `troupe_protocol` is the only place both can see, and it already holds the other
+    contract the two sides share, endpoint discovery.
+
+57. **Session keys are KV v2, not v1, because of one call.**
+    `DELETE /metadata/<path>` removes every version. A v1 delete removes the current
+    value and leaves the key readable at its previous version, which is not erasure.
+
+58. **Creating a session key is idempotent.** A session whose key exists is a retry, not
+    a second session; replacing the key would strand every segment already written under
+    the old one — the session would still exist and none of it would decrypt.
+
+59. **The session id is authenticated but not encrypted.** AES-256-GCM with the session
+    id as associated data, so an object moved between two sessions' prefixes fails to
+    decrypt rather than decoding into the wrong session's history.
+
+60. **Object keys are zero-padded.** Object stores sort by byte, and unpadded `10`
+    sorts before `9` — which is how a replay ends up reading the tail of a session
+    first.
+
+61. **The epoch is part of a segment's key.** A pod presumed lost comes back holding the
+    old epoch, so its segments land under keys nobody reads. Reconstructing a history
+    follows the highest epoch's *contiguous* chain, so an older epoch's segment covering
+    ground already covered is skipped rather than merged — and a gap ends the chain
+    rather than being stepped over, because a history with a hole in it and no way to
+    know is worse than a short one.
+
+62. **The manifest is plaintext and everything else is not.** A rebuild has to enumerate
+    sessions from storage alone, without a key it is not allowed to have. So the manifest
+    carries ids, sizes and where the key lives — and nothing that was said.
+
+63. **S3 signing is `aws_signature` over Req, not an S3 client.** Four verbs, and an S3
+    library with its own opinions about retries, streaming and error shapes would be a
+    second HTTP stack to reason about. Two things had to be got right by hand: `host`
+    must be among the signed headers, and S3 is the service that does *not* double-encode
+    the path.
