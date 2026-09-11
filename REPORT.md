@@ -431,3 +431,122 @@ Stage 3's admin panel and self-service provisioning, and stage 4's collaboration
 client-hosted tools. The seams they need are in place: `Troupe.Plane.Harness` is the
 context an admin API and a `troupe admin` CLI will both go through, and the gateway's
 server-to-client request path is the one `tool.invoke` will use.
+
+---
+
+# Stage 3 — report
+
+Stage 3 is **delivered**. All eight done items pass.
+
+`mix check` is green. Two of the suites need infrastructure beyond the development
+services and say so loudly when it is absent: a kind cluster with the chart installed,
+and PostgreSQL for the plane.
+
+```
+$ scripts/kind-up && helm upgrade --install troupe charts/troupe -n troupe-system --create-namespace
+$ scripts/dev-up && MIX_ENV=test mix ecto.migrate
+$ mix check
+boundaries ok: 4 app rule(s), 1 module rule(s), no violations
+```
+
+## The panel
+
+**1. Profiles, pods, conditions and load, and a killed pod within two seconds.** Driven
+with `Phoenix.LiveViewTest` against the real endpoint and the real routes, because the
+parts of a panel that break are the ones a unit test of the LiveView module would skip:
+the mount that decides who you are, the session the socket carries, the redirect somebody
+with no role gets. Eighteen tests, including that a pod going unhealthy is on the page
+within two seconds, that a team admin sees only their granted profiles and is not offered
+the drain button, and that erasing takes two clicks.
+
+## Provisioning
+
+**2. Direct mode, and what the plane's credential cannot do.** A profile created through
+the panel becomes a `WorkerProfile` the operator reconciles. The RBAC is confirmed by
+asking the API server:
+
+```
+$ kubectl auth can-i create workerprofiles --as system:serviceaccount:troupe-system:troupe-plane -n troupe-system
+yes
+$ kubectl auth can-i create pods --as system:serviceaccount:troupe-system:troupe-plane -n troupe-system
+no
+$ kubectl auth can-i create secrets --as system:serviceaccount:troupe-system:troupe-plane -n troupe-system
+no
+$ kubectl auth can-i create namespaces --as system:serviceaccount:troupe-system:troupe-plane -n troupe-system
+no
+```
+
+The same for `deployments`, `statefulsets`, `serviceaccounts`, `roles`, `rolebindings`,
+`escalate`, and the subresources somebody would reach for next — `pods/exec`,
+`pods/log`, `pods/attach`, `pods/portforward`.
+
+**3. GitOps mode.** The same manifest is committed to a fixture repository and the state
+is `Pending` until the operator's `observedGeneration` catches up. A test parses the
+committed YAML back and asserts it is the document direct mode would have applied — two
+modes producing different profiles would be a trap rather than a choice.
+
+**4. A grant reaches a member without re-logging in.** The profile appears in `me` and
+`profiles.list` the moment the grant is written, and in the next minted token. The token
+already in their hand is *not* retroactively widened, because a token is a claim about
+the moment it was minted; what it may do is decided per request against the grants as
+they stand.
+
+**5. `SecretMissing`, and no value anywhere.** A profile referring to a secret the cluster
+does not have reports the condition with the reference named, and clears it when the
+secret appears. The value never reaches the custom resource or the StatefulSet — both
+carry the reference and the kubelet does the rest.
+
+## Roles
+
+**6. What each administrator sees.** A `team_admin` sees their team's sessions, spend and
+granted profiles and no others; a `platform_admin` sees everything. Neither can fetch
+session content — not as a check applied at the edge, but because the admin context has
+no function that returns it, and a test asserts no function is even *named* as though it
+might.
+
+## Parity
+
+**7. Three surfaces, one context.** `Troupe.Plane.AdminParityTest` enumerates
+`Troupe.Plane.Admin` and asserts every function has both an admin API method and a
+`troupe admin` command, that no method names a function that does not exist, and that the
+arities line up. `mix troupe.boundaries` grew module-level rules and the first one asserts
+a LiveView calls nothing but `Plane.Admin` — it found three real violations the moment it
+was written.
+
+## Audit
+
+**8. Who changed what.** Every administrative change writes a row with the actor and a
+diff over the fields that moved; a refused change writes nothing. `troupe admin audit`
+lists it, narrowable by actor, kind and subject.
+
+## What writing the tests found
+
+**The audit trail was lying about the most interesting changes.** `Audit.diff` used
+assignments as comprehension filters, which drops the element when the value is `nil` —
+so every field set from nothing or cleared to nothing was silently absent. It also
+compared a struct's atom keys and a form's string keys as different fields. Found by the
+profile editor's preview saying "no changes" to a change.
+
+**The plane could not read `TroupePolicy`.** The panel validates against it for fast
+feedback, and in a cluster that check could never have run. The chart gained a read-only
+`ClusterRole`. Found by asking the API server rather than reading the RBAC file.
+
+**`kubectl auth can-i get pods/log` does not ask about `pods/log`.** The slash form is
+answered as though it said `pods`, which the plane *can* get — so the RBAC test would have
+passed while proving nothing. Subresources need `--subresource`, and the answer is the
+last line because `kubectl` writes warnings to the same stream.
+
+**A cluster test left the admission binding owned by the wrong field manager**, so
+`helm upgrade` failed afterwards with a conflict on `.spec.matchResources`. The suite now
+restores it as Helm would, and sweeps profiles left by interrupted runs on the way in —
+each one is otherwise reconciled for as long as the cluster lives.
+
+**`SecretMissing` was made to force `Ready: False`**, which merges two facts the spec
+separates and made every fixture profile in the cluster suite go unready at once.
+Separated, and the fixtures now create the secret they name.
+
+## What is not in this stage
+
+Stage 4: several harnesses on one session, and client-hosted tools. The seams are in
+place — the gateway's connection can send requests as well as receive them, and
+`Troupe.Tool` already takes values as well as modules, which is what the MCP adapter uses.
