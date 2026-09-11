@@ -20,6 +20,14 @@ defmodule Troupe.LLM.Request do
     api_key: nil,
     timeout_ms: 300_000,
     max_retries: 4,
+    # Who this call is for, as the gateway is to record it. Every request a worker makes
+    # is tagged with the session owner as the end user, plus the team and the session, so
+    # the gateway's spend records and the plane's ledger can be reconciled against each
+    # other without either side guessing.
+    #
+    # The owner, not the caller: a collaborator's input is billed to the owner's team
+    # budget, because the budget belongs to the session and a session has one owner.
+    attribution: %{},
     extra: %{}
   ]
 
@@ -35,6 +43,7 @@ defmodule Troupe.LLM.Request do
           api_key: String.t() | nil,
           timeout_ms: pos_integer(),
           max_retries: non_neg_integer(),
+          attribution: map(),
           extra: map()
         }
 end

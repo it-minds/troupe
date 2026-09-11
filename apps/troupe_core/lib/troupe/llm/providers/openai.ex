@@ -183,6 +183,23 @@ defmodule Troupe.LLM.Providers.OpenAI do
     # know the option ignore it, and the ones that do give the agent real numbers to
     # budget with.
     |> maybe_put(:stream_options, stream_options(request))
+    # Who this call is for. `user` is the OpenAI-compatible field every gateway
+    # understands; `metadata` is what LiteLLM records alongside its own request id, which
+    # is what lets the plane's ledger and the gateway's spend records be reconciled
+    # against each other rather than compared by timestamp.
+    |> maybe_put(:user, request.attribution[:owner])
+    |> maybe_put(:metadata, metadata(request))
+  end
+
+  defp metadata(%Request{attribution: attribution}) when map_size(attribution) == 0, do: nil
+
+  defp metadata(%Request{attribution: attribution}) do
+    attribution
+    |> Enum.flat_map(fn
+      {_key, nil} -> []
+      {key, value} -> [{"troupe_" <> to_string(key), to_string(value)}]
+    end)
+    |> Map.new()
   end
 
   defp stream_options(%Request{}), do: %{include_usage: true}

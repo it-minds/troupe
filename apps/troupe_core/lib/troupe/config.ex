@@ -39,6 +39,10 @@ defmodule Troupe.Config do
             # client has no other way to know that `shell` wrote something.
             fs_events: false,
             fs_debounce_ms: 100,
+            # Who the LLM gateway should bill and record this session against:
+            # `%{owner:, team:}`. Set by the worker when the plane places the session,
+            # empty for a local one where there is nobody to bill.
+            attribution: %{},
             auto_approve: false,
             # What a session does when its tree comes back after a restart. `false` —
             # the default — means it comes back interrupted and makes no model call

@@ -183,7 +183,17 @@ defmodule Troupe.LLM.Providers.Anthropic do
     |> maybe_put(:system, request.system)
     |> maybe_put(:temperature, request.temperature)
     |> maybe_put(:tools, encode_tools(request.tools))
+    # Anthropic takes one opaque end-user id and nothing else, so the session's owner
+    # goes there. Everything else a gateway wants is carried by the OpenAI-compatible
+    # adapter, which is what a LiteLLM deployment actually speaks.
+    |> maybe_put(:metadata, metadata(request))
   end
+
+  defp metadata(%Request{attribution: %{owner: owner}}) when is_binary(owner) do
+    %{user_id: owner}
+  end
+
+  defp metadata(%Request{}), do: nil
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, []), do: map

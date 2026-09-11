@@ -33,7 +33,11 @@ defmodule Troupe.Session.SummaryTest do
     Troupe.send_input(session.id, "have a look")
     await_state(session.id, [:idle, :done], 10_000)
 
-    snapshot = Summary.snapshot(session.id)
+    # A projection is a subscriber like any other, and the order `Events.publish/2`
+    # reaches its subscribers in is not defined — so seeing the transition ourselves says
+    # nothing about whether the projection has folded it yet. Waited for rather than
+    # assumed, because the alternative is a test that passes most of the time.
+    snapshot = await_snapshot(session.id, &(&1["agents"]["root"]["state"] in ["idle", "done"]))
 
     assert snapshot["todo"] == "read the failing test"
     assert snapshot["agents"]["root"]["state"] in ["idle", "done"]
@@ -42,6 +46,21 @@ defmodule Troupe.Session.SummaryTest do
     assert snapshot["tokens"] > 0
     assert snapshot["approvals"] == []
     assert snapshot["error"] == nil
+  end
+
+  defp await_snapshot(session_id, predicate, timeout \\ 5_000) do
+    deadline = System.monotonic_time(:millisecond) + timeout
+    do_await_snapshot(session_id, predicate, deadline)
+  end
+
+  defp do_await_snapshot(session_id, predicate, deadline) do
+    snapshot = Summary.snapshot(session_id)
+
+    cond do
+      predicate.(snapshot) -> snapshot
+      System.monotonic_time(:millisecond) >= deadline -> snapshot
+      true -> do_await_snapshot(session_id, predicate, deadline)
+    end
   end
 
   test "publishes diffs, and no more than four a second", context do

@@ -663,8 +663,19 @@ defmodule Troupe.Agent.Server do
       max_tokens: state.config.max_tokens,
       base_url: state.config.base_url,
       api_key: state.config.api_key,
+      attribution: attribution(state),
       extra: request_extra(state)
     }
+  end
+
+  # What the gateway records against this call. Read from the config rather than from
+  # the session's own log, because a worker sets it once when the plane places the
+  # session and nothing in the turn can change it.
+  defp attribution(%State{} = state) do
+    state.config
+    |> Map.get(:attribution, %{})
+    |> Map.put(:session_id, state.session_id)
+    |> Map.put(:agent, Enum.join(state.agent_path, "/"))
   end
 
   # `:agent_path` rides along so the Fake can tell which agent is asking; real
@@ -1149,6 +1160,7 @@ defmodule Troupe.Agent.Server do
         max_tokens: @summarizer_max_tokens,
         base_url: state.config.base_url,
         api_key: state.config.api_key,
+        attribution: attribution(state),
         extra: request_extra(state)
       }
 

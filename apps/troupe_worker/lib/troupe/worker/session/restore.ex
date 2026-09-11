@@ -176,6 +176,13 @@ defmodule Troupe.Worker.Session.Restore do
       |> then(fn given ->
         if context.state_dir, do: Keyword.put_new(given, :state_dir, context.state_dir), else: given
       end)
+      # Who the gateway bills and records this session against. The owner, not whoever
+      # is typing: a collaborator's input is billed to the owner's team budget, because
+      # the budget belongs to the session and a session has one owner.
+      |> Keyword.put_new(:attribution, %{owner: context.owner_subject, team: context.team})
+      # A client attached to a remote session has no other way to know that `shell` wrote
+      # something, so this is not optional here.
+      |> Keyword.put_new(:fs_events, true)
 
     Troupe.resume(context.session_id,
       workspace: root,
