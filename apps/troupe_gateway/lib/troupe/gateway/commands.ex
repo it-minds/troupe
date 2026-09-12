@@ -21,13 +21,16 @@ defmodule Troupe.Gateway.Commands do
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
 
   @doc """
-  Run `fun` unless this `command_id` has been seen, in which case return what it
-  returned the first time.
+  Run `fun` unless this key has been seen, in which case return what it returned the
+  first time.
 
-  The ledger is claimed before `fun` runs, so two connections replaying the same id
-  concurrently cannot both execute it.
+  The key is whatever makes a command unique on this server — `Dispatch` uses the
+  principal's subject together with the client's `command_id`, because a `command_id` is
+  only promised unique per client and two clients counting from `c-1` must not share an
+  acknowledgement. The ledger is claimed before `fun` runs, so two connections replaying
+  the same key concurrently cannot both execute it.
   """
-  @spec once(String.t(), (-> term())) :: term()
+  @spec once(term(), (-> term())) :: term()
   def once(command_id, fun) when is_function(fun, 0) do
     case GenServer.call(__MODULE__, {:claim, command_id}, 15_000) do
       {:done, result} ->

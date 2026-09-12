@@ -53,6 +53,10 @@ defmodule Troupe.WorkerProfile do
     :llm_small_model,
     :llm_secret_name,
     :llm_secret_key,
+    # Each pod's own disk. `nil` for either means the operator's default: 20Gi, on the
+    # cluster's default storage class.
+    :storage_size,
+    :storage_class,
     replicas: 1,
     sessions_per_pod: 4,
     resources: %{},
@@ -79,6 +83,8 @@ defmodule Troupe.WorkerProfile do
       replicas: Map.get(spec, "replicas", 1),
       sessions_per_pod: Map.get(spec, "sessionsPerPod", 4),
       resources: Map.get(spec, "resources", %{}),
+      storage_size: get_in(spec, ["storage", "size"]),
+      storage_class: get_in(spec, ["storage", "storageClassName"]),
       llm_endpoint: get_in(spec, ["llm", "endpoint"]),
       llm_provider: get_in(spec, ["llm", "provider"]) || "openai",
       llm_model: get_in(spec, ["llm", "model"]),

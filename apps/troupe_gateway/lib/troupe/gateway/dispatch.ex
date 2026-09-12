@@ -112,9 +112,22 @@ defmodule Troupe.Gateway.Dispatch do
   # nothing.
   defp idempotent(method, params, context) do
     case Map.get(params, "command_id") do
-      nil -> handle(method, params, context)
-      command_id -> Commands.once(command_id, fn -> handle(method, params, context) end)
+      nil ->
+        handle(method, params, context)
+
+      command_id ->
+        Commands.once(ledger_key(context, command_id), fn -> handle(method, params, context) end)
     end
+  end
+
+  # A `command_id` is unique per client, not per server: the protocol promises that two
+  # clients counting `c-1`, `c-2`, … from their own zero never collide, and the reference
+  # clients do exactly that. So the ledger is keyed by who sent it as well as by what they
+  # called it. The principal rather than the connection, because the whole point of the
+  # ledger is that a retry after a *disconnect* is a no-op — and that retry arrives on a
+  # new connection from the same person.
+  defp ledger_key(%Context{principal: principal}, command_id) do
+    {principal["subject"] || principal[:subject], command_id}
   end
 
   # -- reads ------------------------------------------------------------------

@@ -57,11 +57,17 @@ defmodule Troupe.Operator.Resources do
 
   # -- namespace and identity -------------------------------------------------
 
+  # `troupe.dev/workers=true` is what the plane's own NetworkPolicy selects on: the
+  # control port is open to namespaces carrying it and to nothing else in the cluster.
+  # It is put here rather than in `Names.managed_labels/1` because it says something
+  # about the namespace — workers live in it — and nothing about the objects inside.
   defp namespace(namespace, profile) do
+    labels = Map.put(Names.managed_labels(profile.name), "troupe.dev/workers", "true")
+
     %{
       "apiVersion" => "v1",
       "kind" => "Namespace",
-      "metadata" => %{"name" => namespace, "labels" => Names.managed_labels(profile.name)}
+      "metadata" => %{"name" => namespace, "labels" => labels}
     }
   end
 
@@ -202,11 +208,7 @@ defmodule Troupe.Operator.Resources do
         "metadata" =>
           Names.pod_service(profile.name, ordinal)
           |> metadata(namespace, profile)
-          |> put_in(["annotations"], %{
-            # The harness connection is a long-lived WebSocket, not a request.
-            "nginx.ingress.kubernetes.io/proxy-read-timeout" => "3600",
-            "nginx.ingress.kubernetes.io/proxy-send-timeout" => "3600"
-          }),
+          |> put_unless_nil("annotations", ingress_annotations(settings)),
         "spec" => spec
       }
     end
@@ -217,6 +219,23 @@ defmodule Troupe.Operator.Resources do
   defp tls(host, %Settings{tls_secret_name: secret}) do
     [%{"hosts" => [host], "secretName" => secret}]
   end
+
+  # ingress-nginx reads these. Another controller would ignore them at best, so they are
+  # written only for the class they mean something to.
+  defp ingress_annotations(%Settings{ingress_class_name: "nginx"}) do
+    %{
+      # The harness connection is a long-lived WebSocket, not a request: the proxy has to
+      # sit on an idle socket for as long as a session sits between two tool calls.
+      "nginx.ingress.kubernetes.io/proxy-read-timeout" => "3600",
+      "nginx.ingress.kubernetes.io/proxy-send-timeout" => "3600",
+      # Concurrent connections per client address. A pod holds a handful of sessions and
+      # each session a handful of clients, so fifty is a whole office behind one NAT
+      # address rather than a limit anybody reaches by using the thing.
+      "nginx.ingress.kubernetes.io/limit-connections" => "50"
+    }
+  end
+
+  defp ingress_annotations(_settings), do: nil
 
   # -- network ----------------------------------------------------------------
 
@@ -378,17 +397,26 @@ defmodule Troupe.Operator.Resources do
           "metadata" => %{"labels" => Names.labels(profile.name)},
           "spec" => pod_spec(profile, policy, settings)
         },
-        "volumeClaimTemplates" => [
-          %{
-            "metadata" => %{"name" => Names.data_volume()},
-            "spec" => %{
-              "accessModes" => ["ReadWriteOnce"],
-              "resources" => %{"requests" => %{"storage" => "20Gi"}}
-            }
-          }
-        ]
+        "volumeClaimTemplates" => [data_volume_template(profile)]
       }
     }
+  end
+
+  # A pod's own disk: the working copies of its live sessions, and nothing that has to
+  # outlive them — the log is in object storage. Sized by the profile, 20Gi when it does
+  # not say, and on the cluster's default storage class unless it names one. A volume
+  # claim template is immutable once the StatefulSet exists, so changing either
+  # afterwards is a new StatefulSet rather than a resize, and the apply that tries to
+  # change it in place is refused by the API server.
+  defp data_volume_template(profile) do
+    spec =
+      %{
+        "accessModes" => ["ReadWriteOnce"],
+        "resources" => %{"requests" => %{"storage" => profile.storage_size || "20Gi"}}
+      }
+      |> put_unless_nil("storageClassName", profile.storage_class)
+
+    %{"metadata" => %{"name" => Names.data_volume()}, "spec" => spec}
   end
 
   defp pod_spec(profile, policy, settings) do
@@ -488,7 +516,17 @@ defmodule Troupe.Operator.Resources do
       }
     ]
 
-    base ++ workers_port_env(settings) ++ object_store_env(settings) ++ llm_env(profile)
+    base ++
+      workers_port_env(settings) ++
+      allowed_origins_env(settings) ++ object_store_env(settings) ++ llm_env(profile)
+  end
+
+  # Only when there is a list: a pod with the variable absent admits every origin, and
+  # an empty string would say the same thing less clearly.
+  defp allowed_origins_env(%Settings{worker_allowed_origins: []}), do: []
+
+  defp allowed_origins_env(%Settings{worker_allowed_origins: origins}) do
+    [%{"name" => "TROUPE_ALLOWED_ORIGINS", "value" => Enum.join(origins, ",")}]
   end
 
   # A pod that has an endpoint and a bucket but no credentials signs with `nil` and

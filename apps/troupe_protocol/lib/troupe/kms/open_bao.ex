@@ -130,27 +130,48 @@ defmodule Troupe.KMS.OpenBao do
   end
 
   defp kubernetes_token(opts) do
+    auth_path = config(opts)[:auth_path] || "kubernetes"
+    role = config(opts)[:role] || "troupe-worker"
+
     with {:ok, jwt} <- File.read(service_account_token_path()),
-         {:ok, 200, body} <- login(config(opts)[:role] || "troupe-worker", String.trim(jwt), opts) do
-      get_in(body, ["auth", "client_token"])
+         {:ok, %{token: token}} <- kubernetes_login(address(opts), auth_path, role, jwt) do
+      token
     else
       _ -> nil
     end
   end
 
-  defp login(role, jwt, opts) do
-    path = config(opts)[:auth_path] || "kubernetes"
-    url = address(opts) <> "/v1/auth/#{path}/login"
+  @doc """
+  Exchange a Kubernetes ServiceAccount token for an OpenBao client token.
 
+  One login for every component that authenticates this way: a worker under its
+  profile's role, the plane under its own. The roles differ — that is the point of
+  them — but the exchange is the same call, and the plane gets back the same shape a
+  worker does: the token, and the number of seconds OpenBao will honour it. A lease of
+  zero is a token that does not expire, which is what a root or periodic token reports.
+  """
+  @spec kubernetes_login(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, %{token: String.t(), lease_duration: non_neg_integer()}} | {:error, term()}
+  def kubernetes_login(address, auth_path, role, jwt) do
     case Req.request(
            method: :post,
-           url: url,
-           json: %{"role" => role, "jwt" => jwt},
+           url: address <> "/v1/auth/#{auth_path}/login",
+           json: %{"role" => role, "jwt" => String.trim(jwt)},
            decode_body: true,
-           retry: false
+           retry: false,
+           receive_timeout: 15_000
          ) do
-      {:ok, response} -> {:ok, response.status, response.body}
-      {:error, reason} -> {:error, reason}
+      {:ok, %{status: 200, body: %{"auth" => %{"client_token" => token} = auth}}} ->
+        {:ok, %{token: token, lease_duration: Map.get(auth, "lease_duration", 0)}}
+
+      {:ok, %{status: 200}} ->
+        {:error, :malformed}
+
+      {:ok, %{status: status}} ->
+        {:error, {:unexpected_status, status}}
+
+      {:error, reason} ->
+        {:error, reason}
     end
   end
 

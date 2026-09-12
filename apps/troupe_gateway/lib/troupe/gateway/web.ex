@@ -35,13 +35,19 @@ defmodule Troupe.Gateway.Web do
   end
 
   get "/v1/socket" do
-    conn
-    |> WebSockAdapter.upgrade(
-      Socket,
-      [endpoint: conn.private[:troupe_endpoint], bearer: bearer(conn)],
-      timeout: :timer.hours(24)
-    )
-    |> halt()
+    case origin_allowed?(conn) do
+      true ->
+        conn
+        |> WebSockAdapter.upgrade(
+          Socket,
+          [endpoint: conn.private[:troupe_endpoint], bearer: bearer(conn)],
+          timeout: :timer.hours(24)
+        )
+        |> halt()
+
+      false ->
+        conn |> send_resp(403, "origin not allowed") |> halt()
+    end
   end
 
   match _ do
@@ -54,6 +60,23 @@ defmodule Troupe.Gateway.Web do
       _ -> :ok
     end
   end
+
+  # A browser names the page that opened the socket in `Origin`; nothing else sends the
+  # header at all. The token is what actually admits a connection — a page on another
+  # origin cannot read it out of this one — so the check is a second fence, not the
+  # first: with no allowlist configured every origin is admitted, and a deployment that
+  # knows exactly which origins host its GUI lists them and nothing else gets an upgrade.
+  # `*` in the list says the permissive default was chosen on purpose.
+  defp origin_allowed?(conn) do
+    case {Plug.Conn.get_req_header(conn, "origin"), allowed_origins()} do
+      {[], _allowed} -> true
+      {_origin, nil} -> true
+      {_origin, []} -> true
+      {[origin | _], allowed} -> "*" in allowed or origin in allowed
+    end
+  end
+
+  defp allowed_origins, do: Application.get_env(:troupe_gateway, :allowed_origins)
 
   # The token may arrive in a header, which is what a browser and a reverse proxy are
   # comfortable with, or in `auth.token` on `initialize`, which is what a client with no
@@ -81,11 +104,27 @@ defmodule Troupe.Gateway.Web do
 
     plug = {__MODULE__, endpoint: endpoint, ready: ready}
 
+    # A frame is a whole message, and the connection refuses a message over 64 MiB with
+    # `payload_too_large` — but only once it has the whole thing in memory, and before
+    # `initialize` nobody has shown a token yet. So the socket itself has a ceiling,
+    # well under the connection's, and Bandit closes the frame before it is assembled.
+    # Large payloads travel as blobs and `fs.upload` chunks, neither of which needs a
+    # frame this size.
     Supervisor.child_spec(
-      {Bandit, plug: plug, scheme: :http, port: port, ip: Keyword.get(opts, :ip, :any)},
+      {Bandit,
+       plug: plug,
+       scheme: :http,
+       port: port,
+       ip: Keyword.get(opts, :ip, :any),
+       websocket_options: [max_frame_size: Keyword.get(opts, :max_frame_bytes, max_frame_bytes())]},
       id: Keyword.get(opts, :id, __MODULE__)
     )
   end
+
+  @default_max_frame_bytes 16 * 1024 * 1024
+
+  defp max_frame_bytes,
+    do: Application.get_env(:troupe_gateway, :max_frame_bytes, @default_max_frame_bytes)
 
   @impl Plug
   def init(opts), do: opts

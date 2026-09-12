@@ -29,7 +29,17 @@ defmodule Troupe.Operator.Settings do
             object_store_secret_name: "troupe-object-store",
             workers_scheme: "wss",
             workers_port: nil,
+            # The pull secrets, by name, put on every worker pod. The same names the chart
+            # puts on the plane and the operator: a registry that needs a credential to
+            # pull one image needs it for all three, and the secret has to exist in each
+            # worker namespace, which — like the object-store secret — is somebody else's
+            # job on purpose.
             image_pull_secrets: [],
+            # The browser origins a worker admits on its WebSocket, passed to every pod
+            # as `TROUPE_ALLOWED_ORIGINS`. Empty admits every origin — the token is what
+            # actually admits a connection — and an installation that knows which origins
+            # host its GUI names them once, here, rather than in every profile.
+            worker_allowed_origins: [],
             cilium_available: false,
             drain_timeout_seconds: 300
 
