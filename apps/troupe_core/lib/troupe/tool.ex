@@ -17,6 +17,9 @@ defmodule Troupe.Tool.Ctx do
     :definitions,
     :definition,
     :watcher,
+    # The config bundle the session is pinned to, `%{version, hash, channel, dir}`, or
+    # `nil` for a local session. What the `skill` tool reads from.
+    :bundle,
     todos: [],
     depth: 0,
     max_depth: 3,
@@ -34,6 +37,7 @@ defmodule Troupe.Tool.Ctx do
           definitions: Troupe.Agent.Definitions.t() | nil,
           definition: Troupe.Agent.Definition.t() | nil,
           watcher: pid() | nil,
+          bundle: map() | nil,
           todos: [Troupe.Todo.t()],
           depth: non_neg_integer(),
           max_depth: pos_integer(),
@@ -95,6 +99,13 @@ defmodule Troupe.Tool.Result do
     do: "The tool #{tool} is not available in the current profile."
 
   def describe({:denied, tool}), do: "Permission to run #{tool} was denied by the user."
+
+  def describe({:denied_unattended, tool}),
+    do:
+      "This session runs unattended and nobody is here to approve #{tool}, so it was " <>
+        "denied. Do what you can without it and say clearly what was left undone."
+
+  def describe({:unknown_skill, name}), do: "There is no skill named #{name} in this session."
 
   def describe({:denied_by_policy, tool}),
     do: "The tool #{tool} is denied by the current profile's permissions."

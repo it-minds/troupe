@@ -24,7 +24,8 @@ defmodule Troupe do
   Start a session over a workspace directory.
 
   Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
-  `:session_id`, `:config_overrides`, `:definitions`, `:fake`.
+  `:session_id`, `:config_overrides`, `:definitions`, `:fake`, `:mounts`, `:bundle`
+  (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`.
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
@@ -38,11 +39,7 @@ defmodule Troupe do
 
       # The first durable event says what this session is, so a listing can be
       # rebuilt from the log alone — which is what makes a dormant session visible.
-      Log.append(session_id, Session.root_path(), :session_created, %{
-        "workspace" => workspace.root_real,
-        "profile" => profile,
-        "visibility" => "private"
-      })
+      Log.append(session_id, Session.root_path(), :session_created, created_data(session_opts))
 
       # What this session may touch, and at what mode, recorded once — but only when
       # there is something to say. A local session has `session:/` and nothing else,
@@ -65,6 +62,26 @@ defmodule Troupe do
   defp shared_mounts?(nil), do: false
 
   defp shared_mounts?(%Mounts{entries: entries}), do: Enum.any?(entries, &(&1.kind != :session))
+
+  # What the session is: where, under which profile, of which kind, on which bundle,
+  # and started by what. The optional fields are left out rather than written as null,
+  # so a local session's first event carries the fields it always did plus its kind.
+  defp created_data(session_opts) do
+    workspace = Keyword.fetch!(session_opts, :workspace)
+    bundle = Keyword.get(session_opts, :bundle)
+
+    %{
+      "workspace" => workspace.root_real,
+      "profile" => Keyword.fetch!(session_opts, :profile),
+      "visibility" => "private",
+      "kind" => session_opts |> Keyword.get(:kind, :local) |> to_string()
+    }
+    |> put_present("bundle_version", bundle && bundle[:version] && to_string(bundle[:version]))
+    |> put_present("origin", Keyword.get(session_opts, :origin))
+  end
+
+  defp put_present(data, _key, nil), do: data
+  defp put_present(data, key, value), do: Map.put(data, key, value)
 
   @doc """
   Send the root agent a message. Async: it is postponed if the agent is busy.
@@ -173,11 +190,14 @@ defmodule Troupe do
   Resume a session from its log.
 
   Starting a session with an existing id is all it takes: every agent rebuilds its
-  own state by replaying its own events.
+  own state by replaying its own events. A `:task` may ride along — a worker passes
+  the prompt a session was created with — and it is safe to, because the root agent
+  seeds a task only when its own log is empty, so a session activated a second time
+  replays its first input rather than repeating it.
   """
   @spec resume(String.t(), keyword()) :: {:ok, session()} | {:error, term()}
   def resume(session_id, opts \\ []) do
-    start_session(Keyword.merge(opts, session_id: session_id, task: nil))
+    start_session(Keyword.put(opts, :session_id, session_id))
   end
 
   @doc """

@@ -24,6 +24,7 @@ defmodule Troupe.Worker.Plane.Link do
   alias Troupe.Paths
   alias Troupe.Protocol.{Error, JSONRPC}
   alias Troupe.Worker.Auth
+  alias Troupe.Worker.Bundles
   alias Troupe.Worker.Disk
   alias Troupe.Worker.Plane.Commands
   alias Troupe.Worker.Sessions
@@ -101,7 +102,8 @@ defmodule Troupe.Worker.Plane.Link do
   def info(server \\ __MODULE__), do: GenServer.call(server, :info)
 
   @doc "Ask the plane something and wait. Used by activation to obtain an epoch."
-  @spec request(GenServer.server(), String.t(), map(), timeout()) :: {:ok, map()} | {:error, term()}
+  @spec request(GenServer.server(), String.t(), map(), timeout()) ::
+          {:ok, map()} | {:error, term()}
   def request(server \\ __MODULE__, method, params \\ %{}, timeout \\ 15_000) do
     GenServer.call(server, {:request, method, params}, timeout + 1_000)
   end
@@ -118,7 +120,10 @@ defmodule Troupe.Worker.Plane.Link do
     state = %__MODULE__{
       host:
         opts
-        |> Keyword.get(:host, Keyword.get(configured, :host, "troupe-plane-control.troupe-system.svc"))
+        |> Keyword.get(
+          :host,
+          Keyword.get(configured, :host, "troupe-plane-control.troupe-system.svc")
+        )
         |> to_charlist(),
       port: Keyword.get(opts, :port, Keyword.get(configured, :port, 4001)),
       token: Keyword.get(opts, :token, {:file, @default_token_path}),
@@ -201,7 +206,13 @@ defmodule Troupe.Worker.Plane.Link do
 
     case :gen_tcp.connect(state.host, state.port, options, 5_000) do
       {:ok, socket} ->
-        enrol(%{state | socket: socket, buffer: "", status: :connected, connects: state.connects + 1})
+        enrol(%{
+          state
+          | socket: socket,
+            buffer: "",
+            status: :connected,
+            connects: state.connects + 1
+        })
 
       {:error, reason} ->
         schedule_reconnect(%{state | socket: nil, status: :disconnected}, reason)
@@ -214,7 +225,7 @@ defmodule Troupe.Worker.Plane.Link do
   defp enrol(state) do
     case token(state.token) do
       {:ok, token} ->
-        params = Map.merge(state.claims, %{"token" => token})
+        params = state.claims |> with_bundle_hash() |> Map.put("token", token)
 
         case exchange(state, "enrol", params) do
           {:ok, result} ->
@@ -224,7 +235,12 @@ defmodule Troupe.Worker.Plane.Link do
             announce_identity(result)
             apply_pending_erasures(result)
 
-            %{state | status: :enrolled, profile: result["profile"], worker_id: result["worker_id"]}
+            %{
+              state
+              | status: :enrolled,
+                profile: result["profile"],
+                worker_id: result["worker_id"]
+            }
             |> reset_backoff()
             |> activate_socket()
             |> flush_queue()
@@ -299,7 +315,8 @@ defmodule Troupe.Worker.Plane.Link do
       report(self(), %{"type" => "session.erased", "session_id" => erasure["session_id"]})
     end)
 
-    if pending != [], do: Logger.info("troupe worker: applied #{length(pending)} pending erasure(s)")
+    if pending != [],
+      do: Logger.info("troupe worker: applied #{length(pending)} pending erasure(s)")
   end
 
   defp activate_socket(state) do
@@ -355,12 +372,24 @@ defmodule Troupe.Worker.Plane.Link do
     disk = Disk.usage(Keyword.get(state.opts, :disk_path, Paths.state_dir()))
 
     state.claims
+    |> with_bundle_hash()
     |> Map.take(["capacity", "bundle_hash", "version"])
     |> Map.merge(%{
       "active_sessions" => Sessions.active_count(),
       "disk_used_bytes" => disk.used_bytes,
       "disk_total_bytes" => disk.total_bytes
     })
+  end
+
+  # The hash of the newest bundle this pod has materialised, asked for at the moment of
+  # sending rather than remembered: it is what the plane's adoption view compares
+  # against, and a claim fixed at boot would report the previous publish forever. A
+  # caller's own `bundle_hash` claim — a test's — stands when there is no registry.
+  defp with_bundle_hash(claims) do
+    case Bundles.current_hash() do
+      nil -> claims
+      hash -> Map.put(claims, "bundle_hash", hash)
+    end
   end
 
   # -- sending ----------------------------------------------------------------

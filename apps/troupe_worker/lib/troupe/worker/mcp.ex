@@ -9,6 +9,11 @@ defmodule Troupe.Worker.MCP do
 
   A server that cannot be reached costs its tools and nothing else. A profile with four
   MCP servers and one of them down should lose that server's tools and keep working.
+
+  The configs arrive in the bundle's wire shape, `permission` and `tools` included;
+  `Troupe.MCP.Server.from_config/1` carries both, discovery drops the tools the
+  allowlist does not name, and the permission becomes each tool's default. Nothing
+  here has to know either exists.
   """
 
   use GenServer
@@ -71,7 +76,9 @@ defmodule Troupe.Worker.MCP do
     Application.put_env(:troupe_core, :remote_tools, tools)
 
     if tools != [] do
-      Logger.info("troupe worker: #{length(tools)} MCP tool(s) from #{length(state.servers)} server(s)")
+      Logger.info(
+        "troupe worker: #{length(tools)} MCP tool(s) from #{length(state.servers)} server(s)"
+      )
     end
 
     %{state | tools: tools, discovered_at: System.system_time(:second)}

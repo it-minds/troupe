@@ -17,25 +17,37 @@ defmodule Troupe.Plane.Fleet.Bundle do
 
   import Ecto.Changeset
 
-  alias Troupe.Protocol.Canonical
+  alias Troupe.Protocol.Bundle, as: Document
 
   @primary_key {:id, :binary_id, autogenerate: true}
 
   schema "config_bundles" do
-    field :channel, :string
-    field :version, :integer
-    field :hash, :string
-    field :content, :map, default: %{}
-    field :published_at, :utc_datetime_usec
-    field :published_by, :string
-    field :retired_at, :utc_datetime_usec
+    field(:channel, :string)
+    field(:version, :integer)
+    field(:hash, :string)
+    field(:content, :map, default: %{})
+    # Counts and names, written at publish, so a list of versions does not decode the
+    # documents behind it. Empty for a row an older plane wrote.
+    field(:summary, :map, default: %{})
+    field(:published_at, :utc_datetime_usec)
+    field(:published_by, :string)
+    field(:retired_at, :utc_datetime_usec)
 
     timestamps(type: :utc_datetime_usec)
   end
 
   @type t :: %__MODULE__{}
 
-  @fields [:channel, :version, :hash, :content, :published_at, :published_by, :retired_at]
+  @fields [
+    :channel,
+    :version,
+    :hash,
+    :content,
+    :summary,
+    :published_at,
+    :published_by,
+    :retired_at
+  ]
 
   @doc false
   @spec changeset(t(), map()) :: Ecto.Changeset.t()
@@ -51,15 +63,11 @@ defmodule Troupe.Plane.Fleet.Bundle do
 
   Over the canonical JSON, so two plane replicas that built the same bundle from the
   same source agree on the hash without coordinating — and so a worker comparing what it
-  fetched against what a heartbeat reported is comparing the same thing.
+  fetched against what a heartbeat reported is comparing the same thing. The function
+  itself lives in the protocol, where the worker's copy is the same code.
   """
   @spec hash(map()) :: String.t()
-  def hash(content) do
-    "sha256:" <>
-      (:sha256
-       |> :crypto.hash(Canonical.encode(content))
-       |> Base.encode16(case: :lower))
-  end
+  defdelegate hash(content), to: Document
 
   @doc "Whether this version may still be started on."
   @spec live?(t()) :: boolean()

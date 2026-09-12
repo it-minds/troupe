@@ -2,13 +2,14 @@ defmodule Troupe.Mounts do
   @moduledoc """
   The roots a session may touch, and at what mode.
 
-  Three kinds, resolved once when the session is created and recorded as a durable
+  Four kinds, resolved once when the session is created and recorded as a durable
   event so that what a session was allowed to see is part of its history rather than a
   property of a pod that has since been replaced:
 
       session:/        private, read-write, on the pod's volume
       team:<name>/     the session's team volume, read-only or read-write per grant
       org:/            the org volume from the cluster policy, always read-only
+      skills:/<name>/  the pinned config bundle's skills, always read-only
 
   Two rules make this worth having rather than decorative.
 
@@ -35,7 +36,7 @@ defmodule Troupe.Mounts do
             name: String.t(),
             root: Path.t(),
             mode: :ro | :rw,
-            kind: :session | :team | :org,
+            kind: :session | :team | :org | :bundle,
             root_key: String.t()
           }
   end
@@ -53,7 +54,8 @@ defmodule Troupe.Mounts do
   always meant.
   """
   @spec local(Path.t()) :: t()
-  def local(session_root), do: new([%{name: "session", kind: :session, root: session_root, mode: :rw}])
+  def local(session_root),
+    do: new([%{name: "session", kind: :session, root: session_root, mode: :rw}])
 
   @doc "Build a table from entries, resolving every root to a real path."
   @spec new([map()]) :: t()
@@ -65,30 +67,41 @@ defmodule Troupe.Mounts do
 
   defp entry(attrs) do
     root = Path.expand(attrs[:root] || attrs["root"])
-    real = case Workspace.real_path(root) do
-             {:ok, resolved} -> resolved
-             {:error, _reason} -> root
-           end
+
+    real =
+      case Workspace.real_path(root) do
+        {:ok, resolved} -> resolved
+        {:error, _reason} -> root
+      end
+
+    kind = kind(attrs[:kind] || attrs["kind"])
 
     %Entry{
       name: to_string(attrs[:name] || attrs["name"]),
-      kind: kind(attrs[:kind] || attrs["kind"]),
+      kind: kind,
       root: real,
-      mode: mode(attrs[:mode] || attrs["mode"]),
+      mode: entry_mode(kind, mode(attrs[:mode] || attrs["mode"])),
       root_key: Workspace.compare_key(real)
     }
   end
 
-  defp kind(value) when value in [:session, :team, :org], do: value
+  defp kind(value) when value in [:session, :team, :org, :bundle], do: value
   defp kind("session"), do: :session
   defp kind("team"), do: :team
   defp kind("org"), do: :org
+  defp kind("bundle"), do: :bundle
   defp kind(_other), do: :team
 
   defp mode(value) when value in [:ro, :rw], do: value
   defp mode("ro"), do: :ro
   defp mode("rw"), do: :rw
   defp mode(_other), do: :ro
+
+  # A bundle's skills are the one kind whose mode is not the caller's to choose. The
+  # sandbox binds the same table, so `ro` here is also `ro` to the kernel, and a skill
+  # cannot carry a script that `shell` could run from its own directory.
+  defp entry_mode(:bundle, _mode), do: :ro
+  defp entry_mode(_kind, mode), do: mode
 
   @doc "The session's own root, which is where a bare relative path lands."
   @spec session_root(t()) :: Path.t() | nil
@@ -121,14 +134,15 @@ defmodule Troupe.Mounts do
     end
   end
 
-  # Three prefixes and nothing else: `session:`, `org:`, and `team:<name>`. Anything
-  # that is not one of them is a session-relative path, which is both what every
-  # existing tool call means and what keeps a Windows drive letter from being read as a
-  # mount name.
+  # Four prefixes and nothing else: `session:`, `org:`, `skills:`, and `team:<name>`.
+  # Anything that is not one of them is a session-relative path, which is both what
+  # every existing tool call means and what keeps a Windows drive letter from being read
+  # as a mount name.
   defp entry_for(mounts, path) do
     case String.split(path, ":", parts: 2) do
       ["session", rest] -> of_kind(mounts, :session, String.trim_leading(rest, "/"))
       ["org", rest] -> of_kind(mounts, :org, String.trim_leading(rest, "/"))
+      ["skills", rest] -> of_kind(mounts, :bundle, String.trim_leading(rest, "/"))
       ["team", rest] -> team(mounts, rest)
       # No prefix: the session's own root, and the path is passed through untouched so
       # that an absolute one stays absolute and is rejected rather than reinterpreted.
@@ -138,10 +152,15 @@ defmodule Troupe.Mounts do
 
   defp of_kind(mounts, kind, rest) do
     case Enum.find(mounts.entries, &(&1.kind == kind)) do
-      nil -> {:error, {:no_such_mount, Atom.to_string(kind)}}
+      nil -> {:error, {:no_such_mount, prefix_name(kind)}}
       entry -> {:ok, entry, rest}
     end
   end
+
+  # The bundle's mount is *named* `skills` because that is the word a model reads and
+  # writes; its *kind* is `bundle` because that is what it is a piece of.
+  defp prefix_name(:bundle), do: "skills"
+  defp prefix_name(kind), do: Atom.to_string(kind)
 
   # `team:<name>/rest`. The name is in the path because a person reading a log should be
   # able to see which team's volume was written to without knowing what the session's
@@ -207,7 +226,7 @@ defmodule Troupe.Mounts do
   end
 
   defp prefix(%Entry{kind: :team, name: name}), do: "team:" <> name <> "/"
-  defp prefix(%Entry{kind: kind}), do: Atom.to_string(kind) <> ":/"
+  defp prefix(%Entry{kind: kind}), do: prefix_name(kind) <> ":/"
 
   @doc "The table as a durable event's data. Roots included: a pod is not a secret."
   @spec to_json(t()) :: map()

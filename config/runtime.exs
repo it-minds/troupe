@@ -326,6 +326,10 @@ if config_env() == :prod do
       http_port: String.to_integer(System.get_env("TROUPE_HTTP_PORT", "4000")),
       harness_port: String.to_integer(System.get_env("TROUPE_HARNESS_PORT", "4100")),
       sessions_per_pod: String.to_integer(System.get_env("TROUPE_SESSIONS_PER_POD", "4")),
+      # The profile's MCP servers, as the operator wrote them into the pod spec: the same
+      # shape a bundle carries, so a pod knows its servers before its first bundle arrives
+      # and a bundle that names the same server simply agrees with it.
+      mcp_servers: Jason.decode!(System.get_env("TROUPE_MCP_SERVERS", "[]")),
       drain_timeout_seconds:
         String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
       worker_id: presence.(System.get_env("TROUPE_POD_ORDINAL")),
@@ -370,4 +374,35 @@ if config_env() == :prod do
   # -- the local daemon -----------------------------------------------------
 
   config :troupe_gateway, autostart: System.get_env("TROUPE_DAEMON_AUTOSTART") == "true"
+
+  # -- the A2A facade -------------------------------------------------------
+
+  if System.get_env("TROUPE_A2A_AUTOSTART") == "true" do
+    # What the facade calls itself in the URLs it hands out: the card's `url` and every
+    # artifact's `uri`. There is no default worth having — a pod cannot know the host
+    # its Ingress answers on, and a card that names the wrong URL is a card nobody can
+    # call — so a facade that is actually serving refuses to start without one.
+    public_url =
+      presence.(System.get_env("TROUPE_A2A_PUBLIC_URL")) ||
+        raise("""
+        TROUPE_A2A_PUBLIC_URL is not set.
+
+        The facade puts this in every agent card and every artifact URI. It is the
+        origin the Ingress serves the facade on, such as https://a2a.example.com.
+        """)
+
+    config :troupe_a2a,
+      autostart: true,
+      port: String.to_integer(System.get_env("TROUPE_A2A_PORT", "4002")),
+      # The plane's in-cluster Service. The facade is a client of `/rpc` like any other
+      # and could as well be given the public URL; the Service saves a trip through the
+      # Ingress for every call.
+      plane_url:
+        System.get_env("TROUPE_A2A_PLANE_URL", "http://troupe-plane.troupe-system.svc:4000"),
+      public_url: public_url,
+      max_streams: String.to_integer(System.get_env("TROUPE_A2A_MAX_STREAMS", "200")),
+      # The visibility a task's session is created with. `team` lets a person audit what
+      # other agents asked of the team's profiles; `private` keeps it to the principal.
+      visibility: System.get_env("TROUPE_A2A_VISIBILITY", "private")
+  end
 end

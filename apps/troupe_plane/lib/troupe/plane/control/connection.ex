@@ -15,8 +15,9 @@ defmodule Troupe.Plane.Control.Connection do
 
   use GenServer, restart: :temporary
 
+  alias Troupe.Plane.{Bundles, Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
   alias Troupe.Plane.Control.Connections
-  alias Troupe.Plane.{Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
+  alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Protocol.{Error, JSONRPC}
 
   require Logger
@@ -104,7 +105,8 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   def handle_call(:info, _from, state) do
-    {:reply, %{identity: state.identity, worker: state.worker, enrolled?: not is_nil(state.worker)},
+    {:reply,
+     %{identity: state.identity, worker: state.worker, enrolled?: not is_nil(state.worker)},
      state}
   end
 
@@ -270,6 +272,16 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # Lifecycle, not content: what the session is doing, whether it finished and why, how
+  # many approvals wait, and what it has cost. Fenced on the epoch in `put_status/2`, so
+  # a pod still running an older epoch cannot overwrite what the new one reports.
+  defp dispatch("session.status", params, state) do
+    case Sessions.put_status(params["session_id"], params) do
+      {:ok, _count} -> {:ok, %{"ok" => true}, state}
+      {:error, :stale_epoch} -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+    end
+  end
+
   defp dispatch("session.dormant", params, state) do
     session_id = params["session_id"]
 
@@ -280,7 +292,15 @@ defmodule Troupe.Plane.Control.Connection do
       workspace_bytes: params["workspace_bytes"]
     })
 
+    # The dormancy report is the last word on the session until it wakes, and carries
+    # the same lifecycle fields a `session.status` would.
+    if Map.has_key?(params, "status"), do: Sessions.put_status(session_id, params)
+
+    # Both reservations go back: the slot, and the slice of the team's budget. A dormant
+    # session spends nothing, and a fleet of triggers whose slices were held through
+    # dormancy would pin a team's budget with sessions that are not running.
     Placement.release(state.worker.profile, session_id)
+    release_budget(session_id)
     {:ok, %{"ok" => true}, state}
   end
 
@@ -309,8 +329,54 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # A pod fetching a bundle: by hash, which is what `config.updated` announced and what
+  # the pod verifies the document against before materialising it, or by channel and
+  # version for a session pinned to one the pod has never been told about. The document
+  # is configuration an admin published, not session content, so it may cross here.
+  defp dispatch("bundle.fetch", params, state) do
+    case fetch_bundle(params, state.worker) do
+      %Bundle{} = bundle ->
+        {:ok,
+         %{
+           "content" => bundle.content,
+           "hash" => bundle.hash,
+           "channel" => bundle.channel,
+           "version" => bundle.version
+         }, state}
+
+      nil ->
+        asked = Map.take(params, ~w(hash channel version))
+        {:error, Error.new(:not_found, %{reason: "no such bundle", asked: asked}), state}
+    end
+  end
+
   defp dispatch(method, _params, state) do
     {:error, Error.new(:method_not_found, %{method: method}), state}
+  end
+
+  defp fetch_bundle(%{"hash" => hash}, worker) when is_binary(hash) do
+    Bundles.by_hash(hash, channel: channel_of(worker))
+  end
+
+  defp fetch_bundle(%{"channel" => channel, "version" => version}, _worker)
+       when is_binary(channel) and (is_integer(version) or is_binary(version)) do
+    Bundles.get(channel, version)
+  end
+
+  defp fetch_bundle(_params, _worker), do: nil
+
+  defp channel_of(worker) do
+    case Fleet.get_profile(worker.profile) do
+      nil -> nil
+      profile -> profile.config_bundle_channel
+    end
+  end
+
+  defp release_budget(session_id) do
+    case Sessions.get(session_id) do
+      %{team_id: team_id} when is_binary(team_id) -> TeamBudget.release(team_id, session_id)
+      _ -> :ok
+    end
   end
 
   defp record_usage(team_id, attrs, state) do

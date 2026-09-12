@@ -20,11 +20,15 @@ defmodule Troupe.Worker.Application do
 
   defp autostart?, do: Application.get_env(:troupe_worker, :autostart, false)
 
+  # The MCP registry before the bundles, because a bundle hands its servers to the
+  # registry; the bundles before the link, because the link's enrolment claims the
+  # bundle hash the pod already has.
   defp children do
     [
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
       Troupe.Worker.MCP,
+      Troupe.Worker.Bundles,
       Troupe.Worker.Disk.Watch
     ] ++ link() ++ [Troupe.Worker.Harness]
   end

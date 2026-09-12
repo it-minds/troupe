@@ -12,14 +12,16 @@ defmodule Troupe.Plane.WebTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, Identity, OIDC, Sessions, Tokens}
+  alias Troupe.Plane.{Bundles, Fleet, Identity, OIDC, Principals, Sessions, Tokens}
   alias Troupe.Plane.Web.Router
   alias Troupe.Protocol.Token
 
   @moduletag timeout: 60_000
 
   setup do
-    {:ok, listener} = start_supervised({Bandit, plug: Router, scheme: :http, port: 0, startup_log: false})
+    {:ok, listener} =
+      start_supervised({Bandit, plug: Router, scheme: :http, port: 0, startup_log: false})
+
     {:ok, {_address, port}} = ThousandIsland.listener_info(listener)
 
     Application.put_env(:troupe_plane, :oidc,
@@ -69,7 +71,9 @@ defmodule Troupe.Plane.WebTest do
       _team = team_with_grant("engineering", "dev", name: "engineering")
 
       assert {:ok, %{status: 200, body: body}} =
-               post(context, "/auth/exchange", %{"id_token" => "good:ada@example.test:engineering"})
+               post(context, "/auth/exchange", %{
+                 "id_token" => "good:ada@example.test:engineering"
+               })
 
       assert body["subject"] == "ada@example.test"
       assert body["teams"] == ["engineering"]
@@ -81,7 +85,9 @@ defmodule Troupe.Plane.WebTest do
       # audience, which is the point of the audience being there.
       {:ok, jwks} = Tokens.jwks()
       assert {:ok, _} = Token.verify(body["token"], jwks, audience: OIDC.audience())
-      assert {:error, :wrong_audience} = Token.verify(body["token"], jwks, audience: "worker-dev-0")
+
+      assert {:error, :wrong_audience} =
+               Token.verify(body["token"], jwks, audience: "worker-dev-0")
     end
 
     test "a token the provider does not vouch for is refused", context do
@@ -89,6 +95,104 @@ defmodule Troupe.Plane.WebTest do
                post(context, "/auth/exchange", %{"id_token" => "forged"})
 
       assert body["error"] == "unauthenticated"
+    end
+  end
+
+  describe "a service principal" do
+    test "exchanges its secret for a plane token, and is a user with no role", context do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+
+      {:ok, principal, secret} =
+        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+
+      assert {:ok, %{status: 200, body: body}} =
+               post(context, "/auth/exchange", %{
+                 "client_id" => principal.subject,
+                 "client_secret" => secret
+               })
+
+      assert body["subject"] == "svc:engineering/nightly"
+      assert body["kind"] == "service"
+      assert body["teams"] == ["engineering"]
+      assert body["profiles"] == ["dev"]
+      token = body["token"]
+
+      {:ok, jwks} = Tokens.jwks()
+      assert {:ok, claims} = Token.verify(token, jwks, audience: OIDC.audience())
+      assert claims["kind"] == "service"
+      assert claims["team"] == "engineering"
+
+      assert {:ok, %{status: 200, body: me}} = rpc(context, token, "me", %{})
+      assert me["result"]["kind"] == "service"
+      assert me["result"]["profiles"] == ["dev"]
+      refute me["result"]["platform_admin"]
+
+      # It administers nothing, not even its own team.
+      assert {:ok, %{status: 200, body: refused}} = rpc(context, token, "admin.overview", %{})
+      assert refused["error"]["message"] == "forbidden"
+
+      # The wrong secret, and a secret for a subject that does not exist, are the same
+      # refusal.
+      assert {:ok, %{status: 401}} =
+               post(context, "/auth/exchange", %{
+                 "client_id" => principal.subject,
+                 "client_secret" => "nope"
+               })
+
+      assert {:ok, %{status: 401}} =
+               post(context, "/auth/exchange", %{
+                 "client_id" => "svc:engineering/ghost",
+                 "client_secret" => secret
+               })
+    end
+
+    test "disabled, it is unauthenticated at its next call and its next exchange", context do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+
+      {:ok, principal, secret} =
+        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+
+      {:ok, %{status: 200, body: %{"token" => token}}} =
+        post(context, "/auth/exchange", %{
+          "client_id" => principal.subject,
+          "client_secret" => secret
+        })
+
+      assert {:ok, %{status: 200, body: %{"result" => _}}} = rpc(context, token, "me", %{})
+
+      {:ok, _} = Principals.disable(principal)
+
+      # The token is still perfectly signed and well inside its lifetime, and it is the
+      # subject that is refused.
+      assert {:ok, %{status: 401, body: body}} = rpc(context, token, "me", %{})
+      assert body["error"]["message"] == "unauthenticated"
+
+      assert {:ok, %{status: 401}} =
+               post(context, "/auth/exchange", %{
+                 "client_id" => principal.subject,
+                 "client_secret" => secret
+               })
+    end
+
+    test "a rotated secret replaces the old one at once", context do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+
+      {:ok, principal, old} =
+        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+
+      {:ok, _, new} = Principals.rotate(principal)
+
+      assert {:ok, %{status: 401}} =
+               post(context, "/auth/exchange", %{
+                 "client_id" => principal.subject,
+                 "client_secret" => old
+               })
+
+      assert {:ok, %{status: 200}} =
+               post(context, "/auth/exchange", %{
+                 "client_id" => principal.subject,
+                 "client_secret" => new
+               })
     end
   end
 
@@ -115,7 +219,9 @@ defmodule Troupe.Plane.WebTest do
     end
 
     test "without a token, nothing", context do
-      assert {:ok, %{status: 401, body: body}} = post(context, "/rpc", %{"id" => 1, "method" => "me"})
+      assert {:ok, %{status: 401, body: body}} =
+               post(context, "/rpc", %{"id" => 1, "method" => "me"})
+
       assert body["error"]["message"] == "unauthenticated"
     end
 
@@ -180,7 +286,9 @@ defmodule Troupe.Plane.WebTest do
       # A perfectly good plane token, and the wrong credential for this endpoint. SCIM is
       # pushed by the identity provider with its own.
       assert {:ok, %{status: 401}} =
-               post(context, "/scim/v2/Users", %{"userName" => "x"}, [{"authorization", "Bearer " <> token}])
+               post(context, "/scim/v2/Users", %{"userName" => "x"}, [
+                 {"authorization", "Bearer " <> token}
+               ])
     end
   end
 
@@ -238,8 +346,13 @@ defmodule Troupe.Plane.WebTest do
   end
 
   defp rpc(context, token, method, params) do
-    post(context, "/rpc", %{"jsonrpc" => "2.0", "id" => 1, "method" => method, "params" => params}, [
-      {"authorization", "Bearer " <> token}
-    ])
+    post(
+      context,
+      "/rpc",
+      %{"jsonrpc" => "2.0", "id" => 1, "method" => method, "params" => params},
+      [
+        {"authorization", "Bearer " <> token}
+      ]
+    )
   end
 end

@@ -44,6 +44,12 @@ defmodule Troupe.Config do
             # empty for a local one where there is nobody to bill.
             attribution: %{},
             auto_approve: false,
+            # What happens to an `ask` tool when nobody is attached to answer. `:wait`
+            # leaves the request in the log for a person to find; `:deny` answers no at
+            # once, which is what an unattended session asks for. There is deliberately
+            # no `:auto` here: a session that approves its own shell commands with
+            # nobody watching is the thing this refuses to be.
+            approvals: :wait,
             # What a session does when its tree comes back after a restart. `false` —
             # the default — means it comes back interrupted and makes no model call
             # until someone asks it to carry on, because a crash loop that resumes
@@ -181,5 +187,7 @@ defmodule Troupe.Config do
   end
 
   defp coerce(:compact_at, value) when is_integer(value), do: value / 1
+  defp coerce(:approvals, "deny"), do: :deny
+  defp coerce(:approvals, _value), do: :wait
   defp coerce(_key, value), do: value
 end

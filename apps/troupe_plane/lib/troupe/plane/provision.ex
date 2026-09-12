@@ -24,7 +24,7 @@ defmodule Troupe.Plane.Provision do
   anybody could bypass with `kubectl`.
   """
 
-  alias Troupe.Plane.{Fleet, Identity}
+  alias Troupe.Plane.{ClusterPolicy, Fleet, Identity}
   alias Troupe.Plane.Fleet.Profile
   alias Troupe.Policy
   alias Troupe.Protocol.Error
@@ -78,16 +78,14 @@ defmodule Troupe.Plane.Provision do
 
   # The cluster's `TroupePolicy`, read once per call rather than cached: it is a
   # cluster-admin's document and changing it should take effect without restarting the
-  # plane.
-  defp policy do
-    case Application.get_env(:troupe_plane, :policy) do
-      nil -> nil
-      resource -> Policy.from_resource(resource)
-    end
-  end
+  # plane. Read through `ClusterPolicy` so the bundle check and this one cannot be
+  # looking at two different documents.
+  defp policy, do: ClusterPolicy.current()
 
   defp spec_of(%Profile{} = profile), do: Map.merge(profile.spec || %{}, base_spec(profile))
-  defp spec_of(%{} = attrs), do: attrs |> Map.get(:spec, Map.get(attrs, "spec", %{})) |> Map.merge(base_spec(attrs))
+
+  defp spec_of(%{} = attrs),
+    do: attrs |> Map.get(:spec, Map.get(attrs, "spec", %{})) |> Map.merge(base_spec(attrs))
 
   defp base_spec(source) do
     %{
@@ -116,8 +114,11 @@ defmodule Troupe.Plane.Provision do
   # read as a repository called `registry` with a very odd tag.
   defp tagged(image) do
     case String.split(image, ":") do
-      [repository] -> %{"repository" => repository}
-      parts -> %{"repository" => parts |> Enum.drop(-1) |> Enum.join(":"), "tag" => List.last(parts)}
+      [repository] ->
+        %{"repository" => repository}
+
+      parts ->
+        %{"repository" => parts |> Enum.drop(-1) |> Enum.join(":"), "tag" => List.last(parts)}
     end
   end
 
@@ -175,7 +176,11 @@ defmodule Troupe.Plane.Provision do
         # hand, which is the difference between a bug and a deliberate override.
         "labels" => %{"troupe.dev/managed-by" => "plane"}
       },
-      "spec" => Map.merge(profile.spec || %{}, base_spec(profile) |> Map.merge(%{"teams" => teams_of(profile)}))
+      "spec" =>
+        Map.merge(
+          profile.spec || %{},
+          base_spec(profile) |> Map.merge(%{"teams" => teams_of(profile)})
+        )
     }
   end
 
@@ -183,7 +188,11 @@ defmodule Troupe.Plane.Provision do
     profile.name
     |> Identity.grants_for_profile()
     |> Enum.map(fn grant ->
-      %{"name" => grant.team.name, "volume" => volume_name(grant.team.name), "mode" => grant.volume_mode}
+      %{
+        "name" => grant.team.name,
+        "volume" => volume_name(grant.team.name),
+        "mode" => grant.volume_mode
+      }
     end)
     |> Enum.sort_by(& &1["name"])
   end
@@ -197,8 +206,11 @@ defmodule Troupe.Plane.Provision do
       operation = K8s.Client.apply(manifest(profile), field_manager: "troupe-plane", force: true)
 
       case K8s.Client.run(conn, operation) do
-        {:ok, applied} -> {:ok, %{mode: :direct, state: :applied, generation: generation(applied)}}
-        {:error, reason} -> {:error, reason}
+        {:ok, applied} ->
+          {:ok, %{mode: :direct, state: :applied, generation: generation(applied)}}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -206,13 +218,21 @@ defmodule Troupe.Plane.Provision do
   defp direct_delete(profile, _actor) do
     with {:ok, conn} <- connection() do
       operation =
-        K8s.Client.delete("troupe.dev/v1alpha1", "WorkerProfile", namespace: namespace(), name: profile.name)
+        K8s.Client.delete("troupe.dev/v1alpha1", "WorkerProfile",
+          namespace: namespace(),
+          name: profile.name
+        )
 
       case K8s.Client.run(conn, operation) do
-        {:ok, _deleted} -> {:ok, %{mode: :direct, state: :deleted}}
+        {:ok, _deleted} ->
+          {:ok, %{mode: :direct, state: :deleted}}
+
         # Already gone is the outcome that was wanted.
-        {:error, %K8s.Client.APIError{reason: "NotFound"}} -> {:ok, %{mode: :direct, state: :deleted}}
-        {:error, reason} -> {:error, reason}
+        {:error, %K8s.Client.APIError{reason: "NotFound"}} ->
+          {:ok, %{mode: :direct, state: :deleted}}
+
+        {:error, reason} ->
+          {:error, reason}
       end
     end
   end
@@ -252,7 +272,8 @@ defmodule Troupe.Plane.Provision do
       path = Path.join(repo.path, manifest_path(profile))
       File.rm(path)
 
-      with {:ok, sha} <- commit(repo, path, "troupe: #{profile.name} removed by #{actor.subject}", actor) do
+      with {:ok, sha} <-
+             commit(repo, path, "troupe: #{profile.name} removed by #{actor.subject}", actor) do
         {:ok, %{mode: :gitops, state: :pending, commit: sha}}
       end
     end
@@ -336,7 +357,10 @@ defmodule Troupe.Plane.Provision do
   defp live_resource(profile) do
     with {:ok, conn} <- connection() do
       operation =
-        K8s.Client.get("troupe.dev/v1alpha1", "WorkerProfile", namespace: namespace(), name: profile.name)
+        K8s.Client.get("troupe.dev/v1alpha1", "WorkerProfile",
+          namespace: namespace(),
+          name: profile.name
+        )
 
       K8s.Client.run(conn, operation)
     end

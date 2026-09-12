@@ -16,7 +16,7 @@ defmodule Troupe.Plane.Identity do
 
   alias Ecto.Multi
   alias Troupe.Plane.Identity.{Grant, Group, Membership, Team, TeamAdmin, User}
-  alias Troupe.Plane.{Repo, Sessions}
+  alias Troupe.Plane.{Principals, Repo, Sessions}
 
   require Logger
 
@@ -58,9 +58,9 @@ defmodule Troupe.Plane.Identity do
   """
   @spec set_memberships(User.t(), [String.t()]) :: {:ok, [Group.t()]} | {:error, term()}
   def set_memberships(%User{} = user, external_ids) do
-    groups = Repo.all(from g in Group, where: g.external_id in ^external_ids)
+    groups = Repo.all(from(g in Group, where: g.external_id in ^external_ids))
     wanted = MapSet.new(groups, & &1.id)
-    current = Repo.all(from m in Membership, where: m.user_id == ^user.id)
+    current = Repo.all(from(m in Membership, where: m.user_id == ^user.id))
 
     Multi.new()
     |> Multi.delete_all(
@@ -90,8 +90,15 @@ defmodule Troupe.Plane.Identity do
     end
   end
 
-  @doc "A user by IdP subject, or `nil`."
+  @doc """
+  A user by IdP subject, or `nil`.
+
+  A `svc:` subject is a service principal and resolves to the `%User{}` it is handled
+  as — or to `nil` when it is disabled, which is what makes disabling one take effect at
+  its next request rather than at its next login.
+  """
   @spec get_user(String.t()) :: User.t() | nil
+  def get_user("svc:" <> _ = subject), do: Principals.user_for(subject)
   def get_user(subject), do: Repo.get_by(User, subject: subject)
 
   @doc "A user by the id this plane gave them, or `nil`. SCIM addresses people this way."
@@ -112,7 +119,7 @@ defmodule Troupe.Plane.Identity do
   @spec set_group_members(Group.t(), [Ecto.UUID.t()]) :: :ok
   def set_group_members(%Group{} = group, user_ids) do
     Repo.delete_all(
-      from m in Membership, where: m.group_id == ^group.id and m.user_id not in ^user_ids
+      from(m in Membership, where: m.group_id == ^group.id and m.user_id not in ^user_ids)
     )
 
     for user_id <- user_ids do
@@ -128,17 +135,18 @@ defmodule Troupe.Plane.Identity do
   @spec members_of(Group.t()) :: [User.t()]
   def members_of(%Group{} = group) do
     Repo.all(
-      from u in User,
+      from(u in User,
         join: m in Membership,
         on: m.user_id == u.id,
         where: m.group_id == ^group.id,
         order_by: u.subject
+      )
     )
   end
 
   @doc "Every user, for a SCIM listing."
   @spec list_users() :: [User.t()]
-  def list_users, do: Repo.all(from u in User, order_by: u.subject)
+  def list_users, do: Repo.all(from(u in User, order_by: u.subject))
 
   @doc "A group by IdP id, or `nil`."
   @spec get_group(String.t()) :: Group.t() | nil
@@ -146,7 +154,7 @@ defmodule Troupe.Plane.Identity do
 
   @doc "Every group, for an admin choosing which to enable."
   @spec list_groups() :: [Group.t()]
-  def list_groups, do: Repo.all(from g in Group, order_by: g.display_name)
+  def list_groups, do: Repo.all(from(g in Group, order_by: g.display_name))
 
   # -- teams ------------------------------------------------------------------
 
@@ -195,7 +203,7 @@ defmodule Troupe.Plane.Identity do
 
   @doc "Every enabled team."
   @spec list_teams() :: [Team.t()]
-  def list_teams, do: Repo.all(from t in Team, order_by: t.name)
+  def list_teams, do: Repo.all(from(t in Team, order_by: t.name))
 
   @doc """
   The teams a user is in.
@@ -204,13 +212,23 @@ defmodule Troupe.Plane.Identity do
   group's members, and a cached answer is a way for access to outlive its revocation.
   """
   @spec teams_for(User.t()) :: [Team.t()]
+  def teams_for(%User{kind: "service", principal: principal}) do
+    # A principal is in the team that owns it and in no other; there is no group to
+    # derive that from, and nothing that could revoke it short of disabling the principal.
+    case Repo.get(Team, principal.team_id) do
+      nil -> []
+      team -> [team]
+    end
+  end
+
   def teams_for(%User{} = user) do
     Repo.all(
-      from t in Team,
+      from(t in Team,
         join: m in Membership,
         on: m.group_id == t.group_id,
         where: m.user_id == ^user.id,
         order_by: t.name
+      )
     )
   end
 
@@ -222,14 +240,17 @@ defmodule Troupe.Plane.Identity do
   first — a plane with no teams yet still has to have somebody who can make one.
   """
   @spec group_ids_for(User.t()) :: [String.t()]
+  def group_ids_for(%User{kind: "service"}), do: []
+
   def group_ids_for(%User{} = user) do
     Repo.all(
-      from g in Group,
+      from(g in Group,
         join: m in Membership,
         on: m.group_id == g.id,
         where: m.user_id == ^user.id,
         select: g.external_id,
         order_by: g.external_id
+      )
     )
   end
 
@@ -250,7 +271,7 @@ defmodule Troupe.Plane.Identity do
   @doc "Take a profile away from a team. Its live sessions become read-only."
   @spec revoke(Team.t(), String.t()) :: :ok
   def revoke(%Team{} = team, profile) do
-    Repo.delete_all(from g in Grant, where: g.team_id == ^team.id and g.profile == ^profile)
+    Repo.delete_all(from(g in Grant, where: g.team_id == ^team.id and g.profile == ^profile))
 
     # The grant is what made those sessions allowed, and it is no longer there. They
     # become read-only rather than erased: history is history, and a team losing a grant
@@ -258,7 +279,9 @@ defmodule Troupe.Plane.Identity do
     frozen = Sessions.read_only_for(team.id, profile)
 
     if frozen > 0 do
-      Logger.info("troupe plane: #{frozen} session(s) of #{team.name} on #{profile} are now read-only")
+      Logger.info(
+        "troupe plane: #{frozen} session(s) of #{team.name} on #{profile} are now read-only"
+      )
     end
 
     :ok
@@ -267,7 +290,7 @@ defmodule Troupe.Plane.Identity do
   @doc "Every grant on a profile, which is what the plane projects into its resource."
   @spec grants_for_profile(String.t()) :: [Grant.t()]
   def grants_for_profile(profile) do
-    Repo.all(from g in Grant, where: g.profile == ^profile, preload: [:team])
+    Repo.all(from(g in Grant, where: g.profile == ^profile, preload: [:team]))
   end
 
   @doc "Change a team's budget, retention or default visibility."
@@ -277,7 +300,7 @@ defmodule Troupe.Plane.Identity do
   @doc "A team's grants."
   @spec grants_for_team(Team.t()) :: [Grant.t()]
   def grants_for_team(%Team{} = team) do
-    Repo.all(from g in Grant, where: g.team_id == ^team.id, order_by: g.profile)
+    Repo.all(from(g in Grant, where: g.team_id == ^team.id, order_by: g.profile))
   end
 
   @doc """
@@ -289,11 +312,12 @@ defmodule Troupe.Plane.Identity do
   @spec members_of_team(Team.t()) :: [User.t()]
   def members_of_team(%Team{} = team) do
     Repo.all(
-      from u in User,
+      from(u in User,
         join: m in Membership,
         on: m.user_id == u.id,
         where: m.group_id == type(^team.group_id, :binary_id),
         order_by: u.subject
+      )
     )
   end
 
@@ -305,7 +329,8 @@ defmodule Troupe.Plane.Identity do
   By subject rather than by user, so a platform admin can name a person who has not
   logged in yet and have the role waiting when they do.
   """
-  @spec add_team_admin(Team.t(), String.t(), String.t()) :: {:ok, TeamAdmin.t()} | {:error, term()}
+  @spec add_team_admin(Team.t(), String.t(), String.t()) ::
+          {:ok, TeamAdmin.t()} | {:error, term()}
   def add_team_admin(%Team{} = team, subject, granted_by) do
     %TeamAdmin{}
     |> TeamAdmin.changeset(%{
@@ -316,15 +341,18 @@ defmodule Troupe.Plane.Identity do
     })
     |> Repo.insert(on_conflict: :nothing, conflict_target: [:team_id, :subject])
     |> case do
-      {:ok, %TeamAdmin{id: nil}} -> {:ok, Repo.get_by(TeamAdmin, team_id: team.id, subject: subject)}
-      other -> other
+      {:ok, %TeamAdmin{id: nil}} ->
+        {:ok, Repo.get_by(TeamAdmin, team_id: team.id, subject: subject)}
+
+      other ->
+        other
     end
   end
 
   @doc "Take the role away."
   @spec remove_team_admin(Team.t(), String.t()) :: :ok
   def remove_team_admin(%Team{} = team, subject) do
-    Repo.delete_all(from a in TeamAdmin, where: a.team_id == ^team.id and a.subject == ^subject)
+    Repo.delete_all(from(a in TeamAdmin, where: a.team_id == ^team.id and a.subject == ^subject))
     :ok
   end
 
@@ -332,18 +360,21 @@ defmodule Troupe.Plane.Identity do
   @spec teams_administered_by(User.t()) :: [Team.t()]
   def teams_administered_by(%User{} = user) do
     Repo.all(
-      from t in Team,
+      from(t in Team,
         join: a in TeamAdmin,
         on: a.team_id == t.id,
         where: a.subject == ^user.subject,
         order_by: t.name
+      )
     )
   end
 
   @doc "Who administers a team."
   @spec admins_of(Team.t()) :: [String.t()]
   def admins_of(%Team{} = team) do
-    Repo.all(from a in TeamAdmin, where: a.team_id == ^team.id, select: a.subject, order_by: a.subject)
+    Repo.all(
+      from(a in TeamAdmin, where: a.team_id == ^team.id, select: a.subject, order_by: a.subject)
+    )
   end
 
   @doc """
@@ -352,10 +383,15 @@ defmodule Troupe.Plane.Identity do
   A user in no enabled team gets an empty list, which is the whole of "and cannot
   create": there is nothing to create on.
   """
-  @spec profiles_for(User.t()) :: [%{profile: String.t(), team: Team.t(), volume_mode: String.t()}]
+  @spec profiles_for(User.t()) :: [
+          %{profile: String.t(), team: Team.t(), volume_mode: String.t()}
+        ]
+  def profiles_for(%User{kind: "service", principal: principal}),
+    do: Principals.profiles_for(principal)
+
   def profiles_for(%User{} = user) do
     Repo.all(
-      from g in Grant,
+      from(g in Grant,
         join: t in Team,
         on: t.id == g.team_id,
         join: m in Membership,
@@ -363,6 +399,7 @@ defmodule Troupe.Plane.Identity do
         where: m.user_id == ^user.id,
         order_by: [g.profile, t.name],
         preload: [team: t]
+      )
     )
     |> Enum.map(&%{profile: &1.profile, team: &1.team, volume_mode: &1.volume_mode})
   end

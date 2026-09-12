@@ -18,7 +18,13 @@ defmodule Troupe.Ctl.AdminTest do
     test = self()
 
     {:ok, listener} =
-      :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true, ip: {127, 0, 0, 1}])
+      :gen_tcp.listen(0, [
+        :binary,
+        active: false,
+        packet: :raw,
+        reuseaddr: true,
+        ip: {127, 0, 0, 1}
+      ])
 
     {:ok, port} = :inet.port(listener)
     answers = :ets.new(:answers, [:public, :set])
@@ -93,7 +99,8 @@ defmodule Troupe.Ctl.AdminTest do
     test "a refusal is a sentence, not a tuple", context do
       :ets.insert(
         context.answers,
-        {:answer, {:error, %{"message" => "forbidden", "data" => %{"required_role" => "platform_admin"}}}}
+        {:answer,
+         {:error, %{"message" => "forbidden", "data" => %{"required_role" => "platform_admin"}}}}
       )
 
       output = capture(fn -> assert 1 = run(context, ~w(profiles)) end)
@@ -120,7 +127,13 @@ defmodule Troupe.Ctl.AdminTest do
       assert usage =~ Enum.join(words, " ")
       assert usage =~ help
 
-      for argument <- args, do: assert(usage =~ String.upcase(argument))
+      # A required argument is shown in capitals; one that may be left out, in brackets.
+      for argument <- args do
+        case String.split(argument, "?") do
+          [name, ""] -> assert usage =~ "[#{String.upcase(name)}]"
+          [name] -> assert usage =~ String.upcase(name)
+        end
+      end
     end
 
     # And says the thing that makes this CLI trustworthy.

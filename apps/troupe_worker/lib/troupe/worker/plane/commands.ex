@@ -15,6 +15,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.Protocol.Error
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
+  alias Troupe.Worker.Bundles
   alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
@@ -35,30 +36,41 @@ defmodule Troupe.Worker.Plane.Commands do
 
   # The plane mints the epoch and the worker carries it unchanged. A worker that
   # invented one would be inventing the fence that protects the session from it.
+  #
+  # Besides identity, the push may carry what a session created by nobody in particular
+  # needs to do its first turn alone: a `prompt` that becomes its first input, an
+  # `agent` from the bundle, `terms` that cap it, and an `origin` that says what started
+  # it. All optional, and a session a person opens carries none of them.
   defp dispatch("session.activate", params) do
     session_id = params["session_id"]
 
-    from_plane =
-      Enum.reject(
-        [
-          team: params["team"],
-          epoch: params["epoch"],
-          owner_subject: params["owner_subject"],
-          profile: params["profile"],
-          bundle: bundle_of(params)
-        ],
-        &match?({_key, nil}, &1)
-      )
+    with {:ok, bundle} <- bundle_of(params) do
+      from_plane =
+        Enum.reject(
+          [
+            team: params["team"],
+            epoch: params["epoch"],
+            owner_subject: params["owner_subject"],
+            profile: params["profile"],
+            bundle: bundle,
+            agent: params["agent"],
+            prompt: params["prompt"],
+            terms: terms_of(params["terms"]),
+            origin: params["origin"]
+          ],
+          &match?({_key, nil}, &1)
+        )
 
-    case Sessions.activate(session_id, Keyword.merge(defaults(), from_plane)) do
-      {:ok, summary} ->
-        {:ok, %{"session_id" => session_id, "epoch" => summary.epoch, "activated" => true}}
+      case Sessions.activate(session_id, Keyword.merge(defaults(), from_plane)) do
+        {:ok, summary} ->
+          {:ok, %{"session_id" => session_id, "epoch" => summary.epoch, "activated" => true}}
 
-      {:error, {:stale_epoch, stored, ours}} ->
-        {:error, Error.new(:conflict, %{reason: "stale epoch", stored: stored, offered: ours})}
+        {:error, {:stale_epoch, stored, ours}} ->
+          {:error, Error.new(:conflict, %{reason: "stale epoch", stored: stored, offered: ours})}
 
-      {:error, reason} ->
-        {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+        {:error, reason} ->
+          {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+      end
     end
   end
 
@@ -170,19 +182,39 @@ defmodule Troupe.Worker.Plane.Commands do
      }}
   end
 
-  # A new config bundle. The MCP servers it names are re-discovered; running sessions
-  # keep the tools they started with, because a session's config is the version recorded
-  # in `session_created`.
+  # A new config bundle. The pod fetches it by hash, checks it, writes it to disk and
+  # re-discovers the MCP servers it names; running sessions keep the tools and the
+  # definitions they started with, because a session's config is the version it was
+  # pinned to at creation. A pod with no bundle registry — a test, a development
+  # daemon — applies whatever servers the push still carries inline.
   defp dispatch("config.updated", params) do
-    servers = params["mcp_servers"] || []
-
-    case Process.whereis(MCP) do
+    case Process.whereis(Bundles) do
       nil ->
-        {:ok, %{"applied" => false, "reason" => "no MCP registry on this pod"}}
+        apply_inline_servers(params)
 
-      pid ->
-        {:ok, names} = MCP.put_servers(pid, servers)
-        {:ok, %{"applied" => true, "bundle_hash" => params["bundle_hash"], "tools" => names}}
+      bundles ->
+        case Bundles.announce(bundles, params) do
+          {:ok, applied} ->
+            {:ok,
+             %{
+               "applied" => true,
+               "bundle_hash" => applied.hash,
+               "version" => applied.version,
+               "tools" => applied.tools
+             }}
+
+          {:fallback, %{reason: reason, tools: tools}} ->
+            {:ok,
+             %{
+               "applied" => false,
+               "reason" => inspect(reason),
+               "mcp_servers" => "inline",
+               "tools" => tools
+             }}
+
+          {:error, reason} ->
+            {:ok, %{"applied" => false, "reason" => inspect(reason)}}
+        end
     end
   end
 
@@ -243,7 +275,10 @@ defmodule Troupe.Worker.Plane.Commands do
         true
 
       {:error, reason} ->
-        Logger.error("troupe worker: could not destroy the key for #{session_id}: #{inspect(reason)}")
+        Logger.error(
+          "troupe worker: could not destroy the key for #{session_id}: #{inspect(reason)}"
+        )
+
         false
     end
   end
@@ -252,29 +287,93 @@ defmodule Troupe.Worker.Plane.Commands do
     store = Keyword.get_lazy(defaults(), :store, &ObjectStore.from_env/0)
 
     case Storage.erase(store, session_id) do
-      {:ok, count} -> count
+      {:ok, count} ->
+        count
+
       {:error, reason} ->
-        Logger.error("troupe worker: could not erase objects for #{session_id}: #{inspect(reason)}")
+        Logger.error(
+          "troupe worker: could not erase objects for #{session_id}: #{inspect(reason)}"
+        )
+
         0
     end
   end
 
-  # What the plane says this session should run on, and whether that is a change from
-  # what it was pinned to.
+  defp apply_inline_servers(params) do
+    servers = params["mcp_servers"] || []
+
+    case Process.whereis(MCP) do
+      nil ->
+        {:ok, %{"applied" => false, "reason" => "no MCP registry on this pod"}}
+
+      pid ->
+        {:ok, names} = MCP.put_servers(pid, servers)
+        {:ok, %{"applied" => true, "bundle_hash" => params["bundle_hash"], "tools" => names}}
+    end
+  end
+
+  # What the plane says this session should run on, whether that is a change from what
+  # it was pinned to, and where on this pod it lives. A version this pod has never
+  # materialised is fetched now, before the tree starts, because the definitions and
+  # skills the session runs under come from that directory. A pod with no bundle
+  # registry runs the session on built-ins alone, which is what it did before bundles
+  # had content.
   defp bundle_of(params) do
     case params["bundle_version"] do
       nil ->
-        nil
+        {:ok, nil}
 
       version ->
-        %{
-          version: version,
-          hash: params["bundle_hash"],
-          channel: params["channel"],
-          upgraded_from: params["bundle_upgraded_from"]
-        }
+        pin = %{version: version, hash: params["bundle_hash"], channel: params["channel"]}
+
+        with {:ok, dir} <- bundle_dir(pin) do
+          {:ok, Map.merge(pin, %{dir: dir, upgraded_from: params["bundle_upgraded_from"]})}
+        end
     end
   end
+
+  defp bundle_dir(pin) do
+    case Process.whereis(Bundles) do
+      nil ->
+        {:ok, nil}
+
+      bundles ->
+        case Bundles.ensure(bundles, pin) do
+          {:ok, dir} ->
+            {:ok, dir}
+
+          {:error, reason} ->
+            named = inspect(pin.hash || pin.version)
+
+            {:error,
+             Error.new(:unavailable, %{
+               reason: "bundle #{named} is not on this pod: #{inspect(reason)}"
+             })}
+        end
+    end
+  end
+
+  # The session's terms, as config overrides. Seconds on the wire because that is how
+  # a person writes a schedule; milliseconds inside because that is what the budget
+  # counts. `approvals` is `wait` unless it says `deny`: there is no `auto` a trigger
+  # can ask for.
+  defp terms_of(%{} = terms) do
+    [
+      max_turns: positive(terms["max_turns"]),
+      wall_clock_ms: terms["wall_clock_seconds"] |> positive() |> then(&(&1 && &1 * 1000)),
+      approvals: if(terms["approvals"] == "deny", do: :deny)
+    ]
+    |> Enum.reject(&match?({_key, nil}, &1))
+    |> case do
+      [] -> nil
+      overrides -> overrides
+    end
+  end
+
+  defp terms_of(_terms), do: nil
+
+  defp positive(n) when is_integer(n) and n > 0, do: n
+  defp positive(_), do: nil
 
   # A pod with no auth server is one running without a plane at all — a test, or a
   # development daemon. Saying so is better than crashing on a push it never asked for.

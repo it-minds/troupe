@@ -32,10 +32,22 @@ defmodule Troupe.Plane.Admin.API do
     "admin.sessions.list" => {:sessions_list, ["filter"]},
     "admin.session.erase" => {:session_erase, ["session_id"]},
     "admin.bundles.list" => {:bundles_list, ["channel"]},
+    "admin.bundle.get" => {:bundle_get, ["channel", "version"]},
+    "admin.bundle.validate" => {:bundle_validate, ["content"]},
     "admin.bundle.publish" => {:bundle_publish, ["channel", "content"]},
     "admin.bundle.retire" => {:bundle_retire, ["channel", "version"]},
+    "admin.mcp.check" => {:mcp_check, ["url"]},
     "admin.audit.list" => {:audit_list, ["filter"]},
-    "admin.provisioning.mode" => {:provisioning_mode, []}
+    "admin.provisioning.mode" => {:provisioning_mode, []},
+    "admin.principals.list" => {:principals_list, ["team"]},
+    "admin.principal.create" => {:principal_create, ["team", "principal"]},
+    "admin.principal.rotate" => {:principal_rotate, ["subject"]},
+    "admin.principal.disable" => {:principal_disable, ["subject"]},
+    "admin.triggers.list" => {:triggers_list, ["team"]},
+    "admin.trigger.put" => {:trigger_put, ["trigger"]},
+    "admin.trigger.delete" => {:trigger_delete, ["team", "name"]},
+    "admin.trigger.run" => {:trigger_run, ["team", "name"]},
+    "admin.runs.list" => {:runs_list, ["filter"]}
   }
 
   @doc "Every admin method, and the `Admin` function it renames."
@@ -62,14 +74,19 @@ defmodule Troupe.Plane.Admin.API do
 
   # `filter` and `attrs` are the two shapes a method takes a bag of options in; the rest
   # are plain values. A keyword list for the former because that is what the context
-  # takes, and a context that took maps would be awkward for the CLI.
+  # takes, and a context that took maps would be awkward for the CLI. A `profile`, a
+  # `principal` or a `trigger` is the whole params map when it is not nested, so a
+  # client may send the object flat or under its name.
   defp argument("filter", params), do: options(params["filter"] || params)
   defp argument("attrs", params), do: params["attrs"] || %{}
   defp argument("profile", params), do: params["profile"] || params
+  defp argument("principal", params), do: params["principal"] || params
+  defp argument("trigger", params), do: params["trigger"] || params
   defp argument("content", params), do: params["content"] || %{}
   defp argument(name, params), do: params[name]
 
-  @known_options ~w(limit actor kind subject_id profile state team channel)
+  @known_options ~w(limit actor kind subject_id profile state team channel) ++
+                   ~w(trigger status origin needs_review)
 
   defp options(params) when is_map(params) do
     for {key, value} <- params, key in @known_options, do: {String.to_existing_atom(key), value}

@@ -68,16 +68,22 @@ defmodule Troupe.Operator.ResourcesTest do
       assert get_in(resource, ["metadata", "labels", Names.managed_label()]) == "operator"
     end
 
-    template = hd(get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "volumeClaimTemplates"]))
+    template =
+      hd(get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "volumeClaimTemplates"]))
+
     refute get_in(template, ["metadata", "labels"])
 
     # And the selector stays what it was, because a StatefulSet's is immutable.
-    selector = get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "selector", "matchLabels"])
+    selector =
+      get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "selector", "matchLabels"])
+
     refute Map.has_key?(selector, Names.managed_label())
     assert selector == Names.labels("dev")
   end
 
-  test "nothing carries an owner reference, because one would not survive", %{resources: resources} do
+  test "nothing carries an owner reference, because one would not survive", %{
+    resources: resources
+  } do
     # Owner references may not cross namespaces, and these objects live in
     # `troupe-w-dev` while the profile lives in `troupe-system`. Kubernetes treats such
     # an owner as missing and garbage-collects the dependent — which it did, once,
@@ -99,7 +105,12 @@ defmodule Troupe.Operator.ResourcesTest do
   test "scaling down removes an ingress from the desired set, so pruning will delete it",
        %{policy: policy, settings: settings} do
     two = profile() |> Profile.from_resource() |> Resources.for_profile(policy, settings)
-    one = [replicas: 1] |> profile() |> Profile.from_resource() |> Resources.for_profile(policy, settings)
+
+    one =
+      [replicas: 1]
+      |> profile()
+      |> Profile.from_resource()
+      |> Resources.for_profile(policy, settings)
 
     gone = MapSet.difference(Resources.identities(two), Resources.identities(one))
 
@@ -122,9 +133,13 @@ defmodule Troupe.Operator.ResourcesTest do
       assert selector["statefulset.kubernetes.io/pod-name"] == "troupe-w-dev-1"
     end
 
-    test "the headless Service is the StatefulSet's, and has no cluster IP", %{resources: resources} do
+    test "the headless Service is the StatefulSet's, and has no cluster IP", %{
+      resources: resources
+    } do
       assert get_in(find(resources, "Service", "troupe-w-dev"), ["spec", "clusterIP"]) == "None"
-      assert get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "serviceName"]) == "troupe-w-dev"
+
+      assert get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "serviceName"]) ==
+               "troupe-w-dev"
     end
 
     test "the ingress carries a long read timeout, because the harness connection is one",
@@ -133,7 +148,9 @@ defmodule Troupe.Operator.ResourcesTest do
       assert annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"] == "3600"
     end
 
-    test "TLS is attached per host when the installation has a certificate", %{resources: resources} do
+    test "TLS is attached per host when the installation has a certificate", %{
+      resources: resources
+    } do
       assert [%{"hosts" => ["0.dev.workers.example.test"], "secretName" => "workers-tls"}] =
                get_in(find(resources, "Ingress", "dev-0"), ["spec", "tls"])
     end
@@ -141,7 +158,8 @@ defmodule Troupe.Operator.ResourcesTest do
 
   describe "identity" do
     test "the ServiceAccount token is not automounted", %{resources: resources} do
-      assert find(resources, "ServiceAccount", "troupe-worker")["automountServiceAccountToken"] == false
+      assert find(resources, "ServiceAccount", "troupe-worker")["automountServiceAccountToken"] ==
+               false
 
       pod = pod_spec(resources)
       assert pod["automountServiceAccountToken"] == false
@@ -196,7 +214,10 @@ defmodule Troupe.Operator.ResourcesTest do
                ["ReadOnlyMany"]
     end
 
-    test "a profile without orgMount gets no org volume at all", %{policy: policy, settings: settings} do
+    test "a profile without orgMount gets no org volume at all", %{
+      policy: policy,
+      settings: settings
+    } do
       resources =
         [orgMount: false]
         |> profile()
@@ -210,10 +231,15 @@ defmodule Troupe.Operator.ResourcesTest do
     test "each pod gets its own data volume from the StatefulSet's template",
          %{resources: resources} do
       assert [%{"metadata" => %{"name" => "data"}, "spec" => spec}] =
-               get_in(find(resources, "StatefulSet", "troupe-w-dev"), ["spec", "volumeClaimTemplates"])
+               get_in(find(resources, "StatefulSet", "troupe-w-dev"), [
+                 "spec",
+                 "volumeClaimTemplates"
+               ])
 
       assert spec["accessModes"] == ["ReadWriteOnce"]
-      assert %{"mountPath" => "/var/lib/troupe"} = Enum.find(container(resources)["volumeMounts"], &(&1["name"] == "data"))
+
+      assert %{"mountPath" => "/var/lib/troupe"} =
+               Enum.find(container(resources)["volumeMounts"], &(&1["name"] == "data"))
     end
   end
 
@@ -256,7 +282,10 @@ defmodule Troupe.Operator.ResourcesTest do
 
     test "a disruption budget keeps more than one pod from going at once",
          %{resources: resources} do
-      assert get_in(find(resources, "PodDisruptionBudget", "troupe-w-dev"), ["spec", "maxUnavailable"]) == 1
+      assert get_in(find(resources, "PodDisruptionBudget", "troupe-w-dev"), [
+               "spec",
+               "maxUnavailable"
+             ]) == 1
     end
   end
 
@@ -268,7 +297,9 @@ defmodule Troupe.Operator.ResourcesTest do
 
     test "ingress comes only from the ingress controller, on the harness port",
          %{resources: resources} do
-      assert [rule] = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "ingress"])
+      assert [rule] =
+               get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "ingress"])
+
       assert [%{"namespaceSelector" => %{"matchLabels" => labels}}] = rule["from"]
       assert labels == %{"troupe.dev/ingress" => "true"}
       assert rule["ports"] == [%{"protocol" => "TCP", "port" => 4000}]
@@ -303,9 +334,133 @@ defmodule Troupe.Operator.ResourcesTest do
       assert "api.anthropic.com" in names
       assert "github.com" in names
     end
+
+    test "a wildcard in the profile's egress becomes a pattern, and an exact name stays a name",
+         %{policy: policy} do
+      resources =
+        [egress: %{"fqdns" => ["*.anthropic.com"], "gitHosts" => ["github.com"]}]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      [cilium] = all(resources, "CiliumNetworkPolicy")
+      selectors = cilium |> get_in(["spec", "egress"]) |> Enum.flat_map(&(&1["toFQDNs"] || []))
+
+      assert %{"matchPattern" => "*.anthropic.com"} in selectors
+      assert %{"matchName" => "github.com"} in selectors
+
+      # `matchName` takes a star literally, and no DNS answer ever carries one, so a
+      # wildcard rendered that way is a rule that allows nothing.
+      refute Enum.any?(selectors, &String.contains?(&1["matchName"] || "", "*"))
+    end
   end
 
-  test "scaling the profile changes how many pods are addressed", %{policy: policy, settings: settings} do
+  describe "MCP servers" do
+    setup %{policy: policy, settings: settings} do
+      servers = [
+        %{
+          "name" => "tickets",
+          "url" => "https://mcp.internal.test/tickets",
+          "secretRef" => %{"name" => "troupe-mcp-tickets", "key" => "token"}
+        },
+        %{"name" => "docs", "url" => "https://mcp.internal.test/docs", "timeoutMs" => 5000}
+      ]
+
+      resources =
+        [mcpServers: servers]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+
+      %{env: container(resources)["env"]}
+    end
+
+    test "the pod is told its servers from the spec, before any bundle arrives", %{env: env} do
+      value = Enum.find(env, &(&1["name"] == "TROUPE_MCP_SERVERS"))["value"]
+
+      # The same shape `Troupe.MCP.Server.from_config/1` reads from a bundle push. The
+      # server without a Secret carries no `credential_ref`, and fields the spec left
+      # out are absent rather than null.
+      assert Jason.decode!(value) == [
+               %{
+                 "name" => "tickets",
+                 "url" => "https://mcp.internal.test/tickets",
+                 "credential_ref" => "TROUPE_MCP_TICKETS_TOKEN"
+               },
+               %{
+                 "name" => "docs",
+                 "url" => "https://mcp.internal.test/docs",
+                 "timeout_ms" => 5000
+               }
+             ]
+    end
+
+    test "a credential arrives from its Secret, under the name the list promised, and optionally",
+         %{env: env} do
+      token = Enum.find(env, &(&1["name"] == "TROUPE_MCP_TICKETS_TOKEN"))
+
+      assert get_in(token, ["valueFrom", "secretKeyRef"]) == %{
+               "name" => "troupe-mcp-tickets",
+               "key" => "token",
+               "optional" => true
+             }
+
+      refute Map.has_key?(token, "value")
+
+      # A server without a Secret gets no variable at all.
+      refute Enum.find(env, &(&1["name"] == "TROUPE_MCP_DOCS_TOKEN"))
+    end
+
+    test "a declared credentialRef names the variable instead of the convention",
+         %{policy: policy, settings: settings} do
+      server = %{
+        "name" => "jira",
+        "url" => "https://mcp.internal.test/jira",
+        "credentialRef" => "JIRA_MCP_TOKEN",
+        "secretRef" => %{"name" => "troupe-mcp-jira"}
+      }
+
+      env =
+        [mcpServers: [server]]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+        |> container()
+        |> Map.fetch!("env")
+
+      assert %{
+               "valueFrom" => %{
+                 "secretKeyRef" => %{"name" => "troupe-mcp-jira", "key" => "token"}
+               }
+             } =
+               Enum.find(env, &(&1["name"] == "JIRA_MCP_TOKEN"))
+
+      refute Enum.find(env, &(&1["name"] == "TROUPE_MCP_JIRA_TOKEN"))
+
+      assert [%{"credential_ref" => "JIRA_MCP_TOKEN"}] =
+               Jason.decode!(Enum.find(env, &(&1["name"] == "TROUPE_MCP_SERVERS"))["value"])
+    end
+
+    test "a profile without MCP servers says nothing about them", %{
+      policy: policy,
+      settings: settings
+    } do
+      env =
+        [mcpServers: []]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+        |> container()
+        |> Map.fetch!("env")
+
+      refute Enum.find(env, &String.starts_with?(&1["name"], "TROUPE_MCP_"))
+    end
+  end
+
+  test "scaling the profile changes how many pods are addressed", %{
+    policy: policy,
+    settings: settings
+  } do
     resources =
       [replicas: 1]
       |> profile()

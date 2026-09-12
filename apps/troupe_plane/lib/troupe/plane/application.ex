@@ -32,6 +32,9 @@ defmodule Troupe.Plane.Application do
       # registered with `:global`, so exactly one of each exists across all of them.
       Troupe.Plane.Singleton,
       Troupe.Plane.Fleet.Sweeper,
+      # The in-plane cron is a `:global` singleton like the others, but nothing asks for
+      # it the way a create asks for placement; the keeper asks, from every replica.
+      Troupe.Plane.Triggers.Scheduler.Keeper,
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
       Troupe.Plane.Control.Listener,

@@ -20,7 +20,8 @@ defmodule Troupe.Ctl.MixProject do
   def application do
     [
       extra_applications: [:logger],
-      mod: {Troupe.Ctl.Application, []}]
+      mod: {Troupe.Ctl.Application, []}
+    ]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
@@ -29,10 +30,14 @@ defmodule Troupe.Ctl.MixProject do
   defp deps do
     [
       {:troupe_protocol, in_umbrella: true},
+      # `troupe admin bundle publish <dir>` reads `mcp.yaml`; the parser is the one the
+      # protocol already carries for agent definitions.
+      {:yaml_elixir, "~> 2.12"},
       # Test only, and deliberately so: to test a client you need a server. It is
       # never a dependency outside the test environment, and `mix troupe.boundaries` reads the compiled
       # beams rather than this file, so it would still catch a call from `lib/`.
       {:troupe_gateway, in_umbrella: true, only: :test},
-      {:jason, "~> 1.4"}]
+      {:jason, "~> 1.4"}
+    ]
   end
 end

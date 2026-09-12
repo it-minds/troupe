@@ -16,36 +16,38 @@ defmodule Troupe.Plane.Web.AdminRouter do
   alias Troupe.Plane.Web.Live
 
   pipeline :browser do
-    plug :accepts, ["html"]
-    plug :fetch_session
-    plug :fetch_live_flash
-    plug :put_root_layout, html: {Troupe.Plane.Web.Live.Root, :root}
+    plug(:accepts, ["html"])
+    plug(:fetch_session)
+    plug(:fetch_live_flash)
+    plug(:put_root_layout, html: {Troupe.Plane.Web.Live.Root, :root})
 
-    plug :protect_from_forgery
-    plug :put_secure_browser_headers
+    plug(:protect_from_forgery)
+    plug(:put_secure_browser_headers)
   end
 
   scope "/admin" do
-    pipe_through :browser
+    pipe_through(:browser)
 
-    get "/login", Troupe.Plane.Web.AdminAuth, :login
-    get "/callback", Troupe.Plane.Web.AdminAuth, :callback
-    get "/denied", Troupe.Plane.Web.AdminAuth, :denied
-    get "/logout", Troupe.Plane.Web.AdminAuth, :logout
+    get("/login", Troupe.Plane.Web.AdminAuth, :login)
+    get("/callback", Troupe.Plane.Web.AdminAuth, :callback)
+    get("/denied", Troupe.Plane.Web.AdminAuth, :denied)
+    get("/logout", Troupe.Plane.Web.AdminAuth, :logout)
 
     live_session :admin, on_mount: {Live.Auth, :admin} do
-      live "/", Live.Overview
-      live "/workers", Live.Workers
-      live "/workers/:profile", Live.Workers
-      live "/teams", Live.Teams
-      live "/sessions", Live.Sessions
-      live "/bundles", Live.Bundles
-      live "/audit", Live.Audit
+      live("/", Live.Overview)
+      live("/workers", Live.Workers)
+      live("/workers/:profile", Live.Workers)
+      live("/teams", Live.Teams)
+      live("/sessions", Live.Sessions)
+      live("/bundles", Live.Bundles)
+      live("/triggers", Live.Triggers)
+      live("/triggers/:team", Live.Triggers)
+      live("/audit", Live.Audit)
     end
 
     live_session :platform, on_mount: {Live.Auth, :platform_admin} do
-      live "/profile/new", Live.ProfileEditor
-      live "/profile/:profile", Live.ProfileEditor
+      live("/profile/new", Live.ProfileEditor)
+      live("/profile/:profile", Live.ProfileEditor)
     end
   end
 end

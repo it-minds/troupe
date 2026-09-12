@@ -9,8 +9,14 @@ defmodule Troupe.Agent.Definition do
   data rather than state removes a whole class of races.
 
   Precedence is project `.troupe/agents/` over the global config dir's `agents/` over
-  the built-ins below.
+  a bundle's `agents/` over the built-ins below.
+
+  The parsing itself lives in `Troupe.Protocol.AgentDefinition`, because the plane
+  checks a definition at publish and does not depend on this app. This struct is what
+  the harness runs under; the parser's map is what both sides agree a file means.
   """
+
+  alias Troupe.Protocol.AgentDefinition
 
   @enforce_keys [:name, :mode, :prompt]
   defstruct [
@@ -23,11 +29,13 @@ defmodule Troupe.Agent.Definition do
     permissions: %{},
     max_turns: nil,
     budget_share: 0.25,
+    skills: [],
     source: :builtin
   ]
 
   @type mode :: :primary | :subagent
   @type permission :: :auto | :ask | :deny
+  @type source :: :builtin | :bundle | :global | :project
   @type t :: %__MODULE__{
           name: String.t(),
           prompt: String.t(),
@@ -38,7 +46,8 @@ defmodule Troupe.Agent.Definition do
           permissions: %{optional(String.t()) => permission()},
           max_turns: pos_integer() | nil,
           budget_share: float(),
-          source: :builtin | :global | :project
+          skills: :all | [String.t()],
+          source: source()
         }
 
   @doc """
@@ -65,92 +74,44 @@ defmodule Troupe.Agent.Definition do
   end
 
   @doc """
+  Whether this profile may consult a skill.
+
+  `skills: all` opens every skill the bundle carries; a list names the ones it may
+  read; the default, an empty list, is no skills at all — a profile that did not ask
+  for any should not have its prompt grow because an admin published one.
+  """
+  @spec allows_skill?(t(), String.t()) :: boolean()
+  def allows_skill?(%__MODULE__{skills: :all}, _name), do: true
+  def allows_skill?(%__MODULE__{skills: list}, name), do: name in list
+
+  @doc """
   Parse a definition from markdown with YAML frontmatter.
 
   A file without frontmatter is still valid — the whole file is then the prompt,
   which makes the simplest possible custom agent a single paragraph in a file.
   """
-  @spec parse(String.t(), String.t(), :builtin | :global | :project) ::
-          {:ok, t()} | {:error, term()}
+  @spec parse(String.t(), String.t(), source()) :: {:ok, t()} | {:error, term()}
   def parse(name, contents, source) do
-    {frontmatter, body} = split_frontmatter(contents)
-
-    with {:ok, meta} <- decode_yaml(frontmatter) do
-      build(name, meta, String.trim(body), source)
+    with {:ok, parsed} <- AgentDefinition.parse(name, contents) do
+      {:ok, from_parsed(parsed, source)}
     end
   end
 
-  defp split_frontmatter("---\n" <> rest), do: do_split(rest)
-  defp split_frontmatter("---\r\n" <> rest), do: do_split(rest)
-  defp split_frontmatter(contents), do: {"", contents}
-
-  defp do_split(rest) do
-    case Regex.split(~r/^---\s*$/m, rest, parts: 2) do
-      [yaml, body] -> {yaml, body}
-      [only] -> {"", only}
-    end
+  @doc "Build the struct from what the shared parser returned."
+  @spec from_parsed(AgentDefinition.t(), source()) :: t()
+  def from_parsed(parsed, source) do
+    %__MODULE__{
+      name: parsed.name,
+      prompt: parsed.prompt,
+      description: parsed.description,
+      mode: parsed.mode,
+      model: parsed.model,
+      tools: parsed.tools,
+      permissions: parsed.permissions,
+      max_turns: parsed.max_turns,
+      budget_share: parsed.budget_share,
+      skills: parsed.skills,
+      source: source
+    }
   end
-
-  defp decode_yaml(""), do: {:ok, %{}}
-
-  defp decode_yaml(yaml) do
-    case YamlElixir.read_from_string(yaml) do
-      {:ok, map} when is_map(map) -> {:ok, map}
-      {:ok, _other} -> {:ok, %{}}
-      {:error, reason} -> {:error, {:bad_frontmatter, reason}}
-    end
-  end
-
-  defp build(name, meta, prompt, source) do
-    with {:ok, mode} <- parse_mode(Map.get(meta, "mode", "subagent")),
-         {:ok, tools} <- parse_tools(Map.get(meta, "tools", nil)),
-         {:ok, permissions} <- parse_permissions(Map.get(meta, "permissions", %{})) do
-      {:ok,
-       %__MODULE__{
-         name: name,
-         prompt: prompt,
-         description: Map.get(meta, "description", ""),
-         mode: mode,
-         model: Map.get(meta, "model"),
-         tools: tools,
-         permissions: permissions,
-         max_turns: parse_pos_int(Map.get(meta, "max_turns")),
-         budget_share: parse_share(Map.get(meta, "budget_share")),
-         source: source
-       }}
-    end
-  end
-
-  defp parse_mode("primary"), do: {:ok, :primary}
-  defp parse_mode("subagent"), do: {:ok, :subagent}
-  defp parse_mode(other), do: {:error, {:bad_mode, other}}
-
-  defp parse_tools(nil), do: {:ok, :all}
-  defp parse_tools("all"), do: {:ok, :all}
-
-  defp parse_tools(list) when is_list(list) do
-    if Enum.all?(list, &is_binary/1), do: {:ok, list}, else: {:error, {:bad_tools, list}}
-  end
-
-  defp parse_tools(other), do: {:error, {:bad_tools, other}}
-
-  defp parse_permissions(map) when is_map(map) do
-    Enum.reduce_while(map, {:ok, %{}}, fn {tool, value}, {:ok, acc} ->
-      case value do
-        "auto" -> {:cont, {:ok, Map.put(acc, tool, :auto)}}
-        "ask" -> {:cont, {:ok, Map.put(acc, tool, :ask)}}
-        "deny" -> {:cont, {:ok, Map.put(acc, tool, :deny)}}
-        other -> {:halt, {:error, {:bad_permission, tool, other}}}
-      end
-    end)
-  end
-
-  defp parse_permissions(other), do: {:error, {:bad_permissions, other}}
-
-  defp parse_pos_int(n) when is_integer(n) and n > 0, do: n
-  defp parse_pos_int(_), do: nil
-
-  defp parse_share(n) when is_float(n) and n > 0, do: min(n, 1.0)
-  defp parse_share(n) when is_integer(n) and n > 0, do: min(n / 1, 1.0)
-  defp parse_share(_), do: 0.25
 end

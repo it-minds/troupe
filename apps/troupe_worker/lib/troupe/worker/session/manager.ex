@@ -20,11 +20,22 @@ defmodule Troupe.Worker.Session.Manager do
   the archive from being torn halfway through a file write; erasing last is what makes
   the erase safe, because by then every byte of it is in object storage under a key the
   plane cannot read.
+
+  ## What the plane is told while a session runs
+
+  Four facts that are lifecycle rather than content: `status` (`idle`, `thinking`,
+  `acting`, `waiting` when an approval is pending, `done`, `interrupted`), the
+  `done_reason`, how many approvals are pending, and the cost so far. They go out as
+  `session.status` notifications on change, at most twice a second per session, and
+  again in the dormancy report — which is what lets the plane list a review queue
+  without ever reading a log. Nothing about *what* the agent is doing crosses: not the
+  tool, not the todo, not a word of any message.
   """
 
   use GenServer, restart: :temporary
 
   alias Troupe.ObjectStore
+  alias Troupe.Protocol.Event
   alias Troupe.Session.Log
   alias Troupe.Session.Summary
   alias Troupe.Sessions.{Cipher, Storage}
@@ -43,6 +54,10 @@ defmodule Troupe.Worker.Session.Manager do
   # tree rather than the events since the last one, and skipped entirely when nothing has
   # changed.
   @archive_every_ms 5 * 60 * 1000
+  # The least time between two status notifications for one session. An agent moves
+  # `thinking -> acting -> thinking` several times a second on a fast tool, and the
+  # plane's row does not need to see each of them.
+  @status_debounce_ms 500
 
   defstruct [
     :session_id,
@@ -57,9 +72,13 @@ defmodule Troupe.Worker.Session.Manager do
     :restored,
     :archive_timer,
     :archived_fingerprint,
+    :status_timer,
+    :last_status,
     status: :new,
     activated_at: nil,
-    dormant_after_ms: @dormant_after_ms
+    dormant_after_ms: @dormant_after_ms,
+    status_dirty: false,
+    lifecycle: %{state: "idle", done_reason: nil, interrupted: false, approvals: MapSet.new()}
   ]
 
   # -- api --------------------------------------------------------------------
@@ -121,7 +140,7 @@ defmodule Troupe.Worker.Session.Manager do
     case restore(state) do
       {:ok, state} ->
         Troupe.subscribe(state.session_id)
-        state = state |> touch() |> schedule_archive()
+        state = state |> seed_lifecycle() |> status_changed() |> touch() |> schedule_archive()
         {:reply, {:ok, summary(state)}, state}
 
       {:error, reason} ->
@@ -144,7 +163,8 @@ defmodule Troupe.Worker.Session.Manager do
     {:stop, :normal, dormancy(state), state}
   end
 
-  def handle_call(:go_dormant, _from, state), do: {:reply, {:error, {:not_active, state.status}}, state}
+  def handle_call(:go_dormant, _from, state),
+    do: {:reply, {:error, {:not_active, state.status}}, state}
 
   def handle_call({:fence, epoch}, _from, state) do
     if state.context && epoch > state.context.epoch do
@@ -169,7 +189,14 @@ defmodule Troupe.Worker.Session.Manager do
     end
   end
 
-  def handle_info({:troupe_event, _session_id, _event}, state), do: {:noreply, touch(state)}
+  def handle_info({:troupe_event, _session_id, event}, state) do
+    {:noreply, state |> observe(event) |> touch()}
+  end
+
+  def handle_info(:status_tick, state) do
+    state = %{state | status_timer: nil}
+    {:noreply, if(state.status_dirty, do: flush_status(state), else: state)}
+  end
 
   # A periodic workspace archive, so losing the volume costs at most one interval of
   # files rather than every file. Skipped when the tree has not changed, which is the
@@ -301,6 +328,10 @@ defmodule Troupe.Worker.Session.Manager do
   defp dormancy(state) do
     context = state.context
     head = Troupe.head_seq(state.session_id)
+    # Read while the tree is still up: the projection that knows the cost goes down
+    # with it, and the dormancy report is the last word the plane gets on this session
+    # until it wakes again.
+    lifecycle = status_fields(state)
 
     # Records `session_dormant` and then takes the tree down. The sealer is not part of
     # that tree and is subscribed, so the event is already in its mailbox by the time
@@ -317,22 +348,26 @@ defmodule Troupe.Worker.Session.Manager do
 
     archive = archive(state, sealed.sealed_through)
 
-    state.report.(%{
-      "session_id" => context.session_id,
-      "epoch" => context.epoch,
-      "last_seq" => sealed.sealed_through,
-      "head_hash" => sealed.head_hash,
-      "workspace_seq" => archive[:seq],
-      "reason" => "dormant",
-      "type" => "session.dormant"
-    })
+    payload =
+      Map.merge(lifecycle, %{
+        "session_id" => context.session_id,
+        "epoch" => context.epoch,
+        "last_seq" => sealed.sealed_through,
+        "head_hash" => sealed.head_hash,
+        "workspace_seq" => archive[:seq],
+        "reason" => "dormant",
+        "type" => "session.dormant"
+      })
+
+    state.report.(payload)
 
     # Last, and only once every byte of it is in object storage under a key the plane
     # cannot read. A plaintext workspace left on a PVC is the thing the Forbidden list
     # names first.
     erased = erase_local(state)
 
-    {:ok, Map.merge(sealed, %{workspace: archive, erased: erased, session_id: context.session_id})}
+    {:ok,
+     Map.merge(sealed, %{workspace: archive, erased: erased, session_id: context.session_id})}
   end
 
   defp archive(state, seq) do
@@ -369,8 +404,10 @@ defmodule Troupe.Worker.Session.Manager do
   # the same PVC, and the durable copy of it is encrypted in object storage.
   defp erase_local(state) do
     workspace = Workspace.erase(state.workspace)
+
     log_dir =
       Path.dirname(Restore.log_path(state.session_id, state.workspace, state.context.state_dir))
+
     File.rm_rf(log_dir)
     %{workspace: workspace, log: not File.exists?(log_dir)}
   end
@@ -383,6 +420,147 @@ defmodule Troupe.Worker.Session.Manager do
     Troupe.stop_session(state.session_id)
     erase_local(state)
   end
+
+  # -- status -----------------------------------------------------------------
+
+  # Where the root agent stands the moment the tree is up, read once rather than
+  # inferred from events that arrived before this process subscribed. A session that
+  # came back interrupted, or with an approval outstanding from before it slept, is
+  # reported that way from its first heartbeat.
+  defp seed_lifecycle(state) do
+    lifecycle =
+      case Troupe.snapshot(state.session_id) do
+        %{state: agent_state, done_reason: reason} ->
+          %{
+            state.lifecycle
+            | state: Atom.to_string(agent_state),
+              done_reason: reason && Atom.to_string(reason)
+          }
+
+        _ ->
+          state.lifecycle
+      end
+
+    approvals = state.session_id |> Summary.snapshot() |> Map.get("approvals", []) |> MapSet.new()
+    interrupted = interrupted_on_restore?(state.session_id)
+
+    %{state | lifecycle: %{lifecycle | approvals: approvals, interrupted: interrupted}}
+  end
+
+  # The root's most recent restart, if it was interrupted and nothing has happened
+  # since. Read from the log rather than remembered, because the event was written
+  # before this process was listening.
+  defp interrupted_on_restore?(session_id) do
+    session_id
+    |> Troupe.replay_from(0)
+    |> Enum.filter(&(&1.agent == ["root"] and &1.type in ["agent_restarted", "user_input"]))
+    |> List.last()
+    |> case do
+      %Event{type: "agent_restarted", data: %{"interrupted" => true}} -> true
+      _ -> false
+    end
+  catch
+    :exit, _ -> false
+  end
+
+  # The fold that turns the session's events into the four lifecycle facts. Only the
+  # root agent's transitions count: a subagent thinking under an idle root is a root
+  # that is acting, and the root's own state says so.
+  defp observe(state, %Event{type: "agent_state", agent: ["root"], data: data}) do
+    lifecycle = %{
+      state.lifecycle
+      | state: data["state"],
+        done_reason: data["done_reason"],
+        interrupted: state.lifecycle.interrupted and data["state"] == "idle"
+    }
+
+    status_changed(%{state | lifecycle: lifecycle})
+  end
+
+  defp observe(state, %Event{type: "agent_restarted", agent: ["root"], data: data}) do
+    status_changed(put_in(state.lifecycle.interrupted, data["interrupted"] == true))
+  end
+
+  defp observe(state, %Event{type: "user_input", agent: ["root"]}) do
+    status_changed(put_in(state.lifecycle.interrupted, false))
+  end
+
+  defp observe(state, %Event{type: "approval_requested", data: %{"call_id" => id}}) do
+    status_changed(update_in(state.lifecycle.approvals, &MapSet.put(&1, id)))
+  end
+
+  defp observe(state, %Event{type: type, data: %{"call_id" => id}})
+       when type in ["approval_decided", "approval_resolved"] do
+    status_changed(update_in(state.lifecycle.approvals, &MapSet.delete(&1, id)))
+  end
+
+  defp observe(state, _event), do: state
+
+  # `waiting` outranks everything: a session with a question outstanding is waiting on
+  # a person whatever its agent is doing meanwhile. `interrupted` is an idle root that
+  # came back mid-turn and has not been asked to carry on.
+  defp lifecycle_status(%{approvals: approvals} = lifecycle) do
+    cond do
+      MapSet.size(approvals) > 0 -> "waiting"
+      lifecycle.state == "done" -> "done"
+      lifecycle.interrupted -> "interrupted"
+      lifecycle.state in ["thinking", "compacting"] -> "thinking"
+      lifecycle.state == "acting" -> "acting"
+      true -> "idle"
+    end
+  end
+
+  defp status_fields(state) do
+    %{
+      "status" => lifecycle_status(state.lifecycle),
+      "done_reason" => state.lifecycle.done_reason,
+      "pending_approvals" => MapSet.size(state.lifecycle.approvals),
+      "cost_micros" => cost_micros(state.session_id)
+    }
+  end
+
+  # The summary's cost, in micro-units of the ledger's currency, or nothing when the
+  # projection is not answering — which is what a session mid-shutdown looks like.
+  defp cost_micros(session_id) do
+    case Summary.snapshot(session_id) do
+      %{"cost" => cost} when is_number(cost) -> round(cost * 1_000_000)
+      _ -> 0
+    end
+  end
+
+  # Sent when the fields changed, and no more than once per debounce window: the first
+  # change goes out at once, and anything that changes before the window closes is
+  # sent as one notification when it does. A session that stopped changing is not
+  # reported again.
+  defp status_changed(%__MODULE__{status: status} = state) when status != :active, do: state
+
+  defp status_changed(state) do
+    if status_fields(state) == state.last_status,
+      do: state,
+      else: flush_status(%{state | status_dirty: true})
+  end
+
+  defp flush_status(%{status_timer: nil} = state) do
+    fields = status_fields(state)
+
+    payload =
+      Map.merge(fields, %{
+        "type" => "session.status",
+        "session_id" => state.session_id,
+        "epoch" => state.context && state.context.epoch
+      })
+
+    state.report.(payload)
+
+    %{
+      state
+      | last_status: fields,
+        status_dirty: false,
+        status_timer: Process.send_after(self(), :status_tick, @status_debounce_ms)
+    }
+  end
+
+  defp flush_status(state), do: state
 
   # -- plumbing ---------------------------------------------------------------
 
@@ -416,8 +594,11 @@ defmodule Troupe.Worker.Session.Manager do
     |> Path.wildcard(match_dot: true)
     |> Enum.reduce({0, 0, 0}, fn path, {count, bytes, newest} ->
       case File.stat(path, time: :posix) do
-        {:ok, %File.Stat{size: size, mtime: mtime}} -> {count + 1, bytes + size, max(newest, mtime)}
-        _ -> {count, bytes, newest}
+        {:ok, %File.Stat{size: size, mtime: mtime}} ->
+          {count + 1, bytes + size, max(newest, mtime)}
+
+        _ ->
+          {count, bytes, newest}
       end
     end)
   end

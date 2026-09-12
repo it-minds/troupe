@@ -61,7 +61,7 @@ defmodule Troupe.Plane.Sessions do
   """
   @spec unplace(String.t()) :: {:ok, Ecto.UUID.t() | nil} | :ok
   def unplace(session_id) do
-    case Repo.one(from s in Session, where: s.id == ^session_id, select: s.worker_id) do
+    case Repo.one(from(s in Session, where: s.id == ^session_id, select: s.worker_id)) do
       nil ->
         :ok
 
@@ -85,10 +85,11 @@ defmodule Troupe.Plane.Sessions do
   @spec on_worker(Ecto.UUID.t()) :: [String.t()]
   def on_worker(worker_id) do
     Repo.all(
-      from s in Session,
+      from(s in Session,
         where: s.worker_id == type(^worker_id, :binary_id) and s.state == "active",
         select: s.id,
         order_by: s.id
+      )
     )
   end
 
@@ -96,10 +97,11 @@ defmodule Troupe.Plane.Sessions do
   @spec active_counts_by_worker(String.t()) :: %{Ecto.UUID.t() => non_neg_integer()}
   def active_counts_by_worker(profile) do
     Repo.all(
-      from s in Session,
+      from(s in Session,
         where: s.profile == ^profile and s.state == "active" and not is_nil(s.worker_id),
         group_by: s.worker_id,
         select: {s.worker_id, count(s.id)}
+      )
     )
     |> Map.new()
   end
@@ -126,8 +128,11 @@ defmodule Troupe.Plane.Sessions do
       )
 
     case {count, sessions} do
-      {1, [session]} -> {:ok, session}
-      {0, _} -> if Repo.get(Session, session_id), do: {:error, :not_dormant}, else: {:error, :not_found}
+      {1, [session]} ->
+        {:ok, session}
+
+      {0, _} ->
+        if Repo.get(Session, session_id), do: {:error, :not_dormant}, else: {:error, :not_found}
     end
   end
 
@@ -168,7 +173,8 @@ defmodule Troupe.Plane.Sessions do
     {count, _} =
       Repo.update_all(
         from(s in Session,
-          where: s.team_id == ^team_id and s.profile == ^profile and s.state in ["active", "dormant"]
+          where:
+            s.team_id == ^team_id and s.profile == ^profile and s.state in ["active", "dormant"]
         ),
         set: [state: "read_only", worker_id: nil, updated_at: DateTime.utc_now()]
       )
@@ -218,14 +224,76 @@ defmodule Troupe.Plane.Sessions do
   """
   @spec delete(String.t()) :: :ok
   def delete(session_id) do
-    Repo.delete_all(from s in Session, where: s.id == ^session_id)
+    Repo.delete_all(from(s in Session, where: s.id == ^session_id))
     :ok
   end
 
   @doc "Record a sealed segment: the index's view of how far a session has got."
   @spec seal(String.t(), map()) :: {:ok, Session.t()} | {:error, term()}
   def seal(session_id, attrs) do
-    put_fields(session_id, Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes]))
+    put_fields(
+      session_id,
+      Map.take(attrs, [:last_seq, :head_hash, :object_bytes, :workspace_bytes])
+    )
+  end
+
+  @doc """
+  Record what the worker says a session is doing.
+
+  One conditional statement, fenced on the epoch: a report from a pod that was presumed
+  lost and is still running an older epoch is dropped, because the session has moved on
+  and its status is whatever the new pod says. `done_reason` is the one field where a
+  reported nil is the answer — a session that starts a new turn has no done reason any
+  more — so it is set whenever the report carries the key, unlike the counters.
+  """
+  @spec put_status(String.t(), map()) :: {:ok, non_neg_integer()} | {:error, :stale_epoch}
+  def put_status(session_id, report) do
+    now = DateTime.utc_now()
+
+    fields =
+      [updated_at: now]
+      |> put_status_field(:status, report["status"])
+      |> put_status_field(:pending_approvals, report["pending_approvals"])
+      |> put_status_field(:cost_micros, report["cost_micros"])
+      |> then(fn set ->
+        if Map.has_key?(report, "done_reason"),
+          do: Keyword.put(set, :done_reason, report["done_reason"]),
+          else: set
+      end)
+
+    query = from(s in Session, where: s.id == ^session_id)
+
+    query =
+      case report["epoch"] do
+        epoch when is_integer(epoch) -> from(s in query, where: s.epoch <= ^epoch)
+        _ -> query
+      end
+
+    case Repo.update_all(query, set: fields) do
+      {0, _} -> if Repo.get(Session, session_id), do: {:error, :stale_epoch}, else: {:ok, 0}
+      {count, _} -> {:ok, count}
+    end
+  end
+
+  defp put_status_field(set, :status, status) when is_binary(status) do
+    if status in Session.statuses(), do: Keyword.put(set, :status, status), else: set
+  end
+
+  defp put_status_field(set, key, value) when key in [:pending_approvals, :cost_micros] do
+    if is_integer(value) and value >= 0, do: Keyword.put(set, key, value), else: set
+  end
+
+  defp put_status_field(set, _key, _value), do: set
+
+  @doc """
+  Mark a session reviewed: a person has read what an unattended run produced.
+
+  Recorded with who and when, because it is the answer to "did anybody look at this",
+  and the run it came from is marked by the same call in `Triggers`.
+  """
+  @spec review(String.t(), String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def review(session_id, actor) do
+    put_fields(session_id, %{reviewed_by: actor, reviewed_at: DateTime.utc_now()})
   end
 
   # A field the worker did not report is a field that has not changed. Casting a nil
@@ -281,7 +349,10 @@ defmodule Troupe.Plane.Sessions do
     with {:ok, anchor} <-
            %Anchor{}
            |> Anchor.changeset(attrs)
-           |> Repo.insert(on_conflict: :nothing, conflict_target: [:session_id, :epoch, :last_seq]) do
+           |> Repo.insert(
+             on_conflict: :nothing,
+             conflict_target: [:session_id, :epoch, :last_seq]
+           ) do
       seal(session.id, %{
         last_seq: max(params["last_seq"] || 0, session.last_seq),
         head_hash: params["head_hash"] || session.head_hash,
@@ -295,7 +366,9 @@ defmodule Troupe.Plane.Sessions do
   @doc "Every sealed segment head the plane holds for a session, oldest first."
   @spec anchors(String.t()) :: [Anchor.t()]
   def anchors(session_id) do
-    Repo.all(from a in Anchor, where: a.session_id == ^session_id, order_by: [a.epoch, a.last_seq])
+    Repo.all(
+      from(a in Anchor, where: a.session_id == ^session_id, order_by: [a.epoch, a.last_seq])
+    )
   end
 
   @doc "One session, or `nil`."
@@ -313,10 +386,10 @@ defmodule Troupe.Plane.Sessions do
   """
   @spec visible_to(User.t(), keyword()) :: [Session.t()]
   def visible_to(%User{} = user, opts \\ []) do
-    team_ids = Repo.all(from t in Team, join: m in "memberships", on: m.group_id == type(t.group_id, :binary_id), where: m.user_id == type(^user.id, :binary_id), select: t.id)
+    team_ids = member_team_ids(user)
 
     query =
-      from s in Session,
+      from(s in Session,
         left_join: a in ACL,
         on: a.session_id == s.id and a.subject == ^user.subject,
         where:
@@ -325,19 +398,70 @@ defmodule Troupe.Plane.Sessions do
                (s.visibility == "team" and s.team_id in ^team_ids)),
         distinct: s.id,
         order_by: [desc: s.last_active_at]
+      )
 
     query
     |> filter(opts)
     |> Repo.all()
   end
 
+  # The teams whose shared sessions a user may see. A person's come from the identity
+  # provider's groups; a service principal's is the one team that owns it, and it has no
+  # `users` row to join through.
+  defp member_team_ids(%User{kind: "service", principal: %{team_id: team_id}}), do: [team_id]
+
+  defp member_team_ids(%User{id: id}) when is_binary(id) do
+    Repo.all(
+      from(t in Team,
+        join: m in "memberships",
+        on: m.group_id == type(t.group_id, :binary_id),
+        where: m.user_id == type(^id, :binary_id),
+        select: t.id
+      )
+    )
+  end
+
+  defp member_team_ids(_user), do: []
+
   defp filter(query, opts) do
     Enum.reduce(opts, query, fn
-      {:profile, profile}, acc -> from s in acc, where: s.profile == ^profile
-      {:state, states}, acc -> from s in acc, where: s.state in ^List.wrap(states)
-      {:limit, limit}, acc -> from s in acc, limit: ^limit
-      _other, acc -> acc
+      {:profile, profile}, acc ->
+        from(s in acc, where: s.profile == ^profile)
+
+      {:state, states}, acc ->
+        from(s in acc, where: s.state in ^List.wrap(states))
+
+      {:status, statuses}, acc ->
+        from(s in acc, where: s.status in ^List.wrap(statuses))
+
+      # A row written before origins existed has none, and was a person's.
+      {:origin, kind}, acc ->
+        from(s in acc, where: coalesce(fragment("?->>'kind'", s.origin), "user") == ^kind)
+
+      {:trigger, name}, acc ->
+        from(s in acc, where: fragment("?->>'trigger'", s.origin) == ^name)
+
+      {:needs_review, true}, acc ->
+        needs_review(acc)
+
+      {:needs_review, "true"}, acc ->
+        needs_review(acc)
+
+      {:limit, limit}, acc when is_integer(limit) ->
+        from(s in acc, limit: ^limit)
+
+      _other, acc ->
+        acc
     end)
+  end
+
+  # What a person has not closed the loop on: a session nobody started by hand, that
+  # nobody has marked reviewed. A user's own sessions are never in the queue, because
+  # the person who asked for it is the review.
+  defp needs_review(query) do
+    from(s in query,
+      where: fragment("?->>'kind'", s.origin) in ["trigger", "a2a"] and is_nil(s.reviewed_at)
+    )
   end
 
   @doc """
@@ -368,11 +492,11 @@ defmodule Troupe.Plane.Sessions do
   end
 
   defp admin_scope(query, %{role: :platform_admin}, _team_ids) do
-    from s in query, where: s.state != "erased"
+    from(s in query, where: s.state != "erased")
   end
 
   defp admin_scope(query, _actor, team_ids) do
-    from s in query, where: s.state != "erased" and s.team_id in ^team_ids
+    from(s in query, where: s.state != "erased" and s.team_id in ^team_ids)
   end
 
   @doc """
@@ -402,12 +526,21 @@ defmodule Troupe.Plane.Sessions do
     end
   end
 
-  defp member?(user, team) do
+  # A principal is a member of the team that owns it and of no other; a person is a
+  # member of whatever the identity provider says.
+  defp member?(%User{kind: "service", principal: %{team_id: team_id}}, team),
+    do: team_id == team.id
+
+  defp member?(%User{id: id}, team) when is_binary(id) do
     Repo.exists?(
-      from m in "memberships",
-        where: m.user_id == type(^user.id, :binary_id) and m.group_id == type(^team.group_id, :binary_id)
+      from(m in "memberships",
+        where:
+          m.user_id == type(^id, :binary_id) and m.group_id == type(^team.group_id, :binary_id)
+      )
     )
   end
+
+  defp member?(_user, _team), do: false
 
   # -- the ACL ----------------------------------------------------------------
 
@@ -431,13 +564,13 @@ defmodule Troupe.Plane.Sessions do
   @doc "Mirror an `acl_revoked` event. A revoked collaborator's next command is refused."
   @spec revoke_access(String.t(), String.t()) :: :ok
   def revoke_access(session_id, subject) do
-    Repo.delete_all(from a in ACL, where: a.session_id == ^session_id and a.subject == ^subject)
+    Repo.delete_all(from(a in ACL, where: a.session_id == ^session_id and a.subject == ^subject))
     :ok
   end
 
   @doc "Everyone explicitly on a session."
   @spec access_list(String.t()) :: [ACL.t()]
   def access_list(session_id) do
-    Repo.all(from a in ACL, where: a.session_id == ^session_id, order_by: a.subject)
+    Repo.all(from(a in ACL, where: a.session_id == ^session_id, order_by: a.subject))
   end
 end

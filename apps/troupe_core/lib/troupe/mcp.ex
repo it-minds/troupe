@@ -32,12 +32,18 @@ defmodule Troupe.MCP do
   A server that cannot be reached yields no tools rather than an error: a profile with
   four MCP servers and one of them down should lose that server's tools and keep
   working, not fail to start a session.
+
+  The server's `tools` allowlist is applied here, at discovery, so a tool the bundle
+  did not list is never built and never offered — absent from what the model can see
+  rather than present and denied.
   """
   @spec tools(Server.t()) :: [Tool.t()]
   def tools(%Server{} = server) do
     case Client.list_tools(server) do
       {:ok, listed} ->
-        Enum.map(listed, &Tool.new(server, &1))
+        listed
+        |> Enum.filter(&Server.offers?(server, &1["name"]))
+        |> Enum.map(&Tool.new(server, &1))
 
       {:error, reason} ->
         Logger.warning("troupe: MCP server #{server.name} is unreachable: #{inspect(reason)}")

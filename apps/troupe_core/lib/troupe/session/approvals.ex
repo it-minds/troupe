@@ -14,6 +14,12 @@ defmodule Troupe.Session.Approvals do
   prompt a second apart. **First response wins**, and the second gets an
   `approval_resolved` event naming who got there first — silence would leave them
   believing they decided it.
+
+  A session may also run with nobody to ask. `mode: :deny` is for that: every request
+  is answered no on the spot, and both the request and the decision still go to the
+  log, with the system as the actor, so a person reading the transcript afterwards
+  sees what the agent wanted and that it was refused for want of anyone to say yes.
+  The default, `:wait`, is what a session with people attached has always done.
   """
 
   use GenServer
@@ -23,6 +29,7 @@ defmodule Troupe.Session.Approvals do
   @enforce_keys [:session_id]
   defstruct [
     :session_id,
+    mode: :wait,
     auto_approve: false,
     pending: %{},
     resolved: %{},
@@ -47,9 +54,11 @@ defmodule Troupe.Session.Approvals do
   Ask for permission, blocking until someone decides.
 
   `:infinity` is deliberate: a human may take a minute, and the timeout that matters
-  is the tool's own, enforced by the agent killing the task.
+  is the tool's own, enforced by the agent killing the task. `{:deny, :unattended}` is
+  the answer of a session running in `:deny` mode, told apart from a person's no so
+  the model hears why.
   """
-  @spec request(String.t(), map()) :: :allow | :deny
+  @spec request(String.t(), map()) :: :allow | :deny | {:deny, :unattended}
   def request(session_id, %{call_id: _, tool: _} = req) do
     GenServer.call(Troupe.Registry.approvals(session_id), {:request, req}, :infinity)
   catch
@@ -83,6 +92,7 @@ defmodule Troupe.Session.Approvals do
 
     state = %__MODULE__{
       session_id: session_id,
+      mode: Keyword.get(opts, :mode, :wait),
       auto_approve: Keyword.get(opts, :auto_approve, false)
     }
 
@@ -141,6 +151,24 @@ defmodule Troupe.Session.Approvals do
       # already answered.
       Map.has_key?(state.decided, req.call_id) ->
         {:reply, Map.fetch!(state.decided, req.call_id), state}
+
+      # Nobody to ask. Both events are written all the same — the request so the
+      # transcript shows what the agent wanted, the decision so a later activation
+      # finds the call answered rather than pending — and the actor is the system,
+      # because no person made this choice.
+      state.mode == :deny ->
+        Log.append(state.session_id, req.agent_path, :approval_requested, describe(req))
+
+        Log.append(
+          state.session_id,
+          req.agent_path,
+          :approval_decided,
+          Map.put(describe(req), "decision", "deny")
+        )
+
+        resolved = Map.put(state.resolved, req.call_id, resolved_by(req, nil))
+        decided = Map.put(state.decided, req.call_id, :deny)
+        {:reply, {:deny, :unattended}, %{state | resolved: resolved, decided: decided}}
 
       true ->
         {caller, _tag} = from

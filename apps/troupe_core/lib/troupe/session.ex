@@ -14,7 +14,7 @@ defmodule Troupe.Session do
   use Supervisor
 
   alias Troupe.Agent.Definitions
-  alias Troupe.{Config, Registry, Workspace}
+  alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
 
   @root_path ["root"]
@@ -46,6 +46,7 @@ defmodule Troupe.Session do
       definitions: definitions,
       profile: Keyword.get(opts, :profile, config.default_agent),
       task: Keyword.get(opts, :task),
+      bundle: Keyword.get(opts, :bundle),
       fake: fake_server(session_id, config, opts),
       restart: :permanent
     ]
@@ -54,7 +55,8 @@ defmodule Troupe.Session do
       [
         {Troupe.Session.Log,
          session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
-        {Troupe.Session.Approvals, session_id: session_id, auto_approve: config.auto_approve},
+        {Troupe.Session.Approvals,
+         session_id: session_id, auto_approve: config.auto_approve, mode: config.approvals},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
@@ -124,25 +126,35 @@ defmodule Troupe.Session do
 
   Kept here rather than in the client API so the CLI, the tests and `resume` all
   build a session the same way.
+
+  `:bundle` is the config bundle the session is pinned to, `%{version, hash, channel,
+  dir}`, which a worker passes and a laptop never does. Its `dir` is where agent
+  definitions of source `:bundle` come from and where the `skills:/` mount points.
+  `:kind` says whether this is a `:team` session on a pod or a `:local` one, and
+  `:origin` says what started it; both are recorded in `session_created` and nothing
+  else reads them.
   """
   @spec build_opts(keyword()) :: {:ok, keyword()} | {:error, term()}
   def build_opts(opts) do
     workspace_path = Keyword.get(opts, :workspace, File.cwd!())
+    bundle = Keyword.get(opts, :bundle)
 
     with {:ok, workspace} <- Workspace.new(workspace_path) do
       config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, []))
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
       # already gave it. A session on a pod arrives with its team volume and possibly
-      # the org volume, resolved by the plane from the team's grant.
+      # the org volume, resolved by the plane from the team's grant — and, when its
+      # bundle carries skills, a read-only `skills:/` beside them.
       workspace =
-        case Keyword.get(opts, :mounts) do
-          nil -> workspace
-          mounts -> Workspace.with_mounts(workspace, mounts)
-        end
+        (Keyword.get(opts, :mounts) || workspace.mounts)
+        |> with_skills(bundle)
+        |> then(&Workspace.with_mounts(workspace, &1))
 
       definitions =
-        Keyword.get_lazy(opts, :definitions, fn -> Definitions.load(workspace.root_real) end)
+        Keyword.get_lazy(opts, :definitions, fn ->
+          Definitions.load(workspace.root_real, bundle_dir: bundle && bundle[:dir])
+        end)
 
       {:ok,
        [
@@ -152,10 +164,26 @@ defmodule Troupe.Session do
          definitions: definitions,
          profile: Keyword.get(opts, :agent) || config.default_agent,
          task: Keyword.get(opts, :task),
-         fake: Keyword.get(opts, :fake)
+         fake: Keyword.get(opts, :fake),
+         bundle: bundle,
+         kind: Keyword.get(opts, :kind, :local),
+         origin: Keyword.get(opts, :origin)
        ]}
     end
   end
+
+  # Appended rather than merged: the plane's table never names the bundle, because the
+  # plane does not know where a pod materialised it. A table that already has a
+  # `skills` entry — a session restored with one — keeps it.
+  defp with_skills(%Mounts{} = mounts, bundle) do
+    case {Skills.mount(bundle), Mounts.fetch(mounts, "skills")} do
+      {nil, _} -> mounts
+      {_entry, %Mounts.Entry{}} -> mounts
+      {entry, nil} -> Mounts.new(mounts.entries ++ [entry])
+    end
+  end
+
+  defp with_skills(mounts, _bundle), do: mounts
 
   @doc "A sortable, readable session id: a timestamp plus enough randomness to be unique."
   @spec generate_id() :: String.t()

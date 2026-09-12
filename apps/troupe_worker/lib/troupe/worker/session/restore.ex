@@ -136,8 +136,11 @@ defmodule Troupe.Worker.Session.Restore do
 
   defp newest_archive(context) do
     case ObjectStore.list(context.store, Storage.prefix(context.session_id) <> "workspace/") do
-      {:ok, keys} -> keys |> Enum.flat_map(&parse_archive_key/1) |> Enum.max_by(&elem(&1, 0), fn -> nil end)
-      _ -> nil
+      {:ok, keys} ->
+        keys |> Enum.flat_map(&parse_archive_key/1) |> Enum.max_by(&elem(&1, 0), fn -> nil end)
+
+      _ ->
+        nil
     end
   end
 
@@ -219,6 +222,11 @@ defmodule Troupe.Worker.Session.Restore do
   subscribed before this runs: events appended while the tree comes up — the activation
   itself, anything an agent replays into — are durable events like any other, and a
   sealer started afterwards would miss them.
+
+  `:prompt` becomes the session's first input, and only on the activation that finds
+  the root agent's log empty; a later activation with the same prompt replays the input
+  it already took. `:terms` are config overrides the plane set for this session —
+  `max_turns`, `wall_clock_ms`, `approvals` — and win over the pod's own.
   """
   @spec start(Context.t(), Path.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def start(%Context{} = context, root, opts \\ []) do
@@ -226,7 +234,9 @@ defmodule Troupe.Worker.Session.Restore do
       opts
       |> Keyword.get(:config_overrides, [])
       |> then(fn given ->
-        if context.state_dir, do: Keyword.put_new(given, :state_dir, context.state_dir), else: given
+        if context.state_dir,
+          do: Keyword.put_new(given, :state_dir, context.state_dir),
+          else: given
       end)
       # Who the gateway bills and records this session against. The owner, not whoever
       # is typing: a collaborator's input is billed to the owner's team budget, because
@@ -235,6 +245,7 @@ defmodule Troupe.Worker.Session.Restore do
       # A client attached to a remote session has no other way to know that `shell` wrote
       # something, so this is not optional here.
       |> Keyword.put_new(:fs_events, true)
+      |> Keyword.merge(Keyword.get(opts, :terms, []))
 
     Troupe.resume(context.session_id,
       workspace: root,
@@ -242,6 +253,10 @@ defmodule Troupe.Worker.Session.Restore do
       # worker profile — the Kubernetes one — and the two are different things that
       # happen to share a word.
       agent: Keyword.get(opts, :agent),
+      task: Keyword.get(opts, :prompt),
+      bundle: Keyword.get(opts, :bundle),
+      kind: :team,
+      origin: Keyword.get(opts, :origin),
       fake: Keyword.get(opts, :fake),
       config_overrides: overrides
     )

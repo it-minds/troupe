@@ -9,7 +9,8 @@ defmodule Troupe.MCP.Tool do
 
   `ask` by default, deliberately. A built-in tool's blast radius is known and written
   down here; a tool on somebody else's server is whatever that server decided this
-  morning, and the profile can lower it to `auto` for servers an operator trusts.
+  morning. The bundle that configured the server may lower it to `auto` for servers an
+  admin trusts, and a profile's `permissions:` map may still tighten it from there.
   """
 
   alias Troupe.MCP
@@ -39,7 +40,7 @@ defmodule Troupe.MCP.Tool do
       server: server.name,
       description: description_of(server, listed),
       schema: listed["inputSchema"] || %{"type" => "object", "properties" => %{}},
-      default_permission: :ask,
+      default_permission: server.permission,
       run: fn args, ctx -> call(server, remote_name, args, ctx) end
     }
   end

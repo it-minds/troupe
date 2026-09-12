@@ -11,15 +11,19 @@ defmodule Troupe.Plane.PanelTest do
 
   use Troupe.Plane.PanelCase, async: false
 
-  alias Troupe.Plane.{Admin, Bundles, Fleet, Identity, Sessions}
+  alias Troupe.Plane.{Admin, Bundles, Fleet, Identity, Principals, Sessions, Triggers}
 
   @moduletag timeout: 60_000
 
   setup context do
-    engineering = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 1_000_000)
+    engineering =
+      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 1_000_000)
+
     design = team_with_grant("design", "ux", name: "design")
 
-    {:ok, platform_group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+    {:ok, platform_group} =
+      Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+
     {:ok, _} = Identity.enable_team(platform_group, %{name: "platform"})
 
     root = person("root@example.test", ["platform"])
@@ -28,7 +32,14 @@ defmodule Troupe.Plane.PanelTest do
 
     {:ok, _} = Identity.add_team_admin(engineering, lead.subject, root.subject)
 
-    {:ok, _} = Fleet.put_profile(%{name: "dev", replicas: 2, sessions_per_pod: 4, image: "ghcr.io/troupe/worker:1"})
+    {:ok, _} =
+      Fleet.put_profile(%{
+        name: "dev",
+        replicas: 2,
+        sessions_per_pod: 4,
+        image: "ghcr.io/troupe/worker:1"
+      })
+
     {:ok, _} = Fleet.put_profile(%{name: "ux", replicas: 1, sessions_per_pod: 2})
 
     {:ok, pod} =
@@ -114,17 +125,22 @@ defmodule Troupe.Plane.PanelTest do
       # Against the profile links rather than the raw page. A page carries a base64
       # LiveView session token, and a two-letter substring turns up inside it often
       # enough to make a bare `refute html =~ "ux"` a coin toss.
-      links = Regex.scan(~r|/admin/workers/([\w-]+)|, html) |> Enum.map(&List.last/1) |> Enum.uniq()
+      links =
+        Regex.scan(~r|/admin/workers/([\w-]+)|, html) |> Enum.map(&List.last/1) |> Enum.uniq()
 
       assert "dev" in links
       refute "ux" in links
     end
 
     test "only a platform admin is offered the drain button", context do
-      {:ok, _view, lead_html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/workers")
+      {:ok, _view, lead_html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/workers")
+
       refute lead_html =~ "drain"
 
-      {:ok, _view, root_html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+      {:ok, _view, root_html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+
       assert root_html =~ "drain"
     end
   end
@@ -133,7 +149,8 @@ defmodule Troupe.Plane.PanelTest do
     test "shows metadata and says so", context do
       session = session!(context.engineering, "dev")
 
-      {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
 
       assert html =~ session.id
       assert html =~ "Metadata only"
@@ -144,7 +161,8 @@ defmodule Troupe.Plane.PanelTest do
       mine = session!(context.engineering, "dev")
       theirs = session!(context.design, "ux")
 
-      {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/sessions")
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/sessions")
 
       assert html =~ mine.id
       refute html =~ theirs.id
@@ -152,7 +170,9 @@ defmodule Troupe.Plane.PanelTest do
 
     test "erasing takes two clicks", context do
       session = session!(context.engineering, "dev")
-      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
 
       # The first click asks rather than does: erasure is irreversible and a misclick
       # should not be enough.
@@ -162,7 +182,73 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
+  describe "the triggers page" do
+    test "lists a team's triggers with their runs, and switches one off", context do
+      {:ok, principal, _secret} =
+        Principals.create(context.engineering, %{name: "bot", profiles: ["dev"]}, "root")
+
+      {:ok, _} =
+        Triggers.put(
+          context.engineering,
+          %{
+            "name" => "nightly-deps",
+            "principal" => principal.subject,
+            "profile" => "dev",
+            "source" => %{"kind" => "schedule", "cron" => "0 3 * * 1-5"},
+            "prompt_template" => "Update every dependency."
+          },
+          "root"
+        )
+
+      {:ok, view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/triggers")
+
+      assert html =~ "nightly-deps"
+      assert html =~ "cron 0 3 * * 1-5"
+      assert html =~ principal.subject
+      assert html =~ "never run"
+
+      html =
+        view
+        |> element("button[phx-click='disable'][phx-value-name='nightly-deps']")
+        |> render_click()
+
+      assert html =~ "nightly-deps disabled"
+      refute Triggers.get(context.engineering, "nightly-deps").enabled
+
+      # Another team's admin page shows none of it.
+      {:ok, _view, design_html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/triggers/design")
+
+      refute design_html =~ "nightly-deps"
+    end
+  end
+
   describe "the teams page" do
+    test "shows a team's principals, and makes one with the secret shown once", context do
+      {:ok, view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
+      assert html =~ "Service principals"
+
+      html =
+        view
+        |> form("form[phx-submit='create-principal']", %{
+          "team" => "engineering",
+          "name" => "nightly-deps",
+          "profiles" => "dev",
+          "description" => "the nightly dependency update"
+        })
+        |> render_submit()
+
+      assert html =~ "svc:engineering/nightly-deps"
+      assert html =~ "shown once"
+
+      principal = Principals.get("svc:engineering/nightly-deps")
+      assert principal.profiles == ["dev"]
+
+      # The hash is not on the page, and neither is the salt.
+      refute html =~ principal.secret_hash
+      refute html =~ principal.secret_salt
+    end
+
     test "shows members and offers no way to change them", context do
       {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
 
@@ -198,14 +284,17 @@ defmodule Troupe.Plane.PanelTest do
       {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
       refute html =~ ">grant<"
 
-      {:ok, _view, root_html} = context.conn |> sign_in(context.root.subject) |> live("/admin/teams")
+      {:ok, _view, root_html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/teams")
+
       assert root_html =~ ">grant<"
     end
   end
 
   describe "the audit page" do
     test "shows who changed what, with the diff", context do
-      {:ok, _} = Admin.team_update(Admin.actor_for(context.lead), "engineering", %{budget_micros: 7})
+      {:ok, _} =
+        Admin.team_update(Admin.actor_for(context.lead), "engineering", %{budget_micros: 7})
 
       {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/audit")
 
@@ -221,14 +310,70 @@ defmodule Troupe.Plane.PanelTest do
 
       html =
         view
-        |> form("form[phx-submit='publish']", %{"content" => ~s({"agents": ["build"]})})
+        |> form("form[phx-submit='draft']", %{"content" => ~s({"agents": ["build"]})})
         |> render_submit()
 
       assert html =~ "sha256:"
       assert Bundles.current("stable").version == 1
 
-      {:ok, _view, lead_html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/bundles")
+      {:ok, _view, lead_html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/bundles")
+
       refute lead_html =~ "publish to"
+    end
+
+    test "the current version is shown as what it carries, and a bad draft as its errors",
+         context do
+      {:ok, view, _html} = context.conn |> sign_in(context.root.subject) |> live("/admin/bundles")
+
+      bad =
+        ~s({"schema": 1, "agents": [{"name": "reviewer", "definition": "---\\nmode: odd\\n---\\nHi"}]})
+
+      html =
+        view
+        |> form("form[phx-submit='draft']", %{"content" => bad})
+        |> render_submit(%{"action" => "check"})
+
+      assert html =~ "bad_mode"
+      assert Bundles.current("stable") == nil
+
+      good =
+        Jason.encode!(%{
+          "schema" => 1,
+          "agents" => [
+            %{
+              "name" => "reviewer",
+              "definition" => "---\nmode: primary\ndescription: Reviews code\n---\nGo."
+            }
+          ],
+          "skills" => [
+            %{
+              "name" => "checklist",
+              "description" => "The list",
+              "files" => %{
+                "SKILL.md" => "---\nname: checklist\ndescription: The list\n---\nCheck."
+              }
+            }
+          ],
+          "mcp_servers" => [
+            %{
+              "name" => "jira",
+              "url" => "https://mcp.jira.example/mcp",
+              "credential_ref" => "JIRA_TOKEN"
+            }
+          ]
+        })
+
+      html = view |> form("form[phx-submit='draft']", %{"content" => good}) |> render_submit()
+
+      assert html =~ "published v1"
+      assert html =~ "reviewer"
+      assert html =~ "Reviews code"
+      assert html =~ "checklist"
+      assert html =~ "troupe-mcp-jira"
+      assert html =~ "JIRA_TOKEN"
+      # And who has it: the enrolled pod has reported no hash yet.
+      assert html =~ "troupe-w-dev-0 behind"
     end
   end
 
@@ -237,7 +382,9 @@ defmodule Troupe.Plane.PanelTest do
       assert {:error, {:redirect, %{to: "/admin"}}} =
                context.conn |> sign_in(context.lead.subject) |> live("/admin/profile/dev")
 
-      {:ok, view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
       assert html =~ "What will be applied"
 
       html = view |> element("form") |> render_change(%{"name" => "dev", "replicas" => "5"})

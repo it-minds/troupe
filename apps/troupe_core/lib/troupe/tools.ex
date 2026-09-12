@@ -10,7 +10,7 @@ defmodule Troupe.Tools do
 
   alias Troupe.Agent.Definition
   alias Troupe.Session.{Approvals, ClientTools}
-  alias Troupe.Tool
+  alias Troupe.{Skills, Tool}
   alias Troupe.Tool.{Ctx, Result}
 
   @builtins [
@@ -78,12 +78,26 @@ defmodule Troupe.Tools do
   end
 
   @doc """
+  The tools a profile may use in one agent's context: everything `for_definition/2`
+  gives it, plus the `skill` tool when the session's bundle has skills the profile
+  lists.
+
+  The skill tool is scoped to the context rather than registered pod-wide because it
+  reads the bundle *this session* is pinned to, and two sessions on one pod may be
+  pinned to different versions.
+  """
+  @spec available(Definition.t(), Ctx.t()) :: [Tool.handle()]
+  def available(%Definition{} = definition, %Ctx{} = ctx) do
+    for_definition(definition, ctx.session_id) ++ Skills.tools(ctx.bundle, definition)
+  end
+
+  @doc """
   The tool specs to send a provider, with descriptions rendered for this session.
   """
   @spec specs(Definition.t(), Ctx.t()) :: [Troupe.LLM.Request.tool_spec()]
   def specs(%Definition{} = definition, %Ctx{} = ctx) do
     definition
-    |> for_definition(ctx.session_id)
+    |> available(ctx)
     |> Enum.map(fn tool ->
       %{name: Tool.name(tool), description: Tool.describe(tool, ctx), schema: Tool.schema(tool)}
     end)
@@ -98,7 +112,7 @@ defmodule Troupe.Tools do
   @spec authorize(String.t(), Definition.t(), Ctx.t()) ::
           {:run, Tool.handle(), :task | :inline} | {:reject, Result.t()}
   def authorize(name, %Definition{} = definition, %Ctx{} = ctx) do
-    case fetch(name, ctx.session_id) do
+    case fetch(name, ctx.session_id) |> or_scoped(name, definition, ctx) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}
 
@@ -113,6 +127,18 @@ defmodule Troupe.Tools do
           true ->
             {:run, tool, Tool.mode(tool)}
         end
+    end
+  end
+
+  # The pod-wide list first, then the session-scoped tools. A name found in neither is
+  # unknown; a session-scoped tool the profile does not qualify for is unknown too,
+  # because for that profile it was never offered.
+  defp or_scoped({:ok, tool}, _name, _definition, _ctx), do: {:ok, tool}
+
+  defp or_scoped({:error, reason}, name, definition, ctx) do
+    case Enum.find(Skills.tools(ctx.bundle, definition), &(Tool.name(&1) == name)) do
+      nil -> {:error, reason}
+      tool -> {:ok, tool}
     end
   end
 
@@ -131,6 +157,7 @@ defmodule Troupe.Tools do
         case ask(ctx, name, args) do
           :allow -> execute(tool, args, ctx)
           :deny -> Result.error(ctx.call_id, name, {:denied, name})
+          {:deny, :unattended} -> Result.error(ctx.call_id, name, {:denied_unattended, name})
         end
 
       :auto ->

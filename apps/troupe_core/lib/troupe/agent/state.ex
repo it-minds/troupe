@@ -48,6 +48,10 @@ defmodule Troupe.Agent.State do
     :llm_timer,
     :done_reason,
     :turn_mode,
+    # The config bundle this session is pinned to, or `nil`. Read by the skill tool and
+    # the prompt's skill lines; written into `agent_started` so a transcript says which
+    # definition ran.
+    :bundle,
     budget: %Budget{},
     conversation: [],
     todos: [],
@@ -84,6 +88,7 @@ defmodule Troupe.Agent.State do
           llm_timer: reference() | nil,
           done_reason: atom() | nil,
           turn_mode: :normal | :question | nil,
+          bundle: map() | nil,
           budget: Budget.t(),
           conversation: [Message.t()],
           todos: [Troupe.Todo.t()],

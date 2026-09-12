@@ -21,15 +21,28 @@ defmodule Troupe.Plane.Harness do
   plane replica and it is rarely the one the harness reached.
   """
 
-  alias Troupe.Plane.{Bundles, Erasure, Fleet, Identity, Placement, Sessions, TeamBudget, Tokens}
+  alias Troupe.Plane.{Audit, Bundles, Erasure, Fleet, Identity, Placement, Sessions}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Sessions.{ACL, Session}
+  alias Troupe.Plane.{TeamBudget, Tokens, Triggers}
   alias Troupe.Protocol.{Error, Token}
 
   # What a session reserves against its team's budget before it starts. A slice rather
   # than the whole budget, so one session cannot lock a team out; the ledger records
-  # what was actually spent and the reservation is released at dormancy.
+  # what was actually spent and the reservation is released at dormancy. A session whose
+  # `terms` name a `budget_micros` reserves that instead, capped by what the team has.
   @default_slice_micros 5_000_000
+
+  # A first prompt travels in `session.activate` and nowhere else — the plane never
+  # stores it — but it still crosses the control channel once, and this is how much of
+  # one it will carry.
+  @max_prompt_bytes 65_536
+
+  # An origin is a label, not a payload.
+  @max_origin_bytes 4_096
+
+  @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals)
 
   @type context :: %{user: User.t(), platform_admin?: boolean()}
 
@@ -44,7 +57,10 @@ defmodule Troupe.Plane.Harness do
     "session.create" => :control,
     "session.pin" => :control,
     "session.unpin" => :control,
-    "session.erase" => :control
+    "session.erase" => :control,
+    "session.grant" => :control,
+    "session.review" => :control,
+    "trigger.fire" => :control
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -68,6 +84,7 @@ defmodule Troupe.Plane.Harness do
        "subject" => user.subject,
        "display_name" => user.display_name,
        "email" => user.email,
+       "kind" => user.kind,
        "teams" => Enum.map(Identity.teams_for(user), &team_json/1),
        "profiles" => granted_profiles(user),
        "platform_admin" => Map.get(context, :platform_admin?, false)
@@ -79,7 +96,9 @@ defmodule Troupe.Plane.Harness do
   end
 
   # Only granted profiles, and for each one what a person actually needs in order to
-  # choose: whether there is anywhere to put a session right now.
+  # choose: whether there is anywhere to put a session right now, and what a session
+  # created there will have — which agents it may start as, which skills and MCP servers
+  # the channel's current bundle gives it.
   defp handle("profiles.list", _params, %{user: user}) do
     profiles =
       user
@@ -94,6 +113,7 @@ defmodule Troupe.Plane.Harness do
           "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
           "healthy_pods" => Enum.count(workers, & &1.healthy)
         }
+        |> Map.merge(offering_json(profile))
       end)
 
     {:ok, %{"profiles" => profiles}}
@@ -106,6 +126,10 @@ defmodule Troupe.Plane.Harness do
       []
       |> put_option(:profile, params["profile"])
       |> put_option(:state, params["state"])
+      |> put_option(:status, params["status"])
+      |> put_option(:origin, params["origin"])
+      |> put_option(:trigger, params["trigger"])
+      |> put_option(:needs_review, params["needs_review"])
       |> put_option(:limit, params["limit"])
 
     sessions = Sessions.visible_to(user, options)
@@ -126,17 +150,77 @@ defmodule Troupe.Plane.Harness do
     # The row comes first because reserving capacity *places* the session, and a
     # placement is a conditional write against the row rather than a note in a process.
     # Everything after it unwinds on failure, the row included.
+    # Everything a client can get wrong is checked before the row exists: a bad prompt
+    # or term refused here has cost nothing, where one refused after placing would have
+    # spent a slot and a reservation on a typo.
     with {:ok, team} <- team_for(user, profile, params["team"]),
+         {:ok, agent} <- agent_for(profile, params["agent"]),
+         {:ok, prompt} <- prompt_for(params["prompt"]),
+         {:ok, terms} <- terms_for(params["terms"], team),
+         {:ok, origin} <- origin_for(params["origin"]),
          session_id = params["session_id"] || generate_id(),
-         {:ok, session} <- create_row(session_id, user, team, profile, params),
+         {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
          {:ok, worker} <- reserve_capacity(session, unwind: true),
          {:ok, _budget} <- reserve_budget(team, session),
-         {:ok, _pushed} <- start_on_pod(worker, session, team) do
+         {:ok, _pushed} <- start_on_pod(worker, session, team, agent, prompt) do
       {:ok, endpoint_for(Sessions.get(session.id), worker, user, "owner")}
     end
   end
 
-  # -- opening ----------------------------------------------------------------
+  # -- sharing, reviewing, firing ---------------------------------------------
+
+  # An owner, or an admin of the session's team — the team admin regardless of whether
+  # they could otherwise see it, because the sessions a trigger creates are owned by a
+  # principal and a person has to be able to let somebody in. The grant is mirrored in
+  # the plane's ACL table, which is what `role_for/2` and the next token read, and pushed
+  # to the pod holding the session so a connection already open sees it now.
+  defp handle("session.grant", params, %{user: user}) do
+    with {:ok, session} <- administered(params["session_id"], user),
+         {:ok, subject} <- required_string(params, "subject"),
+         {:ok, role} <- role_param(params["role"]) do
+      case Sessions.grant_access(session.id, subject, role, user.subject) do
+        {:ok, acl} ->
+          {:ok,
+           %{
+             "session_id" => session.id,
+             "subject" => acl.subject,
+             "role" => acl.role,
+             "granted_by" => acl.granted_by,
+             "pushed" => push_acl(session, acl)
+           }}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  # Anybody who may see the session may say they have looked at it. Reviewing is an
+  # acknowledgement rather than a command — it changes nothing the agent will do — and
+  # reading is exactly what a viewer is for.
+  defp handle("session.review", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         {:ok, reviewed} <- reviewed(session, user) do
+      Triggers.reviewed(session.id, user.subject)
+
+      {:ok, _} =
+        Audit.record(user.subject, "session.review", session.id, %{"origin" => session.origin})
+
+      {:ok, session_json(reviewed, user)}
+    end
+  end
+
+  # As the trigger's principal, or as an admin of its team. The session is created by
+  # `Triggers.fire/4` calling back into `session.create` *as the principal*, so every
+  # check a principal's own create would meet — grant, budget, agent, terms — is met.
+  defp handle("trigger.fire", params, %{user: user}) do
+    with {:ok, trigger} <- Triggers.for_caller(params["trigger"], user),
+         {:ok, key} <- required_string(params, "idempotency_key"),
+         {:ok, event} <- event_param(params["event"]),
+         {:ok, fired} <- Triggers.fire(trigger, key, event, user.subject) do
+      {:ok, Triggers.fired_json(fired)}
+    end
+  end
 
   defp handle("session.open", params, %{user: user}) do
     mode = Map.get(params, "mode", "read")
@@ -167,8 +251,12 @@ defmodule Troupe.Plane.Harness do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session) do
       case Erasure.erase(session, actor: user.subject, reason: "requested") do
-        {:ok, tombstone} -> {:ok, %{"session_id" => session.id, "erased" => true, "head_hash" => tombstone.head_hash}}
-        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+        {:ok, tombstone} ->
+          {:ok,
+           %{"session_id" => session.id, "erased" => true, "head_hash" => tombstone.head_hash}}
+
+        {:error, reason} ->
+          {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
       end
     end
   end
@@ -182,6 +270,162 @@ defmodule Troupe.Plane.Harness do
       end
     end
   end
+
+  # The agent a session starts as must be a primary the pinned bundle defines or a
+  # built-in one, checked here against the same version `create_row` pins: a name the
+  # pod would fail to load is refused with the names it could have had, rather than
+  # placed, budgeted and then failed on the pod.
+  defp agent_for(_profile, nil), do: {:ok, nil}
+
+  defp agent_for(profile, agent) when is_binary(agent) do
+    %{agents: agents} = offering(profile)
+
+    if agent in agents do
+      {:ok, agent}
+    else
+      {:error,
+       Error.new(:invalid_params, %{reason: "no primary agent named #{agent}", agents: agents})}
+    end
+  end
+
+  defp agent_for(_profile, other) do
+    {:error, Error.new(:invalid_params, %{reason: "agent is a name", agent: other})}
+  end
+
+  # The first input, sent by the plane so a session with nobody attached still does its
+  # first turn. Never stored here — it is session content — and bounded, because it is
+  # the one piece of content the control channel carries.
+  defp prompt_for(nil), do: {:ok, nil}
+
+  defp prompt_for(prompt) when is_binary(prompt) and byte_size(prompt) <= @max_prompt_bytes do
+    {:ok, prompt}
+  end
+
+  defp prompt_for(prompt) when is_binary(prompt) do
+    {:error, Error.new(:payload_too_large, %{field: "prompt", limit: @max_prompt_bytes})}
+  end
+
+  defp prompt_for(_other), do: invalid("prompt is a string")
+
+  # What the session is allowed. Validated key by key rather than passed through,
+  # because the worker applies these as configuration and a misspelt key would be a cap
+  # that silently did not apply. `approvals` defaults to `wait`; there is no `auto`, since
+  # an unattended session that approves its own shell commands is the thing this design
+  # refuses — a trigger that needs none gets a profile whose definition says so.
+  defp terms_for(nil, _team), do: {:ok, %{"approvals" => "wait"}}
+
+  defp terms_for(%{} = terms, team) do
+    with :ok <- only_keys(terms, @term_keys, "terms"),
+         :ok <- in_range(terms, "budget_micros", 1, nil),
+         :ok <- in_range(terms, "max_turns", 1, 500),
+         :ok <- in_range(terms, "wall_clock_seconds", 60, 86_400),
+         :ok <- one_of(terms, "approvals", ~w(wait deny)) do
+      cap_budget(Map.put_new(terms, "approvals", "wait"), team)
+    end
+  end
+
+  defp terms_for(_other, _team), do: invalid("terms is an object")
+
+  # A slice larger than what the team has left is trimmed to what is left, rather than
+  # refused: a nightly trigger near the end of a budget period should run on the
+  # remainder, and the ledger stops it when that is spent. Nothing left is a refusal.
+  defp cap_budget(%{"budget_micros" => asked} = terms, team) do
+    case TeamBudget.inspect_state(team) do
+      %{remaining_micros: :unlimited} ->
+        {:ok, terms}
+
+      %{remaining_micros: remaining} when remaining > 0 ->
+        {:ok, Map.put(terms, "budget_micros", min(asked, remaining))}
+
+      %{remaining_micros: _none} ->
+        {:error,
+         Error.new(:budget_exhausted, %{team: team.name, reason: "nothing left to reserve"})}
+    end
+  end
+
+  defp cap_budget(terms, _team), do: {:ok, terms}
+
+  # What started this session: a person by default, a trigger or an A2A caller when they
+  # say so. Recorded on the row and passed to the pod for `session_created`, so the
+  # listing and the transcript agree about it.
+  defp origin_for(nil), do: {:ok, %{"kind" => "user"}}
+
+  defp origin_for(%{} = origin) do
+    kind = Map.get(origin, "kind", "user")
+
+    cond do
+      kind not in Session.origins() ->
+        invalid("origin.kind is one of #{Enum.join(Session.origins(), ", ")}")
+
+      byte_size(Jason.encode!(origin)) > @max_origin_bytes ->
+        {:error, Error.new(:payload_too_large, %{field: "origin", limit: @max_origin_bytes})}
+
+      true ->
+        {:ok, Map.put(origin, "kind", kind)}
+    end
+  end
+
+  defp origin_for(_other), do: invalid("origin is an object")
+
+  defp only_keys(map, allowed, name) do
+    case Map.keys(map) -- allowed do
+      [] -> :ok
+      unknown -> invalid("#{name} takes #{Enum.join(allowed, ", ")}", unknown: unknown)
+    end
+  end
+
+  defp in_range(map, key, low, high) do
+    case Map.fetch(map, key) do
+      :error ->
+        :ok
+
+      {:ok, value} when is_integer(value) and value >= low and (is_nil(high) or value <= high) ->
+        :ok
+
+      {:ok, _} ->
+        invalid("#{key} is an integer from #{low}#{if high, do: " to #{high}", else: ""}")
+    end
+  end
+
+  defp one_of(map, key, choices) do
+    case Map.fetch(map, key) do
+      :error ->
+        :ok
+
+      {:ok, value} ->
+        if value in choices,
+          do: :ok,
+          else: invalid("#{key} is one of #{Enum.join(choices, ", ")}")
+    end
+  end
+
+  defp invalid(reason, extra \\ []) do
+    {:error, Error.new(:invalid_params, Map.merge(%{reason: reason}, Map.new(extra)))}
+  end
+
+  defp required_string(params, key) do
+    case Map.get(params, key) do
+      value when is_binary(value) and value != "" -> {:ok, value}
+      _ -> {:error, Error.new(:invalid_params, %{missing: key})}
+    end
+  end
+
+  defp role_param(nil), do: {:ok, "collaborator"}
+  defp role_param(role) when role in ["owner", "collaborator", "viewer"], do: {:ok, role}
+  defp role_param(_role), do: invalid("role is one of #{Enum.join(ACL.roles(), ", ")}")
+
+  # The event a trigger fired on: a small map, already filtered by whatever received it.
+  defp event_param(nil), do: {:ok, %{}}
+
+  defp event_param(%{} = event) do
+    limit = Triggers.max_event_bytes()
+
+    if byte_size(Jason.encode!(event)) <= limit,
+      do: {:ok, event},
+      else: {:error, Error.new(:payload_too_large, %{field: "event", limit: limit})}
+  end
+
+  defp event_param(_other), do: invalid("event is an object")
 
   # -- the create sequence ----------------------------------------------------
 
@@ -230,7 +474,7 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp reserve_budget(team, session) do
-    case TeamBudget.reserve(team, session.id, @default_slice_micros) do
+    case TeamBudget.reserve(team, session.id, slice_of(session)) do
       {:ok, reservation} ->
         {:ok, reservation}
 
@@ -241,7 +485,12 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp create_row(session_id, user, team, profile, params) do
+  # What a session reserves each time it starts: its own terms' slice, already capped by
+  # what the team had when it was created, or the default.
+  defp slice_of(%{terms: %{"budget_micros" => slice}}) when is_integer(slice), do: slice
+  defp slice_of(_session), do: @default_slice_micros
+
+  defp create_row(session_id, user, team, profile, params, terms, origin) do
     attrs = %{
       id: session_id,
       owner_id: user.id,
@@ -253,27 +502,39 @@ defmodule Troupe.Plane.Harness do
       epoch: 1,
       title: params["title"],
       workspace_source: params["source"],
+      terms: terms,
+      origin: origin,
       # Pinned at creation and kept for the life of the session. A session whose agent
       # definitions changed underneath it would be a different session halfway through.
       bundle_version: bundle_version(profile)
     }
 
     case Sessions.create(attrs) do
-      {:ok, session} -> {:ok, session}
-      {:error, changeset} -> {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      {:ok, session} ->
+        {:ok, session}
+
+      {:error, changeset} ->
+        {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
     end
   end
 
-  defp start_on_pod(worker, session, team) do
-    params = %{
-      "session_id" => session.id,
-      "team" => team.name,
-      "epoch" => session.epoch,
-      "owner_subject" => session.owner_subject,
-      "profile" => session.profile,
-      "source" => session.workspace_source,
-      "bundle_version" => session.bundle_version
-    }
+  # The prompt goes only here, on the first activation. A later activation replays the
+  # log, in which the prompt is already the first input; sending it again would run it
+  # again.
+  defp start_on_pod(worker, session, team, agent, prompt) do
+    params =
+      %{
+        "session_id" => session.id,
+        "team" => team.name,
+        "epoch" => session.epoch,
+        "owner_subject" => session.owner_subject,
+        "profile" => session.profile,
+        "source" => session.workspace_source,
+        "bundle_version" => session.bundle_version,
+        "agent" => agent
+      }
+      |> Map.merge(session_terms(session))
+      |> then(fn params -> if prompt, do: Map.put(params, "prompt", prompt), else: params end)
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
@@ -285,7 +546,12 @@ defmodule Troupe.Plane.Harness do
         Placement.release(session.profile, session.id)
         TeamBudget.release(team, session.id)
         Sessions.delete(session.id)
-        {:error, Error.new(:unavailable, %{reason: "the pod did not accept the session", detail: inspect(reason)})}
+
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "the pod did not accept the session",
+           detail: inspect(reason)
+         })}
     end
   end
 
@@ -345,8 +611,28 @@ defmodule Troupe.Plane.Harness do
   defp start_elsewhere(session, user, role) do
     with {:ok, worker} <- reserve_capacity(session, unwind: false),
          {:ok, placed} <- place(session, worker),
+         :ok <- reserve_budget_again(placed),
          {:ok, _} <- restore_on_pod(worker, placed) do
       {:ok, endpoint_for(placed, worker, user, role, mode: "activate")}
+    end
+  end
+
+  # The reservation was given back at dormancy, so waking up takes it again — the same
+  # slice, because the terms were fixed at creation. A team with nothing left cannot wake
+  # a session any more than it can create one; the session stays dormant and says why.
+  defp reserve_budget_again(%{team_id: nil}), do: :ok
+
+  defp reserve_budget_again(session) do
+    case TeamBudget.reserve(session.team_id, session.id, slice_of(session)) do
+      {:ok, _reservation} ->
+        :ok
+
+      {:error, reason} ->
+        Placement.release(session.profile, session.id)
+        Sessions.dormant(session.id)
+
+        {:error,
+         Error.new(:budget_exhausted, %{team: team_name(session), reason: inspect(reason)})}
     end
   end
 
@@ -385,6 +671,9 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Terms and origin travel on every activation, because the pod applies the terms to
+  # the tree it is about to start and records the origin in `session_created` only the
+  # first time. The prompt does not: see `start_on_pod/5`.
   defp restore_on_pod(worker, session) do
     params =
       %{
@@ -395,6 +684,7 @@ defmodule Troupe.Plane.Harness do
         "team" => team_name(session)
       }
       |> Map.merge(bundle_params(session))
+      |> Map.merge(session_terms(session))
 
     case Router.push(worker, "session.activate", params) do
       {:ok, result} ->
@@ -403,7 +693,12 @@ defmodule Troupe.Plane.Harness do
       {:error, reason} ->
         Placement.release(session.profile, session.id)
         Sessions.dormant(session.id)
-        {:error, Error.new(:unavailable, %{reason: "the pod did not accept the session", detail: inspect(reason)})}
+
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "the pod did not accept the session",
+           detail: inspect(reason)
+         })}
     end
   end
 
@@ -453,8 +748,71 @@ defmodule Troupe.Plane.Harness do
       session ->
         # Not-found rather than forbidden: whether a session exists is itself something
         # a person who cannot see it should not learn.
-        if Sessions.role_for(user, session), do: {:ok, session}, else: {:error, Error.new(:not_found, %{session_id: session_id})}
+        if Sessions.role_for(user, session),
+          do: {:ok, session},
+          else: {:error, Error.new(:not_found, %{session_id: session_id})}
     end
+  end
+
+  # A session the caller may administer: as its owner, or as an admin of its team. The
+  # team admin's path does not go through visibility, because the sessions this exists
+  # for are owned by a principal and private until somebody is let in.
+  defp administered(nil, _user),
+    do: {:error, Error.new(:invalid_params, %{missing: "session_id"})}
+
+  defp administered(session_id, user) do
+    case Sessions.get(session_id) do
+      %{state: state} = session when state != "erased" ->
+        cond do
+          Sessions.role_for(user, session) == :admin ->
+            {:ok, session}
+
+          administers_team?(user, session) ->
+            {:ok, session}
+
+          Sessions.role_for(user, session) ->
+            {:error, Error.new(:forbidden, %{required_role: "owner"})}
+
+          true ->
+            {:error, Error.new(:not_found, %{session_id: session_id})}
+        end
+
+      _ ->
+        {:error, Error.new(:not_found, %{session_id: session_id})}
+    end
+  end
+
+  defp administers_team?(_user, %{team_id: nil}), do: false
+
+  defp administers_team?(user, session) do
+    user |> Identity.teams_administered_by() |> Enum.any?(&(&1.id == session.team_id))
+  end
+
+  # Told to the pod holding the session, so a connection already open sees the grant
+  # now. Best effort: the mirror is what the next token and `role_for/2` read, and a
+  # dormant session has no pod to tell — its next activation reads the mirror.
+  defp push_acl(%{worker_id: nil}, _acl), do: false
+
+  defp push_acl(session, acl) do
+    change = %{"session_id" => session.id, "subject" => acl.subject, "role" => acl.role}
+
+    case Fleet.get_worker(session.worker_id) do
+      nil -> false
+      worker -> match?({:ok, _}, Router.push(worker, "acl.changed", %{"changes" => [change]}))
+    end
+  end
+
+  defp reviewed(session, user) do
+    case Sessions.review(session.id, user.subject) do
+      {:ok, reviewed} -> {:ok, reviewed}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # The terms and origin a pod is handed on activation, from the row.
+  defp session_terms(session) do
+    %{"terms" => session.terms, "origin" => session.origin}
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
 
   defp role_of(user, session) do
@@ -495,6 +853,29 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # What the channel's current bundle gives a session on this profile. A profile the
+  # plane has no record of follows no channel and offers the built-ins.
+  defp offering(profile) do
+    case Fleet.get_profile(profile) do
+      nil -> Bundles.offering(nil)
+      %{config_bundle_channel: channel} -> Bundles.offering(channel)
+    end
+  end
+
+  defp offering_json(profile) do
+    offering = offering(profile)
+
+    %{
+      "channel" => offering.channel,
+      "bundle_version" => offering.bundle_version,
+      "bundle_hash" => offering.bundle_hash,
+      "agents" => offering.agents,
+      "skills" =>
+        Enum.map(offering.skills, &%{"name" => &1.name, "description" => &1.description}),
+      "mcp_servers" => offering.mcp_servers
+    }
+  end
+
   # What this session should run on now, and whether that is a change. An upgrade is the
   # only way a session's configuration ever moves, and the worker records it as a durable
   # event so the model is told rather than left to notice.
@@ -503,7 +884,11 @@ defmodule Troupe.Plane.Harness do
          resolved <- Bundles.resolve(channel, session.bundle_version) do
       case resolved do
         {:keep, bundle} ->
-          %{"bundle_version" => bundle.version, "bundle_hash" => bundle.hash, "channel" => channel}
+          %{
+            "bundle_version" => bundle.version,
+            "bundle_hash" => bundle.hash,
+            "channel" => channel
+          }
 
         {:upgrade, from, bundle} ->
           Sessions.pin_bundle(session.id, bundle.version)
@@ -579,6 +964,16 @@ defmodule Troupe.Plane.Harness do
       "object_bytes" => session.object_bytes,
       "workspace_bytes" => session.workspace_bytes,
       "pinned" => session.pinned,
+      # Lifecycle the worker reported, so a queue can be rendered from this listing
+      # without replaying a log. Never what the session said.
+      "status" => session.status,
+      "done_reason" => session.done_reason,
+      "pending_approvals" => session.pending_approvals,
+      "cost_micros" => session.cost_micros,
+      "origin" => session.origin,
+      "terms" => session.terms,
+      "reviewed_by" => session.reviewed_by,
+      "reviewed_at" => session.reviewed_at && DateTime.to_iso8601(session.reviewed_at),
       "your_role" => role_name(Sessions.role_for(user, session))
     }
   end

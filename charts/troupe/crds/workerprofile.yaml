@@ -63,6 +63,9 @@ spec:
                         key: {type: string, default: api-key}
                 mcpServers:
                   type: array
+                  description: >-
+                    Written by the plane from the channel's config bundle. The credential
+                    is a Secret in the worker namespace; nothing here is a value.
                   items:
                     type: object
                     required: [name, url]
@@ -74,6 +77,16 @@ spec:
                         properties:
                           name: {type: string}
                           key: {type: string, default: token}
+                      credentialRef:
+                        type: string
+                        pattern: '^[A-Z][A-Z0-9_]*$'
+                        description: >-
+                          The environment variable the token is injected as. Absent means
+                          TROUPE_MCP_<NAME>_TOKEN.
+                      header:
+                        type: string
+                        description: The header the token is sent in. Absent means authorization.
+                      timeoutMs: {type: integer, minimum: 1}
                 egress:
                   type: object
                   properties:

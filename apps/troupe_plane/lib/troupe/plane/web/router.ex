@@ -19,7 +19,7 @@ defmodule Troupe.Plane.Web.Router do
 
   use Plug.Router
 
-  alias Troupe.Plane.{Admin, Harness, Identity, OIDC, SCIM, Tokens}
+  alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens}
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
@@ -28,8 +28,8 @@ defmodule Troupe.Plane.Web.Router do
   # Before `:match`, so a preflight is answered without ever reaching a route — there
   # is no `options` route to reach, and the 404 it would otherwise get is what a browser
   # reports as a CORS failure.
-  plug Troupe.Plane.Web.CORS
-  plug :match
+  plug(Troupe.Plane.Web.CORS)
+  plug(:match)
 
   # Four mebibytes. The largest legitimate body here is not a `session.create` with a
   # long prompt, which is kilobytes, but `admin.bundle.publish`: a config bundle carries
@@ -37,10 +37,10 @@ defmodule Troupe.Plane.Web.Router do
   # runs well past 256 KiB. Anything larger than this is not a request the plane has a
   # method for, and reading it before finding that out would be the plane buffering a
   # stranger's upload.
-  plug Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason, length: 4_194_304
-  plug :dispatch
+  plug(Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason, length: 4_194_304)
+  plug(:dispatch)
 
-  get "/healthz", do: send_json(conn, 200, %{"ok" => true})
+  get("/healthz", do: send_json(conn, 200, %{"ok" => true}))
 
   # What a client needs to know before it has an identity: which provider to talk to,
   # which client id to use, and what this plane calls itself.
@@ -70,21 +70,36 @@ defmodule Troupe.Plane.Web.Router do
   # A provider token in, a plane token out. The plane never sees the user's provider
   # credentials: the device grant runs against the identity provider directly and only
   # its result comes here.
+  #
+  # Two body shapes, one answer. `{"id_token"}` is a person; `{"client_id",
+  # "client_secret"}` is a service principal presenting the secret the plane minted for
+  # it. Both come out as the same plane token, so nothing downstream cares which.
   post "/auth/exchange" do
-    case OIDC.exchange(conn.body_params["id_token"] || "") do
+    case exchange(conn.body_params) do
       {:ok, session} ->
         send_json(conn, 200, session)
 
       {:error, reason} ->
         Logger.info("troupe plane: refused a login: #{inspect(reason)}")
-        send_json(conn, 401, %{"error" => "unauthenticated", "reason" => to_string(inspect(reason))})
+
+        send_json(conn, 401, %{
+          "error" => "unauthenticated",
+          "reason" => to_string(inspect(reason))
+        })
     end
   end
 
   post "/rpc" do
     case authenticate(conn) do
-      {:ok, user} -> send_json(conn, 200, answer(conn.body_params, user))
-      {:error, error} -> send_json(conn, 401, JSONRPC.encode({:error, id_of(conn.body_params), error}) |> Jason.decode!())
+      {:ok, user} ->
+        send_json(conn, 200, answer(conn.body_params, user))
+
+      {:error, error} ->
+        send_json(
+          conn,
+          401,
+          JSONRPC.encode({:error, id_of(conn.body_params), error}) |> Jason.decode!()
+        )
     end
   end
 
@@ -95,7 +110,10 @@ defmodule Troupe.Plane.Web.Router do
     if scim_authorised?(conn) do
       scim(conn, rest)
     else
-      send_json(conn, 401, %{"schemas" => ["urn:ietf:params:scim:api:messages:2.0:Error"], "status" => "401"})
+      send_json(conn, 401, %{
+        "schemas" => ["urn:ietf:params:scim:api:messages:2.0:Error"],
+        "status" => "401"
+      })
     end
   end
 
@@ -135,9 +153,18 @@ defmodule Troupe.Plane.Web.Router do
 
   # -- who is calling ---------------------------------------------------------
 
+  defp exchange(%{"client_id" => client_id} = body) when is_binary(client_id) do
+    Principals.exchange(client_id, body["client_secret"] || "")
+  end
+
+  defp exchange(body) when is_map(body), do: OIDC.exchange(body["id_token"] || "")
+  defp exchange(_body), do: {:error, :no_token}
+
   # A plane token, minted at login, whose audience is this plane rather than a pod. The
   # same verifier workers use, because a token that two components disagree about is a
-  # token nobody can reason about.
+  # token nobody can reason about. The subject is resolved on every request — a person
+  # to their row, a `svc:` subject to its principal — so a principal disabled a minute
+  # ago is refused now rather than when its token expires.
   defp authenticate(conn) do
     with {:ok, jwt} <- bearer(conn),
          {:ok, jwks} <- Tokens.jwks(),
@@ -165,9 +192,18 @@ defmodule Troupe.Plane.Web.Router do
 
   defp scim(conn, ["Users"]) do
     case conn.method do
-      "POST" -> scim_put_user(conn)
-      "GET" -> send_json(conn, 200, SCIM.render_list(Enum.map(Identity.list_users(), &SCIM.render_user/1)))
-      _ -> send_json(conn, 405, %{"status" => "405"})
+      "POST" ->
+        scim_put_user(conn)
+
+      "GET" ->
+        send_json(
+          conn,
+          200,
+          SCIM.render_list(Enum.map(Identity.list_users(), &SCIM.render_user/1))
+        )
+
+      _ ->
+        send_json(conn, 405, %{"status" => "405"})
     end
   end
 
@@ -190,9 +226,18 @@ defmodule Troupe.Plane.Web.Router do
 
   defp scim(conn, ["Groups"]) do
     case conn.method do
-      "POST" -> scim_put_group(conn)
-      "GET" -> send_json(conn, 200, SCIM.render_list(Enum.map(Identity.list_groups(), &SCIM.render_group/1)))
-      _ -> send_json(conn, 405, %{"status" => "405"})
+      "POST" ->
+        scim_put_group(conn)
+
+      "GET" ->
+        send_json(
+          conn,
+          200,
+          SCIM.render_list(Enum.map(Identity.list_groups(), &SCIM.render_group/1))
+        )
+
+      _ ->
+        send_json(conn, 405, %{"status" => "405"})
     end
   end
 

@@ -10,8 +10,8 @@ defmodule Troupe.Plane.ControlTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  alias Troupe.Plane.{Bundles, Fleet, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
-  alias Troupe.Plane.{Fleet, Sessions}
 
   @moduletag timeout: 60_000
 
@@ -26,9 +26,26 @@ defmodule Troupe.Plane.ControlTest do
     # channel itself can be tested without a cluster; `Troupe.Plane.EnrolmentTest`
     # proves the real thing against a real API server.
     verify = fn
-      "dev-token" -> {:ok, %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}
-      "ux-token" -> {:ok, %{profile: "ux", namespace: "troupe-w-ux", pod_name: nil, service_account: "troupe-worker"}}
-      _ -> {:error, :unauthenticated}
+      "dev-token" ->
+        {:ok,
+         %{
+           profile: "dev",
+           namespace: "troupe-w-dev",
+           pod_name: nil,
+           service_account: "troupe-worker"
+         }}
+
+      "ux-token" ->
+        {:ok,
+         %{
+           profile: "ux",
+           namespace: "troupe-w-ux",
+           pod_name: nil,
+           service_account: "troupe-worker"
+         }}
+
+      _ ->
+        {:error, :unauthenticated}
     end
 
     start_supervised!({Listener, port: 0, verify: verify})
@@ -56,7 +73,9 @@ defmodule Troupe.Plane.ControlTest do
     test "an unknown token is refused and the connection closes", %{port: port} do
       worker = connect(port)
 
-      assert {:error, error} = call(worker, "enrol", %{"token" => "nonsense", "pod_name" => "x-0"})
+      assert {:error, error} =
+               call(worker, "enrol", %{"token" => "nonsense", "pod_name" => "x-0"})
+
       assert error["message"] == "unauthenticated"
 
       # A socket that has not proved which pod it is has nothing to say, and leaving it
@@ -75,7 +94,9 @@ defmodule Troupe.Plane.ControlTest do
     test "enrolling twice on one connection is refused", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
 
-      assert {:error, error} = call(worker, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
+      assert {:error, error} =
+               call(worker, "enrol", %{"token" => "dev-token", "pod_name" => "troupe-w-dev-0"})
+
       assert error["message"] == "invalid_request"
     end
   end
@@ -108,6 +129,28 @@ defmodule Troupe.Plane.ControlTest do
       assert Connections.for_pod("troupe-w-dev", "troupe-w-dev-0")
       assert length(Connections.for_profile("dev")) == 2
       assert length(Connections.for_profile("ux")) == 1
+    end
+
+    test "a worker fetches a bundle by hash, or by channel and version", %{port: port} do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable"})
+      content = %{"schema" => 1, "agents" => [], "skills" => [], "mcp_servers" => []}
+      {:ok, bundle} = Bundles.publish("stable", content, announce: false)
+
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+
+      assert {:ok, fetched} = call(worker, "bundle.fetch", %{"hash" => bundle.hash})
+      assert fetched["content"] == content
+      assert fetched["hash"] == bundle.hash
+      assert fetched["channel"] == "stable"
+      assert fetched["version"] == bundle.version
+
+      assert {:ok, by_version} =
+               call(worker, "bundle.fetch", %{"channel" => "stable", "version" => 1})
+
+      assert by_version["hash"] == bundle.hash
+
+      assert {:error, error} = call(worker, "bundle.fetch", %{"hash" => "sha256:nothing"})
+      assert error["message"] == "not_found"
     end
 
     test "the plane can push to a worker", %{port: port} do
@@ -144,7 +187,14 @@ defmodule Troupe.Plane.ControlTest do
 
     test "a seal report from a stale epoch is refused", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
-      {:ok, _} = Sessions.create(%{id: "s-1", owner_subject: "idp|alice", profile: "dev", state: "dormant"})
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-1",
+          owner_subject: "idp|alice",
+          profile: "dev",
+          state: "dormant"
+        })
 
       # The session was activated somewhere else, which is what bumps the epoch.
       {:ok, session} = Sessions.activate("s-1")
@@ -182,6 +232,92 @@ defmodule Troupe.Plane.ControlTest do
       assert session.state == "dormant"
       assert is_nil(session.worker_id)
       assert session.last_seq == 12
+    end
+
+    test "a status report lands on the row, and one from a stale epoch does not", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, _} =
+        Sessions.create(%{id: "s-1", owner_subject: "idp|alice", profile: "dev", epoch: 2})
+
+      assert {:ok, _} =
+               call(worker, "session.status", %{
+                 "session_id" => "s-1",
+                 "epoch" => 2,
+                 "status" => "waiting",
+                 "done_reason" => nil,
+                 "pending_approvals" => 1,
+                 "cost_micros" => 1234
+               })
+
+      session = Sessions.get("s-1")
+      assert session.status == "waiting"
+      assert session.pending_approvals == 1
+      assert session.cost_micros == 1234
+      assert is_nil(session.done_reason)
+
+      # A pod presumed lost, still running epoch 1, has nothing to say about this session.
+      assert {:error, %{"message" => "conflict"}} =
+               call(worker, "session.status", %{
+                 "session_id" => "s-1",
+                 "epoch" => 1,
+                 "status" => "done",
+                 "done_reason" => "finished"
+               })
+
+      assert Sessions.get("s-1").status == "waiting"
+
+      # Finishing clears the approval count and names the reason.
+      assert {:ok, _} =
+               call(worker, "session.status", %{
+                 "session_id" => "s-1",
+                 "epoch" => 2,
+                 "status" => "done",
+                 "done_reason" => "budget_exhausted",
+                 "pending_approvals" => 0,
+                 "cost_micros" => 2000
+               })
+
+      session = Sessions.get("s-1")
+      assert session.status == "done"
+      assert session.done_reason == "budget_exhausted"
+      assert session.pending_approvals == 0
+    end
+
+    test "going dormant applies the last status and gives the budget slice back", %{port: port} do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 10_000_000)
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-1",
+          owner_subject: "idp|alice",
+          profile: "dev",
+          team_id: team.id
+        })
+
+      {:ok, _} = TeamBudget.reserve(team, "s-1", 5_000_000)
+      assert TeamBudget.inspect_state(team).reserved_micros == 5_000_000
+
+      assert {:ok, _} =
+               call(worker, "session.dormant", %{
+                 "session_id" => "s-1",
+                 "epoch" => 1,
+                 "last_seq" => 12,
+                 "status" => "done",
+                 "done_reason" => "finished",
+                 "pending_approvals" => 0,
+                 "cost_micros" => 4200
+               })
+
+      session = Sessions.get("s-1")
+      assert session.state == "dormant"
+      assert session.status == "done"
+      assert session.done_reason == "finished"
+      assert session.cost_micros == 4200
+
+      # The slice is back with the team, as the module doc always said it would be.
+      assert TeamBudget.inspect_state(team).reserved_micros == 0
     end
   end
 

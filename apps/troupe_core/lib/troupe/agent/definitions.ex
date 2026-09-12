@@ -6,9 +6,11 @@ defmodule Troupe.Agent.Definitions do
   deliberately no process here: definitions cannot change while a session runs, so
   they are data, and a subagent three levels down reads them without a message.
 
-  Precedence, lowest to highest: built-ins shipped in `priv/agents/`, the global
-  config dir's `agents/`, then the project's `.troupe/agents/`. A file at a higher
-  level replaces the same name below it.
+  Precedence, lowest to highest: built-ins shipped in `priv/agents/`, the session's
+  config bundle, the global config dir's `agents/`, then the project's
+  `.troupe/agents/`. A file at a higher level replaces the same name below it. On a
+  worker the global and project directories are empty by design, so the bundle is the
+  effective source; on a laptop there is no bundle and nothing changes.
   """
 
   alias Troupe.Agent.Definition
@@ -22,14 +24,16 @@ defmodule Troupe.Agent.Definitions do
   @doc """
   Load every definition visible from a workspace.
 
-  Unparseable files are skipped with a warning rather than failing the session: one
-  broken custom agent should not stop the user from working.
+  `bundle_dir:` names a materialised bundle whose `agents/` is read as the `:bundle`
+  source. Unparseable files are skipped with a warning rather than failing the
+  session: one broken custom agent should not stop the user from working.
   """
-  @spec load(Path.t()) :: t()
-  def load(workspace_root) do
+  @spec load(Path.t(), keyword()) :: t()
+  def load(workspace_root, opts \\ []) do
     by_name =
       %{}
       |> merge_dir(builtin_dir(), :builtin)
+      |> merge_bundle(Keyword.get(opts, :bundle_dir))
       |> merge_dir(Path.join(Paths.config_dir(), "agents"), :global)
       |> merge_dir(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
 
@@ -72,6 +76,9 @@ defmodule Troupe.Agent.Definitions do
   @doc false
   @spec builtin_dir() :: Path.t()
   def builtin_dir, do: Application.app_dir(:troupe_core, "priv/agents")
+
+  defp merge_bundle(acc, nil), do: acc
+  defp merge_bundle(acc, dir), do: merge_dir(acc, Path.join(dir, "agents"), :bundle)
 
   defp merge_dir(acc, dir, source) do
     case File.ls(dir) do

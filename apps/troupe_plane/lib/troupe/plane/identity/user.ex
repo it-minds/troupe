@@ -8,6 +8,12 @@ defmodule Troupe.Plane.Identity.User do
 
   Nothing here is editable in Troupe. Users arrive by SCIM push or are created just in
   time at login, and both paths write the same row.
+
+  A service principal is handed around as one of these too, with `kind: "service"` and
+  no row behind it: `id` is nil and `principal` carries the record. Everything that
+  answers "what may this caller do" — grants, teams, visibility — takes a `%User{}`, and
+  a principal that were a second struct would need a second copy of every one of those
+  functions. The two virtual fields are the whole of the difference.
   """
 
   use Ecto.Schema
@@ -18,15 +24,21 @@ defmodule Troupe.Plane.Identity.User do
   @foreign_key_type :binary_id
 
   schema "users" do
-    field :subject, :string
-    field :external_id, :string
-    field :email, :string
-    field :display_name, :string
-    field :active, :boolean, default: true
+    field(:subject, :string)
+    field(:external_id, :string)
+    field(:email, :string)
+    field(:display_name, :string)
+    field(:active, :boolean, default: true)
 
-    many_to_many :groups, Troupe.Plane.Identity.Group,
+    # `"user"` for a person, `"service"` for a principal; never persisted, because a
+    # principal has its own table and a person's kind is implied by having a row here.
+    field(:kind, :string, virtual: true, default: "user")
+    field(:principal, :any, virtual: true)
+
+    many_to_many(:groups, Troupe.Plane.Identity.Group,
       join_through: Troupe.Plane.Identity.Membership,
       on_replace: :delete
+    )
 
     timestamps(type: :utc_datetime_usec)
   end

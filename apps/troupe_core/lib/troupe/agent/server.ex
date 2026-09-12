@@ -28,7 +28,7 @@ defmodule Troupe.Agent.Server do
   @behaviour :gen_statem
 
   alias Troupe.Agent.{Call, Definition, Definitions, State}
-  alias Troupe.{Budget, Config, Events, Registry, Todo, Tools}
+  alias Troupe.{Budget, Config, Events, Registry, Skills, Todo, Tools}
   alias Troupe.LLM.{Delta, Message, Provider, Request, Response, ToolResult, ToolUse, Usage}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Blobs, Log}
@@ -73,7 +73,8 @@ defmodule Troupe.Agent.Server do
 
   @doc "An identifier for an input that arrived without one of its own."
   @spec command_id() :: String.t()
-  def command_id, do: "in-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+  def command_id,
+    do: "in-" <> (8 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
 
   @doc "Cancel whatever is in flight and return to `:idle`. Valid from every state."
   @spec cancel(pid()) :: :ok
@@ -122,6 +123,7 @@ defmodule Troupe.Agent.Server do
       parent: Keyword.get(opts, :parent),
       parent_ref: Keyword.get(opts, :parent_ref),
       watcher: Keyword.get(opts, :watcher),
+      bundle: Keyword.get(opts, :bundle),
       budget: opts |> Keyword.get(:budget, Config.budget(config)) |> Budget.start(),
       fake: Keyword.get(opts, :fake)
     }
@@ -155,11 +157,11 @@ defmodule Troupe.Agent.Server do
     events = Log.replay(state.session_id, state.agent_path)
 
     case events do
+      # Never started under this path before. This is the only branch that seeds a
+      # task: a session activated again with the same prompt finds its events here and
+      # replays the input it already took rather than taking it twice.
       [] ->
-        log(state, :agent_started, %{
-          "profile" => state.definition.name,
-          "mode" => Atom.to_string(state.definition.mode)
-        })
+        log(state, :agent_started, started_data(state))
 
         case task do
           nil -> {state, :none}
@@ -178,6 +180,23 @@ defmodule Troupe.Agent.Server do
         })
 
         {state, action}
+    end
+  end
+
+  # The bundle version rides along when there is one, so a transcript says which
+  # definition the agent ran under and not only its name.
+  defp started_data(state) do
+    data = %{
+      "profile" => state.definition.name,
+      "mode" => Atom.to_string(state.definition.mode)
+    }
+
+    case state.bundle do
+      %{version: version} when not is_nil(version) ->
+        Map.put(data, "bundle_version", to_string(version))
+
+      _ ->
+        data
     end
   end
 
@@ -785,6 +804,7 @@ defmodule Troupe.Agent.Server do
     [
       definition.prompt,
       environment_section(state),
+      Skills.prompt_section(state.bundle, definition),
       todo_section(state)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -983,6 +1003,7 @@ defmodule Troupe.Agent.Server do
       definitions: state.definitions,
       definition: state.definition,
       watcher: state.watcher || Registry.watcher_pid(state.session_id),
+      bundle: state.bundle,
       todos: state.todos,
       depth: State.depth(state),
       max_depth: state.config.max_depth,
@@ -1132,6 +1153,7 @@ defmodule Troupe.Agent.Server do
       task: task,
       budget: Budget.slice(state.budget, definition.budget_share),
       watcher: state.watcher,
+      bundle: state.bundle,
       fake: state.fake
     ]
 

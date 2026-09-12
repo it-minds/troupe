@@ -11,8 +11,8 @@ defmodule Troupe.Plane.HarnessTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  alias Troupe.Plane.{Audit, Bundles, Fleet, Harness, Identity, Principals, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{Fleet, Harness, Identity, Sessions}
 
   @moduletag timeout: 60_000
 
@@ -66,6 +66,55 @@ defmodule Troupe.Plane.HarnessTest do
 
       # The ux pods exist and are not this user's business.
       refute Enum.any?(profile["pods"], &(&1["pod"] == "troupe-w-ux-0"))
+    end
+
+    test "says what a session on each profile will have" do
+      team_with_grant("engineering", "dev", name: "engineering")
+      user = person("ada@example.test", ["engineering"])
+      {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable"})
+
+      # Nothing published: the built-ins, and nothing else.
+      assert {:ok, %{"profiles" => [bare]}} = Harness.call("profiles.list", %{}, context(user))
+      assert bare["channel"] == "stable"
+      assert bare["bundle_version"] == nil
+      assert bare["agents"] == ["build", "plan"]
+      assert bare["skills"] == []
+      assert bare["mcp_servers"] == []
+
+      {:ok, bundle} =
+        Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "agents" => [
+              %{
+                "name" => "reviewer",
+                "definition" => "---\nmode: primary\nskills: [review]\n---\nReview."
+              },
+              %{"name" => "helper", "definition" => "You help."}
+            ],
+            "skills" => [
+              %{
+                "name" => "review",
+                "description" => "How we review",
+                "files" => %{
+                  "SKILL.md" => "---\nname: review\ndescription: How we review\n---\nCheck."
+                }
+              }
+            ],
+            "mcp_servers" => [%{"name" => "jira", "url" => "https://mcp.jira.example/mcp"}]
+          },
+          announce: false
+        )
+
+      assert {:ok, %{"profiles" => [profile]}} = Harness.call("profiles.list", %{}, context(user))
+      assert profile["bundle_version"] == bundle.version
+      assert profile["bundle_hash"] == bundle.hash
+      # The bundle's primary, then the built-ins it does not replace; the subagent is
+      # not something a session starts as.
+      assert profile["agents"] == ["reviewer", "build", "plan"]
+      assert profile["skills"] == [%{"name" => "review", "description" => "How we review"}]
+      assert profile["mcp_servers"] == ["jira"]
     end
   end
 
@@ -144,7 +193,9 @@ defmodule Troupe.Plane.HarnessTest do
       team_with_grant("engineering", "dev", name: "engineering")
       stranger = person("nobody@example.test", [])
 
-      assert {:error, error} = Harness.call("session.create", %{"profile" => "dev"}, context(stranger))
+      assert {:error, error} =
+               Harness.call("session.create", %{"profile" => "dev"}, context(stranger))
+
       assert error.message == "forbidden"
     end
 
@@ -152,7 +203,9 @@ defmodule Troupe.Plane.HarnessTest do
       team_with_grant("engineering", "dev", name: "engineering")
       user = person("ada@example.test", ["engineering"])
 
-      assert {:error, error} = Harness.call("session.create", %{"profile" => "dev"}, context(user))
+      assert {:error, error} =
+               Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
       assert error.message in ["capacity", "unavailable"]
 
       # The row went with the failure: a session that never started is not a session,
@@ -165,7 +218,9 @@ defmodule Troupe.Plane.HarnessTest do
       team_with_grant("research", "dev", name: "research")
       user = person("ada@example.test", ["engineering", "research"])
 
-      assert {:error, error} = Harness.call("session.create", %{"profile" => "dev"}, context(user))
+      assert {:error, error} =
+               Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
       assert error.message == "invalid_params"
       assert Enum.sort(error.data.teams) == ["engineering", "research"]
     end
@@ -180,7 +235,11 @@ defmodule Troupe.Plane.HarnessTest do
       session = session!("s-asleep", user, team, state: "dormant")
 
       assert {:ok, result} =
-               Harness.call("session.open", %{"session_id" => session.id, "mode" => "read"}, context(user))
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "read"},
+                 context(user)
+               )
 
       assert result["mode"] == "read"
       assert is_binary(result["token"])
@@ -203,7 +262,11 @@ defmodule Troupe.Plane.HarnessTest do
         1..6
         |> Task.async_stream(
           fn _ ->
-            Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+            Harness.call(
+              "session.open",
+              %{"session_id" => session.id, "mode" => "activate"},
+              context(user)
+            )
           end,
           max_concurrency: 6,
           timeout: 30_000
@@ -223,13 +286,21 @@ defmodule Troupe.Plane.HarnessTest do
       session = session!("s-frozen", user, team, state: "read_only")
 
       assert {:error, error} =
-               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "activate"},
+                 context(user)
+               )
 
       assert error.message == "forbidden"
 
       # Reads still work, which is what read-only means.
       assert {:ok, %{"mode" => "read"}} =
-               Harness.call("session.open", %{"session_id" => session.id, "mode" => "read"}, context(user))
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "read"},
+                 context(user)
+               )
     end
   end
 
@@ -240,15 +311,310 @@ defmodule Troupe.Plane.HarnessTest do
       watcher = person("grace@example.test", ["engineering"])
       session = session!("s-pinned", owner, team, visibility: "team")
 
-      assert {:ok, pinned} = Harness.call("session.pin", %{"session_id" => session.id}, context(owner))
+      assert {:ok, pinned} =
+               Harness.call("session.pin", %{"session_id" => session.id}, context(owner))
+
       assert pinned["pinned"]
       assert Sessions.get(session.id).pinned_by == "ada@example.test"
 
-      assert {:error, error} = Harness.call("session.pin", %{"session_id" => session.id}, context(watcher))
+      assert {:error, error} =
+               Harness.call("session.pin", %{"session_id" => session.id}, context(watcher))
+
       assert error.message == "forbidden"
 
-      assert {:ok, unpinned} = Harness.call("session.unpin", %{"session_id" => session.id}, context(owner))
+      assert {:ok, unpinned} =
+               Harness.call("session.unpin", %{"session_id" => session.id}, context(owner))
+
       refute unpinned["pinned"]
+    end
+  end
+
+  describe "session.create carries the first turn" do
+    test "prompt, terms and origin reach the pod; the row keeps all but the prompt", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      params = %{
+        "profile" => "dev",
+        "prompt" => "update every dependency with a patch release",
+        "terms" => %{"max_turns" => 25, "wall_clock_seconds" => 3600, "approvals" => "deny"},
+        "origin" => %{"kind" => "trigger", "trigger" => "nightly-deps", "run" => "r-1"}
+      }
+
+      assert {:ok, result} = Harness.call("session.create", params, context(user))
+
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      assert pushed["prompt"] == "update every dependency with a patch release"
+
+      assert pushed["terms"] == %{
+               "max_turns" => 25,
+               "wall_clock_seconds" => 3600,
+               "approvals" => "deny"
+             }
+
+      assert pushed["origin"] == %{
+               "kind" => "trigger",
+               "trigger" => "nightly-deps",
+               "run" => "r-1"
+             }
+
+      assert pushed["team"] == team.name
+
+      session = Sessions.get(result["session_id"])
+
+      assert session.terms == %{
+               "max_turns" => 25,
+               "wall_clock_seconds" => 3600,
+               "approvals" => "deny"
+             }
+
+      assert session.origin == %{"kind" => "trigger", "trigger" => "nightly-deps", "run" => "r-1"}
+
+      # The prompt is session content. It went to the pod and is nowhere in this row.
+      refute session |> Map.from_struct() |> inspect() =~ "patch release"
+
+      # And the listing says what started it.
+      assert {:ok, listed} =
+               Harness.call("session.get", %{"session_id" => session.id}, context(user))
+
+      assert listed["origin"]["kind"] == "trigger"
+      assert listed["terms"]["approvals"] == "deny"
+      assert listed["status"] == "idle"
+    end
+
+    test "with nothing said, the defaults are a person waiting on approvals", context do
+      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      assert {:ok, result} = Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      refute Map.has_key?(pushed, "prompt")
+      assert pushed["terms"] == %{"approvals" => "wait"}
+      assert pushed["origin"] == %{"kind" => "user"}
+
+      session = Sessions.get(result["session_id"])
+      assert session.origin == %{"kind" => "user"}
+    end
+
+    test "a bad term is refused before anything is placed", context do
+      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      for terms <- [
+            %{"approvals" => "auto"},
+            %{"max_turns" => 0},
+            %{"max_turns" => 501},
+            %{"wall_clock_seconds" => 5},
+            %{"budget" => 1},
+            "cheap"
+          ] do
+        assert {:error, error} =
+                 Harness.call(
+                   "session.create",
+                   %{"profile" => "dev", "terms" => terms},
+                   context(user)
+                 )
+
+        assert error.message == "invalid_params", "#{inspect(terms)} was accepted"
+      end
+
+      assert {:error, error} =
+               Harness.call(
+                 "session.create",
+                 %{"profile" => "dev", "origin" => %{"kind" => "robot"}},
+                 context(user)
+               )
+
+      assert error.message == "invalid_params"
+
+      too_long = String.duplicate("x", 65_537)
+
+      assert {:error, error} =
+               Harness.call(
+                 "session.create",
+                 %{"profile" => "dev", "prompt" => too_long},
+                 context(user)
+               )
+
+      assert error.message == "payload_too_large"
+
+      refute_receive {:pushed, "session.activate", _}, 200
+      assert {:ok, %{"sessions" => []}} = Harness.call("sessions.list", %{}, context(user))
+    end
+
+    test "a budget slice is trimmed to what the team has left", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 1_000_000)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      params = %{"profile" => "dev", "terms" => %{"budget_micros" => 5_000_000}}
+      assert {:ok, result} = Harness.call("session.create", params, context(user))
+
+      assert Sessions.get(result["session_id"]).terms["budget_micros"] == 1_000_000
+      assert TeamBudget.inspect_state(team).reserved_micros == 1_000_000
+
+      # Nothing left: the next one is refused, and refused before it is placed.
+      assert {:error, error} = Harness.call("session.create", params, context(user))
+      assert error.message == "budget_exhausted"
+    end
+  end
+
+  describe "sessions.list filters" do
+    test "by status, origin, trigger and what still needs a review" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+
+      mine = session!("s-mine", ada, team, [])
+
+      nightly =
+        session!("s-nightly", ada, team,
+          origin: %{"kind" => "trigger", "trigger" => "nightly"},
+          status: "done"
+        )
+
+      triage =
+        session!("s-triage", ada, team,
+          origin: %{"kind" => "trigger", "trigger" => "triage"},
+          status: "waiting"
+        )
+
+      {:ok, _} = Sessions.review(triage.id, ada.subject)
+
+      list = fn params ->
+        {:ok, %{"sessions" => sessions}} = Harness.call("sessions.list", params, context(ada))
+        sessions |> Enum.map(& &1["id"]) |> Enum.sort()
+      end
+
+      assert list.(%{"origin" => "trigger"}) == Enum.sort([nightly.id, triage.id])
+      assert list.(%{"origin" => "user"}) == [mine.id]
+      assert list.(%{"trigger" => "nightly"}) == [nightly.id]
+      assert list.(%{"status" => "waiting"}) == [triage.id]
+      assert list.(%{"status" => ["done", "waiting"]}) == Enum.sort([nightly.id, triage.id])
+      assert list.(%{"needs_review" => true}) == [nightly.id]
+    end
+  end
+
+  describe "session.grant" do
+    test "an owner lets somebody in, and the pod holding the session is told", context do
+      _team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      ada = person("ada@example.test", ["engineering"])
+      grace = person("grace@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, created} = Harness.call("session.create", %{"profile" => "dev"}, context(ada))
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      session = Sessions.get(created["session_id"])
+
+      assert {:error, error} =
+               Harness.call("session.get", %{"session_id" => session.id}, context(grace))
+
+      assert error.message == "not_found"
+
+      params = %{"session_id" => session.id, "subject" => grace.subject, "role" => "collaborator"}
+      assert {:ok, granted} = Harness.call("session.grant", params, context(ada))
+      assert granted["role"] == "collaborator"
+      assert granted["pushed"]
+
+      assert_receive {:pushed, "acl.changed", %{"changes" => [change]}}, 5_000
+
+      assert change == %{
+               "session_id" => session.id,
+               "subject" => grace.subject,
+               "role" => "collaborator"
+             }
+
+      assert {:ok, seen} =
+               Harness.call("session.get", %{"session_id" => session.id}, context(grace))
+
+      assert seen["your_role"] == "collaborator"
+
+      # A collaborator is not an owner, and may not pass the session on.
+      params = %{"session_id" => session.id, "subject" => "nobody@example.test"}
+      assert {:error, error} = Harness.call("session.grant", params, context(grace))
+      assert error.message == "forbidden"
+    end
+
+    test "a team admin may let somebody in to a private session of their team" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("svc-like@example.test", ["engineering"])
+      lead = person("lead@example.test", ["engineering"])
+      reviewer = person("grace@example.test", ["engineering"])
+      {:ok, _} = Identity.add_team_admin(team, lead.subject, "root@example.test")
+
+      session = session!("s-private", owner, team, state: "dormant")
+
+      params = %{"session_id" => session.id, "subject" => reviewer.subject, "role" => "viewer"}
+      assert {:ok, granted} = Harness.call("session.grant", params, context(lead))
+      refute granted["pushed"]
+      assert Sessions.role_for(reviewer, session) == :observe
+    end
+  end
+
+  describe "session.review" do
+    test "records who looked, and audits it" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+
+      session =
+        session!("s-run", ada, team, origin: %{"kind" => "trigger", "trigger" => "nightly"})
+
+      assert {:ok, reviewed} =
+               Harness.call("session.review", %{"session_id" => session.id}, context(ada))
+
+      assert reviewed["reviewed_by"] == ada.subject
+      assert reviewed["reviewed_at"]
+
+      assert {:ok, %{"sessions" => []}} =
+               Harness.call("sessions.list", %{"needs_review" => true}, context(ada))
+
+      assert [event] = Audit.list(kind: "session", subject_id: session.id)
+      assert event.action == "session.review"
+      assert event.actor == ada.subject
+    end
+  end
+
+  describe "a service principal" do
+    test "creates on its profile as itself, and is forbidden everywhere else", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      {:ok, _} = Identity.grant(team, "ux")
+
+      {:ok, principal, _secret} =
+        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+
+      robot = Identity.get_user(principal.subject)
+      assert robot.kind == "service"
+
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      assert {:ok, me} = Harness.call("me", %{}, context(robot))
+      assert me["kind"] == "service"
+      assert Enum.map(me["teams"], & &1["name"]) == ["engineering"]
+      assert me["profiles"] == ["dev"]
+
+      assert {:ok, created} =
+               Harness.call(
+                 "session.create",
+                 %{"profile" => "dev", "prompt" => "go"},
+                 context(robot)
+               )
+
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      assert pushed["owner_subject"] == "svc:engineering/nightly"
+      assert Sessions.get(created["session_id"]).owner_subject == "svc:engineering/nightly"
+
+      # The team is granted ux; the principal is not.
+      assert {:error, error} =
+               Harness.call("session.create", %{"profile" => "ux"}, context(robot))
+
+      assert error.message == "forbidden"
+
+      # And it sees its own sessions, like anybody.
+      assert {:ok, %{"sessions" => [own]}} = Harness.call("sessions.list", %{}, context(robot))
+      assert own["your_role"] == "owner"
     end
   end
 
@@ -258,16 +624,19 @@ defmodule Troupe.Plane.HarnessTest do
 
   defp session!(id, owner, team, opts) do
     {:ok, session} =
-      Sessions.create(%{
-        id: id <> "-#{System.unique_integer([:positive])}",
-        owner_id: owner.id,
-        owner_subject: owner.subject,
-        team_id: team.id,
-        profile: Keyword.get(opts, :profile, "dev"),
-        visibility: Keyword.get(opts, :visibility, "private"),
-        state: Keyword.get(opts, :state, "active"),
-        epoch: 1
-      })
+      Sessions.create(
+        %{
+          id: id <> "-#{System.unique_integer([:positive])}",
+          owner_id: owner.id,
+          owner_subject: owner.subject,
+          team_id: team.id,
+          profile: Keyword.get(opts, :profile, "dev"),
+          visibility: Keyword.get(opts, :visibility, "private"),
+          state: Keyword.get(opts, :state, "active"),
+          epoch: 1
+        }
+        |> Map.merge(Map.new(Keyword.take(opts, [:origin, :status, :done_reason])))
+      )
 
     session
   end
@@ -295,12 +664,19 @@ defmodule Troupe.Plane.HarnessTest do
         "jsonrpc" => "2.0",
         "id" => 0,
         "method" => "enrol",
-        "params" => %{"token" => token, "pod_name" => pod_name, "capacity" => 4, "disk_total_bytes" => 1_000_000}
+        "params" => %{
+          "token" => token,
+          "pod_name" => pod_name,
+          "capacity" => 4,
+          "disk_total_bytes" => 1_000_000
+        }
       })
 
     :ok = :gen_tcp.send(socket, [request, ?\n])
     {:ok, line} = :gen_tcp.recv(socket, 0, 5_000)
-    %{"result" => result} = line |> String.split("\n", trim: true) |> List.first() |> Jason.decode!()
+
+    %{"result" => result} =
+      line |> String.split("\n", trim: true) |> List.first() |> Jason.decode!()
 
     pid =
       spawn_link(fn ->
@@ -321,7 +697,10 @@ defmodule Troupe.Plane.HarnessTest do
           case Jason.decode(line) do
             {:ok, %{"id" => id, "method" => method, "params" => params}} ->
               send(test, {:pushed, method, params})
-              answer = Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"ok" => true}})
+
+              answer =
+                Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"ok" => true}})
+
               :gen_tcp.send(socket, [answer, ?\n])
 
             {:ok, %{"method" => method, "params" => params}} ->
@@ -340,7 +719,8 @@ defmodule Troupe.Plane.HarnessTest do
   end
 
   defp verify("dev-token") do
-    {:ok, %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}
+    {:ok,
+     %{profile: "dev", namespace: "troupe-w-dev", pod_name: nil, service_account: "troupe-worker"}}
   end
 
   defp verify(_token), do: {:error, :unauthenticated}

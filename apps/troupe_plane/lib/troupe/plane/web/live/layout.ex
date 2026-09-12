@@ -12,9 +12,9 @@ defmodule Troupe.Plane.Web.Live.Layout do
   use Phoenix.Component
 
   @doc "The shell: navigation, who you are, and the page."
-  attr :actor, :map, required: true
-  attr :page, :atom, required: true
-  slot :inner_block, required: true
+  attr(:actor, :map, required: true)
+  attr(:page, :atom, required: true)
+  slot(:inner_block, required: true)
 
   def shell(assigns) do
     ~H"""
@@ -27,6 +27,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
           <.tab page={@page} this={:teams} href="/admin/teams">teams</.tab>
           <.tab page={@page} this={:sessions} href="/admin/sessions">sessions</.tab>
           <.tab page={@page} this={:bundles} href="/admin/bundles">bundles</.tab>
+          <.tab page={@page} this={:triggers} href="/admin/triggers">triggers</.tab>
           <.tab page={@page} this={:audit} href="/admin/audit">audit</.tab>
         </nav>
         <span class="who">
@@ -41,10 +42,10 @@ defmodule Troupe.Plane.Web.Live.Layout do
     """
   end
 
-  attr :page, :atom, required: true
-  attr :this, :atom, required: true
-  attr :href, :string, required: true
-  slot :inner_block, required: true
+  attr(:page, :atom, required: true)
+  attr(:this, :atom, required: true)
+  attr(:href, :string, required: true)
+  slot(:inner_block, required: true)
 
   defp tab(assigns) do
     ~H"""
@@ -53,7 +54,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
   end
 
   @doc "A condition as the operator set it, rendered so its status is readable at a glance."
-  attr :conditions, :list, default: []
+  attr(:conditions, :list, default: [])
 
   def conditions(assigns) do
     ~H"""
@@ -76,7 +77,10 @@ defmodule Troupe.Plane.Web.Live.Layout do
   def bytes(nil), do: "—"
   def bytes(count) when count < 1024, do: "#{count} B"
   def bytes(count) when count < 1024 * 1024, do: "#{Float.round(count / 1024, 1)} KiB"
-  def bytes(count) when count < 1024 * 1024 * 1024, do: "#{Float.round(count / 1024 / 1024, 1)} MiB"
+
+  def bytes(count) when count < 1024 * 1024 * 1024,
+    do: "#{Float.round(count / 1024 / 1024, 1)} MiB"
+
   def bytes(count), do: "#{Float.round(count / 1024 / 1024 / 1024, 2)} GiB"
 
   @doc "Micros, as money."

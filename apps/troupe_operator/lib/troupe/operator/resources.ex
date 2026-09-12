@@ -15,6 +15,7 @@ defmodule Troupe.Operator.Resources do
   alias Troupe.Operator.{Names, Settings}
   alias Troupe.Policy
   alias Troupe.WorkerProfile, as: Profile
+  alias Troupe.WorkerProfile.MCPServer
 
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
@@ -143,7 +144,8 @@ defmodule Troupe.Operator.Resources do
     %{
       "apiVersion" => "v1",
       "kind" => "Service",
-      "metadata" => metadata(Names.workload(policy.namespace_prefix, profile.name), namespace, profile),
+      "metadata" =>
+        metadata(Names.workload(policy.namespace_prefix, profile.name), namespace, profile),
       "spec" => %{
         "clusterIP" => "None",
         "selector" => Names.labels(profile.name),
@@ -159,7 +161,10 @@ defmodule Troupe.Operator.Resources do
     for ordinal <- 0..(profile.replicas - 1)//1 do
       selector =
         Names.labels(profile.name)
-        |> Map.put("statefulset.kubernetes.io/pod-name", Names.pod(policy.namespace_prefix, profile.name, ordinal))
+        |> Map.put(
+          "statefulset.kubernetes.io/pod-name",
+          Names.pod(policy.namespace_prefix, profile.name, ordinal)
+        )
 
       %{
         "apiVersion" => "v1",
@@ -248,7 +253,8 @@ defmodule Troupe.Operator.Resources do
     %{
       "apiVersion" => "networking.k8s.io/v1",
       "kind" => "NetworkPolicy",
-      "metadata" => metadata(Names.workload(policy.namespace_prefix, profile.name), namespace, profile),
+      "metadata" =>
+        metadata(Names.workload(policy.namespace_prefix, profile.name), namespace, profile),
       "spec" => %{
         "podSelector" => %{"matchLabels" => Names.labels(profile.name)},
         "policyTypes" => ["Ingress", "Egress"],
@@ -269,12 +275,23 @@ defmodule Troupe.Operator.Resources do
     [
       # DNS, without which none of the rest resolves.
       %{
-        "to" => [%{"namespaceSelector" => %{}, "podSelector" => %{"matchLabels" => %{"k8s-app" => "kube-dns"}}}],
+        "to" => [
+          %{
+            "namespaceSelector" => %{},
+            "podSelector" => %{"matchLabels" => %{"k8s-app" => "kube-dns"}}
+          }
+        ],
         "ports" => [%{"protocol" => "UDP", "port" => 53}, %{"protocol" => "TCP", "port" => 53}]
       },
       # The plane's control listener, which is never exposed through ingress.
       %{
-        "to" => [%{"namespaceSelector" => %{"matchLabels" => %{"kubernetes.io/metadata.name" => settings.plane_namespace}}}],
+        "to" => [
+          %{
+            "namespaceSelector" => %{
+              "matchLabels" => %{"kubernetes.io/metadata.name" => settings.plane_namespace}
+            }
+          }
+        ],
         "ports" => [%{"protocol" => "TCP", "port" => settings.plane_control_port}]
       },
       # Everything outside the cluster: the LLM endpoint, the MCP servers, the git
@@ -334,7 +351,9 @@ defmodule Troupe.Operator.Resources do
   defp namespace_rule(namespace, port) do
     %{
       "to" => [
-        %{"namespaceSelector" => %{"matchLabels" => %{"kubernetes.io/metadata.name" => namespace}}}
+        %{
+          "namespaceSelector" => %{"matchLabels" => %{"kubernetes.io/metadata.name" => namespace}}
+        }
       ],
       "ports" => [%{"protocol" => "TCP", "port" => port}]
     }
@@ -343,7 +362,7 @@ defmodule Troupe.Operator.Resources do
   defp cilium_network_policy(_namespace, _profile, %Settings{cilium_available: false}), do: []
 
   defp cilium_network_policy(namespace, profile, _settings) do
-    patterns = Enum.map(Profile.egress_destinations(profile), &%{"matchName" => &1})
+    patterns = Enum.map(Profile.egress_destinations(profile), &fqdn_selector/1)
 
     [
       %{
@@ -361,11 +380,25 @@ defmodule Troupe.Operator.Resources do
     ]
   end
 
+  # `matchName` is an exact hostname and nothing else: a `*` in it is a literal star,
+  # which no DNS answer ever carries, so a wildcard the policy admitted became a rule
+  # that allowed nothing. `matchPattern` is what Cilium reads a wildcard with, and its
+  # `*` stands for a run of hostname characters that does not include a dot — one label,
+  # which is what `Troupe.Policy.matches?/2` and the admission CEL take `*.example.com`
+  # to mean as well. The three agree, so a wildcard means the same thing wherever it is
+  # checked.
+  defp fqdn_selector(host) do
+    if String.contains?(host, "*"),
+      do: %{"matchPattern" => host},
+      else: %{"matchName" => host}
+  end
+
   defp pod_disruption_budget(namespace, profile, policy) do
     %{
       "apiVersion" => "policy/v1",
       "kind" => "PodDisruptionBudget",
-      "metadata" => metadata(Names.workload(policy.namespace_prefix, profile.name), namespace, profile),
+      "metadata" =>
+        metadata(Names.workload(policy.namespace_prefix, profile.name), namespace, profile),
       "spec" => %{
         # A pod holds live sessions, so at most one may be gone at a time — and a
         # single-replica profile is protected entirely, which is what an eviction
@@ -501,10 +534,16 @@ defmodule Troupe.Operator.Resources do
       # image does on a laptop and must not do here.
       %{"name" => "TROUPE_WORKER_AUTOSTART", "value" => "true"},
       %{"name" => "TROUPE_PROFILE", "value" => profile.name},
-      %{"name" => "TROUPE_NAMESPACE", "value" => Names.namespace(policy.namespace_prefix, profile.name)},
+      %{
+        "name" => "TROUPE_NAMESPACE",
+        "value" => Names.namespace(policy.namespace_prefix, profile.name)
+      },
       %{"name" => "TROUPE_WORKERS_DOMAIN", "value" => policy.workers_domain},
       %{"name" => "TROUPE_WORKERS_SCHEME", "value" => settings.workers_scheme},
-      %{"name" => "TROUPE_PLANE_CONTROL", "value" => "#{settings.plane_control_host}:#{settings.plane_control_port}"},
+      %{
+        "name" => "TROUPE_PLANE_CONTROL",
+        "value" => "#{settings.plane_control_host}:#{settings.plane_control_port}"
+      },
       %{"name" => "TROUPE_BAO_ADDR", "value" => settings.bao_address},
       %{"name" => "TROUPE_OBJECT_ENDPOINT", "value" => settings.object_store_endpoint},
       %{"name" => "TROUPE_OBJECT_BUCKET", "value" => settings.object_store_bucket},
@@ -518,7 +557,8 @@ defmodule Troupe.Operator.Resources do
 
     base ++
       workers_port_env(settings) ++
-      allowed_origins_env(settings) ++ object_store_env(settings) ++ llm_env(profile)
+      allowed_origins_env(settings) ++
+      object_store_env(settings) ++ llm_env(profile) ++ mcp_env(profile)
   end
 
   # Only when there is a list: a pod with the variable absent admits every origin, and
@@ -559,7 +599,8 @@ defmodule Troupe.Operator.Resources do
       [
         %{"name" => "TROUPE_BASE_URL", "value" => profile.llm_endpoint},
         %{"name" => "TROUPE_PROVIDER", "value" => profile.llm_provider}
-      ] ++ model_env("TROUPE_MODEL", profile.llm_model) ++
+      ] ++
+        model_env("TROUPE_MODEL", profile.llm_model) ++
         model_env("TROUPE_SMALL_MODEL", profile.llm_small_model)
 
     key =
@@ -568,7 +609,10 @@ defmodule Troupe.Operator.Resources do
           %{
             "name" => "TROUPE_API_KEY",
             "valueFrom" => %{
-              "secretKeyRef" => %{"name" => profile.llm_secret_name, "key" => profile.llm_secret_key}
+              "secretKeyRef" => %{
+                "name" => profile.llm_secret_name,
+                "key" => profile.llm_secret_key
+              }
             }
           }
         ]
@@ -581,6 +625,54 @@ defmodule Troupe.Operator.Resources do
 
   defp model_env(_name, nil), do: []
   defp model_env(name, value), do: [%{"name" => name, "value" => value}]
+
+  # The profile's MCP servers, as a pod learns them before any bundle arrives: the list
+  # itself in `TROUPE_MCP_SERVERS`, and one variable per credential.
+  #
+  # The list is JSON in one variable rather than a variable per field because the worker
+  # already has a reader for exactly this shape — `Troupe.MCP.Server.from_config/1`, the
+  # same one the bundle push goes through — and a second flattening would be a second
+  # contract. The map keys are few enough that Erlang keeps them sorted, so the encoding
+  # is stable across reconciles; an env value that changed with map order would roll the
+  # StatefulSet for nothing.
+  #
+  # Every credential is `optional: true`. Without it a missing Secret is a pod stuck in
+  # `CreateContainerConfigError` with the reason three `kubectl` calls away; with it the
+  # pod starts, the variable is simply absent, the worker sends no credential to that
+  # server, and the profile's `SecretMissing` condition says what is wrong and where.
+  defp mcp_env(%Profile{mcp_servers: []}), do: []
+
+  defp mcp_env(%Profile{mcp_servers: servers}) do
+    credentials =
+      for %MCPServer{secret_name: secret} = server when is_binary(secret) <- servers do
+        %{
+          "name" => MCPServer.credential_env(server),
+          "valueFrom" => %{
+            "secretKeyRef" => %{"name" => secret, "key" => server.secret_key, "optional" => true}
+          }
+        }
+      end
+
+    configs = Enum.map(servers, &mcp_server_config/1)
+
+    [%{"name" => "TROUPE_MCP_SERVERS", "value" => Jason.encode!(configs)} | credentials]
+  end
+
+  # `credential_ref` is only written when there is a Secret behind it: a reference to a
+  # variable nothing sets would be a lie the worker then had to see through. The other
+  # optional fields are left out when the spec is silent, so the worker's own defaults
+  # apply rather than a `null` it has to be taught to ignore.
+  defp mcp_server_config(%MCPServer{} = server) do
+    %{
+      "name" => server.name,
+      "url" => server.url,
+      "credential_ref" => if(server.secret_name, do: MCPServer.credential_env(server)),
+      "header" => server.header,
+      "timeout_ms" => server.timeout_ms
+    }
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
+  end
 
   # The projected token is the pod's enrolment credential, and the only one it has.
   defp volumes(profile) do

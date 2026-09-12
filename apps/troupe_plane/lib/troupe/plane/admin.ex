@@ -32,8 +32,11 @@ defmodule Troupe.Plane.Admin do
   differently.
   """
 
-  alias Troupe.Plane.{Audit, Bundles, Drain, Erasure, Fleet, Identity, Ledger, Provision, Sessions}
-  alias Troupe.Plane.Fleet.Worker
+  alias Troupe.Plane.{Audit, Bundles, ClusterPolicy, Drain, Erasure, Fleet, Identity, Ledger}
+  alias Troupe.Plane.Fleet.{Bundle, Worker}
+  alias Troupe.Plane.Identity.ServicePrincipal
+  alias Troupe.Plane.{Principals, Provision, Sessions, Triggers}
+  alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
 
   require Logger
@@ -55,6 +58,13 @@ defmodule Troupe.Plane.Admin do
   on their next request instead of at their next login.
   """
   @spec actor_for(Identity.User.t()) :: actor()
+  def actor_for(%Identity.User{kind: "service"} = user) do
+    # A principal can create and steer sessions and nothing else. Not even a team admin
+    # of its own team: a credential that could create more of itself would be the
+    # escalation the whole arrangement refuses.
+    %{subject: user.subject, role: :none, teams: []}
+  end
+
   def actor_for(%Identity.User{} = user) do
     teams = Identity.teams_for(user)
     group = Application.get_env(:troupe_plane, :platform_admin_group)
@@ -158,7 +168,13 @@ defmodule Troupe.Plane.Admin do
         {:ok, profile} ->
           changes = Audit.diff(comparable(before), comparable(profile))
           {:ok, _} = Audit.record(actor.subject, "profile.put", name, changes)
-          {:ok, %{profile: profile_summary(profile), changes: changes, provisioning: provision(profile, actor)}}
+
+          {:ok,
+           %{
+             profile: profile_summary(profile),
+             changes: changes,
+             provisioning: provision(profile, actor)
+           }}
 
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
@@ -184,7 +200,8 @@ defmodule Troupe.Plane.Admin do
   def pod_drain(actor, worker_id) do
     with :ok <- require_platform_admin(actor),
          %Worker{} = worker <- Fleet.get_worker(worker_id) do
-      {:ok, _} = Audit.record(actor.subject, "pod.drain", worker.pod_name, %{"profile" => worker.profile})
+      {:ok, _} =
+        Audit.record(actor.subject, "pod.drain", worker.pod_name, %{"profile" => worker.profile})
 
       case Drain.pod(worker) do
         {:ok, report} -> {:ok, report}
@@ -295,7 +312,8 @@ defmodule Troupe.Plane.Admin do
   def session_erase(actor, session_id) do
     with :ok <- require_admin(actor),
          {:ok, session} <- fetch_session(actor, session_id) do
-      {:ok, _} = Audit.record(actor.subject, "session.erase", session_id, %{"profile" => session.profile})
+      {:ok, _} =
+        Audit.record(actor.subject, "session.erase", session_id, %{"profile" => session.profile})
 
       case Erasure.erase(session, actor: actor.subject, reason: "admin") do
         {:ok, tombstone} -> {:ok, %{session_id: session_id, head_hash: tombstone.head_hash}}
@@ -328,7 +346,8 @@ defmodule Troupe.Plane.Admin do
   @spec preview(actor(), map()) :: result()
   def preview(actor, attrs) do
     with :ok <- require_platform_admin(actor) do
-      current = attrs |> Map.get("name", Map.get(attrs, :name)) |> then(&(&1 && Fleet.get_profile(&1)))
+      current =
+        attrs |> Map.get("name", Map.get(attrs, :name)) |> then(&(&1 && Fleet.get_profile(&1)))
 
       {:ok,
        %{
@@ -349,6 +368,42 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  One version in full: the document, what it carries, and which pods have it.
+
+  Either role, like the list: a bundle holds prompts and skill files and the *names* of
+  credentials, never a value, so there is nothing in it a team admin may not read about
+  the profiles their team uses.
+  """
+  @spec bundle_get(actor(), String.t(), integer() | String.t()) :: result()
+  def bundle_get(actor, channel, version) do
+    with :ok <- require_admin(actor),
+         {:ok, bundle} <- fetch_bundle(channel, version) do
+      {:ok,
+       bundle
+       |> bundle_summary()
+       |> Map.merge(%{
+         content: bundle.content,
+         detail: Bundles.describe(bundle),
+         adoption: Enum.map(Bundles.profiles_on(channel), &Bundles.adoption(&1, bundle.hash))
+       })}
+    end
+  end
+
+  @doc """
+  Check a document the way publishing will, without publishing it.
+
+  The same errors publish would give, as an error rather than a result, so a CLI run in
+  a pipeline fails on an invalid bundle and a panel renders both paths the same way.
+  """
+  @spec bundle_validate(actor(), map()) :: result()
+  def bundle_validate(actor, content) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, parsed} <- validate_bundle(content) do
+      {:ok, %{ok: true, summary: Document.summary(parsed), hash: Bundle.hash(content)}}
+    end
+  end
+
   @doc "Publish a new version, which pushes `config.updated` to every pod on the channel."
   @spec bundle_publish(actor(), String.t(), map()) :: result()
   def bundle_publish(actor, channel, content) do
@@ -358,10 +413,14 @@ defmodule Troupe.Plane.Admin do
           {:ok, _} =
             Audit.record(actor.subject, "bundle.publish", channel, %{
               "version" => bundle.version,
-              "hash" => bundle.hash
+              "hash" => bundle.hash,
+              "summary" => bundle.summary
             })
 
           {:ok, bundle_summary(bundle)}
+
+        {:error, {:invalid_bundle, messages}} ->
+          {:error, invalid_bundle(messages)}
 
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
@@ -373,14 +432,60 @@ defmodule Troupe.Plane.Admin do
   @spec bundle_retire(actor(), String.t(), integer()) :: result()
   def bundle_retire(actor, channel, version) do
     with :ok <- require_platform_admin(actor) do
-      case Bundles.retire(channel, version) do
+      case Bundles.retire(channel, version, by: actor.subject) do
         {:ok, bundle} ->
-          {:ok, _} = Audit.record(actor.subject, "bundle.retire", channel, %{"version" => version})
+          {:ok, _} =
+            Audit.record(actor.subject, "bundle.retire", channel, %{"version" => version})
+
           {:ok, bundle_summary(bundle)}
 
         {:error, reason} ->
           {:error, Error.new(:not_found, %{reason: inspect(reason)})}
       end
+    end
+  end
+
+  @doc """
+  Whether the cluster policy lets a pod reach an MCP server's host.
+
+  The panel's live check while an admin types a URL, and deliberately the same function
+  publishing refuses with: a check that disagreed with the refusal would be one an admin
+  would learn to ignore.
+  """
+  @spec mcp_check(actor(), String.t()) :: result()
+  def mcp_check(actor, url) do
+    with :ok <- require_admin(actor),
+         {:ok, host} <- host_of(url) do
+      {:ok, %{host: host, allowed: ClusterPolicy.egress_allowed?(host)}}
+    end
+  end
+
+  defp host_of(url) when is_binary(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) and host != "" -> {:ok, host}
+      _ -> {:error, Error.new(:invalid_params, %{reason: "not a URL with a host", url: url})}
+    end
+  end
+
+  defp host_of(other),
+    do: {:error, Error.new(:invalid_params, %{reason: "url is a string", url: other})}
+
+  defp validate_bundle(content) when is_map(content) do
+    case Bundles.validate(content) do
+      {:ok, parsed} -> {:ok, parsed}
+      {:error, {:invalid_bundle, messages}} -> {:error, invalid_bundle(messages)}
+    end
+  end
+
+  defp validate_bundle(_content), do: {:error, invalid_bundle(["a bundle is a JSON object"])}
+
+  defp invalid_bundle(messages),
+    do: Error.new(:invalid_params, %{reason: "invalid bundle", errors: messages})
+
+  defp fetch_bundle(channel, version) do
+    case Bundles.get(channel, version) do
+      nil -> {:error, Error.new(:not_found, %{channel: channel, version: version})}
+      bundle -> {:ok, bundle}
     end
   end
 
@@ -410,6 +515,158 @@ defmodule Troupe.Plane.Admin do
       {:ok, _} = Audit.record(actor.subject, "team.admin.remove", name, %{"subject" => subject})
 
       {:ok, %{team: name, admins: Identity.admins_of(team)}}
+    end
+  end
+
+  # -- service principals -----------------------------------------------------
+
+  @doc "A team's principals: what each may use, when it was last used, whether it still works."
+  @spec principals_list(actor(), String.t()) :: result()
+  def principals_list(actor, team_name) do
+    with {:ok, team} <- fetch_team(actor, team_name) do
+      {:ok, team |> Principals.list() |> Enum.map(&principal_summary/1)}
+    end
+  end
+
+  @doc """
+  Create a principal for a team, returning the secret exactly once.
+
+  A team admin's action, because a principal spends the team's budget with nobody
+  watching, and that is the team's decision. The secret is in the result and nowhere
+  else: not in the audit row, not in a log line, not in this database.
+  """
+  @spec principal_create(actor(), String.t(), map()) :: result()
+  def principal_create(actor, team_name, attrs) do
+    with {:ok, team} <- fetch_team(actor, team_name) do
+      case Principals.create(team, attrs, actor.subject) do
+        {:ok, principal, secret} ->
+          {:ok, _} =
+            Audit.record(actor.subject, "principal.create", principal.subject, %{
+              "team" => team.name,
+              "profiles" => principal.profiles
+            })
+
+          {:ok, principal |> principal_summary() |> Map.put(:secret, secret)}
+
+        {:error, :no_profiles} ->
+          {:error, Error.new(:invalid_params, %{missing: "profiles"})}
+
+        {:error, {:not_granted, outside}} ->
+          reason = "#{team.name} is not granted #{Enum.join(outside, ", ")}"
+          {:error, Error.new(:invalid_params, %{reason: reason, profiles: outside})}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  @doc "Mint a new secret. The old one stops working at once; the new one is shown once."
+  @spec principal_rotate(actor(), String.t()) :: result()
+  def principal_rotate(actor, subject) do
+    with {:ok, principal} <- fetch_principal(actor, subject),
+         {:ok, rotated, secret} <- Principals.rotate(principal) do
+      {:ok, _} = Audit.record(actor.subject, "principal.rotate", subject, %{})
+      {:ok, rotated |> principal_summary() |> Map.put(:secret, secret)}
+    end
+  end
+
+  @doc "Disable a principal. Its next call is `unauthenticated`; its sessions are kept."
+  @spec principal_disable(actor(), String.t()) :: result()
+  def principal_disable(actor, subject) do
+    with {:ok, principal} <- fetch_principal(actor, subject),
+         {:ok, disabled} <- Principals.disable(principal) do
+      {:ok, _} = Audit.record(actor.subject, "principal.disable", subject, %{})
+      {:ok, principal_summary(disabled)}
+    end
+  end
+
+  # -- triggers ---------------------------------------------------------------
+
+  @doc "A team's triggers."
+  @spec triggers_list(actor(), String.t()) :: result()
+  def triggers_list(actor, team_name) do
+    with {:ok, team} <- fetch_team(actor, team_name) do
+      {:ok, team |> Triggers.list() |> Enum.map(&Triggers.trigger_json/1)}
+    end
+  end
+
+  @doc """
+  Create or update a trigger by team and name, returning the diff that was applied.
+
+  Partial on update, so enabling and disabling from the panel is the same call as
+  putting a whole file from the CLI. A team admin's action, like a principal's creation
+  and for the same reason.
+  """
+  @spec trigger_put(actor(), map()) :: result()
+  def trigger_put(actor, attrs) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+
+    with {:ok, team} <- fetch_team(actor, attrs["team"]),
+         {:ok, name} <- require_name(attrs) do
+      before = Triggers.get(team, name)
+
+      case Triggers.put(team, attrs, actor.subject) do
+        {:ok, trigger} ->
+          changes = Audit.diff(comparable(before), comparable(trigger))
+          {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", changes)
+          {:ok, %{trigger: Triggers.trigger_json(trigger), changes: changes}}
+
+        {:error, %Error{} = error} ->
+          {:error, error}
+      end
+    end
+  end
+
+  @doc "Remove a trigger. Its runs go with it; the sessions they created do not."
+  @spec trigger_delete(actor(), String.t(), String.t()) :: result()
+  def trigger_delete(actor, team_name, name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name) do
+      detail = comparable(trigger)
+      {:ok, _} = Audit.record(actor.subject, "trigger.delete", "#{team.name}/#{name}", detail)
+      :ok = Triggers.delete(trigger)
+      {:ok, %{team: team.name, name: name, deleted: true}}
+    end
+  end
+
+  @doc """
+  Fire a trigger now, by hand.
+
+  The same `fire/4` a schedule or an executor reaches, with an idempotency key that
+  names the person and the moment, so a second click a minute later is a second run and
+  a retry of a failed one is not.
+  """
+  @spec trigger_run(actor(), String.t(), String.t()) :: result()
+  def trigger_run(actor, team_name, name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name) do
+      now = DateTime.utc_now() |> DateTime.truncate(:second)
+      key = "manual:#{trigger.id}:#{actor.subject}:#{DateTime.to_iso8601(now)}"
+      event = %{"kind" => "manual", "by" => actor.subject, "at" => DateTime.to_iso8601(now)}
+
+      {:ok, _} =
+        Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"run" => key})
+
+      case Triggers.fire(trigger, key, event, actor.subject) do
+        {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
+        {:error, %Error{} = error} -> {:error, error}
+      end
+    end
+  end
+
+  @doc "A team's runs, newest first; `trigger:` narrows to one, `limit:` caps the list."
+  @spec runs_list(actor(), keyword()) :: result()
+  def runs_list(actor, opts \\ []) do
+    with {:ok, team} <- fetch_team(actor, Keyword.get(opts, :team)) do
+      runs =
+        team
+        |> Triggers.runs(Keyword.take(opts, [:trigger, :limit]))
+        |> Enum.map(fn {run, trigger, session} ->
+          run |> Triggers.run_json(session) |> Map.put("trigger", trigger.name)
+        end)
+
+      {:ok, runs}
     end
   end
 
@@ -446,15 +703,20 @@ defmodule Troupe.Plane.Admin do
 
   defp project(profile, actor) do
     case Provision.sync_teams(profile, actor) do
-      {:ok, _state} -> :ok
-      {:error, reason} -> Logger.warning("troupe plane: #{profile}'s teams are stale: #{inspect(reason)}")
+      {:ok, _state} ->
+        :ok
+
+      {:error, reason} ->
+        Logger.warning("troupe plane: #{profile}'s teams are stale: #{inspect(reason)}")
     end
   end
 
   # -- authorisation ----------------------------------------------------------
 
   defp require_admin(actor) do
-    if admin?(actor), do: :ok, else: {:error, Error.new(:forbidden, %{required_role: "team_admin"})}
+    if admin?(actor),
+      do: :ok,
+      else: {:error, Error.new(:forbidden, %{required_role: "team_admin"})}
   end
 
   defp require_platform_admin(%{role: :platform_admin}), do: :ok
@@ -467,12 +729,58 @@ defmodule Troupe.Plane.Admin do
   # person who may not see it should not learn.
   defp fetch_team(actor, name) do
     cond do
-      not admin?(actor) -> {:error, Error.new(:forbidden, %{required_role: "team_admin"})}
-      actor.role == :team_admin and name not in actor.teams -> {:error, Error.new(:not_found, %{team: name})}
-      team = Identity.get_team(name) -> {:ok, team}
-      true -> {:error, Error.new(:not_found, %{team: name})}
+      not admin?(actor) ->
+        {:error, Error.new(:forbidden, %{required_role: "team_admin"})}
+
+      not is_binary(name) ->
+        {:error, Error.new(:invalid_params, %{missing: "team"})}
+
+      actor.role == :team_admin and name not in actor.teams ->
+        {:error, Error.new(:not_found, %{team: name})}
+
+      team = Identity.get_team(name) ->
+        {:ok, team}
+
+      true ->
+        {:error, Error.new(:not_found, %{team: name})}
     end
   end
+
+  # A principal is reached through its team, which its subject names, so the same rule
+  # applies: a team admin sees their own team's and no other's.
+  defp fetch_principal(actor, subject) do
+    with {:ok, team_name, _name} <- parse_principal(subject),
+         {:ok, team} <- fetch_team(actor, team_name) do
+      case Principals.get(subject) do
+        %ServicePrincipal{team_id: team_id} = principal when team_id == team.id ->
+          {:ok, principal}
+
+        _ ->
+          {:error, Error.new(:not_found, %{principal: subject})}
+      end
+    end
+  end
+
+  defp parse_principal(subject) when is_binary(subject) do
+    case ServicePrincipal.parse_subject(subject) do
+      {:ok, team, name} ->
+        {:ok, team, name}
+
+      :error ->
+        {:error, Error.new(:invalid_params, %{reason: "a principal is svc:<team>/<name>"})}
+    end
+  end
+
+  defp parse_principal(_subject), do: {:error, Error.new(:invalid_params, %{missing: "subject"})}
+
+  defp fetch_trigger(team, name) when is_binary(name) do
+    case Triggers.get(team, name) do
+      nil -> {:error, Error.new(:not_found, %{team: team.name, trigger: name})}
+      trigger -> {:ok, trigger}
+    end
+  end
+
+  defp fetch_trigger(_team, _name), do: {:error, Error.new(:invalid_params, %{missing: "name"})}
 
   defp fetch_profile(name) do
     case Fleet.get_profile(name) do
@@ -483,8 +791,13 @@ defmodule Troupe.Plane.Admin do
 
   defp fetch_session(actor, session_id) do
     case Sessions.get(session_id) do
-      nil -> {:error, Error.new(:not_found, %{session_id: session_id})}
-      session -> if visible?(actor, session), do: {:ok, session}, else: {:error, Error.new(:not_found, %{session_id: session_id})}
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: session_id})}
+
+      session ->
+        if visible?(actor, session),
+          do: {:ok, session},
+          else: {:error, Error.new(:not_found, %{session_id: session_id})}
     end
   end
 
@@ -557,8 +870,14 @@ defmodule Troupe.Plane.Admin do
     channel = profile.config_bundle_channel
 
     case Bundles.current(channel) do
-      nil -> %{channel: channel, published: nil, adopted?: nil}
-      bundle -> Map.merge(%{channel: channel, published: bundle.version}, Bundles.adoption(profile.name, bundle.hash))
+      nil ->
+        %{channel: channel, published: nil, adopted?: nil}
+
+      bundle ->
+        Map.merge(
+          %{channel: channel, published: bundle.version},
+          Bundles.adoption(profile.name, bundle.hash)
+        )
     end
   end
 
@@ -575,7 +894,11 @@ defmodule Troupe.Plane.Admin do
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
       admins: Identity.admins_of(team),
-      grants: Enum.map(Identity.grants_for_team(team), &%{profile: &1.profile, volume_mode: &1.volume_mode}),
+      grants:
+        Enum.map(
+          Identity.grants_for_team(team),
+          &%{profile: &1.profile, volume_mode: &1.volume_mode}
+        ),
       # Read-only, always: membership comes from the identity provider and a method to
       # change it would be a second source of truth for who is in a team.
       members: Enum.map(Identity.members_of_team(team), & &1.subject)
@@ -587,7 +910,8 @@ defmodule Troupe.Plane.Admin do
       name: team.name,
       budget_micros: team.budget_micros,
       spent_micros: Ledger.spent_micros(team.id),
-      reserved_micros: team.id |> Ledger.open_reservations() |> Enum.map(& &1.amount_micros) |> Enum.sum()
+      reserved_micros:
+        team.id |> Ledger.open_reservations() |> Enum.map(& &1.amount_micros) |> Enum.sum()
     }
   end
 
@@ -608,11 +932,27 @@ defmodule Troupe.Plane.Admin do
     }
   end
 
+  # Never the hash, never the salt: what a principal is, and whether it still works.
+  defp principal_summary(principal) do
+    %{
+      subject: principal.subject,
+      name: principal.name,
+      description: principal.description,
+      profiles: principal.profiles,
+      created_by: principal.created_by,
+      created_at: principal.inserted_at,
+      disabled_at: principal.disabled_at,
+      last_used_at: principal.last_used_at,
+      enabled: ServicePrincipal.enabled?(principal)
+    }
+  end
+
   defp bundle_summary(bundle) do
     %{
       channel: bundle.channel,
       version: bundle.version,
       hash: bundle.hash,
+      summary: bundle.summary,
       published_at: bundle.published_at,
       published_by: bundle.published_by,
       retired_at: bundle.retired_at
@@ -634,7 +974,14 @@ defmodule Troupe.Plane.Admin do
   defp comparable(nil), do: %{}
 
   defp comparable(%Fleet.Profile{} = profile) do
-    Map.take(profile, [:replicas, :sessions_per_pod, :config_bundle_channel, :image, :workers_domain, :spec])
+    Map.take(profile, [
+      :replicas,
+      :sessions_per_pod,
+      :config_bundle_channel,
+      :image,
+      :workers_domain,
+      :spec
+    ])
   end
 
   defp comparable(%Identity.Team{} = team) do
@@ -648,6 +995,22 @@ defmodule Troupe.Plane.Admin do
       :pins_allowed,
       :volume_storage_class,
       :volume_size
+    ])
+  end
+
+  defp comparable(%Triggers.Trigger{} = trigger) do
+    Map.take(trigger, [
+      :principal_id,
+      :profile,
+      :agent,
+      :enabled,
+      :source,
+      :prompt_template,
+      :terms,
+      :visibility,
+      :review,
+      :notify,
+      :concurrency
     ])
   end
 

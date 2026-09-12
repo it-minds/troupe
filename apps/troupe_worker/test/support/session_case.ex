@@ -133,7 +133,9 @@ defmodule Troupe.Worker.SessionCase do
       Keyword.get_lazy(opts, :fake, fn ->
         ExUnit.Callbacks.start_supervised!(
           Supervisor.child_spec(
-            {Fake, steps: Keyword.get(opts, :steps, []), default: Keyword.get(opts, :default, {:text, "done"})},
+            {Fake,
+             steps: Keyword.get(opts, :steps, []),
+             default: Keyword.get(opts, :default, {:text, "done"})},
             id: {Fake, System.unique_integer([:positive])}
           )
         )
@@ -161,7 +163,12 @@ defmodule Troupe.Worker.SessionCase do
         :dormant_after_ms,
         :archive_every_ms,
         :owner_subject,
-        :profile
+        :profile,
+        :agent,
+        :prompt,
+        :terms,
+        :origin,
+        :bundle
       ])
   end
 
@@ -273,7 +280,11 @@ defmodule Troupe.Worker.SessionCase do
 
   defp bao_reachable? do
     address = Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:58200"
-    match?({:ok, %{status: 200}}, Req.request(method: :get, url: address <> "/v1/sys/health", retry: false))
+
+    match?(
+      {:ok, %{status: 200}},
+      Req.request(method: :get, url: address <> "/v1/sys/health", retry: false)
+    )
   rescue
     _ -> false
   end

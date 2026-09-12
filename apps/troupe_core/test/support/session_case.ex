@@ -71,7 +71,7 @@ defmodule Troupe.SessionCase do
     {:ok, session} =
       Troupe.start_session(
         [workspace: context.workspace, fake: fake, config_overrides: overrides] ++
-          Keyword.take(opts, [:agent, :task, :session_id, :definitions])
+          Keyword.take(opts, [:agent, :task, :session_id, :definitions, :bundle, :kind, :origin])
       )
 
     ExUnit.Callbacks.on_exit(fn -> Troupe.stop_session(session.id) end)

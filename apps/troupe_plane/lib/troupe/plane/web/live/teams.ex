@@ -20,7 +20,9 @@ defmodule Troupe.Plane.Web.Live.Teams do
   end
 
   @impl Phoenix.LiveView
-  def handle_event("edit", %{"team" => name}, socket), do: {:noreply, assign(socket, editing: name)}
+  def handle_event("edit", %{"team" => name}, socket),
+    do: {:noreply, assign(socket, editing: name)}
+
   def handle_event("cancel", _params, socket), do: {:noreply, assign(socket, editing: nil)}
 
   def handle_event("save", %{"team" => name} = params, socket) do
@@ -36,7 +38,11 @@ defmodule Troupe.Plane.Web.Live.Teams do
   end
 
   def handle_event("grant", %{"team" => name, "profile" => profile}, socket) do
-    respond(socket, Admin.team_grant(socket.assigns.actor, name, profile), "#{name} granted #{profile}")
+    respond(
+      socket,
+      Admin.team_grant(socket.assigns.actor, name, profile),
+      "#{name} granted #{profile}"
+    )
   end
 
   def handle_event("revoke", %{"team" => name, "profile" => profile}, socket) do
@@ -48,11 +54,50 @@ defmodule Troupe.Plane.Web.Live.Teams do
   end
 
   def handle_event("add-admin", %{"team" => name, "subject" => subject}, socket) do
-    respond(socket, Admin.team_admin_add(socket.assigns.actor, name, subject), "#{subject} administers #{name}")
+    respond(
+      socket,
+      Admin.team_admin_add(socket.assigns.actor, name, subject),
+      "#{subject} administers #{name}"
+    )
   end
 
   def handle_event("remove-admin", %{"team" => name, "subject" => subject}, socket) do
-    respond(socket, Admin.team_admin_remove(socket.assigns.actor, name, subject), "#{subject} no longer administers #{name}")
+    respond(
+      socket,
+      Admin.team_admin_remove(socket.assigns.actor, name, subject),
+      "#{subject} no longer administers #{name}"
+    )
+  end
+
+  # The secret comes back once and is shown once, in the notice; it is not in the page
+  # after the next event, not in this process's state, and not in the plane's database.
+  def handle_event("create-principal", %{"team" => name} = params, socket) do
+    attrs = %{
+      "name" => params["name"],
+      "description" => params["description"],
+      "profiles" => params |> Map.get("profiles", "") |> String.split(~r/[,\s]+/, trim: true)
+    }
+
+    case Admin.principal_create(socket.assigns.actor, name, attrs) do
+      {:ok, principal} -> shown_once(socket, principal)
+      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+    end
+  end
+
+  def handle_event("rotate-principal", %{"subject" => subject}, socket) do
+    case Admin.principal_rotate(socket.assigns.actor, subject) do
+      {:ok, principal} -> shown_once(socket, principal)
+      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+    end
+  end
+
+  def handle_event("disable-principal", %{"subject" => subject}, socket) do
+    respond(socket, Admin.principal_disable(socket.assigns.actor, subject), "#{subject} disabled")
+  end
+
+  defp shown_once(socket, principal) do
+    message = "#{principal.subject} — secret, shown once: #{principal.secret}"
+    {:noreply, socket |> assign(flash_message: message, editing: nil) |> load()}
   end
 
   defp respond(socket, {:ok, _result}, message) do
@@ -76,9 +121,24 @@ defmodule Troupe.Plane.Web.Live.Teams do
   defp load(socket) do
     with {:ok, teams} <- Admin.teams_list(socket.assigns.actor),
          {:ok, profiles} <- Admin.profiles_list(socket.assigns.actor) do
-      assign(socket, teams: teams, profiles: Enum.map(profiles, & &1.name), error: nil)
+      principals = Map.new(teams, &{&1.name, principals_of(socket.assigns.actor, &1.name)})
+
+      assign(socket,
+        teams: teams,
+        profiles: Enum.map(profiles, & &1.name),
+        principals: principals,
+        error: nil
+      )
     else
-      {:error, error} -> assign(socket, teams: [], profiles: [], error: error.message)
+      {:error, error} ->
+        assign(socket, teams: [], profiles: [], principals: %{}, error: error.message)
+    end
+  end
+
+  defp principals_of(actor, team) do
+    case Admin.principals_list(actor, team) do
+      {:ok, principals} -> principals
+      {:error, _error} -> []
     end
   end
 
@@ -164,6 +224,38 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <input type="hidden" name="team" value={team.name} />
           <input name="subject" placeholder="somebody@example.com" />
           <button type="submit">make an admin</button>
+        </form>
+
+        <h3>Service principals</h3>
+        <p class="hint">
+          Credentials this team owns, for triggers and other work nobody starts by hand. A
+          secret is shown once, when it is made or rotated.
+        </p>
+        <ul class="principals">
+          <li :for={p <- Map.get(@principals, team.name, [])} class={if p.enabled, do: "", else: "none"}>
+            {p.subject}
+            <span class="hint">
+              {Enum.join(p.profiles, ", ")}
+              {if p.description, do: "— #{p.description}"}
+              {if p.last_used_at, do: "· last used #{p.last_used_at}", else: "· never used"}
+              {if !p.enabled, do: "· disabled"}
+            </span>
+            <button :if={p.enabled} phx-click="rotate-principal" phx-value-subject={p.subject}>
+              rotate secret
+            </button>
+            <button :if={p.enabled} phx-click="disable-principal" phx-value-subject={p.subject}>
+              disable
+            </button>
+          </li>
+          <li :if={Map.get(@principals, team.name, []) == []} class="none">none</li>
+        </ul>
+
+        <form phx-submit="create-principal">
+          <input type="hidden" name="team" value={team.name} />
+          <label>name <input name="name" placeholder="nightly-deps" /></label>
+          <label>profiles <input name="profiles" placeholder="dev, review" /></label>
+          <label>description <input name="description" /></label>
+          <button type="submit">create a principal</button>
         </form>
 
         <h3>Members</h3>
