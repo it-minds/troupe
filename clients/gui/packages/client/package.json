@@ -1,0 +1,25 @@
+{
+  "name": "@troupe/client",
+  "version": "0.1.0",
+  "description": "Troupe protocol v1 client: JSON-RPC 2.0 over WebSocket, usable from a browser or Node",
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "files": ["dist"],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test --import tsx dist/../test/*.test.ts"
+  },
+  "devDependencies": {
+    "tsx": "^4.20.3",
+    "typescript": "^5.9.2",
+    "@types/node": "^24.3.0"
+  }
+}
