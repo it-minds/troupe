@@ -1,0 +1,72 @@
+{{- if .Values.networkPolicy.enabled }}
+# What may reach the plane and the operator. Egress is left alone: both need PostgreSQL,
+# object storage, OpenBao and the identity provider, and which of those are in the
+# cluster and which are managed services is the installation's business, not the
+# chart's. Ingress is the side an attacker is on, and it is small enough to write down.
+#
+# Kubelet probes are not in these rules and do not need to be: Cilium admits the node's
+# own traffic to its pods regardless of policy, which is what keeps a health check from
+# being a policy exception. A CNI that does not would fail every probe the moment this
+# is applied, which is at least a loud failure.
+{{- if .Values.plane.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "troupe.plane.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    # HTTP — the panel, the API, the discovery document — from the ingress controller
+    # and nowhere else. The same label the workers' own policy trusts, so labelling the
+    # ingress namespace once is the whole of the admin's half.
+    - from:
+        - namespaceSelector:
+            matchLabels: {"troupe.dev/ingress": "true"}
+      ports:
+        - {protocol: TCP, port: {{ .Values.plane.httpPort }}}
+    # The control port: workers dial it to enrol and to be told about sessions, and the
+    # operator may reach it. Worker namespaces carry `troupe.dev/workers=true` because
+    # the operator puts it there when it creates them. Nothing outside the cluster can
+    # reach this port at all — it has no Ingress — and now nothing inside it can either
+    # except the two things that are meant to.
+    - from:
+        - namespaceSelector:
+            matchLabels: {"troupe.dev/workers": "true"}
+        - podSelector:
+            matchLabels: {{- include "troupe.operator.selectorLabels" . | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: {{ .Values.plane.controlPort }}}
+    {{- if eq .Values.plane.distribution "name" }}
+    # Erlang distribution, between plane replicas only: epmd, where a node asks which
+    # port its peer listens on, and the one port the Deployment pins that listener to.
+    # A distribution port reachable from a worker namespace would be a worker able to
+    # run code on the plane, cookie permitting — and the cookie is in the image.
+    - from:
+        - podSelector:
+            matchLabels: {{- include "troupe.plane.selectorLabels" . | nindent 14 }}
+      ports:
+        - {protocol: TCP, port: 4369}
+        - {protocol: TCP, port: {{ .Values.plane.distPort }}}
+    {{- end }}
+---
+{{- end }}
+# The operator listens on nothing. An empty ingress list with `Ingress` in the policy
+# types is how "nothing may connect to it" is spelled; a pod with no policy at all would
+# accept anything, which for the pod that holds every cluster privilege in Troupe is
+# the wrong default.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: troupe-operator
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "troupe.operator.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress: []
+{{- end }}

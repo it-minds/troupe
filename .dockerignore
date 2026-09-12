@@ -1,0 +1,31 @@
+# What the image build never needs. The Dockerfile copies mix.exs, mix.lock, config/,
+# apps/ and native/ and nothing else, so most of this is about the context Docker tars
+# up before the first instruction runs — a checkout with `_build` and `deps` in it is a
+# gigabyte of that — and about not letting a laptop's build outputs into a Linux image.
+.git
+_build
+deps
+burrito_out
+node_modules
+**/__pycache__
+**/*.pyc
+erl_crash.dump
+
+# Built for the host, which is not the image's platform. The worker release builds its
+# own inside the image, and a stale one from a laptop would be the wrong architecture
+# with the right name.
+apps/*/priv/reaper
+
+# `mix release` compiles lib/ and nothing under test/. The fixtures are the tests'.
+test
+apps/*/test
+fixtures
+
+# Documentation, the reference clients and the chart are read by people and by CI, not
+# by the release.
+docs
+clients
+charts
+dev
+scripts
+*.md

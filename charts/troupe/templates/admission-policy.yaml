@@ -47,10 +47,16 @@ spec:
       expression: variables.endpoints + variables.declared
     - name: allowedEgress
       expression: "has(params.spec.allowedEgress) ? params.spec.allowedEgress : []"
+    # Every storage class the profile names: one per team volume that asks for one, and
+    # the pod's own data volume when it does. A profile that could name any class could
+    # put a working copy on whatever the cluster has, which is what the policy's list
+    # exists to prevent.
     - name: storageClasses
       expression: >-
-        has(variables.spec.teams)
-          ? variables.spec.teams.filter(t, has(t.storageClassName)).map(t, t.storageClassName) : []
+        (has(variables.spec.teams)
+          ? variables.spec.teams.filter(t, has(t.storageClassName)).map(t, t.storageClassName) : []) +
+        (has(variables.spec.storage) && has(variables.spec.storage.storageClassName)
+          ? [variables.spec.storage.storageClassName] : [])
   validations:
     - expression: >-
         has(params.spec.allowedImageRepositories) &&
@@ -113,7 +119,7 @@ spec:
     - expression: >-
         variables.storageClasses.all(c,
           has(params.spec.allowedStorageClasses) && params.spec.allowedStorageClasses.exists(a, a == c))
-      messageExpression: "'a team volume asks for a storage class the TroupePolicy does not allow'"
+      messageExpression: "'a volume asks for a storage class the TroupePolicy does not allow'"
       reason: Forbidden
 
     - expression: "!has(variables.spec.orgMount) || !variables.spec.orgMount || has(params.spec.orgVolume)"

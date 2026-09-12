@@ -9,6 +9,7 @@ spec:
   # reconciles — but one is enough, because reconciliation is level-triggered and a
   # restart costs a resync rather than a repair.
   replicas: {{ .Values.operator.replicas }}
+  revisionHistoryLimit: 3
   selector:
     matchLabels: {{- include "troupe.operator.selectorLabels" . | nindent 6 }}
   template:
@@ -16,6 +17,12 @@ spec:
       labels: {{- include "troupe.operator.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: troupe-operator
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
       # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
       # the namespace, for compatibility with Docker links. `troupe-plane-control`
       # becomes `TROUPE_PLANE_CONTROL_PORT`, which is exactly the name this release reads
@@ -69,6 +76,17 @@ spec:
             - name: TROUPE_WORKERS_PORT
               value: {{ .Values.operator.workersPort | quote }}
             {{- end }}
+            # The same pull secrets this pod uses, by name, for the operator to put on
+            # every worker pod it creates. A private registry that needs a credential to
+            # pull the operator needs the same one to pull the worker — and the secret
+            # has to exist in each worker namespace, which is somebody else's job, the
+            # same way the object-store secret is.
+            - name: TROUPE_IMAGE_PULL_SECRETS
+              value: {{ join "," .Values.imagePullSecrets | quote }}
+            # Browser origins a worker answers cross-origin requests from. Empty means
+            # none, which is right for `troupe` and for a client that is not a browser.
+            - name: TROUPE_WORKER_ALLOWED_ORIGINS
+              value: {{ join "," .Values.operator.workerAllowedOrigins | quote }}
             - name: TROUPE_BAO_ADDR
               value: {{ .Values.bao.address | quote }}
             - name: TROUPE_OBJECT_ENDPOINT
@@ -86,6 +104,20 @@ spec:
             - name: POD_NAME
               valueFrom: {fieldRef: {fieldPath: metadata.name}}
           resources: {{- toYaml .Values.operator.resources | nindent 12 }}
+          # The operator serves nothing over HTTP — it has no port at all — so liveness
+          # is asked of the release itself. `bin/troupe_operator pid` connects to the
+          # running node over local distribution and prints its OS pid; it exits
+          # non-zero when there is no node to connect to, which is the failure a
+          # liveness probe exists to catch: a VM that has stopped without the container
+          # noticing. Each probe spawns a short-lived BEAM to ask, so it is asked rarely
+          # and given time to answer on a small node.
+          livenessProbe:
+            exec:
+              command: ["/app/bin/troupe_operator", "pid"]
+            initialDelaySeconds: 30
+            periodSeconds: 30
+            timeoutSeconds: 10
+            failureThreshold: 3
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: true

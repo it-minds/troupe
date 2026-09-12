@@ -236,11 +236,77 @@ Storage, per month, at the margin:
 
 - object storage ~€0.008/GB — where session history actually lives, and the cheapest
   thing here by twenty times;
-- block storage ~€0.095/GB — 20 GiB per worker pod, currently hard-coded in the
-  StatefulSet template;
+- block storage ~€0.095/GB — 20 GiB per worker pod unless the profile's `storage.size`
+  says otherwise, on the cluster's default class unless `storage.storageClassName`
+  names one;
 - file storage ~€0.161/GB — 25 GB minimum per team volume.
 
 The plane is small: two replicas at 1 vCPU and 1 GiB each. The operator is smaller.
+
+---
+
+## The small release
+
+`charts/troupe/values.small.yaml` is the same deployment with every number turned down:
+one plane with distribution off, one operator, a policy that caps a profile at three
+pods of 2 vCPU and 4 GiB with four sessions each. Every choice in it has its cost
+written beside it. Install it the same way, with that file in place of
+`values.scaleway.yaml`.
+
+What it runs on, and roughly what that is per month. These are list prices from memory
+for `fr-par`, rounded, and **unverified** against the calculator — check them before
+trusting them:
+
+| Piece | Size | Roughly |
+| --- | --- | --- |
+| Kapsule control plane | the shared offer | free |
+| Node pool | 2 × DEV1-M (3 vCPU, 4 GB) or 2 × PLAY2-MICRO-class | €30–40 |
+| Managed PostgreSQL | the smallest instance, PITR on | €15–30 |
+| Load Balancer | LB-S, in front of ingress-nginx | €10 |
+| Object Storage | a few GB of sealed segments | under €1 |
+| Block Storage | 20 GiB per worker pod | €2 each |
+| Container Registry | three images | under €1 |
+
+Call it **€60–90 a month** for a plane, an operator and two or three worker pods. Two
+DEV1-M nodes is the floor, not a suggestion: the plane, the operator, OpenBao,
+ingress-nginx and cert-manager take about a node and a half between them at their
+requests, and what is left is the workers. A pool of 2 GB instances does not fit, and
+fails by leaving worker pods `Pending` rather than by saying so.
+
+What the small release gives up is availability during a plane upgrade. With one
+replica the Deployment rolls by Recreate — the chart insists on it, because a rolling
+update of unclustered planes briefly runs two of them and both place sessions — so
+there are a few seconds without a plane while the new pod starts. Live sessions do not
+notice: the plane is not in their data path. A `troupe login` or a panel load during
+those seconds fails and is retried.
+
+The change set that made this deployable closed these, in the order they would have
+bitten:
+
+- the migration Job had no `+Q`, so it was OOMKilled in a second with an empty log and
+  looked like a failed migration;
+- a single-replica plane rolled by RollingUpdate, which is two unclustered planes for
+  the length of the rollout; the chart now uses Recreate for one replica and refuses
+  more than one without distribution;
+- the operator had no liveness probe at all, and the plane had no startup grace, so a
+  cold start on a shared vCPU could be killed by its own liveness probe;
+- nothing restricted ingress to the plane's control port or to the operator; a
+  NetworkPolicy now admits HTTP from the ingress namespace, the control port from
+  worker namespaces (which the operator labels `troupe.dev/workers=true`) and the
+  operator, and Erlang distribution between plane pods only;
+- no rate limit on the plane's Ingress, which is the one internet-facing thing that
+  talks to the database;
+- no way to name a pull secret, and Scaleway's registry is private by default;
+- the worker PVC was 20 GiB on the default class with no way to say otherwise;
+- CI never ran the plane's suite (it skipped itself without a database) and never built
+  an image.
+
+Two things to do by hand after upgrading to it. The `WorkerProfile` CRD gained a
+`storage` field, and Helm does not upgrade CRDs, so `kubectl apply -f charts/troupe/crds/`
+first. And a worker namespace created by an older operator gets its
+`troupe.dev/workers=true` label on the next reconcile, not before — until then its pods
+cannot reach the control port, which looks like workers that enrol and then go quiet.
+Touching the profile, or waiting for the resync, is the whole fix.
 
 ---
 
@@ -250,9 +316,13 @@ Honest list, all of it known:
 
 - **CI has never run.** The workflow is written and there has been no remote to run it on.
   Everything in it that can run locally does: `mix check`, boundaries, schema diff, the
-  Python conformance client, and a Burrito build with a smoke test.
-- **Worker PVC size is fixed at 20 GiB** and is not a profile field. Changing it is small
-  but it is a change.
+  Python conformance client, and a Burrito build with a smoke test. The image build, the
+  chart lint and the plane's suite against a Postgres service are in it now and have run
+  exactly as many times.
+- **The operator's liveness probe is an exec of `bin/troupe_operator pid`**, because the
+  operator serves no HTTP. It spawns a short-lived BEAM every thirty seconds to ask the
+  running node for its pid. It is cheap and it is correct, and it has not been watched
+  over a week on a small node.
 - **Every worker pod is internet-facing.** By design — a client dials the pod, and the
   plane stays out of the data path — and protected by a pod-audience-bound token, the
   ACL mirror, and the NetworkPolicy. It still deserves a review before production, and an
@@ -279,4 +349,7 @@ tend to bite:
 | `permission denied` logging into OpenBao | No reviewer JWT on the Kubernetes auth mount. |
 | Worker Ingress answers 503 | The ingress namespace is missing `troupe.dev/ingress=true`. |
 | `the pod did not accept the session`, signer crash on `nil` | Object-store credentials are missing from the *worker* namespace. |
-| Sessions placed twice, budgets double-counted | `plane.replicas: 2` with `distribution: none`. The replicas are not clustered, so the `:global` singletons exist once per replica. |
+| Sessions placed twice, budgets double-counted | `plane.replicas: 2` with `distribution: none`. The replicas are not clustered, so the `:global` singletons exist once per replica. The chart now refuses this combination at render time. |
+| Workers enrol, then go quiet; the plane never hears from them again | The worker namespace lacks `troupe.dev/workers=true`, so the plane's NetworkPolicy drops its control connections. The operator labels namespaces it creates; one made by an older operator gets the label on its next reconcile. |
+| `429` from the plane behind one office address | `plane.ingress.rateLimit` is per client IP. Raise `connections` first; every open panel tab is one. |
+| Image pull fails with `unauthorized` in a worker namespace | The pull secret named in `imagePullSecrets` exists in `troupe-system` but not in `troupe-w-<profile>`. Troupe creates no secrets; ESO or a hand does. |

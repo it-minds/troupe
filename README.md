@@ -294,16 +294,30 @@ Troupe.send_input(session.id, "where is the retry logic?")
 `[:troupe, :llm, :start | :stop]`, `[:troupe, :tool, :stop]` and
 `[:troupe, :agent, :transition]`.
 
+## The remote
+
+Remote workers and the control plane are in this repository too. `apps/troupe_plane`
+is the plane — the harness API, the admin panel, the OIDC relying party;
+`apps/troupe_operator` turns a `WorkerProfile` into a namespace of pods; and
+`apps/troupe_worker` is the same daemon running inside one of them. The same JSON-RPC
+runs over a WebSocket to a worker, `troupe --remote` speaks it, and `troupe hq` is
+built on `fleet` and `session.list` rather than on anything local, so it shows remote
+sessions beside local ones without changing.
+
+`charts/troupe` deploys the lot;
+[docs/deploying-on-scaleway.md](docs/deploying-on-scaleway.md) says how, including
+`values.small.yaml` for one plane, one operator and a handful of workers.
+
+The TUI in this repository is now the protocol's test harness rather than the product's
+face. It exercises every method a client needs, it is what CI drives, and `mix
+troupe.boundaries` holds it to `troupe_protocol` alone — which is what keeps "no private
+access" true for the clients people actually use, which live in their own repositories
+and speak the same protocol.
+
 ## Not included
 
-No remote workers, no control plane, no web UI, no MCP client, no git auto-commit or
-undo, no auto-update, no code signing, no native Windows-on-ARM build (the x86_64
-binary runs under emulation).
-
-Remote workers and the control plane are the next stages and the protocol is already
-shaped for them: the same JSON-RPC runs over a WebSocket, and `troupe hq` is built on
-`fleet` and `session.list` rather than on anything local, so it shows remote sessions
-beside local ones without changing.
+No MCP client, no git auto-commit or undo, no auto-update, no code signing, no native
+Windows-on-ARM build (the x86_64 binary runs under emulation).
 
 ## Licence
 

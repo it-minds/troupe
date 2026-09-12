@@ -8,6 +8,20 @@ namespace: troupe-system
 # every object of that kind, which for WorkerProfile means removing the workers.
 # Changing a CRD is therefore a deliberate `kubectl apply -f charts/troupe/crds/`.
 
+# Names of pull secrets, for a registry that needs a credential. Put on the plane, the
+# migration Job and the operator here, and handed to the operator by name so it puts the
+# same ones on every worker pod. Troupe creates no secrets: each name has to exist in
+# `troupe-system` and in every worker namespace, the same way the object-store secret
+# does.
+imagePullSecrets: []
+
+# NetworkPolicy for the plane and the operator: HTTP from the ingress namespace, the
+# control port from worker namespaces and the operator, Erlang distribution between
+# plane replicas, and no other ingress at all. Egress is not restricted. Needs a CNI that
+# enforces NetworkPolicy — Cilium does; kind's default does not, and silently.
+networkPolicy:
+  enabled: true
+
 operator:
   image:
     repository: ghcr.io/objective-mj/troupe-operator
@@ -29,6 +43,10 @@ operator:
   # a certificate gives you; a cluster reached through a port mapping sets both.
   workersScheme: wss
   workersPort: ""
+  # Browser origins a worker pod answers cross-origin requests from, for a client that
+  # runs in a browser. Empty means none: `troupe` is not a browser, and a worker that
+  # answered any origin would let a page you happened to visit talk to your sessions.
+  workerAllowedOrigins: []
   # `+Q`, the BEAM's port table size. Left to itself it is taken from `RLIMIT_NOFILE`,
   # which a container runtime sets absurdly high, and the table costs 1.5GB.
   maxPorts: 65536
@@ -49,16 +67,34 @@ plane:
   # What the plane calls itself in the links it hands out — device-flow pages, the
   # panel. Defaults to https://<host>.
   baseUrl: ""
+  # Browser origins the plane's API answers cross-origin requests from. The panel is
+  # same-origin and needs nothing here; a separate web client does. Empty means none.
+  corsOrigins: []
   ingressClassName: nginx
   tlsSecretName: ""
   ingress:
     enabled: true
+    # The largest request body the ingress will pass on. Nothing a client sends the
+    # plane is large — session data goes to object storage from the worker.
+    bodySize: 1m
+    # Per client IP, enforced by ingress-nginx. `rps` is the steady rate, the burst is
+    # `rps * burstMultiplier`, and `connections` is concurrent connections — which is
+    # the one an office behind a single NAT address will notice first, since every open
+    # panel tab is one. Set the whole block to `null` to turn it off.
+    rateLimit:
+      rps: 20
+      burstMultiplier: 5
+      connections: 100
   resources:
     requests: {cpu: 200m, memory: 256Mi}
     limits: {cpu: "1", memory: 1Gi}
   # The control listener workers dial. Never exposed through ingress.
   controlPort: 4001
   httpPort: 4000
+  # Where the Erlang distribution listener is pinned when `distribution` is `name`, so
+  # the NetworkPolicy can open exactly that port between plane pods rather than the
+  # ephemeral range the VM would otherwise pick from.
+  distPort: 9100
   # `+Q`, the BEAM's port table size. See `operator.maxPorts`.
   maxPorts: 65536
   # `direct` writes WorkerProfile straight to the API server; `gitops` writes a commit
@@ -69,7 +105,10 @@ plane:
   platformAdminGroup: troupe-platform-admins
   groupsClaim: groups
   # `name` joins the replicas into an Erlang cluster for the `:global` singletons;
-  # `none` is correct for a single replica and keeps distribution off the network.
+  # `none` is correct for a single replica and keeps distribution off the network. The
+  # chart refuses `replicas > 1` with `none`: unclustered replicas are not two replicas
+  # of one plane but two planes, each placing sessions as if it were alone. With one
+  # replica, or with `none`, the Deployment rolls by Recreate for the same reason.
   distribution: name
   database:
     # A reference to a secret created out of band or by External Secrets Operator.
@@ -98,7 +137,9 @@ plane:
 
 bao:
   address: http://openbao.troupe-system.svc:8200
-  # The Kubernetes auth mount and the role the plane authenticates with.
+  # The Kubernetes auth mount and the role the plane authenticates with. The plane
+  # presents a ServiceAccount token projected for the `troupe-kms` audience, the same
+  # audience the workers' key-manager token carries.
   authPath: kubernetes
   planeRole: troupe-plane
   # A static token instead, for a development cluster with OpenBao in dev mode. Empty

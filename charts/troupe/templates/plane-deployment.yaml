@@ -1,4 +1,5 @@
 {{- if .Values.plane.enabled }}
+{{- include "troupe.plane.validate" . }}
 # The plane: the admin panel, the harness API, and the control listener workers dial.
 #
 # Two Services on purpose. `troupe-plane` is what the Ingress routes to, and it carries
@@ -54,6 +55,12 @@ spec:
     spec:
       restartPolicy: Never
       serviceAccountName: troupe-plane
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
       # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
       # the namespace, for compatibility with Docker links. `troupe-plane-control`
       # becomes `TROUPE_PLANE_CONTROL_PORT`, which is exactly the name this release reads
@@ -70,6 +77,13 @@ spec:
           imagePullPolicy: {{ .Values.plane.image.pullPolicy }}
           command: ["/app/bin/troupe_plane", "eval", "Troupe.Plane.Release.migrate()"]
           env:
+            # The same `+Q` the plane's own pods set, and for the same reason: left to
+            # `RLIMIT_NOFILE` the port table is 1.5GB, allocated before `eval` has loaded
+            # a module, and the Job is OOMKilled in a second with an empty log — which
+            # looks exactly like a migration that failed. No `+S` here: a one-shot eval
+            # is not worth a downward-API lookup.
+            - name: ERL_FLAGS
+              value: "+Q {{ .Values.plane.maxPorts }}"
             - name: DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -81,10 +95,27 @@ spec:
               value: "false"
             - name: RELEASE_DISTRIBUTION
               value: "none"
+          resources: {{- toYaml .Values.plane.resources | nindent 12 }}
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities: {drop: ["ALL"]}
+          {{- if not .Values.bao.tokenSecretName }}
+          volumeMounts:
+            - name: bao-token
+              mountPath: /var/run/secrets/troupe
+              readOnly: true
+          {{- end }}
+      {{- if not .Values.bao.tokenSecretName }}
+      volumes:
+        - name: bao-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: bao-token
+                  audience: troupe-kms
+                  expirationSeconds: 3600
+      {{- end }}
 ---
 apiVersion: apps/v1
 kind: Deployment
@@ -94,6 +125,17 @@ metadata:
   labels: {{- include "troupe.labels" . | nindent 4 }}
 spec:
   replicas: {{ .Values.plane.replicas }}
+  # Three old ReplicaSets is enough to roll back through; the default of ten is clutter
+  # in a namespace somebody has to read.
+  revisionHistoryLimit: 3
+  {{- if or (eq (int .Values.plane.replicas) 1) (ne .Values.plane.distribution "name") }}
+  # Recreate, not RollingUpdate. A rolling update of a single replica briefly runs two
+  # pods, and two unclustered planes are two planes: both place sessions, both reserve
+  # budget, neither knows about the other. The cost is a few seconds without a plane
+  # during an upgrade, during which live sessions carry on — the plane is not in their
+  # data path — and workers reconnect to the control port when it is back.
+  strategy: {type: Recreate}
+  {{- end }}
   selector:
     matchLabels: {{- include "troupe.plane.selectorLabels" . | nindent 6 }}
   template:
@@ -101,6 +143,12 @@ spec:
       labels: {{- include "troupe.plane.selectorLabels" . | nindent 8 }}
     spec:
       serviceAccountName: troupe-plane
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
       # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
       # the namespace, for compatibility with Docker links. `troupe-plane-control`
       # becomes `TROUPE_PLANE_CONTROL_PORT`, which is exactly the name this release reads
@@ -120,6 +168,12 @@ spec:
               containerPort: {{ .Values.plane.httpPort }}
             - name: control
               containerPort: {{ .Values.plane.controlPort }}
+            {{- if eq .Values.plane.distribution "name" }}
+            - name: epmd
+              containerPort: 4369
+            - name: dist
+              containerPort: {{ .Values.plane.distPort }}
+            {{- end }}
           env:
             # Two things a BEAM in a container gets wrong unless told, and both are
             # measured rather than guessed.
@@ -133,6 +187,11 @@ spec:
             # loaded a module: `:erlang.memory(:system)` reads 2073MB with the default
             # and 19MB with this. That is the whole difference between a pod that is
             # OOMKilled in one second and one that runs in 64MB.
+            #
+            # And with distribution on, a third: the distribution listener is pinned to
+            # one port. Left to itself it picks an ephemeral one, and a NetworkPolicy
+            # cannot name "whatever port the VM chose" — so this is what lets the policy
+            # open the distribution between plane pods and nothing wider.
             - name: TROUPE_SCHEDULERS
               valueFrom:
                 resourceFieldRef:
@@ -140,7 +199,11 @@ spec:
                   resource: limits.cpu
                   divisor: "1"
             - name: ERL_FLAGS
+              {{- if eq .Values.plane.distribution "name" }}
+              value: "+S $(TROUPE_SCHEDULERS):$(TROUPE_SCHEDULERS) +Q {{ .Values.plane.maxPorts }} -kernel inet_dist_listen_min {{ .Values.plane.distPort }} inet_dist_listen_max {{ .Values.plane.distPort }}"
+              {{- else }}
               value: "+S $(TROUPE_SCHEDULERS):$(TROUPE_SCHEDULERS) +Q {{ .Values.plane.maxPorts }}"
+              {{- end }}
             - name: TROUPE_PLANE_AUTOSTART
               value: "true"
             - name: TROUPE_HTTP_PORT
@@ -151,6 +214,10 @@ spec:
               value: {{ .Values.plane.host | quote }}
             - name: TROUPE_BASE_URL
               value: {{ .Values.plane.baseUrl | default (printf "https://%s" .Values.plane.host) | quote }}
+            # Browser origins the API answers cross-origin requests from. Empty means
+            # none: the panel is same-origin and `troupe` is not a browser.
+            - name: TROUPE_CORS_ORIGINS
+              value: {{ join "," .Values.plane.corsOrigins | quote }}
             - name: TROUPE_PLANE_NAMESPACE
               value: {{ .Values.namespace | quote }}
             - name: TROUPE_PROVISIONING_MODE
@@ -171,6 +238,10 @@ spec:
               value: {{ .Values.plane.oidc.tokenUrl | quote }}
             - name: TROUPE_BAO_ADDR
               value: {{ .Values.bao.address | quote }}
+            - name: TROUPE_BAO_AUTH_PATH
+              value: {{ .Values.bao.authPath | quote }}
+            - name: TROUPE_BAO_ROLE
+              value: {{ .Values.bao.planeRole | quote }}
             - name: TROUPE_OBJECT_ENDPOINT
               value: {{ .Values.objectStore.endpoint | quote }}
             - name: TROUPE_OBJECT_BUCKET
@@ -234,25 +305,73 @@ spec:
                   optional: true
             {{- end }}
             {{- if .Values.bao.tokenSecretName }}
+            # A static token, for a development cluster with OpenBao in dev mode.
             - name: TROUPE_BAO_TOKEN
               valueFrom:
                 secretKeyRef:
                   name: {{ .Values.bao.tokenSecretName }}
                   key: {{ .Values.bao.tokenSecretKey }}
+            {{- else }}
+            # Otherwise the plane logs in as its ServiceAccount, with a token projected
+            # for OpenBao's audience alone — the same shape the operator gives a worker.
+            # It is not the automounted API-server token: that one is good at the API
+            # server for as long as the pod lives, and this one is good at OpenBao for an
+            # hour, which is the difference between a credential and a capability.
+            - name: TROUPE_BAO_JWT_PATH
+              value: /var/run/secrets/troupe/bao-token
             {{- end }}
           resources: {{- toYaml .Values.plane.resources | nindent 12 }}
+          # The startup probe is what makes a small node survivable. A cold start on a
+          # shared vCPU — loading the release, connecting the pool, the first query — can
+          # take longer than a liveness probe's patience, and a liveness probe that fires
+          # during it restarts a pod that was about to be fine. Sixty seconds of grace,
+          # after which the ordinary probes take over.
+          startupProbe:
+            httpGet: {path: /.well-known/troupe, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
           readinessProbe:
             httpGet: {path: /.well-known/troupe, port: http}
-            initialDelaySeconds: 3
             periodSeconds: 5
           livenessProbe:
             httpGet: {path: /.well-known/troupe, port: http}
-            initialDelaySeconds: 10
             periodSeconds: 10
           securityContext:
             allowPrivilegeEscalation: false
             readOnlyRootFilesystem: false
             capabilities: {drop: ["ALL"]}
+          {{- if not .Values.bao.tokenSecretName }}
+          volumeMounts:
+            - name: bao-token
+              mountPath: /var/run/secrets/troupe
+              readOnly: true
+          {{- end }}
+      {{- if not .Values.bao.tokenSecretName }}
+      volumes:
+        - name: bao-token
+          projected:
+            sources:
+              - serviceAccountToken:
+                  path: bao-token
+                  audience: troupe-kms
+                  expirationSeconds: 3600
+      {{- end }}
+{{- if gt (int .Values.plane.replicas) 1 }}
+---
+# Only with more than one replica. A budget of `minAvailable: 1` on a single replica
+# would refuse every voluntary eviction — a node drain would hang on it — without
+# buying any availability, since there is no second pod to be available.
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: troupe-plane
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  minAvailable: 1
+  selector:
+    matchLabels: {{- include "troupe.plane.selectorLabels" . | nindent 6 }}
+{{- end }}
 {{- if .Values.plane.ingress.enabled }}
 ---
 apiVersion: networking.k8s.io/v1
@@ -266,6 +385,18 @@ metadata:
     # a request.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # Nothing a client sends the plane is large: a JSON-RPC call, a profile, a login
+    # form. Session data goes to object storage from the worker and never through here.
+    nginx.ingress.kubernetes.io/proxy-body-size: {{ .Values.plane.ingress.bodySize | quote }}
+    {{- with .Values.plane.ingress.rateLimit }}
+    # Per client IP. The plane is the one internet-facing thing that talks to the
+    # database, and the device-flow and login endpoints are the ones a script would
+    # hammer. Generous for a person and for an office NAT; the burst is what lets a
+    # panel page load its assets at once.
+    nginx.ingress.kubernetes.io/limit-rps: {{ .rps | quote }}
+    nginx.ingress.kubernetes.io/limit-burst-multiplier: {{ .burstMultiplier | quote }}
+    nginx.ingress.kubernetes.io/limit-connections: {{ .connections | quote }}
+    {{- end }}
 spec:
   ingressClassName: {{ .Values.plane.ingressClassName }}
   {{- if .Values.plane.tlsSecretName }}

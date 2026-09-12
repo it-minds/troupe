@@ -1,0 +1,151 @@
+# Troupe on Scaleway, as small as it can honestly be run: one plane, one operator, a
+# handful of worker pods, on a node pool of two small instances.
+#
+# The same shape as `values.scaleway.yaml` — Kapsule, Managed PostgreSQL, Object Storage,
+# ingress-nginx and cert-manager, OpenBao in-cluster — with every number turned down and
+# the reason for each written next to it. Copy this, fill in the placeholders marked
+# CHANGE ME, and install:
+#
+#     helm upgrade --install troupe charts/troupe \
+#       --namespace troupe-system --create-namespace \
+#       --values charts/troupe/values.small.yaml
+#
+# What "small" costs, roughly, is in `docs/deploying-on-scaleway.md` under "The small
+# release". What it gives up is written here: a plane restart is a short outage rather
+# than a failover, and three worker pods is the ceiling.
+
+namespace: troupe-system
+
+# A registry that needs a credential to pull from names its secrets here; Scaleway's
+# does. The names must exist in `troupe-system` and in every worker namespace.
+imagePullSecrets: []
+
+networkPolicy:
+  enabled: true
+
+operator:
+  image:
+    repository: rg.fr-par.scw.cloud/troupe/troupe-operator   # CHANGE ME: your registry
+    tag: "0.2.0"
+  replicas: 1
+  # The operator idles at a few tens of MiB and works in bursts when a profile changes.
+  # 96Mi is comfortable for a BEAM with `+Q` set; 256Mi is the ceiling for a resync of
+  # every profile at once. It costs about a twentieth of a small node.
+  resources:
+    requests: {cpu: 50m, memory: 96Mi}
+    limits: {cpu: 300m, memory: 256Mi}
+  ciliumAvailable: true
+  ingressClassName: nginx
+  workersScheme: wss
+  workersPort: ""
+  workerAllowedOrigins: []
+  tlsSecretName: troupe-workers-tls
+  drainTimeoutSeconds: 300
+  maxPorts: 65536
+
+plane:
+  enabled: true
+  image:
+    repository: rg.fr-par.scw.cloud/troupe/troupe-plane      # CHANGE ME: your registry
+    tag: "0.2.0"
+  # One replica, and distribution off with it. This is the whole of the saving on the
+  # plane: half the memory, no Erlang cluster to form, and no second node to keep the
+  # first one honest. What it costs is availability during an upgrade — the Deployment
+  # rolls by Recreate, so there are a few seconds without a plane while the new pod
+  # starts. Live sessions do not notice, because the plane is not in their data path;
+  # a `troupe login` or a panel page load during those seconds fails and is retried.
+  replicas: 1
+  distribution: none
+  host: troupe.example.com                                   # CHANGE ME: your plane host
+  baseUrl: https://troupe.example.com                        # CHANGE ME: the same, with scheme
+  corsOrigins: []
+  ingressClassName: nginx
+  tlsSecretName: troupe-plane-tls
+  ingress:
+    enabled: true
+    bodySize: 1m
+    rateLimit:
+      rps: 20
+      burstMultiplier: 5
+      connections: 100
+  # A plane with nobody on it is a BEAM with `+Q` set — tens of MiB — plus a connection
+  # pool; the panel and a handful of enrolled workers add modestly to that. The limit
+  # is deliberately three times the request because a plane that is OOMKilled restarts
+  # as the only plane there is, and the startup probe then gives it a minute to come
+  # back. Half a vCPU is enough for the request rate a small team makes; the plane does
+  # no work per session once it is placed.
+  resources:
+    requests: {cpu: 100m, memory: 256Mi}
+    limits: {cpu: 500m, memory: 768Mi}
+  controlPort: 4001
+  httpPort: 4000
+  distPort: 9100
+  maxPorts: 65536
+  provisioningMode: direct
+  platformAdminGroup: troupe-platform-admins
+  groupsClaim: groups
+  database:
+    secretName: troupe-plane-database
+    secretKey: url
+  secretKeyBase:
+    secretName: troupe-plane-secret-key-base
+    secretKey: value
+  oidc:
+    issuer: https://login.example.com                        # CHANGE ME
+    clientId: troupe
+    authorizeUrl: https://login.example.com/oauth2/v2.0/authorize
+    deviceUrl: https://login.example.com/oauth2/v2.0/devicecode
+    tokenUrl: https://login.example.com/oauth2/v2.0/token
+    secretName: ""
+  scim:
+    enabled: false
+
+bao:
+  address: http://openbao.troupe-system.svc:8200
+  authPath: kubernetes
+  planeRole: troupe-plane
+  tokenSecretName: ""
+
+objectStore:
+  endpoint: https://s3.fr-par.scw.cloud
+  bucket: troupe-sessions                                    # CHANGE ME if you like
+  region: fr-par
+  secretName: troupe-object-store
+
+policy:
+  install: true
+  name: default
+  allowedImageRepositories:
+    - rg.fr-par.scw.cloud/troupe/troupe-worker               # CHANGE ME: your registry
+  # The ceiling is the node pool. Two small nodes hold the plane, the operator, OpenBao,
+  # the ingress controller and cert-manager with room for about three worker pods at
+  # the limits below — and a worker pod that cannot be scheduled is a profile that
+  # reports fewer ready replicas than it asked for, not an error anyone is paged for.
+  # Raise this together with the node pool, not before.
+  maxReplicas: 3
+  # Four concurrent sessions per pod. A session is a process tree and a workspace on the
+  # pod's own disk; four of them share 4Gi comfortably, eight would not. Dormant
+  # sessions cost nothing, so this bounds concurrent work rather than accounts.
+  maxSessionsPerPod: 4
+  # The largest pod a profile may ask for. Two vCPUs and 4Gi is what one DEV1-M-class
+  # node can give a single pod after the system and the plane have taken theirs; a
+  # profile asking for more would be admitted and never scheduled.
+  maxResources:
+    cpu: "2"
+    memory: 4Gi
+  allowedEgress:
+    - llm-gw.itmindsinternal.dk
+    - github.com
+    - "*.github.com"
+  # `scw-bssd` for a worker's own disk — 20GiB per pod unless the profile says
+  # otherwise, at about €2 a month each — and `scw-sfs` for team volumes, which cost
+  # €4 a month each at the 25GB floor. On a small release, grant team volumes
+  # deliberately.
+  allowedStorageClasses:
+    - scw-bssd
+    - scw-sfs
+  orgVolume: {}
+  namespacePrefix: troupe-w-
+  workersDomain: workers.example.com                         # CHANGE ME: your wildcard
+admission:
+  install: true

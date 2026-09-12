@@ -84,6 +84,21 @@ spec:
                       type: array
                       items: {type: string}
                 configBundleChannel: {type: string, default: stable}
+                storage:
+                  type: object
+                  description: >-
+                    Each pod's own disk, where the working copies of its live sessions are.
+                    Fixed once the pods exist: a StatefulSet's volume claim template cannot
+                    be changed, so a different size or class means a new pool.
+                  properties:
+                    size:
+                      type: string
+                      default: 20Gi
+                    storageClassName:
+                      type: string
+                      description: >-
+                        Must be in the TroupePolicy's allowedStorageClasses. Absent means the
+                        cluster's default class.
                 orgMount:
                   type: boolean
                   default: false

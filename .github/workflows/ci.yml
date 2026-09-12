@@ -21,6 +21,26 @@ jobs:
   check:
     name: compile, format, credo, boundaries, test
     runs-on: ubuntu-latest
+    # The plane is the one app that needs a database, and without one its suite skips
+    # itself — loudly in the log, silently in the exit code, so a green run proved
+    # nothing about the plane. `config/config.exs` points the test repo at
+    # localhost:55432, the port `scripts/dev-up` uses so a laptop's own Postgres is
+    # left alone, and the service is mapped onto that same port so CI and a laptop run
+    # from one configuration. (`DATABASE_URL` is read only by a `prod` release and
+    # would be ignored here.)
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: troupe
+          POSTGRES_PASSWORD: troupe
+          POSTGRES_DB: troupe_plane_test
+        ports: ["55432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U troupe -d troupe_plane_test"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
     steps:
       - uses: actions/checkout@v4
 
@@ -59,10 +79,120 @@ jobs:
       - name: Boundaries
         run: MIX_ENV=test mix troupe.boundaries
 
+      # The same two commands `test_helper.exs` tells a developer to run when it finds
+      # no database; the sandbox then owns every transaction the suite opens.
+      - name: Migrate the plane's test database
+        run: MIX_ENV=test mix ecto.create --quiet && MIX_ENV=test mix ecto.migrate --quiet
+
       # Ten runs, because the suite is concurrent and a race that shows up one time
       # in five is a bug this project cares about.
       - name: Test (10 consecutive runs)
         run: for i in $(seq 10); do mix test || exit 1; done
+
+  chart:
+    name: helm lint, render, kubeconform
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: Lint, with each values file that is meant to install
+        run: |
+          helm lint charts/troupe
+          helm lint charts/troupe --values charts/troupe/values.small.yaml
+          helm lint charts/troupe --values charts/troupe/values.scaleway.yaml
+
+      # The one combination the chart refuses on purpose — replicas that do not form an
+      # Erlang cluster — has to keep being refused, or the check is decoration.
+      - name: The chart refuses unclustered replicas
+        run: |
+          if helm template troupe charts/troupe --set plane.replicas=2 --set plane.distribution=none >/dev/null 2>&1; then
+            echo "plane.replicas=2 with plane.distribution=none rendered; the chart must refuse it"
+            exit 1
+          fi
+
+      # Rendered and checked against the Kubernetes API schemas, which is what catches a
+      # misspelled field before a cluster does. The CRDs are included so a TroupePolicy
+      # and a WorkerProfile are checked against their own schemas; the kinds no schema
+      # is published for are skipped rather than failed.
+      - name: Render and validate
+        run: |
+          for values in values.small.yaml values.scaleway.yaml; do
+            echo "=== $values"
+            helm template troupe charts/troupe \
+              --namespace troupe-system --include-crds \
+              --values "charts/troupe/$values" \
+              | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+                  -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+          done
+
+  images:
+    name: image ${{ matrix.release }}
+    needs: [check, protocol]
+    # A push needs a credential and a pull request from a fork has none, so images are
+    # built from pushes — which is also when there is a commit worth naming a tag after.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        release: [troupe_operator, troupe_plane, troupe_worker]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Where the images go. Three secrets — `REGISTRY`, `REGISTRY_USERNAME`,
+      # `REGISTRY_PASSWORD` — name a registry and how to log in to it, and a fourth,
+      # `REGISTRY_NAMESPACE`, the path under it (Scaleway's registry wants its
+      # namespace there, not the GitHub owner). Without them the images go to this
+      # repository's own packages on ghcr.io with the workflow's token, which is what a
+      # fork or a first run wants.
+      - name: Resolve the registry and the tags
+        id: registry
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          RELEASE: ${{ matrix.release }}
+        run: |
+          registry="${REGISTRY:-ghcr.io}"
+          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          # Registries want lower case, and a GitHub owner need not be.
+          image=$(echo "${registry}/${namespace}/${RELEASE//_/-}" | tr '[:upper:]' '[:lower:]')
+
+          # `sha-<short>` on every push, so every commit is pullable; and the version on
+          # a release tag, without its `v`, because that is what the values files write.
+          tags="${image}:sha-${GITHUB_SHA::7}"
+          case "$GITHUB_REF" in
+            refs/tags/v*) tags="${tags},${image}:${GITHUB_REF_NAME#v}" ;;
+          esac
+
+          echo "registry=${registry}" >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.registry.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+
+      # linux/amd64 only: that is what the node pool is, and an arm64 build of the
+      # umbrella under emulation is an hour nobody has asked for. The three images share
+      # every layer up to `mix release`, so one cache serves the whole matrix.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: docker/Dockerfile
+          build-args: RELEASE=${{ matrix.release }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.registry.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   protocol:
     name: schema compatibility and the Python client

@@ -46,11 +46,17 @@ RUN mix deps.compile && mix compile && mix release ${RELEASE} --overwrite \
 
 FROM debian:${DEBIAN_VERSION} AS runtime
 
-# `bubblewrap` is the worker's sandbox and `git` is how it clones a source; both are
-# harmless in the other images and keep this file to one.
+ARG RELEASE=troupe_operator
+
+# `bubblewrap` is the worker's sandbox and `git` is how it clones a source. Neither has
+# a job in the plane or the operator, and a namespace-juggling sandbox helper and a
+# network client are the two things one would least like to find in the image that is
+# internet-facing and the image that holds every cluster privilege — so they go into
+# the worker image alone, and this stays one Dockerfile.
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \
-      libstdc++6 openssl libncurses6 locales ca-certificates git bubblewrap \
+      libstdc++6 openssl libncurses6 locales ca-certificates \
+      $(if [ "${RELEASE}" = "troupe_worker" ]; then echo git bubblewrap; fi) \
  && rm -rf /var/lib/apt/lists/* \
  && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 
@@ -64,7 +70,6 @@ USER troupe:troupe
 
 COPY --from=build --chown=troupe:troupe /app/release ./
 
-ARG RELEASE=troupe_operator
 ENV RELEASE_NAME=${RELEASE}
 
 # `exec` so signals reach the VM: Kubernetes' SIGTERM has to become a graceful stop,
