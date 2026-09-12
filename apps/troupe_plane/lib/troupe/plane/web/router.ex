@@ -25,8 +25,19 @@ defmodule Troupe.Plane.Web.Router do
 
   require Logger
 
+  # Before `:match`, so a preflight is answered without ever reaching a route — there
+  # is no `options` route to reach, and the 404 it would otherwise get is what a browser
+  # reports as a CORS failure.
+  plug Troupe.Plane.Web.CORS
   plug :match
-  plug Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason
+
+  # Four mebibytes. The largest legitimate body here is not a `session.create` with a
+  # long prompt, which is kilobytes, but `admin.bundle.publish`: a config bundle carries
+  # its agent definitions and skills inline, and one with a few skills' worth of text
+  # runs well past 256 KiB. Anything larger than this is not a request the plane has a
+  # method for, and reading it before finding that out would be the plane buffering a
+  # stranger's upload.
+  plug Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason, length: 4_194_304
   plug :dispatch
 
   get "/healthz", do: send_json(conn, 200, %{"ok" => true})

@@ -15,8 +15,14 @@ defmodule Troupe.Plane.Tokens do
   The `kid` is the key's RFC 7638 thumbprint rather than a name we assign, so the plane
   that minted a token and the worker that fetched the JWKS agree on it with nothing kept
   in step between them.
+
+  What the plane presents to OpenBao is `Troupe.Plane.Tokens.Credential`'s concern: a
+  static token where one is configured, and otherwise a Kubernetes-auth login cached
+  for the length of its lease. Every function here answers `{:error, :no_kms_credential}`
+  when there is neither, and nothing here has a default to fall back on.
   """
 
+  alias Troupe.Plane.Tokens.Credential
   alias Troupe.Protocol.Token
 
   @key_name "troupe-session-tokens"
@@ -139,12 +145,41 @@ defmodule Troupe.Plane.Tokens do
     end
   end
 
+  # The credential comes from `Credential`, which is also told when OpenBao refuses it.
+  # A 403 on a token that was exchanged for a ServiceAccount token means the lease has
+  # gone, one way or another, and is worth exactly one fresh login and one more try; a
+  # 403 on a static token is a policy problem that a retry would only repeat.
   defp request(method, path, body, opts) do
+    config = config(opts)
+
+    with {:ok, address} <- address(config),
+         {:ok, token} <- Credential.fetch(config) do
+      url = address <> path
+
+      method
+      |> perform(url, token, body)
+      |> retry_refused(config, token, &perform(method, url, &1, body))
+    end
+  end
+
+  defp retry_refused({:error, {:unexpected_status, 403, _}} = refused, config, token, again) do
+    if config[:token] do
+      refused
+    else
+      Credential.forget(config, token)
+
+      with {:ok, fresh} <- Credential.fetch(config), do: again.(fresh)
+    end
+  end
+
+  defp retry_refused(other, _config, _token, _again), do: other
+
+  defp perform(method, url, token, body) do
     options =
       [
         method: method,
-        url: address(opts) <> path,
-        headers: [{"x-vault-token", token(opts)}],
+        url: url,
+        headers: [{"x-vault-token", token}],
         decode_body: true,
         retry: false,
         receive_timeout: 5_000
@@ -160,26 +195,18 @@ defmodule Troupe.Plane.Tokens do
 
   defp config(opts), do: Keyword.merge(Application.get_env(:troupe_plane, :transit, []), opts)
 
-  defp address(opts) do
-    config(opts)[:address] || System.get_env("TROUPE_BAO_ADDR") || "http://localhost:58200"
+  # No default. `config.exs` names the development OpenBao for `dev` and `test`, and
+  # `runtime.exs` names the cluster's; a plane with neither is not pointed anywhere, and
+  # saying so beats signing against a port on localhost that happens to be open.
+  defp address(config) do
+    case config[:address] do
+      nil -> {:error, :no_kms_address}
+      address -> {:ok, address}
+    end
   end
 
   defp mount(opts), do: config(opts)[:mount] || "transit"
   defp key_name(opts), do: config(opts)[:key] || @key_name
-
-  defp token(opts) do
-    config(opts)[:token] || System.get_env("TROUPE_BAO_TOKEN") ||
-      read_service_account_token() || "troupe-dev-root"
-  end
-
-  # In a pod the plane authenticates to OpenBao with its own Kubernetes ServiceAccount;
-  # the login exchange happens outside this module and leaves the client token here.
-  defp read_service_account_token do
-    case File.read("/var/run/secrets/troupe/bao-token") do
-      {:ok, contents} -> String.trim(contents)
-      _ -> nil
-    end
-  end
 
   defp issuer, do: Application.get_env(:troupe_plane, :issuer)
 

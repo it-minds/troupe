@@ -101,4 +101,14 @@ if Mix.env() in [:dev, :test] do
       token: "troupe-dev-root",
       mount: "secret"
     ]
+
+  # The plane signs against the same development OpenBao, with the same root token. Set
+  # here, for these two environments only, because `Troupe.Plane.Tokens` has no default
+  # of its own: a production plane that has not been given a credential must fail to
+  # sign rather than try the development root token against a real cluster.
+  config :troupe_plane,
+    transit: [
+      address: "http://localhost:58200",
+      token: "troupe-dev-root"
+    ]
 end

@@ -22,7 +22,12 @@ defmodule Troupe.Plane.Web.Endpoint do
     same_site: "Lax"
   ]
 
-  socket "/live", Phoenix.LiveView.Socket, websocket: [connect_info: [session: @session_options]]
+  # A mebibyte per frame. What the panel sends up a LiveView socket is events — a form,
+  # a click — and the largest of those is a profile editor's YAML; a frame bigger than
+  # this is not the panel, and without a ceiling the socket would buffer it in full
+  # before finding that out.
+  socket "/live", Phoenix.LiveView.Socket,
+    websocket: [connect_info: [session: @session_options], max_frame_size: 1_048_576]
 
   plug Plug.Static, at: "/admin/static", from: :troupe_plane, gzip: false, only: ~w(app.css)
 

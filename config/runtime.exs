@@ -109,7 +109,23 @@ if config_env() == :prod do
       workers_scheme: System.get_env("TROUPE_WORKERS_SCHEME", "wss"),
       workers_port: presence.(System.get_env("TROUPE_WORKERS_PORT")),
       drain_timeout_seconds:
-        String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300"))
+        String.to_integer(System.get_env("TROUPE_DRAIN_TIMEOUT_SECONDS", "300")),
+      # Comma-separated names, as the chart joins them; an unset variable and an empty
+      # one both mean no pull secrets.
+      image_pull_secrets:
+        "TROUPE_IMAGE_PULL_SECRETS"
+        |> System.get_env("")
+        |> String.split(",", trim: true)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == "")),
+      # The same shape: the origins every worker pod admits on its WebSocket, or none
+      # to admit them all.
+      worker_allowed_origins:
+        "TROUPE_WORKER_ALLOWED_ORIGINS"
+        |> System.get_env("")
+        |> String.split(",", trim: true)
+        |> Enum.map(&String.trim/1)
+        |> Enum.reject(&(&1 == ""))
     ]
 
   # -- the plane ------------------------------------------------------------
@@ -119,10 +135,42 @@ if config_env() == :prod do
   # release that reaches its repo and serves nothing, and gating the database on whether
   # the plane is serving would make a migration impossible to run.
   if url = presence.(System.get_env("DATABASE_URL")) do
+    # Verified TLS or none. `ssl: true` on its own encrypts the connection and accepts
+    # whatever certificate is at the other end, which is not what anybody setting
+    # TROUPE_DB_SSL=true means: a database behind a private CA, or a managed one, is
+    # verified against that CA (TROUPE_DB_CACERT_FILE) or the system's roots. The name
+    # checked is the host in DATABASE_URL, with the HTTPS wildcard rules, because a
+    # managed provider's certificate is very often `*.<region>.<provider>`.
+    ssl =
+      if System.get_env("TROUPE_DB_SSL") == "true" do
+        host = URI.parse(url).host || "localhost"
+
+        roots =
+          case presence.(System.get_env("TROUPE_DB_CACERT_FILE")) do
+            nil -> [cacerts: :public_key.cacerts_get()]
+            file -> [cacertfile: String.to_charlist(file)]
+          end
+
+        [
+          verify: :verify_peer,
+          server_name_indication: String.to_charlist(host),
+          customize_hostname_check: [
+            match_fun: :public_key.pkix_verify_hostname_match_fun(:https)
+          ]
+        ] ++ roots
+      else
+        false
+      end
+
+    # Per replica, not per plane: two replicas at the default hold twenty connections
+    # between them, plus the migration's. A single small managed instance — the kind
+    # that allows twenty-five in total — needs this lowered to leave room for anything
+    # else that connects, and a plane that hits the instance's ceiling looks like a
+    # database outage rather than like a pool that is too big.
     config :troupe_plane, Troupe.Plane.Repo,
       url: url,
       pool_size: String.to_integer(System.get_env("TROUPE_POOL_SIZE", "10")),
-      ssl: System.get_env("TROUPE_DB_SSL") == "true"
+      ssl: ssl
   end
 
   if System.get_env("TROUPE_PLANE_AUTOSTART") == "true" do
@@ -146,6 +194,23 @@ if config_env() == :prod do
         without its own.
         """
 
+    # A plane that is serving is a plane people log in to, and a login needs a provider.
+    # Left unset, these would come up as `nil` and the failure would arrive later, as a
+    # client told to visit a device-authorization URL that does not exist.
+    oidc_required = fn name ->
+      presence.(System.get_env(name)) ||
+        raise """
+        #{name} is not set.
+
+        The plane is a relying party: `/auth/exchange` verifies provider tokens against
+        the issuer's keys, and the discovery document at `/.well-known/troupe` tells a
+        client which provider to run the device grant against. Without the issuer, the
+        client id, the device authorization endpoint and the token endpoint, nobody can
+        log in, so a plane that is actually serving refuses to start rather than come up
+        with a login that cannot work.
+        """
+    end
+
     config :troupe_plane, Troupe.Plane.Web.Endpoint,
       server: true,
       secret_key_base: secret,
@@ -154,6 +219,40 @@ if config_env() == :prod do
         port: String.to_integer(System.get_env("TROUPE_HTTP_PORT", "4000"))
       ],
       url: [host: System.get_env("TROUPE_HOST", "localhost"), scheme: "https", port: 443]
+
+    # The plane's own OpenBao credential. A static token where one is given; otherwise
+    # `Troupe.Plane.Tokens.Credential` exchanges the ServiceAccount token projected at
+    # `jwt_path` for a client token under `role`. There is no default token: a plane
+    # with neither fails to sign and says why, rather than trying a development root
+    # token against the cluster's key manager.
+    config :troupe_plane, :transit,
+      address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
+      token: presence.(System.get_env("TROUPE_BAO_TOKEN")),
+      auth_path: System.get_env("TROUPE_BAO_AUTH_PATH", "kubernetes"),
+      role: System.get_env("TROUPE_BAO_ROLE", "troupe-plane"),
+      jwt_path: System.get_env("TROUPE_BAO_JWT_PATH", "/var/run/secrets/troupe/bao-token")
+
+    # Where this plane is reached from outside, which is what a token it mints names as
+    # its issuer. Only origins in the allowlist get a CORS answer, each one exactly as
+    # a browser would send it; an empty list is CORS off, which is right for a plane
+    # only ever reached by the CLI.
+    base_url =
+      presence.(System.get_env("TROUPE_BASE_URL")) ||
+        "https://#{System.get_env("TROUPE_HOST", "localhost")}"
+
+    cors_origins =
+      "TROUPE_CORS_ORIGINS"
+      |> System.get_env("")
+      |> String.split(",", trim: true)
+      |> Enum.map(&String.trim/1)
+      |> Enum.reject(&(&1 == ""))
+
+    # One JSON object per line where the log pipeline parses rather than reads. Only the
+    # formatter changes; what is logged, and at which level, does not.
+    if System.get_env("TROUPE_LOG_FORMAT") == "json" do
+      config :logger, :default_handler,
+        formatter: {Troupe.Plane.LogFormatter, %{metadata: [:request_id, :session_id]}}
+    end
 
     # Erlang distribution, without which `replicas: 2` is not two replicas of one plane
     # but two planes. The cluster-unique actors — one `Placement` per profile, one
@@ -190,6 +289,8 @@ if config_env() == :prod do
     config :troupe_plane,
       autostart: true,
       base_url: System.get_env("TROUPE_BASE_URL"),
+      issuer: base_url,
+      cors_origins: cors_origins,
       control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),
       groups_claim: System.get_env("TROUPE_GROUPS_CLAIM", "groups"),
       scim_token: presence.(System.get_env("TROUPE_SCIM_TOKEN")),
@@ -198,12 +299,12 @@ if config_env() == :prod do
       provisioning_mode:
         String.to_existing_atom(System.get_env("TROUPE_PROVISIONING_MODE", "direct")),
       oidc: [
-        issuer: System.get_env("TROUPE_OIDC_ISSUER"),
-        client_id: System.get_env("TROUPE_OIDC_CLIENT_ID"),
+        issuer: oidc_required.("TROUPE_OIDC_ISSUER"),
+        client_id: oidc_required.("TROUPE_OIDC_CLIENT_ID"),
         client_secret: System.get_env("TROUPE_OIDC_CLIENT_SECRET"),
         authorization_endpoint: System.get_env("TROUPE_OIDC_AUTHORIZE_URL"),
-        device_authorization_endpoint: System.get_env("TROUPE_OIDC_DEVICE_URL"),
-        token_endpoint: System.get_env("TROUPE_OIDC_TOKEN_URL")
+        device_authorization_endpoint: oidc_required.("TROUPE_OIDC_DEVICE_URL"),
+        token_endpoint: oidc_required.("TROUPE_OIDC_TOKEN_URL")
       ]
 
     if store = object_store.() do
@@ -250,6 +351,20 @@ if config_env() == :prod do
     if store = object_store.() do
       config :troupe_protocol, object_store: store
     end
+
+    # The WebSocket a client attaches through. A frame is a whole message and the socket
+    # refuses one larger than this before it is assembled — a ceiling for a connection
+    # that has not yet shown a token, not the protocol's message limit. The origin list
+    # is for browsers: a page not on it does not get an upgrade. Empty admits every origin,
+    # because the token is what actually admits a connection; a deployment that knows
+    # which origins host its GUI names them here.
+    config :troupe_gateway,
+      max_frame_bytes: String.to_integer(System.get_env("TROUPE_MAX_FRAME_BYTES", "16777216")),
+      allowed_origins:
+        "TROUPE_ALLOWED_ORIGINS"
+        |> System.get_env("")
+        |> String.split(",", trim: true)
+        |> Enum.map(&String.trim/1)
   end
 
   # -- the local daemon -----------------------------------------------------

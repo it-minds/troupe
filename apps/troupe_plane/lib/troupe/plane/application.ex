@@ -35,6 +35,9 @@ defmodule Troupe.Plane.Application do
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
       Troupe.Plane.Control.Listener,
+      # The plane's OpenBao credential, exchanged once per lease rather than per token
+      # minted. Before the endpoint, which is what mints them.
+      Troupe.Plane.Tokens.Credential,
       Troupe.Plane.Web.Endpoint
     ] ++ cluster()
   end
