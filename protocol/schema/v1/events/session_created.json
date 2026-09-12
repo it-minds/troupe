@@ -6,6 +6,12 @@
     "bundle_version": {
       "type": "string"
     },
+    "kind": {
+      "type": "string"
+    },
+    "origin": {
+      "type": "object"
+    },
     "profile": {
       "type": "string"
     },

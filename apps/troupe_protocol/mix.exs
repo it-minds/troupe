@@ -19,7 +19,8 @@ defmodule Troupe.Protocol.MixProject do
 
   def application do
     [
-      extra_applications: [:logger, :crypto, :ssl]]
+      extra_applications: [:logger, :crypto, :ssl]
+    ]
   end
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
@@ -47,6 +48,11 @@ defmodule Troupe.Protocol.MixProject do
       # Segments are zstd JSONL, as the spec says. A NIF rather than gzip because a
       # session log is highly repetitive and the ratio is what keeps the object tier
       # affordable.
-      {:ezstd, "~> 1.2"}]
+      {:ezstd, "~> 1.2"},
+      # Agent definitions and skills carry YAML frontmatter, and a bundle is checked by
+      # the plane before it is published as well as by the worker that applies it, so
+      # the parser sits where both can reach it.
+      {:yaml_elixir, "~> 2.12"}
+    ]
   end
 end

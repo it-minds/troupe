@@ -28,17 +28,44 @@ defmodule Troupe.WorkerProfile do
   end
 
   defmodule MCPServer do
-    @moduledoc "One MCP server a profile's sessions may use."
+    @moduledoc """
+    One MCP server a profile's sessions may use.
+
+    `credential_ref` is the name of the environment variable the pod finds the server's
+    token in. The bundle names it; the plane copies it into the spec; the operator writes
+    a `secretKeyRef` under that name and tells the worker the same name in
+    `TROUPE_MCP_SERVERS`, so the three agree without any of them holding the value.
+    """
 
     @enforce_keys [:name, :url]
-    defstruct [:name, :url, :secret_name, :secret_key]
+    defstruct [:name, :url, :secret_name, :secret_key, :credential_ref, :header, :timeout_ms]
 
     @type t :: %__MODULE__{
             name: String.t(),
             url: String.t(),
             secret_name: String.t() | nil,
-            secret_key: String.t() | nil
+            secret_key: String.t() | nil,
+            credential_ref: String.t() | nil,
+            header: String.t() | nil,
+            timeout_ms: pos_integer() | nil
           }
+
+    @doc """
+    The environment variable the server's credential arrives in.
+
+    The declared `credentialRef` when there is one, else `TROUPE_MCP_<NAME>_TOKEN` with
+    the name upper-cased and anything that is not a letter or digit folded to an
+    underscore, so `jira-cloud` becomes `TROUPE_MCP_JIRA_CLOUD_TOKEN`. A fixed default
+    means a profile written by hand, without a bundle, still gets a name the worker can
+    be told.
+    """
+    @spec credential_env(t()) :: String.t()
+    def credential_env(%__MODULE__{credential_ref: ref}) when is_binary(ref) and ref != "",
+      do: ref
+
+    def credential_env(%__MODULE__{name: name}) do
+      "TROUPE_MCP_" <> String.upcase(String.replace(name, ~r/[^A-Za-z0-9]+/, "_")) <> "_TOKEN"
+    end
   end
 
   @enforce_keys [:name, :image]
@@ -127,7 +154,10 @@ defmodule Troupe.WorkerProfile do
       name: Map.fetch!(entry, "name"),
       url: Map.fetch!(entry, "url"),
       secret_name: get_in(entry, ["secretRef", "name"]),
-      secret_key: get_in(entry, ["secretRef", "key"]) || "token"
+      secret_key: get_in(entry, ["secretRef", "key"]) || "token",
+      credential_ref: Map.get(entry, "credentialRef"),
+      header: Map.get(entry, "header"),
+      timeout_ms: Map.get(entry, "timeoutMs")
     }
   end
 
@@ -140,7 +170,8 @@ defmodule Troupe.WorkerProfile do
   """
   @spec egress_destinations(t()) :: [String.t()]
   def egress_destinations(%__MODULE__{} = profile) do
-    endpoints = Enum.map([profile.llm_endpoint | Enum.map(profile.mcp_servers, & &1.url)], &host_of/1)
+    endpoints =
+      Enum.map([profile.llm_endpoint | Enum.map(profile.mcp_servers, & &1.url)], &host_of/1)
 
     (endpoints ++ profile.egress_fqdns ++ profile.git_hosts)
     |> Enum.reject(&(&1 in [nil, ""]))

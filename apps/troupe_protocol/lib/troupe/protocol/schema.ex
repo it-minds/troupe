@@ -32,13 +32,22 @@ defmodule Troupe.Protocol.Schema do
   @spec events() :: %{String.t() => shape()}
   def events do
     %{
+      # `kind` is `team` for a session on a pod and `local` for one on a laptop;
+      # `origin` says what started it — a person, a trigger, a run — when it was not a
+      # person typing.
       "session_created" => %{
         "workspace" => required(:string),
         "profile" => required(:string),
         "visibility" => required(:string),
+        "bundle_version" => optional(:string),
+        "kind" => optional(:string),
+        "origin" => optional(:object)
+      },
+      "agent_started" => %{
+        "profile" => required(:string),
+        "mode" => required(:string),
         "bundle_version" => optional(:string)
       },
-      "agent_started" => %{"profile" => required(:string), "mode" => required(:string)},
       "agent_restarted" => %{
         "replayed_events" => required(:integer),
         "interrupted" => optional(:boolean),
@@ -352,7 +361,10 @@ defmodule Troupe.Protocol.Schema do
   @doc "Every document that belongs in `protocol/schema/v1/`, keyed by its relative path."
   @spec documents() :: %{Path.t() => map()}
   def documents do
-    durable = for {type, shape} <- events(), into: %{}, do: {"events/#{type}.json", document("events", type, shape)}
+    durable =
+      for {type, shape} <- events(),
+          into: %{},
+          do: {"events/#{type}.json", document("events", type, shape)}
 
     ephemeral =
       for {type, shape} <- ephemeral_events(),
@@ -385,7 +397,8 @@ defmodule Troupe.Protocol.Schema do
       "title" => name,
       "type" => "object",
       "properties" => Map.new(shape, fn {field, spec} -> {field, json_type(spec.type)} end),
-      "required" => shape |> Enum.filter(&elem(&1, 1).required) |> Enum.map(&elem(&1, 0)) |> Enum.sort(),
+      "required" =>
+        shape |> Enum.filter(&elem(&1, 1).required) |> Enum.map(&elem(&1, 0)) |> Enum.sort(),
       # Fields may be added within a major version, so a document with more than this
       # is valid — that is the compatibility rule, written into the schema itself.
       "additionalProperties" => true
@@ -447,7 +460,9 @@ defmodule Troupe.Protocol.Schema do
   @doc "One breaking change, in a sentence a person can act on."
   @spec describe(incompatibility()) :: String.t()
   def describe({:removed_document, path}), do: "#{path}: removed; clients still expect it"
-  def describe({:removed_field, path, field}), do: "#{path}: field #{field} was removed or renamed"
+
+  def describe({:removed_field, path, field}),
+    do: "#{path}: field #{field} was removed or renamed"
 
   def describe({:retyped_field, path, field, old, new}) do
     "#{path}: field #{field} changed type from #{inspect(old)} to #{inspect(new)}"

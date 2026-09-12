@@ -120,7 +120,10 @@ defmodule Troupe.Policy do
     cpu = cpu_millis(get_in(profile.resources, ["limits", "cpu"]) || "0")
     memory = memory_bytes(get_in(profile.resources, ["limits", "memory"]) || "0")
 
-    cpu_violation = if cpu > policy.max_cpu_millis, do: [{:cpu_above_maximum, cpu, policy.max_cpu_millis}], else: []
+    cpu_violation =
+      if cpu > policy.max_cpu_millis,
+        do: [{:cpu_above_maximum, cpu, policy.max_cpu_millis}],
+        else: []
 
     memory_violation =
       if memory > policy.max_memory_bytes,
@@ -146,6 +149,12 @@ defmodule Troupe.Policy do
   `*.example.com` matches one label, as it does everywhere else that syntax appears —
   `a.example.com` but not `a.b.example.com`, and never the bare domain. A pattern with
   no star is an exact hostname.
+
+  A profile's own entry may be a wildcard too. It is compared as the string it is, so
+  `*.example.com` passes only a policy that carries that same pattern, never one that
+  merely covers some of the names it would reach. The operator renders such an entry as
+  a Cilium `matchPattern`, whose `*` is also a single label, so what was admitted here
+  and what the network allows are the same set of names.
   """
   @spec matches?(String.t(), String.t()) :: boolean()
   def matches?(host, "*." <> suffix) do

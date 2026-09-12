@@ -15,7 +15,19 @@ defmodule Troupe.MCP.Server do
   """
 
   @enforce_keys [:name, :url]
-  defstruct [:name, :url, :credential, :credential_ref, header: "authorization", timeout_ms: 30_000]
+  defstruct [
+    :name,
+    :url,
+    :credential,
+    :credential_ref,
+    header: "authorization",
+    timeout_ms: 30_000,
+    # What a bundle said about this server's tools: the permission they start at, and
+    # which of them may be offered at all. Applied at discovery, so an unlisted tool is
+    # not merely denied but absent from what a model can see.
+    permission: :ask,
+    tools: :all
+  ]
 
   @type t :: %__MODULE__{
           name: String.t(),
@@ -23,7 +35,9 @@ defmodule Troupe.MCP.Server do
           credential: String.t() | nil,
           credential_ref: String.t() | nil,
           header: String.t(),
-          timeout_ms: pos_integer()
+          timeout_ms: pos_integer(),
+          permission: :ask | :auto,
+          tools: :all | [String.t()]
         }
 
   @doc """
@@ -44,9 +58,24 @@ defmodule Troupe.MCP.Server do
       credential_ref: reference,
       credential: resolve(reference, config["credential"]),
       header: config["header"] || "authorization",
-      timeout_ms: config["timeout_ms"] || 30_000
+      timeout_ms: config["timeout_ms"] || 30_000,
+      permission: permission(config["permission"]),
+      tools: allowlist(config["tools"])
     }
   end
+
+  # Anything but an explicit `auto` is `ask`. A typo in a bundle should make a tool ask
+  # more, never less.
+  defp permission(value) when value in ["auto", :auto], do: :auto
+  defp permission(_value), do: :ask
+
+  defp allowlist(list) when is_list(list), do: Enum.filter(list, &is_binary/1)
+  defp allowlist(_all), do: :all
+
+  @doc "Whether a tool the server listed may be offered under this configuration."
+  @spec offers?(t(), String.t()) :: boolean()
+  def offers?(%__MODULE__{tools: :all}, _remote_name), do: true
+  def offers?(%__MODULE__{tools: list}, remote_name), do: remote_name in list
 
   defp resolve(nil, explicit), do: explicit
 
@@ -80,7 +109,10 @@ defmodule Troupe.MCP.Server do
     def inspect(server, opts) do
       concat([
         "#Troupe.MCP.Server<",
-        to_doc(%{name: server.name, url: server.url, credential_ref: server.credential_ref}, opts),
+        to_doc(
+          %{name: server.name, url: server.url, credential_ref: server.credential_ref},
+          opts
+        ),
         ">"
       ])
     end

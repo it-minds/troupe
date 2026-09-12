@@ -31,7 +31,10 @@ defmodule Troupe.Protocol.Error do
     payload_too_large: -32_012,
     # Stage 4: a client-hosted tool may not be registered on somebody else's behalf.
     # `data` carries the challenge to show them and the tools it covers.
-    consent_required: -32_013
+    consent_required: -32_013,
+    # A team's budget has nothing left to reserve for a new session. Distinct from
+    # `capacity`, which is about pods: one is money, the other is room.
+    budget_exhausted: -32_014
   }
 
   @doc "Every error token and its code, for documentation and schema generation."
@@ -56,7 +59,8 @@ defmodule Troupe.Protocol.Error do
   end
 
   @spec to_json(t()) :: map()
-  def to_json(%__MODULE__{data: nil} = error), do: %{"code" => error.code, "message" => error.message}
+  def to_json(%__MODULE__{data: nil} = error),
+    do: %{"code" => error.code, "message" => error.message}
 
   def to_json(%__MODULE__{} = error) do
     %{"code" => error.code, "message" => error.message, "data" => error.data}
