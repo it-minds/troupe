@@ -195,8 +195,8 @@ Durable:
 
 | type | `data` |
 | --- | --- |
-| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version` |
-| `agent_started` | `profile`, `mode` |
+| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `origin` |
+| `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
 | `user_input` | `source` (`user`/`watch`/`tui_todo_edit`), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
@@ -640,11 +640,38 @@ that team.
 | `admin.team.grant` / `admin.team.revoke` | platform | a team's access to a profile |
 | `admin.sessions.list` | either | session *metadata*, never content |
 | `admin.session.erase` | either | erases one, for authorised roles |
-| `admin.bundles.list` / `admin.bundle.publish` / `admin.bundle.retire` | platform | config bundles |
+| `admin.bundles.list` | either | every version of a channel, each with its `summary` (names of agents, skills and MCP servers) |
+| `admin.bundle.get` | either | one version in full: the document, its `detail` (agents with mode and skills, skills with files, MCP servers with the Secret to create), and adoption per profile |
+| `admin.bundle.validate` | platform | checks a document the way publishing will, without publishing; `{ok: true, summary, hash}` or `invalid_params` with `data.errors` |
+| `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
+| `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
 | `admin.audit.list` | either | who changed what, with diffs |
+| `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
+| `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
+| `admin.principal.rotate` / `admin.principal.disable` | either | `{subject}`: a new secret shown once, or the end of the credential; a disabled principal is `unauthenticated` at its next call |
+| `admin.triggers.list` | either | `{team}` → a team's trigger definitions |
+| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger and the diff |
+| `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not |
+| `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status |
 
 Membership is never editable: it comes from the identity provider, and a method to change
 it would be a second source of truth for who is in a team.
+
+### Triggers and principals on the harness side
+
+Three methods on the plane's `/rpc` that are not administrative, because a caller other
+than an admin uses them:
+
+| method | scope | who | answers |
+| --- | --- | --- | --- |
+| `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The same key returns the same run and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
+| `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
+| `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
+
+`POST /auth/exchange` takes `{"client_id": "svc:<team>/<name>", "client_secret": …}` as
+well as `{"id_token"}`, and answers the same plane token with `kind: "service"`, `team`
+and `profiles` claims.
 
 ### Errors
 
@@ -682,6 +709,7 @@ itself something a person who cannot see it should not learn.
 | -32011 | `rate_limited` | `data.retry_after_ms` |
 | -32012 | `payload_too_large` | `data.limit` |
 | -32013 | `consent_required` | `data.challenge`, `data.prompt`, `data.tools` |
+| -32014 | `budget_exhausted` | the team has nothing left to reserve; `data.team`, `data.reason` |
 
 Transport-level framing faults close the connection after a best-effort error.
 

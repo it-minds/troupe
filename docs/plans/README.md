@@ -1,6 +1,9 @@
 # Plans
 
-What comes after the small release, written before it is built. Each plan says what
+What comes after the small release, written before it was built. The first three are
+built as stage 5 — `ARCHITECTURE.md` §14 describes what landed and `REPORT.md` proves
+it — and stay here as the record of what was intended and why. The fourth is the GUI
+repository's `spec.md`. Each plan says what
 it brings, what it takes, what is already in place, what the code is missing today
 (with file and line), the design, the order of work, and the done items that prove it.
 `spec.md` and `ARCHITECTURE.md` remain the authority on invariants; nothing here weakens

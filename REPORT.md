@@ -851,3 +851,249 @@ writes a commit and waits; nothing in Troupe applies it.
 * **The GUI harness, remote triggers and A2A are not built.** Section 13 of
   `ARCHITECTURE.md` says what each would cost; the client SDK works from any process that
   can receive messages, and nothing in the protocol assumes a terminal.
+
+
+# Stage 5 — report
+
+A profile now carries its skills and MCP servers, and every session created on it has
+them from its first turn; a session can be created, prompted and left to run with
+nobody attached, by a service principal a team owns, and reviewed from a list the plane
+can answer without reading a log; and another agent can hand a profile a task through
+the A2A facade and get an answer back. The three plans in `docs/plans/` are the design;
+this is what was built against them and what proves it.
+
+Everything below was run in a container with PostgreSQL, OpenBao (transit and KV v2)
+and MinIO beside it, on 13 September 2026, from a working tree that compiles with
+`--warnings-as-errors`, passes `credo --strict`, `troupe.boundaries` and
+`troupe.schema.diff`. Nothing here has run on a Kubernetes cluster; the tests that need
+one skipped loudly, exactly as they did on the pristine tree, and the failures below are
+the same set on both.
+
+```
+$ mix compile --warnings-as-errors        # clean
+$ mix credo --strict                      # found no issues
+$ mix troupe.boundaries                   # boundaries ok: 5 app rule(s), 1 module rule(s), no violations
+$ mix troupe.schema.diff                  # schema unchanged: 73 documents
+Result: 92 passed             # troupe_protocol   (+9: the bundle contract)
+Result: 193/205 passed        # troupe_core       (baseline 180/192: same 12 need bubblewrap or reaper)
+Result: 48/57 passed          # troupe_gateway    (baseline identical: 9 need kill, git worktrees, reaper)
+Result: 93/94 passed          # troupe_worker     (one timing flake in PlaneLinkTest; passes alone, twice)
+Result: 236/245 passed        # troupe_plane      (the 9 enrolment tests need a TokenReview)
+Result: 35/47 passed          # troupe_operator   (the same 12 need a cluster)
+Result: 45 passed             # troupe_ctl
+Result: 30 passed             # troupe_tui
+Result: 45 passed             # troupe_a2a        (new)
+```
+
+## What had to be built first
+
+**One document, three readers.** The bundle's content was a free-form map of which one
+key was ever read. `Troupe.Protocol.Bundle` is now the contract the plane validates at
+publish, the worker validates again before materialising, and the panel renders:
+schema 1 with agents, skills and MCP servers, schema 0 for what was published before.
+The agent-definition parser moved with it into `troupe_protocol` as
+`Troupe.Protocol.AgentDefinition`, because the plane has to parse a definition without
+depending on `troupe_core`, and core now builds its struct from the same parse.
+
+```
+$ mix test apps/troupe_protocol/test/troupe/protocol/bundle_test.exs
+Result: 9 passed
+```
+
+**An error code the protocol never had.** The plane refused an over-budget create with
+`Error.new(:budget_exhausted, …)` since stage 2, and `Troupe.Protocol.Error` had no such
+code — a `FunctionClauseError` waiting for the first team to run dry, which no test had
+made happen. `budget_exhausted` is `-32014` now, in the error table and in
+`PROTOCOL.md`, and the test that trims a slice to what a team has left is the test that
+found it.
+
+## The done items
+
+### 1. A session on a profile has the bundle's agent, its skills and its MCP tools
+
+```
+$ mix test apps/troupe_plane/test/troupe/plane/bundles_test.exs
+Result: 15 passed
+$ mix test apps/troupe_worker/test/troupe/worker/bundles_test.exs
+Result: 7 passed
+$ mix test apps/troupe_core/test/troupe/skills_test.exs
+Result: 11 passed
+```
+
+Publishing a document with a definition that does not parse, a skill without its
+`SKILL.md`, an MCP host outside the cluster policy, or a credential that looks like a
+value rather than a name is refused with the reason, and nothing is announced. A
+well-formed one is stored with a `summary` so listings do not decode four megabytes,
+announced to every pod on the channel as a hash, and fetched by hash over the control
+channel; a hash that does not match what was fetched is refused. The worker writes
+`bundles/<hash>/` once and never rewrites it; a version a pod never saw is fetched for
+the session pinned to it and does not become current. The heartbeat carries the newest
+hash, so `bundles.adoption` reports the truth instead of every pod stale.
+
+A definition loaded from the bundle has `source: :bundle` and sits between the built-ins
+and the config directory. An agent that lists skills gets one line per skill in its
+prompt; the `skill` tool returns the `SKILL.md` body and the file list, and answers
+`not_found` for a skill the definition does not list; `skills:/` is a mount kind whose
+mode is forced read-only, and `mounts_resolved` records it beside the others.
+`session_created` now carries `kind`, `bundle_version` and `origin`; `agent_started`
+carries `bundle_version`.
+
+### 2. Publish version 2; a session activated afterwards moves, one still running does not
+
+This is stage 2's done item 11 and 29, unchanged in shape and now reachable with a real
+document: `Bundles.resolve/2` still pins at creation and upgrades at activation with
+`config_upgraded`, and the tests that proved it in stage 2 still pass with schema 1
+content. What is new is that the upgrade changes what a session *has*, because the
+definition and the skills come from the pinned directory.
+
+### 3. MCP hosts reach egress and credentials reach pods
+
+```
+$ mix test apps/troupe_operator/test/troupe/operator/resources_test.exs
+Result: 33 passed
+```
+
+A profile with two MCP servers, one with a `secretRef`, produces `TROUPE_MCP_SERVERS` as
+one JSON variable and one `secretKeyRef` env var, `optional: true`, under the name the
+bundle's `credential_ref` gave it; the secretless server gets no variable. A wildcard
+in `allowedEgress` renders as a Cilium `matchPattern`, an exact name as `matchName`. On
+publish and on retire the plane writes the channel's servers into every profile's
+`spec.mcpServers`, which is how the operator learns of them; the admission policy already
+folded MCP hosts into its egress check and was left alone.
+
+### 4. `session.create` with a prompt and no client runs the first turn, once
+
+```
+$ mix test apps/troupe_worker/test/troupe/worker/unattended_session_test.exs
+Result: 4 passed
+$ mix test apps/troupe_core/test/troupe/session/unattended_approvals_test.exs
+Result: 2 passed
+```
+
+The plane passes `prompt`, `agent`, `terms` and `origin` in `session.activate`; the
+worker seeds the prompt as the first task and the fake provider records one request. A
+second activation of the same session does not repeat it, because the agent seeds only
+when the log has no input. `terms.approvals: deny` logs `approval_requested` and an
+`approval_decided deny` with a system actor, and the model reads a denial rather than
+waiting for a person who is not there. `terms.max_turns` and `wall_clock_seconds` become
+the session's budget.
+
+### 5. A principal can create on its profiles and nothing else
+
+```
+$ mix test apps/troupe_plane/test/troupe/plane/harness_test.exs
+Result: 23 passed
+$ mix test apps/troupe_plane/test/troupe/plane/web_test.exs
+Result: 14 passed
+```
+
+`POST /auth/exchange` with a client id and secret answers the same token a person gets,
+with `kind: "service"`; the principal's `session.create` on its profile is accepted and
+on any other is `forbidden`; `admin.overview` is `forbidden`; disabling the principal
+makes its next call `unauthenticated`. Sessions it creates carry its subject as owner,
+so cost and retention are its team's and every input in the log names it.
+
+### 6. Status the plane can list, and a review that costs no replay
+
+```
+$ mix test apps/troupe_plane/test/troupe/plane/control_test.exs
+Result: 14 passed
+```
+
+A worker's `session.status` lands on the row — status, done reason, pending approvals,
+cost — fenced by epoch, and `session.dormant` carries the same fields and releases the
+team's budget reservation, which its documentation had always claimed. `sessions.list`
+filters on `origin`, `trigger`, `status` and `needs_review`; a row written before
+origins existed reads as a person's. `session.review` marks a run seen and audits it.
+
+### 7. A trigger fires once per key, is capped, and the scheduler fires on the minute
+
+```
+$ mix test apps/troupe_plane/test/troupe/plane/triggers_test.exs
+Result: 14 passed
+```
+
+`trigger.fire` twice with one idempotency key creates one session and returns the same
+run; a second live run over the concurrency cap is recorded as `skipped` with no session;
+the prompt template resolves `{{event.issue.key}}` and renders a missing path as
+nothing; the cron parser answers the five-field forms and the scheduler, given a clock,
+fires a due trigger exactly once and leaves one that is not due alone. The plane
+creates the session through the same `Harness.call` a person's client uses, so every
+grant, budget and policy check applies to a trigger.
+
+### 8. A task is a session, an artifact is a published file, input-required is an approval
+
+```
+$ mix test apps/troupe_a2a/test/troupe/a2a/card_test.exs      # Result: 4 passed
+$ mix test apps/troupe_a2a/test/troupe/a2a/tasks_test.exs     # Result: 20 passed
+$ mix test apps/troupe_a2a/test/troupe/a2a/stream_test.exs    # Result: 7 passed
+$ mix test apps/troupe_a2a/test/troupe/a2a/artifacts_test.exs # Result: 5 passed
+```
+
+Against a stub plane and a fake worker over a real WebSocket: the card for a profile
+lists the bundle's skills and its version; `message/send` creates a session with
+`origin.kind: a2a` and returns the session id as the task id; `tasks/get` maps row
+status onto A2A states; a decision part on a waiting task becomes `approval.respond`,
+free text is refused with a hint; an artifact whose bytes do not hash to its id is a
+502; a second caller's task is not found; a stream survives a token refresh and
+resubscribes from the last sequence the caller saw; the stream cap answers 429.
+
+## The client path, after all of it
+
+The worker image was rebuilt from this tree and the GUI repository's bench run against
+it, twenty clients by ten prompts on the fake model: 200 of 200 turns, p95 of 6.9 ms
+from `input.send` to the end of the turn, about 1,070 turns a second. The same numbers
+as before the stage, which is the point of measuring them.
+
+## Deviations
+
+Each is a numbered entry in `DECISIONS.md`, 221–286. The ones a reader of the plans
+would look for:
+
+* **`config.updated` still carries `mcp_servers` for one release**, so a worker from
+  the previous image keeps working against a plane from this one.
+* **Cron is UTC only.** There is no time-zone database in `mix.lock` and this stage did
+  not add a dependency for it; a non-UTC `tz` is refused at `trigger.put`.
+* **Budget is re-reserved at activation**, the complement of releasing it at dormancy.
+* **`session.grant` pushes `acl.changed` and mirrors the row; it does not append
+  `acl_granted` to the log**, because the pod is the only writer of a session's log and
+  the push is the ACL mechanism the worker already had.
+* **The plane has no push channel to harness clients**, so status changes are columns
+  and filters, not a `session_status` event; `fleet` remains the worker's topic.
+* **Principal secrets are salted SHA-256**, compared in constant time, because adding a
+  password-hashing dependency for a 256-bit random secret buys nothing.
+* **The A2A facade's task id is the session id** and it stores nothing; a restart
+  recovers everything from `sessions.list`.
+* **Push notifications are not built**, and the card says so.
+
+## What writing the tests found
+
+* The `budget_exhausted` error above.
+* `Bundles.adoption/2` had always reported every pod stale, because nothing on the
+  worker populated the `bundle_hash` claim the plane compared against.
+* The operator's `SecretMissing` check reads Secrets in `troupe-system`, while a pod's
+  `secretKeyRef` resolves in `troupe-w-<profile>`, so the condition can disagree with
+  the pod for the LLM secret as well as for MCP ones. Not changed here: the cluster
+  suite creates its secret in `troupe-system` and the operator's RBAC reads there; it
+  needs a decision and a cluster run, and it is the first item for the next stage.
+* `PlaneLinkTest`'s "reports made while the plane is down are delivered when it returns"
+  waits ten seconds for a reconnect and, once in a full run, did not get one; alone it
+  passes every time. Left as it is and named here rather than widened.
+
+## Known limitations
+
+* **Nothing has run on a cluster.** The chart lints and renders with the small values
+  and with the facade enabled, the operator's resources are unit-tested, and the
+  cluster-only tests skip. The end-to-end done items — a pod fetching a bundle from a
+  real plane, a principal's cron firing on kind, LiteLLM's gateway calling the facade —
+  are the next run of `scripts/remote-up`.
+* **`cost_micros` is always zero** in `session.status`, because the summary the worker
+  folds has no cost yet; the column and the wire are there for when it does.
+* **The panel's bundle editor is structured on the way out and JSON on the way in.**
+  The Agents, Skills and MCP pages the plan describes are the CLI's directory publish
+  plus a validating textarea for now.
+* **Hatchet workflows are not in this repository.** The plane's `trigger.fire` is what
+  they call; the in-plane scheduler covers cron without them.
+* **A2A field names** follow the specification as of mid-2026 and a handful are noted
+  as uncertain in `DECISIONS.md`; the conformance run against LiteLLM's client is where
+  any difference will show.

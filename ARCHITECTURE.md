@@ -389,6 +389,13 @@ hashes, byte counts), usage records, and pushes the other way — activate, dorm
 fence, drain, erase, JWKS rotation, ACL changes. Every push is idempotent, because a
 reconnect retries without knowing what landed.
 
+Config bundles are fetched, not pushed. `config.updated` names a channel, a version and
+a hash; the worker asks `bundle.fetch {hash}` (or `{channel, version}`) for the document
+and verifies the hash before materialising it. The heartbeat's `bundle_hash` is the
+newest version the pod holds, which is what `bundles.adoption` compares against the
+channel's current version — a pod holding a newer, since-retired version is ahead, not
+behind.
+
 A pod is attached to exactly one replica, and rarely the one a harness reached, so
 pushes are *routed*: try locally, otherwise ask the other replicas, each of which
 answers with a single registry lookup.
@@ -413,6 +420,49 @@ makes it survive the replica that made it.
 looked at it would never stay dormant. In `activate` mode the conditional epoch bump is
 the decision — exactly one caller wins it, places the session and pushes it to a pod,
 and the others wait for that and are handed the same tree.
+
+`profiles.list` says what a session on each profile will have before it is created:
+the profile's `channel`, the current `bundle_version` and `bundle_hash`, the `agents` it
+may start as (the bundle's primaries, then the built-ins it does not replace), its
+`skills` with descriptions, and the names of its `mcp_servers`. `session.create` takes
+an optional `agent` from that list; a name not on it is refused with the list, before
+anything is placed or budgeted, and the accepted name reaches the pod in
+`session.activate`.
+
+`session.create` also takes what a session with nobody attached needs, and a person may
+use too:
+
+* `prompt` (≤ 64 KiB) — the first input, sent to the pod in `session.activate` and never
+  stored by the plane. Only the first activation carries it; a later one replays the log,
+  in which it is already the first input.
+* `terms` — `budget_micros` (replaces the default slice, trimmed to what the team has
+  left), `max_turns` (1–500), `wall_clock_seconds` (60–86400) and `approvals` (`wait`,
+  the default, or `deny`; there is no `auto`). Kept on the row and sent on every
+  activation, because the pod applies them to the tree it starts.
+* `origin` — `{kind: user | trigger | a2a, …}`, `user` by default; kept on the row and
+  recorded by the pod in `session_created.data.origin`.
+
+Every check on these happens before the row exists, so a bad term costs nothing.
+
+The listing carries what the worker reports over the control channel as
+`session.status` and in its dormancy report — `status` (`idle`, `thinking`, `acting`,
+`waiting`, `done`, `interrupted`), `done_reason`, `pending_approvals` and `cost_micros`
+— plus `origin`, `terms`, `reviewed_by` and `reviewed_at`, so a review queue is a
+listing and not a replay. `sessions.list` filters on `status`, `origin` (a kind),
+`trigger` (a name) and `needs_review` (a trigger's or an A2A caller's session nobody has
+marked reviewed). Status reports are fenced on the epoch like seal reports. There is no
+plane-side push of these to harness clients: `/rpc` is request and answer, and the
+`fleet` topic is the worker's.
+
+Three more methods belong to this API rather than to administration: `session.grant`
+(an owner or a team admin lets a subject in; mirrored in the ACL table and pushed to the
+pod as `acl.changed`), `session.review` (anybody who can see a session marks it looked
+at, on the row and on its run), and `trigger.fire` (a trigger's principal or a team
+admin fires it with an idempotency key; the session is created through `session.create`
+*as the principal*, so every check applies). Service principals — `svc:<team>/<name>`,
+made by a team admin, resolving to a `%User{}` of `kind: "service"` whose only team is
+its own — are how a trigger is a caller and not a feature; `Admin.actor_for/1` gives one
+no role.
 
 ### 8.3 Tokens
 
@@ -643,16 +693,123 @@ they find out from the transcript.
 
 ---
 
-## 13. Kept possible, not built
+## 13. Kept possible, then built
 
-The spec rules these out and then asks that they stay reachable. What that costs, each:
+The spec ruled three things out and asked that they stay reachable. Stage 5 built two
+of them and the third is a client in the GUI repository:
 
-* **A GUI harness** would serve a local LiveView bound to loopback with a one-time token.
-  Nothing in the protocol assumes a terminal and the client SDK works from any process
-  that can receive messages, so this is a client rather than a change.
-* **Remote triggers** need a session created and activated for a service principal with
-  no attached client, under the same grants, budgets and retention, with results waiting
-  in the log for whoever attaches later. That is what the plane already does; a trigger
-  is a caller, not a feature.
-* **A2A** maps onto the event model as tasks. Nothing may assume a session never moves,
-  which fencing and relocation already require.
+* **Remote triggers** and **the A2A facade** are §14. Both turned out to be what §13 once
+  promised: callers of the plane and the worker socket, with a service principal where a
+  person used to be, and a few lifecycle facts the plane can now list.
+* **A GUI harness** is `troupe-gui`, its own repository, speaking the protocol over a
+  WebSocket to pods and, in its second stage, to the daemon on loopback. Nothing in the
+  protocol assumed a terminal, and nothing had to change here for it.
+
+---
+
+## 14. What a profile carries, work nobody starts, and other agents
+
+### 14.1 Bundles, skills and MCP servers
+
+A bundle is the description of a profile beyond a model and file tools: agent
+definitions, skills, and MCP servers, in one versioned, hashed, immutable document
+(`Troupe.Protocol.Bundle`, schema 1; the earlier free-form map is schema 0 and reads as
+MCP servers only). The plane validates it at publish — definitions parse, skills carry a
+`SKILL.md`, MCP hosts are in the cluster's egress policy, a credential reference looks
+like the name of an environment variable and not like a secret — and the worker
+validates it again before applying it, because the plane's word is a hash, not a
+promise.
+
+A worker keeps every version it has been told about under `bundles/<hash>/`, written
+into a scratch directory and renamed into place, so a session pinned to version 3 reads
+version 3 however many have been published since. Agent definitions from the bundle
+slot into the load order between the built-ins and the config directory, which on a pod
+are empty by design, so the bundle is the effective source and `agent_started` names
+the version. `profiles.list` renders the same document as what a session will have, and
+`session.create agent:` picks one of its primaries.
+
+Skills follow the Agent Skills convention: a directory with a `SKILL.md` whose
+frontmatter is its name and description and whose body is instructions, beside any files
+they refer to. They are disclosed progressively. An agent whose definition lists them
+gets one line per skill in its system prompt; a `skill` tool — a tool *value*, as MCP
+tools are — returns the body on demand and logs the call like any tool; the files are
+readable through a `skills:/` mount that is read-only to every tool and to the sandbox.
+A transcript therefore shows which skill was consulted and when, and a skill cannot
+carry anything `shell` could execute from its own directory.
+
+MCP servers have one source of truth, the bundle, and two consumers. Pods re-discover
+tools on `config.updated`, apply the bundle's per-server `tools` allowlist at discovery
+so an unlisted tool is absent rather than denied, and take `permission` as the tool's
+default, which an agent definition may tighten. The operator learns of the servers
+because the plane writes them into the `WorkerProfile` on publish: the hosts join the
+egress destinations (Cilium rules now say `matchPattern` for wildcards, `matchName`
+otherwise), and each server's `secretRef` — `troupe-mcp-<name>`, key `token`, in the
+worker namespace, by convention — is injected as the env var its `credential_ref`
+names, `optional`, so a missing Secret is the profile's `SecretMissing` condition and
+not a pod that will not start. Personal MCP servers are untouched: they arrive through
+`tools.register` under consent and are never configured into a pod.
+
+### 14.2 Service principals, unattended sessions and triggers
+
+A service principal is a credential a team owns — `svc:<team>/<name>`, a hashed secret
+shown once, a list of the team's profiles it may use. It is not a member and not a
+person, which is what keeps team membership the identity provider's business. It
+exchanges its secret at `/auth/exchange` for the same plane token a person gets, with
+`kind: "service"`, resolves through `Identity` as a user with one team, and gets `:none`
+from `Admin.actor_for/1`: it can create and steer sessions on its profiles and do
+nothing else. Every input it sends is in the log under its name.
+
+`session.create` now carries what an unattended session needs: `prompt`, which the
+plane passes to the pod in `session.activate` and the pod seeds as the first task only
+when the log is empty, so a later activation never re-runs it; `terms` — a budget slice
+in place of the fixed one, `max_turns`, `wall_clock_seconds`, and `approvals`, which is
+`wait` (the approval sits in the log and the queue) or `deny` (the agent is told no, as
+a readable result); and `origin`, recorded on the row and in `session_created`. There
+is no `auto` for a triggered session's approvals; a trigger that needs none runs a
+profile whose bundle sets those tools to `auto`, an admin's versioned act rather than a
+flag on a schedule.
+
+Four lifecycle facts left the log and became columns: `status`, `done_reason`,
+`pending_approvals` and `cost_micros`, reported by the pod on change and at dormancy.
+They are not content — a review queue, an A2A `tasks/get` and a synced session list all
+need them, and none of them should have to replay a log to find out. `sessions.list`
+filters on `origin`, `trigger`, `status` and `needs_review`; `session.review` marks a
+run seen; `session.grant` adds a collaborator from the plane. Dormancy now releases the
+team's budget reservation, as its documentation always said.
+
+A trigger is a row the plane stores and a caller fires. `trigger.fire {trigger,
+idempotency_key, event}` renders the prompt template, applies the terms, creates and
+activates the session as the trigger's principal through the same `Harness` call a
+person's client makes — so every grant, budget and policy check applies — grants the
+`notify` subjects, and records a run; the same key returns the same run. Concurrency is
+capped per trigger and an overlapping run is `skipped`, not a second session. Hatchet is
+the executor for schedules with retries and for webhooks, which terminate at Hatchet and
+never at the plane, so the plane still has no public trigger surface and makes no
+outbound call. A plane without Hatchet fires cron triggers itself from a `:global`
+scheduler singleton, the idiom `Placement` and `TeamBudget` already use, which is what
+the small release ships with.
+
+### 14.3 The A2A facade
+
+`troupe_a2a` is a fourth server image and a client of the other three surfaces. It
+depends on `troupe_protocol` only, holds no database and no credential of its own: a
+caller presents a service principal's secret or an identity provider token, the facade
+exchanges it and acts as that principal, and a compromised facade holds nothing more
+than each caller's short-lived plane token.
+
+The mapping is the one the event model was built for. A task is a session, created
+with `origin.kind: a2a` and the session id as the task id; a message is `input.send`;
+`message/stream` is a subscription translated into status and artifact updates over
+server-sent events; `input-required` is `approval_requested`, answered by a structured
+decision part and refused for free text, because text cannot answer a yes or no the log
+will record as a decision; artifacts are `published` events and blob references served
+through `fs.read` and `blob.get` with the caller's own token, the hash being the artifact
+id. The agent card is rendered from `profiles.list`, so Troupe skills are A2A skills and
+the card's version is the bundle's.
+
+Two costs are stated rather than hidden. Reading a finished task's history or an
+artifact opens a reader on a pod of the profile, because the plane cannot decrypt a
+session and never will; `tasks/get` without history is answered from the row alone.
+And there are no push notifications yet: they would be the facade's first outbound call
+through an egress policy that names model endpoints and git hosts, and when they come
+they will be the facade's, to an allowlist, never the plane's.

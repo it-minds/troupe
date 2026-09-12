@@ -177,6 +177,15 @@ And **in every worker namespace** (`troupe-w-<profile>`, which the operator crea
 | `troupe-object-store` | `access-key-id`, `secret-access-key` | the same credentials; a pod reads and writes sealed segments itself |
 | your LLM secret | `api-key` | whatever the profile's `llm.secretRef` names |
 
+**MCP servers** follow a fixed convention rather than a field you fill in. For every
+server the channel's config bundle names with a `credential_ref`, create
+`troupe-mcp-<server>` with key `token` in each worker namespace whose profile is on
+that channel — a bundle server called `jira` means `troupe-mcp-jira`. The operator
+injects it as the environment variable the `credential_ref` names, marked optional, so a
+Secret that is not there yet does not stop the pod: the profile reports `SecretMissing`
+naming it, the server's tools are offered without a credential until it appears, and
+nothing in the plane or the panel ever holds the value.
+
 This is where External Secrets Operator earns its keep: the operator creates the namespace,
 and ESO puts the secrets in it. Doing it by hand means remembering on every new profile.
 

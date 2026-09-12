@@ -308,6 +308,13 @@ sessions beside local ones without changing.
 [docs/deploying-on-scaleway.md](docs/deploying-on-scaleway.md) says how, including
 `values.small.yaml` for one plane, one operator and a handful of workers.
 
+`apps/troupe_a2a` is the A2A facade: every profile as an agent other agents can call,
+with an agent card at `/a2a/<profile>/.well-known/agent-card.json` and `message/send`,
+`message/stream`, `tasks/get` and `tasks/cancel` mapped onto sessions, inputs, the
+event stream and approvals. It is one more protocol client — it depends on
+`troupe_protocol` alone, holds no credential of its own, and exchanges each caller's at
+the plane — and [docs/a2a.md](docs/a2a.md) has the mapping and the auth.
+
 The TUI in this repository is now the protocol's test harness rather than the product's
 face. It exercises every method a client needs, it is what CI drives, and `mix
 troupe.boundaries` holds it to `troupe_protocol` alone — which is what keeps "no private

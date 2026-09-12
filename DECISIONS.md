@@ -1243,3 +1243,539 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      neither of those APIs; moving would mean a second KMS adapter and a second signer, for
      a managed service holding the keys that protect every session. Their Key Manager is
      used for what it is good at instead: auto-unsealing it.
+
+## Stage 5 — skills and MCP servers
+
+221. **The plane reads `TroupePolicy` from the cluster, through one module.** Nothing had
+     ever set `:troupe_plane, :policy`, so outside the tests the plane's profile check ran
+     against no policy at all. `Troupe.Plane.ClusterPolicy` reads the configured document
+     when there is one and otherwise the named `TroupePolicy` over the same client
+     provisioning uses, per call and uncached, and both `Provision` and `Bundles` go
+     through it — the bundle's egress refusal and the profile editor's verdict cannot be
+     reading two different documents. The name comes from `TROUPE_POLICY_NAME`, the
+     variable the operator reads, for the same reason.
+
+222. **No policy means every MCP host is allowed, said once.** A development plane and the
+     test suite have no cluster. Refusing every host there would make publishing
+     impossible where bundles are written; the warning is logged the first time so a
+     production plane that lost its RBAC does not fail silently open. `:egress_allowed` in
+     the application environment replaces the policy with a function, which is the seam a
+     test uses to say "nothing is allowed" without composing a policy document.
+
+223. **Publish validates with the shared contract and answers in sentences.** `Bundles`
+     calls `Troupe.Protocol.Bundle.validate/2` and turns its list of messages into
+     `{:error, {:invalid_bundle, messages}}`; `Admin` renders that as `invalid_params` with
+     `data.reason = "invalid bundle"` and `data.errors`. `admin.bundle.validate` returns the
+     same error rather than `{ok: false}`, so `troupe admin bundle validate` fails in a
+     pipeline and the panel renders a check and a failed publish through one path. The
+     built-ins a bundle may not shadow are listed in the plane (`build plan general
+     explore`) because the plane does not depend on core, where they live.
+
+224. **The `summary` column is written once and empty means "older plane".** A version is
+     immutable, so its summary is too; rows from before the column keep `%{}`, which the
+     panel shows as "summarised by an older plane" rather than as a confident zero.
+     Nothing backfills, because a migration that parsed documents would be running the
+     bundle validator inside a schema change.
+
+225. **`config.updated` carries `mcp_servers` for one more release.** The push is now
+     `{channel, version, bundle_hash}` and the worker fetches the document by hash, but a
+     worker from before `bundle.fetch` applied only what the push carried. Dropping the
+     field in the same release would have left such a pod with no servers until it was
+     rebuilt; it goes when no such worker can be running, and the comment in `announce/1`
+     says so.
+
+226. **`bundle.fetch` answers by hash first, preferring the asking pod's channel.** The
+     same document on two channels has one hash and two rows, and either row's content is
+     right; the channel and version in the answer are the pod's own when they can be, so
+     a log line on the worker names the version the pod was told about. `{channel,
+     version}` is accepted too, for a session pinned to a version the pod has never been
+     announced. A bundle is configuration an admin published and may cross the control
+     channel; session content still never does.
+
+227. **A pod on a retired newer version is "ahead", and adopted.** Adoption compares the
+     heartbeat's hash with the channel's *current* version. After the newest version is
+     retired, a pod that materialised it reports its hash and keeps every version it was
+     told about, so it can serve the current one from its own directory; listing it as
+     stale would make every rollback look like a fleet that had not caught up. It is
+     reported separately so an operator can still see it.
+
+228. **The plane writes `mcpServers` on publish and on retire, from the current version.**
+     `Bundles.project_mcp_servers/2` rewrites every profile on the channel and
+     re-provisions through `Provision.apply/2`, the path `profile.put` uses, so GitOps
+     mode commits the same change. It runs from `Bundles` rather than from `Admin` so a
+     publish from any caller projects; a cluster that cannot be reached is logged and the
+     publish succeeds, as `team.grant` already does for `teams`. Entries carry `name`,
+     `url`, `header`, `timeoutMs`, and — only with a `credential_ref` — `credentialRef`
+     and a `secretRef` of `troupe-mcp-<server>` / `token`, the fixed convention the plan
+     names; a server with no credential stays in the list because egress is decided from
+     it. The projection is not re-validated against egress: a policy that tightened since
+     should stop the next publish, not make a retire fail.
+
+229. **`profiles.list` offers the bundle's primaries *and* the built-ins it does not
+     replace.** Built-ins sit below the bundle in the definition search order, so a bundle
+     that adds `reviewer` has not taken `build` away; offering only the bundle's would
+     refuse a name the pod would happily start. The order is the bundle's first, then
+     `build`, `plan`. The offering is decoded from the document on each call rather than
+     cached: the document is one row the plane already holds, and a cache keyed by hash
+     was more code than the parse it saved.
+
+230. **`session.create agent:` is checked before anything is reserved.** Against the same
+     current version `create_row` pins, with the names that would have been accepted in
+     the error, so a client can correct itself; placing, budgeting and then failing on the
+     pod would have spent a slot and a reservation on a typo. The name reaches the pod as
+     `agent` in `session.activate` and is not stored on the row — the pod's
+     `session_created` is its record.
+
+231. **`admin.bundle.get` and `admin.mcp.check` are either role; `validate` is platform.**
+     A bundle holds prompts, skill files and the *names* of credentials, never a value, so
+     there is nothing in it a team admin may not read about the profiles their team uses,
+     and the same is true of "may a pod reach this host". Validating is a step of
+     publishing and takes publishing's role. `bundle.get` also carries adoption per
+     profile, so the bundles page needs no private path to what the workers page shows.
+
+232. **`troupe admin bundle publish` takes a directory, assembled client-side and validated
+     by the plane.** `agents/*.md`, `skills/<name>/**` and `mcp.yaml` or `mcp.json` become
+     a `schema: 1` document, with each skill's description read from its `SKILL.md`
+     frontmatter rather than asked for twice; nothing is checked in the CLI, because the
+     plane checks every client's document with the same code, and two validators would
+     drift. A directory with none of the three parts is refused as almost certainly the
+     wrong path. The panel keeps a JSON textarea for input and shows the current version
+     as structure, because a bundle's home is git and the CLI, and structured editors for
+     three kinds of thing were more page than the studio needs today.
+
+## Stage 5 — the operator and MCP servers
+
+233. **An MCP credential is injected under the name the bundle's `credential_ref` gives it,
+     and `TROUPE_MCP_<NAME>_TOKEN` when it gives none.** The name is computed in one place,
+     `WorkerProfile.MCPServer.credential_env/1` in `troupe_protocol`, because three parties
+     have to agree on it — the plane writing the spec, the operator writing the pod, the
+     worker reading the variable — and a convention each of them spelled for itself would
+     drift. It is emitted only for an entry with a `secretRef`: a variable nothing sets
+     would be a reference the worker then had to see through. Every such variable is
+     `optional: true`. Without that a missing Secret is a pod stuck in
+     `CreateContainerConfigError`; with it the pod starts, that server is offered without
+     a credential, and the profile's `SecretMissing` condition names what is absent.
+
+234. **The pod learns its servers from `TROUPE_MCP_SERVERS`, one JSON variable.** The
+     worker already reads exactly this shape — `Troupe.MCP.Server.from_config/1`, the
+     same reader the bundle push goes through — so a per-field flattening would have been
+     a second contract for the same thing. Fields the spec is silent on are left out rather
+     than written as `null`, so the worker's defaults apply. The CRD gains `credentialRef`,
+     `header` and `timeoutMs` so the spec can carry what the bundle carries and a pod is
+     right before its first `config.updated`, not only after. A change to the list changes
+     the env, which rolls the StatefulSet under the existing rules; the encoding is stable
+     across reconciles because the maps are small enough for Erlang to keep sorted, and an
+     env value that moved with map order would roll pods for nothing.
+
+235. **A wildcard in `allowedEgress` becomes a Cilium `matchPattern`; an exact name stays a
+     `matchName`.** `matchName` takes a star literally, so a wildcard the policy admitted
+     produced a rule that allowed nothing, silently. Cilium's `*` in a pattern is a run of
+     hostname characters without a dot — one label — which is what `Policy.matches?/2` and
+     the admission CEL already take `*.example.com` to mean, so the admission check, the
+     operator's check and the network now agree on the set of names. A profile's own
+     wildcard entry is compared as the string it is, so it passes only a policy carrying
+     the same pattern. The admission policy already counted `mcpServers[].url` hosts as
+     egress; it was verified and left alone.
+
+## Stage 5 — workers, skills and unattended sessions
+
+236. **Core builds its `Definition` from the shared parser's map.** `Troupe.Agent.Definition.parse/3`
+     is `Troupe.Protocol.AgentDefinition.parse/2` plus a struct, and the duplicated
+     frontmatter code is gone. One parser means the plane refusing a definition at publish
+     and the worker loading it at session start cannot disagree about what a file means;
+     `from_parsed/2` is public so a caller holding a bundle's already-parsed agents does
+     not parse them twice.
+
+237. **A definition lists no skills unless it says so.** `skills:` defaults to `[]`, `all`
+     opens every skill the bundle carries, and `allows_skill?/2` mirrors `allows_tool?/2`.
+     The default is empty rather than `all` because a skill is a paragraph of prompt an
+     admin can change under a running profile, and a profile that never asked for any
+     should not grow one because somebody published it.
+
+238. **Bundle definitions load between the built-ins and the config directory.** Built-in <
+     bundle < global < project, with `source: :bundle`. On a worker the last two are empty
+     by design, so the bundle is the effective source; on a laptop the option is absent and
+     the order is what it was.
+
+239. **The skills mount is kind `bundle`, named `skills`, and read-only whatever it is
+     asked to be.** `Mounts.new/1` forces `:ro` on that kind rather than trusting the caller,
+     because the same table is the sandbox's bind list, and a skill that could carry a
+     script `shell` runs from its own directory is the thing the plan refuses. `skills:/`
+     is the prefix a model writes; `bundle` is what the entry is a piece of, and the mount
+     is only added when the bundle actually has a `skills/` directory, so a profile with
+     nothing but MCP servers records the same `mounts_resolved` it always did.
+
+240. **The `skill` tool is scoped to the agent's context, not registered pod-wide.** It reads
+     the bundle *this session* is pinned to, and two sessions on one pod may be pinned to
+     different versions, so it cannot live in `:remote_tools` beside the MCP tools.
+     `Tools.available/2` is `for_definition/2` plus the tools the context adds, `specs/2`
+     offers from it, and `authorize/3` falls back to it after the pod-wide list — one gate,
+     as before. `Ctx` gained `bundle` for this and `Agent.State` carries it down to
+     subagents.
+
+241. **A skill the profile does not list is not found, not denied.** From inside the session
+     it does not exist, the same way another team's volume does not resolve. The tool is
+     offered only when the bundle has skills and the profile lists at least one, so a model
+     that can see the tool always has something it may ask for.
+
+242. **The prompt carries names and descriptions, the tool carries the body, the log
+     carries nothing extra.** One line per listed skill under a fixed heading; the
+     instructions cost nothing until asked for; and the `tool_call_started` /
+     `tool_call_completed` pair is the whole record of which skill was read and when. A
+     separate `skill_read` event would say the same thing twice.
+
+243. **`session_created.kind` is always written; `origin` and `bundle_version` only when
+     present.** `kind` is `team` from a worker and `local` otherwise, so a listing can tell
+     them apart without inferring it from paths. The optional fields are omitted rather than
+     written as `null`, so a laptop session's first event gains one key and nothing else.
+
+244. **`Troupe.resume/2` passes a task through, and the root seeds one only on an empty
+     agent log.** The old `task: nil` was the guard against re-running a prompt; the real
+     guard is in `Agent.Server.replay/2`, which seeds only when the agent has no events of
+     its own at all — stricter than "no `user_input` yet", and already true. A second
+     activation with the same prompt replays the input it took and takes no new one.
+
+245. **The MCP allowlist and permission are applied where the tools are built.**
+     `Troupe.MCP.Server` carries `permission` and `tools` from the bundle's wire shape;
+     `Troupe.MCP.tools/1` drops what the allowlist does not name before `Tool.new/2` runs,
+     and `Tool.new/2` takes the server's permission as the tool's default. `Worker.MCP`
+     did not change: it hands configs through `from_config/1` and gets the right tools back.
+     Anything but an explicit `auto` reads as `ask`, so a typo in a bundle makes a tool ask
+     more, never less.
+
+246. **`approvals: :deny` writes both events and answers with its own reason.** The request
+     goes to the log so the transcript shows what the agent wanted; the decision goes to
+     the log, actor system, so a later activation finds the call answered rather than
+     pending. The gate answers `{:deny, :unattended}` and the tool result says nobody was
+     there to approve, because "denied by the user" would name a person who does not
+     exist. A decision replayed from the log answers plain `deny`; by then the call is
+     almost always complete anyway.
+
+247. **A bundle's directory is its hash with the colon made a dash.** `sha256:` is how a hash
+     reads on the wire and in a log, and a colon is not a character every filesystem a
+     worker runs on allows in a name. The spelling changes on disk and nowhere else;
+     nothing durable records the directory.
+
+248. **The worker verifies against the announced hash, and validates again.** The document
+     is hashed over canonical JSON before a byte of it is trusted, and a mismatch is refused
+     and logged with both hashes. When no hash was announced — an activation whose version
+     the plane could not resolve — the response's own claim is checked instead, so the
+     document is at least what the plane says it is. Validation is repeated on the pod
+     because the plane's check is the plane's.
+
+249. **A failed fetch with servers inline applies the servers and makes nothing current.**
+     `config.updated` may carry `mcp_servers` for one more release, and a pod that cannot
+     reach the plane for the document still gets its tools from them. But the pod's
+     `bundle_hash` claim stays what it was, because it does not have that bundle, and the
+     plane is entitled to see it as behind.
+
+250. **The bundle index is a file beside the directories, and a missing directory is
+     refetched.** `bundles/index.json` maps hashes to versions and channels and names the
+     current one, so a restarted pod knows what it has, hands the current bundle's MCP
+     servers back to the registry before the plane says anything, and fetches again — with
+     a short first wait and a slow retry — when the index names a bundle whose directory a
+     lost volume took.
+
+251. **The `bundle_hash` claim is a persistent term, published only for a bundle that is on
+     disk.** The link reads it on every heartbeat, and the registry may at that moment be
+     waiting on the link for a fetch; a call between them would have each waiting on the
+     other until a timeout let go. A hash whose directory is missing is not claimed, so a
+     pod that is behind reports itself behind.
+
+252. **Activation materialises the pinned version first, and fails rather than run without
+     it.** The definitions and skills a session runs under come from that directory, and a
+     session that started on built-ins because its bundle was late would be a different
+     session that happened to share an id. The pod answers `unavailable` with the hash and
+     the reason, and the plane may try another pod or try again. `bundle.fetch` carries
+     `channel` and `version` beside the hash so a plane that can answer by version does.
+
+253. **Terms become config overrides at the pod.** `max_turns` is the budget's `max_turns`;
+     `wall_clock_seconds` becomes `wall_clock_ms`, which `Budget` already exhausts on;
+     `approvals` is `:deny` when it says so and the default otherwise. There is no `auto`
+     a trigger can ask for, which is the design's refusal written into the parser.
+
+254. **Status is folded in the manager from the events it already receives.** The root
+     agent's transitions, `agent_restarted`, `user_input` and the approval events are all
+     it needs; `waiting` outranks everything because a session with a question outstanding
+     is waiting on a person whatever its agent is doing meanwhile, and `interrupted` is an
+     idle root that came back mid-turn and has not been asked to carry on. The first report
+     goes at activation, seeded from the snapshot rather than from events the manager was
+     not yet subscribed for; later ones go on change, the first at once and the rest no
+     closer than half a second; the dormancy report carries the same four fields so the
+     plane's last word on a sleeping session is as complete as its first. `cost_micros`
+     comes from the summary's `cost`, which nothing populates yet, so it reads zero
+     honestly rather than being invented here.
+
+255. **The committed schema documents were edited by hand.** `mix troupe.schema.gen` could
+     not be run where this was written, so `session_created.json` and `agent_started.json`
+     under `protocol/schema/v1/events/` were updated to what the generator would write —
+     the same three optional fields, in key order. Running the generator should change
+     nothing; if it does, the generator is right.
+
+## Stage 5 — service principals and triggers
+
+256. **The prompt crosses the control channel once and is stored nowhere on the plane.**
+     `session.create`'s `prompt` travels in the `session.activate` push and only on the
+     first activation; a later one replays the log, in which it is already the first
+     input. It is the one piece of session content the control channel carries, so it is
+     bounded at 64 KiB and the row never sees it — the tests assert the string is absent
+     from the session struct. The canary test for the channel is about what workers
+     *report*; a plane-to-pod push of a first input is the plan's design, and the
+     alternative — a client attaching only to type the first line — is what makes a
+     trigger impossible.
+
+257. **Terms are validated key by key, and `budget_micros` is trimmed rather than
+     refused.** An unknown key is `invalid_params`, because the worker applies terms as
+     configuration and a misspelt cap is a cap that silently did not apply. A slice larger
+     than what the team has left becomes what is left: a nightly trigger near the end of
+     a budget period should run on the remainder and be stopped by the ledger, not be
+     refused for asking. Nothing left is `budget_exhausted` before a row exists. There is
+     no `approvals: "auto"`; a trigger that needs none gets a profile whose definition
+     says so, which is an admin's versioned act rather than a flag on a schedule.
+
+258. **Budget is reserved again on activation, since it is released on dormancy.** The
+     module doc always said `TeamBudget.release` ran at dormancy; making that true
+     without the complement would have let a woken session run on no reservation at
+     all. `start_elsewhere` reserves the session's own slice — its terms', or the
+     default — after placing and before pushing, and a team with nothing left cannot
+     wake a session any more than it can create one. Reserving twice for one session was
+     already a retry in `TeamBudget`, so an older session whose slice was never released
+     is unaffected.
+
+259. **Status is fenced on the epoch, and `done_reason` is the one nullable report.** A
+     `session.status` from an epoch below the row's is `conflict`, like a stale seal: the
+     session has moved on and its status is the new pod's to say. The counters follow the
+     index's rule that an absent field is an unchanged field, but `done_reason` is set
+     whenever the report carries the key, `nil` included — a session that starts another
+     turn has no done reason any more, and a rule that could only ever add one would leave
+     `budget_exhausted` on a session that went on to finish.
+
+260. **No `session_status` lifecycle event from the plane.** The plan has `fleet` on the
+     plane side carrying one. The plane's `/rpc` is request and answer over HTTP; the
+     `fleet` topic is served by the worker's gateway from the session index it holds, and
+     the plane has no subscription mechanism for harness clients to push through. The
+     columns and the `sessions.list` filters are what HQ reads; an event would need a
+     plane-side stream that does not exist and is not this stage's to invent.
+
+261. **A service principal is a `%User{}` with two virtual fields, not a second struct.**
+     Every question about what a caller may do — `teams_for`, `profiles_for`,
+     `visible_to`, `role_for`, `actor_for` — takes a `%User{}`, and a `%Principal{}`
+     would need a second copy of each. So `Identity.get_user/1` resolves a `svc:` subject
+     to a `%User{kind: "service", principal: …}` with no row and a nil `id`, and the few
+     functions that join through `memberships` branch on the kind: a principal's only
+     team is the one that owns it, its profiles are its own list within that team's
+     grants, and `Admin.actor_for/1` gives it `:none` — not even admin of its own team,
+     because a credential that could make more of itself is the escalation refused.
+     Disabling one makes `get_user/1` return `nil`, which is what refuses its next `/rpc`
+     within a token lifetime with nothing revoked.
+
+262. **The secret is a salted SHA-256, not argon2id.** The plan names argon2id; the
+     repository has no key-derivation dependency and the brief forbade adding one. The
+     secret is 32 random bytes — 256 bits of entropy — so a fast hash is not the
+     weakness it would be for a password somebody chose; the salt is per principal so
+     two hashes never compare, and the comparison is `:crypto.hash_equals/2`. A wrong
+     secret, a missing subject and a disabled principal are one refusal.
+
+263. **`session.grant` is mirrored first and pushed second, as `acl.changed`.** The
+     worker already accepts `acl.changed` for its auth mirror; the plane never sent it.
+     The plane's ACL table is what `role_for/2` and the next token read, so the grant is
+     durable there and the push is for a connection already open on the pod holding the
+     session — best effort, and reported in the answer as `pushed`. A dormant session has
+     no pod to tell. The plan's "appends `acl_granted` through the pod" is not a contract
+     the worker offers on the control channel; when it does, the push changes and the
+     mirror does not. A team admin may grant on a private session of their team they
+     could not otherwise see, because the sessions this exists for are a principal's.
+
+264. **`session.review` is for anybody who can see the session.** Reviewing changes
+     nothing the agent will do; it is an acknowledgement that a person read the result,
+     and reading is exactly what a viewer is for. Team visibility gives observe by
+     default, and requiring control would have kept the review queue from the people
+     it is for. It marks the row and the run, and is audited under `session`.
+
+265. **A run row is written before the session, and a failed create is retried by the
+     same key.** Two executors racing on one idempotency key are decided by the unique
+     index rather than by luck: the loser reads the winner's run and is handed the same
+     session with a token minted now. A run over the concurrency cap is `skipped` with no
+     session, so the record shows the cron fired and why nothing happened. A run whose
+     create failed is marked `failed` and the next call with its key tries again, which
+     is what lets Hatchet retry blindly; a run whose session exists is never retried.
+     Live, for the cap, is a run with no session yet, one whose session is active and not
+     finished, or one whose session is dormant with an approval waiting — that last
+     counts, because a second session would be a second question for the same person.
+
+266. **Run state is computed on read from the session's status.** `created`, `failed`
+     and `skipped` are the plane's own decisions at firing and are stored; `running`,
+     `waiting`, `done` and `failed`-after-start come from the session columns the worker
+     keeps current. A run that had to be told its session finished would be a second copy
+     of a fact the index already holds. `budget_exhausted` is `done`: a trigger with
+     `max_turns: 3` is meant to end that way. `interrupted`, or any other reason, is
+     `failed`.
+
+267. **The template is `{{a.b.c}}` and nothing else, and escapes nothing.** Sections,
+     partials and lambdas are left as text, so an event cannot smuggle behaviour through
+     a template and a template cannot loop or call. A missing path renders as nothing,
+     so a template written for one provider's events survives another's leaving a field
+     out; a list is addressed by position. The output is a prompt, not HTML.
+
+268. **Cron is five fields, UTC only, written in a hundred lines.** `* */n a,b a-b a-b/n`,
+     day-of-week `0`–`7`, and both day fields restricted meaning either. No time zone
+     database is in `mix.lock` and none was added, so `source.tz` other than UTC is
+     refused at `put` with a message saying so, rather than accepted and ignored —
+     pretending to support it would fire a nightly job at the wrong hour and say nothing.
+     `previous/2` skips days that cannot match, which keeps `0 0 29 2 *` bounded.
+
+269. **The scheduler fires once for the latest missed minute, and never backfills a
+     new trigger.** A plane down for an hour fires a five-minute trigger once, not
+     twelve times; a nightly job that was missed still runs. A trigger that has never
+     fired fires only for a minute inside the last two ticks, so enabling `0 3 * * *` at
+     ten in the morning does not run it at once. `last_fired_at` is advanced with a
+     conditional write before firing, and the key `cron:<id>:<minute>` is the second
+     line, so two schedulers produce one session.
+
+270. **The scheduler is a `:global` singleton with a per-replica keeper.** `Singleton`
+     starts an actor when it is first asked for; `Placement` is asked for by every
+     create and the scheduler by nobody, so `Scheduler.Keeper` runs in every replica's
+     tree and asks every thirty seconds. After the replica holding the scheduler dies,
+     the next ask from any survivor starts it there. A tick that raises is logged and
+     the next tick is thirty seconds away.
+
+271. **Trigger `put` is partial, and the panel's switch is the same call as the CLI's
+     file.** An existing trigger keeps every field the attributes leave out, so
+     `{team, name, enabled: false}` is a switch-off and a whole definition from git is a
+     replacement; the audit row carries the diff either way. The principal is named by
+     subject and must belong to the team; a schedule's cron and a definition's terms are
+     checked at `put` with the same rules the scheduler and `session.create` apply, so a
+     mistake is refused when it is written rather than at three in the morning.
+
+272. **`trigger.fire` is the principal's or a team admin's, and `for_caller/2` decides.**
+     A principal may fire the triggers that run as it and nothing else; a person may fire
+     the triggers of the teams they administer, by name, by `team/name` or by id. An
+     ordinary member is `not_found`, because whether a trigger exists is the team's
+     business. The session is created by `Harness.call("session.create", …)` as the
+     principal, so a trigger whose principal lost a profile fails the way the principal
+     would.
+
+273. **`troupe admin` grows optional arguments, spelt `name?`.** `runs TEAM [TRIGGER]`
+     needed one, and a fifth tuple element would have changed the shape every test and
+     the usage printer read. A trailing `?` is stripped before the argument is sent,
+     required arguments are counted without it, and the usage shows it in brackets.
+     `principal create` takes `PROFILES` comma-separated for the same reason a list is not
+     a command line.
+
+## Stage 5 — the A2A facade
+
+274. **The task id is the session id, and the facade stores nothing.** `session.create`
+     is sent a `session_id` the facade generates — a version 4 UUID, which is what the
+     request that made it calls a task id — with the same value in `origin.task`, and the
+     id the plane answers with is the task id whether or not it honoured the one it was
+     given. Everything a later call needs is the row: `origin.kind` says it is a task,
+     the plane's visibility check says whose. A restarted facade, or a second replica,
+     answers `tasks/get` identically.
+
+275. **A service principal's credential travels as `Bearer svc:<team>/<name>:<secret>`,
+     or as `Basic`.** The card advertises the bearer scheme and some A2A clients can set
+     nothing but a bearer token, so the bearer form is the primary one; it is told apart
+     from an id token by the `svc:` prefix, which no JWT carries, and the secret is
+     everything after the colon that follows the name so a secret may contain colons.
+     `Basic base64(client_id:secret)` is accepted too because it is what HTTP has always
+     meant by a static credential. Both go to `/auth/exchange` as `{client_id,
+     client_secret}`; an id token goes as `{id_token}`. The exchange is cached per
+     credential digest until sixty seconds before `expires_at`.
+
+276. **The public card is rendered from the URL; the bundle's card is the authenticated
+     extended card.** The card must be fetchable without a token and the facade holds no
+     credential, so without the caller's it cannot ask the plane what the bundle offers.
+     The unauthenticated card names the profile, where to call, the bearer scheme and
+     one skill named for the profile, with `version: "unknown"` and
+     `supportsAuthenticatedExtendedCard: true`; the same `GET` with a credential, and
+     `agent/getAuthenticatedExtendedCard`, render skills and `bundle:<channel>/<version>`
+     from `profiles.list`. A2A's extended card is exactly this distinction, and it keeps
+     "the card is public" and "no facade-wide credential" both true.
+
+277. **The security block is spelled both ways.** `securitySchemes: {bearer: {type: http,
+     scheme: bearer}}` with `security: [{bearer: []}]`, as the current specification has
+     it, and `authentication: {schemes: ["Bearer"]}`, as the earlier one did and the plan
+     wrote it. `protocolVersion` is `"0.3.0"` and `preferredTransport` is `"JSONRPC"`. A
+     skill carries `tags` because the specification marks it required; a profile whose
+     bundle has no skills advertises one skill named for itself so a client that routes
+     by skill has something to route to. Field names chosen with less than full
+     confidence: `securitySchemes`/`security`, `preferredTransport`,
+     `supportsAuthenticatedExtendedCard`, `protocolVersion`, skill `tags`.
+
+278. **A root turn that ends without a tool call is `completed`.** `agent_done` arrives
+     only when the agent called `finish` or ran out of budget; an ordinary answer ends
+     with a root `llm_response` whose `stop_reason` is anything but `tool_use`, and
+     that is the moment a caller wants the answer. The session stays open, which A2A's
+     "terminal states are final" does not expect — and a message on a completed task
+     continues its session rather than being refused, because the log has
+     `input_after_done` for exactly this and a follow-up in a fresh session would have
+     lost everything the first one knew. `contextId` is the task id; a message naming
+     only a `contextId` addresses that task. Sub-agents' responses are not the answer:
+     only `agent: ["root"]` (or none) counts.
+
+279. **`tasks/get` reads the row while the task is being worked on, and the log when it
+     is at rest.** The plan says the row alone answers `tasks/get` without history, and
+     also that a finished task returns the review text; the two meet here. A task that
+     is `thinking` or `acting` with no `historyLength` is the row — the cheap poll. A
+     task that is `completed`, `failed`, `canceled` or `input-required`, or any task with
+     `historyLength > 0`, is rendered from a reader's replay, because the answer, the
+     artifacts and the tool an approval is waiting on all live in the log. The cost is
+     the one the plan states: polling a finished task in a loop pays a reader each time.
+     When the log is at rest its state wins; when it is mid-turn the row's does.
+
+280. **An `idle` row with a log behind it is `completed`; with nothing behind it,
+     `submitted`.** The row's status has no word for "answered and waiting for more",
+     and `idle` covers both a session that just got its prompt and one whose turn ended.
+     `last_seq < 4` — creation, start and the prompt's `user_input` — is the former.
+     The reader path corrects the guess whenever it runs, which for a `completed` row it
+     always does.
+
+281. **Catching up and being live are told apart by `head_seq`.** A stream that resumes
+     from the caller's `metadata.lastSeq` delivers every update after it, but an
+     `input-required` that was answered an hour ago must not end the new stream, so
+     updates from before the head are sent with `final: false`, and a task at rest when
+     the head is reached gets one final update saying where it stands. Ephemeral events
+     carry no `seq` and say nothing about where the replay is. The `input.send` a
+     `message/stream` carries is sent after the subscription is acknowledged, or its
+     effects could slip between the two.
+
+282. **Artifact ids are the bare hex of the hash, and the bytes are verified before
+     they are served.** `published.hash` and blob digests are both `sha256:<hex>`; the
+     artifact id and the route use the hex alone, so a published file and a blob share
+     one URL shape. The route replays the log to find what the hex names — a published
+     destination read back with `fs.read`, or a blob read with `blob.get` — through a
+     reader, and a SHA-256 that does not match is a `502` with the reason. `fs.read`
+     carries text, so a published binary whose bytes JSON could not preserve is refused
+     by the same check rather than served corrupted.
+
+283. **The A2A error table is applied, never the plane's codes.** Troupe's `not_found`
+     is `-32005`, which in A2A means "content type not supported". `not_found` and
+     `forbidden` on a task both become `TaskNotFoundError` (`-32001`), since the plane
+     already refuses to say whether a session another principal cannot see exists;
+     `invalid_params` keeps `-32602`; the rest keep the plane's token as the message in
+     the `-32000` range. Method-level failures are a `200` with an `error`, as JSON-RPC
+     has it; `401` is a caller who is not who they say, `429` a replica at its stream
+     limit, `502` a plane that did not answer.
+
+284. **The facade refuses to start without `TROUPE_A2A_PUBLIC_URL`.** It goes into every
+     card's `url` and every artifact `uri`, a pod cannot know the host its Ingress
+     answers on, and a card that names the wrong URL is a card nobody can call. The
+     chart derives it from `a2a.host`. `TROUPE_A2A_PLANE_URL` defaults to the plane's
+     in-cluster Service as asked; the plane's NetworkPolicy admits HTTP from the ingress
+     namespace only, so a cluster that enforces it must admit the facade's pods on that
+     port or point the facade at the plane's public URL — stated in `values.yaml` and
+     `docs/a2a.md` rather than fixed in a template this stage does not own.
+
+285. **The tests run a real socket to a fake worker.** `troupe_gateway` may not be a
+     dependency, even in test, without the boundaries rule reading as an exception; a
+     WebSock handler behind Bandit speaking the same framing is a page of code and lets
+     the stream loop, the approval round trip, the token refresh and the artifact route
+     be exercised over `Troupe.Protocol.Client` exactly as production does. The stub
+     plane owns rows by subject and refuses another principal's, so "a second caller's
+     task is not found" is the plane's decision, as it is in production.
+
+286. **`req` is a declared dependency of the facade although `troupe_protocol` already
+     carries it.** The facade calls `Req` directly for `/rpc` and `/auth/exchange`; a
+     module an app calls belongs in that app's `mix.exs`, which is the same reasoning
+     the plane applies, and the boundaries task concerns umbrella apps, not Hex packages.
+
