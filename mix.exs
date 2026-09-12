@@ -41,11 +41,11 @@ defmodule Troupe.Umbrella.MixProject do
     ]
   end
 
-  # Four releases from one umbrella.
+  # Five releases from one umbrella.
   #
   # `troupe` is the client binary — the TUI, the CLI, and the local daemon in one
   # executable, wrapped by Burrito so it needs nothing installed alongside it. The
-  # other three are plain Mix releases built into OCI images: they run in a cluster
+  # other four are plain Mix releases built into OCI images: they run in a cluster
   # where an Erlang runtime is the container's business, not the user's.
   defp releases do
     [
@@ -56,6 +56,11 @@ defmodule Troupe.Umbrella.MixProject do
       ],
       troupe_plane: [
         applications: [troupe_protocol: :permanent, troupe_plane: :permanent],
+        include_executables_for: [:unix],
+        steps: [:assemble, :tar]
+      ],
+      troupe_a2a: [
+        applications: [troupe_protocol: :permanent, troupe_a2a: :permanent],
         include_executables_for: [:unix],
         steps: [:assemble, :tar]
       ],

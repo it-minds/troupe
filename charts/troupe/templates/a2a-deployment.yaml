@@ -1,0 +1,169 @@
+{{/*
+The facade's own selector labels. Defined here rather than in `_helpers.tpl` so the
+whole of the facade is one template that `a2a.enabled` switches on and off.
+*/}}
+{{- define "troupe.a2a.selectorLabels" -}}
+app.kubernetes.io/name: troupe
+app.kubernetes.io/component: a2a
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+{{- if .Values.a2a.enabled }}
+# The A2A facade: every profile as an agent other agents can call.
+#
+# A client of the plane and of worker pods over their public APIs, with no database
+# and no ServiceAccount privileges — the default account, with nothing granted to it,
+# because there is nothing in the cluster it needs to ask for. Each caller's own
+# credential is exchanged at the plane; the facade holds nothing between requests.
+apiVersion: v1
+kind: Service
+metadata:
+  name: troupe-a2a
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  selector: {{- include "troupe.a2a.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: {{ .Values.a2a.port }}
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: troupe-a2a
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.a2a.replicas }}
+  revisionHistoryLimit: 3
+  selector:
+    matchLabels: {{- include "troupe.a2a.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels: {{- include "troupe.a2a.selectorLabels" . | nindent 8 }}
+    spec:
+      automountServiceAccountToken: false
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
+      {{- end }}
+      # Kubernetes injects a `<SERVICE>_PORT=tcp://ip:port` variable for every Service in
+      # the namespace, for compatibility with Docker links. `troupe-a2a` would become
+      # `TROUPE_A2A_PORT`, which is exactly the name this release reads a port number
+      # from — and a release whose config provider is handed "tcp://10.96.85.27:4002"
+      # does not start. Nothing here uses service links.
+      enableServiceLinks: false
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 1000
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: a2a
+          image: "{{ .Values.a2a.image.repository }}:{{ .Values.a2a.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.a2a.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.a2a.port }}
+          env:
+            # The same two corrections the plane makes to a BEAM in a container: the
+            # scheduler count from the real CPU limit, and the port table sized by
+            # hand rather than from a container runtime's RLIMIT_NOFILE. See the
+            # plane's Deployment for the measurements.
+            - name: TROUPE_SCHEDULERS
+              valueFrom:
+                resourceFieldRef:
+                  containerName: a2a
+                  resource: limits.cpu
+                  divisor: "1"
+            - name: ERL_FLAGS
+              value: "+S $(TROUPE_SCHEDULERS):$(TROUPE_SCHEDULERS) +Q {{ .Values.a2a.maxPorts }}"
+            - name: TROUPE_A2A_AUTOSTART
+              value: "true"
+            - name: TROUPE_A2A_PORT
+              value: {{ .Values.a2a.port | quote }}
+            - name: TROUPE_A2A_PLANE_URL
+              value: {{ .Values.a2a.planeUrl | quote }}
+            - name: TROUPE_A2A_PUBLIC_URL
+              value: {{ .Values.a2a.publicUrl | default (printf "https://%s" .Values.a2a.host) | quote }}
+            - name: TROUPE_A2A_MAX_STREAMS
+              value: {{ .Values.a2a.maxStreams | quote }}
+            - name: TROUPE_A2A_VISIBILITY
+              value: {{ .Values.a2a.visibility | quote }}
+            - name: RELEASE_DISTRIBUTION
+              value: "none"
+          resources: {{- toYaml .Values.a2a.resources | nindent 12 }}
+          startupProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 2
+            failureThreshold: 30
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 5
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            periodSeconds: 10
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: false
+            capabilities: {drop: ["ALL"]}
+---
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: troupe-a2a
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    # `message/stream` is a server-sent event stream that lasts as long as a task's
+    # turn. A proxy that buffered the response would hold every event until the stream
+    # closed, and one with a short read timeout would cut a model call in half.
+    nginx.ingress.kubernetes.io/proxy-buffering: "off"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # A message is a prompt and a few parts; a file for the agent is put somewhere it
+    # can fetch it. The facade refuses more than a mebibyte itself.
+    nginx.ingress.kubernetes.io/proxy-body-size: 2m
+spec:
+  ingressClassName: {{ .Values.a2a.ingressClassName }}
+  {{- if .Values.a2a.tlsSecretName }}
+  tls:
+    - hosts: [{{ .Values.a2a.host | quote }}]
+      secretName: {{ .Values.a2a.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.a2a.host | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: troupe-a2a
+                port:
+                  number: {{ .Values.a2a.port }}
+{{- if .Values.networkPolicy.enabled }}
+---
+# HTTP from the ingress controller and nowhere else, the same rule the plane's policy
+# states for its own HTTP port. Egress is left alone: the facade dials the plane's
+# Service and worker pods' public endpoints, and which of those goes through the
+# Ingress is the installation's business.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: troupe-a2a
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "troupe.a2a.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {"troupe.dev/ingress": "true"}
+      ports:
+        - {protocol: TCP, port: {{ .Values.a2a.port }}}
+{{- end }}
+{{- end }}

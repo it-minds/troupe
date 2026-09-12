@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build the three server images, and load them into the local kind cluster.
+# Build the four server images, and load them into the local kind cluster.
 #
 # The client binary is not built here: it is a Burrito executable for a laptop, and CI
 # builds it on a native runner per target.
@@ -10,7 +10,7 @@ cd "$(dirname "$0")/.."
 registry="${TROUPE_REGISTRY:-ghcr.io/objective-mj}"
 tag="${TROUPE_IMAGE_TAG:-dev}"
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
-releases=("${@:-troupe_operator troupe_plane troupe_worker}")
+releases=("${@:-troupe_operator troupe_plane troupe_worker troupe_a2a}")
 
 for release in ${releases[@]}; do
   image="${registry}/${release//_/-}:${tag}"

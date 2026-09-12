@@ -140,7 +140,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: [troupe_operator, troupe_plane, troupe_worker]
+        release: [troupe_operator, troupe_plane, troupe_worker, troupe_a2a]
     steps:
       - uses: actions/checkout@v4
 

@@ -135,6 +135,44 @@ plane:
     secretName: troupe-plane-scim
     secretKey: token
 
+# The A2A facade: every profile as an agent other agents can call, at `a2a.<domain>`.
+# A client of the plane and of worker pods over their public APIs, with no database and
+# no credential of its own — each caller's own is exchanged at the plane. Off by
+# default; a cluster that has nothing calling it has no reason to run it.
+a2a:
+  enabled: false
+  image:
+    repository: ghcr.io/objective-mj/troupe-a2a
+    tag: ""
+    pullPolicy: IfNotPresent
+  # Two is fine: nothing is serialised in the facade, and a task's state is the
+  # plane's row, not anything a replica remembers.
+  replicas: 1
+  host: a2a.example.test
+  # What the facade calls itself in agent cards and artifact URIs. Defaults to
+  # https://<host>.
+  publicUrl: ""
+  # Where the plane's `/rpc` is reached from inside the cluster. The plane's
+  # NetworkPolicy admits HTTP from the ingress namespace only, so a cluster that
+  # enforces NetworkPolicy either admits the facade's pods on the plane's HTTP port or
+  # points this at the plane's public URL instead.
+  planeUrl: http://troupe-plane.troupe-system.svc:4000
+  port: 4002
+  # `message/stream` holds a socket to a pod open per stream; this caps them per
+  # replica, and a caller beyond it gets a 429 rather than a replica out of ports.
+  maxStreams: 200
+  # The visibility a task's session is created with: `private` to the calling
+  # principal, or `team` so a person can audit what other agents asked of the team's
+  # profiles.
+  visibility: private
+  ingressClassName: nginx
+  tlsSecretName: ""
+  # `+Q`, the BEAM's port table size. See `operator.maxPorts`.
+  maxPorts: 65536
+  resources:
+    requests: {cpu: 100m, memory: 128Mi}
+    limits: {cpu: 500m, memory: 512Mi}
+
 bao:
   address: http://openbao.troupe-system.svc:8200
   # The Kubernetes auth mount and the role the plane authenticates with. The plane

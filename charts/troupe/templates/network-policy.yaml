@@ -26,6 +26,12 @@ spec:
     - from:
         - namespaceSelector:
             matchLabels: {"troupe.dev/ingress": "true"}
+        {{- if .Values.a2a.enabled }}
+        # The A2A facade is a client of the API like any other, but it lives in this
+        # namespace and reaches the plane by its Service rather than through the ingress.
+        - podSelector:
+            matchLabels: {{- include "troupe.a2a.selectorLabels" . | nindent 14 }}
+        {{- end }}
       ports:
         - {protocol: TCP, port: {{ .Values.plane.httpPort }}}
     # The control port: workers dial it to enrol and to be told about sessions, and the

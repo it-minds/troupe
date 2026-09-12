@@ -1,4 +1,4 @@
-# One Dockerfile for the three server releases. `RELEASE` picks which.
+# One Dockerfile for the four server releases. `RELEASE` picks which.
 #
 # Two stages: build against the full Elixir image, run on a slim Debian with only what
 # the release needs at runtime. The client binary is not built here — it is a Burrito
@@ -31,6 +31,7 @@ COPY apps/troupe_ctl/mix.exs apps/troupe_ctl/
 COPY apps/troupe_worker/mix.exs apps/troupe_worker/
 COPY apps/troupe_plane/mix.exs apps/troupe_plane/
 COPY apps/troupe_operator/mix.exs apps/troupe_operator/
+COPY apps/troupe_a2a/mix.exs apps/troupe_a2a/
 # Fetching only. `mix deps.compile` cannot run here: in an umbrella the sibling apps are
 # path dependencies, so it tries to compile `troupe_core` before any of its source has
 # been copied and fails. What this layer is worth is the *fetch* — the part that needs

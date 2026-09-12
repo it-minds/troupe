@@ -31,8 +31,9 @@ defmodule Mix.Tasks.Troupe.Boundaries do
      "the TUI is a protocol client and gets no private access"},
     {:troupe_ctl, :only, [:troupe_protocol],
      "the CLI is a protocol client and gets no private access"},
-    {:troupe_plane, :never, [:troupe_core, :troupe_gateway],
-     "the plane does not run agents"},
+    {:troupe_a2a, :only, [:troupe_protocol],
+     "the A2A facade is a protocol client and gets no private access"},
+    {:troupe_plane, :never, [:troupe_core, :troupe_gateway], "the plane does not run agents"},
     {:troupe_operator, :never, [:troupe_core, :troupe_gateway, :troupe_plane],
      "the operator holds cluster privileges and has no public surface"}
   ]
@@ -72,13 +73,16 @@ defmodule Mix.Tasks.Troupe.Boundaries do
     |> Enum.flat_map(&beams/1)
     |> Enum.flat_map(&module_calls(&1, prefix, scope))
     |> Enum.reject(fn {_from, to} -> MapSet.member?(allowed, to) end)
-    |> Enum.map(fn {from, to} -> %{app: module_app(from), other: to, from: from, to: to, why: why} end)
+    |> Enum.map(fn {from, to} ->
+      %{app: module_app(from), other: to, from: from, to: to, why: why}
+    end)
     |> Enum.uniq()
   end
 
   # Reported as the app the calling module is in, so a violation reads like every other
   # one rather than like a different kind of thing.
-  defp module_app(module), do: module |> Atom.to_string() |> String.split(".") |> Enum.take(3) |> Enum.join(".")
+  defp module_app(module),
+    do: module |> Atom.to_string() |> String.split(".") |> Enum.take(3) |> Enum.join(".")
 
   defp module_calls(beam, prefix, scope) do
     with {:ok, {module, [imports: imports]}} <- :beam_lib.chunks(beam, [:imports]),
