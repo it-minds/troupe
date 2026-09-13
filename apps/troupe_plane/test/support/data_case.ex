@@ -63,7 +63,11 @@ defmodule Troupe.Plane.DataCase do
     alias Troupe.Plane.Identity
 
     {:ok, group} = Identity.upsert_group(%{external_id: group_id, display_name: group_id})
-    {:ok, team} = Identity.enable_team(group, Map.new(Keyword.take(opts, [:name, :budget_micros])))
+    {:ok, team} =
+      Identity.enable_team(
+        group,
+        Map.new(Keyword.take(opts, [:name, :budget_micros, :volume_storage_class, :volume_size]))
+      )
     {:ok, _} = Identity.grant(team, profile, Map.new(Keyword.take(opts, [:volume_mode])))
     team
   end

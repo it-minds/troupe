@@ -193,18 +193,39 @@ defmodule Troupe.Plane.Provision do
   #
   # `ProvisionManifestTest` round-trips this through the parser, so the two cannot drift
   # again without a test saying so.
+  # Only teams that were actually given a volume, and the volume they were given.
+  #
+  # A grant is not a volume. `volume_mode` is `ro` or `rw` and has no third value, so
+  # every grant used to project a claim whether or not anybody had asked for storage —
+  # and the class and the size, which live on the team, were not projected at all. The
+  # operator therefore fell back to the cluster's default class, and an installation
+  # whose default is block storage got a `ReadOnlyMany` claim that its CSI driver refuses
+  # outright: `mode "MULTI_NODE_READER_ONLY" not supported`. The claim never binds, the
+  # pod never schedules, and granting a team access to a profile is what took that
+  # profile down.
+  #
+  # So the storage class is the switch. It is the field somebody has to fill in on
+  # purpose, it is the one a `TroupePolicy` can allow or refuse, and a deployment with no
+  # many-reader storage simply leaves it empty and gets no team volumes — rather than
+  # unschedulable pods and a message about capacity.
   defp teams_of(profile) do
     profile.name
     |> Identity.grants_for_profile()
+    |> Enum.filter(&volume?/1)
     |> Enum.map(fn grant ->
       %{
         "name" => grant.team.name,
         "claimName" => volume_name(grant.team.name),
-        "mode" => grant.volume_mode
+        "mode" => grant.volume_mode,
+        "storageClassName" => grant.team.volume_storage_class,
+        "size" => grant.team.volume_size
       }
     end)
     |> Enum.sort_by(& &1["name"])
   end
+
+  defp volume?(%{team: %{volume_storage_class: class}}) when is_binary(class), do: class != ""
+  defp volume?(_grant), do: false
 
   defp volume_name(team), do: "troupe-team-#{team}"
 

@@ -82,6 +82,11 @@ defmodule Troupe.Plane.GrantVisibilityTest do
   end
 
   test "the profile carries the team into the cluster as a projection of the grant", context do
+    # The team is given a volume first. `teams` projects the volumes that grants carry,
+    # and a team with no storage class has none to carry: a grant is permission to use a
+    # profile, which is not the same thing as a shared disk to use it on.
+    {:ok, _} = Identity.update_team(context.engineering, %{volume_storage_class: "shared-files"})
+
     assert {:ok, _} = Admin.team_grant(context.root, "engineering", "dev", %{volume_mode: "rw"})
 
     manifest = Provision.manifest(Fleet.get_profile("dev"))
@@ -90,6 +95,33 @@ defmodule Troupe.Plane.GrantVisibilityTest do
     assert team["name"] == "engineering"
     assert team["mode"] == "rw"
     assert team["claimName"] == "troupe-team-engineering"
+  end
+
+  test "giving a team a volume reaches the cluster without anybody re-granting", context do
+    assert {:ok, _} = Admin.team_grant(context.root, "engineering", "dev", %{volume_mode: "rw"})
+
+    # No volume yet, so nothing to project.
+    assert Provision.manifest(Fleet.get_profile("dev"))["spec"]["teams"] == []
+
+    # Granting re-projects and revoking re-projects; updating a team did not, because
+    # until the volume fields were projected there was nothing on a team the cluster
+    # could see. Now there is, and a class set in the panel that never reached the
+    # cluster is the worst kind of wrong: the page says one thing, the profile another,
+    # and nothing reconciles them until somebody happens to re-grant.
+    assert {:ok, _} =
+             Admin.team_update(context.root, "engineering", %{
+               volume_storage_class: "shared-files",
+               volume_size: "25Gi"
+             })
+
+    assert [team] = Provision.manifest(Fleet.get_profile("dev"))["spec"]["teams"]
+    assert team["name"] == "engineering"
+    assert team["storageClassName"] == "shared-files"
+    assert team["size"] == "25Gi"
+
+    # And taking it away takes the claim away, rather than leaving one nothing will bind.
+    assert {:ok, _} = Admin.team_update(context.root, "engineering", %{volume_storage_class: nil})
+    assert Provision.manifest(Fleet.get_profile("dev"))["spec"]["teams"] == []
   end
 
   test "revoking takes it away again, and the sessions with it", context do
