@@ -11,7 +11,7 @@ Three packages in one pnpm workspace:
 | --- | --- |
 | `packages/client` | `@troupe/client` — the protocol in TypeScript. JSON-RPC 2.0 over WebSocket, the plane's HTTP surface (discovery, device-grant login, `/auth/exchange`, `/rpc`), and a `SessionView` that folds events and turns "send a prompt, wait for the turn" into a promise. Runs in a browser or Node; no dependencies. |
 | `packages/bench` | `@troupe/bench` — the throughput test. N clients, one session each, K prompts each, every milestone timed. |
-| `apps/desktop` | The GUI. Vite + React. Signs in through the plane (or dials a worker directly), streams a session, answers approvals. The bundle is plain web; a Tauri or Electron shell would load it unchanged. |
+| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane, shows one list of sessions, streams a session, and answers approvals. The bundle is plain web; a Tauri or Electron shell would load it unchanged and add two things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
 
 ## The path a client takes
 
@@ -50,9 +50,114 @@ pnpm build                       # builds @troupe/client, typechecks the rest
 pnpm dev                         # the GUI on http://localhost:5173
 ```
 
-The GUI's **Plane** tab needs a running plane whose `TROUPE_CORS_ORIGINS` lists the
-GUI's origin (`http://localhost:5173` in development). The **Worker (direct)** tab
-needs only a worker or a local daemon and, for a worker, a token.
+### Against a fake deployment, with nothing else installed
+
+```sh
+pnpm fake                        # an identity provider, a worker and a plane, on loopback
+pnpm dev                         # then sign in to the plane URL `pnpm fake` printed
+```
+
+`pnpm fake` starts the same identity provider, plane and worker the test suite runs
+against, seeded with three sessions, one of them stopped on an approval. The device code
+approves itself, because there is no browser at the other end to click anything. Three
+prompt prefixes drive the scripted agent: `approve: <command>` asks for an approval,
+`big: <label>` returns a tool result too large to inline, and `quiet: …` answers without
+streaming.
+
+### Against a real deployment
+
+Two allowlists, not one:
+
+* the plane's `TROUPE_CORS_ORIGINS` must contain the GUI's origin — `http://localhost:5173`
+  in development, or the origin it is served from;
+* **the identity provider must allow that origin too.** The device grant is spoken to the
+  provider directly, so a deployment that adds the GUI to the plane and stops there signs
+  in as far as discovery and then fails. In Dex this is the public client's
+  `redirectURIs`/allowed origins; in Authentik it is the application's allowed origins.
+
+A browser cannot tell a page *why* a cross-origin request failed, so the GUI says both
+possibilities and names the origin to add. It is not guessing at the cause; it cannot
+know it.
+
+## Testing
+
+```sh
+pnpm test                        # 20 tests: stage 1's done items, the fold, the fleet store
+pnpm first-token                 # sign-in to first streamed token, against the fakes
+pnpm tokens:check                # fails if the generated design tokens are stale
+```
+
+`packages/client/test/support` is a deployment that implements the protocol rather than
+imitating a screen: a real WebSocket, a hash-chained log, replay from a cursor with a
+closed boundary, a device grant that answers `slow_down` and rotates its refresh token,
+token expiry with `auth.expiring` and `auth.refresh`, blob range caps, and approvals
+where the first answer wins. `browserFetch` puts a browser's same-origin policy in front
+of Node's `fetch`, so the CORS behaviour is tested here rather than assumed.
+
+What none of it proves is the *server's* half. See [REPORT.md](REPORT.md).
+
+## Shipping it
+
+The GUI is one static bundle behind nginx. There is no server here — it is a protocol
+client, so what ships is HTML, CSS and JavaScript, and every call goes from the browser
+to the plane or to a worker. Nothing in the image holds a secret or needs telling
+anything at runtime.
+
+```sh
+docker build --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
+scripts/deploy                       # helm upgrade --install, then print the digest
+TAG=sha-1a2b3c4 scripts/deploy       # a specific build from CI
+scripts/deploy --dry-run             # render, change nothing
+```
+
+CI (`.github/workflows/ci.yml`) typechecks, tests, lints the chart against real
+Kubernetes schemas, and builds and pushes an image for every push — tagged `sha-<short>`,
+and the version on a `v*` tag. It takes the same four secrets the server's workflow does
+(`REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`) and falls
+back to this repository's own packages on ghcr.io without them. **CI does not deploy.**
+Pushing an image and rolling a cluster are different decisions, and a workflow that does
+both makes every merge a production change.
+
+### Where it is mounted
+
+`TROUPE_GUI_BASE` is baked in at build time, because Vite writes it into every asset
+URL — an image built for `/app/` cannot be served at `/`. The chart's `basePath` must
+match it; the Ingress strips the prefix so the container stays ignorant of where it is.
+
+**Serving the GUI at a path on the plane's own host is worth preferring.** Same origin
+means no CORS allowlist to keep in step, no second DNS record, no second certificate,
+and a sign-in whose redirect URI is the address people already have. The deployment at
+IT Minds does exactly that: the plane's Ingress owns `/`, the GUI's owns `/app`, and
+nginx routes the more specific path.
+
+```sh
+helm upgrade --install troupe-gui charts/troupe-gui -n troupe-system   --set image.repository=<registry>/troupe-gui --set image.tag=<tag>   --set basePath=/app --set ingress.host=troupe.example.com   --set ingress.tlsSecretName=troupe-plane-tls
+```
+
+`tlsSecretName` naming a secret another release owns is deliberate: two Ingresses on one
+host share one certificate. Leave `certIssuer` empty there, or cert-manager will be asked
+for a second certificate for a host that already has one.
+
+### Check the digest, not the tag
+
+A tag that already exists in the registry plus `imagePullPolicy: IfNotPresent` means the
+node keeps the image it has — and since the Deployment's spec did not change, no pod is
+restarted. `helm upgrade` reports success and the old code carries on serving. This is
+not hypothetical; it happened on this cluster. `scripts/deploy` prints the running
+digest for that reason, and CI never publishes a floating tag.
+
+## Design
+
+[`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system, `tokens.json` is it as
+data, and `example.dc.html` is every surface in one file. `apps/desktop/src/tokens.css`
+is **generated** from `tokens.json` by `pnpm tokens` and committed; do not edit it.
+
+Three rules carry most of the weight, and a change that breaks one of them is a bug:
+
+* **Amber is a job, not a mood.** `--waiting-*` marks work that has stopped and needs a
+  person. Nothing else in the product may use it — not branding, not links, not warnings.
+* **Structure comes from hairlines and alignment**, not from cards, shadows or gradients.
+* **A status is a dot *and* a word.** Colour is never the only carrier of meaning.
 
 ## The throughput test
 
@@ -99,7 +204,23 @@ measured yet because it needs Postgres, OpenBao and an identity provider behind 
 ```
 packages/client/src
   types.ts        protocol shapes (open objects: v1 is additive)
-  connection.ts   TroupeConnection — open, initialize, call, events, tool.invoke, auth
-  plane.ts        PlaneClient — discovery, device grant, exchange, /rpc helpers
-  session.ts      SessionView — subscribe, replay cursor, waitFor, prompt()
+  connection.ts   TroupeConnection — open, initialize, call, events, tool.invoke, auth.refresh
+  plane.ts        PlaneClient — discovery, device grant, exchange, the harness API over /rpc
+  auth.ts         AuthSession — signing in, and staying signed in. The only persisted secret
+  session.ts      SessionView — subscribe, the replay cursor, commands, blobs, files, prompt()
+  attach.ts       SessionAttachment — one session's socket kept alive across expiry and drops
+  transcript.ts   the fold: events → a transcript. Pure, and the reason two clients agree
+  fleet.ts        FleetStore — one list from however many sources there are
+
+apps/desktop/src
+  shell.ts        the whole contract between the web bundle and a desktop shell
+  hooks.ts        React bindings over the stores above; no protocol knowledge
+  tokens.css      generated from docs/design/tokens.json — do not edit
+  views/          SignIn · Sessions · Session · Approval · Approvals · Files · bits
 ```
+
+`SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so
+a pod token running out is invisible: the plane mints a new one, `auth.refresh` hands it
+over on the connection that is already open, and a turn in progress never notices. If the
+socket does go, the view resubscribes from the last `seq` it actually processed and the
+server closes the boundary — no gap, no duplicate.

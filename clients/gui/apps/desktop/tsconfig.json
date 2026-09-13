@@ -3,8 +3,22 @@
   "compilerOptions": {
     "noEmit": true,
     "jsx": "react-jsx",
-    "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"]
+    "lib": [
+      "ES2022",
+      "DOM",
+      "DOM.Iterable"
+    ],
+    "types": [
+      "vite/client"
+    ],
+    // The same resolution `vite.config.ts` uses. Without it `tsc` reads the package's
+    // built `.d.ts` while Vite reads its source, and the two disagree for exactly as
+    // long as it takes somebody to notice.
+    "paths": {
+      "@troupe/client": ["../../packages/client/src/index.ts"]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src"
+  ]
 }

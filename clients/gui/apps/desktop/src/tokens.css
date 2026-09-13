@@ -1,0 +1,316 @@
+/* Generated from docs/design/tokens.json by scripts/tokens.ts. Do not edit by hand:
+   run `pnpm tokens` instead. The design file is the source of truth for every colour,
+   radius and duration in the product.
+
+   Dark is the default theme — this is a tool people sit in all day watching output
+   stream. Light is the same tokens under a different set of values; components never
+   choose between them. */
+
+:root {
+  --font-sans: 'IBM Plex Sans', 'Segoe UI', system-ui, sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'SFMono-Regular', Menlo, monospace;
+
+  --bg-stage: #080C12;
+  --bg-canvas: #0E141D;
+  --bg-panel: #141C27;
+  --bg-raised: #1B2532;
+  --bg-sunken: #0A0F16;
+  --bg-hover: #223040;
+  --bg-selected: #1E2C3C;
+  --scrim: rgba(4,7,11,0.68);
+
+  --text-primary: #E9EEF4;
+  --text-secondary: #AEBCCA;
+  --text-muted: #7E8FA2;
+  --text-inverse: #080C12;
+  --link: #8CC0F0;
+  --link-hover: #B4D8FB;
+
+  --border-hairline: #23303F;
+  --border-strong: #36485D;
+  --focus: #8CC0F0;
+  --divider: #18222E;
+
+  --running-fg: #4FCFB0;
+  --running-bg: #0D2A25;
+  --running-bd: #1C5B4E;
+  --waiting-fg: #FFB43D;
+  --waiting-bg: #2E1F05;
+  --waiting-bd: #8A5E12;
+  --waiting-solid: #FFB43D;
+  --waiting-glow: rgba(255,180,61,0.22);
+  --queued-fg: #9BADC2;
+  --queued-bg: #151E29;
+  --queued-bd: #2B3B4D;
+  --allowed-fg: #6BD08C;
+  --allowed-bg: #0E2617;
+  --allowed-bd: #265C39;
+  --denied-fg: #F0897A;
+  --denied-bg: #2B1512;
+  --denied-bd: #743A31;
+  --dormant-fg: #A79EDB;
+  --dormant-bg: #181A2B;
+  --dormant-bd: #393B63;
+  --readonly-fg: #A3B1BF;
+  --readonly-bg: #141A21;
+  --readonly-bd: #2E3A46;
+  --error-fg: #FF7E6E;
+  --error-bg: #2E110D;
+  --error-bd: #83352A;
+  --private-fg: #8FB3C9;
+  --private-bg: #111A21;
+  --private-bd: #2D414F;
+  --offline-fg: #C6B08A;
+  --offline-bg: #211B10;
+  --offline-bd: #4E4227;
+
+  --diff-add-bg: #0D2418;
+  --diff-add-fg: #8FE0AC;
+  --diff-add-mark: #2F7A4E;
+  --diff-del-bg: #2A1310;
+  --diff-del-fg: #F5A79A;
+  --diff-del-mark: #8C3E31;
+  --diff-ctx: #8B9BAC;
+  --diff-gutter-bg: #0A1119;
+  --diff-gutter-fg: #5F7186;
+  --diff-hunk: #7E8FA2;
+
+  --p1: #7FB3FF;
+  --p2: #C79BF2;
+  --p3: #6FD3B6;
+  --p4: #F096BE;
+  --p5: #6FC5D8;
+  --p6: #B6C36E;
+  --p-self: #A9B7C6;
+  --p-agent: #C3CCD6;
+
+  --sh-raise: 0 1px 2px rgba(0,0,0,0.5);
+  --sh-sheet: 0 -8px 28px rgba(0,0,0,0.55);
+  --sh-overlay: 0 16px 48px rgba(0,0,0,0.62);
+  --sh-footlight: 0 -1px 0 #FFB43D, 0 -14px 34px rgba(255,180,61,0.16);
+
+  --space-0: 0px;
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-7: 32px;
+  --space-8: 40px;
+  --space-9: 56px;
+  --space-10: 72px;
+  --space-11: 96px;
+  --space-px: 1px;
+  --space-half: 2px;
+
+  --radius-none: 0px;
+  --radius-xs: 2px;
+  --radius-sm: 3px;
+  --radius-md: 5px;
+  --radius-lg: 8px;
+  --radius-pill: 999px;
+
+  --bw-hairline: 1px;
+  --bw-strong: 1.5px;
+  --bw-focus: 2px;
+  --bw-marker: 3px;
+
+  --dur-instant: 0ms;
+  --dur-fast: 120ms;
+  --dur-base: 180ms;
+  --dur-slow: 300ms;
+  --dur-wake: 700ms;
+  --dur-pulse: 2200ms;
+  --ease-standard: cubic-bezier(0.2, 0, 0, 1);
+  --ease-enter: cubic-bezier(0.05, 0.7, 0.1, 1);
+  --ease-exit: cubic-bezier(0.3, 0, 0.8, 0.15);
+  --ease-linear: linear;
+
+  --touch-target: 44px;
+  --rail-width: 272px;
+  --backstage-width: 336px;
+  --composer-min-height: 52px;
+  --avatar-sm: 20px;
+  --avatar-md: 26px;
+  --avatar-lg: 34px;
+
+  --bp-min: 380px;
+  --bp-sm: 480px;
+  --bp-md: 720px;
+  --bp-lg: 1040px;
+  --bp-xl: 1320px;
+
+  color-scheme: dark;
+}
+
+:root[data-theme="light"] {
+
+  --bg-stage: #DDE3EA;
+  --bg-canvas: #EEF1F5;
+  --bg-panel: #F8FAFC;
+  --bg-raised: #FFFFFF;
+  --bg-sunken: #E5EAF0;
+  --bg-hover: #E2E9F1;
+  --bg-selected: #DCE6F2;
+  --scrim: rgba(16,24,33,0.42);
+
+  --text-primary: #101821;
+  --text-secondary: #3E4C5B;
+  --text-muted: #5C6B7A;
+  --text-inverse: #FFFFFF;
+  --link: #1A5A96;
+  --link-hover: #0E3C69;
+
+  --border-hairline: #C9D2DC;
+  --border-strong: #98A7B6;
+  --focus: #0F4C81;
+  --divider: #D7DEE6;
+
+  --running-fg: #046B57;
+  --running-bg: #DCF1EB;
+  --running-bd: #8FCDBE;
+  --waiting-fg: #7A4A00;
+  --waiting-bg: #FBEBCB;
+  --waiting-bd: #D89722;
+  --waiting-solid: #B36A00;
+  --waiting-glow: rgba(179,106,0,0.18);
+  --queued-fg: #4D5F75;
+  --queued-bg: #E4EAF2;
+  --queued-bd: #B4C0CF;
+  --allowed-fg: #116B33;
+  --allowed-bg: #DDF2E3;
+  --allowed-bd: #8CC79F;
+  --denied-fg: #95331F;
+  --denied-bg: #FAE3DE;
+  --denied-bd: #DB9C8E;
+  --dormant-fg: #4F4489;
+  --dormant-bg: #E7E5F4;
+  --dormant-bd: #B3AEDA;
+  --readonly-fg: #44525F;
+  --readonly-bg: #E6EAEE;
+  --readonly-bd: #B2BCC6;
+  --error-fg: #A32213;
+  --error-bg: #FCE0DC;
+  --error-bd: #E09A90;
+  --private-fg: #33586E;
+  --private-bg: #E6ECF1;
+  --private-bd: #A9BAC7;
+  --offline-fg: #5F4A21;
+  --offline-bg: #EFE8D9;
+  --offline-bd: #C3B392;
+
+  --diff-add-bg: #DFF3E4;
+  --diff-add-fg: #0E5C2C;
+  --diff-add-mark: #2C8A50;
+  --diff-del-bg: #FBE2DD;
+  --diff-del-fg: #8C2C18;
+  --diff-del-mark: #B54B33;
+  --diff-ctx: #4F5D6B;
+  --diff-gutter-bg: #E1E7EE;
+  --diff-gutter-fg: #68768A;
+  --diff-hunk: #55647A;
+
+  --p1: #1B5299;
+  --p2: #61338F;
+  --p3: #0A6B55;
+  --p4: #96306A;
+  --p5: #0B6076;
+  --p6: #4E5B10;
+  --p-self: #44525F;
+  --p-agent: #2A3642;
+
+  --sh-raise: 0 1px 2px rgba(16,24,33,0.10);
+  --sh-sheet: 0 -8px 28px rgba(16,24,33,0.16);
+  --sh-overlay: 0 16px 48px rgba(16,24,33,0.22);
+  --sh-footlight: 0 -1px 0 #B36A00, 0 -14px 34px rgba(179,106,0,0.14);
+
+  color-scheme: light;
+}
+
+/* A person who has asked their system for light and never touched the toggle gets it. */
+@media (prefers-color-scheme: light) {
+  :root:not([data-theme="dark"]) {
+
+    --bg-stage: #DDE3EA;
+    --bg-canvas: #EEF1F5;
+    --bg-panel: #F8FAFC;
+    --bg-raised: #FFFFFF;
+    --bg-sunken: #E5EAF0;
+    --bg-hover: #E2E9F1;
+    --bg-selected: #DCE6F2;
+    --scrim: rgba(16,24,33,0.42);
+
+    --text-primary: #101821;
+    --text-secondary: #3E4C5B;
+    --text-muted: #5C6B7A;
+    --text-inverse: #FFFFFF;
+    --link: #1A5A96;
+    --link-hover: #0E3C69;
+
+    --border-hairline: #C9D2DC;
+    --border-strong: #98A7B6;
+    --focus: #0F4C81;
+    --divider: #D7DEE6;
+
+    --running-fg: #046B57;
+    --running-bg: #DCF1EB;
+    --running-bd: #8FCDBE;
+    --waiting-fg: #7A4A00;
+    --waiting-bg: #FBEBCB;
+    --waiting-bd: #D89722;
+    --waiting-solid: #B36A00;
+    --waiting-glow: rgba(179,106,0,0.18);
+    --queued-fg: #4D5F75;
+    --queued-bg: #E4EAF2;
+    --queued-bd: #B4C0CF;
+    --allowed-fg: #116B33;
+    --allowed-bg: #DDF2E3;
+    --allowed-bd: #8CC79F;
+    --denied-fg: #95331F;
+    --denied-bg: #FAE3DE;
+    --denied-bd: #DB9C8E;
+    --dormant-fg: #4F4489;
+    --dormant-bg: #E7E5F4;
+    --dormant-bd: #B3AEDA;
+    --readonly-fg: #44525F;
+    --readonly-bg: #E6EAEE;
+    --readonly-bd: #B2BCC6;
+    --error-fg: #A32213;
+    --error-bg: #FCE0DC;
+    --error-bd: #E09A90;
+    --private-fg: #33586E;
+    --private-bg: #E6ECF1;
+    --private-bd: #A9BAC7;
+    --offline-fg: #5F4A21;
+    --offline-bg: #EFE8D9;
+    --offline-bd: #C3B392;
+
+    --diff-add-bg: #DFF3E4;
+    --diff-add-fg: #0E5C2C;
+    --diff-add-mark: #2C8A50;
+    --diff-del-bg: #FBE2DD;
+    --diff-del-fg: #8C2C18;
+    --diff-del-mark: #B54B33;
+    --diff-ctx: #4F5D6B;
+    --diff-gutter-bg: #E1E7EE;
+    --diff-gutter-fg: #68768A;
+    --diff-hunk: #55647A;
+
+    --p1: #1B5299;
+    --p2: #61338F;
+    --p3: #0A6B55;
+    --p4: #96306A;
+    --p5: #0B6076;
+    --p6: #4E5B10;
+    --p-self: #44525F;
+    --p-agent: #2A3642;
+
+    --sh-raise: 0 1px 2px rgba(16,24,33,0.10);
+    --sh-sheet: 0 -8px 28px rgba(16,24,33,0.16);
+    --sh-overlay: 0 16px 48px rgba(16,24,33,0.22);
+    --sh-footlight: 0 -1px 0 #B36A00, 0 -14px 34px rgba(179,106,0,0.14);
+
+    color-scheme: light;
+  }
+}

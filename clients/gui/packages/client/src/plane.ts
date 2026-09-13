@@ -58,12 +58,114 @@ export interface Attachment {
   [k: string]: unknown;
 }
 
+export interface Team {
+  name: string;
+  id: string;
+  budget_micros?: number;
+  members_may_control?: boolean;
+  idle_timeout_seconds?: number;
+  [k: string]: unknown;
+}
+
+/**
+ * `me` answers with team *objects*, where `/auth/exchange` answers with their names.
+ * Two different shapes for the same word, so they are two different types here.
+ */
 export interface Me {
   subject: string;
   display_name?: string;
-  teams: string[];
+  email?: string;
+  kind?: string;
+  teams: Team[];
   profiles: string[];
+  platform_admin?: boolean;
   [k: string]: unknown;
+}
+
+/** One session as the plane's index knows it — no content, and no log was replayed. */
+export interface SessionRow {
+  id: string;
+  owner: string;
+  profile: string;
+  visibility: string;
+  state: "active" | "dormant" | "read_only" | "erased" | string;
+  epoch: number;
+  title: string | null;
+  last_active_at: string | null;
+  last_seq: number;
+  head_hash: string | null;
+  object_bytes: number | null;
+  workspace_bytes: number | null;
+  pinned: boolean;
+  /** What the worker last reported: idle, thinking, acting, waiting, done, interrupted. */
+  status: string | null;
+  done_reason: string | null;
+  pending_approvals: number | null;
+  cost_micros: number | null;
+  origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
+  terms: Record<string, unknown> | null;
+  reviewed_by: string | null;
+  reviewed_at: string | null;
+  your_role: "owner" | "collaborator" | "viewer" | null;
+  [k: string]: unknown;
+}
+
+export interface WorkerPod {
+  pod: string;
+  ordinal: number;
+  endpoint: string;
+  healthy: boolean;
+  draining: boolean;
+  capacity: number;
+  active_sessions: number;
+  disk_used_bytes?: number;
+  disk_total_bytes?: number;
+  version?: string;
+  bundle_hash?: string;
+  [k: string]: unknown;
+}
+
+/**
+ * What a session created on this profile will have, answered before it is created.
+ * `agents` is what it may start as; `skills` and `mcp_servers` are what the channel's
+ * current bundle gives it.
+ */
+export interface ProfileOffering {
+  name: string;
+  pods: WorkerPod[];
+  capacity: number;
+  active_sessions: number;
+  healthy_pods: number;
+  channel: string | null;
+  bundle_version: string | null;
+  bundle_hash: string | null;
+  agents: string[];
+  skills: Array<{ name: string; description?: string }>;
+  mcp_servers: string[];
+  [k: string]: unknown;
+}
+
+export interface SessionsFilter {
+  profile?: string;
+  state?: string;
+  status?: string;
+  origin?: string;
+  trigger?: string;
+  needs_review?: boolean;
+  limit?: number;
+}
+
+export interface CreateSessionParams {
+  profile: string;
+  team?: string;
+  title?: string;
+  /** The first input. At most 64 KiB, and never stored by the plane. */
+  prompt?: string;
+  /** One of `profiles.list`'s `agents`; refused with the list if it is not. */
+  agent?: string;
+  visibility?: string;
+  terms?: { budget_micros?: number; max_turns?: number; wall_clock_seconds?: number; approvals?: "wait" | "deny" };
+  origin?: { kind?: string; [k: string]: unknown };
 }
 
 const trimSlash = (s: string) => s.replace(/\/+$/, "");
@@ -102,7 +204,15 @@ export class PlaneClient {
 
   constructor(baseUrl: string, fetchImpl: typeof fetch = globalThis.fetch) {
     this.baseUrl = trimSlash(baseUrl);
-    this.fetchImpl = fetchImpl;
+    // Bound, because a browser's `fetch` refuses to run with any receiver but the
+    // window: held as a field and called as `this.fetchImpl(…)` it would throw
+    // "Illegal invocation", which arrives looking exactly like a blocked request.
+    this.fetchImpl = fetchImpl.bind(globalThis);
+  }
+
+  /** The `fetch` this client was built with, for callers that speak to the provider. */
+  get http(): typeof fetch {
+    return this.fetchImpl;
   }
 
   /** `GET /.well-known/troupe` — no auth. */
@@ -214,10 +324,7 @@ export class PlaneClient {
   }
 
   /** Place a new session on a worker. Returns the endpoint and pod token to dial. */
-  createSession(
-    planeToken: string,
-    params: { profile: string; team?: string; title?: string; prompt?: string; visibility?: string },
-  ): Promise<Attachment> {
+  createSession(planeToken: string, params: CreateSessionParams): Promise<Attachment> {
     return this.rpc<Attachment>(planeToken, "session.create", params);
   }
 
@@ -231,7 +338,49 @@ export class PlaneClient {
     return this.rpc<Attachment>(planeToken, "token.mint", { session_id: sessionId });
   }
 
-  listSessions(planeToken: string, filter: Record<string, unknown> = {}): Promise<{ sessions: unknown[] }> {
-    return this.rpc(planeToken, "sessions.list", { filter });
+  /**
+   * The plane's index, not a replay: `status`, `done_reason`, `pending_approvals` and
+   * `cost_micros` are what the worker last reported over the control channel, which is
+   * what makes a list of fifty sessions one request instead of fifty logs.
+   *
+   * Filters are top-level params, not a nested `filter` object.
+   */
+  listSessions(planeToken: string, filter: SessionsFilter = {}): Promise<{ sessions: SessionRow[] }> {
+    return this.rpc(planeToken, "sessions.list", filter);
+  }
+
+  getSession(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.get", { session_id: sessionId });
+  }
+
+  listProfiles(planeToken: string): Promise<{ profiles: ProfileOffering[] }> {
+    return this.rpc(planeToken, "profiles.list", {});
+  }
+
+  listTeams(planeToken: string): Promise<{ teams: Team[] }> {
+    return this.rpc(planeToken, "teams.list", {});
+  }
+
+  /** Mark a session looked at. An acknowledgement; it changes nothing the agent does. */
+  reviewSession(planeToken: string, sessionId: string): Promise<SessionRow> {
+    return this.rpc<SessionRow>(planeToken, "session.review", { session_id: sessionId });
+  }
+
+  /** Let another subject in. Owner or team admin only. */
+  grantSession(
+    planeToken: string,
+    sessionId: string,
+    subject: string,
+    role: "collaborator" | "viewer",
+  ): Promise<{ session_id: string; subject: string; role: string; pushed: boolean }> {
+    return this.rpc(planeToken, "session.grant", { session_id: sessionId, subject, role });
+  }
+
+  pinSession(planeToken: string, sessionId: string, pinned: boolean): Promise<unknown> {
+    return this.rpc(planeToken, pinned ? "session.pin" : "session.unpin", { session_id: sessionId });
+  }
+
+  eraseSession(planeToken: string, sessionId: string): Promise<unknown> {
+    return this.rpc(planeToken, "session.erase", { session_id: sessionId });
   }
 }

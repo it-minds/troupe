@@ -171,3 +171,36 @@ export interface ToolInvoke {
   args: Record<string, unknown>;
   [k: string]: unknown;
 }
+
+export interface BlobResponse {
+  blob: string;
+  size: number;
+  /** Inclusive, and possibly shorter than the one asked for: the server caps a response. */
+  range?: [number, number];
+  encoding: "base64" | string;
+  data: string;
+  [k: string]: unknown;
+}
+
+export interface FsEntry {
+  path: string;
+  name: string;
+  kind: "file" | "directory" | "other" | string;
+  size: number;
+  [k: string]: unknown;
+}
+
+export interface FsListing {
+  path: string;
+  entries: FsEntry[];
+  [k: string]: unknown;
+}
+
+export interface FsFile {
+  path: string;
+  content: string;
+  size: number;
+  /** `sha256:…`, the same hash `fs_changed` carries. */
+  hash: string;
+  [k: string]: unknown;
+}

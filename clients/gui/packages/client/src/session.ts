@@ -1,6 +1,9 @@
 import type { TroupeConnection } from "./connection.js";
 import type {
+  BlobResponse,
   DurableEvent,
+  FsFile,
+  FsListing,
   EventEnvelope,
   LlmDeltaData,
   SessionCreateResult,
@@ -26,19 +29,56 @@ export interface SessionViewHooks {
  * same protocol on both.
  */
 export class SessionView {
-  readonly conn: TroupeConnection;
   readonly sessionId: string;
+  /**
+   * The cursor. It belongs to the view rather than to the socket, which is what makes
+   * a reconnection invisible: the new subscription starts from the last seq this view
+   * actually processed, and the server answers with no gap and no duplicate.
+   */
   lastSeq = 0;
   headSeq = 0;
   subscriptionId: string | null = null;
 
+  private connection: TroupeConnection | null = null;
   private readonly hooks: SessionViewHooks;
   private readonly waiters: Array<(e: TroupeEvent) => boolean> = [];
+  private readonly listeners = new Set<(e: TroupeEvent) => void>();
 
-  constructor(conn: TroupeConnection, sessionId: string, hooks: SessionViewHooks = {}) {
-    this.conn = conn;
-    this.sessionId = sessionId;
-    this.hooks = hooks;
+  /**
+   * `new SessionView(sessionId, hooks)` leaves the view unbound, for a caller that will
+   * replace the socket under it (see `SessionAttachment`). Passing a connection first
+   * binds it in one step, which is what a script with one socket wants.
+   */
+  constructor(connOrId: TroupeConnection | string, sessionIdOrHooks?: string | SessionViewHooks, hooks: SessionViewHooks = {}) {
+    if (typeof connOrId === "string") {
+      this.sessionId = connOrId;
+      this.hooks = (sessionIdOrHooks as SessionViewHooks) ?? {};
+    } else {
+      this.connection = connOrId;
+      this.sessionId = sessionIdOrHooks as string;
+      this.hooks = hooks;
+    }
+  }
+
+  /** The socket this view is speaking over. */
+  get conn(): TroupeConnection {
+    if (!this.connection) throw new Error(`session ${this.sessionId} is not attached to a connection`);
+    return this.connection;
+  }
+
+  get bound(): boolean {
+    return this.connection !== null;
+  }
+
+  /** Point the view at a (new) socket. The cursor is untouched. */
+  bind(conn: TroupeConnection): void {
+    this.connection = conn;
+    this.subscriptionId = null; // subscriptions belong to the socket that made them
+  }
+
+  unbind(): void {
+    this.connection = null;
+    this.subscriptionId = null;
   }
 
   get topic(): string {
@@ -57,18 +97,24 @@ export class SessionView {
       this.hooks.onDelta?.(e.data as LlmDeltaData, e.agent);
     }
     this.hooks.onEvent?.(e);
+    for (const l of this.listeners) l(e);
     for (let i = this.waiters.length - 1; i >= 0; i--) {
       if (this.waiters[i]!(e)) this.waiters.splice(i, 1);
     }
     return true;
   }
 
-  /** Subscribe at `detail`. `fromSeq` defaults to the last seq processed (0 = replay all). */
-  async subscribe(fromSeq: number = this.lastSeq): Promise<SubscribeResult> {
+  /**
+   * Subscribe. `fromSeq` defaults to the last seq processed, so the same call is both
+   * the first subscribe (0 replays everything) and the one made after a disconnect or a
+   * `resync_required` — the server promises exactly one event per seq at the boundary,
+   * so resuming from the cursor leaves no gap and no duplicate.
+   */
+  async subscribe(fromSeq: number = this.lastSeq, level: "detail" | "summary" = "detail"): Promise<SubscribeResult> {
     const r = await this.conn.call<SubscribeResult>("subscribe", {
       command_id: this.conn.nextCommandId(),
       topic: this.topic,
-      level: "detail",
+      level,
       from_seq: fromSeq,
     });
     this.subscriptionId = r.subscription_id;
@@ -76,8 +122,24 @@ export class SessionView {
     return r;
   }
 
+  /**
+   * Watch the same stream the view is folding, without taking the hook off whoever
+   * owns it — a file pane and a transcript are looking at one subscription. Returns the
+   * function that stops watching.
+   */
+  listen(fn: (e: TroupeEvent) => void): () => void {
+    this.listeners.add(fn);
+    return () => void this.listeners.delete(fn);
+  }
+
+  /** Re-subscribe from the cursor. What `resync_required` and a reconnect both want. */
+  async resubscribe(level: "detail" | "summary" = "detail"): Promise<SubscribeResult> {
+    this.subscriptionId = null;
+    return this.subscribe(this.lastSeq, level);
+  }
+
   async unsubscribe(): Promise<void> {
-    if (!this.subscriptionId) return;
+    if (!this.subscriptionId || !this.connection) return;
     await this.conn.call("unsubscribe", { subscription_id: this.subscriptionId });
     this.subscriptionId = null;
   }
@@ -107,6 +169,93 @@ export class SessionView {
   async send(text: string, commandId: string = this.conn.nextCommandId()): Promise<{ commandId: string }> {
     await this.conn.call("input.send", { command_id: commandId, session_id: this.sessionId, text });
     return { commandId };
+  }
+
+  /** `approval.respond`. First response wins; a later one is answered with a resolution. */
+  async respondApproval(callId: string, decision: "allow" | "deny" | "allow_session"): Promise<void> {
+    await this.conn.call("approval.respond", {
+      command_id: this.conn.nextCommandId(),
+      session_id: this.sessionId,
+      call_id: callId,
+      decision,
+    });
+  }
+
+  /** `turn.cancel`. Valid from any state. */
+  async cancel(): Promise<void> {
+    await this.conn.call("turn.cancel", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
+  }
+
+  /** `profile.switch`. Applied at the next turn boundary, not immediately. */
+  async switchProfile(profile: string): Promise<void> {
+    await this.conn.call("profile.switch", {
+      command_id: this.conn.nextCommandId(),
+      session_id: this.sessionId,
+      profile,
+    });
+  }
+
+  async editTodo(action: "add" | "cancel" | "complete", params: { id?: string; content?: string }): Promise<void> {
+    await this.conn.call("todo.edit", {
+      command_id: this.conn.nextCommandId(),
+      session_id: this.sessionId,
+      action,
+      ...params,
+    });
+  }
+
+  /** Say who is looking. Costs a seat and nothing else. */
+  async setPresence(state: "viewing" | "typing" | "away"): Promise<void> {
+    await this.conn.call("presence.set", { session_id: this.sessionId, state });
+  }
+
+  /** `fs.list`, resolved through the session's mounts. `path` defaults to the root. */
+  fsList(path = "."): Promise<FsListing> {
+    return this.conn.call<FsListing>("fs.list", { session_id: this.sessionId, path });
+  }
+
+  fsRead(path: string): Promise<FsFile> {
+    return this.conn.call<FsFile>("fs.read", { session_id: this.sessionId, path });
+  }
+
+  /**
+   * `blob.get`. `range` is inclusive and optional; a server may answer with a shorter
+   * range than asked for, and says so, so a caller reading a large blob loops on the
+   * range it got back rather than the one it sent.
+   */
+  blobGet(blob: string, range?: [number, number]): Promise<BlobResponse> {
+    const params: Record<string, unknown> = { session_id: this.sessionId, blob };
+    if (range) params["range"] = range;
+    return this.conn.call<BlobResponse>("blob.get", params);
+  }
+
+  /** The bytes of a blob, following the server's caps until it is whole. */
+  async blobBytes(blob: string, limit = 4 * 1024 * 1024): Promise<Uint8Array> {
+    const chunks: Uint8Array[] = [];
+    let at = 0;
+    let size = Infinity;
+    while (at < Math.min(size, limit)) {
+      const end = Math.min(at + 262_143, limit - 1);
+      const r = await this.blobGet(blob, [at, end]);
+      size = r.size;
+      const bytes = decodeBase64(r.data);
+      if (bytes.length === 0) break;
+      chunks.push(bytes);
+      at = (r.range?.[1] ?? at + bytes.length - 1) + 1;
+    }
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const out = new Uint8Array(total);
+    let o = 0;
+    for (const c of chunks) {
+      out.set(c, o);
+      o += c.length;
+    }
+    return out;
+  }
+
+  /** A blob as text, which is what a tool result that grew past 16 KiB always is. */
+  async blobText(blob: string, limit?: number): Promise<string> {
+    return new TextDecoder().decode(await this.blobBytes(blob, limit));
   }
 
   /**
@@ -222,4 +371,17 @@ export async function createLocalSession(
   params: { workspace: string; profile?: string; prompt?: string; worktree?: "auto" | "never" | "always"; config?: Record<string, unknown> },
 ): Promise<SessionCreateResult> {
   return conn.call<SessionCreateResult>("session.create", { command_id: conn.nextCommandId(), ...params });
+}
+
+/** Base64 without assuming `atob` or `Buffer` is the one that exists. */
+function decodeBase64(data: string): Uint8Array {
+  const g = globalThis as { atob?: (s: string) => string; Buffer?: { from(s: string, enc: string): Uint8Array } };
+  if (g.atob) {
+    const bin = g.atob(data);
+    const out = new Uint8Array(bin.length);
+    for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+    return out;
+  }
+  if (g.Buffer) return new Uint8Array(g.Buffer.from(data, "base64"));
+  throw new Error("no base64 decoder available");
 }

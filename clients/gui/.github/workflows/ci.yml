@@ -1,0 +1,134 @@
+# The GUI's CI, deliberately shaped like the remote's: check first, then build an image
+# from anything that is pushed, to whichever registry the repository is configured with.
+#
+# What it does not do is deploy. Pushing an image and rolling a cluster are different
+# decisions with different blast radii, and a workflow that does both means every merge
+# is a production change. `scripts/deploy` is the second half, run by a person.
+
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+# A second push to the same branch makes the first one's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  check:
+    name: typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The generated stylesheet is committed, so a design token changed without running
+      # `pnpm tokens` would otherwise reach a deployment as a file nobody regenerated.
+      - name: The committed design tokens match the design file
+        run: pnpm tokens:check
+
+      - run: pnpm typecheck
+
+      # The protocol client has to be built before the app typechecks against its types
+      # in a clean checkout, and building it is most of what `pnpm build` does anyway.
+      - run: pnpm build
+
+      - run: pnpm test
+
+  image:
+    name: image
+    needs: [check]
+    # A push has a credential; a pull request from a fork does not. It is also the only
+    # time there is a commit worth naming a tag after.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # Four secrets, exactly as the remote's workflow takes them, so one set of
+      # repository secrets configures both: `REGISTRY` and `REGISTRY_NAMESPACE` say
+      # where, `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` say how to get in. With none
+      # of them the image goes to this repository's own packages on ghcr.io, which is
+      # what a fork or a first run wants.
+      - name: Resolve the registry and the tags
+        id: registry
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+        run: |
+          registry="${REGISTRY:-ghcr.io}"
+          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          image=$(echo "${registry}/${namespace}/troupe-gui" | tr '[:upper:]' '[:lower:]')
+
+          # `sha-<short>` on every push, so every commit is pullable by a name that can
+          # only ever mean one build; and the version on a release tag, without its `v`,
+          # because that is what a values file writes. Never a floating tag: a reused tag
+          # plus `imagePullPolicy: IfNotPresent` is how a cluster keeps serving old code
+          # while `helm upgrade` reports success.
+          tags="${image}:sha-${GITHUB_SHA::7}"
+          case "$GITHUB_REF" in
+            refs/tags/v*) tags="${tags},${image}:${GITHUB_REF_NAME#v}" ;;
+          esac
+
+          echo "registry=${registry}" >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          registry: ${{ steps.registry.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
+          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+
+      # `TROUPE_GUI_BASE` is baked in: Vite writes it into every asset URL, so an image
+      # built for one mount point cannot be served at another. `GUI_BASE` as a repository
+      # variable lets a deployment that serves the GUI at its own root set it to `/`.
+      - uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          build-args: TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.registry.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: azure/setup-helm@v4
+
+      - run: helm lint charts/troupe-gui --set ingress.host=example.test
+
+      # Rendered and validated against real Kubernetes schemas, because a chart that only
+      # ever fails at `helm upgrade` fails in front of a cluster rather than in front of
+      # a reviewer.
+      - name: The rendered manifests are valid Kubernetes
+        run: |
+          helm template troupe-gui charts/troupe-gui \
+            --set ingress.host=example.test \
+            --set ingress.tlsSecretName=example-tls \
+            | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+                -strict -summary -kubernetes-version 1.31.0 -

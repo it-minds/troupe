@@ -11,15 +11,19 @@
       "import": "./dist/index.js"
     }
   },
-  "files": ["dist"],
+  "files": [
+    "dist"
+  ],
   "scripts": {
     "build": "tsc -p tsconfig.json",
-    "typecheck": "tsc -p tsconfig.json --noEmit",
-    "test": "node --test --import tsx dist/../test/*.test.ts"
+    "typecheck": "tsc -p tsconfig.json --noEmit && tsc -p tsconfig.test.json",
+    "test": "node --test --import tsx \"test/**/*.test.ts\""
   },
   "devDependencies": {
+    "@types/node": "^24.3.0",
+    "@types/ws": "^8.18.1",
     "tsx": "^4.20.3",
     "typescript": "^5.9.2",
-    "@types/node": "^24.3.0"
+    "ws": "^8.21.3"
   }
 }

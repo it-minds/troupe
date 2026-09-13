@@ -12,6 +12,27 @@ import type {
   ToolInvoke,
 } from "./types.js";
 
+/**
+ * What the server said, in one line.
+ *
+ * A code and a word — `unavailable (-32010)` — names a category, not a cause. The plane
+ * always puts the cause in `data.reason`, and what some other component told it in
+ * `data.detail`, so a client that shows only the word turns every distinct failure into
+ * the same unactionable sentence. The protocol went to the trouble of saying why;
+ * this is where a person gets to read it.
+ */
+function describe(method: string, err: JsonRpcError): string {
+  const said = (key: string): string | undefined => {
+    const value = err.data?.[key];
+    return typeof value === "string" && value.length > 0 ? value : undefined;
+  };
+
+  const cause = [said("reason"), said("detail")].filter(Boolean).join(": ");
+  const line = `${method}: ${err.message} (${err.code})`;
+
+  return cause ? `${line} — ${cause}` : line;
+}
+
 /** Thrown when the server answers a request with a JSON-RPC error. */
 export class TroupeRpcError extends Error {
   readonly code: number;
@@ -19,7 +40,7 @@ export class TroupeRpcError extends Error {
   readonly method: string;
 
   constructor(method: string, err: JsonRpcError) {
-    super(`${method}: ${err.message} (${err.code})`);
+    super(describe(method, err));
     this.name = "TroupeRpcError";
     this.code = err.code;
     this.data = err.data;
@@ -225,6 +246,17 @@ export class TroupeConnection {
       this.hooks.onFrame?.("out", text);
       this.ws.send(text);
     });
+  }
+
+  /**
+   * `auth.refresh`: hand the server a new token on the connection that is already open,
+   * so a session in the middle of a turn never notices. The new token is verified
+   * exactly as the first one was, audience included — this is not a way to move the
+   * connection to a different pod.
+   */
+  async refreshAuth(token: string): Promise<{ expires_at?: number }> {
+    const r = await this.call<{ auth?: { expires_at?: number } }>("auth.refresh", { auth: { token } });
+    return r.auth ?? {};
   }
 
   /** Send a notification (no response expected). */
