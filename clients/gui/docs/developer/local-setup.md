@@ -169,10 +169,13 @@ pnpm tokens
 pnpm tokens:check
 ```
 
-`scripts/tokens.ts` reads `docs/design/tokens.json` (`:22`), emits dark values on
-`:root`, light values on `:root[data-theme="light"]`, and light again under
-`@media (prefers-color-scheme: light)` for `:root:not([data-theme="dark"])`
-(`:124-155`), and writes `apps/desktop/src/tokens.css` (`:157`). Never edit the output.
+`scripts/tokens.ts` reads every `docs/design/themes/*.tokens.json`, checks that they
+expose identical token names, and for each theme emits dark values on
+`[data-theme="<id>"]`, light values on `[data-theme="<id>"][data-mode="light"]`, and
+light again under `@media (prefers-color-scheme: light)` for
+`[data-theme="<id>"]:not([data-mode="dark"])` — the last is what "follow my system"
+resolves to, and it is why the mode attribute is absent rather than set. It writes
+`apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts`. Never edit the output.
 
 ## `.claude/launch.json`
 

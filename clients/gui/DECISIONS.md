@@ -96,17 +96,21 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     wakes a sleeping session. Answering is an activating command and wakes it, which is
     the person's choice.
 
-14. **Design tokens are generated, not copied.** `docs/design/tokens.json` is the source
-    of truth; `scripts/tokens.ts` emits `apps/desktop/src/tokens.css` with the variable
-    names `docs/design/example.dc.html` already uses, so a screen prototyped there keeps
-    its colours when it is built. `pnpm tokens:check` fails if the committed file is
-    stale. Copying a palette into a stylesheet by hand is how a design system stops
-    being one.
+14. **Design tokens are generated, not copied.** `docs/design/themes/*.tokens.json` are
+    the source of truth; `scripts/tokens.ts` emits `apps/desktop/src/tokens.css` and
+    `apps/desktop/src/mark.ts` with the variable names `docs/design/example.dc.html`
+    already uses, so a screen prototyped there keeps its colours when it is built.
+    `pnpm tokens:check` fails if the committed files are stale. Copying a palette into a
+    stylesheet by hand is how a design system stops being one.
 
-15. **Dark is the default and the toggle is in the rail.** From `DESIGN.md`; a person
-    whose system asks for light and who has never touched the toggle gets light, which
-    the generated stylesheet handles with a `prefers-color-scheme` block that a set
-    `data-theme` always beats.
+
+15. **Theme and mode are two attributes, and two questions.** `data-theme` says which
+    palette and `data-mode` says light or dark — and `data-mode` is *absent* when the
+    answer is "follow my system", because an attribute that says `dark` would out-specify
+    the `prefers-color-scheme` block that is meant to answer instead. Three themes times
+    two modes is six combinations, but nobody is choosing between "Signal light" and
+    "Footlight dark": presenting six cards would make people compare things that are not
+    alternatives.
 
 16. **`fs.list`, `fs.read` and `fs.upload` were documented in `PROTOCOL.md`.** They exist
     in the gateway and in the schema and were in neither the method list nor the scope
@@ -258,3 +262,27 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     client's fault: a code names a category, and the category is never the thing that
     needs fixing. Building the reason into the message rather than into eleven call sites
     means every screen that already shows `e.message` improved without being touched.
+
+37. **Three themes, one contract, and no component knows which one is on.** Every theme
+    file exposes exactly the same token names; a theme swaps values and nothing else.
+    `scripts/tokens.ts` checks this and fails the build on a theme that has grown or
+    lost a token, because a colour that resolves to nothing is invisible until it is on
+    somebody's screen. The consequence worth having is that there is no conditional
+    styling anywhere in the product: one component library, one set of rules, one
+    accessibility audit per theme.
+
+38. **Signal ships as the default, against the design file's own recommendation.**
+    `THEMES.md` nominates Footlight as the safest — least opinionated, closest to the
+    drawn identity the platform's documentation already uses. This build ships Signal:
+    the screen is full of other people's colour all day, pasted screenshots, diffs,
+    charts and terminal output, and true-neutral graphite with no blue cast is the only
+    one of the three that never argues with any of it. `THEMES.md` #4 records the
+    reasoning where the next person will look for it rather than only here.
+
+39. **Theme and mode live in the browser, not on the user record.** The protocol has
+    nowhere to put a reading preference yet, and waiting for one would have meant
+    shipping no themes. `apps/desktop/src/theme.ts` is the only module that knows where
+    the answer is kept, so the day the plane learns to hold it that is the file that
+    changes and no screen does. The browser would keep a copy regardless: it is what
+    makes the first paint after sign-in already correct instead of a flash of the wrong
+    ground.

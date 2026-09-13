@@ -47,12 +47,18 @@ protocol" (`hooks.ts:1-3`; `DECISIONS.md` #1). If something needs a socket or a
 
 ## The generated stylesheet
 
-`apps/desktop/src/tokens.css` is generated from `docs/design/tokens.json` by
-`scripts/tokens.ts` and committed (`tokens.css:1-3`; `DECISIONS.md` #14). Change a
-token in `tokens.json`, run `pnpm tokens`, commit both files. `pnpm tokens:check`
-(`package.json:14`) regenerates and `git diff --exit-code`s it; CI's `check` job would
-run it first (`ci.yml:42-43`). Never add a colour directly in `styles.css`: "If a state
-needs one, it needs a semantic token first" (`docs/design/DESIGN.md:289`).
+`apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts` are generated from
+`docs/design/themes/*.tokens.json` by `scripts/tokens.ts` and committed
+(`tokens.css:1-3`; `DECISIONS.md` #14). Change a token in **all three** theme files, run
+`pnpm tokens`, commit the lot. `pnpm tokens:check` (`package.json:14`) regenerates and
+`git diff --exit-code`s them; CI's `check` job would run it first (`ci.yml:42-43`).
+
+The generator refuses a theme whose token names do not match the others exactly
+(`DECISIONS.md` #37), which is what "three themes, one contract" means in practice: a
+component reads `--waiting-solid` and never a hex, and never branches on a theme. Never
+add a colour directly in `styles.css`: "If a state needs one, it needs a semantic token
+first" (`docs/design/DESIGN.md:289`) — and a token that only one theme can answer is not
+a token.
 
 ## Design rules
 
@@ -136,8 +142,9 @@ this, the server's `PROTOCOL.md` should already name the method (`spec.md:61`).
 4. Use `Pill`, `statusOf`, `Cost`, `When`, `Where`, `Loading` from `views/bits.tsx`
    rather than restating status logic.
 5. Style with existing tokens in `styles.css`; if a new token is needed, it starts in
-   `docs/design/tokens.json` (see above). Check the screen at 380 px wide
-   (`DESIGN.md:262`) and that every status is a dot and a word.
+   all three files under `docs/design/themes/` (see above). Check the screen at 380 px
+   wide (`DESIGN.md:262`), that every status is a glyph and a word, and that it reads in
+   all three themes in both modes — Appearance is the fastest way to look.
 6. Record any arguable choice in `DECISIONS.md`, and if the view closes a gap listed in
    `REPORT.md` "Known limitations", remove the line.
 

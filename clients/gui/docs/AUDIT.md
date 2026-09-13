@@ -41,11 +41,15 @@ team sessions the person may see with search, state and profile filters; start a
 (profile, agent, title, first prompt); open a session and read its transcript live; send
 prompts, stop a turn, switch profile; answer approvals in the session or from a global
 inbox; expand tool output and fetch large results on demand; browse and read workspace
-files; see tasks, sub-agent states, presence, cost and bundle version; dark/light theme.
+files; see tasks, sub-agent states, presence, cost and bundle version; pick one of three
+themes on first sign-in and change it, with light, dark or follow-the-system, in
+Appearance.
 
 Not in the GUI today (spec stages 2–4 and known gaps in `REPORT.md`): local or private
 sessions, a desktop shell, direct worker connection, pin/grant/review/erase/todo edit, file
-upload, admin or review screens, a settings screen.
+upload, admin or review screens, a settings screen beyond Appearance. The theme is kept in
+the browser rather than on the user record, so it does not follow a person to another
+machine (`DECISIONS.md` #39).
 
 ### 1.3 Protocol methods the client uses
 
@@ -72,7 +76,8 @@ No `.env`, no `.env.example`, no `VITE_*` variables (`grep import.meta.env` find
 | plane URL | typed by the user; `localStorage` `troupe.pref.planeUrl` | which plane to talk to; client id and IdP endpoints come from the plane's discovery document |
 | `localStorage` `troupe.auth.refresh:<planeUrl>` | `packages/client/src/auth.ts:40, 167` | the only persisted secret (IdP refresh token) |
 | `sessionStorage` `troupe.auth.pending` | `packages/client/src/pkce.ts:115` | PKCE verifier and state during a redirect |
-| `localStorage` `troupe.pref.theme` | `apps/desktop/src/views/bits.tsx:131-138` | theme |
+| `localStorage` `troupe.pref.theme`, `troupe.pref.mode` | `apps/desktop/src/theme.ts` | which theme, and light/dark/follow-the-system |
+| `localStorage` `troupe.pref.appearance.chosen.<subject>` | `apps/desktop/src/theme.ts` | whether this person has been through the theme screen |
 | `ORIGINS`, `RUNS`, `BENCH_*`, `TRACE_SECONDS` | `scripts/*.ts`, `packages/bench/src/*` | development tools only |
 | `KUBECONFIG_FILE`, `VALUES`, `NAMESPACE`, `RELEASE`, `TAG` | `scripts/deploy` | deploy inputs |
 | CI secrets `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`; variable `GUI_BASE` | `.github/workflows/ci.yml` | image push |

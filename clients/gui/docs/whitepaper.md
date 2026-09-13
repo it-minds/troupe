@@ -241,8 +241,9 @@ in component state, and a `SignIn` view until an `AuthSession` exists (`App.tsx:
 rail shows the session count, an amber "Waiting for you" count, who is signed in and where
 the secret is kept, a theme toggle, and sign out.
 
-The design system (`docs/design/DESIGN.md`, `tokens.json` → generated `tokens.css`) carries
-three rules the code follows: amber marks work that has stopped and needs a person and nothing
+The design system (`docs/design/DESIGN.md`, `docs/design/themes/*.tokens.json` → generated
+`tokens.css`) ships three themes from one token contract and carries three rules the code
+follows: the theme's reserved colour marks work that has stopped and needs a person and nothing
 else may use it; structure comes from hairlines and alignment rather than cards and shadows;
 and a status is a dot *and* a word, never colour alone (`views/bits.tsx`, `Pill`). Status
 precedence in the list is waiting > read-only > error > running > dormant > queued
@@ -314,7 +315,7 @@ encode assumptions about a real plane and pod that only a run against one can co
 | Inbox opens sessions in `read` mode | triage wakes nothing | the list view still opens in `activate` | `DECISIONS.md` #13, [AUDIT.md](AUDIT.md) §2 |
 | Base path baked at build; served under the plane's `/app` | same origin as the plane, static bundle | rebuild to move it; ingress rewrite required | `DECISIONS.md` #29–#31 |
 | Image build runs the tests | an image cannot be built from a red client | slower image builds | `DECISIONS.md` #33 |
-| Generated `tokens.css` from `tokens.json` | design and code share one source | a check step and a rule never to hand-edit | `DECISIONS.md` #14 |
+| Generated `tokens.css` from `themes/*.tokens.json` | design and code share one source; three themes cost one component library | a check step, a rule never to hand-edit, and a token added in three places | `DECISIONS.md` #14, #37 |
 
 ---
 

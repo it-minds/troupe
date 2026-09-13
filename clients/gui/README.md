@@ -148,16 +148,26 @@ digest for that reason, and CI never publishes a floating tag.
 
 ## Design
 
-[`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system, `tokens.json` is it as
-data, and `example.dc.html` is every surface in one file. `apps/desktop/src/tokens.css`
-is **generated** from `tokens.json` by `pnpm tokens` and committed; do not edit it.
+[`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system,
+[`docs/design/themes/`](docs/design/themes/THEMES.md) is it as data — three themes from
+one token contract — and `example.dc.html` is every surface in one file.
+`apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts` are **generated** from
+`docs/design/themes/*.tokens.json` by `pnpm tokens` and committed; do not edit them.
 
 Three rules carry most of the weight, and a change that breaks one of them is a bug:
 
-* **Amber is a job, not a mood.** `--waiting-*` marks work that has stopped and needs a
-  person. Nothing else in the product may use it — not branding, not links, not warnings.
+* **The reserved colour is a job, not a mood.** `--waiting-*` marks work that has stopped
+  and needs a person. Nothing else in the product may use it — not branding, not links,
+  not warnings. Which hue it is depends on the theme; what it means never does.
 * **Structure comes from hairlines and alignment**, not from cards, shadows or gradients.
-* **A status is a dot *and* a word.** Colour is never the only carrier of meaning.
+* **A status is a glyph *and* a word.** Colour is never the only carrier of meaning.
+
+**Themes.** Signal (the default), Footlight and Limelight, each in light and dark. A
+person picks one on first sign-in and can change it in Appearance; it is `data-theme`
+and `data-mode` on the document root and nothing else. Every theme exposes exactly the
+same token names — a component reads `--waiting-solid` and never a hex, and never
+branches on a theme. A theme that needs a new token name is a redesign, not a theme, and
+`pnpm tokens` refuses to build one.
 
 ## The throughput test
 
@@ -215,7 +225,9 @@ packages/client/src
 apps/desktop/src
   shell.ts        the whole contract between the web bundle and a desktop shell
   hooks.ts        React bindings over the stores above; no protocol knowledge
-  tokens.css      generated from docs/design/tokens.json — do not edit
+  theme.ts        which theme and mode this person reads in; the only place that knows
+  tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
+  mark.ts         the mask's geometry, generated from the same files — do not edit
   views/          SignIn · Sessions · Session · Approval · Approvals · Files · bits
 ```
 

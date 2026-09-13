@@ -39,13 +39,16 @@ troupe-gui/
 │   ├── deploy                    bash: helm upgrade --install, then print pod digests
 │   ├── fake-deployment.ts        pnpm fake: IdP + plane + worker on loopback
 │   ├── first-token.ts            pnpm first-token: sign-in to first delta, timed
-│   └── tokens.ts                 pnpm tokens: tokens.json → tokens.css
+│   └── tokens.ts                 pnpm tokens: themes/*.tokens.json → tokens.css, mark.ts
 ├── docs/
 │   ├── AUDIT.md                  the audit these documents cite
 │   ├── bench.md                  the throughput-test recipe
 │   ├── design/
 │   │   ├── DESIGN.md             the design system, 341 lines
-│   │   ├── tokens.json           the design system as data — source of truth
+│   │   ├── themes/               three themes as data — source of truth
+│   │   │   ├── THEMES.md         what a theme may change, and what it may not
+│   │   │   ├── *.tokens.json     signal (default), footlight, limelight
+│   │   │   └── * kit.dc.html     each theme's kit, self-contained
 │   │   └── example.dc.html       every surface in one static file
 │   ├── plans/
 │   │   └── local-and-private-sessions.md   stage 2/3 design
@@ -96,11 +99,16 @@ troupe-gui/
 
 ## What is generated
 
-`apps/desktop/src/tokens.css` is written by `scripts/tokens.ts` from
-`docs/design/tokens.json` (`scripts/tokens.ts:1-2`, `:21-22`, `:157`). Its header says
-so (`tokens.css:1-3`). It is committed so the app builds without a generation step, and
-`pnpm tokens:check` regenerates it and fails on any diff (`package.json:14`;
-`DECISIONS.md` #14). Edit `tokens.json`, run `pnpm tokens`, commit both.
+`apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts` are written by
+`scripts/tokens.ts` from `docs/design/themes/*.tokens.json`. Their headers say so
+(`tokens.css:1-3`). They are committed so the app builds without a generation step, and
+`pnpm tokens:check` regenerates them and fails on any diff (`package.json:14`;
+`DECISIONS.md` #14). Edit the theme files, run `pnpm tokens`, commit the lot.
+
+The stylesheet carries every theme in both modes, keyed on `[data-theme]` and
+`[data-mode]`; the selectors are attribute-only rather than `:root[...]` so a subtree can
+carry a theme of its own, which is what makes the previews on the Appearance screen the
+real components in a theme you are not using yet.
 
 The variable names are chosen to match `docs/design/example.dc.html` so a screen
 prototyped there keeps its colours (`scripts/tokens.ts:10-11`).
@@ -120,7 +128,7 @@ describe.**
 |---|---|
 | Modified, uncommitted | `.gitignore`, `README.md`, `package.json`, `pnpm-lock.yaml`, `apps/desktop/{package.json,tsconfig.json,vite.config.ts}`, `apps/desktop/src/{App.tsx,styles.css}`, `packages/client/package.json`, `packages/client/src/{connection,index,plane,session,types}.ts` |
 | Deleted, uncommitted | `apps/desktop/src/useSession.ts` — the fold moved to `packages/client/src/transcript.ts` (`DECISIONS.md` #1) |
-| Untracked | `.dockerignore`, `.github/workflows/ci.yml`, `DECISIONS.md`, `Dockerfile`, `REPORT.md`, `docker/nginx.conf`, `charts/troupe-gui/**`, `scripts/{deploy,fake-deployment.ts,first-token.ts,tokens.ts}`, `docs/AUDIT.md`, `docs/design/{DESIGN.md,tokens.json,example.dc.html}`, `apps/desktop/src/{hooks.ts,shell.ts,tokens.css}`, `apps/desktop/src/views/*.tsx`, `packages/client/src/{attach,auth,fleet,pkce,transcript}.ts`, `packages/client/test/**`, `packages/client/tsconfig.test.json` |
+| Untracked | `.dockerignore`, `.github/workflows/ci.yml`, `DECISIONS.md`, `Dockerfile`, `REPORT.md`, `docker/nginx.conf`, `charts/troupe-gui/**`, `scripts/{deploy,fake-deployment.ts,first-token.ts,tokens.ts}`, `docs/AUDIT.md`, `docs/design/{DESIGN.md,example.dc.html}`, `docs/design/themes/**`, `apps/desktop/src/{hooks.ts,shell.ts,tokens.css}`, `apps/desktop/src/views/*.tsx`, `packages/client/src/{attach,auth,fleet,pkce,transcript}.ts`, `packages/client/test/**`, `packages/client/tsconfig.test.json` |
 | Committed at `HEAD` and unchanged | `pnpm-workspace.yaml`, `tsconfig.base.json`, `.npmrc`, `.editorconfig`, `.gitattributes`, `spec.md`, `docs/bench.md`, `docs/plans/local-and-private-sessions.md`, `packages/bench/**`, `apps/desktop/index.html`, `apps/desktop/src/main.tsx`, `.claude/launch.json` |
 
 The three commits in the history:

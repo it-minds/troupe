@@ -1,0 +1,417 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+<style>
+/*PALETTE-START*/
+:root{
+  --bg-stage:#0A0B0D; --bg-canvas:#101215; --bg-panel:#16191E; --bg-raised:#1D2128; --bg-sunken:#0B0D10; --bg-hover:#242931; --bg-selected:#1F2630;
+  --text-primary:#ECEFF3; --text-secondary:#AEB5BE; --text-muted:#7D848E; --text-inverse:#0A0B0D;
+  --link:#7FB6F5; --link-hover:#ABD2FA;
+  --border-hairline:#252A31; --border-strong:#3A424C; --focus:#3FD2E8; --divider:#1A1E24;
+  --waiting-fg:#FF7FC6; --waiting-solid:#FF5CB8; --waiting-bg:#2C0B1F; --waiting-bd:#8A2160;
+  --running-fg:#3FD2E8; --running-bg:#062A31; --running-bd:#125B69;
+  --queued-fg:#99A1AC; --queued-bg:#15181D; --queued-bd:#2D343C;
+  --allowed-fg:#5FD69B; --allowed-bg:#07281B; --allowed-bd:#1E5C40;
+  --denied-fg:#DA8B7B; --denied-bg:#2A1411; --denied-bd:#6E382E;
+  --dormant-fg:#8E93E8; --dormant-bg:#15172B; --dormant-bd:#343869;
+  --readonly-fg:#9AA2AC; --readonly-bg:#14171B; --readonly-bd:#2B3139;
+  --error-fg:#FF6B5B; --error-bg:#2C100C; --error-bd:#7F3228;
+  --offline-fg:#C9B27A; --offline-bg:#201B12; --offline-bd:#4B4028;
+  --private-fg:#7FA8B8; --private-bg:#101619; --private-bd:#2A3A42;
+  --p1:#6FB5FF; --p2:#C08BFF; --p3:#59D6B4; --p4:#E8C15E;
+  color-scheme:dark;
+}
+[data-theme="light"]{
+  --bg-stage:#D9DCE0; --bg-canvas:#EDEFF2; --bg-panel:#F9FAFB; --bg-raised:#FFFFFF; --bg-sunken:#E3E6EA; --bg-hover:#E4E8ED; --bg-selected:#DFE5EC;
+  --text-primary:#0E1013; --text-secondary:#3A4049; --text-muted:#585F68; --text-inverse:#FFFFFF;
+  --link:#14568F; --link-hover:#0B3A64;
+  --border-hairline:#C8CCD2; --border-strong:#979EA7; --focus:#0A5866; --divider:#D9DDE2;
+  --waiting-fg:#9B0A5E; --waiting-solid:#C11A79; --waiting-bg:#FCE0F0; --waiting-bd:#E68BC0;
+  --running-fg:#0A5866; --running-bg:#D8EFF3; --running-bd:#85C4CF;
+  --queued-fg:#4E555E; --queued-bg:#E5E8EC; --queued-bd:#B5BBC3;
+  --allowed-fg:#0F6342; --allowed-bg:#DCF1E6; --allowed-bd:#8AC7AC;
+  --denied-fg:#8E3626; --denied-bg:#F9E2DD; --denied-bd:#D79F92;
+  --dormant-fg:#3B3FA0; --dormant-bg:#E3E4F6; --dormant-bd:#ABAEDE;
+  --readonly-fg:#414850; --readonly-bg:#E6E9ED; --readonly-bd:#B3B9C0;
+  --error-fg:#A3200F; --error-bg:#FBDFDB; --error-bd:#E0998E;
+  --offline-fg:#5D4A1E; --offline-bg:#EFE8D8; --offline-bd:#C2B391;
+  --private-fg:#245061; --private-bg:#E0EAEE; --private-bd:#9DBAC5;
+  --p1:#1B5299; --p2:#5B2E96; --p3:#0A6B55; --p4:#7A5B00;
+  color-scheme:light;
+}
+/*PALETTE-END*/
+:root{
+  --font-sans:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+  --t-title:600 clamp(21px,3vw,26px)/1.2 var(--font-sans); --ls-title:-0.015em;
+  --t-heading:600 17px/1.35 var(--font-sans);
+  --t-sub:600 15px/1.4 var(--font-sans);
+  --t-body:400 15px/1.62 var(--font-sans);
+  --t-ui:500 14px/1.4 var(--font-sans);
+  --t-ui-small:500 13px/1.4 var(--font-sans);
+  --t-micro:500 11.5px/1.3 var(--font-mono); --ls-micro:0.04em;
+  --t-code:400 13px/1.55 var(--font-mono);
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px; --s-6:24px; --s-7:32px; --s-8:40px; --s-9:56px; --s-10:72px;
+  --r-xs:2px; --r-sm:3px; --r-md:5px; --r-lg:8px; --r-pill:999px;
+  --bw-hair:1px; --bw-marker:3px;
+  --d-pulse:2200ms; --ease:cubic-bezier(0.2,0,0,1);
+}
+html,body{margin:0;padding:0;background:var(--bg-stage);}
+body{font:var(--t-body);color:var(--text-primary);-webkit-font-smoothing:antialiased;}
+*{box-sizing:border-box;}
+a{color:var(--link);text-decoration:underline;text-underline-offset:2px;}
+a:hover{color:var(--link-hover);}
+button{font-family:inherit;}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px;border-radius:var(--r-xs);}
+@keyframes tk-pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms !important;animation-iteration-count:1 !important;}}
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="min-height:100vh;background:var(--bg-stage);color:var(--text-primary);font:var(--t-body)">
+
+  <header style="position:sticky;top:0;z-index:10;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-3) var(--s-5);background:var(--bg-sunken);border-bottom:var(--bw-hair) solid var(--border-hairline)">
+    <span style="display:inline-flex;align-items:center;gap:var(--s-2)">
+      <svg width="18" height="18" viewBox="0 0 48 48" aria-hidden="true" style="display:block;color:var(--text-primary)">
+        <defs><clipPath id="tk-hd"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+        <path d="M12 17 Q12 10 24 10 Q36 10 36 17 L36 25 Q36 33 24 39 Q12 33 12 25 Z" fill="var(--waiting-solid)" clip-path="url(#tk-hd)"></path>
+        <path d="M12 17 Q12 10 24 10 Q36 10 36 17 L36 25 Q36 33 24 39 Q12 33 12 25 Z" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round"></path>
+        <rect x="16" y="21" width="5.5" height="3.4" rx="1.7" fill="currentColor"></rect>
+        <rect x="26.5" y="21" width="5.5" height="3.4" rx="1.7" fill="var(--text-inverse)"></rect>
+      </svg>
+      <span style="font:600 14px/1 var(--font-mono)">troupe</span>
+      <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);padding-left:var(--s-3);border-left:var(--bw-hair) solid var(--border-hairline)">theme · signal</span>
+    </span>
+    <button type="button" onClick="{{ toggleTheme }}" style="margin-left:auto;min-height:36px;padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui-small);cursor:pointer">{{ themeLabel }}</button>
+  </header>
+
+  <main style="max-width:1120px;margin:0 auto;padding:var(--s-8) var(--s-5) var(--s-10);display:flex;flex-direction:column;gap:var(--s-9)">
+
+    <section>
+      <h1 style="font:var(--t-title);letter-spacing:var(--ls-title);margin:0 0 var(--s-3)">Signal</h1>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-3);max-width:64ch">True neutral graphite with no blue cast, so anything pasted into a session keeps its own colour, and a printer’s duotone on top with one job each: cyan means the machine is working, magenta means you are being asked. Choose it when the platform should read modern and technical before it reads theatrical.</p>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0;max-width:64ch">The mark is a mask, split down the middle: the filled half is the work the agent did on its own, the hollow half is the part still waiting on a person. Everything in this kit is built from that one silhouette and its two eyes. Light and dark come from the same tokens.</p>
+    </section>
+
+    <!-- MARK -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-2)">The mark</h2>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:64ch">Drawn on a 48 grid at 2.6 stroke. The outline is the character; nothing is ever filled with a colour that is not in the token set. Light always falls from the right — never mirror it.</p>
+
+      <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+        <div style="flex:1 1 210px;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-6);display:flex;flex-direction:column;align-items:center;gap:var(--s-4)">
+          <svg width="104" height="104" viewBox="0 0 48 48" role="img" aria-label="Troupe mask" style="display:block;color:var(--text-primary)">
+            <defs><clipPath id="tk-m1"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="var(--waiting-solid)" clip-path="url(#tk-m1)"></path>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"></path>
+            <path d="M24 8 L24 42" stroke="currentColor" stroke-width="1.4"></path>
+            <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"></path>
+            <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="var(--text-inverse)"></path>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);text-align:center">Primary · seam visible above 32px</span>
+        </div>
+        <div style="flex:1 1 210px;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-sunken);padding:var(--s-6);display:flex;flex-direction:column;align-items:center;gap:var(--s-4)">
+          <svg width="104" height="104" viewBox="0 0 48 48" role="img" aria-label="Troupe mask, single colour" style="display:block;color:var(--text-primary)">
+            <defs><clipPath id="tk-m2"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="currentColor" clip-path="url(#tk-m2)"></path>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"></path>
+            <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"></path>
+            <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="var(--bg-sunken)"></path>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);text-align:center">One colour · print, stamps, embroidery</span>
+        </div>
+        <div style="flex:1 1 210px;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--waiting-solid);padding:var(--s-6);display:flex;flex-direction:column;align-items:center;gap:var(--s-4)">
+          <svg width="104" height="104" viewBox="0 0 48 48" role="img" aria-label="Troupe mask, reversed" style="display:block;color:var(--text-inverse)">
+            <defs><clipPath id="tk-m3"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="currentColor" clip-path="url(#tk-m3)" opacity="0.28"></path>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"></path>
+            <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"></path>
+            <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="currentColor"></path>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-inverse);text-align:center">Reversed · sign-in, app tile</span>
+        </div>
+        <div style="flex:1 1 210px;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-6);display:flex;flex-direction:column;align-items:center;gap:var(--s-4)">
+          <svg width="104" height="104" viewBox="0 0 48 48" role="img" aria-label="The troupe: three masks" style="display:block;color:var(--text-primary)">
+            <defs><clipPath id="tk-m4"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+            <path d="M4 17 Q4 11 14 11 Q24 11 24 17 L24 23 Q24 30 14 35 Q4 30 4 23 Z" fill="var(--bg-panel)" stroke="var(--text-muted)" stroke-width="2" stroke-linejoin="round"></path>
+            <path d="M24 17 Q24 11 34 11 Q44 11 44 17 L44 23 Q44 30 34 35 Q24 30 24 23 Z" fill="var(--bg-panel)" stroke="var(--text-muted)" stroke-width="2" stroke-linejoin="round"></path>
+            <path d="M13 18 Q13 10 24 10 Q35 10 35 18 L35 26 Q35 34 24 40 Q13 34 13 26 Z" fill="var(--bg-panel)"></path>
+            <path d="M13 18 Q13 10 24 10 Q35 10 35 18 L35 26 Q35 34 24 40 Q13 34 13 26 Z" fill="var(--waiting-solid)" clip-path="url(#tk-m4)"></path>
+            <path d="M13 18 Q13 10 24 10 Q35 10 35 18 L35 26 Q35 34 24 40 Q13 34 13 26 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"></path>
+            <path d="M17.5 23 Q20.2 21 22.9 23 Q20.2 25 17.5 23 Z" fill="currentColor"></path>
+            <path d="M25.1 23 Q27.8 21 30.5 23 Q27.8 25 25.1 23 Z" fill="var(--text-inverse)"></path>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);text-align:center">Company · lead and subagents</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- WORDMARK -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-2)">Wordmark and app tiles</h2>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:64ch">IBM Plex Mono, lowercase — the platform writes its own name the way it writes an identifier. Below 32px the seam line is dropped and the colour change becomes the seam; below 24px the eyes flatten to bars.</p>
+
+      <div style="display:flex;flex-direction:column;gap:var(--s-3)">
+        <div style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-7) var(--s-6);display:flex;align-items:center;gap:var(--s-6);flex-wrap:wrap">
+          <span style="display:inline-flex;align-items:center;gap:var(--s-3)">
+            <svg width="40" height="40" viewBox="0 0 48 48" aria-hidden="true" style="display:block;color:var(--text-primary)">
+              <defs><clipPath id="tk-w1"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+              <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="var(--waiting-solid)" clip-path="url(#tk-w1)"></path>
+              <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"></path>
+              <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="currentColor"></path>
+              <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="var(--text-inverse)"></path>
+            </svg>
+            <span style="font:600 32px/1 var(--font-mono);letter-spacing:-0.01em">troupe</span>
+          </span>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-left:auto">Full lockup</span>
+        </div>
+
+        <div style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5) var(--s-6);display:flex;align-items:center;gap:var(--s-5);flex-wrap:wrap">
+          <span style="display:inline-flex;align-items:flex-end;gap:var(--s-4)">
+            <svg width="16" height="16" viewBox="0 0 48 48" role="img" aria-label="Favicon at 16 pixels" style="display:block;color:var(--text-primary)">
+              <defs><clipPath id="tk-f16"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+              <rect x="2" y="2" width="44" height="44" rx="7" fill="var(--bg-sunken)"></rect>
+              <path d="M12 17 Q12 10 24 10 Q36 10 36 17 L36 25 Q36 33 24 39 Q12 33 12 25 Z" fill="var(--waiting-solid)" clip-path="url(#tk-f16)"></path>
+              <path d="M12 17 Q12 10 24 10 Q36 10 36 17 L36 25 Q36 33 24 39 Q12 33 12 25 Z" fill="none" stroke="currentColor" stroke-width="3.4" stroke-linejoin="round"></path>
+              <rect x="16" y="21" width="5.5" height="3.4" rx="1.7" fill="currentColor"></rect>
+              <rect x="26.5" y="21" width="5.5" height="3.4" rx="1.7" fill="var(--text-inverse)"></rect>
+            </svg>
+            <svg width="32" height="32" viewBox="0 0 48 48" aria-hidden="true" style="display:block;color:var(--text-primary)">
+              <defs><clipPath id="tk-f32"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+              <rect x="2" y="2" width="44" height="44" rx="7" fill="var(--bg-sunken)"></rect>
+              <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="var(--waiting-solid)" clip-path="url(#tk-f32)"></path>
+              <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="none" stroke="currentColor" stroke-width="3" stroke-linejoin="round"></path>
+              <path d="M15.8 21 Q19.2 18.6 22.6 21 Q19.2 23.4 15.8 21 Z" fill="currentColor"></path>
+              <path d="M25.4 21 Q28.8 18.6 32.2 21 Q28.8 23.4 25.4 21 Z" fill="var(--text-inverse)"></path>
+            </svg>
+            <svg width="64" height="64" viewBox="0 0 48 48" aria-hidden="true" style="display:block;color:var(--text-primary)">
+              <defs><clipPath id="tk-f64"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+              <rect x="2" y="2" width="44" height="44" rx="7" fill="var(--bg-sunken)"></rect>
+              <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="var(--waiting-solid)" clip-path="url(#tk-f64)"></path>
+              <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linejoin="round"></path>
+              <path d="M15.8 21 Q19.2 18.6 22.6 21 Q19.2 23.4 15.8 21 Z" fill="currentColor"></path>
+              <path d="M25.4 21 Q28.8 18.6 32.2 21 Q28.8 23.4 25.4 21 Z" fill="var(--text-inverse)"></path>
+            </svg>
+          </span>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-left:auto;text-align:right">16 · 32 · 64</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- EYE STATUS -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-2)">The eye, as status</h2>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:64ch">The mask's eye is the product's status glyph: one 16×16 shape, six readings. Each is a different <em>outline</em>, so a greyscale screenshot still tells you the state — colour is the third signal, and the word is always present.</p>
+
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(160px,1fr));gap:1px;background:var(--border-hairline);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);overflow:hidden">
+        <div style="background:var(--bg-panel);padding:var(--s-4);display:flex;align-items:center;gap:var(--s-3);color:var(--running-fg)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8 Q8 2.4 14.4 8 Q8 13.6 1.6 8 Z" fill="none" stroke="currentColor" stroke-width="1.5"></path><circle cx="8" cy="8" r="2.1" fill="currentColor"></circle></svg>
+          <span style="font:var(--t-ui-small)">Working<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:2px">open</span></span>
+        </div>
+        <div style="background:var(--bg-panel);padding:var(--s-4);display:flex;align-items:center;gap:var(--s-3);color:var(--waiting-fg)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8 Q8 2.4 14.4 8 Q8 13.6 1.6 8 Z" fill="currentColor"></path><circle cx="8" cy="8" r="2.4" fill="var(--bg-panel)"></circle></svg>
+          <span style="font:var(--t-ui-small)">Waiting for you<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:2px">lit</span></span>
+        </div>
+        <div style="background:var(--bg-panel);padding:var(--s-4);display:flex;align-items:center;gap:var(--s-3);color:var(--queued-fg)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8 Q8 2.4 14.4 8 Q8 13.6 1.6 8 Z" fill="none" stroke="currentColor" stroke-width="1.5" stroke-dasharray="2.4 2"></path></svg>
+          <span style="font:var(--t-ui-small)">Queued<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:2px">dashed</span></span>
+        </div>
+        <div style="background:var(--bg-panel);padding:var(--s-4);display:flex;align-items:center;gap:var(--s-3);color:var(--dormant-fg)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8 Q8 13.6 14.4 8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"></path></svg>
+          <span style="font:var(--t-ui-small)">Asleep<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:2px">closed</span></span>
+        </div>
+        <div style="background:var(--bg-panel);padding:var(--s-4);display:flex;align-items:center;gap:var(--s-3);color:var(--readonly-fg)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8 Q8 2.4 14.4 8 Q8 13.6 1.6 8 Z" fill="none" stroke="currentColor" stroke-width="1.5"></path><path d="M3 12.4 L13 3.6" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>
+          <span style="font:var(--t-ui-small)">Read only<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:2px">crossed</span></span>
+        </div>
+        <div style="background:var(--bg-panel);padding:var(--s-4);display:flex;align-items:center;gap:var(--s-3);color:var(--offline-fg)">
+          <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden="true"><path d="M1.6 8 Q4.6 5.4 7 4.5 M9.4 4.9 Q12.3 6 14.4 8 Q12.6 9.6 10.6 10.7 M8 11.6 Q4.8 11 1.6 8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path></svg>
+          <span style="font:var(--t-ui-small)">Disconnected<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:2px">cut</span></span>
+        </div>
+      </div>
+    </section>
+
+    <!-- CAST -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-2)">Cast</h2>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:64ch"><strong style="font-weight:600">People get initials, agents get masks.</strong> The line the whole metaphor rests on. Role is drawn on the ring — a filled cap for the owner, a finely dashed ring for a viewer, your own ring dashed and neutral so other people stand out.</p>
+
+      <div style="display:flex;flex-wrap:wrap;gap:var(--s-6);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-6)">
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="Jonas Bak, owner" style="display:block;color:var(--p2)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+            <circle cx="22" cy="3" r="3.2" fill="currentColor"></circle>
+            <text x="22" y="27" text-anchor="middle" fill="currentColor" style="font:600 14px var(--font-mono)">JB</text>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Owner</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="Mette Sørensen, collaborator" style="display:block;color:var(--p1)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+            <text x="22" y="27" text-anchor="middle" fill="currentColor" style="font:600 14px var(--font-mono)">MS</text>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Collaborator</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="Amira Haddad, viewer" style="display:block;color:var(--p3)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="1 4" stroke-linecap="round"></circle>
+            <text x="22" y="27" text-anchor="middle" fill="currentColor" style="font:600 14px var(--font-mono)">AH</text>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Viewer</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="You" style="display:block;color:var(--text-muted)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="5 4"></circle>
+            <text x="22" y="27" text-anchor="middle" fill="currentColor" style="font:600 14px var(--font-mono)">SB</text>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">You</span>
+        </div>
+        <div style="width:1px;background:var(--divider)"></div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="Lead agent, working" style="display:block;color:var(--running-fg)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+            <path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round"></path>
+            <circle cx="18.4" cy="21.4" r="1.5" fill="currentColor"></circle>
+            <circle cx="25.6" cy="21.4" r="1.5" fill="currentColor"></circle>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Lead · working</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="Agent waiting for you" style="display:block;color:var(--waiting-fg)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6"></circle>
+            <path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="currentColor"></path>
+            <path d="M15.8 21.4 Q18.4 19.2 21 21.4 Q18.4 23.6 15.8 21.4 Z" fill="var(--bg-panel)"></path>
+            <path d="M23 21.4 Q25.6 19.2 28.2 21.4 Q25.6 23.6 23 21.4 Z" fill="var(--bg-panel)"></path>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Waiting for you</span>
+        </div>
+        <div style="display:flex;flex-direction:column;align-items:center;gap:var(--s-3)">
+          <svg width="46" height="46" viewBox="0 0 44 44" role="img" aria-label="Subagent, not started" style="display:block;color:var(--queued-fg)">
+            <circle cx="22" cy="22" r="19" fill="none" stroke="currentColor" stroke-width="1.6" stroke-dasharray="3 3"></circle>
+            <path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linejoin="round" opacity="0.7"></path>
+            <path d="M16.4 21.6 Q18.4 23.2 20.4 21.6 M23.6 21.6 Q25.6 23.2 27.6 21.6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"></path>
+          </svg>
+          <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Subagent · not started</span>
+        </div>
+      </div>
+    </section>
+
+    <!-- IN PLACE -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-2)">In place</h2>
+      <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:64ch">Real fragments at shipping density: the session row that needs you, the agent tree, and the approval. This is where the theme is actually judged.</p>
+
+      <div style="display:flex;flex-direction:column;gap:var(--s-3)">
+        <a href="#s" style="display:block;text-decoration:none;color:inherit;border:var(--bw-hair) solid var(--waiting-bd);border-left:var(--bw-marker) solid var(--waiting-solid);border-radius:var(--r-md);background:var(--waiting-bg);padding:var(--s-4)">
+          <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+            <span style="font:600 15px/1.62 var(--font-sans);flex:1 1 240px;min-width:0">Tilbud til Kolding Kommune — digital borgerservice</span>
+            <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:2px var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--waiting-bd);background:var(--bg-stage);color:var(--waiting-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:tk-pulse var(--d-pulse) var(--ease) infinite"></span>Waiting for you</span>
+          </div>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)"><span>Wants to change a file</span><span style="color:var(--text-muted)">·</span><span>Mette Sørensen · Salg</span><span style="color:var(--text-muted)">·</span><span style="color:var(--text-muted)">Active now</span></div>
+        </a>
+
+        <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:flex-start">
+          <section style="flex:1 1 300px;min-width:0;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);overflow:hidden">
+            <h3 style="font:var(--t-sub);margin:0;padding:var(--s-3) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider)">Who is working</h3>
+            <ul style="list-style:none;margin:0;padding:var(--s-3) var(--s-4);display:flex;flex-direction:column;gap:var(--s-3);font:var(--t-ui)">
+              <li style="display:flex;align-items:center;gap:var(--s-3)">
+                <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto;color:var(--running-fg)"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"></path><circle cx="18.4" cy="21.4" r="1.9" fill="currentColor"></circle><circle cx="25.6" cy="21.4" r="1.9" fill="currentColor"></circle></svg>
+                <span>Lead</span><span style="margin-left:auto;font:var(--t-ui-small);color:var(--text-muted)">Keeping the plan</span>
+              </li>
+              <li style="display:flex;align-items:center;gap:var(--s-3);padding-left:var(--s-4);margin-left:var(--s-2);border-left:var(--bw-hair) solid var(--border-hairline)">
+                <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto;color:var(--running-fg)"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"></path><circle cx="18.4" cy="21.4" r="1.9" fill="currentColor"></circle><circle cx="25.6" cy="21.4" r="1.9" fill="currentColor"></circle></svg>
+                <span>Research</span><span style="margin-left:auto;font:var(--t-ui-small);color:var(--text-muted)">Reading the rate card</span>
+              </li>
+              <li style="display:flex;align-items:center;gap:var(--s-3);padding-left:var(--s-4);margin-left:var(--s-2);border-left:var(--bw-hair) solid var(--border-hairline)">
+                <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto;color:var(--waiting-fg);animation:tk-pulse var(--d-pulse) var(--ease) infinite"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="currentColor"></path><path d="M15.8 21.4 Q18.4 19.2 21 21.4 Q18.4 23.6 15.8 21.4 Z" fill="var(--bg-panel)"></path><path d="M23 21.4 Q25.6 19.2 28.2 21.4 Q25.6 23.6 23 21.4 Z" fill="var(--bg-panel)"></path></svg>
+                <span>Draft</span><span style="margin-left:auto;font:var(--t-ui-small);color:var(--waiting-fg)">Waiting for you</span>
+              </li>
+              <li style="display:flex;align-items:center;gap:var(--s-3);padding-left:var(--s-4);margin-left:var(--s-2);border-left:var(--bw-hair) solid var(--border-hairline);color:var(--text-muted)">
+                <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" opacity="0.7"></path><path d="M16.4 21.6 Q18.4 23.2 20.4 21.6 M23.6 21.6 Q25.6 23.2 27.6 21.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                <span>Proofreading</span><span style="margin-left:auto;font:var(--t-ui-small)">Not started</span>
+              </li>
+            </ul>
+          </section>
+
+          <section style="flex:1 1 300px;min-width:0;border:var(--bw-hair) solid var(--waiting-bd);border-top:var(--bw-marker) solid var(--waiting-solid);border-radius:var(--r-lg);background:var(--bg-panel)">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-2);padding:var(--s-4) var(--s-4) var(--s-3)">
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:2px var(--s-2);border-radius:var(--r-pill);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-micro);letter-spacing:var(--ls-micro)">Waiting for you</span>
+              <h3 style="font:var(--t-heading);margin:0;flex:1 1 150px;min-width:0">Change a file?</h3>
+            </div>
+            <p style="margin:0;padding:0 var(--s-4) var(--s-3);font:var(--t-ui-small);color:var(--text-secondary)">Rewrite the delivery section so the prototype lands after six weeks instead of eight.</p>
+            <div style="margin:0 var(--s-4);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);overflow:hidden;background:var(--bg-sunken);font:400 12px/1.5 var(--font-mono)">
+              <div style="padding:var(--s-1) var(--s-3);color:var(--text-muted);border-bottom:var(--bw-hair) solid var(--border-hairline)">tilbud/kolding-borgerservice.md</div>
+              <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:var(--denied-bg);color:var(--denied-fg);border-left:var(--bw-marker) solid var(--denied-bd)"><span aria-hidden="true">−</span><span>otte uger efter opstart.</span></div>
+              <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3) var(--s-1);background:var(--allowed-bg);color:var(--allowed-fg);border-left:var(--bw-marker) solid var(--allowed-bd)"><span aria-hidden="true">+</span><span>seks uger efter opstart.</span></div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);padding:var(--s-4)">
+              <button type="button" style="flex:1 1 120px;min-height:44px;padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--waiting-solid);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-ui);cursor:pointer">Allow</button>
+              <button type="button" style="flex:1 1 100px;min-height:44px;padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer">Deny</button>
+            </div>
+          </section>
+        </div>
+      </div>
+    </section>
+
+    <!-- PALETTE -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-5)">Semantic colours</h2>
+      <div style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5);display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:var(--s-4)">
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--waiting-solid)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">waiting for you</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--running-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">running</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--allowed-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">allowed</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--denied-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">denied</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--dormant-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">dormant</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--queued-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">queued</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--private-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">private</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--error-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">error</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--offline-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">offline</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--readonly-fg)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">read only</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--p1)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">person 1</span></span>
+        <span style="display:flex;flex-direction:column;gap:var(--s-2)"><span style="height:34px;border-radius:var(--r-sm);border:var(--bw-hair) solid var(--border-hairline);background:var(--p2)"></span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-secondary)">person 2</span></span>
+      </div>
+    </section>
+
+    <!-- RULES -->
+    <section>
+      <h2 style="font:var(--t-heading);margin:0 0 var(--s-4)">Rules</h2>
+      <ul style="margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:var(--s-3);max-width:64ch">
+        <li style="display:flex;gap:var(--s-3);font:var(--t-body);color:var(--text-secondary)"><span aria-hidden="true" style="flex:0 0 auto;width:var(--bw-marker);background:var(--waiting-solid)"></span><span><strong style="color:var(--text-primary);font-weight:600">One reserved colour.</strong> Magenta means <em>a person must decide</em> and nothing else. No branding, links, highlights or warnings in it.</span></li>
+        <li style="display:flex;gap:var(--s-3);font:var(--t-body);color:var(--text-secondary)"><span aria-hidden="true" style="flex:0 0 auto;width:var(--bw-marker);background:var(--waiting-solid)"></span><span><strong style="color:var(--text-primary);font-weight:600">The mask stays hollow and mouthless.</strong> Two eyes and an outline. A mouth promises a personality the product does not have.</span></li>
+        <li style="display:flex;gap:var(--s-3);font:var(--t-body);color:var(--text-secondary)"><span aria-hidden="true" style="flex:0 0 auto;width:var(--bw-marker);background:var(--waiting-solid)"></span><span><strong style="color:var(--text-primary);font-weight:600">People never get a mask.</strong> A human is initials in a ring, always.</span></li>
+        <li style="display:flex;gap:var(--s-3);font:var(--t-body);color:var(--text-secondary)"><span aria-hidden="true" style="flex:0 0 auto;width:var(--bw-marker);background:var(--waiting-solid)"></span><span><strong style="color:var(--text-primary);font-weight:600">Eyes invert with their half.</strong> An eye on a filled half is cut out of it; an eye on a hollow half is solid. Never two solid eyes on a split mask.</span></li>
+        <li style="display:flex;gap:var(--s-3);font:var(--t-body);color:var(--text-secondary)"><span aria-hidden="true" style="flex:0 0 auto;width:var(--bw-marker);background:var(--waiting-solid)"></span><span><strong style="color:var(--text-primary);font-weight:600">Status is never colour alone.</strong> Eye shape, word, then colour. Greyscale has to survive.</span></li>
+        <li style="display:flex;gap:var(--s-3);font:var(--t-body);color:var(--text-secondary)"><span aria-hidden="true" style="flex:0 0 auto;width:var(--bw-marker);background:var(--waiting-solid)"></span><span><strong style="color:var(--text-primary);font-weight:600">Themes swap values, never names.</strong> Components read <span style="font:var(--t-code)">--waiting-solid</span>, not a hex. A theme that needs a new token name is not a theme, it is a redesign.</span></li>
+      </ul>
+    </section>
+
+  </main>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1120,&quot;height&quot;:900}}">
+class Component extends DCLogic {
+  state = { theme: 'dark' };
+  renderVals() {
+    return {
+      theme: this.state.theme,
+      themeLabel: this.state.theme === 'dark' ? 'Light' : 'Dark',
+      toggleTheme: () => this.setState({ theme: this.state.theme === 'dark' ? 'light' : 'dark' })
+    };
+  }
+}
+
+</script>
+</body>
+</html>
