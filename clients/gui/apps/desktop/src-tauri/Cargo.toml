@@ -1,0 +1,40 @@
+[package]
+name = "troupe-desktop"
+version = "0.1.0"
+description = "The Troupe GUI"
+authors = ["Troupe"]
+edition = "2021"
+rust-version = "1.77.2"
+
+# The library is what the mobile entry point would call; `main.rs` is a two-line shim.
+[lib]
+name = "troupe_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+# The HTTP client that runs outside the webview: no preflight, no Origin, so a plane
+# needs no CORS entry for the desktop app.
+tauri-plugin-http = "2"
+# `target="_blank"` does nothing in a webview and the device grant needs a real browser.
+tauri-plugin-opener = "2"
+# `troupe://enrol?plane=…`, clicked in the web client after signing in there.
+tauri-plugin-deep-link = "2"
+# Windows Credential Manager / macOS Keychain / Secret Service. The refresh token lives
+# here and nowhere else; see src/secrets.rs.
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# On Windows and Linux the OS answers a deep link by starting a *second* process with the
+# URL in argv. Without this the person gets a new window instead of a configured one.
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = "s"
+panic = "abort"
+strip = true
