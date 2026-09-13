@@ -184,13 +184,22 @@ defmodule Troupe.Plane.Provision do
     }
   end
 
+  # `claimName`, which is what the resource declares and what `Troupe.WorkerProfile` reads
+  # back. It said `volume` for a long time and nothing noticed, because `teams` is a
+  # projection of grants and a profile with no grant projects an empty list: the first
+  # grant anybody made turned every subsequent write of that profile into an API error —
+  # `field not declared in schema` — and had the schema been permissive instead, the
+  # operator would have read `claim_name: nil` and quietly never bound the volume.
+  #
+  # `ProvisionManifestTest` round-trips this through the parser, so the two cannot drift
+  # again without a test saying so.
   defp teams_of(profile) do
     profile.name
     |> Identity.grants_for_profile()
     |> Enum.map(fn grant ->
       %{
         "name" => grant.team.name,
-        "volume" => volume_name(grant.team.name),
+        "claimName" => volume_name(grant.team.name),
         "mode" => grant.volume_mode
       }
     end)
