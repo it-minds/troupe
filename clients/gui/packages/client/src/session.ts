@@ -362,10 +362,21 @@ export class SessionView {
       // Give the live `agent_state` a moment to arrive, then ask; a `session.get` round
       // trip is cheap, so this costs a few milliseconds when the ephemeral was dropped.
       let waitMs = 5;
-      while (performance.now() < deadline) {
+      // `giveUp` stops this too. When the turn ends durably, `terminal` wins the race
+      // and this loop is left running over a connection nobody is waiting on any more:
+      // its next `session.get` rejects when that socket eventually closes, into a
+      // promise with no handler, which Node reports as an uncaught error in whatever
+      // happens to be running at the time.
+      while (performance.now() < deadline && !giveUp.signal.aborted) {
         await new Promise((r) => setTimeout(r, waitMs));
         waitMs = Math.min(waitMs * 2, 100);
-        const s = await this.conn.call<{ status?: string; state?: string }>("session.get", { session_id: this.sessionId });
+        if (giveUp.signal.aborted) break;
+        let s: { status?: string; state?: string };
+        try {
+          s = await this.conn.call<{ status?: string; state?: string }>("session.get", { session_id: this.sessionId });
+        } catch {
+          break; // the socket went, or the session did; `terminal` owns the outcome
+        }
         if (s.status && !["thinking", "acting", "compacting", "busy"].includes(s.status)) {
           return { ephemeral: true, type: "agent_state", agent: ["root"], data: { state: s.status, polled: true } };
         }
