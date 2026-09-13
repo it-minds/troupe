@@ -16,6 +16,11 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 tauri = { version = "2", features = [] }
+# `generate_context!` and `#[tauri::command]` both expand into code that names these, so
+# they are dependencies of the macros rather than of anything written here.
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
 # The HTTP client that runs outside the webview: no preflight, no Origin, so a plane
 # needs no CORS entry for the desktop app.
 tauri-plugin-http = "2"
