@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Used only when the build is signed (see tauri.signing.conf.json). The hardened
+  runtime, which notarisation requires, blocks the JIT WKWebView needs for JavaScript;
+  these two entitlements give it back and nothing else. Do not add
+  `disable-library-validation` or `allow-unsigned-executable-memory` — a protocol
+  client has no reason to load anything it did not ship with.
+-->
+<plist version="1.0">
+  <dict>
+    <key>com.apple.security.cs.allow-jit</key>
+    <true/>
+    <key>com.apple.security.cs.allow-unsigned-executable-memory</key>
+    <false/>
+  </dict>
+</plist>

@@ -148,19 +148,47 @@ export class SessionView {
    * Resolve with the first event matching `pred`, or reject after `timeoutMs`.
    * Registered synchronously, so call it *before* the command that causes the event.
    */
-  waitFor(pred: (e: TroupeEvent) => boolean, timeoutMs = 30_000, label = "event"): Promise<TroupeEvent> {
+  waitFor(
+    pred: (e: TroupeEvent) => boolean,
+    timeoutMs = 30_000,
+    label = "event",
+    /** Stop waiting, without waiting out the timeout. See `prompt`. */
+    signal?: AbortSignal,
+  ): Promise<TroupeEvent> {
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => {
+      const stop = () => {
+        clearTimeout(timer);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      // Only for the two paths that end the wait without `handle` knowing about it.
+      // When the predicate matches, `handle` removes the waiter by index — removing it
+      // here as well would shift the array underneath it and drop somebody else's.
+      const forget = () => {
         const i = this.waiters.indexOf(waiter);
         if (i >= 0) this.waiters.splice(i, 1);
+      };
+      const timer = setTimeout(() => {
+        stop();
+        forget();
         reject(new Error(`timed out after ${timeoutMs}ms waiting for ${label} on ${this.sessionId}`));
       }, timeoutMs);
+      const onAbort = () => {
+        stop();
+        forget();
+        reject(new Error(`no longer waiting for ${label} on ${this.sessionId}`));
+      };
       const waiter = (e: TroupeEvent) => {
         if (!pred(e)) return false;
-        clearTimeout(timer);
+        stop();
         resolve(e);
         return true;
       };
+      if (signal?.aborted) {
+        clearTimeout(timer);
+        reject(new Error(`no longer waiting for ${label} on ${this.sessionId}`));
+        return;
+      }
+      signal?.addEventListener("abort", onAbort, { once: true });
       this.waiters.push(waiter);
     });
   }
@@ -269,6 +297,11 @@ export class SessionView {
    */
   async prompt(text: string, timeoutMs = 60_000): Promise<TurnResult> {
     const commandId = this.conn.nextCommandId();
+    // Every waiter below is torn down when the turn ends. Without this, a turn that
+    // produced no `llm_delta` — a dropped ephemeral, a tool-only turn, or a model that
+    // simply answered fast — would hold this method open for that waiter's own timeout
+    // long after the turn was over. The bench calls `prompt`, so the cost lands there.
+    const giveUp = new AbortController();
     const t0 = performance.now();
     const marks: TurnResult["marks"] = {};
     let responseText = "";
@@ -279,18 +312,19 @@ export class SessionView {
       (e) => isDurable(e) && e.type === "input_accepted" && e.data["command_id"] === commandId,
       timeoutMs,
       "input_accepted",
+      giveUp.signal,
     ).then(() => {
       acceptedSeen = true;
       marks.accepted = performance.now() - t0;
     });
 
-    const deltaSeen = this.waitFor((e) => !isDurable(e) && e.type === "llm_delta", timeoutMs, "llm_delta")
+    const deltaSeen = this.waitFor((e) => !isDurable(e) && e.type === "llm_delta", timeoutMs, "llm_delta", giveUp.signal)
       .then(() => {
         marks.firstDelta = performance.now() - t0;
       })
       .catch(() => undefined); // deltas are best-effort by contract
 
-    const responded = this.waitFor((e) => isDurable(e) && e.type === "llm_response", timeoutMs, "llm_response")
+    const responded = this.waitFor((e) => isDurable(e) && e.type === "llm_response", timeoutMs, "llm_response", giveUp.signal)
       .then((e) => {
         marks.response = performance.now() - t0;
         const data = (e as DurableEvent).data;
@@ -307,6 +341,7 @@ export class SessionView {
         (!isDurable(e) && e.type === "agent_state" && isRoot(e) && acceptedSeen && ["idle", "done"].includes(String(e.data["state"]))),
       timeoutMs,
       "end of turn",
+      giveUp.signal,
     );
 
     await this.send(text, commandId);
@@ -340,7 +375,11 @@ export class SessionView {
 
     const end = await Promise.race([terminal, polled]);
     marks.done = performance.now() - t0;
-    await Promise.allSettled([accepted, deltaSeen, responded]);
+    // Handlers attached before the abort, or the rejections it causes are unhandled for
+    // a tick and Node reports them as an uncaught error.
+    const settled = Promise.allSettled([accepted, deltaSeen, responded]);
+    giveUp.abort();
+    await settled;
 
     const endType = isDurable(end) ? end.type : `agent_state:${String(end.data["state"])}`;
     return { commandId, endType, reason: String(end.data["reason"] ?? end.data["done_reason"] ?? ""), text: responseText, marks };
