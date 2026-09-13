@@ -308,6 +308,34 @@ if config_env() == :prod do
         ]
     end
 
+    # How the plane reaches Kubernetes, which until now it could not. `Provision` and
+    # `ClusterPolicy` both read `:k8s_conn` and nothing ever set it, so every profile a
+    # console applied was recorded and never written — reported honestly as `not_applied`
+    # with `:no_cluster`, and just as honestly ignored — and every policy check answered
+    # "no policy configured, allow everything".
+    #
+    # An MFA rather than a built connection, because it is then rebuilt per call: a
+    # projected ServiceAccount token is rotated roughly hourly, and a connection built
+    # once at boot would outlive the token inside it.
+    #
+    # Left unset where there is no cluster to reach. A plane on a laptop drafting profiles
+    # should say it did not apply them, and the absence is what makes it say so.
+    kubernetes =
+      cond do
+        path = presence.(System.get_env("TROUPE_KUBECONFIG")) ->
+          {K8s.Conn, :from_file, [path]}
+
+        File.exists?("/var/run/secrets/kubernetes.io/serviceaccount/token") ->
+          {K8s.Conn, :from_service_account, []}
+
+        true ->
+          nil
+      end
+
+    if kubernetes do
+      config :troupe_plane, k8s_conn: kubernetes
+    end
+
     config :troupe_plane,
       autostart: true,
       base_url: System.get_env("TROUPE_BASE_URL"),
