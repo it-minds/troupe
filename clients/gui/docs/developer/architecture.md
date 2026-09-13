@@ -220,9 +220,13 @@ Anything not exported here is private to the package.
 | `views/Approval.tsx` | The approval panel and the decision record. Headline, consequence and scoped label are chosen by a regex over the tool name (`:21-44`); `A`/`D` answer when focus is not in a field (`:94-106`); an answered panel stays and names who decided (`:122-137`) | none; calls `onAnswer` |
 | `views/Approvals.tsx` | The inbox: rows from `awaitingApproval(rows)` — one `sessions.list`, no replay (`:28`, `:3-6`); each row opens its session in `read` mode while on screen (`:72-92`) | `session.open` mode `read`, `token.mint`, `subscribe`, `approval.respond` |
 | `views/Files.tsx` | Read-only tree and viewer; relists on `fs_changed` via `view.listen` (`:42-47`) | `fs.list`, `fs.read` |
-| `views/bits.tsx` | `Pill` (dot and word, `:28-35`), `statusOf` precedence waiting > readonly > error > running > dormant > queued (`:44-51`), `Where`, `Cost` (micros → dollars, `:75-85`), `When`, `personColour` (amber excluded, `:116-121`), `ThemeToggle` writing `troupe.pref.theme` and `data-theme` (`:129-146`), `Loading` | — |
+| `views/bits.tsx` | `Pill` (glyph and word), `statusOf` precedence waiting > readonly > error > running > dormant > queued, `Where`, `Cost` (micros → dollars), `When`, `personColour` (the reserved colour excluded), `Loading` | — |
+| `views/brand.tsx` | `Mask` and `Wordmark` drawn from the generated `mark.ts`; `Eye`, the mask's eye as the status glyph — one outline per state, so greyscale still reads | — |
+| `views/Appearance.tsx` | The theme screen, on first sign-in and in Settings: three cards, each a live preview in its own theme, plus the light/dark control | — |
+| `theme.ts` | Which theme and mode this person reads in; writes `data-theme` and `data-mode` on the document root and `troupe.pref.*`. The only module that knows where the preference lives (`DECISIONS.md` #39) | — |
 | `styles.css` | The stylesheet, on `DESIGN.md`; imports the Plex faces (`:16-20`) | — |
-| `tokens.css` | **Generated** from `docs/design/tokens.json` by `scripts/tokens.ts`; do not edit (`tokens.css:1-3`) | — |
+| `tokens.css` | **Generated** from `docs/design/themes/*.tokens.json` by `scripts/tokens.ts`; three themes in light and dark, do not edit (`tokens.css:1-3`) | — |
+| `mark.ts` | **Generated** from the same files: the mask's geometry, so the brand is drawn from the design system rather than retyped | — |
 
 ## 4. The sign-in flows
 

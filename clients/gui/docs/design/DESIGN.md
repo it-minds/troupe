@@ -1,10 +1,10 @@
 # Troupe GUI — design
 
-The browser client for Troupe. This document is the reasoning behind `tokens.json` and `example.dc.html`, and the rules for anyone building a new screen.
+The browser client for Troupe. This document is the reasoning behind the token files and `example.dc.html`, and the rules for anyone building a new screen.
 
 Files:
 
-- `tokens.json` — the system as data.
+- `themes/` — the system as data. Three themes from one token contract, and [`themes/THEMES.md`](themes/THEMES.md) for what a theme may change and what it may not. **Signal is the default**; the palette tables in §2 below are Footlight's, which is where this document started and is still one of the three.
 - `example.dc.html` — all six surfaces, self-contained, keyboard-usable, works at 380px. Opens directly in a browser.
 - `DESIGN.md` — this file.
 
@@ -37,6 +37,8 @@ Two moods, held at once: long calm reading (canvas, 15px/1.62 body, 68ch measure
 ## 2. Palette and contrast
 
 Every colour token carries a dark and a light value under one semantic name. Components never choose between them; the theme does. Ratios below are measured against the surface the colour is actually used on.
+
+The hexes in this section are **Footlight's**. There are three themes — Signal, Footlight and Limelight — and each one answers every token name below with its own values and clears the same contrast floor in both modes; `themes/THEMES.md` has the audit table. What does not change between them is everything this document argues for: which token a component reads, what the reserved colour *means*, and the rule that a status is a glyph, then a word, then a colour. Where the text below says "amber", read "the reserved colour" — it is amber in Footlight, magenta in Signal and lime in Limelight, and in all three it means *stopped, a person must decide* and is used for nothing else.
 
 ### Ground and ink
 
@@ -308,7 +310,7 @@ Things that were genuinely arguable, and the call I made.
 
 1. **Kept the technical-theatre palette, repurposed the amber.** Extending the existing document keeps the platform recognisable. But in a document amber was atmosphere; here it is reserved, at token level, for "stopped, waiting for a person". That is the single change that makes approvals work in a list of thirty sessions on a phone. Everything else in the palette went quieter to pay for it.
 
-2. **Dark is the default theme.** Both are first-class and generated from the same tokens, but a tool people sit in all day, watching output stream, defaults dark. The toggle is in the header, not buried in settings.
+2. **Dark is the default mode, and "follow my system" is the default answer.** Light and dark are both first-class and generated from the same tokens, but a tool people sit in all day watching output stream defaults dark when the system has no opinion. This originally put a toggle in the header; it now lives in **Appearance**, with the theme, because there are three themes and two questions to answer rather than one switch to flip — see `themes/THEMES.md`.
 
 3. **The agent tree is demoted.** It is the most technically interesting surface and, for consultants and project managers, the least actionable. It is a compact indented status list in the backstage column, below tasks, and it is the first thing to fall below the fold on a phone. If it turns out people use it to decide anything, promote it — but the brief's audience says otherwise.
 
@@ -324,7 +326,7 @@ Things that were genuinely arguable, and the call I made.
 
 9. **Denied is not red-as-error.** Denial is the product working. Separate token, softer, neutral wording.
 
-10. **Wrapping flex tracks instead of breakpoint-switched layouts.** The client is server-rendered and patched live; layouts that depend on measured width or JS state break on reconnect. The breakpoints in `tokens.json` describe intent and exist for anything that genuinely needs a media query — most things do not.
+10. **Wrapping flex tracks instead of breakpoint-switched layouts.** The client is server-rendered and patched live; layouts that depend on measured width or JS state break on reconnect. The breakpoints in the theme files describe intent and exist for anything that genuinely needs a media query — most things do not.
 
 11. **Tool activity collapsed by default.** Sessions produce hundreds of tool calls. Showing them expanded makes the product look busy and the conversation unreadable. One scannable mono line each, expandable.
 
@@ -338,4 +340,4 @@ Things that were genuinely arguable, and the call I made.
 
 16. **The output choice is phrased as an audience, not a path.** "The Sales team folder — everyone on Sales can open the finished files" answers the question people actually have. The tool-backed destination is disabled, with a reason, when its tool is switched off, rather than disappearing.
 
-17. **Delivered as `example.dc.html` rather than `example.html`.** This project builds designs as single self-contained Design Component files, which is the same thing the brief asked for — one file, no build step, no dependency beyond webfonts — under that extension. Tokens are CSS custom properties generated from `tokens.json` at the top of the file; every value in the stylesheet references a token.
+17. **Delivered as `example.dc.html` rather than `example.html`.** This project builds designs as single self-contained Design Component files, which is the same thing the brief asked for — one file, no build step, no dependency beyond webfonts — under that extension. Tokens are CSS custom properties generated from a theme file at the top of the file; every value in the stylesheet references a token.

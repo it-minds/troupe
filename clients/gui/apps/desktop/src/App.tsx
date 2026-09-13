@@ -10,26 +10,49 @@ import { awaitingApproval } from "@troupe/client";
 import type { AuthSession } from "@troupe/client";
 import { useFleet } from "./hooks";
 import { capabilities } from "./shell";
+import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
+import { AppearanceSettings, Onboarding } from "./views/Appearance";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { SignIn } from "./views/SignIn";
-import { ThemeToggle } from "./views/bits";
+import { Eye, Wordmark } from "./views/brand";
 
-type Where = { screen: "sessions" } | { screen: "approvals" } | { screen: "session"; id: string };
+type Where = { screen: "sessions" } | { screen: "approvals" } | { screen: "appearance" } | { screen: "session"; id: string };
 
 export function App(): JSX.Element {
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const [where, setWhere] = useState<Where>({ screen: "sessions" });
   const { snapshot, refresh } = useFleet(auth);
+  const appearance = useAppearance();
+  // Asked once, on this person's first sign-in, and never again. Tracked per subject:
+  // two people on one computer are two first sign-ins, and the second should not
+  // inherit an answer the first one gave.
+  const [chosen, setChosen] = useState(false);
 
   const signOut = useCallback(async () => {
     await auth?.signOut();
     setAuth(null);
     setWhere({ screen: "sessions" });
+    // Whoever signs in next is a different person until proved otherwise, and whether
+    // *they* have picked a theme is a question about them.
+    setChosen(false);
   }, [auth]);
 
   if (!auth) return <SignIn onSignedIn={setAuth} />;
+
+  if (!chosen && !hasChosen(auth.me?.subject)) {
+    return (
+      <Onboarding
+        name={auth.me?.display_name ?? null}
+        appearance={appearance}
+        onDone={() => {
+          markChosen(auth.me?.subject);
+          setChosen(true);
+        }}
+      />
+    );
+  }
 
   const waiting = awaitingApproval(snapshot.rows).length;
   const planeError = snapshot.sources["plane"]?.error ?? null;
@@ -39,7 +62,7 @@ export function App(): JSX.Element {
   return (
     <div className="app">
       <div className="rail">
-        <div className="wordmark">Troupe</div>
+        <Wordmark size={20} />
         <nav>
           <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
             Sessions <span className="count muted">{snapshot.rows.length}</span>
@@ -48,10 +71,13 @@ export function App(): JSX.Element {
             Waiting for you
             {waiting > 0 && (
               <span className="pill waiting">
-                <span className="dot" aria-hidden="true" />
+                <Eye status="waiting" />
                 {waiting}
               </span>
             )}
+          </button>
+          <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
+            Appearance
           </button>
         </nav>
         <span className="spacer" />
@@ -61,7 +87,6 @@ export function App(): JSX.Element {
           <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
             {caps.shellName ?? "browser"}
           </div>
-          <ThemeToggle />
           <button className="link" onClick={() => void signOut()}>
             Sign out
           </button>
@@ -82,6 +107,8 @@ export function App(): JSX.Element {
             }}
           />
         )}
+
+        {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
 
         {where.screen === "approvals" && (
           <Approvals auth={auth} rows={snapshot.rows} onOpen={(id) => setWhere({ screen: "session", id })} onAnswered={refresh} />

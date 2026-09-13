@@ -1,13 +1,15 @@
 // Small pieces every screen shares.
 //
 // Two rules from DESIGN.md are enforced here rather than repeated everywhere: a status
-// is always a dot *and* a word, never colour on its own; and amber belongs to one
-// state — work that has stopped and is waiting for a person — so `waiting` is the only
-// status that ever returns it.
+// is always a glyph *and* a word, never colour on its own; and the reserved colour
+// belongs to one state — work that has stopped and is waiting for a person — so
+// `waiting` is the only status that ever returns it. Which hue that is depends on the
+// theme; that it means exactly one thing does not.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import type { FleetRow, SessionKind } from "@troupe/client";
+import { Eye } from "./brand";
 
 /** The nine states a session can be in, as the design names them. */
 export type Status = "running" | "waiting" | "queued" | "allowed" | "denied" | "dormant" | "readonly" | "error" | "offline" | "private";
@@ -28,7 +30,7 @@ const WORDS: Record<Status, string> = {
 export function Pill({ status, children, title }: { status: Status; children?: string | undefined; title?: string | undefined }): JSX.Element {
   return (
     <span className={`pill ${status}`} title={title}>
-      <span className="dot" aria-hidden="true" />
+      <Eye status={status} />
       {children ?? WORDS[status]}
     </span>
   );
@@ -60,12 +62,15 @@ function word(s: string): string {
   return s.charAt(0).toUpperCase() + s.slice(1).replace(/_/g, " ");
 }
 
-/** Where a session runs. Private is a status colour; the other two are plain. */
+/**
+ * Where a session runs. Private is a status colour; the other two are plain.
+ *
+ * No glyph on the plain two: an eye means a state, and where a session runs is not one.
+ */
 export function Where({ kind }: { kind: SessionKind }): JSX.Element {
   if (kind === "private") return <Pill status="private">Private</Pill>;
   return (
     <span className="pill" title={kind === "team" ? "Runs on the platform" : "Runs on this computer"}>
-      <span className="dot" aria-hidden="true" />
       {kind === "team" ? "Team" : "This computer"}
     </span>
   );
@@ -123,41 +128,6 @@ export function personColour(subject: string | undefined, self: string | undefin
 export function initials(name: string): string {
   const parts = name.replace(/@.*$/, "").split(/[.\s_-]+/).filter(Boolean);
   return ((parts[0]?.[0] ?? "") + (parts[1]?.[0] ?? "")).toUpperCase() || name.slice(0, 2).toUpperCase();
-}
-
-/** Dark is the default; the toggle is in the header, not buried in settings. */
-export function ThemeToggle(): JSX.Element {
-  const [theme, setTheme] = useState<"dark" | "light">(() => {
-    const stored = read("troupe.pref.theme");
-    if (stored === "light" || stored === "dark") return stored;
-    return globalThis.matchMedia?.("(prefers-color-scheme: light)").matches ? "light" : "dark";
-  });
-
-  useEffect(() => {
-    document.documentElement.dataset["theme"] = theme;
-    write("troupe.pref.theme", theme);
-  }, [theme]);
-
-  return (
-    <button className="link" onClick={() => setTheme(theme === "dark" ? "light" : "dark")}>
-      {theme === "dark" ? "Light theme" : "Dark theme"}
-    </button>
-  );
-}
-
-function read(k: string): string | null {
-  try {
-    return globalThis.localStorage?.getItem(k) ?? null;
-  } catch {
-    return null;
-  }
-}
-function write(k: string, v: string): void {
-  try {
-    globalThis.localStorage?.setItem(k, v);
-  } catch {
-    /* a preference is a convenience */
-  }
 }
 
 /** Loading says what is coming and in what order. No fake percentage. */

@@ -1,6 +1,7 @@
 import React from "react";
 import { createRoot } from "react-dom/client";
 import { App } from "./App";
+import { applyAppearance, storedMode, storedTheme } from "./theme";
 import "./styles.css";
 
 // Inside the desktop shell, `window.troupe` has to exist before anything asks
@@ -12,6 +13,11 @@ async function start(): Promise<void> {
     const { installShell } = await import("./shell-tauri");
     await installShell();
   }
+  // Before the first render, not during it: the ground a person chose is on the
+  // document by the time anything is painted, so nobody watches the app change colour
+  // underneath them at every launch. index.html carries the default until this runs.
+  applyAppearance(storedTheme(), storedMode());
+
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
       <App />

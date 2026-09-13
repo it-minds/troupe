@@ -14,6 +14,7 @@ import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
 import { capabilities, likelyPlaneUrl, prefs, redirectUri, shell, tokenStore } from "../shell";
+import { Wordmark } from "./brand";
 
 /**
  * An `AuthSession` for this host. The shell, when there is one, supplies the credential
@@ -118,7 +119,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
   return (
     <main className="signin">
       <header className="stack" style={{ gap: "var(--space-2)" }}>
-        <div className="wordmark">Troupe</div>
+        <Wordmark size={44} />
         <p>Sign in to see your team's sessions, and answer what is waiting for you.</p>
       </header>
 

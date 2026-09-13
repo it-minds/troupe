@@ -218,12 +218,13 @@ label small {
   color: var(--text-secondary);
   white-space: nowrap;
 }
-.pill .dot {
-  width: 7px;
-  height: 7px;
-  border-radius: 50%;
-  background: currentColor;
+.pill .eye {
   flex: none;
+  display: block;
+  /* Drawn on a 16 grid, set here against 11.5px mono. */
+  width: 13px;
+  height: 13px;
+  margin-top: -1px;
 }
 
 .pill.running {
@@ -278,9 +279,9 @@ label small {
 }
 
 /* Only live states animate, and only as a pulse that restarts cleanly. */
-.pill.running .dot,
-.pill.waiting .dot,
-.pill.reconnecting .dot {
+.pill.running .eye,
+.pill.waiting .eye,
+.pill.reconnecting .eye {
   animation: pulse var(--dur-pulse) var(--ease-standard) infinite;
 }
 @keyframes pulse {
@@ -354,10 +355,7 @@ label small {
   padding: clamp(var(--space-7), 12vh, var(--space-11)) var(--space-5) var(--space-7);
 }
 .signin .wordmark {
-  font-size: clamp(28px, 5vw, 40px);
-  font-weight: 600;
-  line-height: 1.12;
-  letter-spacing: -0.02em;
+  gap: var(--space-3);
 }
 .signin p {
   margin: 0;
@@ -420,10 +418,27 @@ label small {
   background: var(--bg-stage);
   border-right: var(--bw-hairline) solid var(--border-hairline);
 }
-.rail .wordmark {
+/* The lockup: the mask and the word. The platform writes its own name the way it
+   writes an identifier — mono, lowercase, always. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.wordmark .word {
+  font-family: var(--font-mono);
   font-weight: 600;
-  padding: 0 var(--space-2) var(--space-4);
+  line-height: 1;
   letter-spacing: -0.01em;
+}
+.mask {
+  display: block;
+  flex: none;
+}
+
+.rail .wordmark {
+  padding: 0 var(--space-2) var(--space-4);
 }
 .rail nav {
   display: flex;
@@ -1157,6 +1172,232 @@ main {
   border-top: none;
 }
 
+/* -- appearance -------------------------------------------------------------- */
+
+/* Theme and mode, on first sign-in and afterwards in Settings. Two controls, ten
+   seconds, and a sentence saying it can be changed again. Nothing here is theme-aware
+   except the previews, which are deliberately in a theme that is not yours yet. */
+
+.onboarding {
+  min-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: clamp(var(--space-6), 8vh, var(--space-9)) var(--space-5) var(--space-7);
+}
+.onboarding > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.onboarding > header p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-secondary);
+}
+.onboarding > footer {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  padding-top: var(--space-4);
+}
+.onboarding > footer .continue {
+  min-height: var(--touch-target);
+  min-width: 160px;
+  font-weight: 600;
+  background: var(--bg-raised);
+  border-color: var(--border-strong);
+}
+
+.appearance {
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.appearance > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.appearance > header p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-secondary);
+}
+
+.chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.chooser > section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.chooser > section > h2 {
+  color: var(--text-secondary);
+}
+.chooser .mode .options {
+  max-width: 46ch;
+}
+
+/* The three cards. Structure from a hairline and the left marker, like every other
+   choice in the product — no elevation, no scale-on-hover. */
+.themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.theme {
+  flex: 1 1 260px;
+  min-width: 0;
+  text-align: left;
+  background: var(--bg-panel);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left: var(--bw-marker) solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.theme[aria-pressed="true"] {
+  background: var(--bg-selected);
+  border-left-color: var(--border-strong);
+}
+.theme > .label {
+  font-weight: 600;
+  font-size: 15px;
+}
+.theme > .label .micro {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.theme > .consequence {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
+/* The preview is the product at a quarter size, not a row of swatches: the session
+   that needs you, the approval, the cast. It carries its own theme and mode, so these
+   rules are the only place in the app where a colour is read outside the document
+   root. Nothing inside is interactive — the card is the control. */
+.preview {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+  overflow: hidden;
+}
+.preview .rows {
+  border-radius: var(--radius-sm);
+}
+.preview .row {
+  min-height: 0;
+  padding: 5px var(--space-2) 5px 6px;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.preview .row .subject {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.preview .pill {
+  padding: 1px 6px;
+  font-size: 9.5px;
+  gap: 4px;
+}
+.preview .pill .eye {
+  width: 10px;
+  height: 10px;
+}
+
+/* The footlight is the one decorative shadow in the product and the previews keep it:
+   it is most of what a theme's reserved colour looks like in use. The answers are
+   chips here rather than the real buttons, which are sized for a thumb — a preview
+   that reaches the touch target is a preview that is no longer a preview. */
+.preview .approval {
+  position: static;
+  background: var(--bg-panel);
+  border-top: var(--bw-marker) solid var(--waiting-solid);
+  box-shadow: var(--sh-footlight);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.preview .approval .question {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--waiting-fg);
+}
+.preview .approval .answers {
+  display: flex;
+  gap: 5px;
+}
+.preview .approval .allow,
+.preview .approval .deny {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  flex: 0 0 auto;
+  min-height: 0;
+  max-width: none;
+}
+.preview .approval .allow {
+  background: var(--waiting-solid);
+  color: var(--text-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.preview .cast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+}
+.preview .cast .micro {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+/* People never get a mask. A human is initials in a ring. */
+.ring {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--bw-strong) solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
 /* -- motion ----------------------------------------------------------------- */
 
 @media (prefers-reduced-motion: reduce) {
@@ -1167,7 +1408,7 @@ main {
     animation-iteration-count: 1 !important;
     transition-duration: 1ms !important;
   }
-  .pill .dot {
+  .pill .eye {
     animation: none;
   }
 }
@@ -1223,6 +1464,10 @@ main {
   }
   .rail .me button {
     margin-top: 0;
+  }
+  /* One card at a time below the fold beats three unreadable ones side by side. */
+  .theme {
+    flex-basis: 100%;
   }
   /* The backstage is last on a narrow screen, and it is the one thing that may be
      scrolled past rather than shown. */

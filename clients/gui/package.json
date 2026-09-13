@@ -11,7 +11,7 @@
     "dev": "pnpm --filter @troupe/desktop dev",
     "fake": "tsx scripts/fake-deployment.ts",
     "tokens": "tsx scripts/tokens.ts",
-    "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css",
+    "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts",
     "first-token": "tsx scripts/first-token.ts"
   },
   "devDependencies": {
