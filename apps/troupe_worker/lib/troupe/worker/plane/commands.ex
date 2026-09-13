@@ -56,7 +56,8 @@ defmodule Troupe.Worker.Plane.Commands do
             agent: params["agent"],
             prompt: params["prompt"],
             terms: terms_of(params["terms"]),
-            origin: params["origin"]
+            origin: params["origin"],
+            usage_seq: params["usage_seq"]
           ],
           &match?({_key, nil}, &1)
         )

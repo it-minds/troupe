@@ -286,6 +286,34 @@ defmodule Troupe.Plane.Sessions do
   defp put_status_field(set, _key, _value), do: set
 
   @doc """
+  Move the ledger's cursor through a session's log, and say where it now is.
+
+  Monotonic by construction: the column takes the greater of what it holds and what is
+  offered, so a batch that arrives out of order — a retry of an older one, most often —
+  cannot walk the cursor backwards and make a pod resend what is already charged. The
+  answer is what the column holds afterwards, which is what the pod deletes up to, so a
+  loser of that race is told the truth rather than its own number.
+
+  Not fenced on the epoch, unlike `put_status/2`. A charge is a charge: a pod that has
+  since been fenced still made the model calls it is reporting, and refusing them would
+  lose money rather than protect anything.
+  """
+  @spec advance_usage_seq(String.t(), non_neg_integer()) :: non_neg_integer()
+  def advance_usage_seq(session_id, seq) when is_integer(seq) and seq >= 0 do
+    query =
+      from(s in Session,
+        where: s.id == ^session_id,
+        update: [set: [usage_seq: fragment("greatest(?, ?)", s.usage_seq, ^seq)]],
+        select: s.usage_seq
+      )
+
+    case Repo.update_all(query, []) do
+      {1, [current]} -> current
+      _none -> seq
+    end
+  end
+
+  @doc """
   Mark a session reviewed: a person has read what an unattended run produced.
 
   Recorded with who and when, because it is the answer to "did anybody look at this",

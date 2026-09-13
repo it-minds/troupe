@@ -15,7 +15,7 @@ Organisational state (users, teams, grants, budgets, config bundles, session ind
      │                                   ▲ control connection (projected SA token)  
      │ wss + short-lived session token   │  
      ▼                                   │  
-  <ordinal>.<profile>.workers.<domain> ──▶ troupe-w-<profile>: StatefulSet of workers,  
+  <ordinal>-<profile>.workers.<domain> ──▶ troupe-w-<profile>: StatefulSet of workers,  
                                            PVC per pod (working copies), team volumes  
                                               │                        │  
                                            OpenBao: session keys    object storage: segments,  
@@ -114,7 +114,7 @@ The plane is the only writer of teams. It derives the field from team grants, so
 - ServiceAccount with token automount disabled, plus a projected token with audience troupe-plane.  
 - StatefulSet with a PVC template and updateStrategy: OnDelete.  
 - Headless Service.  
-- One Service and Ingress per pod at <ordinal>.<profile>.workers.<domain>.  
+- One Service and Ingress per pod at <ordinal>-<profile>.workers.<domain>.  
 - NetworkPolicy, plus CiliumNetworkPolicy for FQDNs when available. Ingress only from the ingress controller. Egress only to the plane's control Service, OpenBao, the object storage endpoint, the LLM endpoint, the MCP servers, the git hosts, and DNS.  
 - PodDisruptionBudget.  
 - Per-namespace PV/PVC bindings for each listed team volume, and for the org volume when enabled.  

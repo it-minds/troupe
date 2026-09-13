@@ -29,7 +29,19 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Agent.{Call, Definition, Definitions, State}
   alias Troupe.{Budget, Config, Events, Registry, Skills, Todo, Tools}
-  alias Troupe.LLM.{Delta, Message, Provider, Request, Response, ToolResult, ToolUse, Usage}
+
+  alias Troupe.LLM.{
+    Delta,
+    Gateway,
+    Message,
+    Provider,
+    Request,
+    Response,
+    ToolResult,
+    ToolUse,
+    Usage
+  }
+
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Blobs, Log}
   alias Troupe.Tool.{Ctx, Result}
@@ -752,7 +764,15 @@ defmodule Troupe.Agent.Server do
         ref = Provider.start_stream(tasks(state), state.provider, request, self())
         timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 
-        state = %{state | llm_ref: ref, llm_timer: timer, llm_text: "", llm_tool_names: %{}}
+        state = %{
+          state
+          | llm_ref: ref,
+            llm_timer: timer,
+            llm_model: request.model,
+            llm_text: "",
+            llm_tool_names: %{}
+        }
+
         publish_state(state, :thinking)
         {:next_state, :thinking, state}
     end
@@ -845,7 +865,9 @@ defmodule Troupe.Agent.Server do
         "input_tokens" => response.usage.input_tokens,
         "output_tokens" => response.usage.output_tokens
       },
-      "stop_reason" => Atom.to_string(response.stop_reason)
+      "stop_reason" => Atom.to_string(response.stop_reason),
+      "model" => response.model || state.llm_model,
+      "gateway" => gateway_json(response.gateway)
     })
 
     :telemetry.execute(
@@ -863,6 +885,18 @@ defmodule Troupe.Agent.Server do
         budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(response.usage),
         last_input_tokens: response.usage.input_tokens
     }
+  end
+
+  # What the gateway said about the call it just billed, or nothing. Written as a nested
+  # object rather than two flat keys so that a reader can tell "the gateway said nothing"
+  # from "the gateway said this call was free", which are different facts and reconcile
+  # differently. Keys the gateway did not answer are left out rather than sent as null.
+  defp gateway_json(%Gateway{request_id: nil, cost_micros: nil}), do: nil
+
+  defp gateway_json(%Gateway{} = gateway) do
+    %{"request_id" => gateway.request_id, "cost_micros" => gateway.cost_micros}
+    |> Enum.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.new()
   end
 
   # A turn that produced no tool calls ends the turn. A subagent that answered without

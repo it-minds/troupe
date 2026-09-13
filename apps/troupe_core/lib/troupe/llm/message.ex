@@ -34,6 +34,110 @@ defmodule Troupe.LLM.Usage do
   end
 end
 
+defmodule Troupe.LLM.Gateway do
+  @moduledoc """
+  What the gateway in front of the provider said about the call it just billed.
+
+  Two facts, both from response headers: the gateway's own identifier for the request,
+  and the cost. The identifier is the only name both the gateway and this system have
+  for the same call, which is what makes `Troupe.Plane.Reconcile` able to join two
+  ledgers kept by two systems for two different reasons; the cost is taken rather than
+  computed, because the gateway has already priced the call and a price of our own
+  would only ever reconcile against itself.
+
+  A gateway that says nothing leaves both `nil`. That is a recordable fact — tokens with
+  no cost — and not an error: the reconciliation reports it, and nobody guesses.
+  """
+
+  defstruct request_id: nil, cost_micros: nil
+
+  @type t :: %__MODULE__{request_id: String.t() | nil, cost_micros: non_neg_integer() | nil}
+
+  # In preference order, most specific first. LiteLLM's are the ones the deployment
+  # uses; the generic `x-request-id` is what most other OpenAI-compatible gateways send
+  # and costs nothing to accept.
+  @id_headers ~w(x-litellm-call-id x-request-id)
+  @cost_headers ~w(x-litellm-response-cost)
+
+  @doc """
+  Read a gateway's headers.
+
+  Takes headers in the shape `Req` hands them over — a map of lowercase name to a list
+  of values — or a list of pairs, which is what a hand-written test is likely to pass.
+  """
+  @spec from_headers(map() | [{String.t(), String.t() | [String.t()]}]) :: t()
+  def from_headers(headers) do
+    lookup = normalise(headers)
+
+    %__MODULE__{
+      request_id: first(lookup, @id_headers),
+      cost_micros: lookup |> first(@cost_headers) |> to_micros()
+    }
+  end
+
+  @doc """
+  Parse a decimal amount of currency into micro-units.
+
+  Integer arithmetic on the digits rather than `String.to_float/1`, because a cost is
+  money and a float that is one part in a billion out is a ledger that does not add up.
+  More than six decimal places are truncated, which is what a micro-unit ledger can
+  hold; a call that cost less than a micro-unit cost zero, and that is the truth.
+  """
+  @spec to_micros(String.t() | nil) :: non_neg_integer() | nil
+  def to_micros(nil), do: nil
+
+  def to_micros(amount) when is_binary(amount) do
+    case String.split(String.trim(amount), ".", parts: 2) do
+      [""] -> nil
+      [whole] -> micros(whole, "")
+      [whole, fraction] -> micros(whole, fraction)
+    end
+  end
+
+  # A leading dot is a number a gateway could plausibly send; an empty whole part with
+  # nothing after it was handled above, and is a header that said nothing.
+  defp micros(whole, fraction) do
+    whole = if whole == "", do: "0", else: whole
+    fraction = fraction |> String.slice(0, 6) |> String.pad_trailing(6, "0")
+
+    with {units, ""} <- Integer.parse(whole),
+         {parts, ""} <- Integer.parse(fraction) do
+      max(units * 1_000_000 + sign(units, whole) * parts, 0)
+    else
+      _ -> nil
+    end
+  end
+
+  # A negative amount's fraction subtracts. No gateway should send one, and a ledger
+  # that read "-0.5" as "-0.5 + 0.5" would be wrong in the direction that matters.
+  defp sign(units, _whole) when units < 0, do: -1
+  defp sign(_units, "-" <> _rest), do: -1
+  defp sign(_units, _whole), do: 1
+
+  defp normalise(headers) when is_map(headers), do: headers
+
+  defp normalise(headers) when is_list(headers) do
+    Enum.reduce(headers, %{}, fn {name, value}, acc ->
+      Map.update(
+        acc,
+        String.downcase(to_string(name)),
+        List.wrap(value),
+        &(&1 ++ List.wrap(value))
+      )
+    end)
+  end
+
+  defp first(lookup, names) do
+    Enum.find_value(names, fn name ->
+      case Map.get(lookup, name) do
+        [value | _rest] when is_binary(value) -> value
+        value when is_binary(value) -> value
+        _other -> nil
+      end
+    end)
+  end
+end
+
 defmodule Troupe.LLM.Message do
   @moduledoc """
   One provider-neutral conversation message.

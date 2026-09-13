@@ -16,7 +16,7 @@ defmodule Troupe.Plane.Ledger do
   import Ecto.Query
 
   alias Troupe.Plane.Identity.Team
-  alias Troupe.Plane.Ledger.{Reservation, UsageRecord}
+  alias Troupe.Plane.Ledger.{Cache, Reservation, UsageRecord}
   alias Troupe.Plane.Repo
 
   @doc """
@@ -47,7 +47,9 @@ defmodule Troupe.Plane.Ledger do
   end
 
   defp existing(attrs) do
-    Repo.get_by(UsageRecord, gateway_request_id: attrs[:gateway_request_id] || attrs["gateway_request_id"])
+    Repo.get_by(UsageRecord,
+      gateway_request_id: attrs[:gateway_request_id] || attrs["gateway_request_id"]
+    )
   end
 
   defp duplicate?(changeset) do
@@ -65,10 +67,64 @@ defmodule Troupe.Plane.Ledger do
   """
   @spec spent_micros(Ecto.UUID.t()) :: non_neg_integer()
   def spent_micros(team_id) do
+    Cache.fetch({team_id, :spent_micros}, fn ->
+      query =
+        from(u in UsageRecord,
+          where: u.team_id == ^team_id,
+          select: type(coalesce(sum(u.cost_micros), 0), :integer)
+        )
+
+      Repo.one(query) || 0
+    end)
+  end
+
+  @doc """
+  What a team spent in a window, grouped.
+
+  `:model`, `:owner_subject` or `:session_id` — the three questions a panel asks and the
+  three columns worth grouping by. Rows come back newest spend first, because a list of
+  a hundred models is read from the top.
+
+  Cached, and invalidated by the one process that writes the table, so a page that is
+  reloaded twice in a minute costs one aggregate rather than two.
+  """
+  @spec breakdown(Ecto.UUID.t(), :model | :owner_subject | :session_id, keyword()) :: [map()]
+  def breakdown(team_id, group_by, opts \\ [])
+      when group_by in [:model, :owner_subject, :session_id] do
+    from = Keyword.get(opts, :from, ~U[1970-01-01 00:00:00.000000Z])
+    to = Keyword.get(opts, :to, DateTime.utc_now())
+
+    Cache.fetch({team_id, {:breakdown, group_by, from, to}}, fn ->
+      Repo.all(
+        from(u in UsageRecord,
+          where: u.team_id == ^team_id and u.occurred_at >= ^from and u.occurred_at < ^to,
+          group_by: field(u, ^group_by),
+          order_by: [desc: coalesce(sum(u.cost_micros), 0)],
+          select: %{
+            key: field(u, ^group_by),
+            calls: count(u.id),
+            input_tokens: type(coalesce(sum(u.input_tokens), 0), :integer),
+            output_tokens: type(coalesce(sum(u.output_tokens), 0), :integer),
+            cost_micros: type(coalesce(sum(u.cost_micros), 0), :integer)
+          }
+        )
+      )
+    end)
+  end
+
+  @doc """
+  What one session cost.
+
+  Read from the ledger rather than from the session row's `cost_micros`, which is the
+  worker's own running total and stops moving when the pod does. These are the charges.
+  """
+  @spec session_cost_micros(String.t()) :: non_neg_integer()
+  def session_cost_micros(session_id) do
     query =
-      from u in UsageRecord,
-        where: u.team_id == ^team_id,
+      from(u in UsageRecord,
+        where: u.session_id == ^session_id,
         select: type(coalesce(sum(u.cost_micros), 0), :integer)
+      )
 
     Repo.one(query) || 0
   end
@@ -76,7 +132,7 @@ defmodule Troupe.Plane.Ledger do
   @doc "A team's budget, or `0` for no limit."
   @spec budget_micros(Ecto.UUID.t()) :: non_neg_integer()
   def budget_micros(team_id) do
-    Repo.one(from t in Team, where: t.id == ^team_id, select: t.budget_micros) || 0
+    Repo.one(from(t in Team, where: t.id == ^team_id, select: t.budget_micros)) || 0
   end
 
   @doc "Promise part of a team's budget to a session."
@@ -105,9 +161,10 @@ defmodule Troupe.Plane.Ledger do
   @spec open_reservations(Ecto.UUID.t()) :: %{String.t() => non_neg_integer()}
   def open_reservations(team_id) do
     Repo.all(
-      from r in Reservation,
+      from(r in Reservation,
         where: r.team_id == ^team_id and is_nil(r.released_at),
         select: {r.session_id, r.amount_micros}
+      )
     )
     |> Map.new()
   end
@@ -116,9 +173,10 @@ defmodule Troupe.Plane.Ledger do
   @spec records(Ecto.UUID.t(), DateTime.t(), DateTime.t()) :: [UsageRecord.t()]
   def records(team_id, from, to) do
     Repo.all(
-      from u in UsageRecord,
+      from(u in UsageRecord,
         where: u.team_id == ^team_id and u.occurred_at >= ^from and u.occurred_at < ^to,
         order_by: u.occurred_at
+      )
     )
   end
 
@@ -131,9 +189,10 @@ defmodule Troupe.Plane.Ledger do
   @spec request_ids(DateTime.t(), DateTime.t()) :: MapSet.t(String.t())
   def request_ids(from, to) do
     Repo.all(
-      from u in UsageRecord,
+      from(u in UsageRecord,
         where: u.occurred_at >= ^from and u.occurred_at < ^to,
         select: u.gateway_request_id
+      )
     )
     |> MapSet.new()
   end

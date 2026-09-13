@@ -329,6 +329,42 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # What a session's model calls cost, as a batch, with the watermark in the answer.
+  #
+  # The pod holds these in a table it may lose, so the reply is the contract: the
+  # sequence the ledger has now recorded for this session, which is what the pod deletes
+  # up to and folds forward from. A record already in the ledger counts towards it —
+  # a duplicate is a success, and a watermark that refused to move past one would ask
+  # the pod to send it forever.
+  defp dispatch("usage.batch", params, state) do
+    with %{} = session <- Sessions.get(params["session_id"]),
+         team_id when is_binary(team_id) <- session.team_id,
+         {:ok, records} <- usage_records(session, params["records"]) do
+      case TeamBudget.record_batch(team_id, records) do
+        {:ok, tally} ->
+          usage_seq = Sessions.advance_usage_seq(session.id, tally.seq)
+
+          {:ok,
+           %{
+             "recorded" => tally.recorded,
+             "duplicates" => tally.duplicates,
+             "usage_seq" => usage_seq
+           }, state}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(reason)}), state}
+      end
+    else
+      nil ->
+        # No session, or no team: nothing to charge and nothing for the pod to keep
+        # sending. The watermark it gets back is the one it sent, so it stops.
+        {:ok, %{"recorded" => 0, "duplicates" => 0, "usage_seq" => high_seq(params)}, state}
+
+      {:error, reason} ->
+        {:error, Error.new(:invalid_params, %{reason: reason}), state}
+    end
+  end
+
   # A pod fetching a bundle: by hash, which is what `config.updated` announced and what
   # the pod verifies the document against before materialising it, or by channel and
   # version for a session pinned to one the pod has never been told about. The document
@@ -378,6 +414,63 @@ defmodule Troupe.Plane.Control.Connection do
       _ -> :ok
     end
   end
+
+  # Turned into the ledger's shape here rather than trusted as sent: a worker names the
+  # call and its cost, and the plane names whose session it was. Nothing a pod says about
+  # ownership is read, which is the same rule enrolment follows.
+  defp usage_records(session, records) when is_list(records) do
+    Enum.reduce_while(records, {:ok, []}, fn record, {:ok, acc} ->
+      case record do
+        %{"gateway_request_id" => id} when is_binary(id) and id != "" ->
+          {:cont,
+           {:ok,
+            [
+              %{
+                seq: non_negative(record["seq"]),
+                session_id: session.id,
+                owner_subject: session.owner_subject,
+                model: record["model"] || "unknown",
+                input_tokens: non_negative(record["input_tokens"]),
+                output_tokens: non_negative(record["output_tokens"]),
+                cost_micros: non_negative(record["cost_micros"]),
+                gateway_request_id: id,
+                occurred_at: occurred_at(record["occurred_at"])
+              }
+              | acc
+            ]}}
+
+        _other ->
+          {:halt, {:error, "every usage record needs a gateway_request_id"}}
+      end
+    end)
+  end
+
+  defp usage_records(_session, _records), do: {:error, "records is a list"}
+
+  defp non_negative(n) when is_integer(n) and n >= 0, do: n
+  defp non_negative(_other), do: 0
+
+  # The event's own timestamp, so a record folded out of a log an hour later lands in
+  # the window the call actually happened in — but never later than now. A pod whose
+  # clock is ahead would otherwise write charges into a future no report asks about, and
+  # a charge nobody can see is worse than one dated a few seconds early.
+  defp occurred_at(ts) when is_binary(ts) do
+    now = DateTime.utc_now()
+
+    case DateTime.from_iso8601(ts) do
+      {:ok, at, _offset} -> if DateTime.compare(at, now) == :gt, do: now, else: at
+      _error -> now
+    end
+  end
+
+  defp occurred_at(_other), do: DateTime.utc_now()
+
+  # The highest sequence the pod claimed, for the case where there is nothing to charge.
+  defp high_seq(%{"records" => records}) when is_list(records) do
+    records |> Enum.map(&non_negative(&1["seq"])) |> Enum.max(fn -> 0 end)
+  end
+
+  defp high_seq(_params), do: 0
 
   defp record_usage(team_id, attrs, state) do
     case TeamBudget.record(team_id, attrs) do

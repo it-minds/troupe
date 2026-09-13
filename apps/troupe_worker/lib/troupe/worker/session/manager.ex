@@ -42,6 +42,7 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.{Context, Restore, Sealer, Workspace}
   alias Troupe.Worker.Sessions
+  alias Troupe.Worker.Usage
 
   require Logger
 
@@ -140,6 +141,7 @@ defmodule Troupe.Worker.Session.Manager do
     case restore(state) do
       {:ok, state} ->
         Troupe.subscribe(state.session_id)
+        usage_follow(state)
         state = state |> seed_lifecycle() |> status_changed() |> touch() |> schedule_archive()
         {:reply, {:ok, summary(state)}, state}
 
@@ -328,6 +330,11 @@ defmodule Troupe.Worker.Session.Manager do
   defp dormancy(state) do
     context = state.context
     head = Troupe.head_seq(state.session_id)
+
+    # While the log process is still up, because folding it forward is how anything the
+    # collector dropped or never saw is recovered — and a session going dormant is the
+    # last chance to charge for it before the log stops answering.
+    usage_flush(state)
     # Read while the tree is still up: the projection that knows the cost goes down
     # with it, and the dormancy report is the last word the plane gets on this session
     # until it wakes again.
@@ -519,10 +526,33 @@ defmodule Troupe.Worker.Session.Manager do
     }
   end
 
+  # The pod's usage collector, where there is one. There is none on a laptop and none
+  # in most tests, and a session must run identically either way — so both of these are
+  # a lookup and a no-op rather than a dependency.
+  defp usage_follow(state) do
+    if Process.whereis(Usage) do
+      Usage.follow(Usage, state.session_id, Keyword.get(state.opts, :usage_seq, 0))
+    end
+
+    :ok
+  end
+
+  defp usage_flush(state) do
+    if Process.whereis(Usage) do
+      Usage.follow(Usage, state.session_id, Keyword.get(state.opts, :usage_seq, 0))
+      Usage.flush(Usage, state.session_id)
+    end
+
+    :ok
+  end
+
   # The summary's cost, in micro-units of the ledger's currency, or nothing when the
   # projection is not answering — which is what a session mid-shutdown looks like.
+  # Micro-units are read from the projection's own integer; the whole-unit `cost` is a
+  # fallback for a snapshot folded by an older build that had only the float.
   defp cost_micros(session_id) do
     case Summary.snapshot(session_id) do
+      %{"cost_micros" => micros} when is_integer(micros) -> micros
       %{"cost" => cost} when is_number(cost) -> round(cost * 1_000_000)
       _ -> 0
     end

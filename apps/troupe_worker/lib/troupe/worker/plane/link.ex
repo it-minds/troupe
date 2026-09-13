@@ -81,10 +81,18 @@ defmodule Troupe.Worker.Plane.Link do
   @spec reporter(GenServer.server()) :: (map() -> :ok)
   def reporter(server \\ __MODULE__), do: &report(server, &1)
 
-  @doc "Record token usage against the session's team."
-  @spec usage(GenServer.server(), map()) :: :ok
-  def usage(server \\ __MODULE__, payload) do
-    GenServer.cast(server, {:notify, "usage.record", payload})
+  @doc """
+  Report what a session's model calls cost, and learn how far the plane has got.
+
+  A request rather than a notification, because the answer is the watermark: the
+  sequence the plane has now recorded for this session, which is what lets the pod
+  delete what it was holding and what it folds forward from next time. A batch is
+  idempotent at the plane, so a retry after a timeout is safe and is the reason this
+  may be sent again without checking first.
+  """
+  @spec usage_batch(GenServer.server(), String.t(), [map()]) :: {:ok, map()} | {:error, term()}
+  def usage_batch(server \\ __MODULE__, session_id, records) do
+    request(server, "usage.batch", %{"session_id" => session_id, "records" => records})
   end
 
   @doc "Send the whole session index, which is what a reconnect owes the plane."

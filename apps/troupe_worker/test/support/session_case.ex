@@ -168,7 +168,8 @@ defmodule Troupe.Worker.SessionCase do
         :prompt,
         :terms,
         :origin,
-        :bundle
+        :bundle,
+        :usage_seq
       ])
   end
 

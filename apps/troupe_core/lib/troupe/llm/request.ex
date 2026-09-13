@@ -92,19 +92,34 @@ defmodule Troupe.LLM.Delta do
 end
 
 defmodule Troupe.LLM.Response do
-  @moduledoc "A provider's final answer for one request."
+  @moduledoc """
+  A provider's final answer for one request.
 
-  alias Troupe.LLM.{Message, Usage}
+  `gateway` is what the gateway in front of the provider said about the call it just
+  billed: its own identifier for the request, and what it cost. Both come from response
+  headers rather than from the body, because that is where every OpenAI-compatible
+  gateway puts them and because a body shape differs per provider while a header does
+  not. Neither is invented here: a gateway that says nothing leaves an empty
+  `Troupe.LLM.Gateway`, and the accounting records the tokens with no cost rather than a
+  cost we made up, which would reconcile against itself.
+  """
+
+  alias Troupe.LLM.{Gateway, Message, Usage}
 
   @enforce_keys [:content]
-  defstruct content: [], stop_reason: :end_turn, usage: %Usage{}, model: nil
+  defstruct content: [],
+            stop_reason: :end_turn,
+            usage: %Usage{},
+            model: nil,
+            gateway: %Gateway{}
 
   @type stop_reason :: :end_turn | :tool_use | :max_tokens | :stop_sequence | :other
   @type t :: %__MODULE__{
           content: [Message.block()],
           stop_reason: stop_reason(),
           usage: Usage.t(),
-          model: String.t() | nil
+          model: String.t() | nil,
+          gateway: Gateway.t()
         }
 
   @doc "The response as an assistant message to append to the conversation."

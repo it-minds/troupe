@@ -16,6 +16,7 @@ defmodule Troupe.Plane.TeamBudget do
 
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.{Ledger, Singleton}
+  alias Troupe.Plane.Ledger.Cache
 
   @enforce_keys [:team_id]
   defstruct [:team_id, :budget_micros, spent_micros: 0, reserved_micros: 0, reservations: %{}]
@@ -55,6 +56,23 @@ defmodule Troupe.Plane.TeamBudget do
     Singleton.call(__MODULE__, team_id(team), {:record, attrs})
   end
 
+  @doc """
+  Record a batch of them, in one round trip and in sequence order.
+
+  A pod reports what a session spent as a batch rather than a call at a time, so this
+  takes the batch: five hundred separate calls into one team's actor would serialise a
+  pod's whole flush behind another team's reservation. Returns the highest `seq` that is
+  now recorded — including the ones that were already recorded, because a duplicate is
+  a success and the watermark must move past it or the pod will send it forever.
+  """
+  @spec record_batch(Team.t() | Ecto.UUID.t(), [map()]) ::
+          {:ok,
+           %{recorded: non_neg_integer(), duplicates: non_neg_integer(), seq: non_neg_integer()}}
+          | {:error, term()}
+  def record_batch(team, records) when is_list(records) do
+    Singleton.call(__MODULE__, team_id(team), {:record_batch, records})
+  end
+
   @doc "What this actor believes, for tests and diagnostics."
   @spec inspect_state(Team.t() | Ecto.UUID.t()) :: map()
   def inspect_state(team), do: Singleton.call(__MODULE__, team_id(team), :inspect)
@@ -79,7 +97,8 @@ defmodule Troupe.Plane.TeamBudget do
         # Reserving twice for one session is a retry, not a second slice.
         {:reply, {:ok, summary(state)}, state}
 
-      unlimited?(state) or state.spent_micros + state.reserved_micros + amount <= state.budget_micros ->
+      unlimited?(state) or
+          state.spent_micros + state.reserved_micros + amount <= state.budget_micros ->
         # Written before it is granted, so a replica dying does not release it silently.
         {:ok, _} = Ledger.reserve(state.team_id, session_id, amount)
 
@@ -112,6 +131,7 @@ defmodule Troupe.Plane.TeamBudget do
   def handle_call({:record, attrs}, _from, state) do
     case Ledger.record(Map.put(attrs, :team_id, state.team_id)) do
       {:ok, record} ->
+        Cache.invalidate(state.team_id)
         {:reply, {:ok, record}, %{state | spent_micros: state.spent_micros + record.cost_micros}}
 
       # Already recorded: the same gateway request reported twice is one charge, so the
@@ -121,6 +141,43 @@ defmodule Troupe.Plane.TeamBudget do
 
       error ->
         {:reply, error, state}
+    end
+  end
+
+  # Sequence order matters: the watermark that comes out of this is only meaningful if
+  # everything below it was attempted, so a record that fails to insert stops the
+  # watermark there rather than letting the ones after it carry it past a gap.
+  def handle_call({:record_batch, records}, _from, state) do
+    {state, result} =
+      records
+      |> Enum.sort_by(& &1[:seq])
+      |> Enum.reduce_while({state, %{recorded: 0, duplicates: 0, seq: 0}}, fn record,
+                                                                              {acc, tally} ->
+        {seq, attrs} = Map.pop(record, :seq, 0)
+
+        case Ledger.record(Map.put(attrs, :team_id, acc.team_id)) do
+          {:ok, stored} ->
+            acc = %{acc | spent_micros: acc.spent_micros + stored.cost_micros}
+            {:cont, {acc, %{tally | recorded: tally.recorded + 1, seq: max(tally.seq, seq)}}}
+
+          {:duplicate, _stored} ->
+            {:cont, {acc, %{tally | duplicates: tally.duplicates + 1, seq: max(tally.seq, seq)}}}
+
+          {:error, reason} ->
+            {:halt, {acc, {:error, reason}}}
+        end
+      end)
+
+    case result do
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+
+      tally ->
+        # Only where something was actually inserted. A batch of duplicates changes no
+        # sum, and throwing the cache away for it would make a replaying pod cost every
+        # panel in the building a fresh aggregate.
+        if tally.recorded > 0, do: Cache.invalidate(state.team_id)
+        {:reply, {:ok, tally}, state}
     end
   end
 

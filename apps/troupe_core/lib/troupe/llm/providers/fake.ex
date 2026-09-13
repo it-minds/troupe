@@ -16,7 +16,7 @@ defmodule Troupe.LLM.Fake do
 
   use GenServer
 
-  alias Troupe.LLM.{Response, Text, ToolUse, Usage}
+  alias Troupe.LLM.{Gateway, Response, Text, ToolUse, Usage}
 
   @type step ::
           {:text, String.t()}
@@ -24,7 +24,7 @@ defmodule Troupe.LLM.Fake do
           | {:error, term()}
           | map()
 
-  defstruct steps: [], routes: %{}, requests: [], default: nil, delay_ms: 0
+  defstruct steps: [], routes: %{}, requests: [], default: nil, delay_ms: 0, cost_micros: :derived
 
   # -- client -----------------------------------------------------------------
 
@@ -40,6 +40,10 @@ defmodule Troupe.LLM.Fake do
     * `:default` — what to answer once the script runs out (defaults to a final
       "done" text, so an over-running agent stops rather than erroring)
     * `:delay_ms` — artificial latency, for testing parallelism and backpressure
+    * `:cost_micros` — what the imaginary gateway in front of this model charged: an
+      integer for a fixed price per call, `:derived` (the default) for a deterministic
+      function of the tokens, or `nil` for a gateway that reports no cost at all, which
+      is what the accounting path has to survive
     * `:name` — registered name (tests usually pass one)
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -109,7 +113,8 @@ defmodule Troupe.LLM.Fake do
        steps: Keyword.get(opts, :steps, []),
        routes: opts |> Keyword.get(:routes, %{}) |> Map.new(fn {k, v} -> {to_string(k), v} end),
        default: Keyword.get(opts, :default, {:text, "done"}),
-       delay_ms: Keyword.get(opts, :delay_ms, 0)
+       delay_ms: Keyword.get(opts, :delay_ms, 0),
+       cost_micros: Keyword.get(opts, :cost_micros, :derived)
      }}
   end
 
@@ -117,7 +122,7 @@ defmodule Troupe.LLM.Fake do
   def handle_call({:next, request}, _from, state) do
     state = %{state | requests: [request | state.requests]}
     {step, state} = take_step(state, agent_name(request))
-    {:reply, render(step, state.delay_ms), state}
+    {:reply, render(step, state.delay_ms, state.cost_micros), state}
   end
 
   def handle_call(:requests, _from, state), do: {:reply, Enum.reverse(state.requests), state}
@@ -161,25 +166,37 @@ defmodule Troupe.LLM.Fake do
     end
   end
 
-  defp render({:error, reason}, _delay), do: {:error, reason}
+  defp render({:error, reason}, _delay, _cost), do: {:error, reason}
 
-  defp render({:text, text}, delay) do
-    {:ok, %Response{content: [%Text{text: text}], stop_reason: :end_turn, usage: usage(text)},
-     delay}
-  end
-
-  defp render({:tools, calls}, delay) do
+  defp render({:text, text}, delay, cost) do
     {:ok,
-     %Response{content: tool_blocks(calls), stop_reason: :tool_use, usage: usage(inspect(calls))},
-     delay}
+     %Response{
+       content: [%Text{text: text}],
+       stop_reason: :end_turn,
+       usage: usage(text),
+       gateway: gateway(usage(text), cost)
+     }, delay}
   end
 
-  defp render({:text_and_tools, text, calls}, delay) do
+  defp render({:tools, calls}, delay, cost) do
+    usage = usage(inspect(calls))
+
+    {:ok,
+     %Response{
+       content: tool_blocks(calls),
+       stop_reason: :tool_use,
+       usage: usage,
+       gateway: gateway(usage, cost)
+     }, delay}
+  end
+
+  defp render({:text_and_tools, text, calls}, delay, cost) do
     {:ok,
      %Response{
        content: [%Text{text: text} | tool_blocks(calls)],
        stop_reason: :tool_use,
-       usage: usage(text)
+       usage: usage(text),
+       gateway: gateway(usage(text), cost)
      }, delay}
   end
 
@@ -195,6 +212,22 @@ defmodule Troupe.LLM.Fake do
   # numbers that grow with content without depending on a real tokeniser.
   defp usage(text) do
     %Usage{input_tokens: 100, output_tokens: max(div(byte_size(text), 4), 1)}
+  end
+
+  # A request id always, because a real gateway always gives one and the ledger's
+  # idempotency turns on it; a cost only where the script asked for one, so a test can
+  # also reproduce the gateway that reports none.
+  defp gateway(_usage, nil), do: %Gateway{request_id: "fake_" <> unique()}
+
+  defp gateway(usage, :derived) do
+    %Gateway{
+      request_id: "fake_" <> unique(),
+      cost_micros: usage.input_tokens * 3 + usage.output_tokens * 15
+    }
+  end
+
+  defp gateway(_usage, cost) when is_integer(cost) and cost >= 0 do
+    %Gateway{request_id: "fake_" <> unique(), cost_micros: cost}
   end
 end
 

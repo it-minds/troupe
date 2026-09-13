@@ -112,6 +112,23 @@ defmodule Troupe.Plane.ReconcileTest do
       assert result.drift_micros == 700
     end
 
+    test "a call folded out of a log with no gateway is unmetered, not extra", context do
+      {:ok, _} = Ledger.record(usage(context, "req-1", 500))
+      # What `Troupe.Session.Usage` synthesises for a turn logged before a gateway told
+      # anyone what it cost: real tokens, no cost, and an id no gateway would mint.
+      {:ok, _} = Ledger.record(%{usage(context, "seq:s-old:12", 0) | model: "unknown"})
+
+      result = Reconcile.compare([gateway("req-1", 500)], context.from, context.to)
+
+      assert result.extra == []
+      assert [%{request_id: "seq:s-old:12", cost_micros: 0}] = result.unmetered
+
+      # And it is not drift: nothing was billed twice and nothing was lost, so the
+      # comparison is still clean.
+      assert result.drift_micros == 0
+      assert result.clean?
+    end
+
     test "a cost both have and disagree about is named with both numbers", context do
       {:ok, _} = Ledger.record(usage(context, "req-1", 500))
 
@@ -130,7 +147,10 @@ defmodule Troupe.Plane.ReconcileTest do
       {:ok, _} = Ledger.record(usage(context, "req-1", 500))
 
       small =
-        Reconcile.compare([gateway("req-1", 500), gateway("req-lost", 10)], context.from, context.to,
+        Reconcile.compare(
+          [gateway("req-1", 500), gateway("req-lost", 10)],
+          context.from,
+          context.to,
           threshold_micros: 1_000
         )
 
@@ -138,7 +158,10 @@ defmodule Troupe.Plane.ReconcileTest do
       refute small.over_threshold?
 
       large =
-        Reconcile.compare([gateway("req-1", 500), gateway("req-lost", 50_000)], context.from, context.to,
+        Reconcile.compare(
+          [gateway("req-1", 500), gateway("req-lost", 50_000)],
+          context.from,
+          context.to,
           threshold_micros: 1_000
         )
 

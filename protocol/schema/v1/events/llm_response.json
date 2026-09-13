@@ -3,8 +3,14 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "gateway": {
+      "type": "object"
+    },
     "message": {
       "type": "object"
+    },
+    "model": {
+      "type": "string"
     },
     "stop_reason": {
       "type": "string"

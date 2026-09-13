@@ -31,6 +31,10 @@ defmodule Troupe.Session.Summary do
     "todo" => nil,
     "tool" => nil,
     "tokens" => 0,
+    # Micro-units are what the ledger keeps and what the gateway is read in; `cost` is
+    # the same number in whole currency units, derived on every fold rather than
+    # accumulated, so a float never carries an error forward.
+    "cost_micros" => 0,
     "cost" => 0.0,
     "approvals" => [],
     "error" => nil
@@ -161,7 +165,13 @@ defmodule Troupe.Session.Summary do
   def fold(snapshot, %Event{type: "llm_response", data: data}) do
     usage = Map.get(data, "usage") || %{}
     tokens = Map.get(usage, "input_tokens", 0) + Map.get(usage, "output_tokens", 0)
-    Map.update(snapshot, "tokens", tokens, &(&1 + tokens))
+    gateway = Map.get(data, "gateway") || %{}
+    micros = Map.get(snapshot, "cost_micros", 0) + (Map.get(gateway, "cost_micros") || 0)
+
+    snapshot
+    |> Map.update("tokens", tokens, &(&1 + tokens))
+    |> Map.put("cost_micros", micros)
+    |> Map.put("cost", micros / 1_000_000)
   end
 
   def fold(snapshot, %Event{type: "llm_error", data: data}) do
@@ -173,7 +183,7 @@ defmodule Troupe.Session.Summary do
   end
 
   def fold(snapshot, %Event{type: type, data: data})
-       when type in ["approval_decided", "approval_resolved"] do
+      when type in ["approval_decided", "approval_resolved"] do
     Map.update(snapshot, "approvals", [], &List.delete(&1, data["call_id"]))
   end
 

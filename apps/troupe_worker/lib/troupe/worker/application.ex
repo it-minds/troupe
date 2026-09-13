@@ -29,6 +29,7 @@ defmodule Troupe.Worker.Application do
       Troupe.Worker.Auth,
       Troupe.Worker.MCP,
       Troupe.Worker.Bundles,
+      Troupe.Worker.Usage,
       Troupe.Worker.Disk.Watch
     ] ++ link() ++ [Troupe.Worker.Harness]
   end

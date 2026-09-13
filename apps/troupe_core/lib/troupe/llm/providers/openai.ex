@@ -15,7 +15,19 @@ defmodule Troupe.LLM.Providers.OpenAI do
 
   @behaviour Troupe.LLM.Provider
 
-  alias Troupe.LLM.{Delta, Message, Provider, Request, SSE, Text, ToolResult, ToolUse, Usage}
+  alias Troupe.LLM.{
+    Delta,
+    Gateway,
+    Message,
+    Provider,
+    Request,
+    SSE,
+    Text,
+    ToolResult,
+    ToolUse,
+    Usage
+  }
+
   alias Troupe.LLM.Endpoint
   alias Troupe.LLM.Providers.OpenAI.Collector
 
@@ -106,8 +118,15 @@ defmodule Troupe.LLM.Providers.OpenAI do
 
   defp finish(%Req.Response{} = response) do
     case response.private[:troupe] do
-      nil -> {:error, :no_stream_received}
-      %{acc: acc} -> {:ok, Collector.to_response(acc)}
+      nil ->
+        {:error, :no_stream_received}
+
+      %{acc: acc} ->
+        # The gateway's headers are read here rather than in the collector because they
+        # belong to the HTTP response and not to the event stream: a gateway sends them
+        # once, before the first chunk, and the collector never sees them.
+        answer = Collector.to_response(acc)
+        {:ok, %{answer | gateway: Gateway.from_headers(response.headers)}}
     end
   end
 

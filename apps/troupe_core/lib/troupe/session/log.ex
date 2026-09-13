@@ -22,6 +22,7 @@ defmodule Troupe.Session.Log do
   alias Troupe.{Events, Paths}
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Event.Actor
+  alias Troupe.Session.Usage
 
   require Logger
 
@@ -227,6 +228,11 @@ defmodule Troupe.Session.Log do
     :ok = :file.sync(state.device)
 
     Events.publish(state.session_id, event)
+
+    # After the event is durable and after every client has it: accounting is a
+    # projection of what the log says happened, and it must never be able to change
+    # whether the log says it.
+    Usage.observe(state.session_id, event)
 
     {:reply, {:ok, seq}, %{state | seq: seq, last: event}}
   end

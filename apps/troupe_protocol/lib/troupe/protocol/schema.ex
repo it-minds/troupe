@@ -72,7 +72,13 @@ defmodule Troupe.Protocol.Schema do
       "llm_response" => %{
         "message" => required(:object),
         "usage" => optional(:object),
-        "stop_reason" => optional(:string)
+        "stop_reason" => optional(:string),
+        "model" => optional(:string),
+        # What the gateway in front of the provider said about the call it billed:
+        # `request_id` and `cost_micros`. Optional because an event written before there
+        # was a gateway to ask carries neither, and because a gateway may answer with
+        # one and not the other.
+        "gateway" => optional(:object)
       },
       "llm_error" => %{"reason" => required(:string)},
       "tool_call_started" => %{

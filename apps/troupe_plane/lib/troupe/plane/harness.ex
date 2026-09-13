@@ -531,7 +531,8 @@ defmodule Troupe.Plane.Harness do
         "profile" => session.profile,
         "source" => session.workspace_source,
         "bundle_version" => session.bundle_version,
-        "agent" => agent
+        "agent" => agent,
+        "usage_seq" => session.usage_seq
       }
       |> Map.merge(session_terms(session))
       |> then(fn params -> if prompt, do: Map.put(params, "prompt", prompt), else: params end)
@@ -681,7 +682,11 @@ defmodule Troupe.Plane.Harness do
         "epoch" => session.epoch,
         "owner_subject" => session.owner_subject,
         "profile" => session.profile,
-        "team" => team_name(session)
+        "team" => team_name(session),
+        # Where the ledger got to in this session's log. The pod folds forward from here
+        # and reports what is missing, which is how a session that ran while the plane
+        # was unreachable still gets charged.
+        "usage_seq" => session.usage_seq
       }
       |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))

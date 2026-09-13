@@ -14,6 +14,11 @@ defmodule Troupe.Plane.Reconcile do
     for a budget.
   * **extra** — the ledger has a request the gateway does not. A worker recorded a call
     the gateway never saw, which usually means a retry counted twice.
+  * **unmetered** — the ledger has a call whose id it made up, because the log it was
+    folded out of was written before a gateway told anyone what a call cost. Those
+    carry tokens and a cost of zero, and they are counted separately from `extra`
+    because nothing went wrong: the gateway is right not to have them, and the drift
+    they represent is a cost that was never recorded rather than one recorded twice.
   * **mismatched** — both have it and disagree about the cost.
 
   The comparison is by gateway request id, which is why every usage record carries one
@@ -48,8 +53,12 @@ defmodule Troupe.Plane.Reconcile do
     gateway_ids = gateway |> Map.keys() |> MapSet.new()
     our_ids = ours |> Map.keys() |> MapSet.new()
 
+    {unmetered, extra} =
+      our_ids
+      |> MapSet.difference(gateway_ids)
+      |> Enum.split_with(&unmetered?/1)
+
     missing = MapSet.difference(gateway_ids, our_ids)
-    extra = MapSet.difference(our_ids, gateway_ids)
     mismatched = mismatches(MapSet.intersection(gateway_ids, our_ids), gateway, ours)
 
     report(%{
@@ -59,6 +68,7 @@ defmodule Troupe.Plane.Reconcile do
       ledger_records: map_size(ours),
       missing: summarise(missing, gateway),
       extra: summarise(extra, ours),
+      unmetered: summarise(unmetered, ours),
       mismatched: mismatched,
       threshold_micros: Keyword.get(opts, :threshold_micros, threshold())
     })
@@ -78,7 +88,10 @@ defmodule Troupe.Plane.Reconcile do
   end
 
   defp log(%{clean?: true} = result) do
-    Logger.info("troupe plane: ledger reconciled clean over #{result.gateway_records} record(s)")
+    Logger.info(
+      "troupe plane: ledger reconciled clean over #{result.gateway_records} record(s)" <>
+        unmetered_note(result)
+    )
   end
 
   defp log(result) do
@@ -88,9 +101,22 @@ defmodule Troupe.Plane.Reconcile do
       level,
       "troupe plane: ledger drift of #{result.drift_micros} micros — " <>
         "#{length(result.missing)} missing, #{length(result.extra)} extra, " <>
-        "#{length(result.mismatched)} mismatched"
+        "#{length(result.mismatched)} mismatched, " <>
+        "#{length(result.unmetered)} unmetered"
     )
   end
+
+  defp unmetered_note(%{unmetered: []}), do: ""
+
+  defp unmetered_note(%{unmetered: unmetered}) do
+    ", with #{length(unmetered)} unmetered call(s) from before the gateway reported cost"
+  end
+
+  # The shape `Troupe.Session.Usage` gives a call no gateway named. Matched on the
+  # prefix rather than shared as a constant, because `troupe_plane` does not depend on
+  # `troupe_core` and a shared module for one prefix would be a worse coupling than a
+  # documented one.
+  defp unmetered?(request_id), do: String.starts_with?(request_id, "seq:")
 
   defp mismatches(shared, gateway, ours) do
     shared
@@ -142,13 +168,16 @@ defmodule Troupe.Plane.Reconcile do
   defp model_of(_entry), do: nil
 
   defp index_by_request_id(records) do
-    Map.new(records, fn record -> {record["request_id"] || record["gateway_request_id"], record} end)
+    Map.new(records, fn record ->
+      {record["request_id"] || record["gateway_request_id"], record}
+    end)
   end
 
   defp ledger_in(from, to) do
     Repo.all(
-      from u in UsageRecord,
+      from(u in UsageRecord,
         where: u.occurred_at >= ^from and u.occurred_at < ^to
+      )
     )
     |> Map.new(&{&1.gateway_request_id, &1})
   end

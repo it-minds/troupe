@@ -46,6 +46,10 @@ defmodule Troupe.Agent.State do
     :llm_ref,
     :llm_monitor,
     :llm_timer,
+    # The model this turn asked for, kept so the response can be logged against it.
+    # The answer does not always name the model that produced it, and the ledger's
+    # question — what did this call cost, on what — needs both halves.
+    :llm_model,
     :done_reason,
     :turn_mode,
     # The config bundle this session is pinned to, or `nil`. Read by the skill tool and
@@ -86,6 +90,7 @@ defmodule Troupe.Agent.State do
           llm_ref: reference() | nil,
           llm_monitor: reference() | nil,
           llm_timer: reference() | nil,
+          llm_model: String.t() | nil,
           done_reason: atom() | nil,
           turn_mode: :normal | :question | nil,
           bundle: map() | nil,

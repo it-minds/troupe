@@ -69,6 +69,7 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
   def scenarios do
     [
       {"simple_turn", simple_turn()},
+      {"metered_turn", metered_turn()},
       {"tool_use", tool_use()},
       {"approval", approval()},
       {"subagents", subagents()},
@@ -78,10 +79,12 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
 
   defp simple_turn do
     [
-      {:session_created, ["root"], %{"workspace" => "/w", "profile" => "build", "visibility" => "private"}},
+      {:session_created, ["root"],
+       %{"workspace" => "/w", "profile" => "build", "visibility" => "private"}},
       {:agent_started, ["root"], %{"profile" => "build", "mode" => "primary"}},
       {:user_input, ["root"], %{"source" => "user", "text" => "hello"}},
-      {:llm_request, ["root"], %{"model" => "m", "message_count" => 1, "tools" => [], "profile" => "build"}},
+      {:llm_request, ["root"],
+       %{"model" => "m", "message_count" => 1, "tools" => [], "profile" => "build"}},
       {:llm_response, ["root"],
        %{
          "message" => %{"role" => "assistant", "content" => [%{"type" => "text", "text" => "hi"}]},
@@ -91,14 +94,41 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
     ]
   end
 
+  # The same turn, with a gateway in front of the provider. `simple_turn` deliberately
+  # keeps the older shape — tokens and nothing else — so both readings stay covered: a
+  # log from before there was a gateway to ask, and one from after.
+  defp metered_turn do
+    [
+      {:session_created, ["root"],
+       %{"workspace" => "/w", "profile" => "build", "visibility" => "private"}},
+      {:agent_started, ["root"], %{"profile" => "build", "mode" => "primary"}},
+      {:user_input, ["root"], %{"source" => "user", "text" => "hello"}},
+      {:llm_request, ["root"],
+       %{"model" => "m", "message_count" => 1, "tools" => [], "profile" => "build"}},
+      {:llm_response, ["root"],
+       %{
+         "message" => %{"role" => "assistant", "content" => [%{"type" => "text", "text" => "hi"}]},
+         "usage" => %{"input_tokens" => 10, "output_tokens" => 2},
+         "stop_reason" => "end_turn",
+         "model" => "anthropic/claude-opus-5",
+         "gateway" => %{"request_id" => "gw_1", "cost_micros" => 1234}
+       }}
+    ]
+  end
+
   defp tool_use do
     simple_turn() ++
       [
-        {:tool_call_started, ["root"], %{"call_id" => "c1", "name" => "read_file", "args" => %{"path" => "a.ex"}}},
-        {:tool_call_completed, ["root"], %{"call_id" => "c1", "name" => "read_file", "ok" => true, "content" => "defmodule A"}},
+        {:tool_call_started, ["root"],
+         %{"call_id" => "c1", "name" => "read_file", "args" => %{"path" => "a.ex"}}},
+        {:tool_call_completed, ["root"],
+         %{"call_id" => "c1", "name" => "read_file", "ok" => true, "content" => "defmodule A"}},
         {:tool_results, ["root"], %{"results" => []}},
         {:todo_updated, ["root"],
-         %{"items" => [%{"id" => "a", "content" => "read it", "status" => "in_progress"}], "source" => "agent"}}
+         %{
+           "items" => [%{"id" => "a", "content" => "read it", "status" => "in_progress"}],
+           "source" => "agent"
+         }}
       ]
   end
 
@@ -106,7 +136,12 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
     simple_turn() ++
       [
         {:approval_requested, ["root"],
-         %{"call_id" => "c2", "tool" => "shell", "args" => %{"command" => "ls"}, "agent_path" => ["root"]}},
+         %{
+           "call_id" => "c2",
+           "tool" => "shell",
+           "args" => %{"command" => "ls"},
+           "agent_path" => ["root"]
+         }},
         {:approval_decided, ["root"],
          %{
            "call_id" => "c2",
@@ -115,7 +150,8 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
            "agent_path" => ["root"],
            "decision" => "allow"
          }},
-        {:tool_call_completed, ["root"], %{"call_id" => "c2", "name" => "shell", "ok" => true, "content" => "a.ex"}}
+        {:tool_call_completed, ["root"],
+         %{"call_id" => "c2", "name" => "shell", "ok" => true, "content" => "a.ex"}}
       ]
   end
 
@@ -123,11 +159,17 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
     simple_turn() ++
       [
         {:delegation_started, ["root"],
-         %{"call_id" => "c3", "agent" => "explore", "child_path" => ["root", "explore"], "task" => "look"}},
+         %{
+           "call_id" => "c3",
+           "agent" => "explore",
+           "child_path" => ["root", "explore"],
+           "task" => "look"
+         }},
         {:agent_started, ["root", "explore"], %{"profile" => "explore", "mode" => "subagent"}},
         {:user_input, ["root", "explore"], %{"source" => "user", "text" => "look"}},
         {:agent_done, ["root", "explore"], %{"reason" => "finished", "summary" => "found it"}},
-        {:tool_call_completed, ["root"], %{"call_id" => "c3", "name" => "delegate", "ok" => true, "content" => "found it"}}
+        {:tool_call_completed, ["root"],
+         %{"call_id" => "c3", "name" => "delegate", "ok" => true, "content" => "found it"}}
       ]
   end
 
@@ -135,11 +177,15 @@ defmodule Mix.Tasks.Troupe.Fixtures.Record do
     simple_turn() ++
       [
         {:llm_error, ["root"], %{"reason" => "the provider hung up"}},
-        {:agent_restarted, ["root"], %{"replayed_events" => 5, "interrupted" => true, "incomplete_calls" => []}},
+        {:agent_restarted, ["root"],
+         %{"replayed_events" => 5, "interrupted" => true, "incomplete_calls" => []}},
         {:user_input, ["root"], %{"source" => "user", "text" => "try again"}},
         {:llm_response, ["root"],
          %{
-           "message" => %{"role" => "assistant", "content" => [%{"type" => "text", "text" => "done"}]},
+           "message" => %{
+             "role" => "assistant",
+             "content" => [%{"type" => "text", "text" => "done"}]
+           },
            "usage" => %{"input_tokens" => 20, "output_tokens" => 3},
            "stop_reason" => "end_turn"
          }},

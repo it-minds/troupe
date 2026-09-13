@@ -57,6 +57,11 @@ defmodule Troupe.Plane.Sessions.Session do
     field(:pending_approvals, :integer, default: 0)
     field(:cost_micros, :integer, default: 0)
 
+    # How far the ledger has got through this session's log. A cursor between the pod's
+    # log and `usage_records`, carried back to the pod on every batch so it knows what
+    # it still owes; behind is safe and costs a re-fold, ahead is not possible.
+    field(:usage_seq, :integer, default: 0)
+
     # Fixed at creation: what started this session, and what it was allowed.
     field(:origin, :map)
     field(:terms, :map)
@@ -107,6 +112,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :done_reason,
     :pending_approvals,
     :cost_micros,
+    :usage_seq,
     :origin,
     :terms,
     :reviewed_by,
@@ -123,5 +129,6 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:pending_approvals, greater_than_or_equal_to: 0)
     |> validate_number(:cost_micros, greater_than_or_equal_to: 0)
+    |> validate_number(:usage_seq, greater_than_or_equal_to: 0)
   end
 end
