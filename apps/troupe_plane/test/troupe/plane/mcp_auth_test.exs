@@ -83,11 +83,35 @@ defmodule Troupe.Plane.MCPAuthTest do
       assert document["bearer_methods_supported"] == ["header"]
 
       # Not a bare `openid`: that produces an access token addressed to the provider's own
-      # directory API, which this plane will refuse. The scope is the API this registration
-      # exposes, and `offline_access` so the client is given a refresh token rather than
-      # sending the operator back to a browser in an hour.
-      assert "api://#{@client}/admin" in document["scopes_supported"]
+      # directory API, which this plane refuses. And `offline_access`, so the client is
+      # given a refresh token rather than sending the operator back to a browser in an hour.
       assert "offline_access" in document["scopes_supported"]
+    end
+
+    test "the scope is named after the resource, because that is what a client must send" do
+      document = metadata("/.well-known/oauth-protected-resource")
+
+      # MCP obliges a client to send RFC 8707's `resource` set to the server's canonical
+      # URI, and a provider checks it against the resource the scopes belong to. A scope
+      # under any other name is a pair the provider refuses — Entra says AADSTS9010010 —
+      # and the failure lands in a browser, after consent, where it reads as the client's
+      # fault.
+      assert document["scopes_supported"] == [document["resource"] <> "/admin", "offline_access"]
+    end
+
+    test "a registration that exposes it elsewhere can say so" do
+      oidc = Application.get_env(:troupe_plane, :oidc)
+
+      Application.put_env(
+        :troupe_plane,
+        :oidc,
+        Keyword.put(oidc, :mcp_scope, "api://other/admin")
+      )
+
+      on_exit(fn -> Application.put_env(:troupe_plane, :oidc, oidc) end)
+
+      document = metadata("/.well-known/oauth-protected-resource")
+      assert document["scopes_supported"] == ["api://other/admin", "offline_access"]
     end
   end
 
@@ -103,9 +127,16 @@ defmodule Troupe.Plane.MCPAuthTest do
       assert "api://#{@client}" in Troupe.Plane.OIDC.audiences()
     end
 
+    test "so is one addressed to the endpoint's own URL" do
+      # The third identifier URI of the same registration. Which name an access token
+      # carries depends on the provider and on the name the client asked under, neither of
+      # which the caller chooses.
+      assert "https://troupe.example.test/mcp" in Troupe.Plane.OIDC.audiences()
+    end
+
     test "and nothing else" do
       refute "https://graph.microsoft.com" in Troupe.Plane.OIDC.audiences()
-      assert length(Troupe.Plane.OIDC.audiences()) == 2
+      assert length(Troupe.Plane.OIDC.audiences()) == 3
     end
 
     test "a plane with no client configured accepts no provider token at all" do

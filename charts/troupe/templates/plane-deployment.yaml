@@ -237,6 +237,11 @@ spec:
             - name: TROUPE_OIDC_SCOPES
               value: {{ join "," . | quote }}
             {{- end }}
+            {{- with .Values.plane.oidc.mcpScope }}
+            # Only where the registration exposes the MCP scope under another name.
+            - name: TROUPE_OIDC_MCP_SCOPE
+              value: {{ . | quote }}
+            {{- end }}
             - name: TROUPE_OIDC_DEVICE_URL
               value: {{ .Values.plane.oidc.deviceUrl | quote }}
             - name: TROUPE_OIDC_TOKEN_URL

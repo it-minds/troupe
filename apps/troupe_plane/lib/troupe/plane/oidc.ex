@@ -95,14 +95,27 @@ defmodule Troupe.Plane.OIDC do
   @doc """
   What this plane accepts a provider token to be addressed to.
 
-  Two names for one registration, and `nil` when no client is configured — which is a
-  plane with no identity provider, where nothing should verify rather than everything.
+  Three names for one registration, and none at all when no client is configured — a plane
+  with no identity provider should verify nothing rather than everything.
+
+  The client id is what an id_token carries. `api://<client-id>` and the MCP endpoint's own
+  URL are both identifier URIs of the same registration, and which of them appears in an
+  access token depends on the provider and on the name the client asked under — none of
+  which is the caller's choice, and all of which are the same API. The list is closed and
+  every entry names *this* registration; a token for anything else fails on audience.
   """
   @spec audiences() :: [String.t()]
   def audiences do
     case client_id() do
       nil -> []
-      id -> [id, "api://" <> id]
+      id -> [id, "api://" <> id] ++ resource_names()
+    end
+  end
+
+  defp resource_names do
+    case Application.get_env(:troupe_plane, :base_url) do
+      nil -> []
+      base -> ["#{base}/mcp"]
     end
   end
 

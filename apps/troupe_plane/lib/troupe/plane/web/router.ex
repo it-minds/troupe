@@ -308,12 +308,32 @@ defmodule Troupe.Plane.Web.Router do
   # the `:oidc` list and this lives beside it.
   defp plane_url, do: Application.get_env(:troupe_plane, :base_url)
 
+  # The scope a client asks for, named after the *resource* rather than after the client.
+  #
+  # MCP's authorization specification obliges a client to send RFC 8707's `resource`
+  # parameter set to this server's canonical URI, and a provider checks that against the
+  # resource the scopes belong to. Advertising `api://<client-id>/admin` while the client
+  # is required to send `https://<plane>/mcp` is a pair no provider will accept — Entra
+  # refuses it with AADSTS9010010 — so the scope is addressed by the same name as the
+  # resource, and the registration carries that name too.
+  #
+  # `TROUPE_OIDC_MCP_SCOPE` is for a deployment whose registration names it something else.
   defp scopes_supported do
-    case config(:client_id) do
-      nil -> []
-      # `offline_access` so the client is given a refresh token: without it a session ends
-      # in an hour and the operator is sent back to a browser mid-task.
-      id -> ["api://#{id}/admin", "offline_access"]
+    case config(:mcp_scope) || default_mcp_scope() do
+      nil ->
+        []
+
+      scope ->
+        # `offline_access` so the client is given a refresh token: without it a session
+        # ends in an hour and the operator is sent back to a browser mid-task.
+        [scope, "offline_access"]
+    end
+  end
+
+  defp default_mcp_scope do
+    case plane_url() do
+      nil -> nil
+      base -> "#{base}/mcp/admin"
     end
   end
 

@@ -147,6 +147,11 @@ plane:
     # token, named by `groupsClaim`. Asking for one as a scope is refused outright by
     # Microsoft Entra and fails every sign-in before a password is typed.
     scopes: []
+    # What an MCP client asks for. Empty means `<baseUrl>/mcp/admin` — the scope named
+    # after the resource, which is the only name the MCP specification lets a client send
+    # as its `resource` parameter. The app registration has to expose it under that name;
+    # set this only where it exposes another.
+    mcpScope: ""
     secretName: troupe-plane-oidc
     secretKey: client-secret
   # A way into the panel when the identity provider cannot let you in — a misconfigured

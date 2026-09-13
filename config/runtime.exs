@@ -329,6 +329,10 @@ if config_env() == :prod do
         # provider that needs something else; a scope the provider does not recognise
         # fails every sign-in before a password is typed.
         scopes: oidc_scopes,
+        # What an MCP client asks for. Absent means `<base_url>/mcp/admin`, which is the
+        # scope named after the resource itself — the only name a client is allowed to send
+        # as RFC 8707's `resource`. Set it where the registration exposes another.
+        mcp_scope: presence.(System.get_env("TROUPE_OIDC_MCP_SCOPE")),
         device_authorization_endpoint: oidc_required.("TROUPE_OIDC_DEVICE_URL"),
         token_endpoint: oidc_required.("TROUPE_OIDC_TOKEN_URL")
       ]
