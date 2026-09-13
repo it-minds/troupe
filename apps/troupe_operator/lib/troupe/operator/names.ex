@@ -29,14 +29,25 @@ defmodule Troupe.Operator.Names do
   def pod_service(profile, ordinal), do: "#{profile}-#{ordinal}"
 
   @doc """
-  Where a client reaches one pod: `<ordinal>.<profile>.workers.<domain>`.
+  Where a client reaches one pod: `<ordinal>-<profile>.workers.<domain>`.
 
   Per pod rather than per profile because a session lives on exactly one of them, and a
   load balancer that sent the second connection somewhere else would split a session's
   clients across pods that cannot see each other's state.
+
+  **One label, joined by a hyphen, and that is the whole reason for the hyphen.** A DNS
+  wildcard matches exactly one label, so `*.workers.<domain>` covers `0-dev.workers…`
+  and would not have covered `0.dev.workers…`. With a dot, every new profile needs its
+  own DNS record and its own certificate before any of its pods can be reached — which
+  turns creating a profile in the panel into a change request. With a hyphen, one record
+  and one wildcard certificate cover every profile there will ever be.
+
+  `config/runtime.exs` composes the same name for the endpoint a pod reports to the
+  plane. The two must agree, and they cannot share a function: `troupe_worker` does not
+  depend on `troupe_operator` and must not start to.
   """
   @spec host(String.t(), non_neg_integer(), String.t()) :: String.t()
-  def host(profile, ordinal, domain), do: "#{ordinal}.#{profile}.#{domain}"
+  def host(profile, ordinal, domain), do: "#{ordinal}-#{profile}.#{domain}"
 
   @doc """
   The audience a pod's key-manager token is projected for.

@@ -1,0 +1,30 @@
+# Let's Encrypt over HTTP-01, for every hostname Troupe uses.
+#
+#   kubectl apply -f deploy/scaleway/cluster-issuer.yaml
+#
+# HTTP-01 rather than DNS-01, and therefore no wildcard. The plane is one hostname and
+# each worker pod is one hostname, all of them resolving to this cluster's ingress
+# controller, so each can answer its own challenge. That is the whole reason
+# `operator.certIssuer` exists: a wildcard for `*.workers.<domain>` would be one
+# certificate instead of a few, and would require an API token for whoever hosts the
+# zone. `itmindsinternal.dk` is at simply.com, which cert-manager has no solver for, and
+# a deployment that only works on four DNS providers is a worse deployment.
+#
+# The cost is one ACME order per pod hostname. Let's Encrypt allows fifty certificates
+# per registered domain per week, and `maxReplicas` is three, so the ceiling is a long
+# way off — but it is a ceiling, and a cluster that churned pods fast enough would find
+# it. A wildcard is still the right answer at a size where that matters.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: letsencrypt
+spec:
+  acme:
+    server: https://acme-v02.api.letsencrypt.org/directory
+    email: martin@objective-mj.com
+    privateKeySecretRef:
+      name: letsencrypt-account-key
+    solvers:
+      - http01:
+          ingress:
+            ingressClassName: nginx

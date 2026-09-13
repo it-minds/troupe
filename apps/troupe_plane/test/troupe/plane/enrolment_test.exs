@@ -103,7 +103,7 @@ defmodule Troupe.Plane.EnrolmentTest do
                Enrolment.enrol(identity, %{
                  "pod_name" => "troupe-w-dev-2",
                  "capacity" => 4,
-                 "endpoint" => "https://2.dev.workers.test",
+                 "endpoint" => "https://2-dev.workers.test",
                  "disk_total_bytes" => 1000
                })
 
@@ -125,7 +125,10 @@ defmodule Troupe.Plane.EnrolmentTest do
       {:ok, second} = Enrolment.enrol(identity, claims)
 
       assert first.id == second.id
-      assert Fleet.list_workers("dev") |> Enum.filter(&(&1.pod_name == "troupe-w-dev-0")) |> length() == 1
+
+      assert Fleet.list_workers("dev")
+             |> Enum.filter(&(&1.pod_name == "troupe-w-dev-0"))
+             |> length() == 1
     end
 
     test "a pod whose name has no ordinal is refused", context do

@@ -39,7 +39,11 @@ operator:
   workersScheme: wss
   workersPort: ""
   workerAllowedOrigins: []
-  tlsSecretName: troupe-workers-tls
+  # A cert-manager ClusterIssuer: one certificate per pod hostname over HTTP-01,
+  # which needs no DNS API token and so works on any DNS host. Leave it empty and
+  # set `tlsSecretName` instead to share one wildcard certificate.
+  certIssuer: letsencrypt
+  tlsSecretName: ""
   drainTimeoutSeconds: 300
   maxPorts: 65536
 
@@ -60,6 +64,9 @@ plane:
   baseUrl: https://troupe.example.com                        # CHANGE ME: the same, with scheme
   corsOrigins: []
   ingressClassName: nginx
+  # A cert-manager ClusterIssuer for the plane's own hostname, over HTTP-01.
+  # Leave empty and `tlsSecretName` must name a certificate somebody else put there.
+  certIssuer: ""
   tlsSecretName: troupe-plane-tls
   ingress:
     enabled: true
@@ -97,6 +104,19 @@ plane:
     deviceUrl: https://login.example.com/oauth2/v2.0/devicecode
     tokenUrl: https://login.example.com/oauth2/v2.0/token
     secretName: ""
+  # A way into the panel when the identity provider cannot let you in — a misconfigured
+  # client, an expired signing key, or the first five minutes of an installation before
+  # any group exists to be a platform admin of. Leave `secretName` empty and there is no
+  # door at all: the routes answer 404.
+  #
+  # A break-glass session is a platform admin and nothing more, lasts `lifetimeSeconds`,
+  # is written to the audit log both when it succeeds and when it is refused, and says so
+  # on every page while it is open.
+  breakglass:
+    secretName: ""
+    secretKey: token
+    subject: breakglass
+    lifetimeSeconds: 3600
   scim:
     enabled: false
 

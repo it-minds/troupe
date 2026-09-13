@@ -1,5 +1,14 @@
 #!/usr/bin/env bash
-# Build the four server images, and load them into the local kind cluster.
+# Build the four server images, and either load them into the local kind cluster or push
+# them to a registry.
+#
+#   scripts/build-images                                   # kind
+#   TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe \
+#     TROUPE_IMAGE_TAG=0.2.0 TROUPE_PUSH=true scripts/build-images
+#
+# `TROUPE_PUSH=true` pushes instead of loading, which is what a real cluster needs; log
+# in to the registry first. Loading into kind is the default because that is the loop a
+# person runs twenty times a day.
 #
 # The client binary is not built here: it is a Burrito executable for a laptop, and CI
 # builds it on a native runner per target.
@@ -10,14 +19,22 @@ cd "$(dirname "$0")/.."
 registry="${TROUPE_REGISTRY:-ghcr.io/objective-mj}"
 tag="${TROUPE_IMAGE_TAG:-dev}"
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+push="${TROUPE_PUSH:-false}"
 releases=("${@:-troupe_operator troupe_plane troupe_worker troupe_a2a}")
 
 for release in ${releases[@]}; do
   image="${registry}/${release//_/-}:${tag}"
   echo "build-images: building $image"
-  docker build --file docker/Dockerfile --build-arg "RELEASE=${release}" --tag "$image" .
+  # linux/amd64 explicitly: a laptop that is not amd64 would otherwise build an image
+  # the node pool cannot run, and the failure arrives as `exec format error` in a
+  # CrashLoopBackOff rather than as anything about architecture.
+  docker build --platform linux/amd64 \
+    --file docker/Dockerfile --build-arg "RELEASE=${release}" --tag "$image" .
 
-  if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
+  if [ "$push" = "true" ]; then
+    echo "build-images: pushing $image"
+    docker push "$image"
+  elif kind get clusters 2>/dev/null | grep -qx "$cluster"; then
     echo "build-images: loading $image into kind/$cluster"
     kind load docker-image "$image" --name "$cluster"
   fi

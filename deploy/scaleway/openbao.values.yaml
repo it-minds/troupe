@@ -1,0 +1,98 @@
+# OpenBao for Troupe on Kapsule.
+#
+#   helm upgrade --install openbao openbao/openbao \
+#     --namespace troupe-system \
+#     --values deploy/scaleway/openbao.values.yaml
+#
+# OpenBao holds two things Troupe cannot run without: the per-session data keys (KV v2)
+# and the transit key that signs plane tokens. It is the one component here that is not
+# a managed service, because Scaleway sells neither of those APIs.
+#
+# ## One replica, and why that is not a mistake
+#
+# Three replicas is a Raft quorum, not a Troupe requirement. With one there is no quorum
+# to lose — there is a restart window instead, during which a session cannot be opened
+# because its data key cannot be read. Live sessions are unaffected: a worker holds the
+# key in memory for as long as it holds the session. On a two-node pool, three replicas
+# with anti-affinity would not schedule alongside the plane, the operator and the
+# ingress controller, so three would be a worse deployment, not a safer one.
+#
+# ## The seal, and the promise this deployment cannot keep
+#
+# `docs/deploying-on-scaleway.md` says auto-unseal against Scaleway Key Manager. That is
+# not possible: OpenBao's seal types are awskms, azurekeyvault, gcpckms, ocikms and
+# transit, and Scaleway's Key Manager speaks none of those APIs. So this is a Shamir
+# seal with a single share, and the share lives in a Kubernetes Secret that a sidecar
+# reads to unseal after a restart.
+#
+# That is a real reduction in what the seal buys. It protects a stolen PVC — the data at
+# rest is still sealed — and it does not protect against someone who already has cluster
+# admin, because such a person could equally read the running process. Stated here rather
+# than hidden, and the alternative on this platform is a human unsealing by hand every
+# time a node is replaced, which for a one-replica deployment means Troupe is down until
+# somebody wakes up.
+
+server:
+  # The Raft data volume. `sbs-default` is Scaleway Block Storage; 8Gi is far more than
+  # a key store needs and is close to the smallest volume worth provisioning.
+  dataStorage:
+    enabled: true
+    size: 8Gi
+    storageClass: sbs-default
+    accessMode: ReadWriteOnce
+
+  # Audit logs would be a second volume; OpenBao's audit device can be added later
+  # against the same claim if it is wanted.
+  auditStorage:
+    enabled: false
+
+  standalone:
+    enabled: false
+
+  ha:
+    enabled: true
+    replicas: 1
+    raft:
+      enabled: true
+      setNodeId: true
+      config: |
+        ui = false
+
+        listener "tcp" {
+          tls_disable = 1
+          address = "[::]:8200"
+          cluster_address = "[::]:8201"
+        }
+
+        storage "raft" {
+          path = "/openbao/data"
+        }
+
+        service_registration "kubernetes" {}
+
+        # No `seal` stanza: Shamir. See the note at the top of this file.
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      memory: 384Mi
+
+  # Kapsule injects `<SERVICE>_PORT=tcp://…` into every container, which is the same
+  # class of collision that breaks the Troupe releases' config provider. OpenBao reads
+  # `BAO_*`, so nothing collides today — but the pods are cheap to insulate and the
+  # failure mode is a container that will not start with an unhelpful message.
+  enableServiceLinks: false
+
+injector:
+  # Troupe reads OpenBao over its HTTP API with a Kubernetes-auth token it fetches
+  # itself. The sidecar injector templates secrets into unrelated pods and is a second
+  # webhook in the admission path for nothing.
+  enabled: false
+
+ui:
+  enabled: false
+
+csi:
+  enabled: false

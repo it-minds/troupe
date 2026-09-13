@@ -1,0 +1,62 @@
+# ingress-nginx in front of Troupe on Kapsule.
+#
+#   helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx \
+#     --namespace ingress-nginx --create-namespace \
+#     --values deploy/scaleway/ingress-nginx.values.yaml
+#
+# Installing this provisions a Scaleway Load Balancer. Its IP is what both DNS records
+# point at, and it is the only public address in the deployment.
+
+controller:
+  replicaCount: 1
+
+  service:
+    annotations:
+      # The smallest LB Scaleway sells. Everything Troupe puts through it is either a
+      # JSON-RPC call or a WebSocket carrying one session, and the plane is deliberately
+      # not in the data path of a live session.
+      service.beta.kubernetes.io/scw-loadbalancer-type: LB-S
+      # PROXY protocol v2, and ingress-nginx configured below to read it. Without this
+      # every request arrives from the LB's own address, which would make the plane's
+      # per-client-IP rate limit a single shared bucket for the whole internet — and
+      # would make it fire the moment two people opened the panel.
+      service.beta.kubernetes.io/scw-loadbalancer-proxy-protocol-v2: "true"
+      # One LB, both hostnames. A second Service would be a second LB and a second bill.
+      service.beta.kubernetes.io/scw-loadbalancer-use-hostname: "false"
+
+  config:
+    use-proxy-protocol: "true"
+    # A worker session is a WebSocket that can be idle for a long time while a model
+    # thinks. The default sixty seconds would close it mid-turn.
+    proxy-read-timeout: "3600"
+    proxy-send-timeout: "3600"
+    # The protocol's frame cap is 16 MiB; a body limit below it would refuse a large
+    # `input.send` at the proxy rather than at the worker, where the error is meaningful.
+    proxy-body-size: 16m
+
+  # NOTE: the label a worker's NetworkPolicy admits goes on the **namespace**, not on
+  # these pods — the rule is a `namespaceSelector`. Helm cannot label a namespace it did
+  # not create, so it is one command beside the install:
+  #
+  #     kubectl label namespace ingress-nginx troupe.dev/ingress=true
+  #
+  # Without it a worker's Ingress terminates TLS and then hangs, because nginx can reach
+  # nothing behind it. It reads as a timeout rather than as a refusal, which is why it
+  # is written here rather than left to be rediscovered.
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      memory: 512Mi
+
+  # Two DEV1-M nodes: a second replica would take a node's worth of headroom from the
+  # workers and buy nothing, because a Kapsule LB health-checks the one that is up.
+  admissionWebhooks:
+    enabled: true
+    patch:
+      resources:
+        requests:
+          cpu: 10m
+          memory: 32Mi

@@ -205,7 +205,7 @@ defmodule Troupe.Operator.Resources do
             }
           ]
         }
-        |> put_unless_nil("tls", tls(host, settings))
+        |> put_unless_nil("tls", tls(profile.name, ordinal, host, settings))
 
       %{
         "apiVersion" => "networking.k8s.io/v1",
@@ -219,15 +219,38 @@ defmodule Troupe.Operator.Resources do
     end
   end
 
-  defp tls(_host, %Settings{tls_secret_name: nil}), do: nil
+  # Two ways to have a certificate, and the issuer wins where both are configured.
+  #
+  # With a cert-manager issuer each pod gets its own certificate for its own hostname,
+  # in its own secret, over HTTP-01 — which works wherever the hostname already resolves
+  # to the ingress controller, and therefore on any DNS host. Without one, every pod
+  # shares a secret somebody else put in the namespace, which in practice is a wildcard
+  # for `*.workers.<domain>` and can only be issued over DNS-01.
+  defp tls(profile, ordinal, host, %Settings{cert_issuer: issuer}) when is_binary(issuer) do
+    [%{"hosts" => [host], "secretName" => "#{Names.pod_service(profile, ordinal)}-tls"}]
+  end
 
-  defp tls(host, %Settings{tls_secret_name: secret}) do
+  defp tls(_profile, _ordinal, _host, %Settings{tls_secret_name: nil}), do: nil
+
+  defp tls(_profile, _ordinal, host, %Settings{tls_secret_name: secret}) do
     [%{"hosts" => [host], "secretName" => secret}]
   end
 
   # ingress-nginx reads these. Another controller would ignore them at best, so they are
-  # written only for the class they mean something to.
-  defp ingress_annotations(%Settings{ingress_class_name: "nginx"}) do
+  # written only for the class they mean something to. The cert-manager annotation is
+  # added on top where an issuer is configured, because that one is read by cert-manager
+  # rather than by the ingress controller and is not class-specific.
+  defp ingress_annotations(settings) do
+    settings
+    |> controller_annotations()
+    |> put_unless_nil("cert-manager.io/cluster-issuer", settings.cert_issuer)
+    |> case do
+      empty when map_size(empty) == 0 -> nil
+      annotations -> annotations
+    end
+  end
+
+  defp controller_annotations(%Settings{ingress_class_name: "nginx"}) do
     %{
       # The harness connection is a long-lived WebSocket, not a request: the proxy has to
       # sit on an idle socket for as long as a session sits between two tool calls.
@@ -240,7 +263,7 @@ defmodule Troupe.Operator.Resources do
     }
   end
 
-  defp ingress_annotations(_settings), do: nil
+  defp controller_annotations(_settings), do: %{}
 
   # -- network ----------------------------------------------------------------
 

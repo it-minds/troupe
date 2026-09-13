@@ -97,6 +97,8 @@ spec:
               value: {{ .Values.operator.ingressClassName | quote }}
             - name: TROUPE_WORKERS_TLS_SECRET
               value: {{ .Values.operator.tlsSecretName | quote }}
+            - name: TROUPE_WORKERS_CERT_ISSUER
+              value: {{ .Values.operator.certIssuer | quote }}
             - name: TROUPE_CILIUM_AVAILABLE
               value: {{ .Values.operator.ciliumAvailable | quote }}
             - name: TROUPE_DRAIN_TIMEOUT_SECONDS

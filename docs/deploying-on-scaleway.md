@@ -128,12 +128,21 @@ Two hostnames matter and one of them is a wildcard:
 
 - `troupe.example.com` — the plane: the admin panel, `/rpc`, and the OIDC discovery
   document clients read.
-- `*.workers.example.com` — **one hostname per worker pod**, `<ordinal>.<profile>.workers…`.
+- `*.workers.example.com` — **one hostname per worker pod**,
+  `<ordinal>-<profile>.workers.<domain>`, so `0-dev.workers.example.com`.
 
 The wildcard is not a convenience. A client is handed an endpoint and dials that pod
 directly, because the plane is not in the data path of a live session — so every pod needs
 a name a client can resolve. Issue the wildcard with **DNS-01**; HTTP-01 cannot do
 wildcards. Scaleway DNS has a cert-manager webhook.
+
+The **hyphen** between the ordinal and the profile is what makes one wildcard enough. A
+DNS wildcard matches exactly one label, so `*.workers.example.com` covers
+`0-dev.workers.example.com` and would not have covered `0.dev.workers.example.com`. With
+a dot, every new profile would need its own DNS record and its own certificate before any
+of its pods could be reached, and creating a profile in the panel would stop being
+self-service. Both places that compose the name say so:
+`Troupe.Operator.Names.host/3` and `config/runtime.exs`.
 
 ### 3. State
 

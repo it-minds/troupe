@@ -50,8 +50,18 @@ operator:
   # `+Q`, the BEAM's port table size. Left to itself it is taken from `RLIMIT_NOFILE`,
   # which a container runtime sets absurdly high, and the table costs 1.5GB.
   maxPorts: 65536
-  # A wildcard certificate for *.workers.<domain>, issued out of band (cert-manager
-  # with DNS-01 in the reference deployment).
+  # Two ways to give a worker pod a certificate, and `certIssuer` wins where both are set.
+  #
+  # `certIssuer` names a cert-manager ClusterIssuer. Each pod then gets its own
+  # certificate for its own hostname, in its own secret, over HTTP-01 — which works
+  # wherever the hostname resolves to the ingress controller, and so on any DNS host.
+  # This is the recommended setting.
+  #
+  # `tlsSecretName` names one secret every pod's Ingress shares, which in practice holds
+  # a wildcard for `*.workers.<domain>`. Fewer certificates, one more dependency: a
+  # wildcard can only be issued over DNS-01, which needs an API token for whoever hosts
+  # the zone, and many registrars have no cert-manager solver at all.
+  certIssuer: ""
   tlsSecretName: ""
   drainTimeoutSeconds: 300
 
@@ -71,6 +81,9 @@ plane:
   # same-origin and needs nothing here; a separate web client does. Empty means none.
   corsOrigins: []
   ingressClassName: nginx
+  # A cert-manager ClusterIssuer for the plane's own hostname, over HTTP-01.
+  # Leave empty and `tlsSecretName` must name a certificate somebody else put there.
+  certIssuer: ""
   tlsSecretName: ""
   ingress:
     enabled: true
@@ -130,6 +143,19 @@ plane:
     tokenUrl: ""
     secretName: troupe-plane-oidc
     secretKey: client-secret
+  # A way into the panel when the identity provider cannot let you in — a misconfigured
+  # client, an expired signing key, or the first five minutes of an installation before
+  # any group exists to be a platform admin of. Leave `secretName` empty and there is no
+  # door at all: the routes answer 404.
+  #
+  # A break-glass session is a platform admin and nothing more, lasts `lifetimeSeconds`,
+  # is written to the audit log both when it succeeds and when it is refused, and says so
+  # on every page while it is open.
+  breakglass:
+    secretName: ""
+    secretKey: token
+    subject: breakglass
+    lifetimeSeconds: 3600
   scim:
     enabled: false
     secretName: troupe-plane-scim

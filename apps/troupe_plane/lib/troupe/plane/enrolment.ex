@@ -91,7 +91,10 @@ defmodule Troupe.Plane.Enrolment do
   end
 
   defp authenticated(%{"status" => status}) do
-    Logger.warning("troupe plane: refused an enrolment token: #{inspect(Map.get(status, "error"))}")
+    Logger.warning(
+      "troupe plane: refused an enrolment token: #{inspect(Map.get(status, "error"))}"
+    )
+
     {:error, :unauthenticated}
   end
 
@@ -149,7 +152,7 @@ defmodule Troupe.Plane.Enrolment do
   end
 
   # A StatefulSet names its pods `<set>-<ordinal>`, and the ordinal is how a pod is
-  # addressed: `<ordinal>.<profile>.workers.<domain>`.
+  # addressed: `<ordinal>-<profile>.workers.<domain>`.
   defp ordinal_of(nil), do: {:error, :no_pod_name}
 
   defp ordinal_of(pod_name) do

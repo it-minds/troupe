@@ -47,14 +47,19 @@ enrolment = fn
         if node, do: Map.put(claims, "node_name", node), else: claims
       end)
       |> then(fn claims ->
-        # The whole URL, not a bare host. `<ordinal>.<profile>.<domain>` is what the
+        # The whole URL, not a bare host. `<ordinal>-<profile>.<domain>` is what the
         # operator gave this pod's Ingress, and the scheme and port are how that Ingress
         # is actually reached — which the pod is told rather than the client guessing. A
         # client is handed this and dials it directly; the plane is not in the path.
+        #
+        # The hyphen keeps the whole thing one DNS label under `<domain>`, so a single
+        # `*.workers.<domain>` record and a single wildcard certificate cover every
+        # profile. `Troupe.Operator.Names.host/3` composes the same name and says why;
+        # the two must agree and cannot share a function across the app boundary.
         if ordinal && profile && domain do
           scheme = System.get_env("TROUPE_WORKERS_SCHEME", "wss")
           port = presence.(System.get_env("TROUPE_WORKERS_PORT"))
-          authority = "#{ordinal}.#{profile}.#{domain}" <> if(port, do: ":#{port}", else: "")
+          authority = "#{ordinal}-#{profile}.#{domain}" <> if(port, do: ":#{port}", else: "")
 
           Map.put(claims, "endpoint", "#{scheme}://#{authority}/v1/socket")
         else
@@ -102,6 +107,7 @@ if config_env() == :prod do
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
       ingress_class_name: System.get_env("TROUPE_INGRESS_CLASS", "nginx"),
       tls_secret_name: presence.(System.get_env("TROUPE_WORKERS_TLS_SECRET")),
+      cert_issuer: presence.(System.get_env("TROUPE_WORKERS_CERT_ISSUER")),
       cilium_available: System.get_env("TROUPE_CILIUM_AVAILABLE") == "true",
       max_ports: String.to_integer(System.get_env("TROUPE_MAX_PORTS", "65536")),
       object_store_secret_name:
@@ -225,6 +231,16 @@ if config_env() == :prod do
     # `jwt_path` for a client token under `role`. There is no default token: a plane
     # with neither fails to sign and says why, rather than trying a development root
     # token against the cluster's key manager.
+    # The break-glass door into the panel. Absent means there is no door: the routes
+    # answer 404 and nothing about the deployment says otherwise. Set it only where
+    # somebody has decided they want one, and put it in a Secret rather than a values
+    # file — `Troupe.Plane.Web.Breakglass` says what it does and does not buy.
+    config :troupe_plane, :breakglass,
+      token: presence.(System.get_env("TROUPE_BREAKGLASS_TOKEN")),
+      subject: System.get_env("TROUPE_BREAKGLASS_SUBJECT", "breakglass"),
+      lifetime_seconds:
+        String.to_integer(System.get_env("TROUPE_BREAKGLASS_LIFETIME_SECONDS", "3600"))
+
     config :troupe_plane, :transit,
       address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
       token: presence.(System.get_env("TROUPE_BAO_TOKEN")),
@@ -316,6 +332,11 @@ if config_env() == :prod do
 
   if System.get_env("TROUPE_WORKER_AUTOSTART") == "true" do
     plane = presence.(System.get_env("TROUPE_PLANE_CONTROL"))
+
+    # Where a session's model calls are recorded for the plane's ledger. Configured for
+    # a pod and for nothing else: on a laptop there is no plane to report to, and a
+    # session must behave identically with no sink at all.
+    config :troupe_core, usage_sink: Troupe.Worker.Usage
 
     config :troupe_worker,
       autostart: true,

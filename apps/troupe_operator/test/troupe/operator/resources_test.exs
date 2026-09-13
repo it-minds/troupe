@@ -119,13 +119,28 @@ defmodule Troupe.Operator.ResourcesTest do
   end
 
   describe "addressing" do
-    test "each pod is reachable at <ordinal>.<profile>.workers.<domain>", %{resources: resources} do
+    test "each pod is reachable at <ordinal>-<profile>.workers.<domain>", %{resources: resources} do
       hosts =
         resources
         |> all("Ingress")
         |> Enum.map(&get_in(&1, ["spec", "rules", Access.at(0), "host"]))
 
-      assert hosts == ["0.dev.workers.example.test", "1.dev.workers.example.test"]
+      assert hosts == ["0-dev.workers.example.test", "1-dev.workers.example.test"]
+    end
+
+    test "a pod's host is one label under the workers domain, so one wildcard covers all",
+         %{resources: resources} do
+      # The property, not the spelling: a DNS wildcard matches exactly one label, so
+      # `*.workers.example.test` covers a pod only while the ordinal and the profile
+      # share a label. A dot between them would need a record and a certificate per
+      # profile, and creating a profile in the panel would stop being self-service.
+      for ingress <- all(resources, "Ingress") do
+        host = get_in(ingress, ["spec", "rules", Access.at(0), "host"])
+        assert String.ends_with?(host, ".workers.example.test")
+
+        label = String.replace_suffix(host, ".workers.example.test", "")
+        refute String.contains?(label, "."), "#{host} is more than one label deep"
+      end
     end
 
     test "a per-pod Service selects exactly one pod", %{resources: resources} do
@@ -151,7 +166,42 @@ defmodule Troupe.Operator.ResourcesTest do
     test "TLS is attached per host when the installation has a certificate", %{
       resources: resources
     } do
-      assert [%{"hosts" => ["0.dev.workers.example.test"], "secretName" => "workers-tls"}] =
+      assert [%{"hosts" => ["0-dev.workers.example.test"], "secretName" => "workers-tls"}] =
+               get_in(find(resources, "Ingress", "dev-0"), ["spec", "tls"])
+    end
+
+    test "a cert-manager issuer gives each pod its own certificate and its own secret",
+         %{profile: profile, policy: policy} do
+      settings = %Settings{
+        ingress_class_name: "nginx",
+        cert_issuer: "letsencrypt",
+        tls_secret_name: "workers-tls"
+      }
+
+      resources = Resources.for_profile(profile, policy, settings)
+
+      for ordinal <- [0, 1] do
+        ingress = find(resources, "Ingress", "dev-#{ordinal}")
+        host = "#{ordinal}-dev.workers.example.test"
+
+        # Its own secret, so two pods do not overwrite each other's certificate, and the
+        # issuer annotation, which is what makes cert-manager fill it.
+        assert [%{"hosts" => [^host], "secretName" => secret}] = get_in(ingress, ["spec", "tls"])
+        assert secret == "dev-#{ordinal}-tls"
+
+        annotations = get_in(ingress, ["metadata", "annotations"])
+        assert annotations["cert-manager.io/cluster-issuer"] == "letsencrypt"
+        # And the controller's own annotations are still there.
+        assert annotations["nginx.ingress.kubernetes.io/proxy-read-timeout"] == "3600"
+      end
+    end
+
+    test "the issuer wins over a shared secret, because both would be a certificate nobody owns",
+         %{profile: profile, policy: policy} do
+      settings = %Settings{cert_issuer: "letsencrypt", tls_secret_name: "workers-tls"}
+      resources = Resources.for_profile(profile, policy, settings)
+
+      assert [%{"secretName" => "dev-0-tls"}] =
                get_in(find(resources, "Ingress", "dev-0"), ["spec", "tls"])
     end
   end

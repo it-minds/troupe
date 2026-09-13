@@ -24,13 +24,17 @@ operator:
   # without it, egress to a named host is a wide CIDR rule and a documented gap.
   ciliumAvailable: true
   ingressClassName: nginx
-  # Workers are reached at `wss://<ordinal>.<profile>.workers.<domain>` on 443, which is
+  # Workers are reached at `wss://<ordinal>-<profile>.workers.<domain>` on 443, which is
   # the default, so no port here.
   workersScheme: wss
   workersPort: ""
   # A wildcard certificate for `*.workers.<domain>`, issued by cert-manager with DNS-01.
   # One certificate covers every pod of every profile.
-  tlsSecretName: troupe-workers-tls
+  # A cert-manager ClusterIssuer: one certificate per pod hostname over HTTP-01,
+  # which needs no DNS API token and so works on any DNS host. Leave it empty and
+  # set `tlsSecretName` instead to share one wildcard certificate.
+  certIssuer: letsencrypt
+  tlsSecretName: ""
   drainTimeoutSeconds: 300
   maxPorts: 65536
 
@@ -47,6 +51,9 @@ plane:
   host: troupe.example.com                                   # CHANGE ME: your plane host
   baseUrl: https://troupe.example.com                        # CHANGE ME: the same, with scheme
   ingressClassName: nginx
+  # A cert-manager ClusterIssuer for the plane's own hostname, over HTTP-01.
+  # Leave empty and `tlsSecretName` must name a certificate somebody else put there.
+  certIssuer: ""
   tlsSecretName: troupe-plane-tls
   ingress:
     enabled: true
@@ -80,6 +87,19 @@ plane:
     # A public client running the device grant has no secret. Leave empty unless your
     # provider insists on one.
     secretName: ""
+  # A way into the panel when the identity provider cannot let you in — a misconfigured
+  # client, an expired signing key, or the first five minutes of an installation before
+  # any group exists to be a platform admin of. Leave `secretName` empty and there is no
+  # door at all: the routes answer 404.
+  #
+  # A break-glass session is a platform admin and nothing more, lasts `lifetimeSeconds`,
+  # is written to the audit log both when it succeeds and when it is refused, and says so
+  # on every page while it is open.
+  breakglass:
+    secretName: ""
+    secretKey: token
+    subject: breakglass
+    lifetimeSeconds: 3600
   scim:
     enabled: false
 

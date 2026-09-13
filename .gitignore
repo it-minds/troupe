@@ -6,3 +6,8 @@
 erl_crash.dump
 *.ez
 /apps/*/priv/reaper/
+
+# Credentials for a real deployment: a kubeconfig is a cluster admin token and
+# `secrets.env` is the database password and the object store's keys. They live here so
+# a session and a person find them in the same place, and they are never committed.
+/.local/

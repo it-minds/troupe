@@ -16,6 +16,17 @@ defmodule Troupe.Operator.Settings do
             object_store_bucket: "troupe-sessions",
             ingress_class_name: "nginx",
             tls_secret_name: nil,
+            # A cert-manager ClusterIssuer, where the deployment has one. Then every pod
+            # gets its own certificate for its own hostname over HTTP-01, and
+            # `tls_secret_name` is not read at all.
+            #
+            # What that replaces is one wildcard certificate for `*.workers.<domain>`,
+            # which is fewer certificates and one more dependency: a wildcard can only be
+            # issued over DNS-01, DNS-01 needs an API token for whoever hosts the zone,
+            # and most registrars have no cert-manager solver at all. A hostname that
+            # already resolves to the ingress controller can always answer HTTP-01, so
+            # this works on any DNS host and the wildcard does not.
+            cert_issuer: nil,
             # How a pod is actually reached, which it tells the plane when it enrols and
             # the plane hands to clients. `wss` on 443 is the deployment this is built
             # for; a cluster reached through a port mapping says so here rather than

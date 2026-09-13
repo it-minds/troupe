@@ -290,6 +290,20 @@ spec:
                   name: {{ .Values.plane.scim.secretName }}
                   key: {{ .Values.plane.scim.secretKey }}
             {{- end }}
+            {{- if .Values.plane.breakglass.secretName }}
+            # The break-glass door into the panel. Rendered only where a secret is named,
+            # because absent means the routes answer 404 — see
+            # `Troupe.Plane.Web.Breakglass` for what it does and does not buy.
+            - name: TROUPE_BREAKGLASS_TOKEN
+              valueFrom:
+                secretKeyRef:
+                  name: {{ .Values.plane.breakglass.secretName }}
+                  key: {{ .Values.plane.breakglass.secretKey }}
+            - name: TROUPE_BREAKGLASS_SUBJECT
+              value: {{ .Values.plane.breakglass.subject | quote }}
+            - name: TROUPE_BREAKGLASS_LIFETIME_SECONDS
+              value: {{ .Values.plane.breakglass.lifetimeSeconds | quote }}
+            {{- end }}
             {{- if .Values.objectStore.secretName }}
             - name: TROUPE_OBJECT_ACCESS_KEY_ID
               valueFrom:
@@ -381,7 +395,13 @@ metadata:
   namespace: {{ .Values.namespace }}
   labels: {{- include "troupe.labels" . | nindent 4 }}
   annotations:
-    # The admin panel is LiveView, so its socket is a long-lived WebSocket rather than
+    {{- if .Values.plane.certIssuer }}
+    # A cert-manager ClusterIssuer, which issues this one hostname over HTTP-01. The
+    # workers' certificates are the operator's business and are configured separately;
+    # this is the plane's own.
+    cert-manager.io/cluster-issuer: {{ .Values.plane.certIssuer | quote }}
+    {{- end }}
+    # The admin console is LiveView, so its socket is a long-lived WebSocket rather than
     # a request.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
