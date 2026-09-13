@@ -77,6 +77,13 @@ defmodule Troupe.Plane.Placement do
     {state, workers} = refresh(state)
 
     case choose(state, workers) do
+      # A profile with no placeable pod at all is not full, it is absent, and the two
+      # want opposite things done about them: one needs replicas, the other needs
+      # somebody to look at why the pods are not there. Both used to answer "every pod
+      # is full", and that sentence has sent more than one person to the wrong place.
+      nil when workers == [] ->
+        {:reply, {:error, :no_healthy_worker}, state}
+
       nil ->
         {:reply, {:error, :at_capacity}, state}
 

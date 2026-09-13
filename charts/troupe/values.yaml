@@ -77,6 +77,10 @@ plane:
   # What the plane calls itself in the links it hands out — device-flow pages, the
   # panel. Defaults to https://<host>.
   baseUrl: ""
+  # Where the index page at `/` links to the graphical client. The GUI is a separate
+  # release with its own chart, which mounts it at `/app` on this host by default. Empty
+  # means this plane ships without one, and the index offers no door rather than a 404.
+  appUrl: /app
   # Browser origins the plane's API answers cross-origin requests from. The panel is
   # same-origin and needs nothing here; a separate web client does. Empty means none.
   corsOrigins: []

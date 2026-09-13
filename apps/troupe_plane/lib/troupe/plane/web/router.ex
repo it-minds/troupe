@@ -2,6 +2,7 @@ defmodule Troupe.Plane.Web.Router do
   @moduledoc """
   The plane's HTTP surface, which is deliberately small.
 
+      GET  /                           the connection guide, for a browser
       GET  /healthz                    liveness, for Kubernetes
       GET  /.well-known/troupe         where to log in, and what to call this plane
       GET  /.well-known/jwks.json      the keys workers verify session tokens against
@@ -23,6 +24,7 @@ defmodule Troupe.Plane.Web.Router do
   use Plug.Router
 
   alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens}
+  alias Troupe.Plane.Web.Index
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
@@ -42,6 +44,19 @@ defmodule Troupe.Plane.Web.Router do
   # stranger's upload.
   plug(Plug.Parsers, parsers: [:json], pass: ["*/*"], json_decoder: Jason, length: 4_194_304)
   plug(:dispatch)
+
+  # The root, which every other route is a poor answer for. A person handed this URL and
+  # told it is their plane arrives here first, and a `404` is the least it could say: the
+  # page names the three clients and writes their commands against this plane's own URL.
+  # Anything a machine wants is at `/.well-known/troupe`, which is what the page points at.
+  get "/" do
+    conn
+    |> put_resp_content_type("text/html")
+    |> send_resp(
+      200,
+      Index.render(name: config(:plane_name, "troupe"), url: base_url(conn), app_url: app_url())
+    )
+  end
 
   get("/healthz", do: send_json(conn, 200, %{"ok" => true}))
 
@@ -307,6 +322,33 @@ defmodule Troupe.Plane.Web.Router do
   # The plane's own URL, which is not one of the provider's settings: `config/2` reads
   # the `:oidc` list and this lives beside it.
   defp plane_url, do: Application.get_env(:troupe_plane, :base_url)
+
+  # -- the index page ---------------------------------------------------------
+
+  # What the index writes its commands against. `TROUPE_BASE_URL` where a deployment set
+  # one, because that is the name the plane is reached by and the one behind the Ingress
+  # knows nothing about; the request's own scheme and host otherwise, so a plane run
+  # without it still prints a URL that works rather than `nil`.
+  defp base_url(conn) do
+    case plane_url() do
+      nil -> "#{conn.scheme}://#{host_with_port(conn)}"
+      base -> String.trim_trailing(base, "/")
+    end
+  end
+
+  defp host_with_port(%Plug.Conn{scheme: :http, port: 80} = conn), do: conn.host
+  defp host_with_port(%Plug.Conn{scheme: :https, port: 443} = conn), do: conn.host
+  defp host_with_port(conn), do: "#{conn.host}:#{conn.port}"
+
+  # Where the GUI is mounted, which is a *separate* release: the plane cannot tell whether
+  # one is there. `/app` is where its chart mounts it by default, and `TROUPE_APP_URL=""`
+  # is how a plane that ships without one says so rather than offering a door to a 404.
+  defp app_url do
+    case Application.get_env(:troupe_plane, :app_url, "/app") do
+      "" -> nil
+      url -> url
+    end
+  end
 
   # The scope a client asks for, named after the *resource* rather than after the client.
   #

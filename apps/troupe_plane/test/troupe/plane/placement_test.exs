@@ -80,6 +80,18 @@ defmodule Troupe.Plane.PlacementTest do
     assert is_nil(Sessions.get("s-3").worker_id)
   end
 
+  test "a profile with no pod at all says that, and not that the pods are full" do
+    # Zero pods and full pods want opposite things done about them: one needs somebody to
+    # find out why the pods will not start, the other needs replicas. Both answered
+    # `:at_capacity` — and "every pod is full" about a pod that was stuck `Pending` is a
+    # sentence that sends a person to the wrong place entirely.
+    {:ok, _} = Fleet.put_profile(%{name: "dev", replicas: 1, sessions_per_pod: 4})
+    session("s-1", "dev")
+
+    assert {:error, :no_healthy_worker} = Placement.reserve("dev", "s-1")
+    assert is_nil(Sessions.get("s-1").worker_id)
+  end
+
   test "releasing a slot makes room again" do
     profile("dev", 1, per_pod: 1)
     session("s-1", "dev")

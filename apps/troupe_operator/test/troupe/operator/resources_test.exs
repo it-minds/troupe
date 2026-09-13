@@ -19,7 +19,9 @@ defmodule Troupe.Operator.ResourcesTest do
   setup do
     profile = Profile.from_resource(profile())
     policy = Policy.from_resource(policy())
-    settings = %Settings{tls_secret_name: "workers-tls"}
+    # A region that is not the default, so an assertion about it is an assertion that the
+    # value travelled rather than that two constants happen to match.
+    settings = %Settings{tls_secret_name: "workers-tls", object_store_region: "fr-par"}
 
     %{
       resources: Resources.for_profile(profile, policy, settings),
@@ -256,6 +258,58 @@ defmodule Troupe.Operator.ResourcesTest do
                ["ReadWriteMany"]
     end
 
+    test "the claim that is created is the claim that is mounted", %{policy: policy, settings: settings} do
+      # The plane names a team's claim `troupe-team-<name>`; the operator's own default is
+      # `team-<name>`. The mount preferred the plane's name and creation always used the
+      # operator's, so the operator built a claim nothing referenced and asked the
+      # scheduler for one that did not exist. A pod in that state is not degraded — it is
+      # `Pending` forever, which is every session on the profile.
+      #
+      # Asserted as one equality rather than two literals, because two literals is what
+      # the bug was.
+      profile =
+        Profile.from_resource(
+          profile(
+            teams: [
+              %{
+                "name" => "platform-admins",
+                "claimName" => "troupe-team-platform-admins",
+                "mode" => "ro",
+                "storageClassName" => "standard",
+                "size" => "10Gi"
+              }
+            ]
+          )
+        )
+
+      resources = Resources.for_profile(profile, policy, settings)
+
+      mounted =
+        container(resources)["volumeMounts"]
+        |> Enum.find(&(&1["mountPath"] == "/mnt/teams/platform-admins"))
+
+      volume =
+        get_in(find(resources, "StatefulSet", "troupe-w-dev"), [
+          "spec",
+          "template",
+          "spec",
+          "volumes"
+        ])
+        |> Enum.find(&(&1["name"] == mounted["name"]))
+
+      claimed = get_in(volume, ["persistentVolumeClaim", "claimName"])
+
+      assert claimed == "troupe-team-platform-admins"
+      assert find(resources, "PersistentVolumeClaim", claimed)
+    end
+
+    test "a team that declares no claim name still gets the operator's own",
+         %{resources: resources} do
+      # The fixture's teams declare none, which is why this bug hid: both sides computed
+      # `team-<name>` and agreed by coincidence rather than by construction.
+      assert find(resources, "PersistentVolumeClaim", Names.team_claim("dev"))
+    end
+
     test "the org volume is read-only however it was asked for", %{resources: resources} do
       assert %{"readOnly" => true} =
                Enum.find(container(resources)["volumeMounts"], &(&1["name"] == "org"))
@@ -310,6 +364,10 @@ defmodule Troupe.Operator.ResourcesTest do
       assert env["TROUPE_PLANE_CONTROL"] =~ "troupe-plane-control"
       assert env["TROUPE_BAO_ADDR"] =~ "openbao"
       assert env["TROUPE_OBJECT_BUCKET"] == "troupe-sessions"
+      # SigV4 signs the region string, so a pod left on the default signs `us-east-1` at
+      # a bucket that is not there. The plane was always told; the pods, which write most
+      # of a session's log, were not.
+      assert env["TROUPE_OBJECT_REGION"] == "fr-par"
       assert env["TROUPE_SESSIONS_PER_POD"] == "4"
     end
 

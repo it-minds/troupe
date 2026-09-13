@@ -313,6 +313,7 @@ defmodule Troupe.Plane.Admin do
         {:ok, updated} ->
           changes = Audit.diff(before, comparable(updated))
           {:ok, _} = Audit.record(actor.subject, "team.update", name, changes)
+          reproject(updated, changes, actor)
           {:ok, %{team: team_detail(updated), changes: changes}}
 
         {:error, changeset} ->
@@ -915,6 +916,27 @@ defmodule Troupe.Plane.Admin do
       {:ok, state} -> state
       {:error, reason} -> %{state: :not_applied, reason: inspect(reason)}
     end
+  end
+
+  # A team's volume is part of what `teams` projects — whether there is one at all, and
+  # which class and size it asks for — so changing it changes what every profile the team
+  # is granted on should say. Granting re-projects and revoking re-projects; updating did
+  # not, because until the volume fields were projected there was nothing on a team that
+  # the cluster could see. Now there is, and a class edited in the panel that never
+  # reached the cluster would be the worst kind of wrong: the page says one thing, the
+  # profile says another, and nothing reconciles them until somebody happens to re-grant.
+  # `Audit.diff/2` keys by the field's name as a string, and `comparable/1` already takes
+  # both of these, so a change to either is visible here without asking the team again.
+  @volume_fields ~w(volume_storage_class volume_size)
+
+  defp reproject(team, changes, actor) do
+    if Enum.any?(@volume_fields, &Map.has_key?(changes, &1)) do
+      team
+      |> Identity.grants_for_team()
+      |> Enum.each(&project(&1.profile, actor))
+    end
+
+    :ok
   end
 
   defp project(profile, actor) do

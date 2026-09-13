@@ -43,6 +43,69 @@ defmodule Troupe.Plane.WebTest do
     %{url: "http://127.0.0.1:#{port}"}
   end
 
+  # The root used to answer `404 not found`, which is right for an API and useless to the
+  # person who was handed the URL. What matters here is that the page is written against
+  # *this* plane rather than a placeholder, and that it does not offer a door to something
+  # that is not mounted.
+  describe "the index" do
+    setup do
+      on_exit(fn ->
+        Application.delete_env(:troupe_plane, :base_url)
+        Application.delete_env(:troupe_plane, :app_url)
+      end)
+    end
+
+    test "names the clients and both applications", context do
+      assert {:ok, %{status: 200, body: body}} = get(context, "/")
+
+      assert body =~ "<!DOCTYPE html>"
+      assert body =~ "troupe login"
+      assert body =~ "/rpc"
+      assert body =~ ~s(href="/admin")
+      assert body =~ ~s(href="/app")
+    end
+
+    test "is html, so a browser renders it rather than downloading it", context do
+      assert {:ok, %{headers: headers}} = get(context, "/")
+      assert ["text/html" <> _] = headers["content-type"]
+    end
+
+    test "writes its commands against the plane's own URL", context do
+      Application.put_env(:troupe_plane, :base_url, "https://troupe.example.test/")
+
+      assert {:ok, %{body: body}} = get(context, "/")
+
+      # Trailing slash trimmed: `https://troupe.example.test//rpc` is a URL a reader would
+      # copy and a plane would not answer.
+      assert body =~ "troupe login https://troupe.example.test"
+      assert body =~ "https://troupe.example.test/rpc"
+      refute body =~ "troupe.example.test//"
+    end
+
+    # A plane started without `TROUPE_BASE_URL` still has to print a URL that works, and
+    # the request's own host is the one the reader just used.
+    test "falls back to the host the request arrived on", context do
+      assert {:ok, %{body: body}} = get(context, "/")
+
+      assert body =~ "troupe login " <> context.url
+    end
+
+    # The GUI is a separate release and the plane cannot tell whether one is mounted.
+    test "offers no app door where no app is mounted", context do
+      Application.put_env(:troupe_plane, :app_url, "")
+
+      assert {:ok, %{status: 200, body: body}} = get(context, "/")
+
+      refute body =~ ~s(href="/app")
+      assert body =~ "No graphical client is mounted"
+      assert body =~ ~s(href="/admin")
+    end
+
+    test "still 404s everything that is not a route", context do
+      assert {:ok, %{status: 404}} = get(context, "/nope")
+    end
+  end
+
   describe "discovery" do
     test "says where to log in and what to call this plane", context do
       assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/troupe")
@@ -67,7 +130,13 @@ defmodule Troupe.Plane.WebTest do
 
     test "lets a deployment name its own scopes", context do
       oidc = Application.get_env(:troupe_plane, :oidc)
-      Application.put_env(:troupe_plane, :oidc, Keyword.put(oidc, :scopes, ["openid", "api://troupe/.default"]))
+
+      Application.put_env(
+        :troupe_plane,
+        :oidc,
+        Keyword.put(oidc, :scopes, ["openid", "api://troupe/.default"])
+      )
+
       on_exit(fn -> Application.put_env(:troupe_plane, :oidc, oidc) end)
 
       assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/troupe")

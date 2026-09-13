@@ -60,9 +60,16 @@ defmodule Troupe.Plane.ProvisionManifestTest do
     end
   end
 
-  describe "a profile a team has been granted" do
+  describe "a profile a team with a volume has been granted" do
     setup do
-      team = team_with_grant("engineering", "dev", name: "engineering", volume_mode: "rw")
+      team =
+        team_with_grant("engineering", "dev",
+          name: "engineering",
+          volume_mode: "rw",
+          volume_storage_class: "shared-files",
+          volume_size: "25Gi"
+        )
+
       %{team: team}
     end
 
@@ -73,6 +80,17 @@ defmodule Troupe.Plane.ProvisionManifestTest do
       # The assertion that would have failed: `volume` parsed as nothing at all.
       assert team.claim_name == "troupe-team-engineering"
       assert team.mode == :rw
+    end
+
+    test "says which class and how big, rather than leaving the cluster to guess" do
+      [team] = WorkerProfile.from_resource(manifest()).teams
+
+      # Projected as nothing at all until now, so the operator fell back to whatever the
+      # cluster's default class was. Where that default is block storage, a `ro` team
+      # volume becomes a `ReadOnlyMany` claim the CSI driver refuses outright — the claim
+      # never binds, the pod never schedules, and the profile is down.
+      assert team.storage_class == "shared-files"
+      assert team.size == "25Gi"
     end
 
     test "writes no key the resource does not declare" do
@@ -89,11 +107,39 @@ defmodule Troupe.Plane.ProvisionManifestTest do
 
   describe "the grant is the only source" do
     test "a revoked grant takes the team out of the resource", %{} do
-      team = team_with_grant("engineering", "dev", name: "engineering")
+      team =
+        team_with_grant("engineering", "dev",
+          name: "engineering",
+          volume_storage_class: "shared-files"
+        )
+
       assert [_one] = WorkerProfile.from_resource(manifest()).teams
 
       :ok = Identity.revoke(team, "dev")
       assert WorkerProfile.from_resource(manifest()).teams == []
+    end
+  end
+
+  describe "a team that was never given a volume" do
+    test "gets no claim, because a grant is not a volume" do
+      team_with_grant("engineering", "dev", name: "engineering", volume_mode: "ro")
+
+      # `volume_mode` has no third value, so every grant used to project a claim whether
+      # or not anybody had asked for storage. On an installation with no many-reader
+      # storage class that made granting a team access to a profile the thing that took
+      # the profile down: an unbindable claim, a pod stuck `Pending`, and `session.create`
+      # answering "every pod is full" about a pod that was never there.
+      assert WorkerProfile.from_resource(manifest()).teams == []
+    end
+
+    test "and a team given one later gets it", %{} do
+      team = team_with_grant("engineering", "dev", name: "engineering", volume_mode: "ro")
+      assert WorkerProfile.from_resource(manifest()).teams == []
+
+      {:ok, _team} = Identity.update_team(team, %{volume_storage_class: "shared-files"})
+
+      assert [%{name: "engineering", storage_class: "shared-files"}] =
+               WorkerProfile.from_resource(manifest()).teams
     end
   end
 end

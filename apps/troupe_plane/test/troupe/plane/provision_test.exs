@@ -79,8 +79,17 @@ defmodule Troupe.Plane.ProvisionTest do
     end
 
     test "projects the plane's grants into `teams`", context do
-      engineering = team_with_grant("engineering", "dev", name: "engineering", volume_mode: "rw")
-      _design = team_with_grant("design", "dev", name: "design")
+      # Both teams have a volume: `teams` is the projection of the volumes that grants
+      # carry, and a team given no storage class was never given a volume to project.
+      engineering =
+        team_with_grant("engineering", "dev",
+          name: "engineering",
+          volume_mode: "rw",
+          volume_storage_class: "shared-files"
+        )
+
+      _design =
+        team_with_grant("design", "dev", name: "design", volume_storage_class: "shared-files")
 
       manifest = Provision.manifest(context.profile)
       teams = manifest["spec"]["teams"]

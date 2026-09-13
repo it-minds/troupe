@@ -90,10 +90,21 @@ defmodule Troupe.Operator.Resources do
   # The claims that bind a team's shared volume into this namespace. A volume granted
   # `ro` is still claimed `ReadOnlyMany` rather than merely mounted read-only: the mode
   # is enforced by the cluster, not only by the pod spec that asks for it.
+  #
+  # Named by `team_claim_name/1`, the same expression the pod's volume uses. They were
+  # two expressions that had to agree and did not: the plane projects a `claimName` of
+  # `troupe-team-<name>`, the mount preferred it, and creation always used the operator's
+  # own `team-<name>`. So the operator created one claim and mounted another, and the
+  # pod stuck at `persistentvolumeclaim "troupe-team-…" not found` — a pod that cannot be
+  # scheduled at all, which is every session on that profile.
+  # What the plane declared, or the operator's own name when it declared nothing. One
+  # expression, so the claim that is created and the claim that is mounted cannot differ.
+  defp team_claim_name(team), do: team.claim_name || Names.team_claim(team.name)
+
   defp team_claims(namespace, profile) do
     Enum.map(profile.teams, fn team ->
       claim(
-        Names.team_claim(team.name),
+        team_claim_name(team),
         namespace,
         profile,
         team.storage_class,
@@ -570,6 +581,7 @@ defmodule Troupe.Operator.Resources do
       %{"name" => "TROUPE_BAO_ADDR", "value" => settings.bao_address},
       %{"name" => "TROUPE_OBJECT_ENDPOINT", "value" => settings.object_store_endpoint},
       %{"name" => "TROUPE_OBJECT_BUCKET", "value" => settings.object_store_bucket},
+      %{"name" => "TROUPE_OBJECT_REGION", "value" => settings.object_store_region},
       %{"name" => "TROUPE_SESSIONS_PER_POD", "value" => to_string(profile.sessions_per_pod)},
       %{"name" => "TROUPE_CONFIG_CHANNEL", "value" => profile.config_bundle_channel},
       %{
@@ -730,7 +742,7 @@ defmodule Troupe.Operator.Resources do
         %{
           "name" => Names.team_claim(team.name),
           "persistentVolumeClaim" => %{
-            "claimName" => team.claim_name || Names.team_claim(team.name),
+            "claimName" => team_claim_name(team),
             "readOnly" => team.mode == :ro
           }
         }

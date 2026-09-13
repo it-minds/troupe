@@ -16,13 +16,16 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.{Bundles, Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
-  alias Troupe.Plane.Control.Connections
+  alias Troupe.Plane.Control.{Connections, Router}
   alias Troupe.Plane.Fleet.Bundle
   alias Troupe.Protocol.{Error, JSONRPC}
 
   require Logger
 
   @max_message_bytes 8 * 1024 * 1024
+  # Short: this runs on every enrolment, and a pod that cannot answer promptly is
+  # better left alone than waited on.
+  @index_timeout_ms 10_000
 
   @enforce_keys [:socket]
   defstruct [:socket, :identity, :worker, buffer: "", next_id: 1, pending: %{}, verify: nil]
@@ -183,7 +186,11 @@ defmodule Troupe.Plane.Control.Connection do
         # fetched, because the plane is not in the data path of a live session: a pod
         # that had to reach the plane to check a token would make every attach depend on
         # the plane being up, which is exactly what this channel exists to avoid.
-        {:ok, push_jwks(%{state | worker: worker, identity: identity})}
+        state = push_jwks(%{state | worker: worker, identity: identity})
+
+        reconcile_index(worker)
+
+        {:ok, state}
 
       {:error, reason} ->
         write(state, {:error, id, error_for(reason)})
@@ -480,6 +487,61 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   # -- enrolling --------------------------------------------------------------
+
+  # A pod that has just enrolled is the authority on what it is holding. The plane's
+  # record of that is a belief, and after a pod restarts the belief is a whole process
+  # lifetime out of date: the pod comes back with nothing, while the plane still has every
+  # session marked `active` on it.
+  #
+  # Left alone, those sessions are unreachable for good. Opening one takes the
+  # already-running branch — it hands the client an endpoint and never tells the pod to
+  # restore, because as far as the plane knows there is nothing to restore — and the
+  # client's `subscribe` answers `not_found` for as long as anybody cares to retry. No
+  # timeout expires and no retry helps.
+  #
+  # Dormant is exactly the right answer. The session's log is sealed in object storage and
+  # the next open replays it onto a pod; what is lost is the process that was running it,
+  # which was already lost when the pod went. A pod that merely reconnected still lists
+  # everything it holds, so nothing of its is touched.
+  #
+  # Only ever on an answer. A pod that cannot be reached has said nothing about what it
+  # holds, and reading silence as "holding none" would dormant a healthy fleet.
+  defp reconcile_index(worker) do
+    # In a task because the answer arrives on this socket, which this process is the one
+    # reading: asking from inside the handler would deadlock waiting on its own reply.
+    Task.start(fn ->
+      case Router.push(worker, "session.index", %{}, @index_timeout_ms) do
+        {:ok, %{"sessions" => held}} ->
+          orphans(worker, held) |> Enum.each(&strand(worker, &1))
+
+        {:ok, _other} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "troupe plane: #{worker.pod_name} did not say what it holds: #{inspect(reason)}"
+          )
+      end
+    end)
+  end
+
+  defp orphans(worker, held) do
+    on_pod = MapSet.new(List.wrap(held), &(is_map(&1) && &1["id"]))
+
+    worker.id
+    |> Sessions.on_worker()
+    |> Enum.reject(&MapSet.member?(on_pod, &1))
+  end
+
+  defp strand(worker, session_id) do
+    Logger.info(
+      "troupe plane: #{session_id} is not on #{worker.pod_name} any more, marking it dormant"
+    )
+
+    Sessions.dormant(session_id)
+    Placement.release(worker.profile, session_id)
+    release_budget(session_id)
+  end
 
   defp enrol(params, state) do
     with {:ok, token} <- fetch(params, "token"),

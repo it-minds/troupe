@@ -105,6 +105,7 @@ if config_env() == :prod do
       object_store_endpoint:
         System.get_env("TROUPE_OBJECT_ENDPOINT", "http://minio.troupe-system.svc:9000"),
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
+      object_store_region: System.get_env("TROUPE_OBJECT_REGION", "us-east-1"),
       ingress_class_name: System.get_env("TROUPE_INGRESS_CLASS", "nginx"),
       tls_secret_name: presence.(System.get_env("TROUPE_WORKERS_TLS_SECRET")),
       cert_issuer: presence.(System.get_env("TROUPE_WORKERS_CERT_ISSUER")),
@@ -339,6 +340,11 @@ if config_env() == :prod do
     config :troupe_plane,
       autostart: true,
       base_url: System.get_env("TROUPE_BASE_URL"),
+      # Where the index page sends a browser looking for the graphical client. The GUI
+      # is a separate release with its own chart, mounted at `/app` on this host by
+      # default; an empty value is a plane that ships without one, and the index then
+      # offers no door rather than one that answers 404.
+      app_url: System.get_env("TROUPE_APP_URL", "/app"),
       issuer: base_url,
       cors_origins: cors_origins,
       control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),
