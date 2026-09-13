@@ -82,6 +82,14 @@ defmodule Troupe.Plane.SettingsTest do
       assert {:error, {:invalid, _}} = Settings.put("provisioning_mode", "sideways", "root")
     end
 
+    test "a declared choice is accepted even if the codebase never names it" do
+      # `daily` appears nowhere else, so converting the string to an atom raised rather
+      # than accepting a value the setting itself declares. Matched against the declared
+      # atoms now, never converted.
+      assert {:ok, %{value: :daily}} = Settings.put("default_budget_period", "daily", "root")
+      assert Settings.get("default_budget_period") == :daily
+    end
+
     test "a setting nobody declared is refused" do
       assert {:error, :unknown_setting} = Settings.put("turn_off_the_audit", "yes", "root")
     end

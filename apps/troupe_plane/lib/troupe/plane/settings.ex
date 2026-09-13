@@ -72,7 +72,7 @@ defmodule Troupe.Plane.Settings do
       key: "provisioning_mode",
       group: :provisioning,
       type: :enum,
-      values: ~w(direct gitops),
+      values: [:direct, :gitops],
       app_key: :provisioning_mode,
       fallback: :direct,
       summary: "Whether writing a profile changes the cluster or commits it for review.",
@@ -94,7 +94,7 @@ defmodule Troupe.Plane.Settings do
       key: "default_budget_period",
       group: :team_defaults,
       type: :enum,
-      values: ~w(monthly daily),
+      values: [:monthly, :daily],
       # An atom, like every other enum's fallback: a setting whose type depends on whether
       # anybody has changed it is a setting every caller has to handle twice.
       fallback: :monthly,
@@ -285,7 +285,10 @@ defmodule Troupe.Plane.Settings do
       key: setting.key,
       group: setting.group,
       type: setting.type,
-      values: setting.values,
+      # As strings, because that is what a form option and a JSON schema hold. The
+      # registry keeps them as atoms so that parsing one never has to make an atom out
+      # of something a caller sent.
+      values: setting.values && Enum.map(setting.values, &to_string/1),
       summary: setting.summary,
       consequence: setting.consequence,
       effect: setting.effect,
@@ -411,10 +414,15 @@ defmodule Troupe.Plane.Settings do
 
   defp parse(%Setting{type: :string}, value), do: {:ok, value}
 
+  # Matched against the declared atoms rather than converted. `String.to_existing_atom/1`
+  # would raise for a value that happens to appear nowhere else in the codebase — which
+  # `daily` did — and a settings page that raises on a valid choice is worse than one
+  # that refuses an invalid one.
   defp parse(%Setting{type: :enum, values: values}, value) do
-    if value in values,
-      do: {:ok, String.to_existing_atom(value)},
-      else: {:error, {:invalid, "must be one of: " <> Enum.join(values, ", ")}}
+    case Enum.find(values, &(to_string(&1) == value)) do
+      nil -> {:error, {:invalid, "must be one of: " <> Enum.map_join(values, ", ", &to_string/1)}}
+      found -> {:ok, found}
+    end
   end
 
   defp parse(%Setting{type: :integer}, value) do
