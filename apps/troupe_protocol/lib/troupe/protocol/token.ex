@@ -117,10 +117,19 @@ defmodule Troupe.Protocol.Token do
     end
   end
 
+  # `audience` may be one name or several. Several because one caller genuinely has two:
+  # an identity provider addresses an id_token to the client id and an access token for
+  # the same client's API to the API's own name, and both are the same person arriving at
+  # the same door. It is never "any audience" — the list is always closed.
   defp check_audience(claims, opts) do
     case Keyword.fetch(opts, :audience) do
       {:ok, audience} ->
-        if audience in List.wrap(claims["aud"]), do: :ok, else: {:error, :wrong_audience}
+        accepted = List.wrap(audience)
+        addressed = List.wrap(claims["aud"])
+
+        if Enum.any?(accepted, &(&1 in addressed)),
+          do: :ok,
+          else: {:error, :wrong_audience}
 
       :error ->
         {:error, :no_audience_given}

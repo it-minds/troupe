@@ -58,11 +58,51 @@ defmodule Troupe.Plane.OIDC do
            "subject" => user.subject,
            "display_name" => user.display_name,
            "teams" => Enum.map(teams, & &1.name),
-           "profiles" => Identity.profiles_for(user) |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
+           "profiles" =>
+             Identity.profiles_for(user) |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
          }}
 
       {:error, reason} ->
         {:error, reason}
+    end
+  end
+
+  @doc """
+  Authenticate a caller presenting the *provider's* token rather than one of ours.
+
+  `/rpc` takes a plane token, because everything that reaches it has been through
+  `/auth/exchange` first. An MCP client has not: it does OAuth against the identity
+  provider itself, the way the specification says a client should, and arrives holding
+  what the provider gave it. So this is the same three steps `exchange/2` takes — verify,
+  turn claims into an identity, read the teams — stopping before the mint, because there
+  is nothing to mint for: the caller already has a credential and wants to be recognised
+  by it.
+
+  The audience is this client id *or* this client's API. An id_token is addressed to the
+  client; an access token for a scope the client exposes is addressed to the API. Both are
+  the same person and both are signed by the same keys; refusing one of them would mean
+  every MCP client had to obtain a token of the other kind, which is not something a client
+  chooses.
+  """
+  @spec authenticate(String.t(), keyword()) :: {:ok, Identity.User.t()} | {:error, term()}
+  def authenticate(token, opts \\ []) do
+    with {:ok, claims} <- verify(token, Keyword.put_new(opts, :audience, audiences())),
+         {:ok, user, _teams} <- Login.from_claims(claims) do
+      {:ok, user}
+    end
+  end
+
+  @doc """
+  What this plane accepts a provider token to be addressed to.
+
+  Two names for one registration, and `nil` when no client is configured — which is a
+  plane with no identity provider, where nothing should verify rather than everything.
+  """
+  @spec audiences() :: [String.t()]
+  def audiences do
+    case client_id() do
+      nil -> []
+      id -> [id, "api://" <> id]
     end
   end
 
@@ -74,15 +114,15 @@ defmodule Troupe.Plane.OIDC do
   """
   @spec verify(String.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def verify(id_token, opts \\ []) do
-    case Keyword.get(opts, :verifier) || configured_verifier() do
+    case Keyword.get(opts, :verifier) || configured_verifier(opts) do
       nil -> {:error, :no_issuer_configured}
       verifier when is_function(verifier, 1) -> verifier.(id_token)
     end
   end
 
-  defp configured_verifier do
+  defp configured_verifier(opts) do
     case Application.get_env(:troupe_plane, :oidc_verifier) do
-      nil -> default_verifier()
+      nil -> default_verifier(opts)
       verifier -> verifier
     end
   end
@@ -94,24 +134,24 @@ defmodule Troupe.Plane.OIDC do
   # So a signature that does not verify refetches once and tries again, no more often
   # than @refetch_floor_ms, which is what stops the retry becoming the load generator the
   # cache exists to prevent.
-  defp default_verifier do
+  defp default_verifier(opts) do
     case Application.get_env(:troupe_plane, :oidc, [])[:issuer] do
       nil -> nil
-      issuer -> &verify_against_provider(&1, issuer)
+      issuer -> &verify_against_provider(&1, issuer, opts)
     end
   end
 
-  defp verify_against_provider(id_token, issuer) do
-    case attempt(id_token, issuer) do
+  defp verify_against_provider(id_token, issuer, opts) do
+    case attempt(id_token, issuer, opts) do
       {:error, reason} when reason in [:bad_signature, :no_keys] ->
-        if refetch(issuer), do: attempt(id_token, issuer), else: {:error, reason}
+        if refetch(issuer), do: attempt(id_token, issuer, opts), else: {:error, reason}
 
       other ->
         other
     end
   end
 
-  defp attempt(id_token, issuer) do
+  defp attempt(id_token, issuer, opts) do
     with {:ok, jwks} <- provider_jwks(issuer) do
       # `max_lifetime: :any` because this is the *provider's* token, not one of ours. The
       # fifteen-minute ceiling is a rule about what Troupe mints for a pod; applying it
@@ -119,7 +159,11 @@ defmodule Troupe.Plane.OIDC do
       # them. The signature, the issuer, the audience and `exp` are all still checked, and
       # this token is exchanged once, immediately, for a plane token that does have the
       # ceiling.
-      Token.verify(id_token, jwks, audience: client_id(), issuer: issuer, max_lifetime: :any)
+      Token.verify(id_token, jwks,
+        audience: Keyword.get(opts, :audience, client_id()),
+        issuer: issuer,
+        max_lifetime: :any
+      )
     end
   end
 
@@ -146,7 +190,8 @@ defmodule Troupe.Plane.OIDC do
   end
 
   defp fetch_jwks(issuer) do
-    with {:ok, %{status: 200, body: discovery}} <- get(issuer <> "/.well-known/openid-configuration"),
+    with {:ok, %{status: 200, body: discovery}} <-
+           get(issuer <> "/.well-known/openid-configuration"),
          uri when is_binary(uri) <- discovery["jwks_uri"],
          {:ok, %{status: 200, body: jwks}} <- get(uri) do
       :persistent_term.put({__MODULE__, :jwks, issuer}, jwks)
@@ -229,7 +274,12 @@ defmodule Troupe.Plane.OIDC do
         check_result("Signing keys", false, "#{uri} answered with no keys in it.", took)
 
       other ->
-        check_result("Signing keys", false, "Could not read #{inspect(uri)}: #{inspect(other)}.", took)
+        check_result(
+          "Signing keys",
+          false,
+          "Could not read #{inspect(uri)}: #{inspect(other)}.",
+          took
+        )
     end
   end
 
@@ -254,7 +304,12 @@ defmodule Troupe.Plane.OIDC do
           do: "the #{name} is #{configured} but the provider publishes #{document[published]}"
 
     if mismatched == [] do
-      check_result("Endpoints", true, "What this plane was given matches what the provider publishes.", 0)
+      check_result(
+        "Endpoints",
+        true,
+        "What this plane was given matches what the provider publishes.",
+        0
+      )
     else
       check_result("Endpoints", false, Enum.join(mismatched, "; ") <> ".", 0)
     end

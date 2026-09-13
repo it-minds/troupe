@@ -708,8 +708,23 @@ it would be a second source of truth for who is in a team.
 
     POST /mcp
 
-Streamable HTTP, one JSON-RPC message per request, protocol revision `2025-06-18`, and the
-same `Authorization: Bearer` token as `/rpc`. Stateless: no session id is issued and none
+Streamable HTTP, one JSON-RPC message per request, protocol revision `2025-06-18`.
+
+Two kinds of bearer token are accepted, because there are two kinds of caller. `troupe mcp`
+bridges a **plane** token, the same one `/rpc` takes, because the CLI already holds
+credentials. Any other MCP client does OAuth against the identity provider â€” there is no
+step in that flow where it could obtain a plane token â€” and presents what the provider
+issued: an id_token addressed to the client id, or an access token addressed to
+`api://<client-id>`. Both are verified in full against the provider's published keys, the
+configured issuer and that closed list of audiences, and both resolve to the same person,
+because the subject is the same claim in each.
+
+A 401 from `/mcp` carries `WWW-Authenticate: Bearer realm="troupe-plane",
+resource_metadata="<base>/.well-known/oauth-protected-resource"`, and that document
+(RFC 9728, served at the bare path and at `/.well-known/oauth-protected-resource/mcp`)
+names the resource, the authorization server and the scope to ask for. Troupe is a resource
+server and deliberately not an authorization server: running one would mean holding a
+second set of credentials for the same people. Stateless: no session id is issued and none
 is required, so any plane replica can answer any request. A notification is answered with
 `202` and no body; `GET` and `DELETE` are `405`, because this server neither streams nor
 has a session to end.

@@ -5,6 +5,8 @@ defmodule Troupe.Plane.Web.Router do
       GET  /healthz                    liveness, for Kubernetes
       GET  /.well-known/troupe         where to log in, and what to call this plane
       GET  /.well-known/jwks.json      the keys workers verify session tokens against
+      GET  /.well-known/oauth-protected-resource
+                                       which provider an MCP client should authenticate to
       POST /rpc                        the harness JSON-RPC (§ Plane API)
       POST /mcp                        the same admin methods, as MCP tools
       *    /scim/v2/...                users and groups, pushed by the identity provider
@@ -61,6 +63,20 @@ defmodule Troupe.Plane.Web.Router do
     })
   end
 
+  # RFC 9728, which is how an MCP client finds out where to authenticate. It asks this
+  # plane; this plane names the identity provider and gets out of the way. Troupe is a
+  # resource server here and deliberately not an authorization server: running one would
+  # mean holding a second set of credentials for the same people, and the whole identity
+  # arrangement is that the provider is the only thing that authenticates anybody.
+  #
+  # Two paths for one document. A client derives the location from the resource URL by
+  # inserting the well-known segment before the path — `/mcp` becomes
+  # `/.well-known/oauth-protected-resource/mcp` — and the bare path is what a client that
+  # has only the origin asks for. Both answer, because a client that guesses wrong should
+  # not be told there is no metadata when there is.
+  get("/.well-known/oauth-protected-resource", do: send_json(conn, 200, resource_metadata()))
+  get("/.well-known/oauth-protected-resource/mcp", do: send_json(conn, 200, resource_metadata()))
+
   get "/.well-known/jwks.json" do
     case Tokens.jwks() do
       {:ok, jwks} -> send_json(conn, 200, jwks)
@@ -111,7 +127,7 @@ defmodule Troupe.Plane.Web.Router do
   # Streamable HTTP with no session: a notification is answered with 202 and no body,
   # which is what the transport asks for, and everything else with one JSON object.
   post "/mcp" do
-    case authenticate(conn) do
+    case authenticate_tool_caller(conn) do
       {:ok, user} ->
         case Admin.MCP.handle(conn.body_params, Admin.actor_for(user)) do
           {:reply, message} -> send_json(conn, 200, message)
@@ -119,8 +135,11 @@ defmodule Troupe.Plane.Web.Router do
         end
 
       {:error, error} ->
+        # The `resource_metadata` parameter is what turns a 401 into an instruction: a
+        # client that has never seen this server reads it, fetches the document, and knows
+        # which provider to authenticate to. Without it the only thing a 401 says is no.
         conn
-        |> put_resp_header("www-authenticate", ~s(Bearer realm="troupe-plane"))
+        |> put_resp_header("www-authenticate", www_authenticate())
         |> send_json(401, %{"error" => "unauthenticated", "reason" => error.message})
     end
   end
@@ -214,6 +233,76 @@ defmodule Troupe.Plane.Web.Router do
   end
 
   defp platform_admin?(user), do: Admin.actor_for(user).role == :platform_admin
+
+  # -- who is calling /mcp ------------------------------------------------------
+
+  # Two kinds of caller, one endpoint. `troupe mcp` bridges a *plane* token, because the
+  # CLI already holds credentials and exchanging them is what it does. Any other MCP
+  # client does OAuth against the identity provider, the way the specification says a
+  # client should, and arrives with what the provider gave it — there is no step in that
+  # flow where it could obtain a plane token, and inventing one would mean this server
+  # running an authorization server of its own.
+  #
+  # A plane token is tried first because it is the cheaper check and the commoner caller.
+  # Both are verified in full; the difference is who signed them, not how much is trusted.
+  defp authenticate_tool_caller(conn) do
+    with {:ok, jwt} <- bearer(conn) do
+      case authenticate(conn) do
+        {:ok, user} -> {:ok, user}
+        {:error, _plane_token} -> from_provider(jwt)
+      end
+    else
+      {:error, :no_token} -> {:error, Error.new(:unauthenticated, %{reason: "no token"})}
+    end
+  end
+
+  defp from_provider(jwt) do
+    case OIDC.authenticate(jwt) do
+      {:ok, user} -> {:ok, user}
+      {:error, reason} -> {:error, Error.new(:unauthenticated, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp www_authenticate do
+    case plane_url() do
+      nil ->
+        ~s(Bearer realm="troupe-plane")
+
+      base ->
+        ~s(Bearer realm="troupe-plane", resource_metadata="#{base}/.well-known/oauth-protected-resource")
+    end
+  end
+
+  # What an MCP client needs and nothing it does not: the resource it is talking to, the
+  # provider that issues tokens for it, and the scope to ask for. The scope is the API this
+  # registration exposes rather than a plain OIDC scope, because an access token addressed
+  # to Microsoft Graph is not a token this plane will accept, and asking for `openid` alone
+  # is how a client ends up with one.
+  defp resource_metadata do
+    base = plane_url()
+
+    %{
+      "resource" => "#{base}/mcp",
+      "authorization_servers" => List.wrap(config(:issuer)),
+      "scopes_supported" => scopes_supported(),
+      "bearer_methods_supported" => ["header"],
+      "resource_documentation" => "#{base}/admin"
+    }
+    |> Map.reject(fn {_key, value} -> value in [nil, [], ""] end)
+  end
+
+  # The plane's own URL, which is not one of the provider's settings: `config/2` reads
+  # the `:oidc` list and this lives beside it.
+  defp plane_url, do: Application.get_env(:troupe_plane, :base_url)
+
+  defp scopes_supported do
+    case config(:client_id) do
+      nil -> []
+      # `offline_access` so the client is given a refresh token: without it a session ends
+      # in an hour and the operator is sent back to a browser mid-task.
+      id -> ["api://#{id}/admin", "offline_access"]
+    end
+  end
 
   # -- SCIM -------------------------------------------------------------------
 
