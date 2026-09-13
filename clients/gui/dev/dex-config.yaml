@@ -1,0 +1,38 @@
+# The identity provider the GUI's device grant runs against. Mirrors the one in
+# ../troupe-remote/dev/kind/dependencies.yaml, on a port of its own.
+#
+# `dex.localtest.me` resolves to 127.0.0.1 publicly, and the plane is given an
+# `extra_hosts` entry pointing it at the Docker host, so the issuer is one string that
+# means the same thing to the test on the host and to the plane in the network. Anything
+# else and either the client cannot reach the device endpoint or the plane cannot fetch
+# the keys to verify what it issued.
+issuer: http://dex.localtest.me:5560/dex
+
+storage:
+  type: memory
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  # The device flow needs no client secret and no browser redirect back to a terminal,
+  # which is the whole reason sign-in uses it. Skipping the approval screen is what lets
+  # a test drive it without a browser.
+  skipApprovalScreen: true
+
+staticClients:
+  - id: troupe
+    name: Troupe
+    public: true
+
+enablePasswordDB: true
+staticPasswords:
+  # bcrypt of "troupe". A development password on a provider nothing else can reach.
+  - email: "ada@example.test"
+    hash: "$2b$10$HVE7poSm1BWDxR/XRkmfbucZb10p/q/n6d09eq33UTEKwnNzmDhgS"
+    username: "ada"
+    userID: "ada"
+    groups: ["troupe-platform-admins", "engineering"]
+
+frontend:
+  issuer: Troupe (GUI end-to-end)

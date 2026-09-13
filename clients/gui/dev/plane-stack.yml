@@ -1,0 +1,132 @@
+# A whole plane, on a laptop, for the GUI's end-to-end tests.
+#
+# `../troupe-remote/dev/docker-compose.yml` brings up what a plane talks to; the kind
+# cluster brings up the plane itself. This is the third option: the plane image, its
+# dependencies and an identity provider, in one compose project, with no Kubernetes and
+# no Elixir toolchain — because what the GUI needs to be tested against is the plane's
+# HTTP surface, not a cluster.
+#
+# Its own project name and its own ports, so a `scripts/dev-up` or a kind cluster on the
+# same machine does not notice this one.
+#
+# What it does NOT give you: workers. The plane has nowhere to place a session, so
+# `session.create` fails with no capacity — by design, not by breakage. Everything before
+# that is real: discovery, the device grant, /auth/exchange, /rpc, and the admin surface.
+#
+#   docker compose -f dev/plane-stack.yml up -d --wait
+#   docker compose -f dev/plane-stack.yml down -v
+name: troupe-gui-e2e
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: troupe
+      POSTGRES_PASSWORD: troupe
+      POSTGRES_DB: troupe_plane_e2e
+    ports: ["55532:5432"]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U troupe -d troupe_plane_e2e"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  openbao:
+    image: openbao/openbao:2.4.1
+    command: server -dev -dev-root-token-id=troupe-e2e-root -dev-listen-address=0.0.0.0:8200
+    environment:
+      BAO_DEV_ROOT_TOKEN_ID: troupe-e2e-root
+      BAO_ADDR: http://0.0.0.0:8200
+    ports: ["58300:8200"]
+    cap_add: [IPC_LOCK]
+    healthcheck:
+      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+
+  # The plane signs session tokens through transit rather than holding a private key, so
+  # the engine and the key have to exist before it can mint one.
+  openbao-setup:
+    image: openbao/openbao:2.4.1
+    depends_on:
+      openbao: {condition: service_healthy}
+    environment:
+      BAO_ADDR: http://openbao:8200
+      BAO_TOKEN: troupe-e2e-root
+    entrypoint: >
+      /bin/sh -c "
+      bao secrets enable -path=transit transit 2>/dev/null || true;
+      bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256 2>/dev/null || true;
+      echo 'transit ready'
+      "
+
+  # The identity provider the device grant runs against — never the plane itself.
+  #
+  # The issuer is `dex.localtest.me` rather than `dex` because both sides have to agree
+  # on it: the test process on the host, and the plane inside the network. That name
+  # resolves to 127.0.0.1 publicly, and `extra_hosts` below points the plane at the
+  # Docker host, so one URL works from both.
+  dex:
+    image: ghcr.io/dexidp/dex:v2.45.0
+    command: ["dex", "serve", "/etc/dex/config.yaml"]
+    volumes:
+      - ./dex-config.yaml:/etc/dex/config.yaml:ro
+    ports: ["5560:5556"]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:5556/dex/.well-known/openid-configuration"]
+      interval: 2s
+      timeout: 3s
+      retries: 40
+
+  # A release has no Mix, so migrations run as an eval before the plane serves.
+  plane-migrate:
+    image: ${TROUPE_PLANE_IMAGE:-ghcr.io/objective-mj/troupe-plane:dev}
+    depends_on:
+      postgres: {condition: service_healthy}
+    environment:
+      DATABASE_URL: postgres://troupe:troupe@postgres:5432/troupe_plane_e2e
+      TROUPE_SECRET_KEY_BASE: e2e-only-secret-key-base-not-for-any-deployment-0123456789abcdef
+    entrypoint: ["/bin/sh", "-c", "/app/bin/troupe_plane eval 'Troupe.Plane.Release.migrate()'"]
+
+  plane:
+    image: ${TROUPE_PLANE_IMAGE:-ghcr.io/objective-mj/troupe-plane:dev}
+    depends_on:
+      postgres: {condition: service_healthy}
+      openbao-setup: {condition: service_completed_successfully}
+      dex: {condition: service_healthy}
+      plane-migrate: {condition: service_completed_successfully}
+    # So the plane resolves the issuer to the same place the host does.
+    extra_hosts:
+      - "dex.localtest.me:host-gateway"
+    environment:
+      TROUPE_PLANE_AUTOSTART: "true"
+      DATABASE_URL: postgres://troupe:troupe@postgres:5432/troupe_plane_e2e
+      TROUPE_SECRET_KEY_BASE: e2e-only-secret-key-base-not-for-any-deployment-0123456789abcdef
+      TROUPE_HTTP_PORT: "4000"
+      TROUPE_HOST: plane.localtest.me
+
+      # The identity provider, as the discovery document will report it.
+      TROUPE_OIDC_ISSUER: http://dex.localtest.me:5560/dex
+      TROUPE_OIDC_CLIENT_ID: troupe
+      TROUPE_OIDC_DEVICE_URL: http://dex.localtest.me:5560/dex/device/code
+      TROUPE_OIDC_TOKEN_URL: http://dex.localtest.me:5560/dex/token
+      TROUPE_OIDC_AUTHORIZE_URL: http://dex.localtest.me:5560/dex/auth
+      TROUPE_OIDC_SCOPES: "openid profile email groups offline_access"
+      TROUPE_GROUPS_CLAIM: groups
+      TROUPE_PLATFORM_ADMIN_GROUP: troupe-platform-admins
+
+      # The GUI's origins. The browser build's dev server, and the packaged shell's.
+      # Done item 2 is about what happens when this list is *wrong*, so it is worth
+      # knowing exactly what is in it.
+      TROUPE_CORS_ORIGINS: "http://localhost:5173,http://localhost:4173,tauri://localhost,http://tauri.localhost"
+
+      TROUPE_BAO_ADDR: http://openbao:8200
+      TROUPE_BAO_TOKEN: troupe-e2e-root
+
+      RELEASE_DISTRIBUTION: none
+    ports: ["4020:4000"]
+    # No healthcheck on purpose. `bin/troupe_plane rpc` needs Erlang distribution, which
+    # is off here, so it reports a perfectly healthy plane as unhealthy; and the runtime
+    # image carries no HTTP client to ask over the wire with. The test waits for
+    # `/.well-known/troupe` to answer, which is what a client does anyway.
