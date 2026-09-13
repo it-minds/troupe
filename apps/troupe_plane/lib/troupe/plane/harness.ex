@@ -467,6 +467,19 @@ defmodule Troupe.Plane.Harness do
         if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
         {:error, Error.new(:capacity, %{profile: session.profile, reason: "every pod is full"})}
 
+      # Not full: not there. `capacity` says add replicas, which is useless advice when
+      # the replicas exist and cannot start — and `unavailable` is the code whose whole
+      # job is naming a component that is down.
+      {:error, :no_healthy_worker} ->
+        if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
+
+        {:error,
+         Error.new(:unavailable, %{
+           component: "worker",
+           profile: session.profile,
+           reason: "no pod of this profile is healthy and accepting sessions"
+         })}
+
       {:error, reason} ->
         if Keyword.get(opts, :unwind, false), do: Sessions.delete(session.id)
         {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
