@@ -37,13 +37,24 @@ export async function startHarness(
         store: signInOpts.store ?? memoryTokenStore(),
         ...(signInOpts.fetchImpl ? { fetchImpl: signInOpts.fetchImpl } : {}),
       });
-      // The person opens the link and approves. Doing it on a timer rather than up
-      // front keeps the client's polling — and its `slow_down` handling — real.
-      const approving = setTimeout(() => idp.approve(signInOpts.subject ?? "alice@example.com", "Alice"), 20);
+      // The person opens the link and approves. Still on a short timer, so the client
+      // polls at least once and its `slow_down` handling stays real — but started from
+      // the moment the code exists rather than from the moment sign-in began.
+      //
+      // `approve()` walks the grants the provider is currently holding, so approving
+      // before the client has asked for a code approves nothing at all and the flow
+      // runs to its expiry. Twenty milliseconds is plenty on an idle machine and not
+      // always enough on a loaded CI runner, which is exactly the kind of failure that
+      // looks like a broken client.
+      let approving: ReturnType<typeof setTimeout> | undefined;
       try {
-        await auth.signIn();
+        await auth.signIn({
+          onDeviceCode: () => {
+            approving = setTimeout(() => idp.approve(signInOpts.subject ?? "alice@example.com", "Alice"), 20);
+          },
+        });
       } finally {
-        clearTimeout(approving);
+        if (approving) clearTimeout(approving);
       }
       return auth;
     },
