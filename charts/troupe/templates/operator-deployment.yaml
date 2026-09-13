@@ -93,6 +93,11 @@ spec:
               value: {{ .Values.objectStore.endpoint | quote }}
             - name: TROUPE_OBJECT_BUCKET
               value: {{ .Values.objectStore.bucket | quote }}
+            # Passed on to every worker pod. SigV4 signs the region string, so a pod
+            # signing `us-east-1` against a bucket in `fr-par` is refused by a provider
+            # that checks — and the pods write most of a session's log.
+            - name: TROUPE_OBJECT_REGION
+              value: {{ .Values.objectStore.region | quote }}
             - name: TROUPE_INGRESS_CLASS
               value: {{ .Values.operator.ingressClassName | quote }}
             - name: TROUPE_WORKERS_TLS_SECRET

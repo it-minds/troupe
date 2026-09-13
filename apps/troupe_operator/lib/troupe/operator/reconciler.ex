@@ -120,7 +120,8 @@ defmodule Troupe.Operator.Reconciler do
   defp apply_profile(conn, resource, profile, policy) do
     settings = Settings.from_env()
     desired = Resources.for_profile(profile, policy, settings)
-    missing = missing_secrets(conn, profile, settings)
+    namespace = namespace_of(desired)
+    missing = missing_secrets(conn, profile, settings, namespace)
     behind = pods_behind(conn, policy, profile)
 
     # The namespace first and on its own: nothing else in the list can be created
@@ -134,7 +135,7 @@ defmodule Troupe.Operator.Reconciler do
 
     status =
       resource
-      |> status_for(desired, failures, pruned, namespace_of(desired))
+      |> status_for(desired, failures, pruned, namespace)
       |> secret_status(missing, generation(resource))
       |> upgrade_status(behind, generation(resource))
 
@@ -181,11 +182,20 @@ defmodule Troupe.Operator.Reconciler do
   # would not reconcile until every secret existed could not be created before them.
   # What it must not be is invisible — a pod that will not start because a Secret is
   # missing is a mystery unless somebody says so here.
-  defp missing_secrets(conn, profile, settings) do
-    namespace = settings.plane_namespace
-
-    profile
-    |> Profile.secret_names()
+  #
+  # Looked for in the *worker's* namespace, because that is the only namespace a pod can
+  # mount from. Checking the plane's namespace instead asked a question about a different
+  # cluster object that merely shares a name: it called a secret sitting correctly beside
+  # its pods missing, and would have called a genuinely absent one present the moment
+  # something of that name existed in `troupe-system`. Both halves of that happened here.
+  #
+  # The object store is on the list for the same reason the pods are: a worker signs
+  # every read and write of a session's log with those credentials, and one without them
+  # signs with `nil` and dies inside the signer, a long way from the mistake.
+  defp missing_secrets(conn, profile, settings, namespace) do
+    [settings.object_store_secret_name | Profile.secret_names(profile)]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.uniq()
     |> Enum.reject(&secret_exists?(conn, namespace, &1))
   end
 

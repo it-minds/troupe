@@ -14,6 +14,13 @@ defmodule Troupe.Operator.Settings do
             bao_address: "http://openbao.troupe-system.svc:8200",
             object_store_endpoint: "http://minio.troupe-system.svc:9000",
             object_store_bucket: "troupe-sessions",
+            # The region every signature over that bucket claims. It matters even
+            # where the endpoint already names the region: SigV4 signs the region
+            # string, so a pod that says `us-east-1` to a bucket in `fr-par` is
+            # refused by a provider that checks. The plane has always been given
+            # this; the pods, which write far more of a session's log than the
+            # plane ever does, were left on the default.
+            object_store_region: "us-east-1",
             ingress_class_name: "nginx",
             tls_secret_name: nil,
             # A cert-manager ClusterIssuer, where the deployment has one. Then every pod

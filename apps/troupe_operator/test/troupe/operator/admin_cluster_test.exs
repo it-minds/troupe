@@ -156,15 +156,31 @@ defmodule Troupe.Operator.AdminClusterTest do
         "SecretMissing was never reported"
       )
 
+      # In the *worker's* namespace, because that is the only one its pods can mount
+      # from. This test used to put it in `troupe-system` and watch the condition clear,
+      # which made it a test of the wrong namespace: the operator was looking somewhere
+      # no pod reads, and the two agreed with each other and with nothing else. The
+      # object store's credentials live beside it for the same reason — a pod signs every
+      # read and write of a session's log with them.
+      workers = "troupe-w-#{name}"
+
       secret = %{
         "apiVersion" => "v1",
         "kind" => "Secret",
-        "metadata" => %{"name" => secret_name, "namespace" => "troupe-system"},
+        "metadata" => %{"name" => secret_name, "namespace" => workers},
         "stringData" => %{"api-key" => "sk-the-real-thing"}
       }
 
+      object_store = %{
+        "apiVersion" => "v1",
+        "kind" => "Secret",
+        "metadata" => %{"name" => "troupe-object-store", "namespace" => workers},
+        "stringData" => %{"access-key-id" => "troupe", "secret-access-key" => "troupe-secret"}
+      }
+
       apply!(context.conn, secret)
-      on_exit(fn -> delete(context.conn, "v1", "Secret", namespace: "troupe-system", name: secret_name) end)
+      apply!(context.conn, object_store)
+      on_exit(fn -> delete(context.conn, "v1", "Secret", namespace: workers, name: secret_name) end)
 
       # The next reconcile clears it. Nothing needs restarting, because the condition is
       # a fact about the cluster rather than something the operator remembers.

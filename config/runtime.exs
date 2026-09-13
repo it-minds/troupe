@@ -105,6 +105,7 @@ if config_env() == :prod do
       object_store_endpoint:
         System.get_env("TROUPE_OBJECT_ENDPOINT", "http://minio.troupe-system.svc:9000"),
       object_store_bucket: System.get_env("TROUPE_OBJECT_BUCKET", "troupe-sessions"),
+      object_store_region: System.get_env("TROUPE_OBJECT_REGION", "us-east-1"),
       ingress_class_name: System.get_env("TROUPE_INGRESS_CLASS", "nginx"),
       tls_secret_name: presence.(System.get_env("TROUPE_WORKERS_TLS_SECRET")),
       cert_issuer: presence.(System.get_env("TROUPE_WORKERS_CERT_ISSUER")),
