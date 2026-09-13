@@ -1163,8 +1163,12 @@ defmodule Troupe.Plane.Admin do
       # renders both in the same sentence.
       budget_period: team.budget_period,
       spent_micros: Ledger.spent_micros(team.id),
-      reserved_micros:
-        team.id |> Ledger.open_reservations() |> Enum.map(& &1.amount_micros) |> Enum.sum()
+      # `open_reservations/1` answers `%{session_id => amount_micros}`, not a list of
+      # rows: mapping `& &1.amount_micros` over it hands the function a `{id, amount}`
+      # tuple and raises `BadMapError`. Harmless while a team had nothing reserved —
+      # `Enum.map` over an empty map is `[]` — and a 500 on the overview page the moment
+      # one session was running. `team_detail/1` above takes `Map.values/1`; so does this.
+      reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum()
     }
   end
 

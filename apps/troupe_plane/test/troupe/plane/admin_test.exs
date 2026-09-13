@@ -9,7 +9,7 @@ defmodule Troupe.Plane.AdminTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Audit, Bundles, Fleet, Identity, Sessions}
+  alias Troupe.Plane.{Admin, Audit, Bundles, Fleet, Identity, Ledger, Sessions}
 
   @moduletag timeout: 60_000
 
@@ -272,6 +272,27 @@ defmodule Troupe.Plane.AdminTest do
 
       assert {:ok, everything} = Admin.overview(context.root)
       assert "design" in Enum.map(everything.teams, & &1.name)
+    end
+
+    # The overview renders reserved spend, and every earlier test here ran against a team
+    # with nothing reserved — where the bug was invisible, because `Enum.map` over an
+    # empty map is `[]` and sums to zero. One open reservation is all it took: the page
+    # answered 500 for every admin as soon as a single session was running.
+    test "spend is still readable once a team has budget reserved", context do
+      {:ok, _reservation} = Ledger.reserve(context.engineering.id, "s-running", 5_000_000)
+
+      assert {:ok, overview} = Admin.overview(context.lead)
+      assert [%{name: "engineering", reserved_micros: 5_000_000}] = overview.teams
+
+      # And it is a sum over the open ones, not the first or the last.
+      {:ok, _second} = Ledger.reserve(context.engineering.id, "s-also-running", 2_500_000)
+      assert {:ok, more} = Admin.overview(context.lead)
+      assert [%{reserved_micros: 7_500_000}] = more.teams
+
+      # A released promise is not an outstanding one.
+      :ok = Ledger.release(context.engineering.id, "s-running")
+      assert {:ok, after_release} = Admin.overview(context.lead)
+      assert [%{reserved_micros: 2_500_000}] = after_release.teams
     end
 
     test "only the profiles their team is granted", context do
