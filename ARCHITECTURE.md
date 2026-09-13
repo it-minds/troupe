@@ -613,12 +613,31 @@ and an MCP tool; the boundary checker asserts LiveViews call nothing else. Parit
 checked rather than remembered.
 
 **The fourth surface is for a model.** `POST /mcp` is the same table of methods offered as
-MCP tools, authenticated by the same bearer token as `/rpc` and dispatched through the same
-context — so a model administers exactly what the person or principal whose token it holds
-administers, and a refusal names the role it wanted. `troupe mcp` is a stdio bridge over
-that endpoint, so a model can be wired to a plane without a token being pasted into a
-configuration file:
+MCP tools, dispatched through the same context — so a model administers exactly what the
+person whose token it holds administers, and a refusal names the role it wanted.
 
+Two kinds of caller reach it, and they hold different credentials. `troupe mcp` bridges a
+**plane** token over stdio, because the CLI already has credentials and exchanging them is
+what it does. Every other MCP client does OAuth against the identity provider, the way the
+specification says a client should, and there is no step in that flow where it could obtain
+a plane token — so the endpoint also accepts the **provider's** token, verified in full
+against the provider's published keys, the configured issuer, and a closed list of two
+audiences: the client id an id_token carries, and `api://<client-id>` an access token
+carries. The subject is the same claim in both, so the same person is the same person
+however they arrived.
+
+A 401 says *where* to authenticate. `WWW-Authenticate` carries `resource_metadata`, and the
+RFC 9728 document at `/.well-known/oauth-protected-resource` names the resource, the
+authorization server and the scope to ask for. Troupe is a resource server here and
+deliberately not an authorization server: running one would mean holding a second set of
+credentials for the same people, when the whole identity arrangement is that the provider
+is the only thing that authenticates anybody.
+
+    # a client that can do OAuth
+    claude mcp add --transport http troupe https://<plane>/mcp \
+      --client-id <the app registration> --callback-port 33418
+
+    # or over stdio, as whoever is logged in to the CLI
     claude mcp add troupe -- troupe mcp
 
 Two things the MCP surface adds that the others do not need. The method table carries a

@@ -70,9 +70,24 @@ rather than in the context, because the context is also what the console's
 already-confirmed dialog calls. The test asserts both halves: that a wrong value is
 refused, and that nothing happened when it was.
 
-**1d. The transport is `POST /mcp` beside `/rpc`.** Same bearer token, same actor, same
-dispatch. Stateless — no session id — so any replica answers any request. A notification
-gets `202` and no body; `GET` and `DELETE` get `405`.
+**1d. The transport is `POST /mcp` beside `/rpc`.** Same actor, same dispatch. Stateless —
+no session id — so any replica answers any request. A notification gets `202` and no body;
+`GET` and `DELETE` get `405`.
+
+It takes two kinds of token, which was not the first design and had to be. A plane token is
+what `troupe mcp` bridges; it is also the only credential the endpoint originally accepted,
+which meant the endpoint took a credential its intended callers cannot obtain — a remote
+MCP client does OAuth against the identity provider and never sees `/auth/exchange`. So the
+provider's own token is accepted too, verified against the provider's keys, the configured
+issuer and a closed list of two audiences (the client id, and `api://<client-id>` for an
+access token). A 401 carries `WWW-Authenticate: … resource_metadata=…` and the RFC 9728
+document names the provider and the scope, so a client that has never seen the plane can
+find its way in without being configured by hand.
+
+The identity provider has to cooperate: the app registration needs an App ID URI, one
+delegated scope, access tokens at version 2 so their issuer matches, the `groups` claim on
+access tokens as well as id tokens, and the client's loopback redirect. For the IT Minds
+tenant that is `.local/scaleway/entra-expose-mcp-api.sh`.
 
 **1e. `troupe mcp` bridges it over stdio.** A plane token lasts fifteen minutes and is
 minted from a refresh token the CLI already holds, so wiring a model to a plane without
