@@ -521,6 +521,12 @@ defmodule Troupe.Plane.Harness do
   # The prompt goes only here, on the first activation. A later activation replays the
   # log, in which the prompt is already the first input; sending it again would run it
   # again.
+  #
+  # The bundle pin comes from `bundle_params/1`, the same helper the waking path uses,
+  # because a version number on its own is not a pin: a pod asks the plane for a bundle
+  # by hash, or by channel *and* version, and a version with no channel matches nothing.
+  # Sending only the version made every create fail the moment a channel had a bundle to
+  # pin at all — which is to say, as soon as the feature was used.
   defp start_on_pod(worker, session, team, agent, prompt) do
     params =
       %{
@@ -530,10 +536,10 @@ defmodule Troupe.Plane.Harness do
         "owner_subject" => session.owner_subject,
         "profile" => session.profile,
         "source" => session.workspace_source,
-        "bundle_version" => session.bundle_version,
         "agent" => agent,
         "usage_seq" => session.usage_seq
       }
+      |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))
       |> then(fn params -> if prompt, do: Map.put(params, "prompt", prompt), else: params end)
 

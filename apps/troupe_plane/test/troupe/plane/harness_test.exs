@@ -189,6 +189,49 @@ defmodule Troupe.Plane.HarnessTest do
       assert session.worker_id == pod.worker_id
     end
 
+    test "the pod is given a pin it can redeem, not just a version number", context do
+      team_with_grant("engineering", "dev", name: "engineering")
+      user = person("ada@example.test", ["engineering"])
+      {:ok, _} = Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable"})
+
+      {:ok, bundle} =
+        Bundles.publish(
+          "stable",
+          %{"schema" => 1, "agents" => [%{"name" => "reviewer", "definition" => "Review."}]},
+          announce: false
+        )
+
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      assert {:ok, _result} =
+               Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
+      assert_receive {:pushed, "session.activate", params}, 5_000
+
+      # A version number is not a pin. A pod asks the plane for a bundle by hash, or by
+      # channel *and* version, so a create that sent only the version handed the pod
+      # something it could not redeem — and a pod that cannot get its bundle refuses the
+      # session. This is exactly what waking a session already sends.
+      assert params["bundle_version"] == bundle.version
+      assert params["bundle_hash"] == bundle.hash
+      assert params["channel"] == "stable"
+
+      # And the round trip answers. Asserting the keys alone would still pass if the two
+      # sides disagreed about what a pin looks like, which is the mistake being fixed.
+      asked = %{
+        "hash" => params["bundle_hash"],
+        "channel" => params["channel"],
+        "version" => params["bundle_version"]
+      }
+
+      assert %{"result" => fetched} =
+               pod_asks(context.port, "dev-token", "troupe-w-dev-1", "bundle.fetch", asked)
+
+      assert fetched["hash"] == bundle.hash
+      assert fetched["version"] == bundle.version
+      assert fetched["channel"] == "stable"
+    end
+
     test "a user with no grant on the profile cannot create" do
       team_with_grant("engineering", "dev", name: "engineering")
       stranger = person("nobody@example.test", [])
@@ -688,6 +731,36 @@ defmodule Troupe.Plane.HarnessTest do
     ExUnit.Callbacks.on_exit(fn -> :gen_tcp.close(socket) end)
 
     %{worker_id: result["worker_id"], socket: socket}
+  end
+
+  # A pod that asks the plane something and waits for the answer, rather than one that
+  # only receives. Everything the plane pushes goes through `fake_pod`; this is the other
+  # direction, which is how a pod gets its bundle.
+  defp pod_asks(port, token, pod_name, method, params) do
+    {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
+
+    enrol =
+      Jason.encode!(%{
+        "jsonrpc" => "2.0",
+        "id" => 0,
+        "method" => "enrol",
+        "params" => %{
+          "token" => token,
+          "pod_name" => pod_name,
+          "capacity" => 4,
+          "disk_total_bytes" => 1_000_000
+        }
+      })
+
+    :ok = :gen_tcp.send(socket, [enrol, ?\n])
+    {:ok, _enrolled} = :gen_tcp.recv(socket, 0, 5_000)
+
+    ask = Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => method, "params" => params})
+    :ok = :gen_tcp.send(socket, [ask, ?\n])
+    {:ok, line} = :gen_tcp.recv(socket, 0, 5_000)
+    :gen_tcp.close(socket)
+
+    line |> String.split("\n", trim: true) |> List.first() |> Jason.decode!()
   end
 
   defp serve(socket, test) do
