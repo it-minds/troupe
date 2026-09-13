@@ -160,6 +160,122 @@ defmodule Troupe.Plane.OIDC do
 
   defp get(url), do: Req.request(method: :get, url: url, decode_body: true, retry: false)
 
+  # -- checking the configuration ---------------------------------------------
+
+  @doc """
+  What this plane can prove about its identity provider, each check with what it proved.
+
+  The design asks for a test that is a check list with timings rather than a green tick,
+  on the grounds that "identity is fine" is not a useful thing to be told at the moment it
+  is not fine. These three are here because each is genuinely *provable from here* — a
+  check that says "looks right" is worse than no check, because it is believed. The fourth
+  thing worth knowing, whether anybody is actually an administrator, is not about the
+  provider at all and `Troupe.Plane.Admin` asks it.
+
+  What none of them proves is that a person can sign in: that needs a person. The failure
+  they cannot catch is a redirect URI the registration does not have, which is why the
+  console prints the URI it would send rather than claiming it is registered.
+  """
+  @spec check() :: [map()]
+  def check do
+    issuer = Application.get_env(:troupe_plane, :oidc, [])[:issuer]
+    document = timed(fn -> discovery(issuer) end)
+
+    [discovery_check(issuer, document), keys_check(document), endpoints_check(document)]
+  end
+
+  defp discovery(nil), do: {:error, :no_issuer}
+
+  defp discovery(issuer) do
+    case get(issuer <> "/.well-known/openid-configuration") do
+      {:ok, %{status: 200, body: body}} when is_map(body) -> {:ok, body}
+      {:ok, %{status: status}} -> {:error, {:status, status}}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp discovery_check(nil, _document) do
+    check_result("Discovery", false, "No issuer is configured, so there is nobody to ask.", 0)
+  end
+
+  defp discovery_check(issuer, {{:ok, document}, took}) do
+    published = document["issuer"]
+
+    if published == issuer do
+      check_result("Discovery", true, "#{issuer} answered and calls itself the same thing.", took)
+    else
+      check_result(
+        "Discovery",
+        false,
+        "#{issuer} answered but calls itself #{inspect(published)}. A token from it will be refused, because the issuer in the token is what is checked.",
+        took
+      )
+    end
+  end
+
+  defp discovery_check(issuer, {{:error, reason}, took}) do
+    check_result("Discovery", false, "#{issuer} did not answer: #{inspect(reason)}.", took)
+  end
+
+  defp keys_check({{:ok, document}, _took}) do
+    uri = document["jwks_uri"]
+    {result, took} = timed(fn -> if uri, do: get(uri), else: {:error, :no_jwks_uri} end)
+
+    case result do
+      {:ok, %{status: 200, body: %{"keys" => keys}}} when keys != [] ->
+        check_result("Signing keys", true, "#{length(keys)} key(s) at #{uri}.", took)
+
+      {:ok, %{status: 200, body: _empty}} ->
+        check_result("Signing keys", false, "#{uri} answered with no keys in it.", took)
+
+      other ->
+        check_result("Signing keys", false, "Could not read #{inspect(uri)}: #{inspect(other)}.", took)
+    end
+  end
+
+  defp keys_check({{:error, _reason}, _took}) do
+    check_result("Signing keys", false, "Not attempted: discovery did not answer.", 0)
+  end
+
+  # The mistake this one exists for: an Entra tenant configured with a v2 issuer and a v1
+  # token endpoint. Everything looks right, discovery answers, and every device login fails
+  # with a message about the audience.
+  defp endpoints_check({{:ok, document}, _took}) do
+    config = Application.get_env(:troupe_plane, :oidc, [])
+
+    mismatched =
+      for {name, key, published} <- [
+            {"token endpoint", :token_endpoint, "token_endpoint"},
+            {"device endpoint", :device_authorization_endpoint, "device_authorization_endpoint"}
+          ],
+          configured = config[key],
+          is_binary(document[published]),
+          configured != document[published],
+          do: "the #{name} is #{configured} but the provider publishes #{document[published]}"
+
+    if mismatched == [] do
+      check_result("Endpoints", true, "What this plane was given matches what the provider publishes.", 0)
+    else
+      check_result("Endpoints", false, Enum.join(mismatched, "; ") <> ".", 0)
+    end
+  end
+
+  defp endpoints_check({{:error, _reason}, _took}) do
+    check_result("Endpoints", false, "Not attempted: discovery did not answer.", 0)
+  end
+
+  @doc false
+  @spec check_result(String.t(), boolean(), String.t(), non_neg_integer()) :: map()
+  def check_result(name, ok, detail, took) do
+    %{name: name, ok: ok, detail: detail, took_ms: took}
+  end
+
+  defp timed(fun) do
+    started = System.monotonic_time(:millisecond)
+    result = fun.()
+    {result, System.monotonic_time(:millisecond) - started}
+  end
+
   defp client_id, do: Application.get_env(:troupe_plane, :oidc, [])[:client_id]
 
   @doc "The audience a plane token carries, as opposed to a pod's worker id."

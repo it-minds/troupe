@@ -26,6 +26,14 @@ defmodule Troupe.Plane.DataCase do
   setup tags do
     pid = Sandbox.start_owner!(Repo, shared: not tags[:async])
     on_exit(fn -> Sandbox.stop_owner(pid) end)
+
+    # Platform settings are remembered for five seconds, which is right in production and
+    # wrong across a rollback: a setting written by one test and rolled back would still be
+    # cached when the next one read it, and the failure would land in whichever test ran
+    # within five seconds rather than in the one that caused it.
+    Troupe.Plane.Settings.invalidate()
+    on_exit(&Troupe.Plane.Settings.invalidate/0)
+
     :ok
   end
 

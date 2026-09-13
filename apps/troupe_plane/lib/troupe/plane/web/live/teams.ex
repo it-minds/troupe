@@ -30,7 +30,11 @@ defmodule Troupe.Plane.Web.Live.Teams do
       %{}
       |> put_integer(:budget_micros, params["budget_micros"])
       |> put_integer(:idle_timeout_seconds, params["idle_timeout_seconds"])
+      |> put_integer(:cache_eviction_days, params["cache_eviction_days"])
       |> put_integer(:erase_after_days, params["erase_after_days"])
+      |> put_string(:budget_period, params["budget_period"])
+      |> put_string(:volume_size, params["volume_size"])
+      |> put_string(:volume_storage_class, params["volume_storage_class"])
       |> Map.put(:members_may_control, params["members_may_control"] == "on")
       |> Map.put(:pins_allowed, params["pins_allowed"] == "on")
 
@@ -108,6 +112,12 @@ defmodule Troupe.Plane.Web.Live.Teams do
     {:noreply, assign(socket, flash_message: error.message)}
   end
 
+  # A field left blank is a field nobody changed, not a field set to nothing. Every one of
+  # these has a meaning at its current value and none of them has a meaning as `""`.
+  defp put_string(attrs, _key, nil), do: attrs
+  defp put_string(attrs, _key, ""), do: attrs
+  defp put_string(attrs, key, value), do: Map.put(attrs, key, value)
+
   defp put_integer(attrs, _key, nil), do: attrs
   defp put_integer(attrs, _key, ""), do: attrs
 
@@ -145,40 +155,163 @@ defmodule Troupe.Plane.Web.Live.Teams do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} page={:teams}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:teams}>
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
 
       <div :for={team <- @teams} class="team">
         <h2>{team.name}</h2>
 
-        <dl class="counts">
-          <dt>budget</dt>
-          <dd>{money(team.budget_micros)} / {team.budget_period}</dd>
-          <dt>idle timeout</dt>
-          <dd>{team.idle_timeout_seconds}s</dd>
-          <dt>erase after</dt>
-          <dd>{team.erase_after_days} days</dd>
-          <dt>pins</dt>
-          <dd>{if team.pins_allowed, do: "allowed", else: "not allowed"}</dd>
-        </dl>
+        <.title_block>
+          <:field label="spent">
+            <.amount micros={team.spent_micros} />
+          </:field>
+          <:field label="reserved">
+            <.amount micros={team.reserved_micros} />
+          </:field>
+          <:field label="against budget">
+            <.budget team={team} />
+          </:field>
+          <:field label="goes dormant after">{team.idle_timeout_seconds}s idle</:field>
+          <:field label="cache kept">{team.cache_eviction_days} days</:field>
+          <:field label="erased after">{team.erase_after_days} days</:field>
+          <:field label="members may">
+            {if team.members_may_control, do: "steer sessions", else: "watch only"}
+          </:field>
+          <:field label="pinning">
+            {if team.pins_allowed, do: "allowed", else: "not allowed"}
+          </:field>
+          <:field label="team volume">
+            {team.volume_size} on {team.volume_storage_class || "the default class"}
+          </:field>
+        </.title_block>
 
-        <form :if={@editing == team.name} phx-submit="save">
+        <form :if={@editing == team.name} id={"edit-#{team.name}"} phx-submit="save">
           <input type="hidden" name="team" value={team.name} />
-          <label>budget (micros) <input name="budget_micros" value={team.budget_micros} /></label>
-          <label>idle timeout (s) <input name="idle_timeout_seconds" value={team.idle_timeout_seconds} /></label>
-          <label>erase after (days) <input name="erase_after_days" value={team.erase_after_days} /></label>
-          <label>
-            <input type="checkbox" name="members_may_control" checked={team.members_may_control} /> members may control
-          </label>
-          <label>
-            <input type="checkbox" name="pins_allowed" checked={team.pins_allowed} /> pins allowed
-          </label>
-          <button type="submit">save</button>
-          <button type="button" phx-click="cancel">cancel</button>
+
+          <div class="setting">
+            <label>
+              budget, in millionths
+              <input type="number" name="budget_micros" value={team.budget_micros} />
+            </label>
+            <p class="field-help">
+              What this team may spend in a period. 0 is no ceiling at all. At the ceiling
+              a new session is refused rather than a running one being stopped.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label>
+              period
+              <select name="budget_period">
+                <option value="monthly" selected={team.budget_period == "monthly"}>monthly</option>
+                <option value="daily" selected={team.budget_period == "daily"}>daily</option>
+              </select>
+            </label>
+            <p class="field-help">When the total goes back to zero.</p>
+          </div>
+
+          <div class="setting">
+            <label>
+              idle timeout, in seconds
+              <input
+                type="number"
+                name="idle_timeout_seconds"
+                value={team.idle_timeout_seconds}
+              />
+            </label>
+            <p class="field-help">
+              How long a session sits with nothing happening before its actors are released
+              and it goes dormant. A dormant session costs nothing and wakes with its
+              history; shorter frees pod memory sooner, longer means fewer wakes.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label>
+              cache kept, in days
+              <input type="number" name="cache_eviction_days" value={team.cache_eviction_days} />
+            </label>
+            <p class="field-help">
+              How long a dormant session keeps the working copy it can wake straight back
+              into. After this it still wakes, from the log, more slowly.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label>
+              erased after, in days
+              <input type="number" name="erase_after_days" value={team.erase_after_days} />
+            </label>
+            <p class="field-help">
+              When a session is destroyed for good. Irreversible, and it happens without
+              anybody pressing anything.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label>
+              team volume size
+              <input name="volume_size" value={team.volume_size} />
+            </label>
+            <p class="field-help">
+              A Kubernetes quantity, such as 10Gi. The shared disk this team's sessions
+              mount. Changing it after the volume exists needs the storage class to support
+              expansion.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label>
+              team volume storage class
+              <input name="volume_storage_class" value={team.volume_storage_class} />
+            </label>
+            <p class="field-help">
+              Empty means the cluster's default class.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label class="toggle">
+              <input type="checkbox" name="members_may_control" checked={team.members_may_control} />
+              members may steer a session, not only watch it
+            </label>
+            <p class="field-help">
+              What team visibility grants. Off, a colleague can follow a session and cannot
+              type into it.
+            </p>
+          </div>
+
+          <div class="setting">
+            <label class="toggle">
+              <input type="checkbox" name="pins_allowed" checked={team.pins_allowed} />
+              members may pin a session against eviction
+            </label>
+            <p class="field-help">
+              A pinned session keeps its cache past the eviction window.
+            </p>
+          </div>
+
+          <div class="setting__actions">
+            <button type="submit">save</button>
+            <button type="button" phx-click="cancel">cancel</button>
+          </div>
         </form>
 
         <button :if={@editing != team.name} phx-click="edit" phx-value-team={team.name}>edit</button>
+
+        <h3>Spend</h3>
+        <p :if={team.spend_by_model == []} class="empty">
+          Nothing charged yet. A model call is recorded when the pod running it reports
+          what the gateway billed.
+        </p>
+        <ul :if={team.spend_by_model != []} class="spend">
+          <li :for={row <- team.spend_by_model}>
+            <code>{row.key || "unknown"}</code>
+            — {money(row.cost_micros)} over {row.calls} call(s),
+            {row.input_tokens} in / {row.output_tokens} out
+          </li>
+        </ul>
 
         <h3>Grants</h3>
         <ul class="grants">
@@ -196,7 +329,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <li :if={team.grants == []} class="none">no profiles granted</li>
         </ul>
 
-        <form :if={@actor.role == :platform_admin} phx-submit="grant">
+        <form id={"grant-#{team.name}"} :if={@actor.role == :platform_admin} phx-submit="grant">
           <input type="hidden" name="team" value={team.name} />
           <select name="profile">
             <option :for={profile <- @profiles} value={profile}>{profile}</option>
@@ -220,7 +353,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <li :if={team.admins == []} class="none">none</li>
         </ul>
 
-        <form :if={@actor.role == :platform_admin} phx-submit="add-admin">
+        <form id={"add-admin-#{team.name}"} :if={@actor.role == :platform_admin} phx-submit="add-admin">
           <input type="hidden" name="team" value={team.name} />
           <input name="subject" placeholder="somebody@example.com" />
           <button type="submit">make an admin</button>
@@ -250,7 +383,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <li :if={Map.get(@principals, team.name, []) == []} class="none">none</li>
         </ul>
 
-        <form phx-submit="create-principal">
+        <form id={"new-principal-#{team.name}"} phx-submit="create-principal">
           <input type="hidden" name="team" value={team.name} />
           <label>name <input name="name" placeholder="nightly-deps" /></label>
           <label>profiles <input name="profiles" placeholder="dev, review" /></label>

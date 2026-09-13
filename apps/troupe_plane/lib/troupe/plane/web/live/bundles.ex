@@ -137,11 +137,11 @@ defmodule Troupe.Plane.Web.Live.Bundles do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} page={:bundles}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:bundles}>
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
 
-      <form phx-change="channel">
+      <form id="bundle-channel" phx-change="channel">
         <label>channel <input name="channel" value={@channel} /></label>
       </form>
 
@@ -277,7 +277,7 @@ defmodule Troupe.Plane.Web.Live.Bundles do
         </tbody>
       </table>
 
-      <form :if={@actor.role == :platform_admin} phx-submit="draft">
+      <form id="bundle-draft" :if={@actor.role == :platform_admin} phx-submit="draft">
         <label>
           new version (JSON)
           <textarea name="content" rows="12">{@draft}</textarea>

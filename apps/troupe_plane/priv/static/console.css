@@ -1,0 +1,572 @@
+/* The Troupe platform console.
+ *
+ * Every value here is a `var(--…)` from `tokens.css`, which is generated from
+ * `docs/design/admin/tokens.json`. There are no hex codes in this file and there must
+ * not be: a colour typed here is a colour outside the system, and the design's rule is
+ * that if something has colour it is telling you the state of a thing.
+ *
+ * Written in the order the design describes: shell, then the status system, then
+ * tables, then panels and title blocks, then forms and controls, then the pieces that
+ * appear on one surface each.
+ */
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { color-scheme: dark light; }
+:root[data-theme="light"] { color-scheme: light; }
+
+body {
+  margin: 0;
+  background: var(--color-bg-stage);
+  color: var(--color-text-primary);
+  font: var(--typography-role-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+a { color: var(--color-text-link); text-underline-offset: 0.18em; }
+a:hover { color: var(--color-text-link-hover); }
+
+:focus-visible {
+  outline: var(--border-focus) solid var(--color-border-focus);
+  outline-offset: 2px;
+}
+
+/* ---------- shell ---------- */
+
+.shell {
+  display: flex;
+  align-items: flex-start;
+  gap: 0;
+  min-height: 100vh;
+}
+
+.rail {
+  flex: 0 0 var(--size-rail-width);
+  align-self: stretch;
+  position: sticky;
+  top: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-5) 0 var(--space-5) 0;
+  background: var(--color-bg-stage);
+  border-right: var(--border-hairline) solid var(--color-border-hairline);
+}
+
+.rail__brand {
+  font: var(--typography-role-panel-title);
+  letter-spacing: 0.01em;
+  padding: 0 var(--space-5) var(--space-4);
+  color: var(--color-text-primary);
+}
+
+.rail__item {
+  display: block;
+  min-height: var(--density-control-height);
+  line-height: var(--density-control-height);
+  padding: 0 var(--space-4);
+  border-left: var(--border-marker) solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  color: var(--color-text-secondary);
+  font: var(--typography-role-ui);
+  text-decoration: none;
+}
+
+.rail__item:hover { background: var(--color-bg-hover); color: var(--color-text-primary); }
+
+.rail__item[aria-current="page"] {
+  background: var(--color-bg-selected);
+  border-left-color: var(--color-border-focus);
+  color: var(--color-text-primary);
+}
+
+.content {
+  flex: 1 1 auto;
+  min-width: 0;
+  max-width: var(--size-content-max);
+  padding: var(--space-6) var(--space-7) var(--space-10);
+  background: var(--color-bg-canvas);
+  min-height: 100vh;
+}
+
+/* Below the medium breakpoint the rail wraps above the content and its items reflow
+   into a row of 170px buttons. This is the checking-in mode: overview, status lists and
+   the session list stay usable; the forms are reachable but are not the point. */
+@media (max-width: 900px) {
+  .shell { display: block; }
+
+  .rail {
+    position: static;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--space-1);
+    padding: var(--space-4);
+    border-right: 0;
+    border-bottom: var(--border-hairline) solid var(--color-border-hairline);
+  }
+
+  .rail__brand { flex: 1 0 100%; padding: 0 0 var(--space-3); }
+  .rail__item { flex: 1 1 170px; min-height: var(--density-control-height-touch); line-height: var(--density-control-height-touch); }
+  .content { max-width: none; padding: var(--space-5) var(--space-4) var(--space-9); }
+}
+
+h1 {
+  font: var(--typography-role-page-title);
+  letter-spacing: -0.012em;
+  margin: 0 0 var(--space-2);
+}
+
+h2 {
+  font: var(--typography-role-section-title);
+  letter-spacing: -0.004em;
+  margin: var(--space-7) 0 var(--space-3);
+}
+
+h3 { font: var(--typography-role-panel-title); margin: var(--space-5) 0 var(--space-2); }
+
+p { margin: 0 0 var(--space-3); max-width: var(--typography-measure-prose); }
+
+.lede { color: var(--color-text-secondary); }
+.muted { color: var(--color-text-muted); }
+.mono { font: var(--typography-role-data); }
+.micro { font: var(--typography-role-micro); letter-spacing: 0.03em; color: var(--color-text-muted); }
+
+/* ---------- the status system ---------- */
+
+.status {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  font: var(--typography-role-micro);
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.status__glyph { font-size: 1.05em; line-height: 1; }
+
+.status--pill {
+  padding: var(--space-half) var(--space-3);
+  border: var(--border-hairline) solid;
+  border-radius: var(--radius-pill);
+}
+
+.status--healthy { color: var(--color-status-healthy-fg); }
+.status--healthy.status--pill { background: var(--color-status-healthy-bg); border-color: var(--color-status-healthy-border); }
+.status--degraded { color: var(--color-status-degraded-fg); }
+.status--degraded.status--pill { background: var(--color-status-degraded-bg); border-color: var(--color-status-degraded-border); }
+.status--broken { color: var(--color-status-broken-fg); }
+.status--broken.status--pill { background: var(--color-status-broken-bg); border-color: var(--color-status-broken-border); }
+.status--pending { color: var(--color-status-pending-fg); }
+.status--pending.status--pill { background: var(--color-status-pending-bg); border-color: var(--color-status-pending-border); }
+.status--waiting { color: var(--color-status-waiting-fg); }
+.status--waiting.status--pill { background: var(--color-status-waiting-bg); border-color: var(--color-status-waiting-border); }
+.status--draining { color: var(--color-status-draining-fg); }
+.status--draining.status--pill { background: var(--color-status-draining-bg); border-color: var(--color-status-draining-border); }
+.status--unknown { color: var(--color-status-unknown-fg); }
+.status--unknown.status--pill { background: var(--color-status-unknown-bg); border-color: var(--color-status-unknown-border); }
+.status--rejected { color: var(--color-status-rejected-fg); }
+.status--rejected.status--pill { background: var(--color-status-rejected-bg); border-color: var(--color-status-rejected-border); }
+.status--missingCredential { color: var(--color-status-missing-credential-fg); }
+.status--missingCredential.status--pill { background: var(--color-status-missing-credential-bg); border-color: var(--color-status-missing-credential-border); }
+.status--dormant { color: var(--color-status-dormant-fg); }
+.status--dormant.status--pill { background: var(--color-status-dormant-bg); border-color: var(--color-status-dormant-border); }
+.status--running { color: var(--color-status-running-fg); }
+.status--running.status--pill { background: var(--color-status-running-bg); border-color: var(--color-status-running-border); }
+.status--disconnected { color: var(--color-status-disconnected-fg); }
+.status--disconnected.status--pill { background: var(--color-status-disconnected-bg); border-color: var(--color-status-disconnected-border); }
+
+/* Draining is the one animated state, because it is a process with an end. */
+.status--draining .status__glyph { animation: pulse 1.6s ease-in-out infinite; }
+
+@keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
+
+/* ---------- tables ---------- */
+
+.scroller {
+  overflow-x: auto;
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+  margin: 0 0 var(--space-6);
+}
+
+table { border-collapse: collapse; width: 100%; min-width: 44rem; }
+
+caption {
+  text-align: left;
+  font: var(--typography-role-panel-title);
+  padding: var(--space-4) var(--space-5) var(--space-3);
+  color: var(--color-text-primary);
+}
+
+thead th {
+  position: sticky;
+  top: 0;
+  text-align: left;
+  font: var(--typography-role-micro);
+  letter-spacing: 0.03em;
+  color: var(--color-table-header-text);
+  background: var(--color-table-header-bg);
+  border-bottom: var(--border-strong) solid var(--color-border-strong);
+  padding: var(--density-cell-padding-y) var(--density-cell-padding-x);
+  white-space: nowrap;
+}
+
+tbody td,
+tbody th {
+  font: var(--typography-role-data);
+  font-variant-numeric: tabular-nums;
+  text-align: left;
+  padding: var(--density-cell-padding-y) var(--density-cell-padding-x);
+  border-bottom: var(--border-hairline) solid var(--color-table-row-border);
+  height: var(--density-row-height);
+  color: var(--color-text-secondary);
+}
+
+/* The first column is the identity of the row. */
+tbody th[scope="row"] { font: var(--typography-role-data-strong); color: var(--color-text-primary); }
+
+tbody tr:hover td,
+tbody tr:hover th { background: var(--color-bg-hover); }
+
+td.num, th.num { text-align: right; }
+td.actions { text-align: right; white-space: nowrap; }
+
+/* A non-healthy row carries a 3px left marker in its own status colour. No zebra
+   striping anywhere: it fights the marker and adds noise at this density. */
+tr.row--marked th[scope="row"] { box-shadow: inset var(--border-marker) 0 0 0 currentColor; }
+tr.row--marked.row--broken th[scope="row"] { color: var(--color-status-broken-fg); }
+tr.row--marked.row--degraded th[scope="row"] { color: var(--color-status-degraded-fg); }
+tr.row--marked.row--pending th[scope="row"] { color: var(--color-status-pending-fg); }
+tr.row--marked.row--waiting th[scope="row"] { color: var(--color-status-waiting-fg); }
+tr.row--marked.row--draining th[scope="row"] { color: var(--color-status-draining-fg); }
+tr.row--marked.row--unknown th[scope="row"] { color: var(--color-status-unknown-fg); }
+tr.row--marked.row--rejected th[scope="row"] { color: var(--color-status-rejected-fg); }
+tr.row--marked.row--missingCredential th[scope="row"] { color: var(--color-status-missing-credential-fg); }
+tr.row--marked.row--dormant th[scope="row"] { color: var(--color-status-dormant-fg); }
+tr.row--marked.row--disconnected th[scope="row"] { color: var(--color-status-disconnected-fg); }
+
+/* A changed cell flashes once and fades. The only decorative timing in the product, and
+   decorative on purpose: it says where to look after you glanced away. */
+td.changed { animation: settle var(--motion-duration-settle) ease-out 1; }
+
+@keyframes settle { from { background: var(--color-table-changed-cell); } to { background: transparent; } }
+
+.empty {
+  padding: var(--space-6) var(--space-5);
+  color: var(--color-text-muted);
+  font: var(--typography-role-body);
+}
+
+/* ---------- panels and title blocks ---------- */
+
+.panel {
+  background: var(--color-bg-panel);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-5);
+  margin: 0 0 var(--space-6);
+}
+
+.panel > :last-child { margin-bottom: 0; }
+
+.title-block {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: var(--border-hairline);
+  background: var(--border-hairline);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  margin: 0 0 var(--space-6);
+}
+
+.title-block__field {
+  background: var(--color-bg-panel);
+  padding: var(--space-4) var(--space-5);
+  min-height: var(--density-title-block-row);
+}
+
+.title-block__label {
+  display: block;
+  font: var(--typography-role-label);
+  color: var(--color-text-muted);
+  margin-bottom: var(--space-1);
+}
+
+.title-block__value {
+  font: var(--typography-role-data);
+  color: var(--color-text-primary);
+  overflow-wrap: anywhere;
+}
+
+/* Stale: the console lost the cluster. Values are dimmed and timestamped, never
+   blanked — stale data with an honest timestamp beats no data. */
+[data-console-offline="true"] .title-block { opacity: 0.72; }
+
+/* ---------- metrics ---------- */
+
+.metrics {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: var(--space-5);
+  margin: 0 0 var(--space-7);
+}
+
+.metric__label { display: block; font: var(--typography-role-label); color: var(--color-text-muted); }
+.metric__value {
+  display: block;
+  font: var(--typography-role-metric);
+  letter-spacing: -0.01em;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-text-primary);
+  margin: var(--space-1) 0;
+}
+.metric__context { display: block; font: var(--typography-role-body); color: var(--color-text-secondary); }
+
+/* ---------- attention list ---------- */
+
+.attention { list-style: none; margin: 0 0 var(--space-6); padding: 0; }
+
+.attention__item {
+  display: grid;
+  grid-template-columns: var(--size-glyph-column) 1fr auto;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-left-width: var(--border-marker);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+  margin-bottom: var(--space-2);
+}
+
+.attention__item--broken { border-left-color: var(--color-status-broken-fg); }
+.attention__item--degraded { border-left-color: var(--color-status-degraded-fg); }
+.attention__item--missingCredential { border-left-color: var(--color-status-missing-credential-fg); }
+.attention__item--rejected { border-left-color: var(--color-status-rejected-fg); }
+.attention__item--pending { border-left-color: var(--color-status-pending-fg); }
+.attention__item--waiting { border-left-color: var(--color-status-waiting-fg); }
+.attention__item--unknown { border-left-color: var(--color-status-unknown-fg); }
+.attention__what { font: var(--typography-role-body); color: var(--color-text-primary); }
+
+/* ---------- banners ---------- */
+
+.banner {
+  display: flex;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-4) var(--space-5);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-left-width: var(--border-marker);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+  font: var(--typography-role-body);
+  margin: 0 0 var(--space-5);
+}
+
+.banner--offline { border-left-color: var(--color-status-disconnected-fg); }
+.banner--breakglass { border-left-color: var(--color-status-degraded-fg); }
+
+/* Driven from `app.js`, because when it matters the server is the unreachable thing. */
+.banner--offline { display: none; }
+[data-console-offline="true"] .banner--offline { display: flex; }
+
+/* ---------- controls ---------- */
+
+button,
+.button {
+  min-height: var(--density-control-height);
+  padding: 0 var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  font: var(--typography-role-ui);
+  cursor: pointer;
+}
+
+button:hover, .button:hover { background: var(--color-bg-hover); }
+button[disabled] { opacity: 0.5; cursor: not-allowed; }
+
+/* Buttons are neutral. Status is the accent system and nothing else is coloured — the
+   one exception is a destructive confirm, which only becomes red at the moment it
+   becomes destructive. */
+button.destructive:not([disabled]) {
+  border-color: var(--color-status-broken-border);
+  background: var(--color-status-broken-bg);
+  color: var(--color-status-broken-fg);
+  min-height: var(--density-control-height-touch);
+}
+
+.actions button { min-height: var(--density-control-height); }
+
+form { display: flex; flex-direction: column; gap: var(--density-field-gap); max-width: 34rem; }
+form.row { flex-direction: row; flex-wrap: wrap; align-items: flex-end; }
+
+label { display: flex; flex-direction: column; gap: var(--space-1); font: var(--typography-role-label); color: var(--color-text-secondary); }
+
+input, select, textarea {
+  min-height: var(--density-control-height);
+  padding: 0 var(--space-3);
+  border: var(--border-hairline) solid var(--color-border-strong);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-raised);
+  color: var(--color-text-primary);
+  font: var(--typography-role-data);
+}
+
+textarea { padding: var(--space-3); font: var(--typography-role-code); min-height: 12rem; }
+
+.field-help { font: var(--typography-role-body); color: var(--color-text-muted); }
+
+/* ---------- code, diffs, budget ---------- */
+
+pre, code {
+  font: var(--typography-role-code);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+}
+
+pre {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  overflow-x: auto;
+  margin: 0 0 var(--space-4);
+  white-space: pre-wrap;
+}
+
+.budget { display: flex; align-items: center; gap: var(--space-4); }
+.budget__track { flex: 1 1 8rem; height: var(--space-2); border-radius: var(--radius-pill); background: var(--color-budget-track-bg); overflow: hidden; }
+.budget__fill { height: 100%; }
+.budget--under .budget__fill { background: var(--color-budget-under); }
+.budget--near .budget__fill { background: var(--color-budget-near); }
+.budget--over .budget__fill { background: var(--color-budget-over); }
+.budget__figures { font: var(--typography-role-data); font-variant-numeric: tabular-nums; color: var(--color-text-secondary); }
+
+/* ---------- motion ---------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { animation-duration: 0.01ms !important; animation-iteration-count: 1 !important; transition-duration: 0.01ms !important; }
+  .status--draining .status__glyph { opacity: 1; }
+}
+
+/* ---------- settings ---------- */
+
+/* A setting is a field, what it does, and what changing it costs — in that order, and
+   never in a tooltip. The consequence line is the reason this is not a table: a table
+   would make the prose a cell and the prose is the point. */
+.setting {
+  max-width: var(--typography-measure-prose);
+  padding: var(--space-4) 0;
+  border-bottom: var(--border-hairline) solid var(--color-border-hairline);
+  gap: var(--space-2);
+}
+
+.setting:last-of-type { border-bottom: 0; }
+.setting__actions { display: flex; gap: var(--space-2); }
+
+.setting--fixed {
+  display: grid;
+  grid-template-columns: minmax(11rem, auto) 1fr;
+  column-gap: var(--space-4);
+  align-items: baseline;
+}
+
+.setting__label { font: var(--typography-role-label); color: var(--color-text-secondary); }
+.setting__value { color: var(--color-text-primary); overflow-wrap: anywhere; }
+.setting--fixed .field-help { grid-column: 1 / -1; margin: var(--space-1) 0 0; }
+
+/* ---------- check lists ---------- */
+
+/* A result with what each check proved and how long it took, rather than a tick. Read
+   after something has gone wrong, so every line says which thing it is about. */
+.checks-block { margin-top: var(--space-6); }
+.checks { list-style: none; margin: var(--space-4) 0; padding: 0; }
+
+.checks li {
+  display: grid;
+  grid-template-columns: minmax(9rem, auto) 1fr auto;
+  gap: var(--space-4);
+  align-items: baseline;
+  padding: var(--space-3) var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-left-width: var(--border-marker);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-panel);
+  margin-bottom: var(--space-2);
+}
+
+.checks__ok { border-left-color: var(--color-status-healthy-fg); }
+.checks__bad { border-left-color: var(--color-status-broken-fg); }
+.checks__name { font: var(--typography-role-data-strong); color: var(--color-text-primary); }
+.checks__detail { color: var(--color-text-secondary); }
+.checks__took { white-space: nowrap; }
+
+@media (max-width: 900px) {
+  .checks li,
+  .setting--fixed { grid-template-columns: 1fr; }
+}
+
+/* ---------- diffs ---------- */
+
+/* One line per field that moved, with the path and both values. Used identically for a
+   profile's changes, a bundle version and an audit entry — never a coloured blob that
+   says something changed without saying what. */
+.diff { list-style: none; margin: var(--space-4) 0; padding: 0; }
+
+.diff__row {
+  display: grid;
+  grid-template-columns: minmax(12rem, auto) 1fr 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  background: var(--color-diff-gutter-bg);
+  margin-bottom: var(--space-1);
+  overflow-wrap: anywhere;
+}
+
+.diff__field { color: var(--color-diff-hunk-header); }
+
+.diff__from {
+  color: var(--color-diff-removed-text);
+  background: var(--color-diff-removed-bg);
+  box-shadow: inset var(--border-marker) 0 0 0 var(--color-diff-removed-marker);
+  padding: 0 var(--space-2);
+}
+
+.diff__to {
+  color: var(--color-diff-added-text);
+  background: var(--color-diff-added-bg);
+  box-shadow: inset var(--border-marker) 0 0 0 var(--color-diff-added-marker);
+  padding: 0 var(--space-2);
+}
+
+/* ---------- one MCP server's row in the profile editor ---------- */
+
+.server {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: var(--space-3);
+  align-items: end;
+  padding: var(--space-4);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--color-bg-raised);
+  margin-bottom: var(--space-3);
+  max-width: none;
+}
+
+.server .setting__actions,
+.server .field-help { grid-column: 1 / -1; }
+
+/* A checkbox reads left to right; every other label reads top to bottom. */
+.toggle { flex-direction: row; align-items: center; gap: var(--space-3); }
+.toggle input { min-height: auto; }
+
+@media (max-width: 900px) {
+  .diff__row { grid-template-columns: 1fr; }
+}

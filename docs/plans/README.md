@@ -3,7 +3,7 @@
 What comes after the small release, written before it was built. The first three are
 built as stage 5 — `ARCHITECTURE.md` §14 describes what landed and `REPORT.md` proves
 it — and stay here as the record of what was intended and why. The fourth is the GUI
-repository's `spec.md`. Each plan says what
+repository's `spec.md`; the fifth is not built. Each plan says what
 it brings, what it takes, what is already in place, what the code is missing today
 (with file and line), the design, the order of work, and the done items that prove it.
 `spec.md` and `ARCHITECTURE.md` remain the authority on invariants; nothing here weakens
@@ -15,13 +15,17 @@ them, and where one asks to revise a decision it says so and why.
 | [Remote triggers](remote-triggers.md) | Sessions nobody starts by hand, run by Hatchet through the plane API as service principals, reviewed in HQ. | the bundle's `agent` list for what a trigger runs; nothing else |
 | [The A2A facade](a2a-facade.md) | Other agents delegate tasks to a profile; a task is a session, an artifact is a published file. | service principals, `prompt` through activation and status columns from triggers; skills from the first plan for the agent card |
 | [Local and private sessions](../../../troupe-gui/docs/plans/local-and-private-sessions.md) (in the GUI repository) | The GUI shows local sessions beside team sessions, and a person's private session is sealed to object storage under their own key and follows them to another device. | independent of the other three; shares the sealer with workers |
+| [Stage 6](stage-6.md) | Token accounting as a fold over the log (built), entitlements below the profile, credentials that belong to a person, trigger revisions, and the cluster suite that proves the last three stages. | all of stage 5 |
+| [The admin surface](admin-surface.md) (built) | A fourth rendering of the admin context, for a model; platform settings an operator can change without a deploy; and a console that configures the whole of a profile. | the admin context and its parity test |
 
 The order above is the order to build them. Skills first because the others describe a
 profile by what its bundle carries. Triggers second because the facade is its second
 caller. Private sessions can proceed in parallel with any of them; its first step, the
 daemon's loopback WebSocket, is a day's work and unblocks the GUI for local use.
+Stage 6 comes after all of them, and reads a comparison with `different-ai/openwork` for
+the five places where they had something we did not.
 
-## Threads that run through all four
+## Threads that run through them
 
 * **A caller is a caller.** Triggers, the facade and the GUI are clients of `/rpc` and
   the worker socket, with the scopes their principal has, and no private door.

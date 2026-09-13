@@ -110,11 +110,11 @@ defmodule Troupe.Plane.Web.Live.Triggers do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} page={:triggers}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:triggers}>
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
 
-      <form :if={length(@teams) > 1} phx-change="pick">
+      <form id="trigger-team" :if={length(@teams) > 1} phx-change="pick">
         <label>
           team
           <select name="team">

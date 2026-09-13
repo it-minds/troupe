@@ -20,8 +20,15 @@ defmodule Troupe.Plane.Web.Live.Auth do
   @doc false
   def on_mount(:admin, _params, session, socket) do
     case actor(session) do
-      nil -> {:halt, redirect(socket, to: "/admin/denied")}
-      actor -> {:cont, socket |> assign(:actor, actor) |> assign(:subject, actor.subject)}
+      nil ->
+        {:halt, redirect(socket, to: "/admin/denied")}
+
+      actor ->
+        {:cont,
+         socket
+         |> assign(:actor, actor)
+         |> assign(:subject, actor.subject)
+         |> assign(:breakglass, actor.breakglass)}
     end
   end
 
@@ -33,5 +40,9 @@ defmodule Troupe.Plane.Web.Live.Auth do
     end
   end
 
-  defp actor(session), do: Admin.actor_for_subject(session["subject"])
+  # One call, because the console reaches the plane through `Admin` and nowhere else —
+  # `mix troupe.boundaries` enforces it, and the reason is that a LiveView with a private
+  # path into the plane is a path no other client has. Whether the session is a
+  # break-glass one is the plane's decision too, and travels on the actor.
+  defp actor(session), do: Admin.actor_for_session(session)
 end

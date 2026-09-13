@@ -23,7 +23,9 @@ defmodule Troupe.Plane.Web.Live.Workers do
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
     if connected?(socket), do: :timer.send_interval(@refresh_ms, :refresh)
-    {:ok, socket |> assign(selected: params["profile"], detail: nil, flash_message: nil) |> load()}
+
+    {:ok,
+     socket |> assign(selected: params["profile"], detail: nil, flash_message: nil) |> load()}
   end
 
   @impl Phoenix.LiveView
@@ -38,7 +40,10 @@ defmodule Troupe.Plane.Web.Live.Workers do
   def handle_event("drain", %{"worker" => worker_id}, socket) do
     case Admin.pod_drain(socket.assigns.actor, worker_id) do
       {:ok, report} ->
-        {:noreply, socket |> assign(flash_message: "drained #{report.pod}: #{report.drained} session(s)") |> load()}
+        {:noreply,
+         socket
+         |> assign(flash_message: "drained #{report.pod}: #{report.drained} session(s)")
+         |> load()}
 
       {:error, error} ->
         {:noreply, assign(socket, flash_message: "could not drain: #{error.message}")}
@@ -66,7 +71,7 @@ defmodule Troupe.Plane.Web.Live.Workers do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} page={:workers}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:workers}>
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
 
@@ -155,7 +160,9 @@ defmodule Troupe.Plane.Web.Live.Workers do
   # A violation is a tuple from the policy checker; the panel is where it becomes a
   # sentence. Kept here rather than in the checker so the checker stays a pure function
   # over documents.
-  defp describe({reason, actual, allowed}), do: "#{humanise(reason)}: #{inspect(actual)} (allowed: #{inspect(allowed)})"
+  defp describe({reason, actual, allowed}),
+    do: "#{humanise(reason)}: #{inspect(actual)} (allowed: #{inspect(allowed)})"
+
   defp describe({reason, actual}), do: "#{humanise(reason)}: #{inspect(actual)}"
   defp describe(other), do: inspect(other)
 

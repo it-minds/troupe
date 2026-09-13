@@ -1,0 +1,50 @@
+{
+  "broken": {
+    "glyph": "✕",
+    "word": "Broken"
+  },
+  "degraded": {
+    "glyph": "◐",
+    "word": "Degraded"
+  },
+  "disconnected": {
+    "glyph": "⚡",
+    "word": "Console offline"
+  },
+  "dormant": {
+    "glyph": "○",
+    "word": "Asleep"
+  },
+  "draining": {
+    "glyph": "↓",
+    "word": "Draining"
+  },
+  "healthy": {
+    "glyph": "●",
+    "word": "Healthy"
+  },
+  "missingCredential": {
+    "glyph": "∅",
+    "word": "Credential missing"
+  },
+  "pending": {
+    "glyph": "◇",
+    "word": "Pending"
+  },
+  "rejected": {
+    "glyph": "⊘",
+    "word": "Rejected by policy"
+  },
+  "running": {
+    "glyph": "▸",
+    "word": "Running"
+  },
+  "unknown": {
+    "glyph": "?",
+    "word": "Unknown"
+  },
+  "waiting": {
+    "glyph": "⏸",
+    "word": "Waiting"
+  }
+}

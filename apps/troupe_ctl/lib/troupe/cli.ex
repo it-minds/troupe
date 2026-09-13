@@ -88,6 +88,12 @@ defmodule Troupe.CLI do
     0
   end
 
+  # Not `troupe admin mcp`: `admin mcp check` is already an admin method, and this is not
+  # a method at all — it is the transport that carries every one of them.
+  def dispatch(%Options{command: :mcp, plane: plane}, _opts) do
+    Troupe.Ctl.MCP.bridge([], plane: plane)
+  end
+
   def dispatch(%Options{command: :daemon} = options, _opts) do
     case daemon_module() do
       nil ->
@@ -138,7 +144,9 @@ defmodule Troupe.CLI do
     end
   end
 
-  def dispatch(%Options{command: :admin, args: args}, _opts), do: Admin.safe(args)
+  def dispatch(%Options{command: :admin, args: args, plane: plane}, _opts) do
+    Admin.safe(args, plane: plane)
+  end
 
   def dispatch(%Options{command: :logout, plane: nil}, _opts) do
     case Credentials.default() do
@@ -643,6 +651,7 @@ defmodule Troupe.CLI.Options do
     %{base | command: :verify, session_id: session_id}
   end
   defp with_command(base, ["daemon"]), do: %{base | command: :daemon}
+  defp with_command(base, ["mcp"]), do: %{base | command: :mcp}
   defp with_command(_base, ["login"]), do: {:error, "login needs a plane: troupe login https://troupe.example.com"}
 
   defp with_command(base, ["login", plane | _]), do: %{base | command: :login, plane: plane}
@@ -670,6 +679,7 @@ defmodule Troupe.CLI.Options do
       troupe login PLANE_URL          log in to a remote plane
       troupe logout [PLANE_URL]       forget a plane's credentials
       troupe admin ...                administer a plane (`troupe admin` for the list)
+      troupe mcp                      serve the same admin tools to a model, over stdio
       troupe daemon                   run the daemon in the foreground
       troupe --version
 

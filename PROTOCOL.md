@@ -202,7 +202,7 @@ Durable:
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
-| `llm_response` | `message`, `usage`, `stop_reason` |
+| `llm_response` | `message`, `usage`, `stop_reason`, `model`, `gateway` |
 | `llm_error` | `reason` |
 | `tool_call_started` | `call_id`, `name`, `args` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
@@ -225,6 +225,15 @@ Durable:
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
+
+`llm_response.gateway` is what the gateway in front of the provider said about the call
+it billed: `{"request_id": "…", "cost_micros": 18400}`. Both keys are optional and the
+whole object is absent where the gateway said nothing, which is a fact a reader may act
+on — tokens with no cost — rather than a cost of zero. A client that shows spend should
+treat an absent `gateway` as "not known" and a `cost_micros` of `0` as "free".
+
+Neither key is present in events written before this release. A reader folding an old
+log gets the tokens and no cost, which is what was true.
 
 ### Payloads are semantic
 
@@ -403,6 +412,38 @@ effect.
 `range` is an inclusive byte range and is optional; omit it for the whole blob.
 Servers may cap a single response and will say so with a shorter `range` than asked.
 
+#### `fs.list`
+```json
+{"session_id": "s-9f", "path": "lib"}
+```
+→ `{"path": "lib", "entries": [{"path", "name", "kind", "size"}]}`
+
+`path` is relative to the session's workspace and defaults to its root. `kind` is
+`file`, `directory`, or `other`. Paths are resolved through the session's **mount
+table**, the same one the agent's own file tools go through, so a client sees exactly
+what the agent may see and a path that climbs out of a mount is refused with
+`forbidden`.
+
+#### `fs.read`
+```json
+{"session_id": "s-9f", "path": "lib/a.ex"}
+```
+→ `{"path", "content", "size", "hash"}`
+
+`hash` is the `sha256:…` of the bytes, the same one `fs_changed` carries, so a client
+can check that the file it read is the file the event announced. Reading a directory,
+or a file larger than the server's cap, is `invalid_params`.
+
+#### `fs.upload`
+```json
+{"command_id": "c-9", "session_id": "s-9f", "path": "notes.md", "content": "…"}
+```
+→ `{"path", "size", "hash"}`
+
+Needs `control`: putting a file into a workspace is steering the session. The write is
+recorded as an `fs_changed` event whose actor is the client that uploaded it, not the
+session.
+
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
 ```json
@@ -467,8 +508,8 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `workspace.recent`, `workspace.search`, `worktree.list` |
-| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `tools.register` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set` |
+| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `watch.set` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
@@ -617,10 +658,10 @@ log, so it cannot end up there by accident.
 *(Stage 3.)*
 
 Administration is a separate surface from a session: it runs against the **plane**, and
-every method goes through one context that the panel and `troupe admin` also go through.
-There is no admin method that returns session content — administration is about profiles,
-teams, budgets and lifecycle state, and reading what a session said requires being on its
-ACL.
+every method goes through one context that the console, `troupe admin` and the admin MCP
+server also go through. There is no admin method that returns session content —
+administration is about profiles, teams, budgets and lifecycle state, and reading what a
+session said requires being on its ACL.
 
 Two roles. `platform_admin` comes from an identity-provider group named in the plane's
 configuration; `team_admin` is assigned per team by a platform admin and is scoped to
@@ -645,7 +686,12 @@ that team.
 | `admin.bundle.validate` | platform | checks a document the way publishing will, without publishing; `{ok: true, summary, hash}` or `invalid_params` with `data.errors` |
 | `admin.bundle.publish` / `admin.bundle.retire` | platform | publish a version — refused as `invalid_params` with `data.errors`, one sentence per problem, when the document is malformed or names an MCP host outside `allowedEgress` — or retire one |
 | `admin.mcp.check` | either | `{host, allowed}`: whether the cluster policy lets a pod reach an MCP server's host |
-| `admin.audit.list` | either | who changed what, with diffs |
+| `admin.audit.list` | either | who changed what, with diffs, each change keyed by its path (`spec.llm.model`) |
+| `admin.provisioning.mode` | either | `direct` or `gitops`: whether a profile write changes the cluster or commits for review |
+| `admin.settings.list` | either | every platform setting with its value, where that value came from (`stored`, `deployed`, `unset`), what changing it does and when it takes effect; a secret is reported as set and never returned |
+| `admin.setting.put` | platform | `{key, value}` — parsed against the setting's declared type and refused if it does not fit, or if the deployment owns it |
+| `admin.setting.reset` | platform | `{key}` — drops the stored value, so the setting goes back to what the plane was deployed with |
+| `admin.identity.check` | either | four named checks with what each proved and how long it took: provider discovery, its signing keys, the endpoints this plane was given, and who actually carries the platform admin group. `{group}` checks a candidate group *before* it is saved |
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
 | `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
 | `admin.principal.rotate` / `admin.principal.disable` | either | `{subject}`: a new secret shown once, or the end of the credential; a disabled principal is `unauthenticated` at its next call |
@@ -657,6 +703,41 @@ that team.
 
 Membership is never editable: it comes from the identity provider, and a method to change
 it would be a second source of truth for who is in a team.
+
+### The same methods as MCP tools
+
+    POST /mcp
+
+Streamable HTTP, one JSON-RPC message per request, protocol revision `2025-06-18`, and the
+same `Authorization: Bearer` token as `/rpc`. Stateless: no session id is issued and none
+is required, so any plane replica can answer any request. A notification is answered with
+`202` and no body; `GET` and `DELETE` are `405`, because this server neither streams nor
+has a session to end.
+
+`initialize`, `ping`, `tools/list` and `tools/call` are implemented; `resources/list` and
+`prompts/list` answer with empty lists although neither capability is offered, because
+several clients ask regardless.
+
+A tool's name is its method with the dots replaced by underscores — `admin.profile.put`
+becomes `admin_profile_put` — mechanically and reversibly, so a call in a model's
+transcript can be found in the audit log, where it is written the other way. Every tool
+carries a JSON Schema built from the method's declared arguments, with
+`additionalProperties: false` so a misspelled field is an error rather than a change that
+silently does nothing, and MCP annotations that say whether it reads, writes or destroys.
+
+A **destructive** tool takes a `confirm` argument that must repeat the identifier the
+method names — `admin_session_erase` wants `session_id` and `confirm` to be the same
+string — and the call is refused if it does not match. A refused or failed call comes back
+as `isError: true` with a sentence, not as a JSON-RPC error, so the model can read it and
+try something else.
+
+The tool list is *not* filtered by role: a team admin sees every tool and is refused if
+they call one they may not, with the role that was wanted named in the refusal.
+
+`troupe mcp` bridges this endpoint over stdio for a client that cannot send a bearer
+header, minting and renewing the plane token from the credentials `troupe login` stored:
+
+    claude mcp add troupe -- troupe mcp
 
 ### Triggers and principals on the harness side
 

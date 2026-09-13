@@ -332,7 +332,7 @@ Namespace              troupe-w-dev
 ServiceAccount         troupe-worker            automount disabled
 StatefulSet            troupe-w-dev             OnDelete, one PVC per pod
 Service (headless)     troupe-w-dev
-Service + Ingress      dev-0, dev-1, …          <ordinal>.<profile>.workers.<domain>
+Service + Ingress      dev-0, dev-1, …          <ordinal>-<profile>.workers.<domain>
 NetworkPolicy          troupe-w-dev             default-deny, then exactly what is needed
 PodDisruptionBudget    troupe-w-dev
 PersistentVolumeClaim  team-<name>, org         one per granted team volume
@@ -385,9 +385,20 @@ the projected ServiceAccount token mounted into the pod. The plane validates it 
 what it is. Nothing the worker says about itself is trusted for that.
 
 Over the channel: heartbeats, the session *index* (ids, epochs, sequence numbers, head
-hashes, byte counts), usage records, and pushes the other way — activate, dormant,
+hashes, byte counts), usage batches, and pushes the other way — activate, dormant,
 fence, drain, erase, JWKS rotation, ACL changes. Every push is idempotent, because a
 reconnect retries without knowing what landed.
+
+`usage.batch` is the one call whose *answer* is the contract. A pod sends what a
+session's model calls cost — one row per call, keyed by the gateway's own request id —
+and is told back `usage_seq`, the highest log sequence the ledger has now recorded for
+that session. The pod deletes what it was holding up to that number and, at the next
+activation, folds its log forward from it. The column moves monotonically
+(`greatest(current, offered)`), so a retry of an older batch cannot walk it backwards
+and ask a pod to send what is already charged; and it is deliberately *not* fenced on
+the epoch, because a pod that has since been fenced still made the calls it is
+reporting, and refusing them would lose money rather than protect anything. §15 is what
+this is for.
 
 Config bundles are fetched, not pushed. `config.updated` names a channel, a version and
 a hash; the worker asks `bundle.fetch {hash}` (or `{channel, version}`) for the document
@@ -586,20 +597,51 @@ for a full replay, which produces exactly the same fold.
 
 ---
 
-## 11. The admin panel
+## 11. The admin surface
 
-### 11.1 One context, three surfaces
+### 11.1 One context, four surfaces
 
-Every administrative action goes through `Troupe.Plane.Admin`, and the panel, the admin
-JSON-RPC and `troupe admin` are three renderings of that one context. This is the
-Forbidden list's "any client, including our own TUI and panel, using anything but public
-APIs" made structural: a LiveView that reached into `Fleet` or `Identity` directly would
-be a private path into the plane, and a panel with a button the CLI cannot press would be
-a feature only one kind of operator has.
+Every administrative action goes through `Troupe.Plane.Admin`, and the console, the admin
+JSON-RPC, `troupe admin` and the admin MCP server are four renderings of that one context.
+This is the Forbidden list's "any client, including our own TUI and panel, using anything
+but public APIs" made structural: a LiveView that reached into `Fleet` or `Identity`
+directly would be a private path into the plane, and a console with a button the CLI
+cannot press would be a feature only one kind of operator has.
 
-A test enumerates the context and asserts every function has both an API method and a CLI
-command; the boundary checker asserts LiveViews call nothing else. Parity is checked
-rather than remembered.
+A test enumerates the context and asserts every function has an API method, a CLI command
+and an MCP tool; the boundary checker asserts LiveViews call nothing else. Parity is
+checked rather than remembered.
+
+**The fourth surface is for a model.** `POST /mcp` is the same table of methods offered as
+MCP tools, authenticated by the same bearer token as `/rpc` and dispatched through the same
+context — so a model administers exactly what the person or principal whose token it holds
+administers, and a refusal names the role it wanted. `troupe mcp` is a stdio bridge over
+that endpoint, so a model can be wired to a plane without a token being pasted into a
+configuration file:
+
+    claude mcp add troupe -- troupe mcp
+
+Two things the MCP surface adds that the others do not need. The method table carries a
+**summary and a typed argument list** for every method, because a model has the tool
+description and nothing else — the description is not documentation about the interface,
+it is the interface, and the parity test fails a method that arrives without one. And a
+**destructive tool takes a `confirm` argument** that must repeat the identifier exactly:
+the erase dialog's rule, which the design gives as the model for everything irreversible,
+applied to a caller with no dialog to read.
+
+### 11.1a What the console configures
+
+The console edits the whole of a `WorkerProfile` — scale, model endpoint and credential
+reference, egress, per-pod disk, requests and limits, MCP servers, bundle channel — rather
+than the four fields it started with. A field that names something outside Troupe carries
+what it is for underneath it, in body text; a blank field is *absent* from the resource
+rather than empty in it, because `storage: {size: ""}` overrides a CRD default with
+nonsense; and nothing is applied until the diff has been read, computed by the same
+function that writes the audit record.
+
+There is one apply control rather than the design's two named buttons, because which of
+the two happens is not the operator's choice — it is `provisioning_mode`. The button is
+named for what will actually happen and the consequence is written above it.
 
 ### 11.2 Two roles, and what neither can do
 
@@ -636,6 +678,28 @@ rather than as a pod that will not start for reasons nobody can see. It is repor
 not refused: the reference may be right and the secret on its way, and a profile that
 would not reconcile until every secret existed could not be created before them.
 
+### 11.4a Platform settings
+
+Some of what a plane runs on is a *deployment's* decision and some is an *operator's*, and
+both used to be environment variables. `Troupe.Plane.Settings` is a registry of the second
+kind: a stored row **overrides** the deployment and never replaces it, so a setting with no
+row reads whatever the plane was deployed with and resetting one deletes the row rather
+than writing today's default into it. The deployment stays the floor, and the worst a bad
+setting can do is be reset.
+
+What made this worth building is the failure it repairs. A plane whose `platform_admin_group`
+names a group nobody is in has no administrator, no console, and no way back except a Helm
+change and a rollout — so the group that decides who may administer is changeable from
+behind the break-glass door, and the field will not save until a check has passed *for the
+value in the field*: how many people would administer this platform afterwards, and whether
+you are one of them.
+
+Settings that could shut the console — the issuer, the client id, the audience — are listed
+with their values and are not editable, with the reason written next to them. Secrets are
+listed and never shown; what is reported is whether one is set. Values are read through a
+five-second cache, so a change is immediate on the replica that made it and within five
+seconds everywhere else.
+
 ### 11.5 Audit
 
 Every administrative change writes a row with the actor and a diff over the fields that
@@ -643,7 +707,10 @@ moved. Not a log line — a row, queryable, because the question an audit answer
 months later by somebody who was not there. A refused change writes nothing.
 
 The diff is computed by the same function the profile editor renders its preview with, so
-what the form promised and what the trail says cannot differ.
+what the form promised and what the trail says cannot differ. It walks nested maps and
+keys each change by its path — `spec.llm.model`, not `spec` — because a profile's whole
+configuration lives under one field, and a diff that stopped at the top would report
+changing a model name as one twenty-line object becoming another.
 
 ---
 
@@ -813,3 +880,88 @@ session and never will; `tasks/get` without history is answered from the row alo
 And there are no push notifications yet: they would be the facade's first outbound call
 through an egress policy that names model endpoints and git hosts, and when they come
 they will be the facade's, to an allowlist, never the plane's.
+
+---
+
+## 15. What a session cost
+
+A team can be told what it spent, by session, by model and by person. The mechanism is
+one sentence long: **cost is a fold over the log, not a second thing to write down.**
+
+### 15.1 The event carries it
+
+Every model call already left an `llm_response` in its session's log. That event now
+carries three more things: the `model` the turn asked for, and, where a gateway sat in
+front of the provider, that gateway's `request_id` and `cost_micros`. Both come from
+response headers — `x-litellm-call-id` and `x-litellm-response-cost` — read once in the
+shared HTTP path and never from the body, because a body shape differs per provider and
+a header does not.
+
+**Troupe has no price table.** The gateway has already priced the call by the time it
+answers, and the plane already runs a nightly reconciliation whose whole purpose is to
+catch the ledger disagreeing with the gateway. A price of our own would only ever
+reconcile against itself. Where a gateway says nothing, the tokens are recorded with a
+cost of zero and a request id synthesised as `seq:<session>:<n>` — a shape no gateway
+would mint, which is what lets reconciliation count it as *unmetered* rather than as a
+call the gateway never made.
+
+Adding keys to an event is what the compatibility rule permits, so an old log still
+folds; what it folds to is tokens and no cost, which is what was true.
+
+### 15.2 The pod holds it in a table it may lose
+
+`Troupe.Session.Log` hands every durable event to `Troupe.Session.Usage.observe/2`,
+which is a no-op for all but one type and for every deployment with no sink configured
+— which is every laptop, because there is no ledger to report to. On a pod the sink is
+`Troupe.Worker.Usage`: a named public ETS set keyed by `{session_id, seq}`, written with
+`:ets.insert/2` from the log's own process, drained on an interval into one
+`usage.batch` per session.
+
+Three properties, in the order they matter:
+
+* **No mailbox on the turn path.** The writer never sends this process a message, so a
+  slow flush, an unreachable plane, or a collector that has just crashed and not yet
+  restarted cost a turn exactly nothing.
+* **Losing the table costs a fold.** Everything in it came from the log and can come
+  from the log again. The plane's `usage_seq` says where to start;
+  `Log.replay_from/2` and `Usage.records/2` do the rest, and the ledger's uniqueness
+  turns any overlap into duplicates rather than charges. A cap of twenty thousand rows
+  drops the newest and says so, for the same reason: dropping is recoverable, growing
+  is not.
+* **The live path and the recovery path are one function.** `Usage.record/2` folds a
+  single event as it arrives; `Usage.records/2` folds a list on catch-up. Two callers,
+  one definition of what a row is.
+
+Keying on the log's sequence rather than a counter of the collector's own is what makes
+the watermark free: there is already exactly one monotonic number per session, and it is
+the one the index reports.
+
+### 15.3 The plane records it once
+
+`TeamBudget.record_batch/2` inserts a batch inside the team's own actor — one round trip
+rather than five hundred, and still serialised per team — and reports how many were new,
+how many were already there, and the highest sequence now accounted for. A duplicate
+counts towards that sequence: it is a success, and a watermark that refused to move past
+one would ask the pod to send it forever. A record that fails to insert stops the
+watermark where it is, so the number never jumps a gap.
+
+The plane names the owner, not the pod. What a worker sends is the call and its cost;
+whose session it was comes from the row, which is the same rule enrolment follows. A
+charge dated in the future is dated now, because a pod with a fast clock would otherwise
+write charges into a window no report asks about.
+
+`Troupe.Plane.Ledger.Cache` is an ETS table owned by a process, in the same shape as the
+facade's token cache: sums and breakdowns remembered for a minute, invalidated by
+`TeamBudget` — which is already one actor per team, so the invalidation is serialised
+without a lock. Losing it costs a query.
+
+### 15.4 What this does not do
+
+There is no rollup pipeline. `usage_records` with its `(team_id, occurred_at)` index and
+this cache answer every question the panel asks at the small release's volume, and a
+fold-into-buckets job for a table with fifty thousand rows in it is work that looks like
+progress. What the next stage owes is the retention decision, not the pipeline.
+
+And `session.status`'s `cost_micros` now moves, because the summary projection folds the
+same field — so a review queue shows a cost without anyone reading a log, which is what
+§14.2 always claimed and could not yet do.

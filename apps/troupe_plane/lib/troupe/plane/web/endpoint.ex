@@ -26,27 +26,41 @@ defmodule Troupe.Plane.Web.Endpoint do
   # a click — and the largest of those is a profile editor's YAML; a frame bigger than
   # this is not the panel, and without a ceiling the socket would buffer it in full
   # before finding that out.
-  socket "/live", Phoenix.LiveView.Socket,
+  socket("/live", Phoenix.LiveView.Socket,
     websocket: [connect_info: [session: @session_options], max_frame_size: 1_048_576]
+  )
 
-  plug Plug.Static, at: "/admin/static", from: :troupe_plane, gzip: false, only: ~w(app.css)
+  # `tokens.css` is generated from the design tokens and `app.js` is vendored from the
+  # Phoenix dependencies; both by a mix task, both committed. The allowlist named only
+  # `app.css` — a file that has never existed — while the document asked for `app.js`,
+  # so the panel served a 404 for its own script and every LiveView was inert.
+  plug(Plug.Static,
+    at: "/admin/static",
+    from: :troupe_plane,
+    gzip: false,
+    only: ~w(app.js tokens.css console.css),
+    # Generated assets change only when the release does, and the document names them
+    # with the release's version, so a year is safe and a reload is not a re-download.
+    cache_control_for_etags: "public, max-age=31536000, immutable"
+  )
 
-  plug Plug.RequestId
-  plug Plug.Telemetry, event_prefix: [:troupe, :plane, :endpoint]
+  plug(Plug.RequestId)
+  plug(Plug.Telemetry, event_prefix: [:troupe, :plane, :endpoint])
 
-  plug Plug.Parsers,
+  plug(Plug.Parsers,
     parsers: [:urlencoded, :multipart, :json],
     pass: ["*/*"],
     json_decoder: Phoenix.json_library()
+  )
 
-  plug Plug.MethodOverride
-  plug Plug.Head
-  plug Plug.Session, @session_options
+  plug(Plug.MethodOverride)
+  plug(Plug.Head)
+  plug(Plug.Session, @session_options)
 
   # One port, two surfaces, split by path rather than chained: chaining them would mean
   # every panel request that the panel answered still ran through the API's router, which
   # would then try to 404 a response that had already been sent.
-  plug :route
+  plug(:route)
 
   # The panel is all under `/admin`; everything else is the API.
   defp route(%Plug.Conn{path_info: ["admin" | _rest]} = conn, _opts) do

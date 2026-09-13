@@ -41,7 +41,10 @@ defmodule Troupe.Plane.Web.Live.Sessions do
       {:ok, result} ->
         {:noreply,
          socket
-         |> assign(flash_message: "erased #{id}; the tombstone keeps #{result.head_hash}", confirming: nil)
+         |> assign(
+           flash_message: "erased #{id}; the tombstone keeps #{result.head_hash}",
+           confirming: nil
+         )
          |> load()}
 
       {:error, error} ->
@@ -62,11 +65,11 @@ defmodule Troupe.Plane.Web.Live.Sessions do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} page={:sessions}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:sessions}>
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
 
-      <form phx-change="filter">
+      <form id="session-filter" phx-change="filter">
         <label>
           state
           <select name="state">

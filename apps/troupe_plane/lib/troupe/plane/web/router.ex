@@ -6,6 +6,7 @@ defmodule Troupe.Plane.Web.Router do
       GET  /.well-known/troupe         where to log in, and what to call this plane
       GET  /.well-known/jwks.json      the keys workers verify session tokens against
       POST /rpc                        the harness JSON-RPC (§ Plane API)
+      POST /mcp                        the same admin methods, as MCP tools
       *    /scim/v2/...                users and groups, pushed by the identity provider
 
   Everything a person's client does goes through `/rpc`, and everything `/rpc` does goes
@@ -102,6 +103,32 @@ defmodule Troupe.Plane.Web.Router do
         )
     end
   end
+
+  # The admin surface as MCP tools. The same token as `/rpc`, resolved to the same actor,
+  # dispatched through the same table — an operator's model gets exactly what an operator
+  # gets, and a principal's token administers exactly what that principal may.
+  #
+  # Streamable HTTP with no session: a notification is answered with 202 and no body,
+  # which is what the transport asks for, and everything else with one JSON object.
+  post "/mcp" do
+    case authenticate(conn) do
+      {:ok, user} ->
+        case Admin.MCP.handle(conn.body_params, Admin.actor_for(user)) do
+          {:reply, message} -> send_json(conn, 200, message)
+          :noreply -> send_resp(conn, 202, "")
+        end
+
+      {:error, error} ->
+        conn
+        |> put_resp_header("www-authenticate", ~s(Bearer realm="troupe-plane"))
+        |> send_json(401, %{"error" => "unauthenticated", "reason" => error.message})
+    end
+  end
+
+  # No server-initiated stream and no session to end. Both are optional in the transport,
+  # and answering them with a 405 is how a client is told so.
+  get("/mcp", do: send_json(conn, 405, %{"error" => "this server does not stream"}))
+  delete("/mcp", do: send_json(conn, 405, %{"error" => "this server has no sessions to end"}))
 
   # SCIM is pushed by the identity provider with its own bearer token, which is a
   # different credential from a person's: this endpoint never sees a user token and a

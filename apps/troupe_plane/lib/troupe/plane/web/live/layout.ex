@@ -1,44 +1,89 @@
 defmodule Troupe.Plane.Web.Live.Layout do
   @moduledoc """
-  The chrome every panel page sits in.
+  The chrome every console page sits in: a nav rail, a content column, and the two
+  banners that are allowed to interrupt.
 
-  Plain HTML and one stylesheet. A panel is a tool an operator opens when something is
-  wrong, and the thing that matters then is that the page renders at all — on a phone, on
-  a locked-down browser, through whatever corporate proxy stands between them and the
-  cluster. Every page works with JavaScript disabled except for the live updating, which
-  is the part that degrades to a refresh.
+  A control room, not a dashboard. The rail is a fixed 216px column at desktop widths
+  and wraps above the content below 900px, where the console is in checking-in mode —
+  overview, status lists and the session list stay usable, and the forms are reachable
+  without being the point. Every region declares a flex basis or an auto-fit grid and
+  the browser decides; nothing measures a width, because the console is server-rendered
+  and patched over a live connection and layout that depends on client state is a
+  liability on reconnect.
+
+  ## The two banners
+
+  **Console offline** is the only thing in the product driven from the browser rather
+  than the server, for the obvious reason: when it matters, the server is what cannot be
+  reached. `app.js` sets `data-console-offline` on the root element and CSS reveals the
+  banner. It leads with what is *not* affected, which the design calls the single most
+  consequential sentence here — an operator who believes the platform is down at three in
+  the morning does something expensive.
+
+  **Break-glass** says the reader is an administrator because they presented a token, not
+  because anybody says they are one.
   """
 
   use Phoenix.Component
 
-  @doc "The shell: navigation, who you are, and the page."
+  @pages [
+    {:overview, "Overview", "/admin"},
+    {:workers, "Workers", "/admin/workers"},
+    {:teams, "Teams", "/admin/teams"},
+    {:bundles, "Configuration bundles", "/admin/bundles"},
+    {:triggers, "Triggers", "/admin/triggers"},
+    {:sessions, "Sessions and spend", "/admin/sessions"},
+    {:audit, "Audit", "/admin/audit"},
+    {:settings, "Settings", "/admin/settings"}
+  ]
+
+  @doc "Every page in the rail, in the order it appears."
+  @spec pages() :: [{atom(), String.t(), String.t()}]
+  def pages, do: @pages
+
+  @doc "The shell: the rail, who you are, the banners, and the page."
   attr(:actor, :map, required: true)
   attr(:page, :atom, required: true)
+  # Defaulted rather than required so a page rendered outside the console's own mount —
+  # a test, a preview — does not have to know the door exists.
+  attr(:breakglass, :boolean, default: false)
   slot(:inner_block, required: true)
 
   def shell(assigns) do
-    ~H"""
-    <main>
-      <header>
-        <strong>troupe</strong>
-        <nav>
-          <.tab page={@page} this={:overview} href="/admin">overview</.tab>
-          <.tab page={@page} this={:workers} href="/admin/workers">workers</.tab>
-          <.tab page={@page} this={:teams} href="/admin/teams">teams</.tab>
-          <.tab page={@page} this={:sessions} href="/admin/sessions">sessions</.tab>
-          <.tab page={@page} this={:bundles} href="/admin/bundles">bundles</.tab>
-          <.tab page={@page} this={:triggers} href="/admin/triggers">triggers</.tab>
-          <.tab page={@page} this={:audit} href="/admin/audit">audit</.tab>
-        </nav>
-        <span class="who">
-          {@actor.subject} · {role_name(@actor.role)}
-        </span>
-      </header>
+    assigns = assign(assigns, :pages, @pages)
 
-      <section>
+    ~H"""
+    <div class="shell">
+      <nav class="rail" aria-label="Console">
+        <div class="rail__brand">Troupe</div>
+        <.rail_item :for={{page, label, href} <- @pages} page={@page} this={page} href={href}>
+          {label}
+        </.rail_item>
+      </nav>
+
+      <main class="content">
+        <p class="banner banner--offline" role="status">
+          <strong>Console offline.</strong>
+          No answer from the plane. <strong>Sessions and workers are unaffected</strong> —
+          this console going dark is not an outage of the platform. You are reading the
+          values it last received; it is retrying.
+        </p>
+
+        <p :if={@breakglass} class="banner banner--breakglass">
+          <strong>Break-glass session.</strong>
+          You are a platform admin because you presented the break-glass token, not because
+          anyone says you are one. This is in the audit log and it expires on its own.
+          <a href="/admin/logout">End it now</a>
+        </p>
+
         {render_slot(@inner_block)}
-      </section>
-    </main>
+
+        <p class="micro" style="margin-top: var(--space-9)">
+          {@actor.subject} · {role_name(@actor.role)}
+          · <a href="/admin/logout">sign out</a>
+        </p>
+      </main>
+    </div>
     """
   end
 
@@ -47,13 +92,67 @@ defmodule Troupe.Plane.Web.Live.Layout do
   attr(:href, :string, required: true)
   slot(:inner_block, required: true)
 
-  defp tab(assigns) do
+  defp rail_item(assigns) do
     ~H"""
-    <a href={@href} class={if @page == @this, do: "here"}>{render_slot(@inner_block)}</a>
+    <.link
+      navigate={@href}
+      class="rail__item"
+      aria-current={if @page == @this, do: "page", else: "false"}
+    >
+      {render_slot(@inner_block)}
+    </.link>
     """
   end
 
-  @doc "A condition as the operator set it, rendered so its status is readable at a glance."
+  @doc """
+  A labelled field grid: what a thing is configured as, readable without scrolling.
+
+  Borrowed from the drafting sheets in the platform's own documentation, and used here
+  because the answer to "what is this thing" should be in a fixed place, in the same
+  order, every time.
+  """
+  slot(:field, required: true) do
+    attr(:label, :string, required: true)
+  end
+
+  def title_block(assigns) do
+    ~H"""
+    <div class="title-block">
+      <div :for={field <- @field} class="title-block__field">
+        <span class="title-block__label">{field.label}</span>
+        <span class="title-block__value">{render_slot(field)}</span>
+      </div>
+    </div>
+    """
+  end
+
+  @doc """
+  A number worth four of on Overview, and never one without a line of context.
+
+  "14" alone is not information; the design forbids a metric with no context line, so
+  the slot is required rather than optional.
+  """
+  attr(:label, :string, required: true)
+  attr(:value, :string, required: true)
+  slot(:context, required: true)
+
+  def metric(assigns) do
+    ~H"""
+    <div class="metric">
+      <span class="metric__label">{@label}</span>
+      <span class="metric__value" aria-live="polite">{@value}</span>
+      <span class="metric__context">{render_slot(@context)}</span>
+    </div>
+    """
+  end
+
+  @doc """
+  A Kubernetes condition, rendered so its status is readable at a glance.
+
+  The console's own states are `Troupe.Plane.Web.Live.Status`; these are the cluster's,
+  reported verbatim on a profile, and they keep the cluster's vocabulary rather than
+  being translated into a state the cluster did not claim.
+  """
   attr(:conditions, :list, default: [])
 
   def conditions(assigns) do
@@ -63,7 +162,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
         {condition["type"]}
         <span :if={condition["message"]}>— {condition["message"]}</span>
       </li>
-      <li :if={@conditions == []} class="none">no conditions reported</li>
+      <li :if={@conditions == []} class="muted">no conditions reported</li>
     </ul>
     """
   end
@@ -72,7 +171,12 @@ defmodule Troupe.Plane.Web.Live.Layout do
   defp condition_class(%{"status" => "True"}), do: "bad"
   defp condition_class(_condition), do: "neutral"
 
-  @doc "Bytes, for a person."
+  @doc """
+  Bytes, for a person.
+
+  Binary units, because what is being measured is a volume and a disk, and a reader
+  comparing this against `kubectl` should see the same number.
+  """
   @spec bytes(integer() | nil) :: String.t()
   def bytes(nil), do: "—"
   def bytes(count) when count < 1024, do: "#{count} B"
@@ -83,15 +187,72 @@ defmodule Troupe.Plane.Web.Live.Layout do
 
   def bytes(count), do: "#{Float.round(count / 1024 / 1024 / 1024, 2)} GiB"
 
-  @doc "Micros, as money."
+  @doc """
+  Micros, as money.
+
+  Two decimal places and no unit: the unit is `kr` and it belongs in muted text beside
+  the figure so the figure stays the figure, which is what `amount/1` renders. A caller
+  that only needs the number — a table cell already in a column headed with the unit —
+  uses this.
+  """
   @spec money(integer() | nil) :: String.t()
   def money(nil), do: "—"
   def money(0), do: "unlimited"
-  def money(micros), do: "#{Float.round(micros / 1_000_000, 2)}"
+  def money(micros), do: :erlang.float_to_binary(micros / 1_000_000, decimals: 2)
+
+  @doc "An amount with its unit set quietly beside it, tabular so a column lines up."
+  attr(:micros, :integer, default: nil)
+
+  def amount(assigns) do
+    ~H"""
+    <span class="mono" style="font-variant-numeric: tabular-nums">
+      {money(@micros)}<span :if={is_integer(@micros) and @micros > 0} class="muted">&nbsp;kr</span>
+    </span>
+    """
+  end
+
+  @doc """
+  A team's spend against its ceiling: a bar, and the figures beside it in text.
+
+  The figures are not optional. A bar alone says "quite full", which is not a number
+  anybody can act on, and a bar alone is also nothing at all to a reader who cannot see
+  the colour. Reserved money counts towards the fill because it is money the platform has
+  already promised on this team's behalf — a team whose bar looked comfortable while its
+  next session was about to be refused would be worse than no bar.
+  """
+  attr(:team, :map, required: true)
+
+  def budget(assigns) do
+    assigns =
+      assigns
+      |> assign(:committed, assigns.team.spent_micros + assigns.team.reserved_micros)
+      |> then(&assign(&1, :fraction, fraction(&1.committed, &1.team.budget_micros)))
+
+    ~H"""
+    <span :if={@team.budget_micros == 0} class="muted">no ceiling</span>
+
+    <div :if={@team.budget_micros > 0} class={"budget budget--#{level(@fraction)}"}>
+      <span class="budget__track">
+        <span class="budget__fill" style={"width: #{min(round(@fraction * 100), 100)}%"}></span>
+      </span>
+      <span class="budget__figures">
+        {money(@committed)} / {money(@team.budget_micros)} {@team.budget_period}
+      </span>
+    </div>
+    """
+  end
+
+  defp fraction(_committed, 0), do: 0.0
+  defp fraction(committed, budget), do: committed / budget
+
+  # The three the design names, and the thresholds are the same ones Overview sorts by.
+  defp level(fraction) when fraction >= 1.0, do: "over"
+  defp level(fraction) when fraction >= 0.8, do: "near"
+  defp level(_fraction), do: "under"
 
   @doc "A role, as a person would say it."
   @spec role_name(atom()) :: String.t()
   def role_name(:platform_admin), do: "platform admin"
   def role_name(:team_admin), do: "team admin"
-  def role_name(_role), do: "no role"
+  def role_name(_other), do: "no role"
 end

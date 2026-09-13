@@ -1,15 +1,35 @@
 defmodule Troupe.Plane.Web.Live.ProfileEditor do
   @moduledoc """
-  Editing a profile, and seeing what it will become before applying it.
+  Editing a profile: every field of it, and what it will become before applying it.
 
-  The form renders the resulting custom resource as a diff and does not apply anything
-  until that has been looked at. A profile is a description of how somebody else's work
-  runs — the image, the egress, the volumes — and a panel that applied on submit would
-  make a typo in a field nobody was looking at into a fleet-wide change.
+  A profile is a description of how somebody else's work runs — which image, which model,
+  what it may reach on the network, how much disk it gets — and for a while this page
+  edited four of those and left the rest to whoever was willing to write JSON and post it
+  to the API. That is not an administration console, it is a form beside one. So it now
+  renders the whole `WorkerProfile` spec: scale, model, egress, storage, resources, MCP
+  servers, and the channel the pods follow.
 
-  Policy is checked as the form changes, so a disallowed image is red while it is being
-  typed rather than after a round trip. That check is *the same* check admission makes,
-  not an approximation: both parse the same `TroupePolicy` with the same code.
+  ## Three things that make it safe to have all of that on one page
+
+  **The form's state is one map and one list.** `@fields` is every scalar, keyed by the
+  name the input carries, and `@servers` is the MCP rows. Both are rebuilt on change and
+  both are what apply reads — so there is no second copy to drift, and a button that is not
+  a submit (adding a row, checking a host) does not lose what has been typed, which is what
+  happens when a handler tries to read a form it was not sent.
+
+  **Empty is absent.** A blank field does not write an empty string into the custom
+  resource; the branch it belongs to disappears entirely if nothing under it is set. The
+  CRD has defaults, and `storage: {size: ""}` overrides them with nonsense.
+
+  **Nothing is applied until the diff has been read.** The page shows what will change,
+  field by field, computed by the same function that writes the audit record — so what the
+  form promised and what the trail says cannot differ. Policy is checked as the form
+  changes, with the same check admission will make.
+
+  The apply control is one button and not the design's two, deliberately: which of the two
+  happens is not the operator's choice, it is `provisioning_mode`. The button is named for
+  what will actually happen and the consequence is written above it. Two buttons where one
+  of them is a lie would be worse than one.
   """
 
   use Phoenix.LiveView, layout: false
@@ -18,67 +38,277 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   alias Troupe.Plane.Admin
 
+  @providers ~w(openai anthropic fake)
+
+  # Every scalar field, in the order it appears. The form's names are paths into the
+  # resource, so a field and the thing it writes are spelled the same and there is no
+  # translation table to get wrong.
+  @scalars ~w(
+    name image replicas sessionsPerPod
+    llm.endpoint llm.provider llm.model llm.smallModel llm.secretRef.name llm.secretRef.key
+    egress.fqdns egress.gitHosts
+    storage.size storage.storageClassName
+    resources.requests.cpu resources.requests.memory
+    resources.limits.cpu resources.limits.memory
+    configBundleChannel
+  )
+
+  @server_fields ~w(name url credentialRef header timeoutMs)
+
   @impl Phoenix.LiveView
   def mount(params, _session, socket) do
-    name = params["profile"]
-
     {:ok,
      socket
-     |> assign(name: name, flash_message: nil, applied: nil)
-     |> load(name)}
+     |> assign(name: params["profile"], notice: nil, error: nil, applied: nil, checked: %{})
+     |> load(params["profile"])}
   end
 
   @impl Phoenix.LiveView
   def handle_event("change", params, socket) do
-    {:noreply, assign(socket, draft: draft_from(socket, params, socket.assigns.draft))}
+    {:noreply,
+     socket
+     |> assign(fields: merge_fields(socket.assigns.fields, params))
+     |> assign(servers: rows_from(params))
+     |> preview()}
   end
 
-  def handle_event("apply", _params, socket) do
-    case Admin.profile_put(socket.assigns.actor, socket.assigns.draft) do
+  def handle_event("add-server", _params, socket) do
+    {:noreply, socket |> assign(servers: socket.assigns.servers ++ [%{}]) |> preview()}
+  end
+
+  def handle_event("remove-server", %{"index" => index}, socket) do
+    servers = List.delete_at(socket.assigns.servers, to_integer(index) || 0)
+    {:noreply, socket |> assign(servers: servers) |> preview()}
+  end
+
+  # Whether the cluster would let a pod reach a server, asked of the plane rather than
+  # guessed: the answer belongs to the egress policy, and a page that assumed it would be
+  # confidently wrong on exactly the profiles where it matters.
+  def handle_event("check-server", %{"url" => url}, socket) do
+    case Admin.mcp_check(socket.assigns.actor, url) do
       {:ok, result} ->
-        {:noreply,
-         socket
-         |> assign(applied: result.provisioning, flash_message: applied_message(result))
-         |> load(socket.assigns.name)}
+        {:noreply, assign(socket, checked: Map.put(socket.assigns.checked, url, result))}
 
       {:error, error} ->
-        {:noreply, assign(socket, flash_message: describe(error))}
+        {:noreply, assign(socket, error: describe(error))}
     end
   end
 
-  defp applied_message(%{changes: changes}) when changes == %{}, do: "nothing changed"
+  def handle_event("apply", _params, socket) do
+    case Admin.profile_put(socket.assigns.actor, draft(socket.assigns)) do
+      {:ok, result} ->
+        {:noreply,
+         socket
+         |> assign(applied: result.provisioning, notice: applied_message(result), error: nil)
+         |> load(socket.assigns.fields["name"])}
 
-  defp applied_message(%{changes: changes, provisioning: %{state: :pending, commit: commit}}) do
-    "#{map_size(changes)} field(s) committed as #{String.slice(commit, 0, 8)} — pending until Flux applies it"
+      {:error, error} ->
+        {:noreply, assign(socket, error: describe(error), notice: nil)}
+    end
   end
 
-  defp applied_message(%{changes: changes}), do: "#{map_size(changes)} field(s) applied"
+  # -- the form's state --------------------------------------------------------
 
-  defp describe(%{message: message, data: %{policy_violations: violations}}) do
-    "#{message}: #{Enum.map_join(violations, "; ", &inspect/1)}"
+  # A checkbox that is off sends nothing at all, so it is read from the form's presence
+  # rather than from its value: without this, unmounting the org volume would be a change
+  # the form could express and never send.
+  defp merge_fields(fields, params) do
+    fields
+    |> Map.merge(Map.take(params, @scalars))
+    |> Map.put("orgMount", Map.has_key?(params, "orgMount"))
   end
 
-  defp describe(%{message: message}), do: message
+  # Rows arrive as `mcp.0.url`. Gathered by index and kept whole, empty ones included: a
+  # row being typed into is a row, and dropping it because its URL is still blank would
+  # take the field away mid-keystroke.
+  defp rows_from(params) do
+    params
+    |> Enum.flat_map(fn
+      {"mcp." <> rest, value} ->
+        case String.split(rest, ".", parts: 2) do
+          [index, field] when field in @server_fields -> [{to_integer(index), field, value}]
+          _other -> []
+        end
+
+      _other ->
+        []
+    end)
+    |> Enum.group_by(fn {index, _field, _value} -> index end)
+    |> Enum.sort_by(fn {index, _fields} -> index end)
+    |> Enum.map(fn {_index, fields} ->
+      Map.new(fields, fn {_index, field, value} -> {field, value} end)
+    end)
+  end
+
+  defp preview(socket) do
+    draft = draft(socket.assigns)
+
+    case Admin.preview(socket.assigns.actor, draft) do
+      {:ok, preview} -> assign(socket, preview: preview, error: nil)
+      {:error, error} -> assign(socket, preview: nil, error: describe(error))
+    end
+  end
+
+  @doc """
+  The profile the form describes, in the shape `admin.profile.put` takes.
+
+  Public so a test can assert the mapping without driving a browser: this function is
+  where a mis-spelled path in the form would turn into a field the cluster ignores.
+  """
+  @spec draft(map()) :: map()
+  def draft(%{fields: fields, servers: servers}) do
+    spec =
+      compact(%{
+        "llm" =>
+          compact(%{
+            "endpoint" => fields["llm.endpoint"],
+            "provider" => fields["llm.provider"],
+            "model" => fields["llm.model"],
+            "smallModel" => fields["llm.smallModel"],
+            "secretRef" =>
+              compact(%{
+                "name" => fields["llm.secretRef.name"],
+                "key" => fields["llm.secretRef.key"]
+              })
+          }),
+        "egress" =>
+          compact(%{
+            "fqdns" => split(fields["egress.fqdns"]),
+            "gitHosts" => split(fields["egress.gitHosts"])
+          }),
+        "storage" =>
+          compact(%{
+            "size" => fields["storage.size"],
+            "storageClassName" => fields["storage.storageClassName"]
+          }),
+        "resources" =>
+          compact(%{
+            "requests" =>
+              compact(%{
+                "cpu" => fields["resources.requests.cpu"],
+                "memory" => fields["resources.requests.memory"]
+              }),
+            "limits" =>
+              compact(%{
+                "cpu" => fields["resources.limits.cpu"],
+                "memory" => fields["resources.limits.memory"]
+              })
+          }),
+        "mcpServers" => servers_for(servers),
+        "configBundleChannel" => fields["configBundleChannel"],
+        # Always present: false is a value here, not an absence, and an absent `orgMount`
+        # would mean a mounted volume could never be unmounted from this page.
+        "orgMount" => fields["orgMount"] == true
+      })
+
+    compact(%{
+      "name" => fields["name"],
+      "image" => fields["image"],
+      "replicas" => to_integer(fields["replicas"]),
+      "sessions_per_pod" => to_integer(fields["sessionsPerPod"]),
+      "spec" => spec
+    })
+  end
+
+  defp servers_for(servers) do
+    servers
+    |> Enum.map(fn server ->
+      server
+      |> Map.take(@server_fields)
+      |> Map.new(fn {field, value} -> {field, cast_server(field, value)} end)
+      |> compact()
+    end)
+    |> Enum.reject(&(&1["url"] in [nil, ""]))
+  end
+
+  defp cast_server("timeoutMs", value), do: to_integer(value)
+  defp cast_server(_field, value), do: value
+
+  # Absent, not empty. A blank field is one nobody filled in, and the difference between
+  # "no storage class" and "the storage class is the empty string" is the difference
+  # between the cluster's default and a resource the API server refuses.
+  defp compact(%{} = map), do: Map.reject(map, fn {_key, value} -> empty?(value) end)
+
+  defp empty?(nil), do: true
+  defp empty?(""), do: true
+  defp empty?([]), do: true
+  defp empty?(map) when map == %{}, do: true
+  defp empty?(_value), do: false
+
+  defp split(nil), do: []
+  defp split(text) when is_binary(text), do: String.split(text, ~r/[\s,]+/, trim: true)
+  defp split(list) when is_list(list), do: list
+
+  defp to_integer(nil), do: nil
+  defp to_integer(value) when is_integer(value), do: value
+
+  defp to_integer(value) when is_binary(value) do
+    case Integer.parse(String.trim(value)) do
+      {number, _rest} -> number
+      :error -> nil
+    end
+  end
+
+  # -- loading -----------------------------------------------------------------
 
   defp load(socket, nil) do
-    assign(socket, current: nil, draft: %{}, verdict: nil, mode: mode(socket))
+    socket
+    |> assign(current: nil, verdict: nil, mode: mode(socket), preview: nil)
+    |> assign(fields: %{"orgMount" => false}, servers: [])
   end
 
   defp load(socket, name) do
     case Admin.profile_get(socket.assigns.actor, name) do
       {:ok, detail} ->
-        draft = Map.merge(%{"name" => name}, Map.new(detail.spec))
+        spec = detail.spec || %{}
 
         socket
-        |> assign(current: detail, draft: Map.get(socket.assigns, :draft, draft), verdict: detail.policy)
-        |> assign(mode: mode(socket))
+        |> assign(current: detail, verdict: detail.policy, mode: mode(socket), preview: nil)
+        |> assign(fields: fields_from(name, detail, spec), servers: servers_of(spec))
 
       {:error, error} ->
         socket
-        |> assign(current: nil, draft: %{"name" => name}, verdict: nil, mode: mode(socket))
-        |> assign(flash_message: error.message)
+        |> assign(current: nil, verdict: nil, mode: mode(socket), preview: nil)
+        |> assign(fields: %{"name" => name, "orgMount" => false}, servers: [])
+        |> assign(error: error.message)
     end
   end
+
+  defp fields_from(name, detail, spec) do
+    %{
+      "name" => name,
+      "image" => detail.profile.image,
+      "replicas" => detail.profile.replicas,
+      "sessionsPerPod" => detail.profile.sessions_per_pod,
+      "llm.endpoint" => get_in(spec, ["llm", "endpoint"]),
+      "llm.provider" => get_in(spec, ["llm", "provider"]),
+      "llm.model" => get_in(spec, ["llm", "model"]),
+      "llm.smallModel" => get_in(spec, ["llm", "smallModel"]),
+      "llm.secretRef.name" => get_in(spec, ["llm", "secretRef", "name"]),
+      "llm.secretRef.key" => get_in(spec, ["llm", "secretRef", "key"]),
+      "egress.fqdns" => joined(get_in(spec, ["egress", "fqdns"])),
+      "egress.gitHosts" => joined(get_in(spec, ["egress", "gitHosts"])),
+      "storage.size" => get_in(spec, ["storage", "size"]),
+      "storage.storageClassName" => get_in(spec, ["storage", "storageClassName"]),
+      "resources.requests.cpu" => get_in(spec, ["resources", "requests", "cpu"]),
+      "resources.requests.memory" => get_in(spec, ["resources", "requests", "memory"]),
+      "resources.limits.cpu" => get_in(spec, ["resources", "limits", "cpu"]),
+      "resources.limits.memory" => get_in(spec, ["resources", "limits", "memory"]),
+      "configBundleChannel" => Map.get(spec, "configBundleChannel"),
+      "orgMount" => Map.get(spec, "orgMount") == true
+    }
+  end
+
+  defp servers_of(spec) do
+    case Map.get(spec, "mcpServers") do
+      list when is_list(list) -> list
+      _absent -> []
+    end
+  end
+
+  defp joined(nil), do: ""
+  defp joined(list) when is_list(list), do: Enum.join(list, "\n")
+  defp joined(other), do: to_string(other)
 
   defp mode(socket) do
     case Admin.provisioning_mode(socket.assigns.actor) do
@@ -87,100 +317,415 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     end
   end
 
-  # The panel's own check, run on every keystroke. Not the enforcement — admission is,
-  # and the operator is again after that — but the same function, so what it says is what
-  # will happen.
-  defp draft_from(socket, params, previous) do
-    draft =
-      previous
-      |> Map.merge(Map.take(params, ~w(name image replicas sessionsPerPod)))
-      |> Map.reject(fn {_key, value} -> value in [nil, ""] end)
+  defp applied_message(%{changes: changes}) when changes == %{}, do: "Nothing changed."
 
-    case Admin.preview(socket.assigns.actor, atomise(draft)) do
-      {:ok, preview} -> Map.put(draft, "__preview__", preview)
-      {:error, _error} -> draft
+  defp applied_message(%{changes: changes, provisioning: %{state: :pending, commit: commit}}) do
+    "#{count(changes)} committed as #{String.slice(commit, 0, 8)}. Nothing has changed in the cluster yet."
+  end
+
+  defp applied_message(%{changes: changes}), do: "#{count(changes)} applied."
+
+  defp count(changes) do
+    case map_size(changes) do
+      1 -> "One field"
+      n -> "#{n} fields"
     end
   end
 
-  defp atomise(draft) do
-    %{
-      name: draft["name"],
-      image: draft["image"],
-      replicas: to_integer(draft["replicas"]),
-      sessions_per_pod: to_integer(draft["sessionsPerPod"]),
-      spec: Map.drop(draft, ~w(name image replicas sessionsPerPod __verdict__))
-    }
+  defp describe(%{message: message, data: %{policy_violations: violations}}) do
+    "#{message}: #{Enum.map_join(violations, "; ", &violation/1)}"
   end
 
-  defp to_integer(nil), do: nil
+  defp describe(%{message: message, data: %{reason: reason}}), do: "#{message}: #{reason}"
+  defp describe(%{message: message}), do: message
 
-  defp to_integer(value) when is_binary(value) do
-    case Integer.parse(value) do
-      {number, _rest} -> number
-      :error -> nil
-    end
+  defp violation(%{} = violation) do
+    violation[:message] || violation["message"] || inspect(violation)
   end
 
-  defp to_integer(value), do: value
+  defp violation(other), do: to_string(other)
+
+  # -- rendering ---------------------------------------------------------------
 
   @impl Phoenix.LiveView
   def render(assigns) do
+    assigns =
+      assigns
+      |> assign(:decision, decision(assigns))
+      |> assign(:changes, changes_of(assigns))
+      |> assign(:providers, @providers)
+
     ~H"""
-    <.shell actor={@actor} page={:workers}>
-      <p :if={@flash_message} class="notice">{@flash_message}</p>
+    <.shell actor={@actor} breakglass={@breakglass} page={:workers}>
+      <h1>{@name || "New profile"}</h1>
+      <p class="lede">
+        How work runs on this profile: which image, which model, what the pods may reach,
+        and how much of the cluster each one takes.
+      </p>
 
-      <h2>{@name || "new profile"}</h2>
-      <p class="hint">Provisioning mode: {@mode}.</p>
+      <p :if={@notice} class="banner" role="status">{@notice}</p>
+      <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
 
-      <form phx-change="change" phx-submit="apply">
-        <label>name <input name="name" value={@draft["name"]} /></label>
-        <label>image <input name="image" value={@draft["image"]} /></label>
-        <label>replicas <input name="replicas" value={@draft["replicas"]} /></label>
-        <label>sessions per pod <input name="sessionsPerPod" value={@draft["sessionsPerPod"]} /></label>
+      <form id="profile-editor" phx-change="change" phx-submit="apply">
+        <section class="panel">
+          <h2>What runs</h2>
 
-        <.verdict verdict={verdict_of(@draft, @verdict)} />
+          <.field form={@fields} name="name" label="name">
+            The profile's name, and the name of its WorkerProfile in the cluster. A
+            different name is a different profile, not a rename.
+          </.field>
+          <.field form={@fields} name="image" label="image">
+            repository:tag, or repository@sha256:… A digest pins the image; a tag does not,
+            and a pod that restarts on a moved tag comes back running something else.
+          </.field>
+          <.field form={@fields} name="replicas" label="replicas" type="number">
+            How many pods. Scaling down drains the ones that go.
+          </.field>
+          <.field form={@fields} name="sessionsPerPod" label="sessions per pod" type="number">
+            How many sessions one pod carries before placement fills the next.
+          </.field>
+        </section>
 
-        <h3>What will be applied</h3>
-        <pre>{changes_text(@draft)}</pre>
+        <section class="panel">
+          <h2>The model</h2>
+          <p class="lede">
+            Where a session's model calls go. Usually a gateway rather than a provider,
+            which is what makes the cost of a call knowable.
+          </p>
 
-        <button type="submit" disabled={not allowed?(verdict_of(@draft, @verdict))}>apply</button>
+          <.field form={@fields} name="llm.endpoint" label="endpoint">
+            The base URL. Egress has to allow its host, or every call times out.
+          </.field>
+
+          <.choice form={@fields} name="llm.provider" label="provider" options={@providers}>
+            Which adapter speaks to it. openai is plain Chat Completions, which is what a
+            gateway serves; anthropic is the Messages API; fake answers without a network.
+          </.choice>
+
+          <.field form={@fields} name="llm.model" label="model">
+            What a session uses for its work.
+          </.field>
+          <.field form={@fields} name="llm.smallModel" label="small model">
+            Used only to summarise a long conversation, where a cheaper model is enough.
+          </.field>
+          <.field form={@fields} name="llm.secretRef.name" label="credential: secret name">
+            The name of a Secret in the worker's namespace. A reference, read at call time
+            by the pod: neither the plane nor this page ever holds the value, and there is
+            nothing here that could show it to you.
+          </.field>
+          <.field form={@fields} name="llm.secretRef.key" label="credential: key">
+            The key inside that Secret. Empty means api-key.
+          </.field>
+        </section>
+
+        <section class="panel">
+          <h2>What the pods may reach</h2>
+          <p class="lede">
+            Enforced by the cluster's network policy and not by the worker. A host that is
+            not here is not reachable from a session, whatever the session tries.
+          </p>
+
+          <.text_lines form={@fields} name="egress.fqdns" label="allowed hosts">
+            One per line. The model endpoint, and anything a skill calls.
+          </.text_lines>
+          <.text_lines form={@fields} name="egress.gitHosts" label="git hosts">
+            One per line. Where a session may clone from and push to.
+          </.text_lines>
+        </section>
+
+        <section class="panel">
+          <h2>Each pod's disk</h2>
+          <p class="lede">
+            Where the working copies of live sessions are. Fixed once the pods exist: a
+            StatefulSet's volume claim cannot be resized in place, so changing either of
+            these replaces the pods.
+          </p>
+
+          <.field form={@fields} name="storage.size" label="size">
+            A Kubernetes quantity, such as 20Gi. Empty means 20Gi.
+          </.field>
+          <.field form={@fields} name="storage.storageClassName" label="storage class">
+            Must be one the cluster policy allows. Empty means the cluster's default.
+          </.field>
+        </section>
+
+        <section class="panel">
+          <h2>What each pod is given</h2>
+          <p class="lede">
+            Requests decide where a pod fits; limits decide when it is throttled or killed.
+            Left empty, the namespace's own defaults apply.
+          </p>
+
+          <.field form={@fields} name="resources.requests.cpu" label="cpu requested">
+            Cores, or millicores as 500m.
+          </.field>
+          <.field form={@fields} name="resources.requests.memory" label="memory requested">
+            A quantity, such as 2Gi.
+          </.field>
+          <.field form={@fields} name="resources.limits.cpu" label="cpu limit">
+            Above this the pod is throttled, not killed.
+          </.field>
+          <.field form={@fields} name="resources.limits.memory" label="memory limit">
+            Above this the pod is killed — which takes its sessions with it, so a limit set
+            too low fails the longest-running work first.
+          </.field>
+        </section>
+
+        <section class="panel">
+          <h2>MCP servers</h2>
+          <p class="lede">
+            Offered to every session on this profile. The credential is the name of an
+            environment variable the pod finds a token in; the token is a Secret the
+            operator mounts, and nothing here holds it.
+          </p>
+
+          <.server
+            :for={{server, index} <- Enum.with_index(@servers)}
+            server={server}
+            index={index}
+            checked={@checked}
+          />
+
+          <p :if={@servers == []} class="empty">
+            None. Sessions on this profile get whatever the configuration bundle gives them
+            and nothing else.
+          </p>
+
+          <button type="button" phx-click="add-server">add a server</button>
+        </section>
+
+        <section class="panel">
+          <h2>Configuration</h2>
+
+          <.field form={@fields} name="configBundleChannel" label="bundle channel">
+            Which channel's agents, skills and servers the pods follow. Publishing to it
+            pushes to every pod on this profile.
+          </.field>
+
+          <.toggle form={@fields} name="orgMount" label="mount the org volume">
+            Read-only, always. The volume the cluster policy names, for material every team
+            may read.
+          </.toggle>
+        </section>
+
+        <section class="panel">
+          <h2>What will happen</h2>
+
+          <.policy verdict={@decision} />
+          <.diff changes={@changes} />
+
+          <p><strong>{consequence(@mode)}</strong></p>
+
+          <button type="submit" disabled={not allowed?(@decision)}>{apply_label(@mode)}</button>
+
+          <p :if={@applied} class="micro">{state_of(@applied)}</p>
+        </section>
       </form>
     </.shell>
     """
   end
 
-  attr :verdict, :any, default: nil
+  defp consequence(:gitops),
+    do:
+      "Applying writes a commit for review. Nothing changes in the cluster until somebody applies it."
 
-  defp verdict(assigns) do
+  defp consequence(:direct),
+    do: "Applying changes the cluster now. Running sessions keep the pods they are on."
+
+  defp consequence(_unknown),
+    do: "This plane could not say how it provisions. Applying may or may not reach the cluster."
+
+  defp apply_label(:gitops), do: "commit for review"
+  defp apply_label(_direct), do: "apply now"
+
+  defp state_of(%{state: state}), do: "Last write: #{state}."
+  defp state_of(_other), do: ""
+
+  defp allowed?(nil), do: true
+  defp allowed?(%{allowed?: allowed}), do: allowed
+
+  # What policy makes of the form as it stands, or of the profile as it is when nothing
+  # has been typed yet.
+  defp decision(%{preview: %{policy: policy}}), do: policy
+  defp decision(%{verdict: verdict}), do: verdict
+
+  defp changes_of(%{preview: %{changes: changes}}), do: changes
+  defp changes_of(_assigns), do: nil
+
+  attr(:form, :map, required: true)
+  attr(:name, :string, required: true)
+  attr(:label, :string, required: true)
+  attr(:type, :string, default: "text")
+  slot(:inner_block, required: true)
+
+  # The help is required rather than optional: every field here names something outside
+  # Troupe — an image, a model, a storage class — and the design's rule is that a field
+  # naming an external thing says what it is for, in body text and not in a tooltip.
+  defp field(assigns) do
+    ~H"""
+    <div class="setting">
+      <label>
+        {@label}
+        <input type={@type} name={@name} value={Map.get(@form, @name)} />
+      </label>
+      <p class="field-help">{render_slot(@inner_block)}</p>
+    </div>
+    """
+  end
+
+  attr(:form, :map, required: true)
+  attr(:name, :string, required: true)
+  attr(:label, :string, required: true)
+  attr(:options, :list, required: true)
+  slot(:inner_block, required: true)
+
+  defp choice(assigns) do
+    ~H"""
+    <div class="setting">
+      <label>
+        {@label}
+        <select name={@name}>
+          <option value="">not set</option>
+          <option
+            :for={option <- @options}
+            value={option}
+            selected={Map.get(@form, @name) == option}
+          >
+            {option}
+          </option>
+        </select>
+      </label>
+      <p class="field-help">{render_slot(@inner_block)}</p>
+    </div>
+    """
+  end
+
+  attr(:form, :map, required: true)
+  attr(:name, :string, required: true)
+  attr(:label, :string, required: true)
+  slot(:inner_block, required: true)
+
+  defp text_lines(assigns) do
+    ~H"""
+    <div class="setting">
+      <label>
+        {@label}
+        <textarea name={@name} rows="4">{Map.get(@form, @name)}</textarea>
+      </label>
+      <p class="field-help">{render_slot(@inner_block)}</p>
+    </div>
+    """
+  end
+
+  attr(:form, :map, required: true)
+  attr(:name, :string, required: true)
+  attr(:label, :string, required: true)
+  slot(:inner_block, required: true)
+
+  defp toggle(assigns) do
+    ~H"""
+    <div class="setting">
+      <label class="toggle">
+        <input type="checkbox" name={@name} checked={Map.get(@form, @name) == true} />
+        {@label}
+      </label>
+      <p class="field-help">{render_slot(@inner_block)}</p>
+    </div>
+    """
+  end
+
+  attr(:server, :map, required: true)
+  attr(:index, :integer, required: true)
+  attr(:checked, :map, required: true)
+
+  defp server(assigns) do
+    ~H"""
+    <div class="setting server">
+      <label>
+        name
+        <input name={"mcp.#{@index}.name"} value={@server["name"]} />
+      </label>
+      <label>
+        url
+        <input name={"mcp.#{@index}.url"} value={@server["url"]} />
+      </label>
+      <label>
+        credential variable
+        <input name={"mcp.#{@index}.credentialRef"} value={@server["credentialRef"]} />
+      </label>
+      <label>
+        header
+        <input name={"mcp.#{@index}.header"} value={@server["header"]} />
+      </label>
+      <label>
+        timeout (ms)
+        <input type="number" name={"mcp.#{@index}.timeoutMs"} value={@server["timeoutMs"]} />
+      </label>
+
+      <div class="setting__actions">
+        <button
+          :if={@server["url"] not in [nil, ""]}
+          type="button"
+          phx-click="check-server"
+          phx-value-url={@server["url"]}
+        >
+          can a pod reach it?
+        </button>
+        <button type="button" phx-click="remove-server" phx-value-index={@index}>remove</button>
+      </div>
+
+      <p :if={Map.has_key?(@checked, @server["url"])} class="field-help">
+        {reachability(Map.get(@checked, @server["url"]))}
+      </p>
+    </div>
+    """
+  end
+
+  defp reachability(%{allowed: true, host: host}), do: "Egress policy allows #{host}."
+
+  defp reachability(%{host: host}) do
+    "Egress policy does not allow #{host}. A session's calls to it would time out."
+  end
+
+  attr(:verdict, :any, default: nil)
+
+  defp policy(assigns) do
     ~H"""
     <div :if={@verdict}>
-      <p :if={@verdict.allowed?} class="good">policy: allowed</p>
-      <ul :if={not @verdict.allowed?} class="violations">
-        <li :for={violation <- @verdict.violations}>{inspect(violation)}</li>
+      <p :if={@verdict.allowed?} class="micro">Cluster policy allows this profile.</p>
+
+      <ul :if={not @verdict.allowed?} class="checks">
+        <li :for={violation <- @verdict.violations} class="checks__bad">
+          <span class="checks__name">policy</span>
+          <span class="checks__detail">{violation(violation)}</span>
+        </li>
       </ul>
     </div>
     """
   end
 
-  defp allowed?(nil), do: true
-  defp allowed?(%{allowed?: allowed}), do: allowed
+  attr(:changes, :any, default: nil)
 
-  defp verdict_of(draft, fallback) do
-    case draft["__preview__"] do
-      %{policy: policy} -> policy
-      _ -> fallback
-    end
+  # The same diff the audit record will carry, one line per field that moved, with both
+  # values. The design uses this shape for config revisions, bundle versions and audit
+  # entries alike, and it is never a coloured blob saying something changed.
+  defp diff(assigns) do
+    ~H"""
+    <p :if={is_nil(@changes)} class="empty">Change something to see what would be written.</p>
+    <p :if={@changes == %{}} class="empty">Nothing would change.</p>
+
+    <ul :if={is_map(@changes) and @changes != %{}} class="diff">
+      <li :for={{field, %{"from" => from, "to" => to}} <- Enum.sort(@changes)} class="diff__row">
+        <span class="diff__field mono">{field}</span>
+        <span class="diff__from mono">− {show(from)}</span>
+        <span class="diff__to mono">+ {show(to)}</span>
+      </li>
+    </ul>
+    """
   end
 
-  # The diff a person reads before pressing apply. It is the same diff `profile_put` will
-  # record in the audit, computed by the same function — so what the form promised and
-  # what the trail says cannot differ.
-  defp changes_text(%{"__preview__" => %{changes: changes}}) when changes != %{} do
-    Enum.map_join(changes, "\n", fn {field, %{"from" => from, "to" => to}} ->
-      "#{field}: #{inspect(from)} → #{inspect(to)}"
-    end)
-  end
-
-  defp changes_text(%{"__preview__" => _preview}), do: "no changes"
-  defp changes_text(_draft), do: "type something to see what would change"
+  defp show(nil), do: "not set"
+  defp show(value) when is_binary(value), do: value
+  defp show(value) when is_number(value) or is_boolean(value), do: to_string(value)
+  defp show(value), do: Jason.encode!(value)
 end

@@ -1,0 +1,495 @@
+defmodule Troupe.Plane.Settings do
+  @moduledoc """
+  What a platform admin may change about this plane, and where each value comes from.
+
+  Every setting here had a value before this module existed: an environment variable, read
+  through `Application.get_env/3` at the point of use. That is the right home for what a
+  *deployment* decides and the wrong one for what an *operator* does, and the difference
+  showed up the first time it mattered — a plane whose `platform_admin_group` named a group
+  nobody was in had no administrator, and no administrator meant no console, and the only
+  repair was a Helm change and a rollout. A setting that can lock you out of the thing that
+  changes settings should be changeable from behind the break-glass door.
+
+  ## The ordering, which is the whole safety argument
+
+  A stored row **overrides** the deployment; it never replaces it. A setting with no row
+  reads whatever the plane was deployed with, and `reset/2` deletes the row rather than
+  writing today's default into it — writing it back would freeze this release's default
+  into the database and make the next deployment's change invisible. So the deployment
+  stays the floor, and the worst a bad setting can do is be reset.
+
+  Some settings are deliberately **not** editable and are here to be read: the issuer, the
+  client id, the audience. Changing those from inside the console is how you lock every
+  administrator out at once, and they belong to the deployment for the same reason a lock's
+  keyhole is not adjustable from inside the house. They are listed anyway, with their
+  values, because "where is this plane's configuration" should have one answer and not
+  "some of it is here and the rest is in a values file somebody has".
+
+  Secrets are listed too and never shown. What is reported is whether one is *set*, which
+  is the only thing anybody debugging can act on and the only thing that is not a leak.
+
+  ## Freshness
+
+  Reads go through a small table with a five-second life. `platform_admin_group` is read on
+  every administrative request, and the alternative is a query per request for a value that
+  changes twice a year. A change is visible immediately on the replica that made it and
+  within five seconds everywhere else; a plane where an administrator is added and their
+  next click is still refused would be worse than the delay, which is why the writer clears
+  its own node rather than waiting.
+  """
+
+  use GenServer
+
+  import Ecto.Query
+
+  alias Troupe.Plane.Repo
+  alias Troupe.Plane.Settings.Setting
+  alias Troupe.Plane.Settings.Stored
+
+  @settings [
+    %Setting{
+      key: "platform_admin_group",
+      group: :administration,
+      type: :string,
+      app_key: :platform_admin_group,
+      summary: "The identity-provider group whose members administer this whole platform.",
+      consequence:
+        "Members of this group can do everything here. Setting it to a group you are not in removes your own access at your next request; a break-glass session can put it back.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "groups_claim",
+      group: :administration,
+      type: :string,
+      app_key: :groups_claim,
+      fallback: "groups",
+      summary: "The claim in an identity token that carries a person's groups.",
+      consequence:
+        "Wrong, and every login arrives with no groups: nobody is a platform admin and nobody is in a team. Entra ID calls it groups; some providers use roles.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "provisioning_mode",
+      group: :provisioning,
+      type: :enum,
+      values: ~w(direct gitops),
+      app_key: :provisioning_mode,
+      fallback: :direct,
+      summary: "Whether writing a profile changes the cluster or commits it for review.",
+      consequence:
+        "In gitops the console proposes and a reviewer disposes: a profile write lands as a commit and nothing changes until it is applied. In direct it changes the cluster as soon as you apply.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "default_budget_micros",
+      group: :team_defaults,
+      type: :integer,
+      fallback: 0,
+      summary: "The spend ceiling a team gets when it is enabled, in millionths.",
+      consequence:
+        "Only for teams enabled after the change. 0 is unlimited, which is what a team gets today unless you set this.",
+      effect: :next_team
+    },
+    %Setting{
+      key: "default_budget_period",
+      group: :team_defaults,
+      type: :enum,
+      values: ~w(monthly daily),
+      # An atom, like every other enum's fallback: a setting whose type depends on whether
+      # anybody has changed it is a setting every caller has to handle twice.
+      fallback: :monthly,
+      summary: "The period that ceiling is measured over.",
+      consequence: "Only for teams enabled after the change.",
+      effect: :next_team
+    },
+    %Setting{
+      key: "default_idle_timeout_seconds",
+      group: :team_defaults,
+      type: :integer,
+      fallback: 1800,
+      summary: "How long a new team's sessions sit idle before going dormant.",
+      consequence:
+        "A dormant session costs nothing and wakes with its history. Shorter saves memory on the pods; longer means fewer wakes.",
+      effect: :next_team
+    },
+    %Setting{
+      key: "default_erase_after_days",
+      group: :team_defaults,
+      type: :integer,
+      fallback: 365,
+      summary: "How long a new team's sessions are kept before they are erased.",
+      consequence: "Only for teams enabled after the change. Erasure is irreversible.",
+      effect: :next_team
+    },
+    %Setting{
+      key: "default_bundle_channel",
+      group: :sessions,
+      type: :string,
+      fallback: "stable",
+      summary: "The configuration channel a new profile follows.",
+      consequence:
+        "A profile with no channel of its own takes this one. Existing profiles keep what they were given.",
+      effect: :next_session
+    },
+    # -- read-only: what this plane was deployed with ---------------------------
+    %Setting{
+      key: "issuer",
+      group: :deployment,
+      type: :string,
+      app_key: [:oidc, :issuer],
+      editable: false,
+      summary: "The identity provider this plane trusts.",
+      consequence:
+        "Deployment only. Changing the issuer from inside the console would invalidate every session including the one making the change.",
+      effect: :restart
+    },
+    %Setting{
+      key: "client_id",
+      group: :deployment,
+      type: :string,
+      app_key: [:oidc, :client_id],
+      editable: false,
+      summary: "The application registration this plane signs people in as.",
+      consequence:
+        "Deployment only. The provider will not issue tokens for a client it has no registration for.",
+      effect: :restart
+    },
+    %Setting{
+      key: "client_secret",
+      group: :deployment,
+      type: :string,
+      app_key: [:oidc, :client_secret],
+      editable: false,
+      secret: true,
+      summary: "The client secret used to redeem an authorization code for the console.",
+      consequence:
+        "Deployment only, and never shown. Without it the console's own sign-in cannot complete, though the CLI's device flow still can.",
+      effect: :restart
+    },
+    %Setting{
+      key: "audience",
+      group: :deployment,
+      type: :string,
+      app_key: :audience,
+      editable: false,
+      fallback: "troupe-plane-api",
+      summary: "What this plane's own tokens are addressed to.",
+      consequence:
+        "Deployment only. Workers and the plane must agree, or every token is refused.",
+      effect: :restart
+    },
+    %Setting{
+      key: "base_url",
+      group: :deployment,
+      type: :string,
+      app_key: :base_url,
+      editable: false,
+      summary: "The URL this plane believes it is reached at.",
+      consequence:
+        "Deployment only. The OIDC redirect must match it exactly, which is the usual cause of a sign-in that returns an error instead of a session.",
+      effect: :restart
+    },
+    %Setting{
+      key: "scim_token",
+      group: :deployment,
+      type: :string,
+      app_key: :scim_token,
+      editable: false,
+      secret: true,
+      summary: "The bearer token the identity provider presents when it pushes users and groups.",
+      consequence:
+        "Deployment only, and never shown. Unset means SCIM is refused and group membership arrives only at login.",
+      effect: :restart
+    },
+    %Setting{
+      key: "breakglass_token",
+      group: :deployment,
+      type: :string,
+      app_key: [:breakglass, :token],
+      editable: false,
+      secret: true,
+      summary: "The token that opens the break-glass door.",
+      consequence:
+        "Deployment only, and never shown. Unset means the door is not there at all: /admin/breakglass answers 404 like any other path that does not exist.",
+      effect: :restart
+    }
+  ]
+
+  @by_key Map.new(@settings, &{&1.key, &1})
+
+  @table __MODULE__
+  @ttl_seconds 5
+
+  # The panels of the Settings page, in the order they appear. A group with a heading and
+  # a sentence rather than a bare heading: a section called "Provisioning" tells a reader
+  # nothing they did not already know from the field beneath it.
+  @groups [
+    {:administration, "Who administers this platform",
+     "Both of these decide whether anybody can use this console at all. Getting one wrong locks everybody out, and the break-glass door is how you get back in."},
+    {:provisioning, "How a change reaches the cluster",
+     "Whether the console applies a profile itself or writes a commit for somebody to review."},
+    {:team_defaults, "What a new team starts with",
+     "Applied when a group is enabled as a team. Changing them leaves existing teams alone; each team's own values are on the Teams page."},
+    {:sessions, "What a new session runs with",
+     "Defaults for work started after the change. Running sessions keep what they were given."},
+    {:deployment, "What this plane was deployed with",
+     "Read-only here on purpose: these are the values that decide who may sign in, and a console that could change them is a console that could shut itself. Change them in the deployment and roll it."}
+  ]
+
+  @doc "The panels of the Settings page: a key, a heading and the sentence under it."
+  @spec groups() :: [{atom(), String.t(), String.t()}]
+  def groups, do: @groups
+
+  @doc "Every setting this plane has, in the order they are shown."
+  @spec definitions() :: [Setting.t()]
+  def definitions, do: @settings
+
+  @doc "One setting's definition, or `nil`."
+  @spec definition(String.t()) :: Setting.t() | nil
+  def definition(key), do: Map.get(@by_key, key)
+
+  @doc """
+  A setting's value, typed.
+
+  The stored override if there is one, otherwise what the plane was deployed with,
+  otherwise the fallback this release ships. Callers use this instead of
+  `Application.get_env/3` — that is the whole point, and a caller still reading the
+  environment directly is a setting the console cannot actually change.
+  """
+  @spec get(String.t()) :: term()
+  def get(key) do
+    case Map.fetch(@by_key, key) do
+      :error -> nil
+      {:ok, setting} -> value_of(setting, stored())
+    end
+  end
+
+  @doc """
+  Every setting with its value and where that value came from.
+
+  A secret's value is never in the answer; `set` says whether there is one. This is what
+  the console's Settings page renders and what `admin.settings.list` returns, so the
+  console and a model reading over MCP are looking at exactly the same thing.
+  """
+  @spec all() :: [map()]
+  def all do
+    overrides = stored()
+    Enum.map(@settings, &describe(&1, overrides))
+  end
+
+  defp describe(%Setting{} = setting, overrides) do
+    stored_value = Map.get(overrides, setting.key)
+    value = value_of(setting, overrides)
+
+    base = %{
+      key: setting.key,
+      group: setting.group,
+      type: setting.type,
+      values: setting.values,
+      summary: setting.summary,
+      consequence: setting.consequence,
+      effect: setting.effect,
+      effect_description: effect_description(setting.effect),
+      editable: setting.editable,
+      secret: setting.secret,
+      set: not is_nil(value) and value != "",
+      source: source(setting, stored_value, value),
+      deployed: display(setting, deployed(setting))
+    }
+
+    if setting.secret, do: base, else: Map.put(base, :value, display(setting, value))
+  end
+
+  defp source(_setting, stored_value, _value) when is_binary(stored_value), do: :stored
+  defp source(_setting, _stored, nil), do: :unset
+  defp source(_setting, _stored, _value), do: :deployed
+
+  @doc "What the effect atom means, in a sentence a person reads next to the field."
+  @spec effect_description(atom()) :: String.t()
+  def effect_description(:immediate), do: "Takes effect on the next request."
+  def effect_description(:next_team), do: "Applies to teams enabled after the change."
+  def effect_description(:next_session), do: "Applies to sessions started after the change."
+  def effect_description(:restart), do: "Set at deploy time; changing it needs a rollout."
+
+  @doc """
+  Change a setting.
+
+  Refuses anything that is not a setting, anything the deployment owns, and any value that
+  does not parse as the declared type — the parse is the validation, and it happens here
+  rather than at read time so a bad value is refused by the person who typed it rather than
+  discovered by whatever reads it next.
+  """
+  @spec put(String.t(), String.t(), String.t()) ::
+          {:ok, map()} | {:error, :unknown_setting | :not_editable | {:invalid, String.t()}}
+  def put(key, value, actor) do
+    with {:ok, setting} <- editable(key),
+         {:ok, parsed} <- parse(setting, value) do
+      %Stored{}
+      |> Stored.changeset(%{key: key, value: to_string(value), updated_by: actor})
+      |> Repo.insert!(
+        on_conflict: {:replace, [:value, :updated_by, :updated_at]},
+        conflict_target: :key
+      )
+
+      invalidate()
+      {:ok, %{key: key, value: parsed, effect: effect_description(setting.effect)}}
+    end
+  end
+
+  @doc "Drop a stored value, so the setting goes back to what the plane was deployed with."
+  @spec reset(String.t(), String.t()) :: {:ok, map()} | {:error, :unknown_setting | :not_editable}
+  def reset(key, _actor) do
+    with {:ok, setting} <- editable(key) do
+      Repo.delete_all(from(s in Stored, where: s.key == ^key))
+      invalidate()
+
+      {:ok,
+       %{key: key, value: value_of(setting, %{}), effect: effect_description(setting.effect)}}
+    end
+  end
+
+  defp editable(key) do
+    case Map.fetch(@by_key, key) do
+      :error -> {:error, :unknown_setting}
+      {:ok, %Setting{editable: false}} -> {:error, :not_editable}
+      {:ok, setting} -> {:ok, setting}
+    end
+  end
+
+  # -- values -----------------------------------------------------------------
+
+  defp value_of(%Setting{} = setting, overrides) do
+    case Map.get(overrides, setting.key) do
+      nil ->
+        deployed(setting)
+
+      raw ->
+        # A stored value that no longer parses — the type of a setting changed under it —
+        # is not a crash and not a silent nil: the deployment's value is what a plane runs
+        # on when it cannot read its own override.
+        case parse(setting, raw) do
+          {:ok, parsed} -> parsed
+          {:error, _reason} -> deployed(setting)
+        end
+    end
+  end
+
+  defp deployed(%Setting{app_key: nil} = setting), do: setting.fallback
+
+  defp deployed(%Setting{app_key: key} = setting) when is_atom(key) do
+    presence(Application.get_env(:troupe_plane, key), setting.fallback)
+  end
+
+  # `:oidc` and `:breakglass` are keyword lists, which `get_in/2` reads with plain atom
+  # keys. A plane with neither configured at all is a laptop, and `[]` answers `nil`.
+  defp deployed(%Setting{app_key: [root | path]} = setting) do
+    :troupe_plane
+    |> Application.get_env(root, [])
+    |> get_in(path)
+    |> presence(setting.fallback)
+  end
+
+  defp presence(nil, fallback), do: fallback
+  defp presence("", fallback), do: fallback
+  defp presence(value, _fallback), do: value
+
+  # What a reader sees. Atoms are rendered as their own text so `:direct` reads `direct`
+  # rather than as an Elixir term nobody outside this codebase would recognise.
+  defp display(%Setting{secret: true}, value), do: if(is_nil(value), do: nil, else: "set")
+  defp display(_setting, nil), do: nil
+
+  defp display(_setting, value) when is_atom(value) and not is_boolean(value),
+    do: to_string(value)
+
+  defp display(_setting, value), do: value
+
+  # Everything is parsed from text: that is how it is stored, and how a form and a JSON-RPC
+  # caller both send it.
+  defp parse(%Setting{} = setting, value) when not is_binary(value) do
+    parse(setting, to_string(value))
+  end
+
+  defp parse(%Setting{type: :string}, value), do: {:ok, value}
+
+  defp parse(%Setting{type: :enum, values: values}, value) do
+    if value in values,
+      do: {:ok, String.to_existing_atom(value)},
+      else: {:error, {:invalid, "must be one of: " <> Enum.join(values, ", ")}}
+  end
+
+  defp parse(%Setting{type: :integer}, value) do
+    case Integer.parse(String.trim(value)) do
+      {number, ""} -> {:ok, number}
+      _other -> {:error, {:invalid, "must be a whole number"}}
+    end
+  end
+
+  defp parse(%Setting{type: :boolean}, value) do
+    case String.downcase(String.trim(value)) do
+      yes when yes in ~w(true yes on 1) -> {:ok, true}
+      no when no in ~w(false no off 0) -> {:ok, false}
+      _other -> {:error, {:invalid, "must be true or false"}}
+    end
+  end
+
+  # -- the stored half, and the five seconds it is remembered for --------------
+
+  @doc "Forget what is cached on this node. The writer calls it; a test may."
+  @spec invalidate() :: :ok
+  def invalidate do
+    :ets.delete(@table, :stored)
+    :ok
+  rescue
+    ArgumentError -> :ok
+  end
+
+  defp stored do
+    case lookup() do
+      {:ok, overrides} -> overrides
+      :error -> remember(from_database())
+    end
+  end
+
+  defp from_database do
+    Repo.all(from(s in Stored, select: {s.key, s.value})) |> Map.new()
+  rescue
+    # A plane answering `/healthz` before its database is reachable, or a unit test with
+    # no repo: the deployment's values are a complete answer on their own.
+    _error -> %{}
+  end
+
+  defp lookup do
+    case :ets.lookup(@table, :stored) do
+      [{:stored, overrides, expires_at}] when expires_at > 0 ->
+        if expires_at > now(), do: {:ok, overrides}, else: :error
+
+      _miss ->
+        :error
+    end
+  rescue
+    ArgumentError -> :error
+  end
+
+  defp remember(overrides) do
+    :ets.insert(@table, {:stored, overrides, now() + @ttl_seconds})
+    overrides
+  rescue
+    # No table means nothing is running this process — a mix task, a test that starts no
+    # application. Reading the database every time is the correct behaviour there.
+    ArgumentError -> overrides
+  end
+
+  defp now, do: System.system_time(:second)
+
+  # -- the process that owns the table ----------------------------------------
+
+  @spec start_link(term()) :: GenServer.on_start()
+  def start_link(opts \\ []), do: GenServer.start_link(__MODULE__, opts, name: __MODULE__)
+
+  @impl GenServer
+  def init(_opts) do
+    Process.set_label("troupe plane settings")
+    _table = :ets.new(@table, [:named_table, :public, :set, read_concurrency: true])
+    {:ok, %{}}
+  end
+end

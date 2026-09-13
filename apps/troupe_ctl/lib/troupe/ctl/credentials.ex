@@ -52,6 +52,29 @@ defmodule Troupe.Ctl.Credentials do
   end
 
   @doc """
+  The record a command should use, given its options.
+
+  `--plane` when one was named, the default otherwise, and whatever a test injected
+  before either. One function because there were two, and they disagreed: `troupe admin
+  --plane <url> overview` read the flag, dropped it, and answered from whichever plane
+  happened to be the most recently logged into.
+  """
+  @spec for(keyword()) :: map() | nil
+  def for(opts) do
+    case Keyword.get(opts, :credentials) do
+      nil -> named_or_default(opts)
+      record -> record
+    end
+  end
+
+  defp named_or_default(opts) do
+    case Keyword.get(opts, :plane) do
+      nil -> default(opts)
+      plane -> get(plane, opts)
+    end
+  end
+
+  @doc """
   Store one plane's credentials.
 
   The file is written whole and then chmod'd, rather than created with a mode: an

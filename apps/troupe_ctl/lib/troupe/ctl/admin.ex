@@ -49,6 +49,13 @@ defmodule Troupe.Ctl.Admin do
     {~w(audit), "admin.audit.list", [], "who changed what, newest first"},
     {~w(provisioning), "admin.provisioning.mode", [],
      "whether this plane applies directly or through GitOps"},
+    {~w(settings), "admin.settings.list", [],
+     "every platform setting, its value, and where that value came from"},
+    {~w(setting set), "admin.setting.put", ["key", "value"], "change one platform setting"},
+    {~w(setting reset), "admin.setting.reset", ["key"],
+     "put one back to what this plane was deployed with"},
+    {~w(identity check), "admin.identity.check", ["group?"],
+     "test the identity configuration; GROUP checks one before you set it"},
     {~w(principal list), "admin.principals.list", ["team"], "a team's service principals"},
     {~w(principal create), "admin.principal.create", ["team", "name", "profiles"],
      "create one; PROFILES is comma-separated, and the secret is printed once"},
@@ -287,7 +294,7 @@ defmodule Troupe.Ctl.Admin do
   end
 
   defp credentials(opts) do
-    case Keyword.get(opts, :credentials) || Credentials.default() do
+    case Credentials.for(opts) do
       nil ->
         {:error, "not logged in to any plane — run `troupe login <plane-url>`"}
 

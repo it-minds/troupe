@@ -15,6 +15,7 @@ defmodule Troupe.Plane.Login do
 
   alias Troupe.Plane.Identity
   alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Settings
 
   @doc """
   Apply an access token's claims.
@@ -60,7 +61,7 @@ defmodule Troupe.Plane.Login do
   end
 
   defp groups_in(claims) do
-    claim = Application.get_env(:troupe_plane, :groups_claim, "groups")
+    claim = Settings.get("groups_claim")
 
     case Map.get(claims, claim) do
       list when is_list(list) -> Enum.filter(list, &is_binary/1)

@@ -242,7 +242,7 @@ CRDs, the operator, its RBAC, a default `TroupePolicy` and the admission policie
 cluster test creates `dev` and `ux`, waits for `Ready`, and asserts every object the
 architecture lists — namespace, ServiceAccount with automount disabled, StatefulSet on
 `OnDelete`, headless Service, a Service and an Ingress per pod at
-`<ordinal>.<profile>.workers.<domain>`, NetworkPolicy, PodDisruptionBudget, and a claim
+`<ordinal>-<profile>.workers.<domain>`, NetworkPolicy, PodDisruptionBudget, and a claim
 per granted team volume.
 
 **2. A profile outside policy is refused, and nothing is created.**
@@ -1097,3 +1097,207 @@ would look for:
 * **A2A field names** follow the specification as of mid-2026 and a handful are noted
   as uncertain in `DECISIONS.md`; the conformance run against LiteLLM's client is where
   any difference will show.
+
+---
+
+# Stage 6 — token accounting
+
+`cost_micros` has been on the wire, in a column and in `session.status` since stage 5,
+and it has always been zero. It is not zero any more. A team can be told what it spent,
+by session, by model and by person; a session's status carries a cost a review queue can
+show without reading a log; and the nightly reconciliation against the gateway now has
+something to reconcile.
+
+Part 1 of `docs/plans/stage-6.md` is the design. Nothing else in that plan is built.
+
+Everything below was run on 13 September 2026 in a container with PostgreSQL, OpenBao
+and MinIO beside it, from a working tree that compiles with `--warnings-as-errors`.
+
+```
+$ mix compile --force --warnings-as-errors   # clean
+$ mix credo --strict                         # 5459 mods/funs, found no issues
+$ mix troupe.boundaries                      # boundaries ok: 5 app rule(s), 1 module rule(s), no violations
+$ mix troupe.schema.diff                     # schema unchanged: 73 documents
+$ mix format --check-formatted <changed>     # clean
+```
+
+## What was already there, and what was missing
+
+Almost all of it was built and nothing connected it. `usage_records` was append-only and
+unique on the gateway's request id; `Ledger.record/1` treated a repeat as a success;
+`TeamBudget` kept the running total in process state; the plane handled `usage.record` on
+the control channel; `Reconcile` compared a window against the gateway. And
+`Troupe.Worker.Plane.Link.usage/2` — the one function that would have fed all of it —
+had no callers, in any app, in any test.
+
+What was missing was upstream of that: `Troupe.LLM.Response` had nowhere to put a
+gateway's request id or its price, the HTTP adapters threw the response headers away,
+and the `llm_response` event carried two integers.
+
+## The done items
+
+### 1. A turn is a ledger row with the gateway's own id and price
+
+```
+$ mix test apps/troupe_core/test/troupe/llm/gateway_test.exs \
+           apps/troupe_core/test/troupe/session/usage_test.exs \
+           apps/troupe_core/test/troupe/log/fold_test.exs
+Result: 31 passed
+```
+
+`Troupe.LLM.Gateway` reads `x-litellm-call-id` and `x-litellm-response-cost` from the
+response, in the shared `finish/1` of both HTTP adapters, and parses the amount with
+integer arithmetic over the digits — `8.87` is `8_870_000` micros and not `8_869_999`,
+which is what `String.to_float/1` would have made it. A gateway that says nothing leaves
+both empty, which is recorded as tokens with no cost rather than guessed at.
+
+`llm_response` now carries `model` and `gateway`, and `Troupe.Session.Usage` is the one
+function that turns that event into a ledger row — used by the live path for a single
+event and by the catch-up path for a list, so the two cannot disagree. An event written
+before this release folds to its real tokens, a cost of zero and a request id of
+`seq:<session>:<n>`.
+
+### 2. A pod holds what it owes in a table it may lose
+
+```
+$ mix test apps/troupe_worker/test/troupe/worker/usage_test.exs \
+           apps/troupe_worker/test/troupe/worker/usage_flow_test.exs
+Result: 15 passed
+```
+
+`Troupe.Worker.Usage` is a named public ETS ordered set keyed by `{session_id, seq}`.
+A `Task` calling `put/2` leaves the collector's mailbox empty, which the test asserts
+with `Process.info(pid, :messages)` — the property the whole shape exists for. A plane
+that refuses keeps every row; a watermark behind what was sent keeps the rows above it;
+the interval drains without anyone asking; and the twenty-thousand-row cap drops and
+counts what it dropped.
+
+`usage_flow_test` is the end-to-end one, against real MinIO and OpenBao: a session runs
+two turns on the fake provider, and the batch that goes out carries the same request ids
+and a cost the session's own summary agrees with. Then the two failure shapes — the
+plane refusing, and the collector losing its table — and in the second, a fresh
+collector with an empty table folds the log again from the plane's watermark and
+produces exactly the two rows.
+
+### 3. The plane records a batch once, and says how far it got
+
+```
+$ mix test apps/troupe_plane/test/troupe/plane/usage_test.exs \
+           apps/troupe_plane/test/troupe/plane/reconcile_test.exs
+Result: 22 passed
+```
+
+`usage.batch` over the control channel: two records land, the team's spend moves, and the
+answer is `%{"recorded" => 2, "duplicates" => 0, "usage_seq" => 6}`. The same batch again
+is `%{"recorded" => 0, "duplicates" => 1, "usage_seq" => 4}` and the total does not move.
+A retry of an older batch is still recorded and is told the watermark it did not set. An
+`owner_subject` the pod put in the payload is ignored in favour of the row's. A record
+with no gateway id is refused and nothing is written. A charge dated an hour in the
+future is dated now, so a report can still see it.
+
+`Ledger.breakdown/3` groups a window by model, by owner or by session; `Ledger.Cache`
+remembers it for a minute and `TeamBudget` throws it away on the way past, which the test
+proves by reading a zero, recording, and reading the new number. Reconciliation gained an
+`unmetered` category so a pre-gateway call is not reported as a call billed twice — and
+does not make a clean comparison dirty.
+
+### 4. The suites, before and after
+
+```
+troupe_core        214/226   (before 193/205: the same 12 need bubblewrap or reaper, plus one known load-only flake)
+troupe_worker      109       (before 94)
+troupe_plane       248/257   (before 236/245: the same 9 need a TokenReview)
+troupe_gateway     48/57     unchanged
+troupe_a2a         45        unchanged
+troupe_ctl         45        unchanged
+troupe_tui         30        unchanged
+troupe_operator    35/47     unchanged
+```
+
+Forty-eight tests added; every pre-existing failure is the same one it was.
+`Troupe.Agent.DelegationTest`'s restart-intensity test failed once in a full run and
+passes alone — the flake already named in stage 5's report.
+
+## What writing the tests found
+
+* **`Map.pop/2` returns `{value, rest}`.** The batch handler had `{attrs, seq}` and would
+  have handed the ledger a sequence number as its attributes. Elixir's type checker
+  caught it at compile time, through the `||` that could then never run.
+* **A charge dated in the future is invisible.** The first `breakdown` test failed because
+  a fixture timestamped `10:00` was ahead of a container clock reading `00:32`, and
+  `occurred_at < to` excluded it. That is not a test problem: a pod with a fast clock
+  would write charges no window query would ever return. The plane clamps to now, and
+  there is a test for it.
+* **The fixture fold hash moved, exactly as expected.** The summary projection gained
+  `cost_micros`, so every recorded fixture folded differently.
+  `mix troupe.fixtures.record` refuses to overwrite a recorded version, and it is right
+  to: a recorded hash is evidence of what a *released* Troupe produced. There are no
+  release tags, so 0.2.0 is the in-development set, and it was re-recorded with a new
+  `metered_turn` fixture beside `simple_turn` so both an event with a gateway and one
+  without stay covered.
+* **Two indexes already existed.** The migration tried to create
+  `usage_records_team_id_occurred_at_index` and `usage_records_session_id_index`, both of
+  which stage 1 created with the table. The migration is one column now.
+
+## Known limitations
+
+* **Nothing has run on a cluster**, which is still the first item on the list. The
+  end-to-end test uses real object storage and a real key manager, and a fake plane.
+* **No rollup pipeline and no retention job.** Raw records and a cached aggregate answer
+  everything at this volume. The decision this stage owes the next one is the row count
+  at which that stops being true.
+* **`x-litellm-response-cost` on a streamed response is assumed, not verified.** It was
+  the one open question in the plan and the answer given was that cost is streamed. If a
+  deployment turns out to send it only on buffered responses, the tokens are still
+  recorded and `Reconcile` reports the cost as unmetered — the design degrades to the
+  pre-gateway case rather than losing the call.
+* **The panel shows spend and does not let anyone act on it.** A team's page carries what
+  it spent, what is reserved and the top five models. There is no per-session drill-down
+  and no export.
+* **The bench was not re-run.** What the turn path gained is one `:ets.insert/2` on a
+  path that already does an `fsync` per event, so the cost should be immaterial — but
+  "should be" is not a measurement, and the 1,070 turns a second in stage 5's report is
+  the last number that was actually taken.
+
+## The admin surface — a fourth rendering, and real configuration
+
+**What was claimed.** That `Troupe.Plane.Admin` is one context with several renderings and
+that parity between them is checked rather than remembered; that the console configures the
+platform rather than displaying it; and that a setting an operator owns can be changed
+without a deploy.
+
+**What was done.**
+
+*A fourth surface.* `POST /mcp` offers the same method table as MCP tools, on the same
+bearer token as `/rpc`, dispatched through the same context. `Troupe.Plane.AdminParityTest`
+now asserts every context function has an API method, a CLI command **and** a tool, that
+every method carries a summary and every argument a description, and that every destructive
+method names an argument that must be confirmed. 13 tests in
+`apps/troupe_plane/test/troupe/plane/admin_mcp_test.exs` cover the handshake, the schemas
+and the confirmation — including that a destructive call without confirmation leaves the
+profile in place, which is the assertion that matters.
+
+*Settings that decide something.* `platform_settings` is an override table read through
+`Troupe.Plane.Settings`; `Provision.mode/0`, `Admin.actor_for/1` and `Login`'s group claim
+read through it, so changing the provisioning mode or the platform admin group takes effect
+on the next request rather than at the next rollout. 15 tests prove the ordering that makes
+it safe — a stored value overrides the deployment, a reset goes back to the *deployment's*
+value and not to this release's default, a value that does not parse falls back rather than
+crashing, and a secret is never in the answer.
+
+*A console that configures.* The profile editor renders the whole `WorkerProfile` spec
+rather than four fields of it; Overview leads with an attention list sorted worst-first;
+Teams edits every field a team has, with a budget bar and the figures beside it. A new
+Settings page shows every setting with its value, where that value came from, what changing
+it does and when it takes effect — and will not let the group that decides who administers
+be saved until a check has passed for the value in the field.
+
+**What it cost to find.** Two real defects, both found by writing the tests rather than by
+running the console. `Identity.enable_team/2` put an atom key into a map that arrived from
+JSON, which Ecto refuses to cast — so enabling a team with any attributes at all worked from
+the panel and raised from the CLI and the API. And `Audit.diff/2` compared only top-level
+keys, so every profile change was recorded as one twenty-line object becoming another.
+
+**What is not claimed.** Identity and Integrations are not their own screens; the erase
+dialog is a two-step confirmation and not the typed identifier the design specifies; Audit
+has no integrity tab. `docs/plans/admin-surface.md` lists what is owed.

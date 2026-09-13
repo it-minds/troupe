@@ -58,11 +58,18 @@ defmodule Troupe.Plane.Audit do
 
   Both sides are compared as they would be stored, so a change from `nil` to `""` is not
   a change and a reordered list is.
+
+  Nested maps are walked and the key is the path: `spec.llm.model`. A profile's whole
+  configuration lives under one `spec` field, and a diff that stopped at the top would
+  report changing a model name as `spec` going from one twenty-line object to another —
+  technically the truth, and useless both to the person about to press apply and to the
+  person reading the audit trail six weeks later. Structs are values, not maps: a
+  timestamp is one thing that changed, not six.
   """
   @spec diff(map(), map()) :: map()
-  def diff(before, now) do
-    before = stringify(before)
-    now = stringify(now)
+  def diff(before, now), do: walk(stringify(before), stringify(now), [])
+
+  defp walk(before, now, path) do
     keys = MapSet.union(MapSet.new(Map.keys(before)), MapSet.new(Map.keys(now)))
 
     # Deliberately not a comprehension with `was = …` as a filter: an assignment used as
@@ -73,11 +80,18 @@ defmodule Troupe.Plane.Audit do
     |> Enum.flat_map(fn key ->
       was = Map.get(before, key)
       is = Map.get(now, key)
+      here = path ++ [key]
 
-      if was == is, do: [], else: [{key, %{"from" => was, "to" => is}}]
+      cond do
+        was == is -> []
+        walkable?(was) and walkable?(is) -> Map.to_list(walk(stringify(was), stringify(is), here))
+        true -> [{Enum.join(here, "."), %{"from" => was, "to" => is}}]
+      end
     end)
     |> Map.new()
   end
+
+  defp walkable?(value), do: is_map(value) and not is_struct(value)
 
   # Both sides keyed the same way, so a caller comparing a struct's atom keys with a
   # form's string ones gets a diff rather than a list of everything.

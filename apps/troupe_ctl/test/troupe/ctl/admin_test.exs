@@ -41,9 +41,10 @@ defmodule Troupe.Ctl.AdminTest do
   describe "commands" do
     test "each one reaches its method", context do
       for {words, method, args, _help} <- Admin.commands() do
+        invocation = Enum.join(words ++ placeholders(args), " ")
         assert 0 = run(context, words ++ placeholders(args))
 
-        assert_receive {:rpc, request}, 5_000
+        assert_receive {:rpc, request}, 5_000, "no request for `troupe admin #{invocation}`"
         assert request["method"] == method
       end
     end

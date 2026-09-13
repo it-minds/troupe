@@ -32,10 +32,21 @@ defmodule Troupe.Plane.Admin do
   differently.
   """
 
-  alias Troupe.Plane.{Audit, Bundles, ClusterPolicy, Drain, Erasure, Fleet, Identity, Ledger}
+  alias Troupe.Plane.{
+    Audit,
+    Breakglass,
+    Bundles,
+    ClusterPolicy,
+    Drain,
+    Erasure,
+    Fleet,
+    Identity,
+    Ledger
+  }
+
   alias Troupe.Plane.Fleet.{Bundle, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
-  alias Troupe.Plane.{Principals, Provision, Sessions, Triggers}
+  alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
 
@@ -67,7 +78,7 @@ defmodule Troupe.Plane.Admin do
 
   def actor_for(%Identity.User{} = user) do
     teams = Identity.teams_for(user)
-    group = Application.get_env(:troupe_plane, :platform_admin_group)
+    group = Settings.get("platform_admin_group")
 
     cond do
       # Against the provider's *groups*, not against enabled teams. A team is something
@@ -103,6 +114,32 @@ defmodule Troupe.Plane.Admin do
   end
 
   def actor_for_subject(_subject), do: nil
+
+  @doc """
+  Who a console session is, break-glass included.
+
+  The console's only way to ask, because a LiveView reaches the plane through this
+  module and nowhere else. Both answers are worked out on every call rather than carried
+  in the cookie: a person whose admin role was taken away loses the console at their next
+  page, and a break-glass session that has run out of time loses it at the same moment.
+
+  The actor carries `breakglass` so a page can say so — the design requires a session
+  opened with the token to be marked on every page, and a flag the caller has to fetch
+  separately is a flag a page can forget.
+  """
+  @spec actor_for_session(map()) :: actor() | nil
+  def actor_for_session(session) when is_map(session) do
+    if Breakglass.live?(session) do
+      session |> Breakglass.actor() |> Map.put(:breakglass, true)
+    else
+      case actor_for_subject(session["subject"]) do
+        nil -> nil
+        actor -> Map.put(actor, :breakglass, false)
+      end
+    end
+  end
+
+  def actor_for_session(_session), do: nil
 
   # -- overview ---------------------------------------------------------------
 
@@ -234,7 +271,12 @@ defmodule Troupe.Plane.Admin do
   def team_enable(actor, group_id, attrs \\ %{}) do
     with :ok <- require_platform_admin(actor),
          %Identity.Group{} = group <- Identity.get_group(group_id) do
-      case Identity.enable_team(group, Map.put(attrs, :enabled_by, actor.subject)) do
+      attrs =
+        team_defaults()
+        |> Map.merge(Map.new(attrs, fn {key, value} -> {to_string(key), value} end))
+        |> Map.put("enabled_by", actor.subject)
+
+      case Identity.enable_team(group, attrs) do
         {:ok, team} ->
           {:ok, _} = Audit.record(actor.subject, "team.enable", team.name, %{"group" => group_id})
           {:ok, team_detail(team)}
@@ -246,6 +288,19 @@ defmodule Troupe.Plane.Admin do
       nil -> {:error, Error.new(:not_found, %{group: group_id})}
       other -> other
     end
+  end
+
+  # What a team starts with, from the platform's settings rather than from the schema's
+  # defaults. The schema still has defaults — a team created by a migration or a test has
+  # to be some shape — but a platform that has decided every new team gets a 500 kr ceiling
+  # should not have to remember to set it on each one.
+  defp team_defaults do
+    %{
+      "budget_micros" => Settings.get("default_budget_micros"),
+      "budget_period" => to_string(Settings.get("default_budget_period")),
+      "idle_timeout_seconds" => Settings.get("default_idle_timeout_seconds"),
+      "erase_after_days" => Settings.get("default_erase_after_days")
+    }
   end
 
   @doc "Change a team's budget, retention or default visibility."
@@ -355,6 +410,167 @@ defmodule Troupe.Plane.Admin do
          changes: Audit.diff(comparable(current), comparable_attrs(attrs)),
          mode: Provision.mode()
        }}
+    end
+  end
+
+  # -- the platform's own settings --------------------------------------------
+
+  @doc """
+  Every platform setting: its value, where that value came from, and what changing it does.
+
+  A team admin may read this. The values here are not secrets — the one thing that would
+  be, a credential, is reported as set or not and never returned — and a team admin who
+  can see that the platform admin group is a group they are not in has been told something
+  true and useful rather than something they could exploit.
+
+  The panels come back with the settings rather than being the console's own list, so the
+  console does not hold an opinion about how the platform's configuration is arranged and
+  a setting added to `Troupe.Plane.Settings` appears on the page with nothing else changed.
+  """
+  @spec settings_list(actor()) :: result()
+  def settings_list(actor) do
+    with :ok <- require_admin(actor) do
+      groups = Enum.map(Settings.groups(), fn {key, title, blurb} -> %{key: key, title: title, blurb: blurb} end)
+
+      {:ok, %{groups: groups, settings: Settings.all()}}
+    end
+  end
+
+  @doc """
+  Change one setting.
+
+  Audited like any other change, and with the same diff shape, so a setting that locked
+  everybody out is answerable in the audit log rather than being a mystery about the
+  deployment.
+  """
+  @spec setting_put(actor(), String.t(), String.t()) :: result()
+  def setting_put(actor, key, value) do
+    with :ok <- require_platform_admin(actor) do
+      before = Settings.get(key)
+
+      case Settings.put(key, value, actor.subject) do
+        {:ok, applied} ->
+          changes = Audit.diff(%{key => before}, %{key => applied.value})
+          {:ok, _} = Audit.record(actor.subject, "setting.put", key, changes)
+          {:ok, Map.put(applied, :changes, changes)}
+
+        {:error, reason} ->
+          {:error, setting_error(key, reason)}
+      end
+    end
+  end
+
+  @doc "Put a setting back to whatever this plane was deployed with."
+  @spec setting_reset(actor(), String.t()) :: result()
+  def setting_reset(actor, key) do
+    with :ok <- require_platform_admin(actor) do
+      before = Settings.get(key)
+
+      case Settings.reset(key, actor.subject) do
+        {:ok, applied} ->
+          changes = Audit.diff(%{key => before}, %{key => applied.value})
+          {:ok, _} = Audit.record(actor.subject, "setting.reset", key, changes)
+          {:ok, Map.put(applied, :changes, changes)}
+
+        {:error, reason} ->
+          {:error, setting_error(key, reason)}
+      end
+    end
+  end
+
+  defp setting_error(key, :unknown_setting),
+    do: Error.new(:not_found, %{setting: key})
+
+  defp setting_error(key, :not_editable),
+    do:
+      Error.new(:invalid_params, %{
+        setting: key,
+        reason: "this one belongs to the deployment and cannot be changed from here"
+      })
+
+  defp setting_error(key, {:invalid, why}),
+    do: Error.new(:invalid_params, %{setting: key, reason: why})
+
+  @doc """
+  Test the identity configuration, and optionally a group before making it the admin one.
+
+  Four checks with what each proved, because the design asks for a check list rather than a
+  tick: an operator whose sign-in is broken needs to know *which* of the four things is
+  wrong, and they are separable. Three are about the provider and come from `OIDC`; the
+  fourth is about this plane and is the one that actually decides whether anybody can
+  administer anything.
+
+  `group` is what makes this a check rather than a report. The way to lock every
+  administrator out of a platform is to save a `platform_admin_group` that nobody is in,
+  and the way to not do that is to be told, before saving, how many people would be
+  administrators afterwards and whether you are one of them. So the console asks with the
+  value in the field, not the value in the database.
+  """
+  @spec identity_check(actor(), String.t() | nil) :: result()
+  def identity_check(actor, group \\ nil) do
+    with :ok <- require_admin(actor) do
+      candidate = presence(group) || Settings.get("platform_admin_group")
+      checks = OIDC.check() ++ [admin_group_check(actor, candidate)]
+
+      {:ok,
+       %{
+         checks: checks,
+         ok: Enum.all?(checks, & &1.ok),
+         group: candidate,
+         # Not a check, because nothing here can prove it: the provider is the only thing
+         # that knows which redirect URIs are registered. Reported so it can be compared
+         # against the registration by eye, which is the actual repair.
+         redirect_uri: redirect_uri()
+       }}
+    end
+  end
+
+  # Nothing here talks to the provider. It asks this plane's own tables who has arrived
+  # carrying the group, which is the thing that decides who is an administrator — a group
+  # that exists in Entra and has never appeared in a token grants nobody anything here.
+  defp admin_group_check(_actor, nil) do
+    OIDC.check_result(
+      "Platform admins",
+      false,
+      "No platform admin group is set, so nobody who signs in is a platform admin.",
+      0
+    )
+  end
+
+  defp admin_group_check(actor, candidate) do
+    claim = Settings.get("groups_claim")
+
+    case Identity.get_group(candidate) do
+      nil ->
+        OIDC.check_result(
+          "Platform admins",
+          false,
+          "#{candidate} has never arrived in the #{claim} claim of anybody's token. Either the group id is wrong, or the provider is not sending group claims, or nobody in it has signed in yet.",
+          0
+        )
+
+      group ->
+        members = Identity.members_of(group)
+        you = Enum.any?(members, &(&1.subject == actor.subject))
+
+        OIDC.check_result(
+          "Platform admins",
+          members != [],
+          "#{length(members)} person/people known here carry #{candidate} in the #{claim} claim" <>
+            if(you, do: ", including you.", else: ", and you are not one of them."),
+          0
+        )
+    end
+  end
+
+  defp presence(nil), do: nil
+  defp presence(""), do: nil
+  defp presence(value), do: value
+
+  defp redirect_uri do
+    case Settings.get("base_url") do
+      nil -> nil
+      base -> String.trim_trailing(base, "/") <> "/admin/callback"
     end
   end
 
@@ -853,6 +1069,10 @@ defmodule Troupe.Plane.Admin do
             ordinal: worker.ordinal,
             healthy: worker.healthy,
             draining: worker.draining,
+            # Carried so a console can tell silence from failure. A pod that has never
+            # reported is unknown; one that reported and then said it was unhealthy is
+            # broken, and a console that called both broken cries wolf in a partition.
+            last_seen_at: worker.last_heartbeat_at,
             capacity: worker.capacity,
             active_sessions: worker.active_sessions,
             disk_fraction: Worker.disk_fraction(worker),
@@ -901,7 +1121,15 @@ defmodule Troupe.Plane.Admin do
         ),
       # Read-only, always: membership comes from the identity provider and a method to
       # change it would be a second source of truth for who is in a team.
-      members: Enum.map(Identity.members_of_team(team), & &1.subject)
+      members: Enum.map(Identity.members_of_team(team), & &1.subject),
+      # What the team has actually spent, against what it promised. Both are aggregates
+      # over an append-only table and both go through `Ledger.Cache`, so a page that is
+      # reloaded costs a lookup rather than a scan.
+      spent_micros: Ledger.spent_micros(team.id),
+      reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum(),
+      # The five models the money went on. Five because it is a summary on a page about
+      # something else; the whole list is what `Ledger.breakdown/3` is for.
+      spend_by_model: team.id |> Ledger.breakdown(:model) |> Enum.take(5)
     }
   end
 
@@ -909,6 +1137,9 @@ defmodule Troupe.Plane.Admin do
     %{
       name: team.name,
       budget_micros: team.budget_micros,
+      # The ceiling means nothing without the period it is measured over, and Overview
+      # renders both in the same sentence.
+      budget_period: team.budget_period,
       spent_micros: Ledger.spent_micros(team.id),
       reserved_micros:
         team.id |> Ledger.open_reservations() |> Enum.map(& &1.amount_micros) |> Enum.sum()

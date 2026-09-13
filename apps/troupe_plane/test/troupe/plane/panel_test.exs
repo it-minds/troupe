@@ -15,6 +15,48 @@ defmodule Troupe.Plane.PanelTest do
 
   @moduletag timeout: 60_000
 
+  describe "signing in" do
+    test "the authorize request asks for an id_token and nothing that is not a scope",
+         %{conn: conn} do
+      # `groups` was in this list, and it is not a scope — not in OIDC and not at any
+      # provider. Entra validated it *after* authentication and redirected back with
+      # `invalid_scope`, which the callback then reported as "you do not administer
+      # anything here". The console asks for an identity and reads groups out of the
+      # token it gets; it does not ask for them.
+      previous = Application.get_env(:troupe_plane, :oidc)
+
+      Application.put_env(:troupe_plane, :oidc,
+        issuer: "https://login.example.test/v2.0",
+        client_id: "troupe",
+        authorization_endpoint: "https://login.example.test/authorize"
+      )
+
+      on_exit(fn -> Application.put_env(:troupe_plane, :oidc, previous) end)
+
+      location =
+        conn
+        |> Phoenix.ConnTest.get("/admin/login")
+        |> Plug.Conn.get_resp_header("location")
+        |> List.first()
+
+      scope =
+        location
+        |> URI.parse()
+        |> Map.fetch!(:query)
+        |> URI.decode_query()
+        |> Map.fetch!("scope")
+        |> String.split(" ", trim: true)
+
+      assert "openid" in scope, "without `openid` the provider issues no id_token to verify"
+      refute "groups" in scope, "`groups` is not a scope; group claims come from the token"
+
+      # Every scope here has to be one a provider actually defines. The console needs an
+      # identity and nothing else, so the list is short on purpose.
+      assert Enum.all?(scope, &(&1 in ~w(openid profile email offline_access))),
+             "unexpected scope(s): #{inspect(scope -- ~w(openid profile email offline_access))}"
+    end
+  end
+
   setup context do
     engineering =
       team_with_grant("engineering", "dev", name: "engineering", budget_micros: 1_000_000)
@@ -385,11 +427,146 @@ defmodule Troupe.Plane.PanelTest do
       {:ok, view, html} =
         context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
 
-      assert html =~ "What will be applied"
+      assert html =~ "What will happen"
+      assert html =~ "Change something to see what would be written"
 
       html = view |> element("form") |> render_change(%{"name" => "dev", "replicas" => "5"})
+
       assert html =~ "replicas"
-      assert html =~ "→"
+      assert html =~ "5"
+    end
+
+    test "edits every part of the spec, not four fields of it", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      # The fields a profile actually has. A page that edits a subset of them is a page
+      # that quietly makes the rest unreachable except by hand-written JSON.
+      for field <- ~w(
+            image replicas sessionsPerPod
+            llm.endpoint llm.provider llm.model llm.secretRef.name
+            egress.fqdns egress.gitHosts
+            storage.size storage.storageClassName
+            resources.requests.cpu resources.limits.memory
+            configBundleChannel orgMount
+          ) do
+        assert html =~ ~s(name="#{field}"), "the editor has no field for #{field}"
+      end
+    end
+
+    test "a blank field is absent from the spec rather than empty in it" do
+      draft =
+        Troupe.Plane.Web.Live.ProfileEditor.draft(%{
+          fields: %{
+            "name" => "dev",
+            "image" => "ghcr.io/troupe/worker:1",
+            "llm.model" => "gpt-4o",
+            "storage.size" => "",
+            "egress.fqdns" => "gateway.example.test\nregistry.example.test",
+            "orgMount" => false
+          },
+          servers: []
+        })
+
+      assert draft["spec"]["llm"] == %{"model" => "gpt-4o"}
+      assert draft["spec"]["egress"]["fqdns"] == ~w(gateway.example.test registry.example.test)
+
+      # Not `%{"size" => ""}`, which is a resource the API server refuses, and not
+      # `%{}`, which is a branch that says nothing.
+      refute Map.has_key?(draft["spec"], "storage")
+      refute Map.has_key?(draft["spec"], "resources")
+
+      # A boolean is a value even when it is false: without this, unmounting the org
+      # volume would be a change the form could express and never send.
+      assert draft["spec"]["orgMount"] == false
+    end
+
+    test "an MCP row with no url is a row being typed, not a server" do
+      draft =
+        Troupe.Plane.Web.Live.ProfileEditor.draft(%{
+          fields: %{"name" => "dev", "image" => "ghcr.io/troupe/worker:1"},
+          servers: [
+            %{"name" => "jira", "url" => "https://mcp.example.test", "timeoutMs" => "5000"},
+            %{"name" => "half-typed", "url" => ""}
+          ]
+        })
+
+      assert [server] = draft["spec"]["mcpServers"]
+      assert server["name"] == "jira"
+      assert server["timeoutMs"] == 5000
+    end
+  end
+
+  describe "the settings page" do
+    test "says what every setting does and where its value came from", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/settings")
+
+      assert html =~ "platform_admin_group"
+      assert html =~ "provisioning_mode"
+
+      # The panels, so a reader is not handed a flat list of twenty keys.
+      assert html =~ "Who administers this platform"
+      assert html =~ "What this plane was deployed with"
+
+      # Where the value came from, which is the question a settings page usually leaves
+      # a person guessing at.
+      assert html =~ "from the deployment"
+    end
+
+    test "a secret is reported as set and never shown", context do
+      Application.put_env(:troupe_plane, :scim_token, "sh-do-not-print-me")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :scim_token) end)
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/settings")
+
+      assert html =~ "scim_token"
+      assert html =~ "reference only, never shown"
+      refute html =~ "sh-do-not-print-me"
+    end
+
+    test "a team admin reads it and cannot save any of it", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/settings")
+
+      assert html =~ "read-only for you"
+      assert html =~ "platform_admin_group"
+
+      # Not one enabled save button on the page.
+      refute html =~ ~r/<button type="submit"(?![^>]*disabled)/
+    end
+
+    test "the group that decides who administers cannot be saved unchecked", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/settings")
+
+      assert html =~ "Run the check below before saving this one"
+
+      # Checking a group nobody is in leaves it locked: this is the whole point, and the
+      # reason is written where the person about to lock themselves out will read it.
+      html =
+        view
+        |> element(~s(form[phx-submit="save"]), "platform_admin_group")
+        |> render_change(%{"key" => "platform_admin_group", "value" => "nobody-carries-this"})
+
+      _ = html
+      html = view |> element(~s(button[phx-click="check"])) |> render_click()
+
+      assert html =~ "never arrived in the"
+      assert html =~ "Run the check below before saving this one"
+
+      # Checking one that people do carry unlocks it, and says who.
+      html =
+        view
+        |> element(~s(form[phx-submit="save"]), "platform_admin_group")
+        |> render_change(%{"key" => "platform_admin_group", "value" => "platform"})
+
+      _ = html
+      html = view |> element(~s(button[phx-click="check"])) |> render_click()
+
+      assert html =~ "including you."
+      refute html =~ "Run the check below before saving this one"
     end
   end
 

@@ -25,6 +25,9 @@ defmodule Troupe.Plane.Application do
   defp children do
     [
       Troupe.Plane.Repo,
+      # What an operator may change without a deploy, remembered for five seconds. Before
+      # anything that reads a setting, which by the second line is everything.
+      Troupe.Plane.Settings,
       # LiveView needs one, and it is the plane's own rather than a shared cluster topic:
       # what it carries is one browser's view of one page.
       {Phoenix.PubSub, name: Troupe.Plane.PubSub},
@@ -38,6 +41,9 @@ defmodule Troupe.Plane.Application do
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
       Troupe.Plane.Control.Listener,
+      # Sums over an append-only table, remembered for a minute. Owned by a process so
+      # that what it remembers dies with the node rather than outliving it.
+      Troupe.Plane.Ledger.Cache,
       # The plane's OpenBao credential, exchanged once per lease rather than per token
       # minted. Before the endpoint, which is what mints them.
       Troupe.Plane.Tokens.Credential,

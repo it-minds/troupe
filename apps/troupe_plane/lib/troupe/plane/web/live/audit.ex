@@ -42,10 +42,10 @@ defmodule Troupe.Plane.Web.Live.Audit do
   @impl Phoenix.LiveView
   def render(assigns) do
     ~H"""
-    <.shell actor={@actor} page={:audit}>
+    <.shell actor={@actor} breakglass={@breakglass} page={:audit}>
       <p :if={@error} class="error">{@error}</p>
 
-      <form phx-change="filter">
+      <form id="audit-filter" phx-change="filter">
         <label>actor <input name="actor" value={@filter[:actor]} /></label>
         <label>kind <input name="kind" value={@filter[:kind]} /></label>
         <label>subject <input name="subject_id" value={@filter[:subject_id]} /></label>

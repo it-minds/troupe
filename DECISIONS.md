@@ -1779,3 +1779,188 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      module an app calls belongs in that app's `mix.exs`, which is the same reasoning
      the plane applies, and the boundaries task concerns umbrella apps, not Hex packages.
 
+
+## Stage 6 — token accounting
+
+287. **Cost is a fold over the log, not a second write path.** Every model call already
+     left a durable `llm_response`; making it carry the model, the gateway's request id
+     and the cost means the ledger is derivable from what the pod already wrote down.
+     The alternative — a second record kept beside the log — has to be made durable
+     itself, and then has its own recovery story. This one's recovery story is
+     `Log.replay_from/2`.
+
+288. **No price table.** The gateway prices the call before it answers, and
+     `Troupe.Plane.Reconcile` already exists to catch the ledger disagreeing with it.
+     A price of our own would reconcile against itself, and keeping a table of model
+     prices current is a job somebody has to do forever. Where the gateway reports no
+     cost, the tokens are recorded with a cost of zero rather than an estimate.
+
+289. **Costs are parsed with integer arithmetic on the digits, never a float.**
+     `8.87 * 1_000_000` is `8869999.999999999` in binary floating point. One unit per
+     call is a ledger that does not add up, and a ledger that does not add up is worse
+     than one that is missing rows, because nobody can tell which number is wrong.
+     Truncation beyond six places, because that is what a micro-unit column holds.
+
+290. **A call no gateway named gets `seq:<session>:<n>`, and reconciliation calls it
+     `unmetered`.** A log written before this release has real tokens and no cost. It is
+     still recorded, because the tokens are real; it gets a synthesised id, because the
+     ledger's uniqueness is what makes re-folding safe; and the id has a shape no gateway
+     would mint, so the nightly job can count it as a cost that was never captured rather
+     than as a call billed twice. Unmetered rows are not drift and do not make a
+     comparison dirty.
+
+291. **The sink is a behaviour resolved from application environment, configured for a
+     pod and for nothing else.** `troupe_core` cannot depend on `troupe_worker`, and a
+     laptop has no plane to report to. `Troupe.Session.Usage.observe/2` is a no-op with
+     no sink, which is the same shape `Troupe.KMS.adapter/0` already uses.
+
+292. **The hook is in `Troupe.Session.Log`, after the write and after the publish.**
+     It is the single place every durable event passes through with its sequence already
+     assigned, and putting accounting last means it can never decide whether the log says
+     something happened.
+
+293. **An ETS table, not a mailbox.** The writer is the log process finishing a turn; a
+     message to a collector would put that process's mailbox between a turn and the next
+     thing the agent does, on a pod running many sessions. `put/2` is `:ets.insert/2`
+     from the caller's own process and rescues `ArgumentError`, so a collector that is
+     restarting costs a turn nothing.
+
+294. **Keyed by `{session_id, seq}` in an ordered set, so the watermark is free.** There
+     is already exactly one monotonic number per session and it is the one the index
+     reports. A counter of the collector's own would be a second ordering to reconcile.
+
+295. **The cap drops the newest.** Twenty thousand rows and the table has stopped being a
+     buffer. Dropping the newest keeps what remains contiguous from the plane's
+     watermark, so the kept rows still flush usefully, and the fold at the next
+     activation is what recovers the rest. Every dropped row is logged as a count.
+
+296. **`usage.batch` is a request, not a notification, and its answer is the watermark.**
+     A notification would leave the pod guessing what landed. `usage_seq` on the session
+     row moves as `greatest(current, offered)` so a retried older batch cannot walk it
+     backwards, and is **not** fenced on the epoch: a pod that has since been fenced
+     still made the calls it is reporting, and refusing them loses money rather than
+     protecting anything.
+
+297. **A duplicate counts towards the watermark; a failed insert stops it.** A watermark
+     that refused to move past a record already in the ledger would ask the pod to send
+     it forever. A watermark that moved past a record that failed to insert would lose
+     it. Records are therefore applied in sequence order and the batch halts at the first
+     real error.
+
+298. **`Link.usage/2` is gone; the plane keeps handling `usage.record` for one release.**
+     The new worker only sends batches. The single-record method stays on the plane so a
+     pod from the previous image keeps working against a plane from this one — the same
+     rule `config.updated` got in stage 5.
+
+299. **A charge dated in the future is dated now.** A pod with a fast clock would
+     otherwise write charges into a window no report asks about, and a charge nobody can
+     see is worse than one dated a few seconds early. The event's own timestamp is used
+     otherwise, so a record folded out of a log an hour later still lands in the window
+     the call happened in.
+
+300. **`Ledger.Cache` is ETS owned by a process, invalidated by the only writer.** Sums
+     over an append-only table get slower every day. `TeamBudget` is already one actor
+     per team and is the only thing that inserts, so the invalidation is serialised
+     without a lock; a cache that is not running answers by computing, which is what a
+     test and a `mix` task get. Only a batch that inserted something invalidates —
+     a replaying pod must not cost every panel a fresh aggregate.
+
+301. **No rollup pipeline in this stage.** Raw records with `(team_id, occurred_at)` and
+     the cache answer everything the panel asks at this volume. What is owed is the
+     retention decision and a row count at which to revisit, not a fold-into-buckets job
+     for a table with fifty thousand rows in it.
+
+302. **The 0.2.0 fixtures were re-recorded, and a `metered_turn` added.** The summary
+     projection gained `cost_micros`, which moves the witness hash for every fixture —
+     the check doing its job. `mix troupe.fixtures.record` refuses to overwrite a
+     recorded version because a recorded hash is evidence of what a *released* Troupe
+     produced, and there are no release tags: 0.2.0 is the in-development set. The new
+     fixture carries a gateway and `simple_turn` deliberately does not, so both readings
+     stay covered.
+
+303. **`session.status`'s cost is read from the projection's integer, not from its float.**
+     The snapshot keeps `cost` in whole units for the wire and `cost_micros` as the number
+     of record, derived on every fold rather than accumulated, so a float never carries
+     an error forward. The worker reads the integer and falls back to the float for a
+     snapshot folded by an older build.
+
+304. **The admin surface has a fourth rendering, and it is MCP.** Troupe already speaks
+     MCP as a client; the person administering a platform of agents increasingly is one.
+     `POST /mcp` offers the same method table as tools, on the same bearer token as
+     `/rpc`, through the same context — so there is no privileged path and no second
+     opinion about who may do what. The tool list is *not* filtered by role: a team admin
+     sees `admin_profile_put` and is refused if they call it, because hiding it would mean
+     this module holding an opinion about authorisation that the context also holds, and
+     the two would diverge.
+
+305. **A destructive tool takes the identifier twice.** The design makes typed
+     confirmation the model for everything irreversible, on the grounds that the friction
+     should be understanding rather than ceremony. A model has no dialog to read, so it
+     gets the same rule as the only guard it has: `confirm` must repeat the argument the
+     method names, and the check is in the MCP layer rather than in the context, because
+     the context is also what the console's already-confirmed dialog calls.
+
+306. **The method table carries prose and types.** It was a name, a function and a list of
+     argument names, which is everything a dispatcher needs and nothing a caller does. A
+     model choosing between `admin.team.revoke` and `admin.profile.delete` has the tool
+     description and nothing else, so the description *is* the interface and belongs where
+     the method is declared. The parity test fails a method with no summary and an argument
+     with no description; object arguments name their properties, because a caller told
+     only "an object" sends `budget` to a field called `budget_micros` and is told nothing
+     is wrong — because nothing was.
+
+307. **A stored setting overrides the deployment; it never replaces it.** A plane whose
+     `platform_admin_group` named a group nobody was in had no administrator and no console,
+     and the only repair was a Helm change and a rollout. So the settings an operator owns
+     live in a table, and the table is an override: absent means "whatever this plane was
+     deployed with", and reset *deletes the row* rather than writing today's default into
+     it — writing it back would freeze this release's default into the database and make
+     the next deployment's change invisible. The deployment stays the floor.
+
+308. **The settings that could shut the console are read-only in it.** The issuer, the
+     client id and the audience are listed with their values and cannot be changed from
+     inside, for the same reason a lock's keyhole is not adjustable from inside the house.
+     They are listed rather than omitted, because "where is this platform's configuration"
+     should have one answer, and a missing field reads as a feature nobody built.
+
+309. **The group that decides who administers cannot be saved unchecked.** The design says
+     identity configuration cannot be saved until a test has passed. The test that is worth
+     passing is not "is that a valid group" but "how many people would administer this
+     platform afterwards, and are you one of them" — so the check runs against the value in
+     the field rather than the value in the database, and the save is disabled until it has.
+     It is gated on that one check and not on all four: a plane whose provider is briefly
+     unreachable should still be able to fix the group that is locking everybody out.
+
+310. **Settings are cached for five seconds, not invalidated across the cluster.**
+     `platform_admin_group` is read on every administrative request and changes twice a
+     year. A change is immediate on the replica that made it — the writer clears its own
+     node — and within five seconds everywhere else. Cross-replica invalidation would be a
+     new distributed concern for a value whose staleness window is shorter than the time it
+     takes to notice.
+
+311. **A profile's diff is keyed by path.** `Audit.diff/2` walks nested maps and reports
+     `spec.llm.model`, not `spec`. A profile's whole configuration lives under one field,
+     and a top-level diff would report changing a model name as one twenty-line object
+     becoming another — technically true, and useless both to the person about to press
+     apply and to the person reading the trail six weeks later. Structs are values, not
+     maps: a timestamp is one thing that changed, not six.
+
+312. **The profile editor has one apply button, not the design's two.** The design asks for
+     Apply now and Commit for review with the consequence between them. Which of the two
+     happens is not the operator's choice here — it is `provisioning_mode` — so the button
+     is named for what will actually happen and the consequence is written above it. Two
+     buttons where one of them is a lie would be worse than one.
+
+313. **A blank field is absent from the resource, not empty in it.** The CRD has defaults,
+     and `storage: {size: ""}` overrides them with something the API server refuses. Every
+     branch of the spec disappears when nothing under it is set. The exception is a boolean:
+     `orgMount` is always written, because an unchecked box sends nothing and treating that
+     as "leave it alone" would make a mounted volume impossible to unmount from the form.
+
+314. **`troupe mcp`, not `troupe admin mcp`.** `admin mcp check` is already an admin method,
+     and the bridge is not a method at all — it is the transport that carries every one of
+     them. It exists because a plane token lasts fifteen minutes and is minted from a
+     refresh token the CLI already holds: wiring a model to a plane without it means pasting
+     a credential into a configuration file, where it is stale by lunchtime and committed by
+     Friday. The bridge interprets nothing, because a bridge that understood the protocol
+     would be a second implementation of it.

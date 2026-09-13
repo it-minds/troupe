@@ -1,0 +1,962 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600&amp;display=swap" rel="stylesheet" />
+<style>
+:root{
+  --font-sans:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+
+  --bg-stage:#070B10; --bg-canvas:#0C121A; --bg-panel:#111924; --bg-raised:#19222F;
+  --bg-sunken:#090E15; --bg-hover:#1E2938; --bg-selected:#1C2A3A; --scrim:rgba(3,6,10,0.72);
+  --text-primary:#E7ECF3; --text-secondary:#AAB9C8; --text-muted:#7C8DA0; --text-inverse:#070B10;
+  --link:#8ABFF0; --link-hover:#B6D9FB;
+  --border-hairline:#212D3B; --border-strong:#35475C; --focus:#8ABFF0; --divider:#17212D;
+
+  --ok-fg:#4CCCAD; --ok-bg:#0C2823; --ok-bd:#1B5A4C;
+  --deg-fg:#FFB43D; --deg-bg:#2C1E05; --deg-bd:#8A5E12;
+  --brk-fg:#FF7E6E; --brk-bg:#2C100C; --brk-bd:#82342A;
+  --pen-fg:#9BB8E8; --pen-bg:#111A2A; --pen-bd:#2E4166;
+  --wai-fg:#C9A9E8; --wai-bg:#1B1428; --wai-bd:#3F2E5C;
+  --dra-fg:#8FB6C9; --dra-bg:#0F1A21; --dra-bd:#2A3F4D;
+  --unk-fg:#96A5B6; --unk-bg:#131A22; --unk-bd:#2B3745;
+  --rej-fg:#E6849E; --rej-bg:#28111A; --rej-bd:#6E2E42;
+  --cred-fg:#FF9F6E; --cred-bg:#2A1609; --cred-bd:#7A4423;
+  --dor-fg:#A79EDB; --dor-bg:#181A2B; --dor-bd:#393B63;
+  --off-fg:#C6B08A; --off-bg:#1F1A10; --off-bd:#4C4026;
+
+  --bud-under:#4CCCAD; --bud-near:#FFB43D; --bud-over:#FF7E6E; --bud-track:#0A1119;
+
+  --diff-add-bg:#0C2317; --diff-add-fg:#8EDFAB; --diff-add-mark:#2E7A4D;
+  --diff-del-bg:#29120F; --diff-del-fg:#F4A699; --diff-del-mark:#8B3D30;
+  --diff-ctx:#899AAB; --diff-gut-bg:#090F17; --diff-gut-fg:#5E7085; --diff-hunk:#7C8DA0;
+
+  --tb-head-bg:#090E15; --tb-head-fg:#9AA9BA; --tb-row-bd:#182230; --tb-changed:#1F2C1F;
+
+  --t-page:600 21px/1.25 var(--font-sans); --ls-page:-0.012em;
+  --t-section:600 15px/1.35 var(--font-sans); --ls-section:-0.004em;
+  --t-panel:600 13px/1.35 var(--font-sans);
+  --t-body:400 13px/1.55 var(--font-sans);
+  --t-ui:500 13px/1.35 var(--font-sans);
+  --t-label:500 12px/1.3 var(--font-sans);
+  --t-data:400 12.5px/1.45 var(--font-mono);
+  --t-data-strong:600 12.5px/1.45 var(--font-mono);
+  --t-micro:500 11px/1.3 var(--font-mono); --ls-micro:0.03em;
+  --t-code:400 12px/1.5 var(--font-mono);
+  --t-metric:600 22px/1.15 var(--font-mono); --ls-metric:-0.01em;
+
+  --s-px:1px; --s-half:2px; --s-1:4px; --s-2:6px; --s-3:8px; --s-4:12px; --s-5:16px;
+  --s-6:20px; --s-7:24px; --s-8:32px; --s-9:40px; --s-10:56px; --s-11:72px;
+
+  --d-row:32px; --d-row2:40px; --d-cellx:10px; --d-celly:6px;
+  --d-ctl:30px; --d-touch:44px; --d-fieldgap:12px; --d-tbrow:28px;
+
+  --r-xs:2px; --r-sm:3px; --r-md:4px; --r-lg:6px; --r-pill:999px;
+  --bw-hair:1px; --bw-strong:1.5px; --bw-focus:2px; --bw-marker:3px;
+
+  --sh-raise:0 1px 2px rgba(0,0,0,0.55); --sh-overlay:0 18px 50px rgba(0,0,0,0.66);
+
+  --dur-fast:100ms; --dur-base:160ms; --dur-slow:260ms; --dur-settle:1800ms; --dur-pulse:2400ms;
+  --ease:cubic-bezier(0.2,0,0,1);
+
+  --z-sticky:100; --z-rail:200; --z-popover:300; --z-dialog:400;
+  --rail-w:216px; --content-max:1480px; --glyph-col:16px;
+  --measure-prose:76ch; --measure-narrow:52ch;
+  color-scheme:dark;
+}
+[data-theme="light"]{
+  --bg-stage:#D8DFE7; --bg-canvas:#EDF1F5; --bg-panel:#F8FAFC; --bg-raised:#FFFFFF;
+  --bg-sunken:#E4E9EF; --bg-hover:#E1E8F0; --bg-selected:#DAE4F0; --scrim:rgba(12,18,26,0.46);
+  --text-primary:#0D141C; --text-secondary:#3B4957; --text-muted:#5A6977; --text-inverse:#FFFFFF;
+  --link:#17578F; --link-hover:#0C3A64;
+  --border-hairline:#C6CFDA; --border-strong:#95A5B4; --focus:#0E4A7E; --divider:#D5DDE5;
+
+  --ok-fg:#046855; --ok-bg:#DBF0EA; --ok-bd:#8DCCBD;
+  --deg-fg:#7A4A00; --deg-bg:#FAEAC9; --deg-bd:#D69620;
+  --brk-fg:#A02112; --brk-bg:#FBDFDB; --brk-bd:#DE988E;
+  --pen-fg:#2A4E85; --pen-bg:#E2E9F6; --pen-bd:#A9BBDC;
+  --wai-fg:#5B3487; --wai-bg:#EDE4F7; --wai-bd:#C1A9DC;
+  --dra-fg:#2E566B; --dra-bg:#E3EBF0; --dra-bd:#A5BAC7;
+  --unk-fg:#495868; --unk-bg:#E6EAEF; --unk-bd:#AFB9C4;
+  --rej-fg:#8E1F44; --rej-bg:#FADFE7; --rej-bd:#DB99B0;
+  --cred-fg:#8E3A05; --cred-bg:#FBE6D6; --cred-bd:#DDA987;
+  --dor-fg:#4F4489; --dor-bg:#E7E5F4; --dor-bd:#B3AEDA;
+  --off-fg:#5D4820; --off-bg:#EEE7D7; --off-bd:#C1B190;
+
+  --bud-under:#046855; --bud-near:#7A4A00; --bud-over:#A02112; --bud-track:#DCE3EB;
+
+  --diff-add-bg:#DEF2E3; --diff-add-fg:#0D5A2B; --diff-add-mark:#2B8A4F;
+  --diff-del-bg:#FAE1DC; --diff-del-fg:#8A2B17; --diff-del-mark:#B44A32;
+  --diff-ctx:#4D5B69; --diff-gut-bg:#E0E6ED; --diff-gut-fg:#667488; --diff-hunk:#53627A;
+
+  --tb-head-bg:#E4E9EF; --tb-head-fg:#41505F; --tb-row-bd:#DCE3EB; --tb-changed:#E3F0DF;
+
+  --sh-raise:0 1px 2px rgba(12,18,26,0.10); --sh-overlay:0 18px 50px rgba(12,18,26,0.24);
+  color-scheme:light;
+}
+html,body{margin:0;padding:0;background:var(--bg-stage);}
+body{font:var(--t-body);color:var(--text-primary);-webkit-font-smoothing:antialiased;}
+*{box-sizing:border-box;}
+a{color:var(--link);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px;}
+a:hover{color:var(--link-hover);}
+button,input,textarea,select{font-family:inherit;}
+:focus-visible{outline:var(--bw-focus) solid var(--focus);outline-offset:2px;border-radius:var(--r-xs);}
+[data-nav][aria-current="page"]{background:var(--bg-selected) !important;color:var(--text-primary) !important;border-left-color:var(--ok-fg) !important;}
+[data-tab][aria-pressed="true"]{background:var(--bg-selected) !important;color:var(--text-primary) !important;border-color:var(--border-strong) !important;}
+[data-trow]:hover{background:var(--bg-hover);}
+@keyframes adm-pulse{0%,100%{opacity:1}50%{opacity:0.4}}
+@keyframes adm-settle{0%{background:var(--tb-changed)}100%{background:transparent}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms !important;animation-iteration-count:1 !important;transition-duration:1ms !important;}}
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="min-height:100vh;background:var(--bg-stage);color:var(--text-primary);font:var(--t-body)">
+
+  <header style="position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--s-4);flex-wrap:wrap;padding:var(--s-3) var(--s-5);background:var(--bg-sunken);border-bottom:var(--bw-hair) solid var(--border-hairline)">
+    <span style="font:var(--t-data-strong);color:var(--text-primary)">troupe</span>
+    <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);padding-left:var(--s-4);border-left:var(--bw-hair) solid var(--border-hairline)">platform console · itm-prod · eu-north-1</span>
+    <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">mock data</span>
+    <div style="margin-left:auto;display:flex;gap:var(--s-3);flex-wrap:wrap">
+      <button type="button" onClick="{{ toggleOffline }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">{{ offlineLabel }}</button>
+      <button type="button" onClick="{{ goSignin }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Sign in screen</button>
+      <button type="button" onClick="{{ toggleTheme }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">{{ themeLabel }}</button>
+    </div>
+  </header>
+
+  <!-- ===================== SIGN IN ===================== -->
+  <sc-if value="{{ isSignin }}" hint-placeholder-val="{{ false }}">
+    <main style="display:flex;flex-wrap:wrap;gap:var(--s-8);justify-content:center;align-items:flex-start;padding:var(--s-10) var(--s-5)">
+      <section style="flex:1 1 320px;max-width:400px">
+        <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-3)">Troupe platform console</h1>
+        <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-6);max-width:var(--measure-narrow)">Administrator access. Sign in with the company identity provider.</p>
+        <button type="button" onClick="{{ goOverview }}" style="width:100%;min-height:var(--d-touch);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Continue with Microsoft Entra ID</button>
+        <dl style="display:grid;grid-template-columns:auto 1fr;gap:var(--s-2) var(--s-5);margin:var(--s-6) 0 0;font:var(--t-data)">
+          <dt style="font:var(--t-label);color:var(--text-muted)">Issuer</dt>
+          <dd style="margin:0;overflow-wrap:anywhere">login.microsoftonline.com/8f3c9a11/v2.0</dd>
+          <dt style="font:var(--t-label);color:var(--text-muted)">Console</dt>
+          <dd style="margin:0">2026.9.2 · build 4d81ba7</dd>
+          <dt style="font:var(--t-label);color:var(--text-muted)">Cluster</dt>
+          <dd style="margin:0;display:flex;align-items:center;gap:var(--s-2)"><span aria-hidden="true" style="color:var(--ok-fg)">&#9679;</span>itm-prod reachable</dd>
+        </dl>
+      </section>
+
+      <section style="flex:1 1 340px;max-width:460px;border:var(--bw-hair) solid var(--deg-bd);border-radius:var(--r-lg);background:var(--bg-panel)">
+        <div style="display:flex;align-items:center;gap:var(--s-3);padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider);background:var(--deg-bg);color:var(--deg-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+          <span aria-hidden="true">&#9680;</span><span>Bootstrap · identity not connected</span>
+        </div>
+        <div style="padding:var(--s-5)">
+          <h2 style="font:var(--t-section);letter-spacing:var(--ls-section);margin:0 0 var(--s-3)">First administrator</h2>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4);max-width:var(--measure-narrow)">No identity provider is connected, so sign-in falls back to the bootstrap token printed by the installer. This path grants one session, on this console only, and closes the moment an identity provider is verified.</p>
+          <label for="boot" style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-2)">Bootstrap token</label>
+          <input id="boot" type="password" value="0000000000000000" style="width:100%;min-height:var(--d-touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" />
+          <p style="font:var(--t-code);color:var(--text-muted);margin:var(--s-2) 0 var(--s-4)">kubectl -n troupe get secret bootstrap -o jsonpath='{.data.token}' | base64 -d</p>
+          <button type="button" onClick="{{ goIdentity }}" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Sign in and connect identity</button>
+          <p style="font:var(--t-body);color:var(--text-muted);margin:var(--s-4) 0 0">Expires 2026-09-14 08:00Z. Two attempts left.</p>
+        </div>
+      </section>
+    </main>
+  </sc-if>
+
+  <!-- ===================== CONSOLE SHELL ===================== -->
+  <sc-if value="{{ inConsole }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-wrap:wrap;align-items:flex-start;max-width:var(--content-max);margin:0 auto">
+
+      <nav aria-label="Console sections" style="flex:1 1 200px;max-width:var(--rail-w);padding:var(--s-5) var(--s-3);border-right:var(--bw-hair) solid var(--border-hairline)">
+        <div style="display:flex;flex-wrap:wrap;gap:var(--s-half)">
+          <button type="button" data-nav="1" aria-current="{{ nOverview }}" onClick="{{ goOverview }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Overview</button>
+          <button type="button" data-nav="1" aria-current="{{ nIdentity }}" onClick="{{ goIdentity }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Identity</button>
+          <button type="button" data-nav="1" aria-current="{{ nTeams }}" onClick="{{ goTeams }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Teams</button>
+          <button type="button" data-nav="1" aria-current="{{ nWorkers }}" onClick="{{ goWorkers }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Workers</button>
+          <button type="button" data-nav="1" aria-current="{{ nIntegrations }}" onClick="{{ goIntegrations }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Integrations</button>
+          <button type="button" data-nav="1" aria-current="{{ nBundles }}" onClick="{{ goBundles }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Configuration bundles</button>
+          <button type="button" data-nav="1" aria-current="{{ nSessions }}" onClick="{{ goSessions }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Sessions and spend</button>
+          <button type="button" data-nav="1" aria-current="{{ nAudit }}" onClick="{{ goAudit }}" style="flex:1 1 170px;text-align:left;min-height:var(--d-ctl);padding:0 var(--s-4);border:0;border-left:var(--bw-marker) solid transparent;border-radius:0 var(--r-md) var(--r-md) 0;background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Audit</button>
+        </div>
+        <p style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin:var(--s-6) var(--s-4) 0;line-height:1.5">Signed in as c.krogh@itm.dk<br />platform administrator</p>
+      </nav>
+
+      <main style="flex:999 1 520px;min-width:0;padding:var(--s-5) var(--s-5) var(--s-11)">
+
+        <sc-if value="{{ offline }}" hint-placeholder-val="{{ false }}">
+          <div role="status" style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-3) var(--s-5);margin-bottom:var(--s-5);border:var(--bw-hair) solid var(--off-bd);border-left:var(--bw-marker) solid var(--off-fg);border-radius:var(--r-md);background:var(--off-bg);color:var(--off-fg);font:var(--t-ui)">
+            <span aria-hidden="true" style="animation:adm-pulse var(--dur-pulse) var(--ease) infinite">&#9889;</span>
+            <span style="flex:1 1 300px;min-width:0">Console offline — no answer from itm-prod since 11:48:02Z. Sessions and workers are unaffected; you are reading values from 11:48. Retrying every 10 s.</span>
+            <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid currentColor;background:transparent;color:inherit;font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Retry now</button>
+          </div>
+        </sc-if>
+
+        <!-- ===================== OVERVIEW ===================== -->
+        <sc-if value="{{ isOverview }}" hint-placeholder-val="{{ true }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-5)">Overview</h1>
+
+          <section aria-labelledby="attn" style="border:var(--bw-hair) solid var(--brk-bd);border-radius:var(--r-lg);background:var(--bg-panel);margin-bottom:var(--s-7)">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-3);padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 id="attn" style="font:var(--t-section);letter-spacing:var(--ls-section);margin:0">Needs attention</h2>
+              <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">5 items · worst first</span>
+            </div>
+            <ul style="list-style:none;margin:0;padding:0">
+              <li data-trow="1" style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--tb-row-bd);border-left:var(--bw-marker) solid var(--brk-fg)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);min-width:170px;color:var(--brk-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true" style="width:var(--glyph-col);text-align:center">&#10005;</span>Broken</span>
+                <span style="flex:1 1 300px;min-width:0;font:var(--t-body);color:var(--text-primary)">Integration <span style="font:var(--t-data-strong)">github-enterprise</span> unreachable since 14:02:11Z — 503 from ghe.itm.dk after 5 retries. Blocks <span style="font:var(--t-data)">dev-standard</span>, <span style="font:var(--t-data)">design-docs</span>.</span>
+                <button type="button" onClick="{{ goIntegrations }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Open integration</button>
+              </li>
+              <li data-trow="1" style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--tb-row-bd);border-left:var(--bw-marker) solid var(--cred-fg)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);min-width:170px;color:var(--cred-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true" style="width:var(--glyph-col);text-align:center">&#8709;</span>Credential missing</span>
+                <span style="flex:1 1 300px;min-width:0;font:var(--t-body);color:var(--text-primary)">Integration <span style="font:var(--t-data-strong)">economic</span> points at <span style="font:var(--t-data)">kv/troupe/economic-api</span>, which does not exist in the vault.</span>
+                <button type="button" onClick="{{ goIntegrations }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Repoint reference</button>
+              </li>
+              <li data-trow="1" style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--tb-row-bd);border-left:var(--bw-marker) solid var(--deg-fg)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);min-width:170px;color:var(--deg-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true" style="width:var(--glyph-col);text-align:center">&#9680;</span>Degraded</span>
+                <span style="flex:1 1 300px;min-width:0;font:var(--t-body);color:var(--text-primary)">User sync last completed 2026-09-11 03:00Z, 53 hours ago. Three records rejected. Sign-in still works.</span>
+                <button type="button" onClick="{{ goIdentity }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Open sync</button>
+              </li>
+              <li data-trow="1" style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--tb-row-bd);border-left:var(--bw-marker) solid var(--deg-fg)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);min-width:170px;color:var(--deg-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true" style="width:var(--glyph-col);text-align:center">&#9680;</span>Over budget</span>
+                <span style="flex:1 1 300px;min-width:0;font:var(--t-body);color:var(--text-primary)">Team <span style="font:var(--t-data-strong)">Design</span> has spent 26.110 kr of 25.000 kr this month. New sessions are still allowed.</span>
+                <button type="button" onClick="{{ goTeams }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Open team</button>
+              </li>
+              <li data-trow="1" style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-left:var(--bw-marker) solid var(--pen-fg)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);min-width:170px;color:var(--pen-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true" style="width:var(--glyph-col);text-align:center">&#9671;</span>Pending</span>
+                <span style="flex:1 1 300px;min-width:0;font:var(--t-body);color:var(--text-primary)">Bundle <span style="font:var(--t-data-strong)">troupe-agents 2026.9.4</span> committed to <span style="font:var(--t-data)">canary</span> at 08:41Z by c.krogh. The pipeline has not confirmed it after 3 h 12 m.</span>
+                <button type="button" onClick="{{ goBundles }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Open bundle</button>
+              </li>
+            </ul>
+          </section>
+
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-px);background:var(--border-hairline);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-7);overflow:hidden">
+            <div style="flex:1 1 160px;background:var(--bg-panel);padding:var(--s-5)">
+              <span style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-2)">Sessions running</span>
+              <span aria-live="polite" style="display:inline-block;font:var(--t-metric);letter-spacing:var(--ls-metric);padding:0 var(--s-2);border-radius:var(--r-xs);animation:{{ liveAnim }}">{{ liveCount }}</span>
+              <span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-2)">31 asleep · updated {{ liveStamp }}</span>
+            </div>
+            <div style="flex:1 1 160px;background:var(--bg-panel);padding:var(--s-5)">
+              <span style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-2)">Workers healthy</span>
+              <span style="font:var(--t-metric);letter-spacing:var(--ls-metric)">11<span style="color:var(--text-muted)"> / 13</span></span>
+              <span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-2)">1 draining · 1 broken</span>
+            </div>
+            <div style="flex:1 1 160px;background:var(--bg-panel);padding:var(--s-5)">
+              <span style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-2)">Spend, September</span>
+              <span style="font:var(--t-metric);letter-spacing:var(--ls-metric)">68.420<span style="font:var(--t-data);color:var(--text-muted)"> kr</span></span>
+              <span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-2)">of 95.000 kr · 13 days left</span>
+            </div>
+            <div style="flex:1 1 160px;background:var(--bg-panel);padding:var(--s-5)">
+              <span style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-2)">Changes today</span>
+              <span style="font:var(--t-metric);letter-spacing:var(--ls-metric)">6</span>
+              <span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-2)">1 pending · 1 waiting</span>
+            </div>
+          </div>
+
+          <h2 style="font:var(--t-section);letter-spacing:var(--ls-section);margin:0 0 var(--s-4)">Recent changes</h2>
+          <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md)">
+            <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:640px">
+              <thead>
+                <tr>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong);white-space:nowrap">Time (UTC)</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong);white-space:nowrap">Who</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong);white-space:nowrap">Change</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong);white-space:nowrap">State</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">11:52:14</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">c.krogh</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">worker/design-docs capacity 4 &#8594; 6</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--wai-fg)"><span aria-hidden="true">&#9208;</span> Waiting</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">08:41:03</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">c.krogh</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">bundle troupe-agents 2026.9.4 &#8594; canary</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--pen-fg)"><span aria-hidden="true">&#9671;</span> Pending</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">08:12:55</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">m.ravn</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">team/Design budget 20.000 &#8594; 25.000 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Applied</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">2026-09-12 16:30</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">m.ravn</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">integration/economic credential repointed</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--rej-fg)"><span aria-hidden="true">&#8856;</span> Rejected by policy</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-muted);white-space:nowrap">2026-09-12 09:03</td><td style="padding:var(--s-2) var(--d-cellx)">c.krogh</td><td style="padding:var(--s-2) var(--d-cellx)">worker/admin-back-office egress rule added</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Applied</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </sc-if>
+
+        <!-- ===================== IDENTITY ===================== -->
+        <sc-if value="{{ isIdentity }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Identity</h1>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:var(--measure-prose)">Two separate mechanisms. Sign-in decides who may enter. Sync decides who and what groups exist before they enter. Either can fail without the other.</p>
+
+          <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);margin-bottom:var(--s-6)">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-4);padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 style="font:var(--t-panel);margin:0;flex:1 1 auto">Provider</h2>
+              <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">connected 2026-02-03 by c.krogh</span>
+            </div>
+            <dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:0;margin:0">
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Provider</dt><dd style="margin:0;font:var(--t-data)">Microsoft Entra ID</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Protocol</dt><dd style="margin:0;font:var(--t-data)">OIDC · authorization code + PKCE</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Client ID</dt><dd style="margin:0;font:var(--t-data);overflow-wrap:anywhere">4a19f0c2-77be-4d31-9a0e-1b8c2f61d004</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Issuer</dt><dd style="margin:0;font:var(--t-data);overflow-wrap:anywhere">https://login.microsoftonline.com/8f3c9a11/v2.0</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Client secret</dt><dd style="margin:0;font:var(--t-data);color:var(--text-secondary)">kv/troupe/entra-client &#8599;<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-1)">reference only · never shown</span></dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Group claim</dt><dd style="margin:0;font:var(--t-data)">groups &#8594; team mapping</dd></div>
+            </dl>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);padding:var(--s-4) var(--s-5)">
+              <button type="button" onClick="{{ toggleVerify }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Test connection</button>
+              <button type="button" disabled="{{ notVerified }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer;opacity:{{ saveOpacity }}" style-hover="background:var(--bg-hover)">Save changes</button>
+              <span style="font:var(--t-body);color:var(--text-muted);flex:1 1 240px;min-width:0">{{ verifyHint }}</span>
+            </div>
+            <sc-if value="{{ verified }}" hint-placeholder-val="{{ false }}">
+              <div style="margin:0 var(--s-5) var(--s-5);border:var(--bw-hair) solid var(--ok-bd);border-radius:var(--r-md);background:var(--bg-sunken);font:var(--t-code)">
+                <div style="padding:var(--s-3) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> 4 of 4 checks passed · 620 ms</div>
+                <ul style="list-style:none;margin:0;padding:var(--s-3) var(--s-4);display:flex;flex-direction:column;gap:var(--s-2);color:var(--diff-ctx)">
+                  <li><span aria-hidden="true" style="color:var(--ok-fg)">&#9679;</span> discovery document fetched — 200, 84 ms</li>
+                  <li><span aria-hidden="true" style="color:var(--ok-fg)">&#9679;</span> jwks_uri reachable — 3 signing keys</li>
+                  <li><span aria-hidden="true" style="color:var(--ok-fg)">&#9679;</span> client credentials accepted — token issued, discarded</li>
+                  <li><span aria-hidden="true" style="color:var(--ok-fg)">&#9679;</span> claim <span style="color:var(--text-primary)">groups</span> present — 12 groups in sample token</li>
+                </ul>
+                <p style="margin:0;padding:0 var(--s-4) var(--s-3);color:var(--text-muted)">Nothing is saved until you press Save changes. The current configuration keeps serving sign-in meanwhile.</p>
+              </div>
+            </sc-if>
+          </section>
+
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-5)">
+            <section style="flex:1 1 320px;min-width:0;border:var(--bw-hair) solid var(--ok-bd);border-radius:var(--r-lg);background:var(--bg-panel)">
+              <div style="display:flex;gap:var(--s-3);align-items:center;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);padding:var(--s-half) var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--ok-bd);background:var(--ok-bg);color:var(--ok-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true">&#9679;</span>Healthy</span>
+                <h2 style="font:var(--t-panel);margin:0">Sign-in</h2>
+              </div>
+              <dl style="margin:0;padding:var(--s-4) var(--s-5);display:grid;grid-template-columns:auto 1fr;gap:var(--s-3) var(--s-5);font:var(--t-data)">
+                <dt style="font:var(--t-label);color:var(--text-muted)">Last success</dt><dd style="margin:0">11:47:20Z · s.brandt@itm.dk</dd>
+                <dt style="font:var(--t-label);color:var(--text-muted)">Last 24 h</dt><dd style="margin:0">148 sign-ins · 2 failed</dd>
+                <dt style="font:var(--t-label);color:var(--text-muted)">Failures</dt><dd style="margin:0;color:var(--text-secondary)">2 × invalid_grant (expired code)</dd>
+              </dl>
+            </section>
+
+            <section style="flex:1 1 320px;min-width:0;border:var(--bw-hair) solid var(--deg-bd);border-radius:var(--r-lg);background:var(--bg-panel)">
+              <div style="display:flex;gap:var(--s-3);align-items:center;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);padding:var(--s-half) var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--deg-bd);background:var(--deg-bg);color:var(--deg-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true">&#9680;</span>Degraded</span>
+                <h2 style="font:var(--t-panel);margin:0">User and group sync</h2>
+              </div>
+              <dl style="margin:0;padding:var(--s-4) var(--s-5) var(--s-3);display:grid;grid-template-columns:auto 1fr;gap:var(--s-3) var(--s-5);font:var(--t-data)">
+                <dt style="font:var(--t-label);color:var(--text-muted)">Mechanism</dt><dd style="margin:0">SCIM 2.0 push · every 6 h</dd>
+                <dt style="font:var(--t-label);color:var(--text-muted)">Last complete</dt><dd style="margin:0;color:var(--deg-fg)">2026-09-11 03:00Z · 53 h ago</dd>
+                <dt style="font:var(--t-label);color:var(--text-muted)">Last attempt</dt><dd style="margin:0">2026-09-13 03:00Z · partial</dd>
+                <dt style="font:var(--t-label);color:var(--text-muted)">Scope</dt><dd style="margin:0">214 users · 12 groups</dd>
+              </dl>
+              <p style="margin:0;padding:0 var(--s-5) var(--s-3);font:var(--t-body);color:var(--text-secondary)">Sign-in is unaffected. People who changed group since Friday keep their old teams until sync completes.</p>
+              <div style="overflow-x:auto;border-top:var(--bw-hair) solid var(--divider)">
+                <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:460px">
+                  <caption style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);padding:var(--s-3) var(--s-5)">3 rejected records, kept for retry</caption>
+                  <thead><tr>
+                    <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Record</th>
+                    <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Reason</th>
+                  </tr></thead>
+                  <tbody>
+                    <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">user/ext-lho@itm.dk</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">no userPrincipalName</td></tr>
+                    <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">group/ITM-Praktik</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">display name collides with ITM-Praktik (2024)</td></tr>
+                    <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx)">user/k.dam@itm.dk</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">mail attribute empty</td></tr>
+                  </tbody>
+                </table>
+              </div>
+              <div style="padding:var(--s-4) var(--s-5)">
+                <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Run sync now</button>
+              </div>
+            </section>
+          </div>
+
+          <p style="font:var(--t-body);color:var(--text-muted);margin:var(--s-5) 0 0;max-width:var(--measure-prose)">If you remove sync, people are created at first sign-in from their token claims instead. Groups then appear only when someone from them signs in, so a team can look empty until its first member arrives.</p>
+        </sc-if>
+
+        <!-- ===================== TEAMS ===================== -->
+        <sc-if value="{{ isTeams }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Teams</h1>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:var(--measure-prose)">A team is an identity group you enabled. Membership is not editable here.</p>
+
+          <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-7)">
+            <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:760px">
+              <thead><tr>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Team</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Identity group</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">People</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Profiles</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Spend / budget</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Retention</th>
+              </tr></thead>
+              <tbody>
+                <tr data-trow="1" style="background:var(--bg-selected)"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">Salg</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">ITM-Salg</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">6</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">31.240 / 40.000 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">180 days</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">Design</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">ITM-Design</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">11</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums;color:var(--bud-over)">26.110 / 25.000 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">180 days</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">Udvikling</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">ITM-Udvikling</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">24</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">dev-standard, design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">9.870 / 20.000 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">365 days</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);font:var(--t-data-strong)">Administration</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">ITM-Adm</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">9</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">admin-back-office</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">1.200 / 10.000 kr</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">90 days</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);margin-bottom:var(--s-7)">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 style="font:var(--t-section);letter-spacing:var(--ls-section);margin:0">Salg</h2>
+              <span style="font:var(--t-data);color:var(--text-muted)">team/salg · enabled 2026-02-04</span>
+            </div>
+            <dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(230px,1fr));margin:0">
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Identity group</dt><dd style="margin:0;font:var(--t-data)">ITM-Salg<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-1)">objectId 7c1a…d09</span></dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Shared storage</dt><dd style="margin:0;font:var(--t-data);overflow-wrap:anywhere">s3://troupe-itm/teams/salg<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-1)">412 GB · 1.204 objects</span></dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Retention</dt><dd style="margin:0;font:var(--t-data)">180 days after last activity<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);margin-top:var(--s-1)">2 sessions pinned, never deleted</span></dd></div>
+            </dl>
+
+            <div style="padding:var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:baseline;margin-bottom:var(--s-3)">
+                <span style="font:var(--t-label);color:var(--text-secondary)">Spend, September</span>
+                <span style="font:var(--t-data);color:var(--text-muted);margin-left:auto">31.240 kr of 40.000 kr · 78%</span>
+              </div>
+              <div style="height:8px;border-radius:var(--r-xs);background:var(--bud-track);overflow:hidden"><div style="width:78%;height:100%;background:var(--bud-under)"></div></div>
+              <p style="font:var(--t-body);color:var(--text-muted);margin:var(--s-3) 0 0">Over budget does not stop sessions. It raises an item on Overview and mails the team owner.</p>
+            </div>
+
+            <div style="display:flex;flex-wrap:wrap;gap:0">
+              <div style="flex:1 1 300px;min-width:0;padding:var(--s-5);border-right:var(--bw-hair) solid var(--divider)">
+                <h3 style="font:var(--t-panel);margin:0 0 var(--s-2)">People</h3>
+                <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4)">From ITM-Salg. Add and remove people in Entra ID — this roster follows within six hours. <a href="#entra">Open group in Entra ID &#8599;</a></p>
+                <ul style="list-style:none;margin:0;padding:0;font:var(--t-data);display:flex;flex-direction:column;gap:var(--s-half)">
+                  <li style="display:flex;gap:var(--s-4);padding:var(--s-2) 0;border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">m.soerensen@itm.dk</span><span style="color:var(--text-muted)">owner</span></li>
+                  <li style="display:flex;gap:var(--s-4);padding:var(--s-2) 0;border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">s.brandt@itm.dk</span><span style="color:var(--text-muted)">member</span></li>
+                  <li style="display:flex;gap:var(--s-4);padding:var(--s-2) 0;border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis">j.bak@itm.dk</span><span style="color:var(--text-muted)">member</span></li>
+                  <li style="display:flex;gap:var(--s-4);padding:var(--s-2) 0"><span style="color:var(--text-muted)">and 3 more</span></li>
+                </ul>
+              </div>
+              <div style="flex:1 1 300px;min-width:0;padding:var(--s-5)">
+                <h3 style="font:var(--t-panel);margin:0 0 var(--s-2)">Worker profiles this team may use</h3>
+                <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4)">Granted here. This is the only place a team gains reach.</p>
+                <ul style="list-style:none;margin:0;padding:0;font:var(--t-data);display:flex;flex-direction:column;gap:var(--s-2)">
+                  <li style="display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-3);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-sm)"><span style="color:var(--ok-fg)" aria-hidden="true">&#9679;</span><span style="flex:1 1 auto">design-docs</span><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Revoke</button></li>
+                  <li style="display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-3);border:var(--bw-hair) dashed var(--border-hairline);border-radius:var(--r-sm);color:var(--text-muted)"><span aria-hidden="true">+</span><span style="flex:1 1 auto">Grant another profile</span></li>
+                </ul>
+              </div>
+            </div>
+          </section>
+
+          <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel)">
+            <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 style="font:var(--t-panel);margin:0">Enable a group as a team</h2>
+              <p style="font:var(--t-body);color:var(--text-secondary);margin:var(--s-2) 0 0;max-width:var(--measure-prose)">Groups synced from Entra ID that are not yet teams. You cannot create a team that has no group behind it.</p>
+            </div>
+            <ul style="list-style:none;margin:0;padding:var(--s-3) var(--s-5) var(--s-5);display:flex;flex-direction:column;gap:var(--s-2);font:var(--t-data)">
+              <li style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-2) 0;border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><span style="flex:1 1 200px">ITM-Support</span><span style="color:var(--text-muted)">17 people</span><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Enable as team</button></li>
+              <li style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-2) 0;border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><span style="flex:1 1 200px">ITM-Ledelse</span><span style="color:var(--text-muted)">4 people</span><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Enable as team</button></li>
+              <li style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-2) 0;color:var(--text-muted)"><span style="flex:1 1 200px">ITM-Praktik</span><span style="color:var(--deg-fg)"><span aria-hidden="true">&#9680;</span> rejected by sync — name collision</span></li>
+            </ul>
+          </section>
+        </sc-if>
+
+        <!-- ===================== WORKERS ===================== -->
+        <sc-if value="{{ isWorkers }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Workers</h1>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:var(--measure-prose)">A worker profile is a named answer to "what may an agent of this kind reach". Machines are pooled per profile.</p>
+
+          <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-7)">
+            <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:780px">
+              <thead><tr>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Profile</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">State</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Machines</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Load</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Teams</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Bundle</th>
+              </tr></thead>
+              <tbody>
+                <tr data-trow="1" style="background:var(--bg-selected)"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--deg-fg)"><span aria-hidden="true">&#9680;</span> Degraded</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">3 / 4</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">86%</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">Salg, Design, Udvikling</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">2026.9.3</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">dev-standard</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--wai-fg)"><span aria-hidden="true">&#9208;</span> Waiting</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">6 / 6</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">41%</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">Udvikling</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">2026.9.3</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);font:var(--t-data-strong)">admin-back-office</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Healthy</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">3 / 3</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">12%</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">Administration</td><td style="padding:var(--s-2) var(--d-cellx)">2026.9.3</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel);margin-bottom:var(--s-6)">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 style="font:var(--t-section);letter-spacing:var(--ls-section);margin:0">design-docs</h2>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-2);padding:var(--s-half) var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--deg-bd);background:var(--deg-bg);color:var(--deg-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true">&#9680;</span>Degraded — 1 machine broken</span>
+              <span style="font:var(--t-data);color:var(--text-muted);margin-left:auto">running config rev 41 · published 2026-09-08</span>
+            </div>
+            <dl style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));margin:0">
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Model endpoint</dt><dd style="margin:0;font:var(--t-data);overflow-wrap:anywhere">https://api.anthropic.com/v1 · claude-sonnet</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Integrations</dt><dd style="margin:0;font:var(--t-data)">sharepoint-tilbud, web-search, crm<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--brk-fg);margin-top:var(--s-1)">github-enterprise unreachable</span></dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Network egress</dt><dd style="margin:0;font:var(--t-data)">3 rules · deny by default</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Storage</dt><dd style="margin:0;font:var(--t-data);overflow-wrap:anywhere">s3://troupe-itm/profiles/design-docs</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-right:var(--bw-hair) solid var(--divider);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Capacity</dt><dd style="margin:0;font:var(--t-data)">4 machines · 8 sessions each</dd></div>
+              <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)"><dt style="font:var(--t-label);color:var(--text-muted);margin-bottom:var(--s-1)">Teams granted</dt><dd style="margin:0;font:var(--t-data)">Salg, Design, Udvikling</dd></div>
+            </dl>
+
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:620px">
+                <caption style="text-align:left;font:var(--t-panel);padding:var(--s-4) var(--s-5) var(--s-3)">Machines</caption>
+                <thead><tr>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Machine</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">State</th>
+                  <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Sessions</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Detail</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)"></th>
+                </tr></thead>
+                <tbody>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">design-docs-0</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Healthy</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">7 / 8</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">up 6 d</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Drain</button></td></tr>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">design-docs-1</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Healthy</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">6 / 8</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">up 6 d</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Drain</button></td></tr>
+                  <tr data-trow="1" style="border-left:var(--bw-marker) solid var(--dra-fg)"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">design-docs-2</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--dra-fg)"><span aria-hidden="true" style="animation:adm-pulse var(--dur-pulse) var(--ease) infinite">&#8595;</span> Draining</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">2 / 8</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">no new work · last session ends ~14:40</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)"><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Stop draining</button></td></tr>
+                  <tr data-trow="1" style="border-left:var(--bw-marker) solid var(--brk-fg)"><td style="padding:var(--s-2) var(--d-cellx)">design-docs-3</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--brk-fg)"><span aria-hidden="true">&#10005;</span> Broken</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">0 / 8</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--brk-fg)">storage mount failed · 4 restarts in 20 m</td><td style="padding:var(--s-2) var(--d-cellx)"><button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Replace</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+
+          <section style="border:var(--bw-hair) solid var(--pen-bd);border-radius:var(--r-lg);background:var(--bg-panel);margin-bottom:var(--s-6)">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 style="font:var(--t-panel);margin:0">Edit design-docs</h2>
+              <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">2 changes, not applied</span>
+            </div>
+            <div style="padding:var(--s-4) var(--s-5);font:var(--t-code);background:var(--bg-sunken);border-bottom:var(--bw-hair) solid var(--divider)">
+              <div style="color:var(--diff-hunk);margin-bottom:var(--s-2)">@@ profile/design-docs rev 41 &#8594; rev 42 @@</div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);color:var(--diff-ctx)"><span aria-hidden="true" style="width:1ch">&nbsp;</span><span>capacity:</span></div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-del-bg);color:var(--diff-del-fg);border-left:var(--bw-marker) solid var(--diff-del-mark)"><span aria-hidden="true" style="width:1ch">&#8722;</span><span>&nbsp;&nbsp;machines: 4</span></div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>&nbsp;&nbsp;machines: 6</span></div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);color:var(--diff-ctx)"><span aria-hidden="true" style="width:1ch">&nbsp;</span><span>egress:</span></div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>&nbsp;&nbsp;- allow: api.kortforsyningen.dk:443</span></div>
+            </div>
+            <div style="padding:var(--s-4) var(--s-5)">
+              <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4);max-width:var(--measure-prose)">Applying now restarts machines without running sessions immediately. Machines with sessions keep rev 41 and take rev 42 when they empty — up to 4 hours for the longest session.</p>
+              <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+                <button type="button" onClick="{{ applyNow }}" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Apply now</button>
+                <button type="button" onClick="{{ commitReview }}" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Commit for review</button>
+                <span style="font:var(--t-body);color:var(--text-muted);flex:1 1 240px;min-width:0">Commit writes the change to the platform repository. The deployment pipeline applies it.</span>
+              </div>
+            </div>
+            <sc-if value="{{ hasApplyState }}" hint-placeholder-val="{{ false }}">
+              <div role="status" style="margin:0 var(--s-5) var(--s-5);padding:var(--s-4);border-radius:var(--r-md);border-width:var(--bw-hair);border-style:solid;font:var(--t-body);border-color:{{ applyBorder }};background:{{ applyBg }};color:{{ applyFg }}">
+                <strong style="font:var(--t-data-strong)"><span aria-hidden="true">{{ applyGlyph }}</span> {{ applyTitle }}</strong>
+                <span style="display:block;margin-top:var(--s-2);color:var(--text-secondary)">{{ applyBody }}</span>
+              </div>
+            </sc-if>
+          </section>
+
+          <section style="border:var(--bw-hair) solid var(--wai-bd);border-left:var(--bw-marker) solid var(--wai-fg);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5)">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:baseline;margin-bottom:var(--s-3)">
+              <span style="display:inline-flex;align-items:center;gap:var(--s-2);padding:var(--s-half) var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--wai-bd);background:var(--wai-bg);color:var(--wai-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true">&#9208;</span>Waiting for a safe moment</span>
+              <h2 style="font:var(--t-panel);margin:0">dev-standard · rev 18 applied, rev 19 held</h2>
+            </div>
+            <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4);max-width:var(--measure-prose)">Rev 19 was accepted at 11:52:14Z. Three machines still carry sessions and will take it as they empty. Nothing is wrong; nothing needs doing.</p>
+            <div style="overflow-x:auto">
+              <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:460px">
+                <thead><tr>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Machine</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Config</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Takes rev 19</th>
+                </tr></thead>
+                <tbody>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">dev-standard-0…2</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)">rev 19</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">done 11:52</td></tr>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">dev-standard-3</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--wai-fg)">rev 18</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">when 1 session ends · started 09:12</td></tr>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx)">dev-standard-4, -5</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--wai-fg)">rev 18</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">when 4 sessions end</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </sc-if>
+
+        <!-- ===================== INTEGRATIONS ===================== -->
+        <sc-if value="{{ isIntegrations }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Integrations</h1>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:var(--measure-prose)">External tool servers agents may call. Credentials are references into the vault; the console never reads a value.</p>
+
+          <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-6)">
+            <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:900px">
+              <thead><tr>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Integration</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Identity</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Endpoint</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Credential</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Scope</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">State</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Used by</th>
+              </tr></thead>
+              <tbody>
+                <tr data-trow="1" style="border-left:var(--bw-marker) solid var(--brk-fg)"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">github-enterprise</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">service</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">https://ghe.itm.dk/api/v3</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">kv/troupe/ghe-app</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">repo:read</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--brk-fg)"><span aria-hidden="true">&#10005;</span> Broken</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">2 profiles</td></tr>
+                <tr data-trow="1" style="border-left:var(--bw-marker) solid var(--cred-fg)"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">economic</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">service</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">https://restapi.e-conomic.com</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--cred-fg)">kv/troupe/economic-api</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">invoices:read</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--cred-fg)"><span aria-hidden="true">&#8709;</span> Credential missing</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">1 profile</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">sharepoint-tilbud</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">service</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">https://itm.sharepoint.com/sites/tilbud</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">kv/troupe/sp-tilbud</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">files:readwrite</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Healthy</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">2 profiles</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">web-search</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">service</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">https://search.internal.itm.dk</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">kv/troupe/search</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">query</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Healthy</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">3 profiles</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);font:var(--t-data-strong)">onedrive-personal</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--deg-fg)">personal · 31 users</td><td style="padding:var(--s-2) var(--d-cellx)">https://graph.microsoft.com/v1.0</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">per-user token</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">files:read</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Healthy</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">3 profiles</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-5);margin-bottom:var(--s-6)">
+            <section style="flex:1 1 340px;min-width:0;border:var(--bw-hair) solid var(--brk-bd);border-radius:var(--r-lg);background:var(--bg-panel)">
+              <div style="display:flex;gap:var(--s-3);align-items:center;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-2);padding:var(--s-half) var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--brk-bd);background:var(--brk-bg);color:var(--brk-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)"><span aria-hidden="true">&#10005;</span>Broken</span>
+                <h2 style="font:var(--t-panel);margin:0">github-enterprise</h2>
+              </div>
+              <div style="padding:var(--s-4) var(--s-5)">
+                <p style="font:var(--t-body);color:var(--text-primary);margin:0 0 var(--s-3)">Unreachable since 14:02:11Z. The credential is valid; the host is not answering.</p>
+                <pre style="margin:0 0 var(--s-4);padding:var(--s-3);border-radius:var(--r-md);background:var(--bg-sunken);border:var(--bw-hair) solid var(--border-hairline);font:var(--t-code);color:var(--text-secondary);white-space:pre-wrap;overflow-wrap:anywhere">GET https://ghe.itm.dk/api/v3/meta
+503 Service Unavailable · 5 attempts · last 14:09:44Z
+agents calling this tool receive: tool unavailable</pre>
+                <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4)">Sessions keep running. Agents that call this tool are told it is unavailable and carry on without it.</p>
+                <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+                  <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Test now</button>
+                  <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Disable in 2 profiles</button>
+                </div>
+              </div>
+            </section>
+
+            <section style="flex:1 1 340px;min-width:0;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel)">
+              <div style="padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)"><h2 style="font:var(--t-panel);margin:0">Add an integration</h2></div>
+              <div style="padding:var(--s-4) var(--s-5);display:flex;flex-direction:column;gap:var(--d-fieldgap)">
+                <div><label for="i-name" style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-1)">Name</label><input id="i-name" value="kortforsyningen" style="width:100%;min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" /></div>
+                <div><label for="i-ep" style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-1)">Endpoint</label><input id="i-ep" value="https://api.kortforsyningen.dk" style="width:100%;min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" /></div>
+                <div><label for="i-cred" style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-1)">Credential reference</label><input id="i-cred" value="kv/troupe/kortfors" style="width:100%;min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" /><p style="font:var(--t-body);color:var(--text-muted);margin:var(--s-2) 0 0">A path in the vault. Troupe reads it at call time and never stores the value.</p></div>
+                <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+                  <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Test</button>
+                  <button type="button" disabled="disabled" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-muted);font:var(--t-ui);cursor:not-allowed">Add</button>
+                  <span style="font:var(--t-body);color:var(--text-muted)">Test first. An untested integration cannot be added.</span>
+                </div>
+              </div>
+            </section>
+          </div>
+
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0;max-width:var(--measure-prose)"><strong style="font-weight:600">Personal connections</strong> are attached by individual users to their own sessions and run as that person, not as the platform. 31 users have connected <span style="font:var(--t-data)">onedrive-personal</span>. Data reached through a personal connection is outside the platform's service identity and is flagged in the audit export.</p>
+        </sc-if>
+
+        <!-- ===================== BUNDLES ===================== -->
+        <sc-if value="{{ isBundles }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Configuration bundles</h1>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-5);max-width:var(--measure-prose)">A bundle is a versioned set of agent definitions, skills and tool permissions. Profiles subscribe to a channel, not to a version.</p>
+
+          <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-6)">
+            <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:720px">
+              <thead><tr>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Channel</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Published</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Profiles</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Reported by workers</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">State</th>
+              </tr></thead>
+              <tbody>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">stable</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">2026.9.3 · 2026-09-08 10:12Z</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">design-docs, admin-back-office</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--deg-fg)">2026.9.3 on 6 of 7 machines</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--deg-fg)"><span aria-hidden="true">&#9680;</span> Drift</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);font:var(--t-data-strong)">canary</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">2026.9.4 · committed 08:41Z</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">dev-standard</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">no machine reports it yet</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--pen-fg)"><span aria-hidden="true" style="animation:adm-pulse var(--dur-pulse) var(--ease) infinite">&#9671;</span> Pending 3 h 12 m</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);font:var(--t-data-strong)">frozen</td><td style="padding:var(--s-2) var(--d-cellx)">2026.6.1 · 2026-06-02 09:00Z</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">—</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-muted)">—</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--unk-fg)"><span aria-hidden="true">?</span> Unused</td></tr>
+              </tbody>
+            </table>
+          </div>
+
+          <section style="border:var(--bw-hair) solid var(--deg-bd);border-left:var(--bw-marker) solid var(--deg-fg);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5);margin-bottom:var(--s-6)">
+            <h2 style="font:var(--t-panel);margin:0 0 var(--s-2)"><span aria-hidden="true" style="color:var(--deg-fg)">&#9680;</span> Drift on design-docs-2</h2>
+            <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4);max-width:var(--measure-prose)">The machine reports bundle <span style="font:var(--t-data-strong);color:var(--text-primary)">2026.9.2</span>, which was never published to <span style="font:var(--t-data)">stable</span>. Intent and reality disagree. The machine is draining; the drift disappears when it is replaced.</p>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+              <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Force resync</button>
+              <button type="button" onClick="{{ goWorkers }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Open machine</button>
+            </div>
+          </section>
+
+          <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-panel)">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-4);align-items:baseline;padding:var(--s-4) var(--s-5);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h2 style="font:var(--t-panel);margin:0">2026.9.3 &#8594; 2026.9.4</h2>
+              <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">3 agent definitions · 11 skills · 24 tool permissions</span>
+            </div>
+            <div style="padding:var(--s-4) var(--s-5);font:var(--t-code);background:var(--bg-sunken);border-bottom:var(--bw-hair) solid var(--divider)">
+              <div style="color:var(--diff-hunk);margin-bottom:var(--s-2)">@@ agents/proofreader.yaml @@</div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>max_parallel: 2</span></div>
+              <div style="color:var(--diff-hunk);margin:var(--s-3) 0 var(--s-2)">@@ permissions/tools.yaml @@</div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-del-bg);color:var(--diff-del-fg);border-left:var(--bw-marker) solid var(--diff-del-mark)"><span aria-hidden="true" style="width:1ch">&#8722;</span><span>shell.run: ask</span></div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>shell.run: ask_always</span></div>
+              <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);color:var(--diff-ctx)"><span aria-hidden="true" style="width:1ch">&nbsp;</span><span>files.write: ask</span></div>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);padding:var(--s-4) var(--s-5)">
+              <button type="button" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Publish 2026.9.4 to stable</button>
+              <button type="button" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Roll canary back to 2026.9.3</button>
+              <span style="font:var(--t-body);color:var(--text-muted);flex:1 1 260px;min-width:0">Rolling back republishes 2026.9.3 as a new revision. History is never rewritten.</span>
+            </div>
+          </section>
+        </sc-if>
+
+        <!-- ===================== SESSIONS AND SPEND ===================== -->
+        <sc-if value="{{ isSessions }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Sessions and spend</h1>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:center;padding:var(--s-3) var(--s-4);border:var(--bw-hair) solid var(--border-hairline);border-left:var(--bw-marker) solid var(--border-strong);border-radius:var(--r-md);background:var(--bg-panel);margin-bottom:var(--s-5);max-width:var(--measure-prose)">
+            <span aria-hidden="true" style="color:var(--text-muted)">&#9679;</span>
+            <span style="font:var(--t-body);color:var(--text-secondary);flex:1 1 260px;min-width:0">Administrators cannot read session content. This list shows metadata only: owner, team, profile, state, size and cost. There is no setting that changes this.</span>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-bottom:var(--s-4)">
+            <select aria-label="Team" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)"><option>All teams</option><option>Salg</option><option>Design</option><option>Udvikling</option></select>
+            <select aria-label="Profile" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)"><option>All profiles</option><option>design-docs</option><option>dev-standard</option></select>
+            <select aria-label="State" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)"><option>Any state</option><option>Running</option><option>Asleep</option><option>Read only</option></select>
+            <input aria-label="Owner" placeholder="owner contains…" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" />
+            <input aria-label="Minimum cost in kroner" placeholder="min. kr" style="width:100px;min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" />
+            <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);align-self:center">45 sessions · 68.420 kr this month</span>
+          </div>
+
+          <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-6)">
+            <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:900px">
+              <thead><tr>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Session</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Owner</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Team</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Profile</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">State</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Files</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Size</th>
+                <th scope="col" style="text-align:right;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Spend</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Last active</th>
+                <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)"></th>
+              </tr></thead>
+              <tbody>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">ses_8f21c4</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">m.soerensen</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">Salg</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9656;</span> Running</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">18</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">42 MB</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">812 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">now</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)"></td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">ses_71ab09</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">j.bak</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">Design</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9656;</span> Running</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">7</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">9 MB</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">340 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">3 min ago</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)"></td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">ses_44d130</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">s.brandt</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">Salg</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--dor-fg)"><span aria-hidden="true">&#9675;</span> Asleep</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">61</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">210 MB</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);text-align:right;font-variant-numeric:tabular-nums">2.106 kr</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)">6 days ago</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted)"><span aria-hidden="true">&#128204;</span> pinned</td></tr>
+                <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx)">ses_1c77e2</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">k.dam</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">Udvikling</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">dev-standard</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--dor-fg)"><span aria-hidden="true">&#9675;</span> Asleep</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">9</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">3 MB</td><td style="padding:var(--s-2) var(--d-cellx);text-align:right;font-variant-numeric:tabular-nums">88 kr</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-muted)">21 days ago</td><td style="padding:var(--s-2) var(--d-cellx)"><button type="button" onClick="{{ openErase }}" style="min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--brk-bd);background:transparent;color:var(--brk-fg);font:var(--t-ui);cursor:pointer" style-hover="background:var(--brk-bg)">Erase</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </sc-if>
+
+        <!-- ===================== AUDIT ===================== -->
+        <sc-if value="{{ isAudit }}" hint-placeholder-val="{{ false }}">
+          <h1 style="font:var(--t-page);letter-spacing:var(--ls-page);margin:0 0 var(--s-2)">Audit</h1>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4);max-width:var(--measure-prose)">Two different questions. The change log answers what an administrator did. The integrity check answers whether a session's record has been altered since it was written.</p>
+          <div style="display:flex;gap:var(--s-2);margin-bottom:var(--s-5)">
+            <button type="button" data-tab="1" aria-pressed="{{ tabChanges }}" onClick="{{ showChanges }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Change log</button>
+            <button type="button" data-tab="1" aria-pressed="{{ tabIntegrity }}" onClick="{{ showIntegrity }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Integrity check</button>
+          </div>
+
+          <sc-if value="{{ isChanges }}" hint-placeholder-val="{{ true }}">
+            <div style="overflow-x:auto;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);margin-bottom:var(--s-5)">
+              <table style="width:100%;border-collapse:collapse;font:var(--t-data);min-width:820px">
+                <thead><tr>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Time (UTC)</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Actor</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Object</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Change</th>
+                  <th scope="col" style="text-align:left;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--tb-head-fg);padding:var(--s-2) var(--d-cellx);background:var(--tb-head-bg);border-bottom:var(--bw-hair) solid var(--border-strong)">Result</th>
+                </tr></thead>
+                <tbody>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">2026-09-13 11:52:14</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">c.krogh@itm.dk</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">worker/design-docs</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">capacity.machines 4 &#8594; 6</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--wai-fg)"><span aria-hidden="true">&#9208;</span> Waiting</td></tr>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">2026-09-12 16:30:02</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">m.ravn@itm.dk</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">integration/economic</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">credentialRef &#8594; kv/personal/mr-economic</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--rej-fg)"><span aria-hidden="true">&#8856;</span> Rejected by policy</td></tr>
+                  <tr><td colspan="5" style="padding:0 var(--d-cellx) var(--s-4);border-bottom:var(--bw-hair) solid var(--tb-row-bd);background:var(--bg-sunken)">
+                    <div style="padding:var(--s-3) 0;font:var(--t-code);color:var(--rej-fg)">policy/credential-scope: a credential reference must live under kv/troupe/. The change was not applied and no state was modified.</div>
+                    <div style="font:var(--t-code)">
+                      <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-del-bg);color:var(--diff-del-fg);border-left:var(--bw-marker) solid var(--diff-del-mark)"><span aria-hidden="true" style="width:1ch">&#8722;</span><span>credentialRef: kv/troupe/economic-api</span></div>
+                      <div style="display:flex;gap:var(--s-4);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>credentialRef: kv/personal/mr-economic</span></div>
+                    </div>
+                  </td></tr>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-muted);white-space:nowrap">2026-09-12 09:03:41</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">c.krogh@itm.dk</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd)">worker/admin-back-office</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--text-secondary)">egress + restapi.e-conomic.com:443</td><td style="padding:var(--s-2) var(--d-cellx);border-bottom:var(--bw-hair) solid var(--tb-row-bd);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Applied</td></tr>
+                  <tr data-trow="1"><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-muted);white-space:nowrap">2026-09-11 14:22:07</td><td style="padding:var(--s-2) var(--d-cellx)">system</td><td style="padding:var(--s-2) var(--d-cellx)">session/ses_39aa01</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--text-secondary)">erased on retention · 180 days</td><td style="padding:var(--s-2) var(--d-cellx);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Applied</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p style="font:var(--t-body);color:var(--text-muted);margin:0;max-width:var(--measure-prose)">The change log records configuration only. It never contains session content, and it cannot be edited or deleted from this console.</p>
+          </sc-if>
+
+          <sc-if value="{{ isIntegrity }}" hint-placeholder-val="{{ false }}">
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:center;margin-bottom:var(--s-5)">
+              <input aria-label="Session id" value="ses_44d130" style="min-width:180px;min-height:var(--d-ctl);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" />
+              <button type="button" onClick="{{ flipIntegrity }}" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Run check</button>
+              <span style="font:var(--t-body);color:var(--text-muted)">Recomputes the hash chain over every record. Reads hashes, not content.</span>
+            </div>
+
+            <sc-if value="{{ integrityPass }}" hint-placeholder-val="{{ true }}">
+              <section style="border:var(--bw-hair) solid var(--ok-bd);border-left:var(--bw-marker) solid var(--ok-fg);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5)">
+                <h2 style="font:var(--t-panel);margin:0 0 var(--s-3);color:var(--ok-fg)"><span aria-hidden="true">&#9679;</span> Intact — 9.301 of 9.301 records verified</h2>
+                <dl style="display:grid;grid-template-columns:auto 1fr;gap:var(--s-3) var(--s-5);margin:0;font:var(--t-data)">
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Session</dt><dd style="margin:0">ses_44d130 · s.brandt@itm.dk · Salg</dd>
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Span</dt><dd style="margin:0">2026-09-01 08:12:04Z &#8594; 2026-09-07 15:44:52Z</dd>
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Root hash</dt><dd style="margin:0;overflow-wrap:anywhere">sha256:6b9f0c1d8e2a4f7b5c3d9e1a0f8b2c4d6e8a0c2e4f6b8d0a2c4e6f8b0d2a4c6e</dd>
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Checked</dt><dd style="margin:0">2026-09-13 11:58:31Z · 1.9 s</dd>
+                </dl>
+                <p style="font:var(--t-body);color:var(--text-secondary);margin:var(--s-4) 0 0;max-width:var(--measure-prose)">Every record hashes to its successor and the chain ends at the published root. Content was not read to determine this.</p>
+                <button type="button" style="margin-top:var(--s-4);min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Export signed report</button>
+              </section>
+            </sc-if>
+
+            <sc-if value="{{ integrityFail }}" hint-placeholder-val="{{ false }}">
+              <section style="border:var(--bw-hair) solid var(--brk-bd);border-left:var(--bw-marker) solid var(--brk-fg);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5)">
+                <h2 style="font:var(--t-panel);margin:0 0 var(--s-3);color:var(--brk-fg)"><span aria-hidden="true">&#10005;</span> Broken chain — verified 4.181 of 9.301 records</h2>
+                <dl style="display:grid;grid-template-columns:auto 1fr;gap:var(--s-3) var(--s-5);margin:0 0 var(--s-4);font:var(--t-data)">
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Fails at</dt><dd style="margin:0;color:var(--brk-fg)">record 4.182 · 2026-09-09 22:14:06Z</dd>
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Expected</dt><dd style="margin:0;overflow-wrap:anywhere">sha256:1a4c…f09b</dd>
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Found</dt><dd style="margin:0;overflow-wrap:anywhere;color:var(--brk-fg)">sha256:77de…21c4</dd>
+                  <dt style="font:var(--t-label);color:var(--text-muted)">Records after</dt><dd style="margin:0">5.119 unverifiable — the chain cannot be followed past the break</dd>
+                </dl>
+                <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-4);max-width:var(--measure-prose)">Records 1 to 4.181 are provably unaltered. From record 4.182 the stored hash does not match the recomputed one. This means the record store was written to outside Troupe, or the storage volume returned a corrupted read. The console cannot tell which; the storage log for 2026-09-09 will.</p>
+                <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+                  <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Export signed report</button>
+                  <button type="button" style="min-height:var(--d-ctl);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Open storage log for that hour</button>
+                </div>
+              </section>
+            </sc-if>
+          </sc-if>
+        </sc-if>
+
+      </main>
+    </div>
+  </sc-if>
+
+  <!-- ===================== ERASE DIALOG ===================== -->
+  <sc-if value="{{ eraseOpen }}" hint-placeholder-val="{{ false }}">
+    <div style="position:fixed;inset:0;z-index:var(--z-dialog);background:var(--scrim);display:flex;align-items:center;justify-content:center;padding:var(--s-5)">
+      <div role="dialog" aria-modal="true" aria-labelledby="erase-title" style="width:100%;max-width:520px;border:var(--bw-hair) solid var(--brk-bd);border-radius:var(--r-lg);background:var(--bg-panel);box-shadow:var(--sh-overlay)">
+        <div style="padding:var(--s-5) var(--s-5) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider)">
+          <h2 id="erase-title" style="font:var(--t-section);letter-spacing:var(--ls-section);margin:0 0 var(--s-3)">Erase session ses_1c77e2</h2>
+          <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-3)">This deletes the conversation, the 9 files, the task list and every backup copy, in the primary store and in the replica in eu-west-1. It cannot be undone and it cannot be recovered from a snapshot.</p>
+          <ul style="margin:0;padding-left:var(--s-6);font:var(--t-body);color:var(--text-secondary);display:flex;flex-direction:column;gap:var(--s-1)">
+            <li>Owner k.dam is not notified.</li>
+            <li>The audit record of the erasure remains, with your name.</li>
+            <li>Spend already recorded against Udvikling stays in the September total.</li>
+          </ul>
+        </div>
+        <div style="padding:var(--s-5)">
+          <label for="erase-input" style="display:block;font:var(--t-label);color:var(--text-secondary);margin-bottom:var(--s-2)">Type <span style="font:var(--t-data-strong);color:var(--text-primary)">ses_1c77e2</span> to confirm</label>
+          <input id="erase-input" value="{{ eraseText }}" onInput="{{ typeErase }}" autocomplete="off" style="width:100%;min-height:var(--d-touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-data)" />
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-5)">
+            <button type="button" onClick="{{ closeErase }}" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Cancel</button>
+            <button type="button" disabled="{{ eraseBlocked }}" onClick="{{ closeErase }}" style="min-height:var(--d-touch);padding:0 var(--s-5);border-radius:var(--r-md);border-width:var(--bw-hair);border-style:solid;font:var(--t-ui);cursor:pointer;border-color:var(--brk-bd);background:{{ eraseBg }};color:{{ eraseFg }};opacity:{{ eraseOpacity }}">Erase session</button>
+            <span style="font:var(--t-body);color:var(--text-muted);flex:1 1 180px;min-width:0">{{ eraseHint }}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1440,&quot;height&quot;:960}}">
+class Component extends DCLogic {
+  state = {
+    screen: 'overview',
+    theme: 'dark',
+    offline: false,
+    verified: false,
+    apply: null,
+    auditTab: 'changes',
+    integrity: 'pass',
+    eraseOpen: false,
+    eraseText: '',
+    live: 14,
+    flash: false,
+    stamp: '11:58:02Z'
+  };
+
+  componentDidMount() {
+    this.timer = setInterval(() => {
+      const delta = Math.random() < 0.5 ? -1 : 1;
+      const next = Math.max(9, Math.min(22, this.state.live + delta));
+      const d = new Date();
+      const p = (n) => String(n).padStart(2, '0');
+      this.setState({ live: next, flash: true, stamp: p(d.getUTCHours()) + ':' + p(d.getUTCMinutes()) + ':' + p(d.getUTCSeconds()) + 'Z' });
+      clearTimeout(this.settle);
+      this.settle = setTimeout(() => this.setState({ flash: false }), 1800);
+    }, 6000);
+    this.onKey = (e) => { if (e.key === 'Escape' && this.state.eraseOpen) this.setState({ eraseOpen: false, eraseText: '' }); };
+    document.addEventListener('keydown', this.onKey);
+  }
+
+  componentWillUnmount() {
+    clearInterval(this.timer);
+    clearTimeout(this.settle);
+    document.removeEventListener('keydown', this.onKey);
+  }
+
+  go = (screen) => this.setState({ screen: screen });
+
+  renderVals() {
+    const s = this.state;
+    const apply = s.apply;
+    const applyMap = {
+      now: {
+        glyph: '\u25CF', title: 'Applied — rev 42 is live',
+        body: 'Two machines restarted immediately. Two carry sessions and take rev 42 as they empty; the profile shows Waiting until they do.',
+        fg: 'var(--ok-fg)', bg: 'var(--ok-bg)', bd: 'var(--ok-bd)'
+      },
+      review: {
+        glyph: '\u25C7', title: 'Pending — committed as platform/profiles/design-docs.yaml',
+        body: 'Commit 9f2a1c pushed at 12:01:07Z. Nothing has changed in the cluster yet. This stays pending until the pipeline reports back; if it disagrees with reality you will see both values here.',
+        fg: 'var(--pen-fg)', bg: 'var(--pen-bg)', bd: 'var(--pen-bd)'
+      }
+    };
+    const a = apply ? applyMap[apply] : null;
+    const eraseOk = s.eraseText === 'ses_1c77e2';
+    return {
+      theme: s.theme,
+      themeLabel: s.theme === 'dark' ? 'Light' : 'Dark',
+      toggleTheme: () => this.setState({ theme: s.theme === 'dark' ? 'light' : 'dark' }),
+
+      offline: s.offline,
+      offlineLabel: s.offline ? 'Reconnect console' : 'Simulate console offline',
+      toggleOffline: () => this.setState({ offline: !s.offline }),
+
+      isSignin: s.screen === 'signin',
+      inConsole: s.screen !== 'signin',
+      isOverview: s.screen === 'overview',
+      isIdentity: s.screen === 'identity',
+      isTeams: s.screen === 'teams',
+      isWorkers: s.screen === 'workers',
+      isIntegrations: s.screen === 'integrations',
+      isBundles: s.screen === 'bundles',
+      isSessions: s.screen === 'sessions',
+      isAudit: s.screen === 'audit',
+      nOverview: s.screen === 'overview' ? 'page' : 'false',
+      nIdentity: s.screen === 'identity' ? 'page' : 'false',
+      nTeams: s.screen === 'teams' ? 'page' : 'false',
+      nWorkers: s.screen === 'workers' ? 'page' : 'false',
+      nIntegrations: s.screen === 'integrations' ? 'page' : 'false',
+      nBundles: s.screen === 'bundles' ? 'page' : 'false',
+      nSessions: s.screen === 'sessions' ? 'page' : 'false',
+      nAudit: s.screen === 'audit' ? 'page' : 'false',
+      goSignin: () => this.go('signin'),
+      goOverview: () => this.go('overview'),
+      goIdentity: () => this.go('identity'),
+      goTeams: () => this.go('teams'),
+      goWorkers: () => this.go('workers'),
+      goIntegrations: () => this.go('integrations'),
+      goBundles: () => this.go('bundles'),
+      goSessions: () => this.go('sessions'),
+      goAudit: () => this.go('audit'),
+
+      liveCount: s.live,
+      liveStamp: s.stamp,
+      liveAnim: s.flash ? 'adm-settle var(--dur-settle) var(--ease) 1' : 'none',
+
+      verified: s.verified,
+      notVerified: !s.verified,
+      saveOpacity: s.verified ? '1' : '0.45',
+      verifyHint: s.verified
+        ? 'Verified 12:03:44Z. Saving replaces the live configuration.'
+        : 'Changes cannot be saved until a test passes. This is the screen that locks everyone out.',
+      toggleVerify: () => this.setState({ verified: !s.verified }),
+
+      applyNow: () => this.setState({ apply: 'now' }),
+      commitReview: () => this.setState({ apply: 'review' }),
+      hasApplyState: !!a,
+      applyGlyph: a ? a.glyph : '',
+      applyTitle: a ? a.title : '',
+      applyBody: a ? a.body : '',
+      applyFg: a ? a.fg : '',
+      applyBg: a ? a.bg : '',
+      applyBorder: a ? a.bd : '',
+
+      tabChanges: s.auditTab === 'changes' ? 'true' : 'false',
+      tabIntegrity: s.auditTab === 'integrity' ? 'true' : 'false',
+      isChanges: s.auditTab === 'changes',
+      isIntegrity: s.auditTab === 'integrity',
+      showChanges: () => this.setState({ auditTab: 'changes' }),
+      showIntegrity: () => this.setState({ auditTab: 'integrity' }),
+      integrityPass: s.auditTab === 'integrity' && s.integrity === 'pass',
+      integrityFail: s.auditTab === 'integrity' && s.integrity === 'fail',
+      flipIntegrity: () => this.setState({ integrity: s.integrity === 'pass' ? 'fail' : 'pass' }),
+
+      eraseOpen: s.eraseOpen,
+      eraseText: s.eraseText,
+      openErase: () => this.setState({ eraseOpen: true, eraseText: '' }),
+      closeErase: () => this.setState({ eraseOpen: false, eraseText: '' }),
+      typeErase: (e) => this.setState({ eraseText: e.target.value }),
+      eraseBlocked: !eraseOk,
+      eraseBg: eraseOk ? 'var(--brk-fg)' : 'transparent',
+      eraseFg: eraseOk ? 'var(--text-inverse)' : 'var(--text-muted)',
+      eraseOpacity: eraseOk ? '1' : '0.5',
+      eraseHint: eraseOk ? 'This cannot be undone.' : 'The name must match exactly.'
+    };
+  }
+}
+
+</script>
+</body>
+</html>

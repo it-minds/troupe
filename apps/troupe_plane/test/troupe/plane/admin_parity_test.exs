@@ -2,14 +2,19 @@ defmodule Troupe.Plane.AdminParityTest do
   @moduledoc """
   Three surfaces, one context, and a test that keeps it that way.
 
-  The panel, the admin JSON-RPC and `troupe admin` are supposed to be three renderings of
-  `Troupe.Plane.Admin`. Left to care alone that lasts about a release: somebody adds a
-  button, the CLI does not get it, and an operator who works over SSH finds out months
-  later that the thing they need is only in a browser.
+  The panel, the admin JSON-RPC, `troupe admin` and the admin MCP server are supposed to
+  be four renderings of `Troupe.Plane.Admin`. Left to care alone that lasts about a
+  release: somebody adds a button, the CLI does not get it, and an operator who works over
+  SSH finds out months later that the thing they need is only in a browser.
 
-  So it is enumerated. Every public function of the context must have a method and a
-  command; every method and command must name a function that exists; and the panel must
+  So it is enumerated. Every public function of the context must have a method, a command
+  and a tool; every method and command must name a function that exists; and the panel must
   call nothing else.
+
+  The MCP half checks something the other three do not need: that every method carries the
+  prose and the types a caller with no documentation depends on. A model has the tool
+  description and nothing else, so an argument with no description is a defect in the
+  interface rather than in its documentation.
   """
 
   use ExUnit.Case, async: true
@@ -17,15 +22,17 @@ defmodule Troupe.Plane.AdminParityTest do
   alias Troupe.Ctl.Admin, as: CLI
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.API
+  alias Troupe.Plane.Admin.API.Method
+  alias Troupe.Plane.Admin.MCP
 
   # Not administrative actions: these work out *who is asking* rather than doing anything
   # on their behalf. Listed one by one rather than filtered by a naming rule, because a
   # rule would silently exempt whatever a future name happened to match.
-  @not_actions [actor_for: 1, actor_for_subject: 1, admin?: 1]
+  @not_actions [actor_for: 1, actor_for_session: 1, actor_for_subject: 1, admin?: 1]
 
   describe "every action has three surfaces" do
     test "each context function has an admin API method" do
-      covered = API.methods() |> Map.values() |> Enum.map(&elem(&1, 0)) |> MapSet.new()
+      covered = API.methods() |> Map.values() |> Enum.map(& &1.function) |> MapSet.new()
       missing = MapSet.difference(MapSet.new(action_names()), covered)
 
       assert MapSet.size(missing) == 0, """
@@ -39,7 +46,7 @@ defmodule Troupe.Plane.AdminParityTest do
     end
 
     test "each context function has a `troupe admin` command" do
-      by_method = Map.new(API.methods(), fn {method, {function, _args}} -> {method, function} end)
+      by_method = Map.new(API.methods(), fn {method, %Method{} = m} -> {method, m.function} end)
       covered = CLI.methods() |> Enum.map(&Map.fetch!(by_method, &1)) |> MapSet.new()
       missing = MapSet.difference(MapSet.new(action_names()), covered)
 
@@ -56,12 +63,14 @@ defmodule Troupe.Plane.AdminParityTest do
     test "no method names a function the context does not have" do
       actions = MapSet.new(action_names())
 
-      for {method, {function, arguments}} <- API.methods() do
-        assert MapSet.member?(actions, function),
-               "#{method} names Admin.#{function}/#{length(arguments) + 1}, which does not exist"
+      for {method, %Method{} = declared} <- API.methods() do
+        arity = length(declared.arguments) + 1
 
-        assert function_exported?(Admin, function, length(arguments) + 1),
-               "#{method} passes #{length(arguments)} argument(s) to Admin.#{function}, which takes a different number"
+        assert MapSet.member?(actions, declared.function),
+               "#{method} names Admin.#{declared.function}/#{arity}, which does not exist"
+
+        assert function_exported?(Admin, declared.function, arity),
+               "#{method} passes #{length(declared.arguments)} argument(s) to Admin.#{declared.function}, which takes a different number"
       end
     end
 
@@ -69,8 +78,69 @@ defmodule Troupe.Plane.AdminParityTest do
       methods = MapSet.new(Map.keys(API.methods()))
 
       for method <- CLI.methods() do
-        assert MapSet.member?(methods, method), "`troupe admin` has a command for #{method}, which is not a method"
+        assert MapSet.member?(methods, method),
+               "`troupe admin` has a command for #{method}, which is not a method"
       end
+    end
+  end
+
+  describe "the MCP surface" do
+    test "every method is a tool, and every tool is a method" do
+      tools = MapSet.new(MCP.tools(), & &1["name"])
+      methods = MapSet.new(Map.keys(API.methods()), &MCP.tool_name/1)
+
+      assert MapSet.equal?(tools, methods), """
+      The MCP tool list and the admin methods have come apart:
+
+        only tools:   #{inspect(MapSet.to_list(MapSet.difference(tools, methods)))}
+        only methods: #{inspect(MapSet.to_list(MapSet.difference(methods, tools)))}
+      """
+    end
+
+    test "a tool name maps back to the method it came from" do
+      for {name, _declared} <- API.methods() do
+        assert MCP.method_for(MCP.tool_name(name)) == name,
+               "#{name} does not survive the round trip through an MCP tool name"
+      end
+    end
+
+    test "every method says what it does, and every argument says what it is" do
+      for {name, %Method{} = declared} <- API.methods() do
+        refute declared.summary in [nil, ""], "#{name} has no summary"
+
+        assert String.ends_with?(declared.summary, "."),
+               "#{name}'s summary is not a sentence; it is read aloud by a model"
+
+        for argument <- declared.arguments do
+          refute argument.description in [nil, ""],
+                 "#{name}'s #{argument.name} has no description"
+
+          for property <- argument.properties || [] do
+            refute property.description in [nil, ""],
+                   "#{name}'s #{argument.name}.#{property.name} has no description"
+          end
+        end
+      end
+    end
+
+    test "a destructive method names an argument to confirm, and it exists" do
+      for {name, %Method{risk: :destructive} = declared} <- API.methods() do
+        assert declared.confirm,
+               "#{name} is destructive but names nothing to confirm; there would be no guard on it"
+
+        assert declared.confirm in Method.argument_names(declared),
+               "#{name} asks to confirm #{declared.confirm}, which is not one of its arguments"
+      end
+    end
+
+    test "a schema refuses a field the method does not have" do
+      # The failure this prevents: `budget` where the field is `budget_micros`, accepted,
+      # changing nothing, and reported as a success.
+      schema = Enum.find(MCP.tools(), &(&1["name"] == "admin_team_update"))["inputSchema"]
+
+      assert schema["additionalProperties"] == false
+      assert "name" in schema["required"]
+      assert schema["properties"]["attrs"]["properties"]["budget_micros"]
     end
   end
 
@@ -111,7 +181,8 @@ defmodule Troupe.Plane.AdminParityTest do
   defp action_names_with_arity do
     Admin.__info__(:functions)
     |> Enum.reject(fn {name, arity} = function ->
-      function in @not_actions or name |> Atom.to_string() |> String.starts_with?("_") or arity == 0
+      function in @not_actions or name |> Atom.to_string() |> String.starts_with?("_") or
+        arity == 0
     end)
     |> Enum.uniq_by(&elem(&1, 0))
   end

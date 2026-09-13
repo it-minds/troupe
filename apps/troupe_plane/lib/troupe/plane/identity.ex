@@ -168,11 +168,16 @@ defmodule Troupe.Plane.Identity do
   def enable_team(%Group{} = group, attrs \\ %{}) do
     existing = Repo.get_by(Team, group_id: group.id)
 
+    # String keys throughout, whoever called. `Map.put_new(:group_id, ...)` on a map that
+    # arrived from JSON produced a map with mixed keys, which Ecto refuses to cast — so
+    # enabling a team with any attributes at all worked from the panel and raised from the
+    # CLI and the API.
     attrs =
       attrs
-      |> Map.put_new(:group_id, group.id)
-      |> Map.put_new(:name, default_team_name(group))
-      |> Map.put_new(:enabled_at, DateTime.utc_now())
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      |> Map.put_new("group_id", group.id)
+      |> Map.put_new("name", default_team_name(group))
+      |> Map.put_new("enabled_at", DateTime.utc_now())
 
     (existing || %Team{})
     |> Team.changeset(attrs)

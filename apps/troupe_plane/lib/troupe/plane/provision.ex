@@ -24,7 +24,7 @@ defmodule Troupe.Plane.Provision do
   anybody could bypass with `kubectl`.
   """
 
-  alias Troupe.Plane.{ClusterPolicy, Fleet, Identity}
+  alias Troupe.Plane.{ClusterPolicy, Fleet, Identity, Settings}
   alias Troupe.Plane.Fleet.Profile
   alias Troupe.Policy
   alias Troupe.Protocol.Error
@@ -32,7 +32,7 @@ defmodule Troupe.Plane.Provision do
 
   @doc "Which way this plane provisions."
   @spec mode() :: :direct | :gitops
-  def mode, do: Application.get_env(:troupe_plane, :provisioning_mode, :direct)
+  def mode, do: Settings.get("provisioning_mode")
 
   @doc """
   Check a profile against the cluster policy, for fast feedback.

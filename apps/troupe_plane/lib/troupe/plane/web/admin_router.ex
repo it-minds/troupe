@@ -33,6 +33,12 @@ defmodule Troupe.Plane.Web.AdminRouter do
     get("/denied", Troupe.Plane.Web.AdminAuth, :denied)
     get("/logout", Troupe.Plane.Web.AdminAuth, :logout)
 
+    # The break-glass door. Always routed, and a 404 from the controller where no token
+    # is configured — routing it conditionally would make the route table depend on
+    # runtime configuration, and a 404 either way tells a stranger the same thing.
+    get("/breakglass", Troupe.Plane.Web.AdminAuth, :breakglass)
+    post("/breakglass", Troupe.Plane.Web.AdminAuth, :breakglass_submit)
+
     live_session :admin, on_mount: {Live.Auth, :admin} do
       live("/", Live.Overview)
       live("/workers", Live.Workers)
@@ -43,6 +49,10 @@ defmodule Troupe.Plane.Web.AdminRouter do
       live("/triggers", Live.Triggers)
       live("/triggers/:team", Live.Triggers)
       live("/audit", Live.Audit)
+      # Readable by a team admin and writable only by a platform admin, which the page
+      # enforces per field rather than by not being routed: a team admin who cannot see
+      # what the platform is configured with cannot tell whether their problem is theirs.
+      live("/settings", Live.Settings)
     end
 
     live_session :platform, on_mount: {Live.Auth, :platform_admin} do
