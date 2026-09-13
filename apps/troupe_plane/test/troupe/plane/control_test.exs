@@ -163,6 +163,57 @@ defmodule Troupe.Plane.ControlTest do
     end
   end
 
+  describe "a pod that restarted" do
+    test "gives up the sessions the plane still thought it was holding", %{port: port} do
+      first = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(first, [%{"id" => "s-live"}])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-live", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, session} = Sessions.place("s-live", pod)
+      assert session.state == "active"
+      assert session.worker_id == pod.id
+
+      # The pod goes, and comes back with nothing — which is what a restart looks like
+      # from here.
+      :gen_tcp.close(first.socket)
+
+      second = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(second, [])
+
+      # Without this the session is unreachable for good: the plane keeps saying it is
+      # already running, hands out an endpoint, never tells the pod to restore, and the
+      # client's `subscribe` answers `not_found` however long anybody retries.
+      assert until(fn -> Sessions.get("s-live").state == "dormant" end),
+             "the session stayed active on a pod that no longer has it"
+
+      assert is_nil(Sessions.get("s-live").worker_id)
+    end
+
+    test "leaves alone what the pod says it still holds", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-kept", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, _} = Sessions.place("s-kept", pod)
+
+      # A control link that dropped and came back is not a restart, and the pod is still
+      # running everything it was. Reading a reconnect as an empty pod would dormant a
+      # healthy fleet every time the network hiccupped — which it did, eight times in one
+      # day on the deployment this was found on.
+      :gen_tcp.close(worker.socket)
+
+      again = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(again, [%{"id" => "s-kept"}])
+
+      refute until(fn -> Sessions.get("s-kept").state == "dormant" end, 12),
+             "a session the pod still holds was dormanted"
+
+      assert Sessions.get("s-kept").state == "active"
+    end
+  end
+
   describe "the session index" do
     test "a sealed segment is anchored, and the index moves with it", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
@@ -375,6 +426,39 @@ defmodule Troupe.Plane.ControlTest do
       })
 
     worker
+  end
+
+  # The plane asks every pod what it holds the moment it enrols. A fake pod that never
+  # answered would leave the plane waiting, so this reads past the pushes to the request
+  # and replies with whatever the test says the pod has.
+  defp answer_index(worker, sessions, attempts \\ 8)
+
+  defp answer_index(_worker, _sessions, 0), do: flunk("no session.index request arrived")
+
+  defp answer_index(worker, sessions, attempts) do
+    case read(worker) do
+      %{"method" => "session.index", "id" => id} ->
+        :ok =
+          :gen_tcp.send(worker.socket, [
+            Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"sessions" => sessions}}),
+            "
+"
+          ])
+
+        :ok
+
+      _other ->
+        answer_index(worker, sessions, attempts - 1)
+    end
+  end
+
+  # The reconciliation runs off the enrolment, so it lands a moment after the answer.
+  defp until(check, attempts \\ 40) do
+    cond do
+      check.() -> true
+      attempts == 0 -> false
+      true -> Process.sleep(50) && until(check, attempts - 1)
+    end
   end
 
   defp call(worker, method, params) do
