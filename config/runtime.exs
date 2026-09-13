@@ -256,6 +256,12 @@ if config_env() == :prod do
       presence.(System.get_env("TROUPE_BASE_URL")) ||
         "https://#{System.get_env("TROUPE_HOST", "localhost")}"
 
+    oidc_scopes =
+      case System.get_env("TROUPE_OIDC_SCOPES") do
+        nil -> nil
+        value -> value |> String.split([",", " "], trim: true) |> Enum.map(&String.trim/1)
+      end
+
     cors_origins =
       "TROUPE_CORS_ORIGINS"
       |> System.get_env("")
@@ -319,6 +325,10 @@ if config_env() == :prod do
         client_id: oidc_required.("TROUPE_OIDC_CLIENT_ID"),
         client_secret: System.get_env("TROUPE_OIDC_CLIENT_SECRET"),
         authorization_endpoint: System.get_env("TROUPE_OIDC_AUTHORIZE_URL"),
+        # Absent means the four OIDC scopes the router defaults to. Set it only for a
+        # provider that needs something else; a scope the provider does not recognise
+        # fails every sign-in before a password is typed.
+        scopes: oidc_scopes,
         device_authorization_endpoint: oidc_required.("TROUPE_OIDC_DEVICE_URL"),
         token_endpoint: oidc_required.("TROUPE_OIDC_TOKEN_URL")
       ]

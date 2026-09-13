@@ -45,6 +45,19 @@ defmodule Troupe.Plane.Web.Router do
 
   get("/healthz", do: send_json(conn, 200, %{"ok" => true}))
 
+  # What a client asks the provider for, and nothing beyond it.
+  #
+  # These four are OIDC's own scopes, which every provider understands. Group membership
+  # is *not* among them: a group claim is a property of the token the provider is
+  # configured to issue, not something a client asks for. Microsoft Entra says so by
+  # refusing the request outright — `AADSTS650053: the application asked for scope
+  # 'groups' that doesn't exist on the resource` — which fails every sign-in, the CLI's
+  # device grant included, before anybody types a password. Whichever claim carries
+  # groups is `TROUPE_GROUPS_CLAIM`, and it is read from the token.
+  #
+  # `TROUPE_OIDC_SCOPES` overrides this for a provider that wants something else.
+  @default_scopes ["openid", "profile", "email", "offline_access"]
+
   # What a client needs to know before it has an identity: which provider to talk to,
   # which client id to use, and what this plane calls itself.
   get "/.well-known/troupe" do
@@ -53,7 +66,7 @@ defmodule Troupe.Plane.Web.Router do
       "client_id" => config(:client_id),
       "device_authorization_endpoint" => config(:device_authorization_endpoint),
       "token_endpoint" => config(:token_endpoint),
-      "scopes" => config(:scopes, ["openid", "profile", "email", "offline_access", "groups"]),
+      "scopes" => config(:scopes, @default_scopes),
       "plane" => %{
         "name" => config(:plane_name, "troupe"),
         "rpc" => "/rpc",

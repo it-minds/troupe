@@ -54,6 +54,26 @@ defmodule Troupe.Plane.WebTest do
       assert body["plane"]["protocol_version"] == Troupe.Protocol.version()
     end
 
+    # `groups` is not a scope anywhere. Group membership is a claim the provider is
+    # configured to put in the token — `TROUPE_GROUPS_CLAIM` names it — and asking for it
+    # as a scope is refused outright by Microsoft Entra with AADSTS650053, which fails
+    # every sign-in, the CLI's device grant included, before a password is typed.
+    test "asks only for scopes a provider actually has", context do
+      assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/troupe")
+
+      assert body["scopes"] == ["openid", "profile", "email", "offline_access"]
+      refute "groups" in body["scopes"]
+    end
+
+    test "lets a deployment name its own scopes", context do
+      oidc = Application.get_env(:troupe_plane, :oidc)
+      Application.put_env(:troupe_plane, :oidc, Keyword.put(oidc, :scopes, ["openid", "api://troupe/.default"]))
+      on_exit(fn -> Application.put_env(:troupe_plane, :oidc, oidc) end)
+
+      assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/troupe")
+      assert body["scopes"] == ["openid", "api://troupe/.default"]
+    end
+
     test "publishes the keys workers verify session tokens against", context do
       assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/jwks.json")
       assert [key | _] = body["keys"]

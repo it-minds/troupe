@@ -232,6 +232,11 @@ spec:
               value: {{ .Values.plane.oidc.clientId | quote }}
             - name: TROUPE_OIDC_AUTHORIZE_URL
               value: {{ .Values.plane.oidc.authorizeUrl | quote }}
+            {{- with .Values.plane.oidc.scopes }}
+            # Only for a provider that wants something other than the four OIDC scopes.
+            - name: TROUPE_OIDC_SCOPES
+              value: {{ join "," . | quote }}
+            {{- end }}
             - name: TROUPE_OIDC_DEVICE_URL
               value: {{ .Values.plane.oidc.deviceUrl | quote }}
             - name: TROUPE_OIDC_TOKEN_URL

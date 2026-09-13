@@ -141,6 +141,12 @@ plane:
     authorizeUrl: ""
     deviceUrl: ""
     tokenUrl: ""
+    # What a client asks the provider for. Empty means the four OIDC scopes — openid,
+    # profile, email, offline_access — which every provider understands. Group
+    # membership is not a scope: it is a claim the provider is configured to put in the
+    # token, named by `groupsClaim`. Asking for one as a scope is refused outright by
+    # Microsoft Entra and fails every sign-in before a password is typed.
+    scopes: []
     secretName: troupe-plane-oidc
     secretKey: client-secret
   # A way into the panel when the identity provider cannot let you in — a misconfigured
