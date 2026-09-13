@@ -65,6 +65,20 @@ defmodule Troupe.Plane.WebTest do
       assert body =~ ~s(href="/app")
     end
 
+    # The page is the only one most people see before they have an account, so it is the
+    # one that carries the identity. `front_page_assets_test.exs` checks these files exist
+    # and are served; what is checked here is that the document still asks for them.
+    test "wears the brand: the mask, the wordmark and the Signal theme", context do
+      assert {:ok, %{body: body}} = get(context, "/")
+
+      assert body =~ ~s(href="/static/theme.css")
+      assert body =~ ~s(src="/static/brand/mask.png")
+      assert body =~ ~s(href="/static/brand/favicon.svg")
+      assert body =~ ~s(<svg class="mark")
+      assert body =~ ">troupe</span>"
+      assert body =~ "Welcome to the troupe, where your actors perform at your whim."
+    end
+
     test "is html, so a browser renders it rather than downloading it", context do
       assert {:ok, %{headers: headers}} = get(context, "/")
       assert ["text/html" <> _] = headers["content-type"]

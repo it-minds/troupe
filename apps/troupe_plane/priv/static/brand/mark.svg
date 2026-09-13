@@ -1,0 +1,24 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Troupe">
+  <!-- The mask, from docs/design/themes (Signal). One silhouette split down the middle:
+       the filled half is what the agent did alone, the hollow half is what still needs a
+       person. Light falls from the right - never mirror it. Self-contained rather than
+       reading the page's tokens, because this file is also loaded as an <img>. -->
+  <style>
+    .ink { fill: #ECEFF3; }
+    .reserved { fill: #FF5CB8; }
+    .cut { fill: #0A0B0D; }
+    .edge { stroke: #ECEFF3; }
+    @media (prefers-color-scheme: light) {
+      .ink { fill: #0E1013; }
+      .reserved { fill: #C11A79; }
+      .cut { fill: #FFFFFF; }
+      .edge { stroke: #0E1013; }
+    }
+  </style>
+  <defs><clipPath id="troupe-mark-half"><rect x="24" y="0" width="24" height="48"/></clipPath></defs>
+  <path class="reserved" d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" clip-path="url(#troupe-mark-half)"/>
+  <path class="edge" d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke-width="2.6" stroke-linejoin="round"/>
+  <path class="edge" d="M24 8 L24 42" stroke-width="1.4"/>
+  <path class="ink" d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z"/>
+  <path class="cut" d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z"/>
+</svg>

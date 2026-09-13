@@ -44,6 +44,19 @@ defmodule Troupe.Plane.Web.Endpoint do
     cache_control_for_etags: "public, max-age=31536000, immutable"
   )
 
+  # The brand, and the theme the front page is painted in. Off the root rather than under
+  # `/admin`, because the page that uses them is the one a person sees *before* they can
+  # sign in — a stylesheet behind the console's door would 404 for exactly that reader.
+  # `theme.css` is generated from the Signal kit by `mix troupe.theme`; `brand/` is the
+  # mask, as SVG for the page and as the two bitmap formats a favicon cannot avoid.
+  plug(Plug.Static,
+    at: "/static",
+    from: :troupe_plane,
+    gzip: false,
+    only: ~w(theme.css brand),
+    cache_control_for_etags: "public, max-age=31536000, immutable"
+  )
+
   plug(Plug.RequestId)
   plug(Plug.Telemetry, event_prefix: [:troupe, :plane, :endpoint])
 

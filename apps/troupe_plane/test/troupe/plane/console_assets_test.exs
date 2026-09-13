@@ -66,8 +66,11 @@ defmodule Troupe.Plane.ConsoleAssetsTest do
   test "every asset the document names is in the static plug's allowlist" do
     # Reaching into the endpoint's compiled plug list would test Plug rather than this
     # code, so the allowlist is read from the source — which is the thing that was wrong.
+    # Anchored to this mount's own `at:`, because the endpoint has a second static plug
+    # for the front page's theme and brand, and an unanchored match would read whichever
+    # of the two happened to be written first.
     source = File.read!(Path.join(__DIR__, "../../../lib/troupe/plane/web/endpoint.ex"))
-    [_all, allowed] = Regex.run(~r/only: ~w\(([^)]+)\)/, source)
+    [_all, allowed] = Regex.run(~r{at: "/admin/static",.*?only: ~w\(([^)]+)\)}s, source)
     allowed = String.split(allowed, ~r/\s+/, trim: true)
 
     for asset <- referenced_assets() do
