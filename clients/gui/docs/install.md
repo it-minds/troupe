@@ -75,9 +75,6 @@ The build targets Ubuntu 22.04's glibc and WebKitGTK 4.1. It runs on anything th
 or newer; on anything older it will not start, and the AppImage is the only format that
 might be made to.
 
-`troupe://` links are registered from the app's desktop entry, so they work after a `.deb`
-or `.rpm` install. An AppImage registers the scheme at startup, once it has been run once.
-
 ---
 
 ## What you get and what you do not
