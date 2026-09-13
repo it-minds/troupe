@@ -89,7 +89,7 @@ defmodule Troupe.Plane.GrantVisibilityTest do
 
     assert team["name"] == "engineering"
     assert team["mode"] == "rw"
-    assert team["volume"] == "troupe-team-engineering"
+    assert team["claimName"] == "troupe-team-engineering"
   end
 
   test "revoking takes it away again, and the sessions with it", context do

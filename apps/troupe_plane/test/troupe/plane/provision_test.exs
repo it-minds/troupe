@@ -87,7 +87,11 @@ defmodule Troupe.Plane.ProvisionTest do
 
       assert Enum.map(teams, & &1["name"]) == ["design", "engineering"]
       assert Enum.find(teams, &(&1["name"] == "engineering"))["mode"] == "rw"
-      assert Enum.find(teams, &(&1["name"] == "engineering"))["volume"] == "troupe-team-engineering"
+      # `claimName`, which is what the CRD declares and what the operator's parser reads.
+      # This asserted `volume` for a long time â€” pinning the plane's output to a key nothing
+      # on the other side could see, which is how the mismatch survived having a test.
+      assert Enum.find(teams, &(&1["name"] == "engineering"))["claimName"] ==
+               "troupe-team-engineering"
 
       # A revoked grant leaves the projection, because the projection is the grants.
       :ok = Identity.revoke(engineering, "dev")
