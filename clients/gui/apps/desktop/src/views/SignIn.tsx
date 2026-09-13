@@ -13,7 +13,22 @@ import { useEffect, useState } from "react";
 import type { JSX } from "react";
 import { AuthSession, PlaneUnreachableError } from "@troupe/client";
 import type { DeviceAuthorization, Discovery } from "@troupe/client";
-import { capabilities, likelyPlaneUrl, prefs, redirectUri, tokenStore } from "../shell";
+import { capabilities, likelyPlaneUrl, prefs, redirectUri, shell, tokenStore } from "../shell";
+
+/**
+ * An `AuthSession` for this host. The shell, when there is one, supplies the credential
+ * store, HTTP from outside the webview, and which sign-in it can actually complete —
+ * a webview looks like a browser to the inference and has no redirect to come back to.
+ */
+function newSession(planeUrl: string): AuthSession {
+  const host = shell();
+  return new AuthSession({
+    planeUrl,
+    store: tokenStore(),
+    ...(host?.fetchImpl ? { fetchImpl: host.fetchImpl } : {}),
+    ...(host?.signInFlow ? { flow: host.signInFlow } : {}),
+  });
+}
 
 const SECRETS: Record<string, string> = {
   "os-keychain": "Your sign-in is kept in this computer's credential store.",
@@ -42,7 +57,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
       setRestoring(false);
       return;
     }
-    const auth = new AuthSession({ planeUrl: url, store: tokenStore() });
+    const auth = newSession(url);
 
     (async () => {
       if (returning) {
@@ -73,7 +88,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
     setError(null);
     setDevice(null);
     prefs.set("planeUrl", planeUrl);
-    const auth = new AuthSession({ planeUrl, store: tokenStore() });
+    const auth = newSession(planeUrl);
     try {
       const found = await auth.discover();
       setDiscovery(found);
@@ -132,7 +147,19 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
         <section className="device">
           <p>
             Open{" "}
-            <a href={device.verification_uri_complete ?? device.verification_uri} target="_blank" rel="noreferrer noopener">
+            <a
+              href={device.verification_uri_complete ?? device.verification_uri}
+              target="_blank"
+              rel="noreferrer noopener"
+              onClick={(e) => {
+                // A webview does nothing with target="_blank", and this link is the
+                // whole device grant. Where there is a shell, hand it over.
+                const open = shell()?.openExternal;
+                if (!open) return;
+                e.preventDefault();
+                void open(device.verification_uri_complete ?? device.verification_uri);
+              }}
+            >
               {device.verification_uri}
             </a>{" "}
             and enter this code:

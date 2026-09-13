@@ -129,6 +129,15 @@ export interface AuthSessionOptions {
    * saying nothing.
    */
   origin?: string | null;
+  /**
+   * Force a sign-in flow instead of inferring one.
+   *
+   * The inference asks whether this looks like a browser, and a desktop webview looks
+   * exactly like one — it has a `location` and Web Crypto — while having no redirect
+   * worth coming back to: its origin is `tauri://localhost`, which no provider will
+   * have registered. A host that knows what it is says so.
+   */
+  flow?: "redirect" | "device";
   /** For tests. */
   now?: () => number;
 }
@@ -152,6 +161,7 @@ export class AuthSession {
   private discovery: Discovery | null = null;
   private credential: PlaneCredential | null = null;
   private renewing: Promise<PlaneCredential> | null = null;
+  private readonly forcedFlow: "redirect" | "device" | null;
 
   constructor(opts: AuthSessionOptions) {
     this.planeUrl = opts.planeUrl.replace(/\/+$/, "");
@@ -160,6 +170,7 @@ export class AuthSession {
     this.renewMargin = opts.renewMarginSeconds ?? 120;
     this.origin = opts.origin === undefined ? currentOrigin() : opts.origin;
     this.now = opts.now ?? (() => Date.now());
+    this.forcedFlow = opts.flow ?? null;
   }
 
   /** The key the refresh token is stored under; one per plane, so two are independent. */
@@ -191,6 +202,7 @@ export class AuthSession {
    * device grant, which is what it is for.
    */
   get preferredFlow(): "redirect" | "device" {
+    if (this.forcedFlow) return this.forcedFlow;
     const hasLocation = typeof (globalThis as { location?: { href?: string } }).location?.href === "string";
     return hasLocation && Boolean(globalThis.crypto?.subtle) ? "redirect" : "device";
   }

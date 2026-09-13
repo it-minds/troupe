@@ -24,13 +24,6 @@
       "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ipc: http://ipc.localhost ws: wss: http: https:"
     }
   },
-  "plugins": {
-    "deep-link": {
-      "desktop": {
-        "schemes": ["troupe"]
-      }
-    }
-  },
   "bundle": {
     "active": true,
     "targets": "all",
@@ -56,7 +49,10 @@
     },
     "linux": {
       "deb": {
-        "depends": ["libwebkit2gtk-4.1-0", "libgtk-3-0"]
+        "depends": [
+          "libwebkit2gtk-4.1-0",
+          "libgtk-3-0"
+        ]
       }
     }
   }

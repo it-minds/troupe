@@ -25,6 +25,26 @@ export interface TroupeShell {
   readonly version: string;
   /** A store backed by the OS keychain. */
   secretStore?: TokenStore;
+  /**
+   * Open a URL in the person's real browser.
+   *
+   * A webview does nothing useful with `target="_blank"`, and the device grant is
+   * unusable without it: the verification link has to leave this window.
+   */
+  openExternal?: (url: string) => Promise<void>;
+  /**
+   * HTTP from outside the webview.
+   *
+   * A shell has an origin of its own — `tauri://localhost` — so a plane would have to
+   * name it in `TROUPE_CORS_ORIGINS`, per installation. A request made outside the
+   * webview has no origin and no preflight, so there is nothing to configure.
+   */
+  fetchImpl?: typeof fetch;
+  /**
+   * Which sign-in this host can complete. A shell has no redirect worth coming back to,
+   * whatever `AuthSession` would otherwise infer from it looking like a browser.
+   */
+  readonly signInFlow?: "redirect" | "device";
   /** Stage 2: find the daemon this machine is running, starting it if it is not. */
   findDaemon?: () => Promise<DaemonEndpoint | null>;
   /** Stage 2: pick a workspace directory. */
