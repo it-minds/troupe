@@ -2,9 +2,9 @@ defmodule Mix.Tasks.Troupe.Boundaries do
   @moduledoc """
   Cross-reference check: does any app reach into one it is not allowed to know about?
 
-  The umbrella's architecture is a claim about coupling — the TUI is a protocol client
-  with no private access, the plane does not run agents, the operator is not the plane.
-  Claims like that decay the first time someone reaches for a convenient module, and
+  The umbrella's architecture is a claim about coupling — the A2A facade is a protocol
+  client with no private access, the plane does not run agents, the operator is not the
+  plane. Claims like that decay the first time someone reaches for a convenient module, and
   they decay silently, because Elixir will happily compile a call into a sibling app
   whose beams are sitting in the same `_build`.
 
@@ -27,10 +27,6 @@ defmodule Mix.Tasks.Troupe.Boundaries do
 
   # Written the way the spec states them, so the two can be compared by eye.
   @rules [
-    {:troupe_tui, :only, [:troupe_protocol],
-     "the TUI is a protocol client and gets no private access"},
-    {:troupe_ctl, :only, [:troupe_protocol],
-     "the CLI is a protocol client and gets no private access"},
     {:troupe_a2a, :only, [:troupe_protocol],
      "the A2A facade is a protocol client and gets no private access"},
     {:troupe_plane, :never, [:troupe_core, :troupe_gateway], "the plane does not run agents"},

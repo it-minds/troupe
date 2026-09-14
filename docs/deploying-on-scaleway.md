@@ -116,9 +116,9 @@ Registry namespace. Build and push:
 TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe TROUPE_IMAGE_TAG=0.2.0 scripts/build-images
 ```
 
-`scripts/build-images` builds all three server images from one Dockerfile and pushes
-nothing — it loads into kind. For Scaleway, push them; the client binary is not built here,
-because it is a Burrito executable for a laptop and CI builds it per target.
+`scripts/build-images` builds all four images from one Dockerfile and pushes nothing — it
+loads into kind. For Scaleway, push them. There is nothing else to build: this repository
+produces images and the chart, and no client.
 
 ### 2. Ingress, DNS and certificates
 
@@ -332,11 +332,11 @@ Touching the profile, or waiting for the resync, is the whole fix.
 
 Honest list, all of it known:
 
-- **CI has never run.** The workflow is written and there has been no remote to run it on.
-  Everything in it that can run locally does: `mix check`, boundaries, schema diff, the
-  Python conformance client, and a Burrito build with a smoke test. The image build, the
-  chart lint and the plane's suite against a Postgres service are in it now and have run
-  exactly as many times.
+- **Nothing in CI runs an image.** `check`, `chart`, `protocol` and the four image builds
+  are green, and the image jobs publish. What no job does is start one of those images,
+  run a command through a worker, or bring a plane and a worker up together — and the
+  smoke-testing that used to exist was for the client binary, which is gone. A cluster
+  job is the next thing the pipeline needs.
 - **The operator's liveness probe is an exec of `bin/troupe_operator pid`**, because the
   operator serves no HTTP. It spawns a short-lived BEAM every thirty seconds to ask the
   running node for its pid. It is cheap and it is correct, and it has not been watched

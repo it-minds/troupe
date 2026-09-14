@@ -345,6 +345,10 @@ if config_env() == :prod do
       # default; an empty value is a plane that ships without one, and the index then
       # offers no door rather than one that answers 404.
       app_url: System.get_env("TROUPE_APP_URL", "/app"),
+      # And where the terminal client is published. Nothing here builds one — this
+      # repository is deployed to a cluster and installs on no machine — so there is no
+      # sensible default: unset, the page says to ask an administrator; set, it links.
+      cli_url: System.get_env("TROUPE_CLI_URL", ""),
       issuer: base_url,
       cors_origins: cors_origins,
       control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),

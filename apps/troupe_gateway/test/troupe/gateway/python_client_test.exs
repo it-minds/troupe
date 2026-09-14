@@ -2,11 +2,14 @@ defmodule Troupe.Gateway.PythonClientTest do
   @moduledoc """
   The protocol, checked from outside the BEAM.
 
-  `clients/python/conformance.py` is a client written against `PROTOCOL.md` in the
+  `test/conformance/conformance.py` is a client written against `PROTOCOL.md` in the
   Python standard library and nothing else. Running it here is the only check that
-  actually proves the claim the whole stage rests on: that Troupe's own TUI has no
-  private access. Everything else is an assertion about Elixir code written by the
-  same people who wrote the server.
+  actually proves the claim this repository rests on: that a client gets no private
+  access, because every client is outside it. Everything else is an assertion about
+  Elixir code written by the same people who wrote the server.
+
+  It is a test fixture and not a deliverable — nothing this repository ships is
+  written in Python, and nothing it ships is a client at all.
 
   Skipped, loudly, where there is no `python3` — never silently, because a
   conformance check that quietly does not run is worse than none.
@@ -115,7 +118,7 @@ defmodule Troupe.Gateway.PythonClientTest do
   end
 
   defp run_conformance(context, session_id) do
-    client_dir = Path.join([umbrella_root(), "clients", "python"])
+    client_dir = conformance_dir()
 
     System.cmd(
       context.python,
@@ -131,10 +134,11 @@ defmodule Troupe.Gateway.PythonClientTest do
     )
   end
 
-  # Tests run from either the umbrella root or the app directory, so the repository
-  # root is found rather than assumed.
-  defp umbrella_root do
-    Path.expand(Path.join(Mix.Project.build_path(), "../.."))
+  # Resolved against this file rather than against the working directory: the suite runs
+  # from the umbrella root and from the app directory, and the fixture sits beside both
+  # of them at a fixed distance from here.
+  defp conformance_dir do
+    Path.expand(Path.join([__DIR__, "..", "..", "conformance"]))
   end
 
   defp await_idle(session_id, attempts \\ 400) do

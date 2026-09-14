@@ -4,7 +4,16 @@
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers are from that tree.
 
-Step lists with the exact commands. Every `troupe admin …` command is one call to the plane's `/rpc` with the token `troupe login` stored; the table of commands is `apps/troupe_ctl/lib/troupe/ctl/admin.ex:19-74` and the methods behind them are in [roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-method-table). `kubectl` and `helm` commands assume the release name `troupe` in namespace `troupe-system`. Images and chart delivery are in [../developer/deployment.md](../developer/deployment.md); the CLI itself in [../user/cli-reference.md](../user/cli-reference.md).
+> **Re-audited 2026-09-14.** The client apps were deleted; this repository ships four
+> images and the chart. The `troupe admin …` commands used throughout this track are the
+> **terminal client's** rendering of the admin API, and that client is published from its
+> own repository — `plane.cliUrl` is where you tell the front page it lives. Every command
+> shown has three equivalents that do ship here: an `admin.*` JSON-RPC method at
+> `POST /rpc`, the same method as an MCP tool at `POST /mcp`, and a page in the console at
+> `/admin`. [roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-method-table)
+> is the method table; a step written as a command is a step, not a dependency on a binary.
+
+Step lists with the exact commands. Every `troupe admin …` command is one call to the plane's `/rpc` with the token `troupe login` stored; the methods behind those commands are in [roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-method-table). `kubectl` and `helm` commands assume the release name `troupe` in namespace `troupe-system`. Images and chart delivery are in [../developer/deployment.md](../developer/deployment.md); the CLI itself is documented, deprecated, in [../user/cli-reference.md](../user/cli-reference.md).
 
 Marked where a step relies on something outside the repository or on behaviour that could not be confirmed.
 

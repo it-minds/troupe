@@ -2,12 +2,21 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 ## 1. Layout
 
 Every app keeps its tests under `apps/<app>/test/troupe/**/*_test.exs` with case
 templates and stubs in `apps/<app>/test/support/` (compiled only in the test environment
 by `elixirc_paths(:test)` in each `apps/*/mix.exs`). File counts on 2026-09-13:
-protocol 8, core 29, gateway 11, tui 4, ctl 5, worker 21, plane 26, operator 4, a2a 5.
+protocol 8, core 28, gateway 11, worker 21, plane 26, operator 4, a2a 5 — nine fewer than
+on 2026-09-13, which is the TUI's four, the CLI's five, and the core's `wrapper_test.exs`.
 
 The test environment differs from dev in three ways set at compile time:
 
@@ -78,18 +87,17 @@ and the `:cluster` tag; everything else in the table still flunks.
 | `inotifywait` (Linux), `mac_listener` (macOS), `inotifywait.exe` (Windows) | the `native backend` half of `apps/troupe_core/test/troupe/watch/watcher_test.exs` | `Backend.usable?/2` is false; each test runs through `run_if_available/2` and passes without asserting; the polling backend is exercised regardless | `watcher_test.exs:36-62`; `apps/troupe_core/lib/troupe/watch/file_system_backend.ex:41-48` |
 | `zig` | the `shell` tool and anything that runs a process through `reaper` | `mix compile.reaper` prints a warning and skips; tests that run `shell` then fail with `:reaper_missing` | `apps/troupe_core/lib/mix/tasks/compile.reaper.ex:45-53`; `apps/troupe_core/lib/troupe/reaper.ex:20-25` |
 
-Every suite that touches the developer's environment isolates itself: the core, ctl and
-tui helpers point `TROUPE_CONFIG_HOME` at a fresh temp directory once per run and unset
+Every suite that touches the developer's environment isolates itself: the core helper
+points `TROUPE_CONFIG_HOME` at a fresh temp directory once per run and unsets
 `TROUPE_STATE_HOME`, because `System.put_env/2` is process-global and would leak across
 `async: true` tests; per-test state goes through `state_dir` in config instead
 (`apps/troupe_core/test/test_helper.exs:1-10`, `test/support/session_case.ex:27-41`).
 Worker tests set `TROUPE_STATE_HOME` per test and are all `async: false` for that reason
 (`apps/troupe_worker/test/support/session_case.ex:58-62`).
 
-Logger output is set to `:critical` (core, ctl, tui, a2a) or `:warning` (worker,
-operator) in each `test_helper.exs` because the suites "assert on events and telemetry,
-never on log lines" (`apps/troupe_core/test/test_helper.exs:12-14`). `TROUPE_TEST_LOGS`
-turns the ctl suite's logs back on (`apps/troupe_ctl/test/test_helper.exs:15-17`).
+Logger output is set to `:critical` (core, a2a) or `:warning` (worker, operator) in each
+`test_helper.exs` because the suites "assert on events and telemetry, never on log lines"
+(`apps/troupe_core/test/test_helper.exs:12-14`).
 
 ## 4. Fixtures
 
@@ -116,8 +124,11 @@ update" (`fold_test.exs:10-12`).
 
 ### Other fixtures
 
-- `fixtures/sample_repo/` — a small Mix project, used by
-  `apps/troupe_ctl/test/troupe/cli/options_test.exs`.
+- `fixtures/sample_repo/` — a small Mix project the core's workspace and tool suites read.
+- `apps/troupe_gateway/test/conformance/` — `troupe.py` and `conformance.py`, the Python
+  client described below. It moved here from `clients/` when the client apps were deleted:
+  it is a fixture belonging to the suite that runs it, and this repository publishes no
+  Python package.
 - `apps/troupe_operator/test/support/fixtures.ex` — `WorkerProfile` and `TroupePolicy`
   maps "as the API server would hand them over" (`:1-8`), used by the operator's
   `resources_test.exs` and the protocol's `policy_test.exs`.
@@ -131,13 +142,15 @@ update" (`fold_test.exs:10-12`).
 
 ### The Python conformance client
 
-`clients/python/conformance.py` is "a client written against `PROTOCOL.md` in the Python
-standard library and nothing else … the only check that actually proves the claim the
-whole stage rests on: that Troupe's own TUI has no private access"
-(`python_client_test.exs:2-9`). The test starts a daemon on a Unix socket with the fake
-provider, warms the session so `from_seq: 0` has something to replay, runs
-`python3 conformance.py --socket <path> --session <id>` with `PYTHONPATH` set to
-`clients/python` and `PYTHONDONTWRITEBYTECODE=1`, and asserts on the JSON report it
+`apps/troupe_gateway/test/conformance/conformance.py` is "a client written against
+`PROTOCOL.md` in the Python standard library and nothing else … the only check that
+actually proves the claim this repository rests on: that a client gets no private access,
+because every client is outside it". That claim used to be carried by two boundary rules
+holding the TUI and the CLI to `troupe_protocol`; with both apps gone, this test is what
+is left of it, and it matters more rather than less. The test starts a daemon on a Unix
+socket with the fake provider, warms the session so `from_seq: 0` has something to replay,
+runs `python3 conformance.py --socket <path> --session <id>` with `PYTHONPATH` set to the
+fixture directory and `PYTHONDONTWRITEBYTECODE=1`, and asserts on the JSON report it
 prints: server name `troupe-daemon`, principal `user`, all three scopes, the session in
 the fleet, `replayed == head_seq` (`python_client_test.exs:64-84,117-132`). The script
 itself checks a contiguous replay from `seq` 1, an accepted `input.send`, an answered
@@ -148,12 +161,12 @@ approval and the hash chain (`conformance.py:1-14,42-60`).
 `apps/troupe_plane/test/troupe/plane/admin_parity_test.exs` enumerates the public
 functions of `Troupe.Plane.Admin` (minus `actor_for/1`, `actor_for_session/1`,
 `actor_for_subject/1`, `admin?/1`, `:31`) and asserts: each has a method in
-`Troupe.Plane.Admin.API`, a command in `Troupe.Ctl.Admin`, and a tool in
-`Troupe.Plane.Admin.MCP`; no method or command names something that does not exist; every
-method has a summary ending in a full stop and every argument a description; every
-`:destructive` method names a `confirm` argument that exists; and nothing in the context
-returns session content (`:33-150`). It is why `troupe_plane` has a test-only dependency
-on `troupe_ctl` (`apps/troupe_plane/mix.exs:61-65`).
+`Troupe.Plane.Admin.API` and a tool in `Troupe.Plane.Admin.MCP`; no method names
+something that does not exist; every method has a summary ending in a full stop and every
+argument a description; every `:destructive` method names a `confirm` argument that
+exists; and nothing in the context returns session content. It used to assert a fourth
+surface — a `troupe admin` command per function — and that half went with the CLI, along
+with the plane's test-only dependency on `troupe_ctl`. Three surfaces, one context.
 
 ### The boundaries task
 

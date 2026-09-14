@@ -10,8 +10,8 @@
 # in to the registry first. Loading into kind is the default because that is the loop a
 # person runs twenty times a day.
 #
-# The client binary is not built here: it is a Burrito executable for a laptop, and CI
-# builds it on a native runner per target.
+# These four are everything this repository produces. There is no client binary here and
+# no other artifact: what is deployed is these images and `charts/troupe`.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."

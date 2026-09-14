@@ -81,6 +81,11 @@ plane:
   # release with its own chart, which mounts it at `/app` on this host by default. Empty
   # means this plane ships without one, and the index offers no door rather than a 404.
   appUrl: /app
+  # Where the index page at `/` links to the terminal client. That is a release from
+  # another repository and nothing in this chart serves it, so there is no default
+  # worth guessing: empty means the page says to ask an administrator. Point it at the
+  # release page, the internal mirror, or wherever your organisation keeps it.
+  cliUrl: ""
   # Browser origins the plane's API answers cross-origin requests from. The panel is
   # same-origin and needs nothing here; a separate web client does. Empty means none.
   corsOrigins: []

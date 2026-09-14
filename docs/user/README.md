@@ -1,5 +1,21 @@
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> ## Deprecated — kept as an artifact
+>
+> This page documents the `troupe` terminal client. That client left this repository on
+> 2026-09-14: `apps/troupe_tui` and `apps/troupe_ctl` were deleted, the packaged binary
+> and its installers with them, and nothing here builds an executable any more. The
+> source citations under each section point at files that now exist only in git history
+> (`git show 20fe871 -- apps/troupe_ctl` and the tree at that commit).
+>
+> What this repository is, is the remote: the plane, the operator, the worker pods and
+> the admin console, deployed to Kubernetes by `charts/troupe` and reached over
+> [PROTOCOL.md](../../PROTOCOL.md). A terminal or graphical client is a separate release
+> from a separate repository, and its own documentation goes with it.
+>
+> Nothing in this directory is maintained against the code. It is here because the prose
+> is worth keeping until the client repository can take it, and for no other reason.
+
 # Troupe for users
 
 This track is for people who **use** Troupe: a developer who signs in to the team's

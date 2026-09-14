@@ -1,5 +1,12 @@
 # Documentation audit — troupe-remote
 
+> **Superseded in part, 2026-09-14.** This audit inventoried a tree that contained
+> `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe` Burrito release, its installers and
+> `clients/python`. All of that has been removed or moved; §2's finding that
+> `ARCHITECTURE.md` disagreed with `mix.exs` about the number of releases is resolved —
+> both now say four. The developer and admin tracks have been brought in line; the user
+> track is deprecated and marked as such on every page.
+
 Audited against commit `4083b1f` on branch `main`, 2026-09-13. The audit began at
 `3f7c91f` with five uncommitted files whose single functional change was the
 `plane.oidc.scopes` → `TROUPE_OIDC_SCOPES` override and the removal of `groups` from the

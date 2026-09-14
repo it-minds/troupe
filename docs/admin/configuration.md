@@ -4,6 +4,11 @@
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; every line number below is from that tree, whose working copy was otherwise clean.
 
+> **Re-audited 2026-09-14.** The client apps were deleted and this repository now ships
+> only its four images and the chart. `TROUPE_CLI_URL` / `plane.cliUrl` are new; the
+> client-side variables in A.2 are kept for client authors and no longer read by anything
+> here.
+
 This is the one place every knob is listed. Four layers, lowest first:
 
 1. **Environment variables**, read at boot by `config/runtime.exs` (Part A). There is no `.env.example` in the repository ([AUDIT.md §1.5](../AUDIT.md)); the list was derived from `config/runtime.exs`, `config/config.exs` and every `System.get_env` call under `apps/*/lib`.
@@ -72,6 +77,7 @@ The module paths above are `apps/troupe_operator/lib/troupe/operator/`. `Troupe.
 | `TROUPE_OIDC_SCOPES` | unset → `openid profile email offline_access` | no | comma- or space-separated scopes advertised at `/.well-known/troupe` and used by the console's authorize request | `plane.oidc.scopes` joined with `,`, rendered only when non-empty, `plane-deployment.yaml:235-239` | `runtime.exs:259-263,331`; `web/router.ex:59,69`; `web/admin_auth.ex:321` |
 | `TROUPE_OIDC_MCP_SCOPE` | unset → `<base_url>/mcp/admin` | no | the scope the RFC 9728 document tells an MCP client to ask for (plus `offline_access`); set only where the app registration exposes the MCP scope under another name (commit `4083b1f`) | `plane.oidc.mcpScope`, rendered only when non-empty, `plane-deployment.yaml:240-244` | `runtime.exs:332-335`; `web/router.ex:311-338` |
 | `TROUPE_APP_URL` | `/app` | no | where the index page at `/` links to the graphical client; empty renders no app door and the page says no GUI is mounted | `plane.appUrl`, `plane-deployment.yaml:220-221` | `runtime.exs:347`; `web/router.ex:52-58,346-351`; `web/index.ex` |
+| `TROUPE_CLI_URL` | (empty) | no | where the index page at `/` links to the terminal client. Nothing here builds or serves one, so there is no default worth guessing: empty makes the page say to ask an administrator rather than link at a download that is not there | `plane.cliUrl`, `plane-deployment.yaml` | `runtime.exs`; `web/router.ex` `cli_url/0`; `web/index.ex` `binary_step/1` |
 | `TROUPE_CORS_ORIGINS` | `""` (CORS off) | no | exact browser origins answered on `/rpc`, `/auth/exchange`, `/.well-known/*`; a separate GUI needs its origin here | `plane.corsOrigins` joined, `plane-deployment.yaml:219-220` | `runtime.exs:265-270,315` |
 | `TROUPE_LOG_FORMAT` | unset (Elixir default formatter) | no | `"json"` installs `Troupe.Plane.LogFormatter` on the default handler, one JSON object per line with `request_id` and `session_id` | **no Helm value** | `runtime.exs:274-277`; `log_formatter.ex:22` |
 | `RELEASE_DISTRIBUTION` | set by chart | — | `"name"` enables the libcluster Kubernetes topology; anything else runs unclustered | `plane.distribution`, `plane-deployment.yaml:261-262`; `"none"` on the Job (`:96-97`) | `runtime.exs:293` |
@@ -175,12 +181,10 @@ Not an admin concern beyond knowing they exist; details are in [../developer/loc
 | Variable | Read at | Purpose |
 |---|---|---|
 | `TROUPE_DAEMON_AUTOSTART` | `runtime.exs:411` | starts the local gateway daemon in a prod build |
-| `TROUPE_CONFIG_HOME`, `XDG_CONFIG_HOME` | `apps/troupe_ctl/lib/troupe/ctl/credentials.ex:20-21`; `apps/troupe_core/lib/troupe/paths.ex:73-84` | where `credentials.json` and `config.yaml` live |
+| `TROUPE_CONFIG_HOME`, `XDG_CONFIG_HOME` | `apps/troupe_core/lib/troupe/paths.ex:73-84` | where `config.yaml` and `agents/` live |
 | `TROUPE_STATE_HOME`, `XDG_STATE_HOME`, `LOCALAPPDATA`, `APPDATA` | `paths.ex:73-91` | state and config roots per OS |
 | `TROUPE_DAEMON_SOCKET`, `XDG_RUNTIME_DIR` | `apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:30,116-127` | daemon socket discovery |
-| `TROUPE_DAEMON_COMMAND`, `__BURRITO_BIN_PATH` | `apps/troupe_protocol/lib/troupe/protocol/daemon.ex:244-252` | how a client spawns a daemon |
-| `__BURRITO` | `apps/troupe_ctl/lib/troupe/cli.ex:513`; `apps/troupe_core/lib/troupe/wrapper.ex:51` | whether running inside the packaged binary |
-| `TROUPE_MCP_CONFIG`, `HOME` | `apps/troupe_tui/lib/troupe/ui/tui/connectors.ex:70-80` | personal MCP connector file |
+| `TROUPE_DAEMON_COMMAND` | `apps/troupe_protocol/lib/troupe/protocol/daemon.ex` | how a client spawns a local daemon. The `__BURRITO_BIN_PATH` fallback went with the packaged binary: a caller that does not set this gets `:no_daemon_command` |
 | `USER`, `USERNAME` | `apps/troupe_gateway/lib/troupe/gateway/connection.ex:466` | local subject name |
 | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`, `TROUPE_FAKE_SCRIPT` | `apps/troupe_core/lib/troupe/config.ex:139-152` | core LLM config overrides (also on a pod, A.3) |
 | `TROUPE_BAO_ADDR`, `TROUPE_BAO_TOKEN` | `apps/troupe_protocol/lib/troupe/kms/open_bao.ex:121,129` | fallbacks when `:troupe_worker, :kms` is not configured |
@@ -241,6 +245,7 @@ Chart `troupe` version `0.2.0`, `appVersion "0.2.0"` (`charts/troupe/Chart.yaml:
 | `plane.host` (76) | `plane.example.test` | `plane-deployment.yaml:213-214,434,438` | `TROUPE_HOST`; Ingress host and TLS host |
 | `plane.baseUrl` (79) | `""` → `https://<host>` | `plane-deployment.yaml:215-216` | `TROUPE_BASE_URL` |
 | `plane.appUrl` (83) | `/app` | `plane-deployment.yaml:220-221` | `TROUPE_APP_URL`; the GUI's own chart mounts it at this path on the same host |
+| `plane.cliUrl` (88) | (empty) | `plane-deployment.yaml` | `TROUPE_CLI_URL`; the terminal client is published from another repository and this chart does not serve it |
 | `plane.corsOrigins` (82) | `[]` | `plane-deployment.yaml:219-220` | `TROUPE_CORS_ORIGINS` (csv) |
 | `plane.ingressClassName` (83) | `nginx` | `plane-deployment.yaml:431` | Ingress class |
 | `plane.certIssuer` (86) | `""` | `plane-deployment.yaml:408-413` | `cert-manager.io/cluster-issuer` annotation |
@@ -388,7 +393,6 @@ Discrepancies and caveats:
 | Surface | How |
 |---|---|
 | Console | `/admin/settings` (`web/admin_router.ex:55`); readable by team admins, writable by platform admins only |
-| CLI | `troupe admin setting set KEY VALUE` and `troupe admin setting reset KEY` (`apps/troupe_ctl/lib/troupe/ctl/admin.ex:54-56`); `troupe admin settings` lists them |
 | JSON-RPC | `admin.setting.put {key, value}` and `admin.setting.reset {key}` (`admin/api.ex:532-563`), platform admin only (`admin.ex:447-479`) |
 | MCP | tools `admin_setting_put` and `admin_setting_reset` (dots become underscores, `admin/mcp.ex:211`) |
 

@@ -43,10 +43,9 @@ defmodule Troupe.Gateway.Loopback do
   Options:
 
     * `:enabled` — whether to listen at all. **Off unless asked**, for the same reason
-      the daemon itself is: the release is both the daemon and the clients that talk to
-      it, and a `troupe ctl` run must not open a listening socket or write a discovery
-      file just by booting. `Gateway.Application` turns it on where it turns the daemon
-      on, and a test that wants one asks for it.
+      the daemon itself is: booting this code must not open a listening socket or write a
+      discovery file on its own. `Gateway.Application` turns it on where it turns the
+      daemon on, and a test that wants one asks for it.
     * `:port` — 0 (the default) asks the kernel for a free one.
     * `:allowed_origins` — overrides the default localhost policy.
   """

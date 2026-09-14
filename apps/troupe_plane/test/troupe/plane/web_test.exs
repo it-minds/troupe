@@ -52,6 +52,7 @@ defmodule Troupe.Plane.WebTest do
       on_exit(fn ->
         Application.delete_env(:troupe_plane, :base_url)
         Application.delete_env(:troupe_plane, :app_url)
+        Application.delete_env(:troupe_plane, :cli_url)
       end)
     end
 
@@ -113,6 +114,27 @@ defmodule Troupe.Plane.WebTest do
       refute body =~ ~s(href="/app")
       assert body =~ "No graphical client is mounted"
       assert body =~ ~s(href="/admin")
+    end
+
+    # Neither client is built here, so neither can be discovered: the terminal client is
+    # published wherever the organisation publishes it, and the page links there only if
+    # somebody said where.
+    test "links to the terminal client when it has been told where it is", context do
+      Application.put_env(:troupe_plane, :cli_url, "https://downloads.example.test/troupe")
+
+      assert {:ok, %{status: 200, body: body}} = get(context, "/")
+
+      assert body =~ ~s(href="https://downloads.example.test/troupe")
+      assert body =~ "get the terminal client"
+    end
+
+    test "says to ask an administrator when it has not been", context do
+      Application.put_env(:troupe_plane, :cli_url, "")
+
+      assert {:ok, %{status: 200, body: body}} = get(context, "/")
+
+      assert body =~ "ask your administrator"
+      refute body =~ "get the terminal client"
     end
 
     test "still 404s everything that is not a route", context do

@@ -2,16 +2,24 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
-Two kinds of artefact come out of the umbrella: four server images built by
-`docker/Dockerfile`, and one client binary per target built by Burrito. Plus three
-generators whose output is committed.
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
+One kind of artefact comes out of the umbrella: four server images, built by
+`docker/Dockerfile` with `RELEASE` picking which. Plus the chart that deploys them, and
+three generators whose output is committed.
 
 ## 1. The four server images
 
 ### The Dockerfile
 
-`docker/Dockerfile` is "One Dockerfile for the four server releases. `RELEASE` picks
-which" (`:1`). Two stages:
+`docker/Dockerfile` is "One Dockerfile for the four releases this repository has.
+`RELEASE` picks which" (`:1`). Two stages:
 
 | Stage | Base | What happens | Lines |
 |---|---|---|---|
@@ -71,64 +79,22 @@ and pushes only with the variable set.
 and operator, because "a rebuilt image under the same tag changes nothing in the pod
 spec, so Kubernetes has no reason to replace the pods" (`scripts/remote-up:148-153`).
 
-## 2. The client binary
+## 2. There is no client binary
 
-### The release
+There used to be a fifth release, `troupe`: `troupe_core`, `troupe_protocol`,
+`troupe_gateway`, `troupe_tui` and `troupe_ctl` wrapped by Burrito into one executable for
+each of five targets, built by `scripts/build-local` on a laptop and by one native runner
+per target in CI, verified by `Troupe.Release.verify_linux_nif/1`, installed by
+`install.sh` and `install.ps1`, and smoke-tested in a clean container.
 
-`mix.exs:77-101`: release `troupe` with applications `troupe_core`, `troupe_protocol`,
-`troupe_gateway`, `troupe_tui`, `troupe_ctl` (in that order; the CLI last because its
-`troupe daemon` blocks, `apps/troupe_ctl/lib/troupe/ctl/application.ex:5-8`),
-`include_executables_for: [:unix, :windows]`, steps `:assemble`,
-`Troupe.Release.build_reapers/1`, `Troupe.Release.verify_linux_nif/1`, `Burrito.wrap/1`,
-and five Burrito targets:
+All of it is gone, and so are the two apps it packaged. This repository is deployed to
+Kubernetes by `charts/troupe`; it is installed on no machine, so there is no machine to
+build for and no target matrix to maintain. A terminal or graphical client is a separate
+release from a separate repository that speaks [PROTOCOL.md](../../PROTOCOL.md), and the
+plane's front page links to it through `plane.cliUrl` and `plane.appUrl`.
 
-| Target | `os` / `cpu` | CI runner (`ci.yml:256-260`) |
-|---|---|---|
-| `linux_x86_64` | linux / x86_64 | `ubuntu-latest` |
-| `linux_aarch64` | linux / aarch64 | `ubuntu-24.04-arm` |
-| `macos_x86_64` | darwin / x86_64 | `macos-15-intel` |
-| `macos_aarch64` | darwin / aarch64 | `macos-14` |
-| `windows_x86_64` | windows / x86_64 | `windows-latest` |
-
-Cross-building is not supported: "rustler_precompiled resolves the ExRatatui NIF against
-the build host, so a macOS binary built on Linux would carry a Linux .so and fail at NIF
-load" (`ci.yml:252-255`, `scripts/build-local:2-7`, `README.md:226-229`). One target per
-native runner is the whole design of the `build` job.
-
-### scripts/build-local
-
-```bash
-scripts/build-local
-```
-
-What it does, in order (`scripts/build-local`):
-
-| Step | Lines |
-|---|---|
-| Requires `zig` and `xz` on `PATH`; requires `zig version` to be exactly `0.16.0` ("Burrito 1.6 hard-pins Zig 0.16.0") | `:12-23` |
-| Target: `BURRITO_TARGET` if set, else derived from `uname` (`linux_*`, `macos_*`, `windows_x86_64` under MINGW/MSYS/CYGWIN) | `:25-41` |
-| Sets `ZIG_LOCAL_CACHE_DIR` and `ZIG_GLOBAL_CACHE_DIR` under `${TMPDIR:-/tmp}/troupe-zig-cache` because "Zig 0.16 uses renameat2 with flags that ecryptfs and some network filesystems reject with EINVAL" | `:43-49` |
-| `TARGET_ABI=musl` for `linux_*`: "The Linux wrapper carries a musl ERTS, so the bundled NIF must be the musl variant" | `:51-54` |
-| `unset EX_RATATUI_BUILD`: a locally built crate ignores `TARGET_ABI` | `:56-58` |
-| `MIX_ENV=prod`, `BURRITO_TARGET`, `TROUPE_REAPER_TARGETS=all`; `mix deps.get`; `mix release troupe --overwrite` (named, because the umbrella has more than one release) | `:60-68` |
-| Reads the version with `mix run --no-start --no-compile`, clears Burrito's payload cache (`~/.local/share/.burrito/troupe_erts-*`, or `~/Library/Application Support/.burrito` on macOS) because "a rebuild that does not change `version:` re-runs the cached copy", and renames `burrito_out/troupe_<target>` to `burrito_out/troupe-<version>-<target>[.exe]` | `:70-97` |
-
-`Troupe.Release.verify_linux_nif/1` runs for any `BURRITO_TARGET` starting with `linux`
-and byte-scans the assembled `ex_ratatui` `.so` for `libc.so.6` or `GLIBC_`, raising with
-the rebuild command if it finds either (`apps/troupe_core/lib/troupe/release.ex:19-46,80-98`).
-It exists because ExRatatui's own check keys off `BURRITO_TARGET` being literally
-`"linux"` (`:14-17`).
-
-The same steps by hand, for a Linux host:
-
-```bash
-TARGET_ABI=musl BURRITO_TARGET=linux_x86_64 TROUPE_REAPER_TARGETS=all MIX_ENV=prod mix release troupe --overwrite
-```
-
-CI's `build` job runs the equivalent (`ci.yml:284-303`), then names the artefact
-`troupe-<version>-<target><ext>`, smoke-tests it with the fake provider, records size and
-cold/warm start in the step summary, and uploads it (`ci.yml:305-368`; see
-[ci-cd.md](ci-cd.md)).
+What this leaves is one build path — `docker/Dockerfile`, four times — and the reaper
+inside it.
 
 ### The reaper
 
@@ -137,8 +103,21 @@ cold/warm start in the step summary, and uploads it (`ci.yml:305-368`; see
 -target <triple> -O ReleaseSafe -lc -fstrip` into `apps/troupe_core/priv/reaper/<triple>/reaper[.exe]`
 for the host triple by default, all five (`x86_64-linux-musl`, `aarch64-linux-musl`,
 `x86_64-macos`, `aarch64-macos`, `x86_64-windows`) under `TROUPE_REAPER_TARGETS=all`, or
-a comma-separated list (`compile.reaper.ex:26-32,78-134`). Outputs are skipped when newer
-than the source (`:136-141`) and `mix clean` removes `priv/reaper` (`:72-76`).
+a comma-separated list. Outputs are skipped when newer than the source and `mix clean`
+removes `priv/reaper`.
+
+`Troupe.Release.build_reapers/1`, the worker release's second step, sets
+`TROUPE_REAPER_TARGETS` to `x86_64-linux-musl,aarch64-linux-musl` — the two Linux triples
+and nothing else. It used to set `all`: a pod cannot execute a macOS or a Windows binary,
+and building three of them cost a Zig invocation each on every image build. The three
+non-Linux triples stay in the task's own table because a developer's `mix test` runs
+`shell` on their own machine, which is the only place they are ever built now.
+
+The image build makes the reaper's absence loud rather than silent. `docker/Dockerfile`
+installs pinned Zig for `RELEASE=troupe_worker` alone, and then fails the build if the
+assembled release has no `*-linux-musl/reaper` — without that check the image starts
+perfectly well and answers every `shell` call with `:reaper_missing`, which is a failure
+that only ever appears in a pod.
 
 ## 3. Generated, committed files
 

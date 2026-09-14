@@ -2,35 +2,39 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 This document says where things are and which rules the build enforces. Data flows and
 the reasons behind the design are in [../whitepaper.md](../whitepaper.md); runtime
 configuration is in [../admin/configuration.md](../admin/configuration.md). Where the
 prose in `ARCHITECTURE.md` disagrees with the code, the code is quoted and the stale
 line is named.
 
-## 1. One umbrella, nine apps, five releases
+## 1. One umbrella, seven apps, four releases
 
-`mix.exs:8` sets `apps_path: "apps"`. Nine Mix projects live there; `mix.exs:50-102`
-declares five releases from them.
+`mix.exs:8` sets `apps_path: "apps"`. Seven Mix projects live there, and `mix.exs`
+declares four releases from them — every one of them a container image.
 
 | App | Description (from its `mix.exs`) | Umbrella deps (runtime) | Test-only umbrella deps |
 |---|---|---|---|
 | `troupe_protocol` | "Wire format: JSON-RPC messages, events, schemas, and a client" (`apps/troupe_protocol/mix.exs:15`) | none | none declared; see §7 |
 | `troupe_core` | "Session actor trees: agents, tools, providers, and the log" (`apps/troupe_core/mix.exs:17`) | `troupe_protocol` (`:33`) | — |
 | `troupe_gateway` | "The daemon: transports, connections, subscriptions, scopes" (`apps/troupe_gateway/mix.exs:15`) | `troupe_core`, `troupe_protocol` (`:31-32`) | — |
-| `troupe_tui` | "The terminal client. Speaks only the protocol." (`apps/troupe_tui/mix.exs:15`) | `troupe_protocol` (`:30`) | `troupe_gateway` (`:34`) |
-| `troupe_ctl` | "The command line. Speaks only the protocol." (`apps/troupe_ctl/mix.exs:15`) | `troupe_protocol` (`:32`) | `troupe_gateway` (`:39`) |
 | `troupe_worker` | "Remote worker runtime (stage 2)" (`apps/troupe_worker/mix.exs:15`) | `troupe_core`, `troupe_protocol`, `troupe_gateway` (`:31-33`) | `troupe_plane` (`:38`) |
-| `troupe_plane` | "Control plane: identity, placement, budgets, admin (stage 2)" (`apps/troupe_plane/mix.exs:15`) | `troupe_protocol` (`:31`) | `troupe_ctl` (`:65`) |
+| `troupe_plane` | "Control plane: identity, placement, budgets, admin (stage 2)" (`apps/troupe_plane/mix.exs:15`) | `troupe_protocol` (`:31`) | — |
 | `troupe_operator` | "Kubernetes operator (stage 2)" (`apps/troupe_operator/mix.exs:15`) | `troupe_protocol` (`:31`) | — |
 | `troupe_a2a` | "The A2A facade: a profile as an agent other agents can call" (`apps/troupe_a2a/mix.exs:15`) | `troupe_protocol` (`:35`) | — |
 
-Discrepancy: `ARCHITECTURE.md:19-30` says "Four releases" and lists eight apps without
-`troupe_a2a`; `mix.exs:50-102` defines five releases and `apps/` holds nine projects.
 The "(stage 2)" descriptions in `apps/troupe_worker/mix.exs:15`,
 `apps/troupe_plane/mix.exs:15` and `apps/troupe_operator/mix.exs:15` predate stages 3-6.
 
-Releases (`mix.exs:50-102`):
+Releases:
 
 | Release | Applications | Steps | Packaging |
 |---|---|---|---|
@@ -38,13 +42,17 @@ Releases (`mix.exs:50-102`):
 | `troupe_plane` | `troupe_protocol`, `troupe_plane` | `:assemble`, `:tar` | OCI image |
 | `troupe_a2a` | `troupe_protocol`, `troupe_a2a` | `:assemble`, `:tar` | OCI image |
 | `troupe_worker` | `troupe_core`, `troupe_protocol`, `troupe_gateway`, `troupe_worker` | `:assemble`, `Troupe.Release.build_reapers/1`, `:tar` | OCI image |
-| `troupe` | `troupe_core`, `troupe_protocol`, `troupe_gateway`, `troupe_tui`, `troupe_ctl` | `:assemble`, `build_reapers/1`, `Troupe.Release.verify_linux_nif/1`, `Burrito.wrap/1` | Burrito binary for five targets (`mix.exs:93-99`) |
 
-The comment at `mix.exs:44-49` gives the split: the client is one Burrito executable
-"so it needs nothing installed alongside it"; the other four run "in a cluster where an
-Erlang runtime is the container's business, not the user's". `troupe_ctl` is listed last
-in the `troupe` release because `Troupe.CLI` blocks for `troupe daemon` and the core and
-gateway must already be up (`apps/troupe_ctl/lib/troupe/ctl/application.ex:5-8`).
+There used to be a fifth, `troupe`: the TUI, the CLI and the local daemon wrapped by
+Burrito into one executable per platform, with `verify_linux_nif/1` and five build
+targets behind it. It is gone, and so are the two apps it packaged. The comment that
+replaced its own says why: this repository is deployed by `charts/troupe` and installed
+on nobody's machine, so each release is "a plain Mix release that runs where an Erlang
+runtime is the container's business rather than the user's".
+
+`Troupe.Release.build_reapers/1` follows from that. It sets `TROUPE_REAPER_TARGETS` to
+`x86_64-linux-musl,aarch64-linux-musl` rather than `all`, because a pod cannot execute a
+macOS or Windows binary and cross-compiling three of them cost a Zig build each.
 
 Every app and the chart are version `0.2.0` (`mix.exs:4`, each `apps/*/mix.exs:7`,
 `charts/troupe/Chart.yaml`).
@@ -57,9 +65,7 @@ and the module rule at `:48-51`:
 
 | Rule | Text in the task |
 |---|---|
-| `troupe_tui` may call only `troupe_protocol` | "the TUI is a protocol client and gets no private access" (`:30-31`) |
-| `troupe_ctl` may call only `troupe_protocol` | `:32-33` |
-| `troupe_a2a` may call only `troupe_protocol` | `:34-35` |
+| `troupe_a2a` may call only `troupe_protocol` | "the A2A facade is a protocol client and gets no private access" |
 | `troupe_plane` never calls `troupe_core` or `troupe_gateway` | "the plane does not run agents" (`:36`) |
 | `troupe_operator` never calls `troupe_core`, `troupe_gateway` or `troupe_plane` | "the operator holds cluster privileges and has no public surface" (`:37-38`) |
 | Every `Troupe.Plane.Web.Live.*` module may call only `Troupe.Plane.Admin` among `Troupe.Plane.*` | "a LiveView is an admin API client and gets no private access" (`:49-50`) |
@@ -69,15 +75,19 @@ Two further checks run in the same task: every cross-app call must be declared a
 the task raises on the first violation (`:179-188`). It runs as part of `mix check`
 (`mix.exs:34-40`) and in CI (`.github/workflows/ci.yml:79-80`).
 
+The rules used to have two more — the TUI and the CLI, each held to `troupe_protocol`
+alone. That was the check that made "our own clients have no private access" a fact, and
+with both apps gone the fact is now structural instead: every client is in another
+repository, and the only thing that proves the protocol is sufficient is the Python
+conformance client CI runs against a real daemon.
+
 Test-only umbrella dependencies do not violate the rules because the task reads beams
-under `_build/<env>/lib/<app>/ebin` (`:212-217`) and `lib/` never calls them; the
-comments at `apps/troupe_ctl/mix.exs:36-38`, `apps/troupe_plane/mix.exs:61-64` and
-`apps/troupe_worker/mix.exs:34-37` say so.
+under `_build/<env>/lib/<app>/ebin` (`:212-217`) and `lib/` never calls them; the comment
+at `apps/troupe_worker/mix.exs:34-37` says so. The plane's test-only dependency on
+`troupe_ctl`, which existed for the admin parity test, went with the CLI.
 
 Runtime seams that keep the rules true without a compile-time dependency:
 
-- `troupe_ctl` finds the TUI, the HQ view and the daemon module through
-  `config :troupe_ctl, frontend:, fleet_view:, daemon:` (`config/config.exs:3-10`).
 - The operator and the worker both compose the pod hostname
   `<ordinal>-<profile>.<domain>`; `apps/troupe_operator/lib/troupe/operator/names.ex:45-50`
   and `config/runtime.exs:50-64` each say the two "cannot share a function across the app
@@ -104,8 +114,13 @@ Troupe.Supervisor
 │       ├── Session.Watcher       watch mode
 │       ├── Session.Files         fs_changed events
 │       └── Session.Summary       the summary projection, last on purpose
-└── [Troupe.Wrapper]              only inside a Burrito binary (wrapper.ex:1-21)
 ```
+
+`Troupe.Wrapper` used to hang off that root: a watchdog that halted the VM when Burrito's
+launcher process went away, so a `kill -9` on the binary a user could see did not leave an
+orphaned BEAM holding the reaper pipes open. There is no launcher now — a pod's VM is
+PID 1 of its container and Kubernetes kills the whole thing — so the watchdog went with
+the binary.
 
 The ordering argument is in the moduledoc at `apps/troupe_core/lib/troupe/session.ex:2-12`:
 `Log` first because everything persists through it; `Approvals` and `ClientTools` above
@@ -210,14 +225,11 @@ The Kubernetes connection is built once in `init/1` (`supervisor.ex:28`) by
 `TROUPE_KUBE_CONTEXT` outside a pod (`conn.ex:1-11`, `:49-57`). The watch namespace
 defaults to `TROUPE_PLANE_NAMESPACE` or `troupe-system` (`supervisor.ex:46`).
 
-### 3.6 The A2A facade and the CLI
+### 3.6 The A2A facade
 
 `Troupe.A2A.Application` always starts `Troupe.A2A.Plane.Cache` and `Troupe.A2A.Streams`;
 Bandit on `Troupe.A2A.Router` is added only when `Troupe.A2A.autostart?/0`
 (`apps/troupe_a2a/lib/troupe/a2a/application.ex:14-30`; `config/runtime.exs:415-442`).
-
-`Troupe.Ctl.Application` supervises `Troupe.CLI`, which runs the command synchronously
-inside a Burrito binary and is a no-op otherwise (`apps/troupe_ctl/lib/troupe/ctl/application.ex:2-19`).
 
 ## 4. The three transports
 
@@ -275,7 +287,7 @@ child (`daemon.ex:61-66`). `docs/plans/README.md:52` lists that as still to do (
 |---|---|---|---|
 | Local session log | `<state>/sessions/<workspace-hash>/<session-id>/events.jsonl`; `<state>` is `TROUPE_STATE_HOME`, else `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\troupe` | `Session.Log` | `apps/troupe_core/lib/troupe/paths.ex:29-47,88-93`; `session/log.ex:109,190` |
 | Local blobs | `<session dir>/blobs/<digest>` | `Session.Blobs` | `apps/troupe_core/lib/troupe/session/blobs.ex:119-123` |
-| Local config | `TROUPE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/troupe` or `%APPDATA%\troupe`; `config.yaml`, `agents/`, `credentials.json`, `mcp.json` | user, `troupe login` | `paths.ex:13-20,81-86`; `apps/troupe_ctl/lib/troupe/ctl/credentials.ex:20-24`; `apps/troupe_tui/lib/troupe/ui/tui/connectors.ex:35-36` |
+| Local config | `TROUPE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/troupe` or `%APPDATA%\troupe`; `config.yaml`, `agents/` | the profile's bundle, in a pod | `paths.ex:13-20,81-86` |
 | Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock` or a `daemon.json` with a TCP token; `O_EXCL` lock, stale after 30 s | the daemon | `apps/troupe_protocol/lib/troupe/protocol/daemon.ex:1-29` |
 | Pod working copies | PVC `data` at `/var/lib/troupe` | worker | `apps/troupe_operator/lib/troupe/operator/resources.ex:756` |
 | Sealed session data | S3 `sessions/<id>/{manifest.json, segments/, snapshots/, workspace/, blobs/}` | workers; the plane reads manifests only in `mix troupe.index.rebuild` | `apps/troupe_protocol/lib/troupe/sessions/storage.ex`; `apps/troupe_plane/lib/mix/tasks/troupe.index.rebuild.ex:4-17` |

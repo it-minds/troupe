@@ -2,14 +2,13 @@ defmodule Troupe.Plane.AdminParityTest do
   @moduledoc """
   Three surfaces, one context, and a test that keeps it that way.
 
-  The panel, the admin JSON-RPC, `troupe admin` and the admin MCP server are supposed to
-  be four renderings of `Troupe.Plane.Admin`. Left to care alone that lasts about a
-  release: somebody adds a button, the CLI does not get it, and an operator who works over
-  SSH finds out months later that the thing they need is only in a browser.
+  The panel, the admin JSON-RPC and the admin MCP server are supposed to be three
+  renderings of `Troupe.Plane.Admin`. Left to care alone that lasts about a release:
+  somebody adds a button, the JSON-RPC method never appears, and a client that is not a
+  browser finds out months later that the thing it needs is only in one.
 
-  So it is enumerated. Every public function of the context must have a method, a command
-  and a tool; every method and command must name a function that exists; and the panel must
-  call nothing else.
+  So it is enumerated. Every public function of the context must have a method and a tool;
+  every method must name a function that exists; and the panel must call nothing else.
 
   The MCP half checks something the other three do not need: that every method carries the
   prose and the types a caller with no documentation depends on. A model has the tool
@@ -19,7 +18,6 @@ defmodule Troupe.Plane.AdminParityTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.Ctl.Admin, as: CLI
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.API
   alias Troupe.Plane.Admin.API.Method
@@ -45,21 +43,6 @@ defmodule Troupe.Plane.AdminParityTest do
       """
     end
 
-    test "each context function has a `troupe admin` command" do
-      by_method = Map.new(API.methods(), fn {method, %Method{} = m} -> {method, m.function} end)
-      covered = CLI.methods() |> Enum.map(&Map.fetch!(by_method, &1)) |> MapSet.new()
-      missing = MapSet.difference(MapSet.new(action_names()), covered)
-
-      assert MapSet.size(missing) == 0, """
-      These are in Troupe.Plane.Admin with no `troupe admin` command:
-
-        #{Enum.join(MapSet.to_list(missing), "\n  ")}
-
-      Add them to Troupe.Ctl.Admin, or an operator who works over SSH cannot do what
-      somebody with a browser can.
-      """
-    end
-
     test "no method names a function the context does not have" do
       actions = MapSet.new(action_names())
 
@@ -71,15 +54,6 @@ defmodule Troupe.Plane.AdminParityTest do
 
         assert function_exported?(Admin, declared.function, arity),
                "#{method} passes #{length(declared.arguments)} argument(s) to Admin.#{declared.function}, which takes a different number"
-      end
-    end
-
-    test "no command names a method the API does not have" do
-      methods = MapSet.new(Map.keys(API.methods()))
-
-      for method <- CLI.methods() do
-        assert MapSet.member?(methods, method),
-               "`troupe admin` has a command for #{method}, which is not a method"
       end
     end
   end

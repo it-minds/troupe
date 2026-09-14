@@ -1,5 +1,11 @@
 # Stage 1 — report
 
+> **Historical.** Each section below is the evidence for a stage as it stood when that
+> stage was finished. On 2026-09-14 this repository became the remote alone: the client
+> apps, the packaged binary, its installers and the CI jobs that built them were deleted
+> (`DECISIONS.md` 319-324). Test counts, release names and `scripts/build-local` runs
+> recorded here were true when they were written and are not re-run.
+
 Sessions have moved out of the TUI process and into a daemon. Every client reaches
 them through one protocol and nothing reaches them any other way.
 

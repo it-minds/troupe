@@ -2,6 +2,14 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 Note on the baseline: while these files were being written the uncommitted change landed
 as commit `6c29471` ("`groups` is not a scope, in the last place that still asked for
 it"). The line numbers cited here were checked against the working tree that contains
@@ -9,13 +17,13 @@ it, which is identical to `3f7c91f` plus that change.
 
 | File | One line |
 |---|---|
-| [architecture.md](architecture.md) | Nine apps, five releases, the enforced boundaries, the five supervision trees, the three transports, where state lives |
+| [architecture.md](architecture.md) | Seven apps, four releases, the enforced boundaries, the supervision trees, the three transports, where state lives |
 | [tech-stack.md](tech-stack.md) | Every runtime, library, native binary and external service in use, with the reason the code gives |
 | [repo-structure.md](repo-structure.md) | Annotated tree, each app's `lib/` layout, where tests, fixtures, schemas and CRDs live, what is generated and by which task |
 | [local-setup.md](local-setup.md) | Prerequisites, `scripts/dev-up`, the test database, why the only local plane is `scripts/remote-up`, every development variable and `config.yaml` key |
 | [testing.md](testing.md) | Suite layout, what each suite needs and what it does without it, fixtures, the conformance client, the parity test, the ten CI runs |
-| [build.md](build.md) | The four images, the Burrito binary, the reaper, the three generators |
-| [ci-cd.md](ci-cd.md) | Every job and step of `ci.yml`; no deploy step; no branch protection in the repo |
+| [build.md](build.md) | The four images, the reaper, the three generators — and nothing else, because there is nothing else to build |
+| [ci-cd.md](ci-cd.md) | Every job and step of `ci.yml`; the chart published on a tag; no deploy step; no branch protection in the repo |
 | [deployment.md](deployment.md) | Images, CRDs, the chart, the migration hook, rollout behaviour, the kind and Scaleway flows, rollback |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter blind spot, credo, stated rules, commit style, naming, recipes |
 
@@ -63,30 +71,18 @@ Every job and step of `.github/workflows/ci.yml`, and the section of
 | `protocol` | Schema compatibility | `:226-230` | #7; build.md §3 |
 | `protocol` | Committed schema is current | `:232-236` | #8 |
 | `protocol` | Python reference client, end to end | `:238-242` | #9; testing.md §5 |
-| `build` | `needs`, matrix | `:246-260` | ci-cd.md §2 `build` |
-| `build` | checkout | `:263` | #1 |
-| `build` | setup-beam | `:265-268` | #2 |
-| `build` | setup-zig | `:270-272` | #3 |
-| `build` | Install xz (macOS) | `:274-276` | #4 |
-| `build` | Install xz and 7zip (Windows) | `:278-280` | #5 |
-| `build` | `mix deps.get` | `:282` | #6 |
-| `build` | Build the release | `:284-303` | #7; build.md §2 |
-| `build` | Name the artifact | `:305-314` | #8 |
-| `build` | Smoke test the artifact | `:316-342` | #9 |
-| `build` | Report size and start-up cost | `:344-362` | #10 |
-| `build` | upload-artifact | `:364-368` | #11 |
-| `containers` | checkout | `:375` | ci-cd.md §2 `containers` #1 |
-| `containers` | download-artifact | `:377-381` | #2 |
-| `containers` | Run in glibc and musl containers | `:383-419` | #3 |
-| `installer-sh` | checkout, download, Install/upgrade/reject/uninstall | `:426-442` | ci-cd.md §2 `installer-sh` |
-| `installer-ps1` | checkout, download, Install/upgrade/reject/uninstall | `:448-468` | ci-cd.md §2 `installer-ps1` |
-| `release` | `needs`, `if`, permissions | `:472-476` | ci-cd.md §2 `release` |
-| `release` | download-artifact | `:478-482` | #1 |
-| `release` | Checksums | `:484-488` | #2 |
-| `release` | action-gh-release | `:490-494` | #3 |
+| `release` | `needs`, `if`, permissions | ci-cd.md §2 `release` |
+| `release` | checkout, setup-helm | #1 |
+| `release` | Package the chart at this version | #2 |
+| `release` | action-gh-release, the chart tarball | #3 |
 
 Nothing in the workflow is left uncovered. What the workflow does not contain — a deploy
-step, branch protection, asset `--check` steps, a cluster — is in ci-cd.md §6.
+step, branch protection, a cluster — is in ci-cd.md §6.
+
+The four columns above became three for the `release` rows: the `ci.yml` line numbers in
+this table are from the 2026-09-13 audit, and the workflow has been rewritten twice since
+— once to make it green, once to remove the client build. Treat them as a reading order
+rather than as coordinates, and read `ci.yml` itself for the lines.
 
 ## Self-check: development variables
 

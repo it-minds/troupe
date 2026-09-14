@@ -4,11 +4,20 @@
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers in this tree are from that commit.
 
+> **Re-audited 2026-09-14.** The client apps were deleted; this repository ships four
+> images and the chart. The `troupe admin …` commands used throughout this track are the
+> **terminal client's** rendering of the admin API, and that client is published from its
+> own repository — `plane.cliUrl` is where you tell the front page it lives. Every command
+> shown has three equivalents that do ship here: an `admin.*` JSON-RPC method at
+> `POST /rpc`, the same method as an MCP tool at `POST /mcp`, and a page in the console at
+> `/admin`. [roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-method-table)
+> is the method table; a step written as a command is a step, not a dependency on a binary.
+
 ## Who this is for
 
 You operate a Troupe deployment: you install the Helm chart, run PostgreSQL, object storage, OpenBao and an identity provider beside it, set its configuration, and manage teams, worker profiles, policy, bundles, triggers, principals, backups and monitoring. Every claim in this tree names the file and line that decides it. Where prose in the repository disagrees with the code, the code is documented and the stale text is named as a `Discrepancy`; where the code could not settle a question, it is marked `Unconfirmed` with a pointer into [AUDIT.md](../AUDIT.md).
 
-Other tracks: [developer](../developer/README.md) (build, deploy, CI, architecture), [user](../user/README.md) (the CLI and what a session can do), the [whitepaper](../whitepaper.md) (why it is built this way), and the [A2A facade](../a2a.md).
+Other tracks: [developer](../developer/README.md) (build, deploy, CI, architecture), [user](../user/README.md) (the CLI and what a session can do — deprecated), the [whitepaper](../whitepaper.md) (why it is built this way), and the [A2A facade](../a2a.md).
 
 ## The documents
 

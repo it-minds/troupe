@@ -2,9 +2,10 @@ defmodule Troupe.Gateway.Application do
   @moduledoc """
   The daemon's supervision tree.
 
-  Started but idle unless `troupe_gateway`'s `:autostart` is set, because the same
-  release is both the daemon and the clients that talk to it: a `troupe ctl` run must
-  not open a listening socket just by booting.
+  Started but idle unless `troupe_gateway`'s `:autostart` is set. Booting this
+  application must not open a listening socket on its own: the same code runs inside a
+  worker pod, which is told to serve, and inside a test or an embedding host, which is
+  not.
   """
 
   use Application

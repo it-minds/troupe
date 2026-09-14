@@ -5,7 +5,6 @@
 .git
 _build
 deps
-burrito_out
 node_modules
 **/__pycache__
 **/*.pyc
@@ -21,10 +20,8 @@ test
 apps/*/test
 fixtures
 
-# Documentation, the reference clients and the chart are read by people and by CI, not
-# by the release.
+# Documentation and the chart are read by people and by CI, not by the release.
 docs
-clients
 charts
 dev
 scripts

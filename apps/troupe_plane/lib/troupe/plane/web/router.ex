@@ -55,7 +55,12 @@ defmodule Troupe.Plane.Web.Router do
     |> put_resp_content_type("text/html")
     |> send_resp(
       200,
-      Index.render(name: config(:plane_name, "troupe"), url: base_url(conn), app_url: app_url())
+      Index.render(
+        name: config(:plane_name, "troupe"),
+        url: base_url(conn),
+        app_url: app_url(),
+        cli_url: cli_url()
+      )
     )
   end
 
@@ -362,6 +367,16 @@ defmodule Troupe.Plane.Web.Router do
   # is how a plane that ships without one says so rather than offering a door to a 404.
   defp app_url do
     case Application.get_env(:troupe_plane, :app_url, "/app") do
+      "" -> nil
+      url -> url
+    end
+  end
+
+  # Where the terminal client is published, which this host does not build and cannot
+  # serve: it runs in a cluster and has no binary for anyone's laptop. Unset by default,
+  # because a wrong guess here is a download link that 404s.
+  defp cli_url do
+    case Application.get_env(:troupe_plane, :cli_url, "") do
       "" -> nil
       url -> url
     end

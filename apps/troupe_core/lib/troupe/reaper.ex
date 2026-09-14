@@ -13,9 +13,9 @@ defmodule Troupe.Reaper do
   @doc """
   Path to the reaper binary for this host, or `{:error, :reaper_missing}`.
 
-  `priv/reaper/<triple>/reaper` is populated by `mix compile.reaper` and travels
-  inside the Burrito payload, so a packaged binary carries a reaper for every
-  platform it can run on.
+  `priv/reaper/<triple>/reaper` is populated by `mix compile.reaper` and packed into
+  the release, so a worker image carries the reaper for the architecture its pods run
+  on and never builds anything at runtime.
   """
   @spec path() :: {:ok, Path.t()} | {:error, :reaper_missing}
   def path do

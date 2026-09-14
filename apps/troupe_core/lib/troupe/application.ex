@@ -15,13 +15,12 @@ defmodule Troupe.Application do
 
   @impl Application
   def start(_type, _args) do
-    children =
-      [
-        Troupe.Registry,
-        Troupe.Events,
-        Troupe.Sessions.Index,
-        Troupe.Sessions
-      ] ++ List.wrap(Troupe.Wrapper.child_spec_if_wrapped())
+    children = [
+      Troupe.Registry,
+      Troupe.Events,
+      Troupe.Sessions.Index,
+      Troupe.Sessions
+    ]
 
     Supervisor.start_link(children, strategy: :one_for_one, name: Troupe.Supervisor)
   end

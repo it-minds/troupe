@@ -6,17 +6,18 @@ defmodule Mix.Tasks.Compile.Reaper do
   program rather than one per app; the binaries belong to `troupe_core`, which is what
   loads them at runtime.
 
-  `reaper` is the process-tree supervisor every shell command runs under. One binary
-  per target triple is built with the same Zig toolchain Burrito already requires, and
-  the whole `priv/` tree ends up inside the Burrito payload, so a packaged binary
-  carries a reaper for every platform it can run on.
+  `reaper` is the process-tree supervisor every shell command runs under, and it is
+  built with Zig because one toolchain cross-compiles every triple this project has a
+  use for. The worker's release carries the Linux ones; the rest exist so the suite can
+  run `shell` on a developer's own machine, which is the only place they are ever built.
 
   Without `zig` on `PATH` this task is a no-op with a warning: a checkout that only
   needs `mix test` against already-built binaries, or a machine that never runs
   `shell`, should not be blocked on a Zig install.
 
-  Set `TROUPE_REAPER_TARGETS=all` to build every target (what CI and `mix release` do);
-  the default builds only the host triple, which is what a dev loop needs.
+  `TROUPE_REAPER_TARGETS` is a comma-separated list of triples, or `all`; the default
+  builds only the host triple, which is what a dev loop needs. `Troupe.Release` sets it
+  to the Linux triples when it packs a release, because a pod runs nothing else.
   """
 
   use Mix.Task.Compiler
