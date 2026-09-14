@@ -271,39 +271,26 @@ jobs:
         if: startsWith(matrix.os, 'windows')
         run: choco install -y xz 7zip
 
-      - run: mix deps.get
-
+      # `scripts/build-local`, because every one of its details is load-bearing and a
+      # second copy of them here would drift: the musl ABI the Linux wrapper's ERTS
+      # needs, the Zig cache directories that keep `renameat2` off a filesystem that
+      # refuses it, `EX_RATATUI_BUILD` unset so the NIF is not rebuilt against the
+      # host's libc — and the release *name*, without which `mix release` refuses to
+      # guess between the umbrella's five. It reads `BURRITO_TARGET` and writes
+      # `burrito_out/troupe-<version>-<target>`, which is the name this job publishes.
       - name: Build the release
         shell: bash
         env:
-          MIX_ENV: prod
           BURRITO_TARGET: ${{ matrix.target }}
-          TROUPE_REAPER_TARGETS: all
-        run: |
-          # Burrito's Linux wrapper carries a musl ERTS, so the bundled NIF must be
-          # the musl variant; a glibc .so cannot load there.
-          case "${{ matrix.target }}" in
-            linux_*) export TARGET_ABI=musl ;;
-          esac
-
-          # Zig 0.16 uses renameat2 flags that some filesystems reject with EINVAL,
-          # which it treats as a programmer bug and aborts on.
-          export ZIG_LOCAL_CACHE_DIR="${RUNNER_TEMP}/zig-local"
-          export ZIG_GLOBAL_CACHE_DIR="${RUNNER_TEMP}/zig-global"
-          mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
-
-          mix release --overwrite
+        run: bash scripts/build-local
 
       - name: Name the artifact
         id: artifact
         shell: bash
         run: |
-          version=$(mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')
-          name="troupe-${version}-${{ matrix.target }}${{ matrix.ext }}"
-          mv "burrito_out/troupe_${{ matrix.target }}${{ matrix.ext }}" "burrito_out/${name}"
-          chmod +x "burrito_out/${name}" || true
+          set -euo pipefail
+          name=$(basename "$(ls burrito_out/troupe-*-${{ matrix.target }}${{ matrix.ext }})")
           echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test the artifact
         shell: bash
