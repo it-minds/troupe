@@ -228,12 +228,13 @@ installer refuses it on the checksum, then uninstalls and purges
 | 2 | Checksums | `sha256sum troupe-* > SHA256SUMS` in `dist/` | `:500-504` |
 | 3 | publish | `softprops/action-gh-release@v2` with `dist/troupe-*` and `dist/SHA256SUMS` | `:506-510` |
 
-**The installers do not point here.** `install.sh:17` and `install.ps1:39` default to
-`https://github.com/objective-mj/troupe/releases/latest/download`, a repository that does
-not resolve; this one publishes to `it-minds/troupe-remote`, which is private and has no
-releases. Nothing in CI notices, because both installer jobs are pointed at a `file://`
-directory. Whoever owns distribution has to decide where public downloads live before a
-`v*` tag means anything ([../AUDIT.md](../AUDIT.md) §4.2).
+`install.sh:17` and `install.ps1:39` default to
+`https://github.com/it-minds/troupe-remote/releases/latest/download`, which is where this
+job publishes. They used to default to `objective-mj/troupe`, a repository that does not
+resolve, and nothing in CI noticed because both installer jobs are pointed at a `file://`
+directory instead ([../AUDIT.md](../AUDIT.md) §4.2). **An anonymous install still fails**:
+this repository is private, so its releases are not downloadable without a token. Making
+them public is a distribution decision, not a CI one.
 
 ## 3. Dependency graph
 

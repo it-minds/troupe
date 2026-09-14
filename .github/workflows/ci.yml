@@ -295,9 +295,26 @@ jobs:
         if: startsWith(matrix.os, 'macos')
         run: brew install xz || true
 
-      - name: Install xz and 7zip (Windows)
+      # Burrito hard-requires `xz` on PATH for every target and `7z` on top of that for
+      # the Windows one (`deps/burrito/lib/burrito.ex:30,39`). Chocolatey has no `xz`
+      # package — the `choco install -y xz 7zip` this used to be exited 1 with "the
+      # package was not found", which is what a job that has never run looks like. 7-Zip
+      # is already on the runner image, so only xz has to be fetched, from upstream and
+      # pinned.
+      - name: Install xz (Windows)
         if: startsWith(matrix.os, 'windows')
-        run: choco install -y xz 7zip
+        shell: bash
+        env:
+          XZ_VERSION: "5.8.4"
+        run: |
+          set -euo pipefail
+          curl -fsSL -o "${RUNNER_TEMP}/xz.zip" \
+            "https://github.com/tukaani-project/xz/releases/download/v${XZ_VERSION}/xz-${XZ_VERSION}-windows.zip"
+          powershell -NoProfile -Command \
+            "Expand-Archive -Path '$RUNNER_TEMP\\xz.zip' -DestinationPath '$RUNNER_TEMP\\xz' -Force"
+          echo "${RUNNER_TEMP}\\xz\\bin_x86-64" >> "$GITHUB_PATH"
+          "${RUNNER_TEMP}/xz/bin_x86-64/xz.exe" --version
+          7z i > /dev/null
 
       # `scripts/build-local`, because every one of its details is load-bearing and a
       # second copy of them here would drift: the musl ABI the Linux wrapper's ERTS
@@ -348,6 +365,16 @@ jobs:
           TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/smoke/script.json" \
             "./$binary" sessions --workspace smoke/ws | grep -q "Sessions for\|No sessions" 
 
+      # Before the report, not after it: the binary is what this job is for, and three
+      # jobs wait on it. A step that only writes numbers into the run summary should not
+      # be able to lose it — which is exactly what happened on both macOS legs, where
+      # the report was the last step and it failed.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: burrito_out/${{ steps.artifact.outputs.name }}
+          if-no-files-found: error
+
       - name: Report size and start-up cost
         shell: bash
         run: |
@@ -356,23 +383,23 @@ jobs:
           echo "### ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- binary size: $((size / 1024 / 1024)) MiB ($size bytes)" >> "$GITHUB_STEP_SUMMARY"
 
+          # `date +%s%N` is a GNU extension. BSD date prints a literal "N", so on macOS
+          # this arithmetic got `1789385995N` and said "value too great for base" —
+          # which is a sentence about a nanosecond, not about the build. Perl's
+          # Time::HiRes is core and is on all three runner images.
+          now_ms() { perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'; }
+
           # The first run pays for extraction; the second is the warm path.
           "./$binary" maintenance uninstall >/dev/null 2>&1 <<< "y" || true
-          cold_start=$(date +%s%N)
+          cold_start=$(now_ms)
           "./$binary" --version > /dev/null
-          cold_end=$(date +%s%N)
-          warm_start=$(date +%s%N)
+          cold_end=$(now_ms)
+          warm_start=$(now_ms)
           "./$binary" --version > /dev/null
-          warm_end=$(date +%s%N)
+          warm_end=$(now_ms)
 
-          echo "- cold start: $(( (cold_end - cold_start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
-          echo "- warm start: $(( (warm_end - warm_start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.artifact.outputs.name }}
-          path: burrito_out/${{ steps.artifact.outputs.name }}
-          if-no-files-found: error
+          echo "- cold start: $(( cold_end - cold_start )) ms" >> "$GITHUB_STEP_SUMMARY"
+          echo "- warm start: $(( warm_end - warm_start )) ms" >> "$GITHUB_STEP_SUMMARY"
 
   containers:
     name: clean-container check (linux x86_64)

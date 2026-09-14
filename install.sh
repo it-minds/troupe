@@ -14,7 +14,7 @@
 # moved into place, and a mismatch aborts with the download discarded.
 set -eu
 
-RELEASE_URL="${TROUPE_RELEASE_URL:-https://github.com/objective-mj/troupe/releases/latest/download}"
+RELEASE_URL="${TROUPE_RELEASE_URL:-https://github.com/it-minds/troupe-remote/releases/latest/download}"
 INSTALL_DIR="${TROUPE_INSTALL_DIR:-$HOME/.local/bin}"
 BINARY_NAME="troupe"
 PURGE=0
