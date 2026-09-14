@@ -397,10 +397,19 @@ jobs:
           TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
             ./troupe run "smoke" --headless --workspace ws --auto-approve
           grep -q packaged ws/hello.txt
+
           # Watch mode has to fall back to polling with no inotify-tools installed.
+          # This used to grep the output for "polling for changes", which is not a
+          # string this program has ever printed: the notice reads "watch: no native
+          # file watcher available, polling every Nms", and it is published as an
+          # ephemeral event while the session is being created — before any client has
+          # subscribed — so a fresh headless run never prints it at all. What a clean
+          # container can honestly check is that the fallback happens rather than the
+          # session dying with no backend, which is what the run finishing means.
           rm -rf wws && mkdir wws
           TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
-            ./troupe run "watch" --headless --watch --workspace wws --auto-approve | grep -q "polling for changes"
+            ./troupe run "watch" --headless --watch --workspace wws --auto-approve
+          grep -q packaged wws/hello.txt
           SH
           chmod +x check.sh
 
