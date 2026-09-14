@@ -154,8 +154,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       # replica behind a Service looks like from here. Its connections go with it: a
       # listener that stops does not close the sockets it has already handed over.
       port = context.port
-      stop_supervised!(Listener)
-      stop_supervised!(Connections)
+      stop_plane()
       eventually(fn -> not Link.connected?(link) end)
 
       start_supervised!(Connections)
@@ -174,8 +173,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       assert {:ok, _} = activate(context, report: Link.reporter(link))
 
       port = context.port
-      stop_supervised!(Listener)
-      stop_supervised!(Connections)
+      stop_plane()
       eventually(fn -> not Link.connected?(link) end)
 
       # Sealing does not depend on the plane being up, so this still reaches object

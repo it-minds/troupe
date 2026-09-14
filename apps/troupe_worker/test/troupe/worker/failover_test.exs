@@ -100,8 +100,7 @@ defmodule Troupe.Worker.FailoverTest do
     # The replica this worker is attached to goes away. Its connections go with it,
     # which is what a killed pod does to the TCP it was holding.
     Service.put_backends(context.service, [context.peer_port])
-    stop_supervised!(Listener)
-    stop_supervised!(Connections)
+    stop_plane()
 
     started = System.monotonic_time(:millisecond)
     eventually(fn -> not Link.connected?(link) end, 5_000)
@@ -134,8 +133,7 @@ defmodule Troupe.Worker.FailoverTest do
     assert worker.healthy
 
     Service.put_backends(context.service, [context.peer_port])
-    stop_supervised!(Listener)
-    stop_supervised!(Connections)
+    stop_plane()
 
     eventually(fn -> Link.connected?(link) end, 10_000)
 

@@ -58,8 +58,7 @@ defmodule Troupe.Worker.PlaneDownTest do
     assert {:ok, _} = Client.subscribe(client, "session:" <> context.session_id)
 
     # The plane goes away, connections and all.
-    stop_supervised!(Listener)
-    stop_supervised!(Connections)
+    stop_plane()
     eventually(fn -> not Link.connected?(link) end)
 
     # Subscribed before the input, not after: a turn against a scripted model can be over
@@ -116,8 +115,7 @@ defmodule Troupe.Worker.PlaneDownTest do
 
     # Now there is no pod anyone can reach — which is what a session looks like when the
     # plane's own view of the fleet is empty.
-    stop_supervised!(Listener)
-    stop_supervised!(Connections)
+    stop_plane()
 
     assert {:error, create_error} =
              Harness.call("session.create", %{"profile" => "dev"}, %{user: user, platform_admin?: false})
