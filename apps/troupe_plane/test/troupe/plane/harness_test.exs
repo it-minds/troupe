@@ -753,14 +753,40 @@ defmodule Troupe.Plane.HarnessTest do
       })
 
     :ok = :gen_tcp.send(socket, [enrol, ?\n])
-    {:ok, _enrolled} = :gen_tcp.recv(socket, 0, 5_000)
+    {:ok, enrolled} = :gen_tcp.recv(socket, 0, 5_000)
 
     ask = Jason.encode!(%{"jsonrpc" => "2.0", "id" => 1, "method" => method, "params" => params})
     :ok = :gen_tcp.send(socket, [ask, ?\n])
-    {:ok, line} = :gen_tcp.recv(socket, 0, 5_000)
+    answer = await_answer(socket, 1, enrolled)
     :gen_tcp.close(socket)
 
-    line |> String.split("\n", trim: true) |> List.first() |> Jason.decode!()
+    answer
+  end
+
+  # The plane starts pushing the moment a pod enrols - `jwks.updated` is on its way
+  # before the ask is even written - so the next frame down the socket is not
+  # necessarily the answer to it. Read until the frame carrying this id arrives;
+  # anything else on the way is the other direction and none of this function's
+  # business. Taking whatever arrived first made this a race, and it lost in
+  # `bundle.fetch`, which had nothing to do with it.
+  defp await_answer(socket, id, buffer) do
+    {frames, rest} = split_frames(buffer)
+
+    case Enum.find(frames, &match?(%{"id" => ^id}, &1)) do
+      nil ->
+        {:ok, data} = :gen_tcp.recv(socket, 0, 5_000)
+        await_answer(socket, id, rest <> data)
+
+      answer ->
+        answer
+    end
+  end
+
+  # Newline-delimited JSON, and a read can end mid-frame; the trailing fragment goes
+  # back on the buffer rather than through `Jason.decode!/1`.
+  defp split_frames(buffer) do
+    {complete, [rest]} = buffer |> String.split("\n") |> Enum.split(-1)
+    {Enum.map(complete, &Jason.decode!/1), rest}
   end
 
   defp serve(socket, test) do
