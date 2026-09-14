@@ -294,11 +294,19 @@ jobs:
           # wrapper but not for the payload: rustler_precompiled resolves the
           # ExRatatui NIF against the build host, so a macOS binary built on Linux
           # would carry a Linux .so and fail at NIF load.
-          - { os: ubuntu-latest, target: linux_x86_64, ext: "" }
-          - { os: ubuntu-24.04-arm, target: linux_aarch64, ext: "" }
-          - { os: macos-15-intel, target: macos_x86_64, ext: "" }
-          - { os: macos-14, target: macos_aarch64, ext: "" }
-          - { os: windows-latest, target: windows_x86_64, ext: ".exe" }
+          #
+          # No `windows_x86_64`. `ezstd` — zstd for session segments and snapshots,
+          # and a hard dependency of `troupe_protocol` — declares
+          # `{pre_hooks, [{"(linux|darwin)", compile, "make compile_nif"}]}`, so on
+          # Windows nothing builds its NIF and the build stops at "Missing artifact
+          # priv/ezstd_nif.so". That is upstream's decision rather than a gap in this
+          # runner, so there is no Windows binary to publish and this matrix does not
+          # claim one. `install.ps1` and `scripts/test-install.ps1` stay in the tree
+          # against the day there is.
+          - { os: ubuntu-latest, target: linux_x86_64 }
+          - { os: ubuntu-24.04-arm, target: linux_aarch64 }
+          - { os: macos-15-intel, target: macos_x86_64 }
+          - { os: macos-14, target: macos_aarch64 }
 
     steps:
       - uses: actions/checkout@v4
@@ -315,27 +323,6 @@ jobs:
       - name: Install xz (macOS)
         if: startsWith(matrix.os, 'macos')
         run: brew install xz || true
-
-      # Burrito hard-requires `xz` on PATH for every target and `7z` on top of that for
-      # the Windows one (`deps/burrito/lib/burrito.ex:30,39`). Chocolatey has no `xz`
-      # package — the `choco install -y xz 7zip` this used to be exited 1 with "the
-      # package was not found", which is what a job that has never run looks like. 7-Zip
-      # is already on the runner image, so only xz has to be fetched, from upstream and
-      # pinned.
-      - name: Install xz (Windows)
-        if: startsWith(matrix.os, 'windows')
-        shell: bash
-        env:
-          XZ_VERSION: "5.8.4"
-        run: |
-          set -euo pipefail
-          curl -fsSL -o "${RUNNER_TEMP}/xz.zip" \
-            "https://github.com/tukaani-project/xz/releases/download/v${XZ_VERSION}/xz-${XZ_VERSION}-windows.zip"
-          powershell -NoProfile -Command \
-            "Expand-Archive -Path '$RUNNER_TEMP\\xz.zip' -DestinationPath '$RUNNER_TEMP\\xz' -Force"
-          echo "${RUNNER_TEMP}\\xz\\bin_x86-64" >> "$GITHUB_PATH"
-          "${RUNNER_TEMP}/xz/bin_x86-64/xz.exe" --version
-          7z i > /dev/null
 
       # `scripts/build-local`, because every one of its details is load-bearing and a
       # second copy of them here would drift: the musl ABI the Linux wrapper's ERTS
@@ -355,7 +342,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          name=$(basename "$(ls burrito_out/troupe-*-${{ matrix.target }}${{ matrix.ext }})")
+          name=$(basename "$(ls burrito_out/troupe-*-${{ matrix.target }})")
           echo "name=${name}" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test the artifact
@@ -505,35 +492,12 @@ jobs:
 
           docker run --rm -v "$PWD:/src" ubuntu:24.04 /src/scripts/test-install.sh
 
-  installer-ps1:
-    name: install.ps1 (windows runner)
-    needs: build
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-windows_x86_64.exe
-          merge-multiple: true
-          path: dist
-
-      - name: Install, upgrade, reject a corrupt artifact, uninstall
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path release -Force | Out-Null
-          Copy-Item dist/troupe-*-windows_x86_64.exe release/
-          Push-Location release
-          Get-ChildItem troupe-* | ForEach-Object {
-            "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Set-Content SHA256SUMS
-          Pop-Location
-
-          ./scripts/test-install.ps1 -ReleaseDir release
-
   release:
     name: publish
-    needs: [build, containers, installer-sh, installer-ps1]
+    # No `installer-ps1`: there is no Windows binary for it to install, because there
+    # is no Windows build. `scripts/test-install.ps1` is still in the tree and still
+    # the scenario the Windows installer has to pass, on the day it can be run.
+    needs: [build, containers, installer-sh]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

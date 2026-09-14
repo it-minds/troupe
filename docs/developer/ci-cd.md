@@ -95,7 +95,7 @@ Runner `ubuntu-latest`. No `needs`; nothing needs it.
 
 `dev/kind/values.yaml` is not linted or rendered here.
 
-### `protocol` — "schema compatibility and the Python client" (`ci.yml:217-262`)
+### `protocol` — "schema compatibility and the Python client" (`ci.yml:238-283`)
 
 Runner `ubuntu-latest`. No `needs`.
 
@@ -111,7 +111,7 @@ Runner `ubuntu-latest`. No `needs`.
 | 8 | Committed schema is current | `mix troupe.schema.gen` then `git diff --exit-code protocol/schema/v1` | `:252-256` |
 | 9 | Python reference client, end to end | `mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace` | `:261-262` |
 
-### `images` — "image ${{ matrix.release }}" (`ci.yml:150-215`)
+### `images` — "image ${{ matrix.release }}" (`ci.yml:150-236`)
 
 `needs: [check, protocol]`. `if: github.event_name == 'push'` — "A push needs a
 credential and a pull request from a fork has none" (`:133-135`). Runner
@@ -154,32 +154,43 @@ the Scaleway secrets set. `sha-<7>` tags are pushed on every branch push
 ([../AUDIT.md](../AUDIT.md) §3.16). Discrepancy: the comment at `:184-185` says "The
 three images share every layer"; the matrix has four.
 
-### `build` — "build ${{ matrix.target }}" (`ci.yml:264-375`)
+### `build` — "build ${{ matrix.target }}" (`ci.yml:285-410`)
 
 `needs: [check, protocol]`. `fail-fast: false`. Matrix:
 
-| `os` | `target` | `ext` |
-|---|---|---|
-| `ubuntu-latest` | `linux_x86_64` | |
-| `ubuntu-24.04-arm` | `linux_aarch64` | |
-| `macos-15-intel` | `macos_x86_64` | |
-| `macos-14` | `macos_aarch64` | |
-| `windows-latest` | `windows_x86_64` | `.exe` |
+| `os` | `target` |
+|---|---|
+| `ubuntu-latest` | `linux_x86_64` |
+| `ubuntu-24.04-arm` | `linux_aarch64` |
+| `macos-15-intel` | `macos_x86_64` |
+| `macos-14` | `macos_aarch64` |
+
+**There is no Windows target.** `ezstd` — zstd for session segments and snapshots, and a
+hard dependency of `troupe_protocol` — declares
+`{pre_hooks, [{"(linux|darwin)", compile, "make compile_nif"}]}`, so on Windows nothing
+builds its NIF and the build stops at "Missing artifact `priv/ezstd_nif.so`". That is
+upstream's decision, not a gap in the runner. `install.ps1` and `scripts/test-install.ps1`
+remain in the tree; nothing in CI runs them.
 
 | # | Step | What | Lines |
 |---|---|---|---|
-| 1 | checkout | `actions/checkout@v4` | `:283` |
-| 2 | BEAM | `erlef/setup-beam@v1` | `:285-288` |
-| 3 | Zig | `mlugg/setup-zig@v2` | `:290-292` |
-| 4 | Install xz (macOS) | `brew install xz \|\| true` | `:294-296` |
-| 5 | Install xz and 7zip (Windows) | `choco install -y xz 7zip` | `:298-299` |
-| 6 | Build the release | `BURRITO_TARGET=<target> bash scripts/build-local` | `:309-313` |
-| 7 | Name the artifact | `basename` of `burrito_out/troupe-*-<target><ext>`; outputs `name` | `:315-321` |
-| 8 | Smoke test the artifact | `--version`; a fake-provider script with `write_file` and `shell`; `run "smoke" --headless --workspace smoke/ws --auto-approve`; `grep -q packaged smoke/ws/hello.txt`; `sessions --workspace smoke/ws` must print `Sessions for` or `No sessions` | `:323-349` |
-| 9 | Report size and start-up cost | binary size, cold and warm `--version` timings into `$GITHUB_STEP_SUMMARY` after `maintenance uninstall` | `:351-369` |
-| 10 | upload | `actions/upload-artifact@v4`, name and path `burrito_out/<name>`, `if-no-files-found: error` | `:371-375` |
+| 1 | checkout | `actions/checkout@v4` | `:312` |
+| 2 | BEAM | `erlef/setup-beam@v1` | `:314-317` |
+| 3 | Zig | `mlugg/setup-zig@v2` | `:319-321` |
+| 4 | Install xz (macOS) | `brew install xz \|\| true` | `:323-325` |
+| 5 | Build the release | `BURRITO_TARGET=<target> bash scripts/build-local` | `:334-338` |
+| 6 | Name the artifact | `basename` of `burrito_out/troupe-*-<target>`; outputs `name` | `:340-346` |
+| 7 | Smoke test the artifact | `--version`; a fake-provider script with `write_file` and `shell`; `run "smoke" --headless --workspace smoke/ws --auto-approve`; `grep -q packaged smoke/ws/hello.txt`; `sessions --workspace smoke/ws` must print `Sessions for` or `No sessions` | `:348-378` |
+| 8 | upload | `actions/upload-artifact@v4`, name and path `burrito_out/<name>`, `if-no-files-found: error` | `:380-384` |
+| 9 | Report size and start-up cost | binary size, cold and warm `--version` timings into `$GITHUB_STEP_SUMMARY` after `maintenance uninstall` | `:386-410` |
 
-Step 6 used to be a copy of `scripts/build-local` inlined here, and the copy had
+The upload comes before the report, not after: a step that only writes numbers into the
+run summary should not be able to lose the binary three jobs are waiting for, which is
+what happened on both macOS legs the first time this job ran — `date +%s%N` is a GNU
+extension, BSD `date` prints a literal `N`, and the arithmetic then said "value too great
+for base". The timings come from Perl's `Time::HiRes` now, which is core on both images.
+
+Step 5 used to be a copy of `scripts/build-local` inlined here, and the copy had
 drifted: it ran `mix release --overwrite` with no release name, which the umbrella's
 five releases make Mix refuse rather than guess between, and the step after it read the
 version out of `mix run` without `--no-compile`, so the compiler's own progress would
@@ -190,7 +201,7 @@ that refuses it, the unset `EX_RATATUI_BUILD`, the release name, and the artifac
 
 No cache step: this job downloads deps fresh on each runner.
 
-### `containers` — "clean-container check (linux x86_64)" (`ci.yml:377-436`)
+### `containers` — "clean-container check (linux x86_64)" (`ci.yml:412-471`)
 
 `needs: build`. Runner `ubuntu-latest`.
 
@@ -207,7 +218,7 @@ created, before any client has subscribed — so a fresh headless run never prin
 check is now that the run finishes, which is what "the fallback happened rather than the
 session dying with no backend" looks like from outside.
 
-### `installer-sh` — "install.sh (clean ubuntu container, zsh user)" (`ci.yml:438-458`)
+### `installer-sh` — "install.sh (clean ubuntu container, zsh user)" (`ci.yml:473-493`)
 
 `needs: build`. Runner `ubuntu-latest`. Downloads the linux artefact, writes
 `release/SHA256SUMS`, and runs `scripts/test-install.sh` inside `ubuntu:24.04` with the
@@ -215,18 +226,12 @@ repository mounted at `/src` (`:445-458`). The step is named "Install, upgrade, 
 corrupt artifact, uninstall": the script installs from a `file://` release directory,
 upgrades and checks the previous binary is kept, corrupts an artifact and asserts the
 installer refuses it on the checksum, then uninstalls and purges
-(`scripts/test-install.sh`). The Windows job below runs the same scenario through
-`scripts/test-install.ps1`.
+(`scripts/test-install.sh`). `scripts/test-install.ps1` is the same scenario for Windows
+and nothing runs it, because there is no Windows binary to run it against.
 
-### `installer-ps1` — "install.ps1 (windows runner)" (`ci.yml:460-484`)
+### `release` — "publish" (`ci.yml:495-522`)
 
-`needs: build`. Runner `windows-latest`. Downloads the Windows artefact, writes
-`SHA256SUMS` with `Get-FileHash`, runs `./scripts/test-install.ps1 -ReleaseDir release`
-(`:467-484`).
-
-### `release` — "publish" (`ci.yml:486-510`)
-
-`needs: [build, containers, installer-sh, installer-ps1]`.
+`needs: [build, containers, installer-sh]`.
 `if: startsWith(github.ref, 'refs/tags/v')`. Runner `ubuntu-latest`. Permissions
 `contents: write`.
 
@@ -251,9 +256,8 @@ check ───┐
          ├──► images     (push events only; 4 images)
 protocol ┘
 check ───┐
-         ├──► build (5 targets) ──► containers ───┐
-protocol ┘                     ├──► installer-sh ─┼──► release (v* tags only)
-                               └──► installer-ps1 ┘
+         ├──► build (4 targets) ──► containers ────┐
+protocol ┘                     └──► installer-sh ──┴──► release (v* tags only)
 chart   (gates nothing; nothing needs it)
 ```
 
@@ -265,7 +269,7 @@ the repository.
 
 | Artefact | Produced by | Retention / destination |
 |---|---|---|
-| `troupe-<version>-<target>[.exe]` | `build`, one per matrix leg | workflow artefacts (default retention); attached to the GitHub release on a `v*` tag with `SHA256SUMS` |
+| `troupe-<version>-<target>` | `build`, one per matrix leg | workflow artefacts (default retention); attached to the GitHub release on a `v*` tag with `SHA256SUMS` |
 | `<registry>/<namespace>/troupe-{operator,plane,worker,a2a}:sha-<7>` | `images`, every push | the registry named by secrets, else `ghcr.io/<owner>` |
 | `…:<version>` | `images`, on `v*` tags | same |
 | step summary with size and start-up cost | `build` | the run's summary page |
