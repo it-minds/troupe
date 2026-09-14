@@ -102,6 +102,10 @@ It runs `scripts/deploy` — the same script a person runs on a laptop — rathe
 reimplementing it. Two implementations of "deploy" is how the documented one stops being
 what actually happens.
 
+(`scripts/deploy` was committed without its executable bit, which a Windows checkout
+cannot preserve. Nothing noticed, because nothing but a person on their own machine had
+ever run it. It is `100755` now.)
+
 | secret | what it is |
 |---|---|
 | `KUBECONFIG` | the cluster's kubeconfig, written to `.local/kubeconfig.yaml` where the script looks |
