@@ -111,8 +111,7 @@ defmodule Troupe.Plane.Web.Index do
         <figure class="hero-mask">
           <img src="#{@brand}/mask.png" width="760" height="859" fetchpriority="high" decoding="async" alt="The Troupe mask: one face, the left half black, the right half magenta.">
           <figcaption>
-            One mask, split down the middle. The filled half is the work an agent did on
-            its own; the hollow half is the part still waiting on a person.
+            All actors wear masks, which one are you putting on today?
           </figcaption>
         </figure>
       </section>
