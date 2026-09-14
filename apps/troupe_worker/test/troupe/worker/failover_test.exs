@@ -20,6 +20,7 @@ defmodule Troupe.Worker.FailoverTest do
   alias Troupe.Plane.{EnrolmentStub, Fleet, Placement, Replica, Repo}
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.PlaneHelper
   alias Troupe.Worker.Service
   alias Troupe.Worker.Session.{Manager, Sealer}
 
@@ -100,7 +101,7 @@ defmodule Troupe.Worker.FailoverTest do
     # The replica this worker is attached to goes away. Its connections go with it,
     # which is what a killed pod does to the TCP it was holding.
     Service.put_backends(context.service, [context.peer_port])
-    stop_plane()
+    PlaneHelper.stop_plane()
 
     started = System.monotonic_time(:millisecond)
     eventually(fn -> not Link.connected?(link) end, 5_000)
@@ -133,7 +134,7 @@ defmodule Troupe.Worker.FailoverTest do
     assert worker.healthy
 
     Service.put_backends(context.service, [context.peer_port])
-    stop_plane()
+    PlaneHelper.stop_plane()
 
     eventually(fn -> Link.connected?(link) end, 10_000)
 

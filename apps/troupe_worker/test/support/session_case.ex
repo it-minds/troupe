@@ -13,8 +13,6 @@ defmodule Troupe.Worker.SessionCase do
   alias Troupe.KMS
   alias Troupe.LLM.Fake
   alias Troupe.ObjectStore
-  alias Troupe.Plane.Control.Connections
-  alias Troupe.Plane.Control.Listener
   alias Troupe.Protocol.Event
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Drain
@@ -267,35 +265,6 @@ defmodule Troupe.Worker.SessionCase do
     after
       timeout -> ExUnit.Assertions.flunk("the root agent never finished its turn")
     end
-  end
-
-  @doc """
-  Take the plane away the way a killed replica does, without taking the test's database
-  connection with it.
-
-  `Troupe.Plane.Control.Connection` does not trap exits, so a supervisor shutdown kills
-  it where it stands — and where it stands is sometimes inside a query. The sandbox
-  hands every process one shared connection, so a client that exits mid-checkout takes
-  that connection down with it, and every plane process after it fails with an
-  `OwnershipError` a hundred lines away from the `stop_supervised!` that caused it.
-  `GenServer.stop/3` goes through the process's own loop instead: each connection
-  finishes the callback it is in, runs `terminate/2`, and closes its socket. What the
-  worker sees is the same either way — a socket that went.
-  """
-  @spec stop_plane(String.t()) :: :ok
-  def stop_plane(profile \\ "dev") do
-    ExUnit.Callbacks.stop_supervised!(Listener)
-
-    for pid <- Connections.for_profile(profile) do
-      try do
-        GenServer.stop(pid, :normal, 5_000)
-      catch
-        :exit, _already_gone -> :ok
-      end
-    end
-
-    ExUnit.Callbacks.stop_supervised!(Connections)
-    :ok
   end
 
   @doc "Poll until `fun` returns a truthy value, or fail."

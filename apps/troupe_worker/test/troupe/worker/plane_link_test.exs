@@ -16,6 +16,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
   alias Troupe.Plane.{Fleet, Repo}
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.PlaneHelper
   alias Troupe.Worker.RecordingProxy
 
   @moduletag timeout: 180_000
@@ -154,7 +155,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       # replica behind a Service looks like from here. Its connections go with it: a
       # listener that stops does not close the sockets it has already handed over.
       port = context.port
-      stop_plane()
+      PlaneHelper.stop_plane()
       eventually(fn -> not Link.connected?(link) end)
 
       start_supervised!(Connections)
@@ -173,7 +174,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       assert {:ok, _} = activate(context, report: Link.reporter(link))
 
       port = context.port
-      stop_plane()
+      PlaneHelper.stop_plane()
       eventually(fn -> not Link.connected?(link) end)
 
       # Sealing does not depend on the plane being up, so this still reaches object
