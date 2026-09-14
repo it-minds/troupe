@@ -2,6 +2,14 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 593 tracked files (`git ls-files | wc -l` on 2026-09-13). The umbrella root has no `lib/`
 of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Reaper` and
 `Troupe.Release`, live in `apps/troupe_core/lib/` (`DECISIONS.md:8-16`).
@@ -14,28 +22,26 @@ of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Rea
 ├── .dockerignore            what the image build never needs
 ├── .formatter.exs           inputs: {mix,.formatter}.exs and {config,lib,test}/** at the ROOT only (:3)
 ├── .github/workflows/ci.yml the one workflow
-├── .gitignore               _build, deps, burrito_out, apps/*/priv/reaper, .local/ (:1-13)
+├── .gitignore               _build, deps, apps/*/priv/reaper, .local/
 ├── .tool-versions           erlang 28.5.0.5, elixir 1.20.4-otp-28, zig 0.16.0
 ├── ARCHITECTURE.md          prose architecture (stale in places; see architecture.md)
 ├── DECISIONS.md             every deviation from spec.md, numbered, newest at the bottom (:1-4)
 ├── PROTOCOL.md              the normative wire document for client authors
-├── README.md                install, use, configure, build, embed
+├── README.md                what it ships, deploy, the front door, the console, build
 ├── REPORT.md                per-stage evidence that done items are done
 ├── spec.md                  the specification DECISIONS.md deviates from
-├── apps/                    nine Mix projects (below)
+├── apps/                    seven Mix projects (below)
 ├── charts/troupe/           the Helm chart, its CRDs and three values files
-├── clients/python/          troupe.py (reference client) and conformance.py
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
 ├── deploy/scaleway/         ingress-nginx, cert-manager and OpenBao values for Kapsule
 ├── dev/                     docker-compose.yml; kind/dependencies.yaml and kind/values.yaml
-├── docker/Dockerfile        one two-stage Dockerfile for the four server releases
+├── docker/Dockerfile        one two-stage Dockerfile for all four releases
 ├── docs/                    AUDIT.md, a2a.md, deploying-on-scaleway.md, design/admin/, plans/, and the four tracks
-├── fixtures/sample_repo/    a small Elixir project used by apps/troupe_ctl/test/troupe/cli/options_test.exs
-├── install.sh, install.ps1  end-user installers for the Burrito binary
+├── fixtures/sample_repo/    a small Elixir project the core's workspace tests read
 ├── mix.exs, mix.lock        the umbrella: aliases (check), releases, umbrella-wide deps
 ├── native/reaper/reaper.zig the process-tree reaper, one source for every triple
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, dev-down, kind-up, kind-down, build-images, build-local, remote-up, pitr-drill, test-install.{sh,ps1}
+├── scripts/                 dev-up, dev-down, kind-up, kind-down, build-images, remote-up, pitr-drill, brand-icons.py
 └── test/fixtures/logs/      recorded log fixtures per released version (0.2.0/)
 ```
 
@@ -73,7 +79,7 @@ lib/mix/tasks/compile.reaper.ex         the :reaper compiler (mix.exs:15)
 lib/mix/tasks/troupe.boundaries.ex      the coupling check
 lib/mix/tasks/troupe.fixtures.record.ex records test/fixtures/logs/<version>/
 lib/troupe.ex                           the embedding API (start_session, send_input, ...)
-lib/troupe/{application,config,paths,registry,events,release,reaper,sandbox,wrapper,workspace,gitignore,mounts,skills,mcp,mcp/tool,budget,todo,tool,tools}.ex
+lib/troupe/{application,config,paths,registry,events,release,reaper,sandbox,workspace,gitignore,mounts,skills,mcp,mcp/tool,budget,todo,tool,tools}.ex
 lib/troupe/agent/{definition,definitions,node,server,state}.ex
 lib/troupe/llm/{endpoint,message,provider,request,sse}.ex, llm/providers/{anthropic,openai,fake}.ex
 lib/troupe/log/{fold,upcast}.ex
@@ -96,17 +102,12 @@ test/support/harness_case.ex            several clients as distinct principals o
 test/troupe/gateway/**                  11 files, including python_client_test.exs
 ```
 
-### `apps/troupe_tui` and `apps/troupe_ctl` — the clients
+### There are no client apps
 
-```
-troupe_tui/lib/troupe/ui/tui.ex, ui/tui/{server,state,view,connectors}.ex
-troupe_tui/lib/troupe/ui/hq.ex, ui/hq/{server,state,view}.ex
-troupe_ctl/lib/troupe/cli.ex
-troupe_ctl/lib/troupe/ctl/{admin,application,credentials,login,mcp,remote,verify}.ex
-troupe_ctl/lib/troupe/ui/headless.ex
-```
-
-Neither has a `priv/`. `troupe_ctl/test` has 5 files, `troupe_tui/test` 4.
+`apps/troupe_tui` and `apps/troupe_ctl` — the terminal UI, the fleet view, the CLI, the
+headless renderer and the login and credential handling — were deleted on 2026-09-14.
+Nothing in this repository is a client any more, and nothing it builds is installed on a
+machine. `git show 20fe871:apps/troupe_ctl` has them if the client repository wants them.
 
 ### `apps/troupe_worker` — a pod
 
@@ -180,7 +181,7 @@ test/troupe/a2a/**                        5 files
 | Database migrations | `apps/troupe_plane/priv/repo/migrations/` |
 | CRDs | `charts/troupe/crds/{workerprofile,teamvolume,troupepolicy}.yaml`; the admission policy is a template, `charts/troupe/templates/admission-policy.yaml` |
 | Design tokens | `docs/design/admin/tokens.json` (with `DESIGN.md`, `example.dc.html`, `support.js`) |
-| Python client | `clients/python/troupe.py`, `clients/python/conformance.py` (a tracked `__pycache__/troupe.cpython-312.pyc` sits beside them; [../AUDIT.md](../AUDIT.md) §3.20) |
+| Python conformance fixture | `apps/troupe_gateway/test/conformance/troupe.py` and `conformance.py` — a test fixture under the suite that runs it, not a client this repository publishes |
 
 ## 4. Generated files and the task that writes each
 
@@ -198,7 +199,8 @@ test/troupe/a2a/**                        5 files
 
 `docker/Dockerfile:25-43` copies `mix.exs`, `mix.lock`, each `apps/*/mix.exs`, then
 `config/`, `apps/` and `native/`, and nothing else. `.dockerignore` removes `_build`,
-`deps`, `burrito_out`, `apps/*/priv/reaper`, every `test/` directory, `fixtures`, `docs`,
-`clients`, `charts`, `dev`, `scripts` and `*.md` (`.dockerignore:5-31`). This is why
+`deps`, `apps/*/priv/reaper`, every `test/` directory (which is where the Python
+conformance fixture now lives), `fixtures`, `docs`, `charts`, `dev`, `scripts` and
+`*.md`. This is why
 `priv/design/statuses.json` is vendored into the app instead of read from `docs/`
 (`troupe.admin.tokens.ex:38-43`).

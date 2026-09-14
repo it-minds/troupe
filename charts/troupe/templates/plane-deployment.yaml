@@ -219,6 +219,12 @@ spec:
             # host; empty means this plane ships without one and the index offers no door.
             - name: TROUPE_APP_URL
               value: {{ .Values.plane.appUrl | quote }}
+            # And where the terminal client is published — a release from another
+            # repository, which this cluster does not host. Empty means the page tells a
+            # reader to ask an administrator instead of linking at a download that is not
+            # there.
+            - name: TROUPE_CLI_URL
+              value: {{ .Values.plane.cliUrl | quote }}
             # Browser origins the API answers cross-origin requests from. Empty means
             # none: the panel is same-origin and `troupe` is not a browser.
             - name: TROUPE_CORS_ORIGINS

@@ -4,15 +4,23 @@
 > against the `ci/green-suite` work of 2026-09-14, which is the first time any of these
 > jobs past `check` has run. See [AUDIT.md](../AUDIT.md).
 
-One workflow: `.github/workflows/ci.yml`, named `ci`. Nine jobs. Every step is listed
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
+One workflow: `.github/workflows/ci.yml`, named `ci`. Five jobs. Every step is listed
 below in file order.
 
 Three facts first, because the rest of this document is detail:
 
 - **There is no deploy step.** No job applies a chart, touches a cluster or talks to a
-  staging or production environment. Delivery ends at images in a registry and binaries
-  on a GitHub release. How a build reaches a cluster is a manual procedure in
-  [deployment.md](deployment.md).
+  staging or production environment. Delivery ends at four images in a registry and, on a
+  `v*` tag, a packaged chart on a GitHub release. How a build reaches a cluster is a
+  manual procedure in [deployment.md](deployment.md).
 - **No branch protection or required-check configuration is recorded in the
   repository.** Which jobs gate a merge, if any, lives in the forge's settings, and the
   workflow header says it is written to run on both GitHub and Forgejo (`ci.yml:4-6`).
@@ -154,125 +162,57 @@ the Scaleway secrets set. `sha-<7>` tags are pushed on every branch push
 ([../AUDIT.md](../AUDIT.md) §3.16). Discrepancy: the comment at `:184-185` says "The
 three images share every layer"; the matrix has four.
 
-### `build` — "build ${{ matrix.target }}" (`ci.yml:285-410`)
+### `release` — "publish the chart"
 
-`needs: [check, protocol]`. `fail-fast: false`. Matrix:
-
-| `os` | `target` |
-|---|---|
-| `ubuntu-latest` | `linux_x86_64` |
-| `ubuntu-24.04-arm` | `linux_aarch64` |
-| `macos-15-intel` | `macos_x86_64` |
-| `macos-14` | `macos_aarch64` |
-
-**There is no Windows target.** `ezstd` — zstd for session segments and snapshots, and a
-hard dependency of `troupe_protocol` — declares
-`{pre_hooks, [{"(linux|darwin)", compile, "make compile_nif"}]}`, so on Windows nothing
-builds its NIF and the build stops at "Missing artifact `priv/ezstd_nif.so`". That is
-upstream's decision, not a gap in the runner. `install.ps1` and `scripts/test-install.ps1`
-remain in the tree; nothing in CI runs them.
-
-| # | Step | What | Lines |
-|---|---|---|---|
-| 1 | checkout | `actions/checkout@v4` | `:312` |
-| 2 | BEAM | `erlef/setup-beam@v1` | `:314-317` |
-| 3 | Zig | `mlugg/setup-zig@v2` | `:319-321` |
-| 4 | Install xz (macOS) | `brew install xz \|\| true` | `:323-325` |
-| 5 | Build the release | `BURRITO_TARGET=<target> bash scripts/build-local` | `:334-338` |
-| 6 | Name the artifact | `basename` of `burrito_out/troupe-*-<target>`; outputs `name` | `:340-346` |
-| 7 | Smoke test the artifact | `--version`; a fake-provider script with `write_file` and `shell`; `run "smoke" --headless --workspace smoke/ws --auto-approve`; `grep -q packaged smoke/ws/hello.txt`; `sessions --workspace smoke/ws` must print `Sessions for` or `No sessions` | `:348-378` |
-| 8 | upload | `actions/upload-artifact@v4`, name and path `burrito_out/<name>`, `if-no-files-found: error` | `:380-384` |
-| 9 | Report size and start-up cost | binary size, cold and warm `--version` timings into `$GITHUB_STEP_SUMMARY` after `maintenance uninstall` | `:386-410` |
-
-The upload comes before the report, not after: a step that only writes numbers into the
-run summary should not be able to lose the binary three jobs are waiting for, which is
-what happened on both macOS legs the first time this job ran — `date +%s%N` is a GNU
-extension, BSD `date` prints a literal `N`, and the arithmetic then said "value too great
-for base". The timings come from Perl's `Time::HiRes` now, which is core on both images.
-
-Step 5 used to be a copy of `scripts/build-local` inlined here, and the copy had
-drifted: it ran `mix release --overwrite` with no release name, which the umbrella's
-five releases make Mix refuse rather than guess between, and the step after it read the
-version out of `mix run` without `--no-compile`, so the compiler's own progress would
-have ended up in the filename. It now runs the script, which owns the musl ABI the Linux
-wrapper's ERTS needs, the Zig cache directories that keep `renameat2` off a filesystem
-that refuses it, the unset `EX_RATATUI_BUILD`, the release name, and the artifact name
-`troupe-<version>-<target>`.
-
-No cache step: this job downloads deps fresh on each runner.
-
-### `containers` — "clean-container check (linux x86_64)" (`ci.yml:412-471`)
-
-`needs: build`. Runner `ubuntu-latest`.
-
-| # | Step | What | Lines |
-|---|---|---|---|
-| 1 | checkout | `actions/checkout@v4` | `:382` |
-| 2 | download | `actions/download-artifact@v4`, pattern `troupe-*-linux_x86_64`, merged into `dist/` | `:384-388` |
-| 3 | Run in glibc and musl containers with nothing installed | for `ubuntu:24.04` and `alpine:latest`: assert `erl`, `elixir`, `mix`, `inotifywait` are absent; `--version`; a headless fake-provider run; `grep packaged`; a `--watch` run that must also finish and write its file | `:390-436` |
-
-The watch half used to grep the output for `polling for changes`, which is not a string
-this codebase contains. The notice reads `watch: no native file watcher available,
-polling every Nms` and is published as an *ephemeral* event while the session is being
-created, before any client has subscribed — so a fresh headless run never prints it. The
-check is now that the run finishes, which is what "the fallback happened rather than the
-session dying with no backend" looks like from outside.
-
-### `installer-sh` — "install.sh (clean ubuntu container, zsh user)" (`ci.yml:473-493`)
-
-`needs: build`. Runner `ubuntu-latest`. Downloads the linux artefact, writes
-`release/SHA256SUMS`, and runs `scripts/test-install.sh` inside `ubuntu:24.04` with the
-repository mounted at `/src` (`:445-458`). The step is named "Install, upgrade, reject a
-corrupt artifact, uninstall": the script installs from a `file://` release directory,
-upgrades and checks the previous binary is kept, corrupts an artifact and asserts the
-installer refuses it on the checksum, then uninstalls and purges
-(`scripts/test-install.sh`). `scripts/test-install.ps1` is the same scenario for Windows
-and nothing runs it, because there is no Windows binary to run it against.
-
-### `release` — "publish" (`ci.yml:495-522`)
-
-`needs: [build, containers, installer-sh]`.
+`needs: [check, protocol, chart, images]`.
 `if: startsWith(github.ref, 'refs/tags/v')`. Runner `ubuntu-latest`. Permissions
 `contents: write`.
 
-| # | Step | What | Lines |
-|---|---|---|---|
-| 1 | download | `actions/download-artifact@v4`, pattern `troupe-*`, merged into `dist/` | `:494-498` |
-| 2 | Checksums | `sha256sum troupe-* > SHA256SUMS` in `dist/` | `:500-504` |
-| 3 | publish | `softprops/action-gh-release@v2` with `dist/troupe-*` and `dist/SHA256SUMS` | `:506-510` |
+| # | Step | What |
+|---|---|---|
+| 1 | checkout, `azure/setup-helm@v4` | the chart is the artefact, so the chart has to be on disk |
+| 2 | Package the chart at this version | `helm package charts/troupe --version <tag without v> --app-version <same> --destination dist`, so an install of that file pulls the images this run built rather than whatever `values.yaml` was last edited to say |
+| 3 | publish | `softprops/action-gh-release@v2` with `dist/troupe-*.tgz`, and a body giving the `helm upgrade --install` line |
 
-`install.sh:17` and `install.ps1:39` default to
-`https://github.com/it-minds/troupe-remote/releases/latest/download`, which is where this
-job publishes. They used to default to `objective-mj/troupe`, a repository that does not
-resolve, and nothing in CI noticed because both installer jobs are pointed at a `file://`
-directory instead ([../AUDIT.md](../AUDIT.md) §4.2). **An anonymous install still fails**:
-this repository is private, so its releases are not downloadable without a token. Making
-them public is a distribution decision, not a CI one.
+### The four jobs that are gone
+
+`build`, `containers`, `installer-sh` and `installer-ps1` were the client half of this
+pipeline: a matrix with one native runner per target building a Burrito executable, a
+clean-container check that ran it in `ubuntu:24.04` and `alpine:latest` with no Erlang
+installed, and the installers exercised end to end against a `file://` release directory.
+`release` then attached the binaries and a `SHA256SUMS` to a GitHub release.
+
+All four were deleted with the client itself. This repository is deployed to Kubernetes
+and installed on no machine, so the only artefacts worth publishing are the four images —
+which `images` already tags with the version on a `v*` tag — and the chart, which is what
+`release` now packages. The open question the old `release` carried with it, that
+`install.sh` pointed at a private repository's release assets and an anonymous install
+would fail, went away with the installers rather than being answered.
 
 ## 3. Dependency graph
 
 ```
 check ───┐
-         ├──► images     (push events only; 4 images)
-protocol ┘
-check ───┐
-         ├──► build (4 targets) ──► containers ────┐
-protocol ┘                     └──► installer-sh ──┴──► release (v* tags only)
-chart   (gates nothing; nothing needs it)
+         ├──► images (push events only; 4 images) ──┐
+protocol ┘                                          ├──► release (v* tags only)
+chart ──────────────────────────────────────────────┘
 ```
 
-Only `check` and `protocol` are prerequisites for anything. `chart` runs in parallel and
-its failure stops no other job. Whether any job is a required check on `main` is not in
+`chart` used to gate nothing. It gates `release` now, because the thing `release`
+publishes is the chart, and publishing one that `kubeconform` has not seen would be
+worse than publishing nothing. Whether any job is a required check on `main` is not in
 the repository.
 
 ## 4. Artefacts and where they end up
 
 | Artefact | Produced by | Retention / destination |
 |---|---|---|
-| `troupe-<version>-<target>` | `build`, one per matrix leg | workflow artefacts (default retention); attached to the GitHub release on a `v*` tag with `SHA256SUMS` |
-| `<registry>/<namespace>/troupe-{operator,plane,worker,a2a}:sha-<7>` | `images`, every push | the registry named by secrets, else `ghcr.io/<owner>` |
+| `<registry>/<namespace>/troupe-{operator,plane,worker,a2a}:sha-<7>` | `images`, every push | the registry named by secrets |
 | `…:<version>` | `images`, on `v*` tags | same |
-| step summary with size and start-up cost | `build` | the run's summary page |
+| `troupe-<version>.tgz` | `release`, on `v*` tags | attached to the GitHub release; `--version` and `--app-version` are the tag, so the chart pulls the images of the same run |
+
+There is no binary artefact of any kind, and no `SHA256SUMS`: nothing here is downloaded
+onto a machine and run.
 
 ## 5. Caches
 
@@ -280,7 +220,6 @@ the repository.
 |---|---|---|
 | `deps`, `_build` | `check`, `protocol` | `${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}`, restore-keys `${{ runner.os }}-mix-` (`:70-76,236-242`) |
 | Docker layer cache | `images` | GitHub Actions cache, `type=gha,mode=max`, shared across the four-image matrix (`:214-215`) |
-| Zig cache | `build` | not cached; `scripts/build-local` redirects it under `$TMPDIR` per run (`scripts/build-local:44-49`) |
 | Zig cache | `check`, `protocol` | `mlugg/setup-zig@v2`'s own cache, on by default |
 
 ## 6. What is not in CI
@@ -290,11 +229,12 @@ the repository.
   ([testing.md](testing.md) §3), so nothing here exercises a real API server: not
   admission, not the operator's reconciliation, not a `TokenReview`.
 - No `helm upgrade`, `kubectl apply`, or environment promotion of any kind. Delivery
-  ends at images in a registry and binaries on a release; see
+  ends at images in a registry and a chart on a release; see
   [deployment.md](deployment.md).
-- No signing of binaries or images (`README.md:325-326`: "no code signing").
-- No publishing anyone can install from: see the note under `release` above.
-- Nothing checks the worker *image* the way the `build` matrix checks the client
-  binary. The Dockerfile now refuses to produce a worker release with no `reaper` in
-  it, which is the failure that used to be silent, but no job starts the image and
-  runs a command through it.
+- No image signing.
+- **Nothing runs the images.** This is the gap the Kubernetes-only change makes the
+  important one: the client binary used to be smoke-tested on four native runners and in
+  two clean containers, and that is exactly the work that has gone away. The Dockerfile
+  refuses to produce a worker release with no `reaper` in it, which is the failure that
+  used to be silent, but no job starts an image, runs a command through it, or brings a
+  plane and a worker up together. A cluster job is the next thing this pipeline needs.

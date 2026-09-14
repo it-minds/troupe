@@ -2,11 +2,14 @@
 # A whole Troupe — plane, operator, workers, and the things they depend on — on one
 # laptop, in kind.
 #
-# This is the *remote* product running locally: `troupe login` against a real identity
-# provider, sessions created through the plane's public API, and a client attaching to a
-# worker pod over a WebSocket. Nothing here is a shortcut around the protocol; what is
-# shortened is the infrastructure, which runs as single replicas on `emptyDir` volumes
-# with development credentials.
+# This is the whole product running locally: a real identity provider, sessions created
+# through the plane's public API, and a client attaching to a worker pod over a WebSocket.
+# Nothing here is a shortcut around the protocol; what is shortened is the infrastructure,
+# which runs as single replicas on `emptyDir` volumes with development credentials.
+#
+# The client is not part of this repository and is not installed by this script. The lines
+# printed at the end are what a terminal client's commands look like against what it just
+# brought up; a browser can do the same through the console and the app.
 #
 # Not idempotent by accident: every step is an apply or an upgrade, so running it again
 # after a change is the way to pick the change up.
@@ -233,10 +236,12 @@ cat <<EOF
   identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
   workers    ws://<n>.${profile}.workers.localtest.me:30080/v1/socket
 
-Log in and use it:
+Log in and use it, with a client from its own repository:
 
   troupe login http://plane.localtest.me:30080
   troupe --remote sessions
   troupe --remote
+
+Or open the console at /admin, which this repository does serve.
 
 EOF

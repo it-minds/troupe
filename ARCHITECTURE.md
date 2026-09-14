@@ -16,25 +16,27 @@ Read it before changing anything under `apps/troupe_gateway/`,
 
 ## 1. The umbrella
 
-Four releases come out of one umbrella.
+Four releases come out of one umbrella, and every one of them is a container image. There
+was a fifth — `troupe`, the TUI and the CLI wrapped by Burrito into an executable per
+platform — and it was deleted on 2026-09-14 along with the two apps it packaged. This
+repository is the remote: it is deployed by `charts/troupe` and installed on no machine,
+and every client is a separate release from a separate repository.
 
 | App | In which release | What it is |
 | --- | --- | --- |
 | `troupe_protocol` | all | The wire: JSON-RPC framing, events, errors, the reference client, endpoint discovery. No sessions, no I/O beyond a socket. |
-| `troupe_core` | `troupe`, `troupe_worker` | Sessions: the agent tree, tools, the log, the index. Unchanged in substance from stage 0. |
-| `troupe_gateway` | `troupe`, `troupe_worker` | The daemon: transports, connections, subscriptions, scopes, idempotency. |
-| `troupe_tui` | `troupe` | The terminal UI, as a protocol client. |
-| `troupe_ctl` | `troupe` | The command line, as a protocol client. |
+| `troupe_core` | `troupe_worker` | Sessions: the agent tree, tools, the log, the index. Unchanged in substance from stage 0. |
+| `troupe_gateway` | `troupe_worker` | The daemon: transports, connections, subscriptions, scopes, idempotency. |
 | `troupe_worker` | `troupe_worker` | Stage 2: a worker pod's link to the plane. |
 | `troupe_plane` | `troupe_plane` | Stage 3: Phoenix, the harness API, the admin panel. |
 | `troupe_operator` | `troupe_operator` | Stage 3: Kubernetes reconciliation. |
+| `troupe_a2a` | `troupe_a2a` | Stage 5: every profile as an agent other agents can call. |
 
 ### 1.1 Boundaries
 
 ```
-troupe_protocol ◄──── troupe_tui
-       ▲        ◄──── troupe_ctl
-       │        ◄──── troupe_plane
+troupe_protocol ◄──── troupe_a2a
+       ▲        ◄──── troupe_plane
        │        ◄──── troupe_operator
        │
    troupe_core ◄──── troupe_gateway ◄──── troupe_worker
@@ -42,12 +44,12 @@ troupe_protocol ◄──── troupe_tui
 
 Three rules, enforced by `mix troupe.boundaries` and therefore by CI:
 
-* **`troupe_tui` and `troupe_ctl` depend only on `troupe_protocol`.** The built-in
-  clients get no private access. If the TUI can do something, a third-party client can
-  do it too — not by policy, but because there is no other door. This is the rule that
-  keeps the protocol honest, and it is the reason it is checked mechanically: a single
-  convenient call into `Troupe.Sessions` would quietly make the TUI special, and
-  nobody would notice for months.
+* **`troupe_a2a` depends only on `troupe_protocol`.** A client in this umbrella gets no
+  private access. If the facade can do something, a third-party client can do it too —
+  not by policy, but because there is no other door. The rule used to cover the TUI and
+  the CLI as well, and with those gone the property is now structural: every client is
+  outside this repository, and the thing that proves the protocol is sufficient is the
+  Python conformance client CI runs against a real daemon.
 * **`troupe_plane` never depends on `troupe_core`.** The plane does not run agents. It
   knows *that* a session exists and who may see it; it never holds one.
 * **`troupe_operator` depends on neither.** It holds cluster privileges and has no

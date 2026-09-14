@@ -2,6 +2,14 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 Every runtime, library and external service the repository actually uses, with the
 reason the code or its comments give. Locked versions come from `mix.lock`; constraints
 from the `mix.exs` that declares the dependency. Where no comment justifies a choice the
@@ -13,17 +21,16 @@ table says "no comment".
 |---|---|---|---|
 | Erlang/OTP | 28.5.0.5 | `.tool-versions:1`; `docker/Dockerfile:8`; `.github/workflows/ci.yml:17` | runtime for every release |
 | Elixir | 1.20.4 (`1.20.4-otp-28`) | `.tool-versions:2`; `docker/Dockerfile:7`; `ci.yml:16`; every `apps/*/mix.exs` requires `~> 1.20` | umbrella language |
-| Zig | 0.16.0 | `.tool-versions:3`; `ci.yml:18`; `scripts/build-local:18-23` | builds `native/reaper/reaper.zig` for five triples (`apps/troupe_core/lib/mix/tasks/compile.reaper.ex:9-13,26-32`) and is what Burrito wraps releases with; "Burrito 1.6 hard-pins Zig 0.16.0" (`scripts/build-local:21`). Without `zig` the reaper compiler is a no-op with a warning (`compile.reaper.ex:14-16,45-53`) |
-| Python | 3.12 in CI | `ci.yml:212-214` | runs `clients/python/conformance.py`, a stdlib-only reference client (`clients/python/troupe.py:1-7`); the test skips without `python3` (`apps/troupe_gateway/test/troupe/gateway/python_client_test.exs:11-12,23-25`) |
-| xz, 7zip | unpinned | `ci.yml:274-280`; `scripts/build-local:16` | Burrito payload compression on macOS/Windows runners |
+| Zig | 0.16.0 | `.tool-versions:3`; `ci.yml` `env.ZIG_VERSION`; `docker/Dockerfile` for the worker image | builds `native/reaper/reaper.zig` — the host triple in a dev loop, the two Linux triples in a release. Without `zig` the reaper compiler is a no-op with a warning, which is why `docker/Dockerfile` installs a pinned Zig for the worker image and then fails the build if the assembled release has no reaper |
+| Python | 3.12 in CI | `ci.yml:212-214` | runs `apps/troupe_gateway/test/conformance/conformance.py`, a stdlib-only fixture (`clients/python/troupe.py:1-7`); the test skips without `python3` (`apps/troupe_gateway/test/troupe/gateway/python_client_test.exs:11-12,23-25`) |
 | Docker, kind, kubectl, helm | unpinned | `scripts/remote-up:25-28`; `scripts/kind-up:10-11` | the only local path to a running plane and worker |
 | Debian base image | `bookworm-20260824-slim` | `docker/Dockerfile:9,48` | runtime stage for the four server images |
 | hexpm/elixir image | `1.20.4-erlang-28.5.0.5-debian-bookworm-20260824-slim` | `docker/Dockerfile:11` | build stage |
 
 ## 2. Elixir dependencies
 
-Umbrella-wide (`mix.exs:25-30`): `credo ~> 1.7` (dev/test, `runtime: false`) and
-`burrito ~> 1.6` (`runtime: false`). The comment at `mix.exs:23-24`: "Each app declares
+Umbrella-wide: `credo ~> 1.7` (dev/test, `runtime: false`),
+and nothing else since `burrito` went with the client binary. The comment at `mix.exs:23-24`: "Each app declares
 the ones it actually uses; these are the tools that run across all of them."
 
 | Library | Locked | Declared in | Reason given |
@@ -45,12 +52,10 @@ the ones it actually uses; these are the tools that run across all of them."
 | `req` | 0.7.4 | protocol `:43` (`~> 0.7`), core `:34` (`~> 0.7.4`), worker `:39`, plane `:66`, a2a `:43` | protocol: "For the key manager and the object store, which are contracts both the plane and the workers hold" (`:40-42`); a2a: "Req is what `troupe_protocol` already carries for the object store, and the plane's own clients use it for `/rpc`" (`:41-42`) |
 | `aws_signature` | 0.4.3 | `apps/troupe_protocol/mix.exs:47` | "SigV4 only. The HTTP is Req's … an S3 client with its own opinions about retries and streaming would be a second HTTP stack to reason about" (`:44-46`) |
 | `ezstd` | 1.2.4 | `apps/troupe_protocol/mix.exs:51` | "Segments are zstd JSONL, as the spec says. A NIF rather than gzip because a session log is highly repetitive and the ratio is what keeps the object tier affordable" (`:48-50`) |
-| `yaml_elixir` | 2.12.2 | protocol `:55`, core `:38`, ctl `:35`, operator `:38` | protocol: agent definitions and skills carry YAML frontmatter and bundles are checked by both plane and worker (`:52-54`); ctl: `troupe admin bundle publish <dir>` reads `mcp.yaml` (`:33-34`) |
+| `yaml_elixir` | 2.12.2 | protocol `:55`, core `:38`, operator `:38` | protocol: agent definitions and skills carry YAML frontmatter and bundles are checked by both plane and worker (`:52-54`); ctl: `troupe admin bundle publish <dir>` reads `mcp.yaml` (`:33-34`) |
 | `ymlr` | 5.1.6 | `apps/troupe_plane/mix.exs:60` | "GitOps mode commits the same manifest the direct mode applies, and a manifest in a repository is YAML because that is what Flux reads" (`:58-59`) |
-| `ex_ratatui` | 0.13.1 | `apps/troupe_tui/mix.exs:35` | no comment in `mix.exs`. Its precompiled NIF is why the Burrito build cannot cross-compile: "rustler_precompiled resolves the ExRatatui NIF against the build host" (`.github/workflows/ci.yml:252-255`, `scripts/build-local:4-6`) and why Linux targets need `TARGET_ABI=musl` (`apps/troupe_core/lib/troupe/release.ex:6-17`) |
-| `burrito` | 1.6.0 | `mix.exs:28` | wraps the `troupe` release into one executable per target (`mix.exs:44-49,86-99`) |
 | `credo` | 1.7.19 | `mix.exs:27` | `mix credo --strict` is part of `mix check` (`mix.exs:37`); configuration in `.credo.exs` |
-| `jason` | 1.4.5 | every app except `troupe_tui` | JSON codec; no comment |
+| `jason` | 1.4.5 | every app | JSON codec; no comment |
 | `telemetry` | 1.4.2 | `apps/troupe_core/mix.exs:36`; `apps/troupe_gateway/mix.exs:34` | core emits `[:troupe, :llm, :start\|:stop]`, `[:troupe, :tool, :stop]`, `[:troupe, :agent, :transition]` (`README.md:293-295`) |
 | `file_system` | 1.1.1 | `apps/troupe_core/mix.exs:37` | the native watch backend runs `inotifywait` / `mac_listener` from its `priv` (`apps/troupe_core/lib/troupe/watch/file_system_backend.ex:6,41-48`) |
 | `stream_data` | 1.4.0 | core `:39`, gateway `:40` (dev/test) | property tests (`apps/troupe_core/test/troupe/agent/property_test.exs`, `apps/troupe_gateway/test/troupe/gateway/replay_property_test.exs`) |

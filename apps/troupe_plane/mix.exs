@@ -58,11 +58,6 @@ defmodule Troupe.Plane.MixProject do
       # GitOps mode commits the same manifest the direct mode applies, and a manifest in
       # a repository is YAML because that is what Flux reads.
       {:ymlr, "~> 5.1"},
-      # Test-only, and in this direction only. The parity test asserts every admin
-      # context function has a `troupe admin` command, which means reading the CLI's own
-      # table rather than a copy of it — and a copy is exactly what the test exists to
-      # prevent. No `lib` code here calls it, which `mix troupe.boundaries` checks.
-      {:troupe_ctl, in_umbrella: true, only: :test},
       {:req, "~> 0.7"},
       {:jason, "~> 1.4"}]
   end

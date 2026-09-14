@@ -2,6 +2,14 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 Only what is enforced by a tool or visible in the code and history. Where a convention
 is stated but not enforced, this says so.
 
@@ -24,7 +32,7 @@ CI's `check` job runs the same five commands as separate steps (`ci.yml:71-90`).
 The rules and their reasons are quoted in [architecture.md](architecture.md) §2. In
 practice, when adding code:
 
-- A client app (`troupe_tui`, `troupe_ctl`, `troupe_a2a`) may call `Troupe.Protocol.*`,
+- A client app — `troupe_a2a` is the only one left — may call `Troupe.Protocol.*`,
   `Troupe.KMS.*`, `Troupe.ObjectStore`, `Troupe.MCP.*`, `Troupe.Policy`,
   `Troupe.WorkerProfile` and `Troupe.Sessions.Storage` — whatever lives under
   `apps/troupe_protocol/lib` — and nothing from the other apps. Needing a server module
@@ -34,10 +42,9 @@ practice, when adding code:
   and no other `Troupe.Plane.*` module (`:41-51`).
 - Every cross-app call must appear as `{:troupe_x, in_umbrella: true}` in the caller's
   `mix.exs`, or the task reports "not declared in mix.exs" (`:128-139`).
-- A test-only dependency in the reverse direction is allowed and used three times
-  (`apps/troupe_tui/mix.exs:34`, `apps/troupe_ctl/mix.exs:39`, `apps/troupe_plane/mix.exs:65`,
-  `apps/troupe_worker/mix.exs:38`); each carries a comment saying why and that the task
-  would still catch a call from `lib/`.
+- A test-only dependency in the reverse direction is allowed; `apps/troupe_worker/mix.exs:38`
+  is the one that remains, and it carries a comment saying why and that the task would
+  still catch a call from `lib/`.
 
 ## 3. Formatting, and its blind spot
 
@@ -140,8 +147,8 @@ enforces any of this.
 | Client endpoint | `<scheme>://<ordinal>-<profile>.<domain>[:port]/v1/socket` | `config/runtime.exs:59-64` |
 | Session id | `YYYYMMDDTHHMMSS-<4 random bytes, url-safe base64>` | `apps/troupe_core/lib/troupe/session.ex:188-197` |
 | Service principal subject | `svc:<team>/<name>` | [../AUDIT.md](../AUDIT.md) §1 (plane note) |
-| Images | `troupe-operator`, `troupe-plane`, `troupe-worker`, `troupe-a2a` (release name with `_` as `-`) | `scripts/build-images:26`; `ci.yml:163` |
-| Burrito artefacts | `troupe-<version>-<target>[.exe]` | `scripts/build-local:90`; `ci.yml:310` |
+| Images | `troupe-operator`, `troupe-plane`, `troupe-worker`, `troupe-a2a` (release name with `_` as `-`) | `scripts/build-images:26`; `ci.yml` `images` matrix |
+| Chart tarball | `troupe-<version>.tgz`, version and app-version both the tag without its `v` | `ci.yml` `release` |
 | Team and org PVCs | `team-<team>`, `org`; the pod's own volume `data` | `names.ex:62-72` |
 | Labels | `app.kubernetes.io/{name,instance,managed-by}`, `troupe.dev/profile`, `troupe.dev/managed=operator` for what the operator wrote and pruning selects | `names.ex:79-110` |
 | Test files and modules | `<subject>_test.exs` defining `Troupe.<App>.<Subject>Test`; `describe` and `test` names are sentences describing a property, and each file opens with a `@moduledoc` saying what it proves and how it skips | e.g. `apps/troupe_plane/test/troupe/plane/admin_parity_test.exs:1-33`; enforced only by `WrongTestFilename` |
@@ -162,9 +169,7 @@ The edits:
    with a summary ending in a full stop, typed `%Argument{}`s each with a description,
    a `risk`, and `confirm` naming an argument when the risk is `:destructive`
    (`api.ex:16-35`; checked at `admin_parity_test.exs:107-134`).
-3. A `{~w(words), "admin.x.y", ["arg", ...], "help"}` row in `@commands` in
-   `apps/troupe_ctl/lib/troupe/ctl/admin.ex:19-`.
-4. The console: a LiveView under `apps/troupe_plane/lib/troupe/plane/web/live/` that
+3. The console: a LiveView under `apps/troupe_plane/lib/troupe/plane/web/live/` that
    calls `Admin.<function>` and nothing else in `Troupe.Plane.*` (the module rule in
    `troupe.boundaries.ex:48-51`).
 

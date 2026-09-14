@@ -22,11 +22,12 @@ everything that happened. A **session** is one such agent tree plus its log and 
 `PROTOCOL.md`: the terminal UI, the CLI, a Python script, the GUI in its own repository, or
 the A2A facade acting for another agent.
 
-Two deployment shapes share one codebase (`mix.exs:44-101`):
+The codebase still has two deployment shapes in it, but only one of them is built here:
 
-- **Local**: the `troupe` binary is the CLI, the TUI and a daemon in one Burrito executable.
-  The daemon owns sessions on the person's machine and clients attach over a Unix socket or
-  loopback TCP.
+- **Local**: a daemon owns sessions on a person's machine and clients attach over a Unix
+  socket or loopback TCP. `troupe_core` and `troupe_gateway` implement it and the suite
+  exercises it, but no release in this repository packages it — that is a client's job,
+  and clients live elsewhere now.
 - **Remote**: a **plane** (control plane) decides who may use what and where a session runs;
   an **operator** turns a `WorkerProfile` custom resource into a namespace of **worker pods**;
   a worker pod is the same daemon code, reached over a WebSocket with a short-lived token.
@@ -41,16 +42,19 @@ the plane keeps an index of logs, never their content
 
 ## 2. The umbrella and its boundaries
 
-Nine Mix applications, five releases.
+Seven Mix applications, four releases — and all four are container images. There was a
+fifth release, `troupe`, that packaged a terminal UI and a command line into one
+executable per platform; it and its two apps were deleted on 2026-09-14, because this
+repository is deployed to Kubernetes rather than installed on a machine. Every client is
+now outside it.
 
 ```mermaid
 flowchart LR
   subgraph clients["Clients (protocol only)"]
-    tui[troupe_tui]
-    ctl[troupe_ctl]
     a2a[troupe_a2a]
     gui[troupe-gui<br/>separate repo]
-    py[clients/python]
+    cli[terminal client<br/>separate repo]
+    py[conformance fixture<br/>test/conformance]
   end
   proto[troupe_protocol<br/>wire, events, tokens,<br/>KMS + S3 clients, bundles]
   core[troupe_core<br/>agents, tools, log, index]
@@ -59,8 +63,6 @@ flowchart LR
   plane[troupe_plane<br/>Phoenix, /rpc, console,<br/>ledger, control channel]
   op[troupe_operator<br/>Bonny reconciler]
 
-  tui --> proto
-  ctl --> proto
   a2a --> proto
   plane --> proto
   op --> proto
@@ -86,13 +88,13 @@ carry the design:
 
 A fourth, module-level rule keeps the admin console honest: `Troupe.Plane.Web.Live.*` may
 call only `Troupe.Plane.Admin` among the plane's modules
-(`troupe.boundaries.ex:48-51`), so a LiveView cannot grow a private path the CLI lacks.
+(`troupe.boundaries.ex:48-51`), so a LiveView cannot grow a private path that the JSON-RPC
+and MCP surfaces lack.
 
-Releases: `troupe` (core + protocol + gateway + tui + ctl, wrapped by Burrito for five
-targets), `troupe_worker` (core + protocol + gateway + worker), `troupe_plane`,
-`troupe_operator`, `troupe_a2a` (`mix.exs:52-101`). One `docker/Dockerfile` builds the four
-server images from a `RELEASE` build argument; only the worker image carries `git` and
-`bubblewrap` (`docker/Dockerfile:57-62`).
+Releases: `troupe_worker` (core + protocol + gateway + worker), `troupe_plane`,
+`troupe_operator`, `troupe_a2a`. One `docker/Dockerfile` builds all four images from a
+`RELEASE` build argument; only the worker image carries `git` and `bubblewrap`, and only
+the worker image carries Zig, which builds the reaper it is then checked for.
 
 **Trade-off.** Mechanical boundaries cost a custom Mix task and occasional friction (a helper
 that would be convenient to share between the plane and the operator has to live in
@@ -113,8 +115,9 @@ event to the previous one over canonical JSON — keys sorted by code point, no 
 whitespace — computed over the event *without* its own `prev_hash`
 (`apps/troupe_protocol/lib/troupe/protocol/event.ex`, `canonical.ex`). A client can therefore
 verify the history it was handed without trusting the server that handed it over;
-`troupe verify` and the Python conformance client both do exactly that
-(`apps/troupe_ctl/lib/troupe/verify.ex`, `clients/python/conformance.py`).
+the Python conformance client does exactly that
+(`apps/troupe_gateway/test/conformance/conformance.py`), as did the `troupe verify`
+command before the CLI moved out.
 
 `Troupe.Session.Log` is a process per session that appends to `events.jsonl`, calls
 `:file.sync` before replying, publishes the event it just wrote, and hands it to the usage

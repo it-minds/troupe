@@ -2,6 +2,14 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
+> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
+> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
+> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
+> `installer-ps1` CI jobs, and moved `clients/python` to
+> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
+> that; line citations that predate it refer to the tree at commit `20fe871`.
+
 There is no `.env.example` in this repository ([../AUDIT.md](../AUDIT.md) §1.5). The
 variables a developer may set are tabulated in §7 of this document; every runtime
 variable a deployment sets is in [../admin/configuration.md](../admin/configuration.md).
@@ -14,7 +22,7 @@ From `.tool-versions`:
 |---|---|---|
 | Erlang/OTP | 28.5.0.5 | everything |
 | Elixir | 1.20.4-otp-28 | everything |
-| Zig | 0.16.0 | `mix compile.reaper` (runs as a compiler on every `mix compile`, `apps/troupe_core/mix.exs:15`). Without `zig` on `PATH` it prints a warning and skips, and "the `shell` tool will not run until it is built" (`apps/troupe_core/lib/mix/tasks/compile.reaper.ex:45-53`). Required for `scripts/build-local` (`:15,18-23`) |
+| Zig | 0.16.0 | `mix compile.reaper` (runs as a compiler on every `mix compile`, `apps/troupe_core/mix.exs:15`). Without `zig` on `PATH` it prints a warning and skips, and "the `shell` tool will not run until it is built" (`apps/troupe_core/lib/mix/tasks/compile.reaper.ex:45-53`). `docker/Dockerfile` installs it for the worker image and fails the build if no reaper comes out |
 
 Optional, each unlocking a part of the suite that otherwise skips (details in
 [testing.md](testing.md)):
@@ -26,7 +34,6 @@ Optional, each unlocking a part of the suite that otherwise skips (details in
 | `bubblewrap` | `apps/troupe_core/test/troupe/sandbox_test.exs` |
 | `inotify-tools` (Linux) | the native watch backend; CI installs it (`.github/workflows/ci.yml:56-59`) |
 | `kind`, `kubectl`, `helm` | `scripts/kind-up`, `scripts/remote-up`, and the operator's and plane's cluster suites |
-| `xz` | `scripts/build-local:16` |
 
 ## 2. Dependencies and the gate
 
@@ -228,7 +235,7 @@ in [../admin/configuration.md](../admin/configuration.md).
 
 | Variable | Read by | Effect |
 |---|---|---|
-| `MIX_ENV` | Mix | `test` for the suite; `prod` for `mix release` (`scripts/build-local:60`, `ci.yml:287`, `docker/Dockerfile:20`). Only `prod` evaluates `config/runtime.exs` (`:94`) |
+| `MIX_ENV` | Mix | `test` for the suite; `prod` for `mix release` (`docker/Dockerfile`). Only `prod` evaluates `config/runtime.exs` (`:94`) |
 | `TROUPE_SKIP_BUILD` | `scripts/remote-up:81,151` | `1` skips `scripts/build-images` and the plane/operator rollout restart |
 | `TROUPE_PROFILE_NAME` | `scripts/remote-up:20` | the dev `WorkerProfile` name; default `dev` |
 | `TROUPE_GATEWAY_URL` | `scripts/remote-up:181` | `llm.endpoint` of the dev profile; default `https://llm-gw.itmindsinternal.dk/v1` |
@@ -241,21 +248,17 @@ in [../admin/configuration.md](../admin/configuration.md).
 | `TROUPE_PUSH` | `scripts/build-images:22,34-36` | `true` pushes; anything else loads into kind if the cluster exists |
 | `TROUPE_PG_CONTAINER` | `scripts/pitr-drill:24` | compose container name; default `troupe-dev-postgres-1` |
 | `TROUPE_PITR_DB` | `scripts/pitr-drill:25` | database the drill runs against; default `troupe_plane_test` |
-| `TROUPE_REAPER_TARGETS` | `apps/troupe_core/lib/mix/tasks/compile.reaper.ex:78-84` | `all` builds all five triples (set by `Troupe.Release.build_reapers/1`, `scripts/build-local:62`, `ci.yml:289`); unset builds the host triple; a comma-separated list builds those |
-| `BURRITO_TARGET` | Burrito; `apps/troupe_core/lib/troupe/release.ex:73-78`; `scripts/build-local:41` | which target `mix release troupe` wraps; `linux_*` enables the musl NIF check |
-| `TARGET_ABI` | `rustler_precompiled` via `ex_ratatui` | `musl` for Linux targets (`scripts/build-local:51-54`, `ci.yml:291-295`, `release.ex:89-96`) |
-| `ZIG_LOCAL_CACHE_DIR`, `ZIG_GLOBAL_CACHE_DIR` | Zig | moved to a plain local filesystem because Zig 0.16's `renameat2` flags fail with `EINVAL` on ecryptfs and some network mounts (`scripts/build-local:43-49`, `ci.yml:297-301`) |
+| `TROUPE_REAPER_TARGETS` | `apps/troupe_core/lib/mix/tasks/compile.reaper.ex` | a comma-separated list of triples, or `all`; the default is the host triple. `Troupe.Release.build_reapers/1` sets the two Linux triples when it packs a release (`releasild-local:62`, `ci.yml:289`); unset builds the host triple; a comma-separated list builds those |
+| `ZIG_LOCAL_CACHE_DIR`, `ZIG_GLOBAL_CACHE_DIR` | Zig | worth pointing at a plain local filesystem: Zig 0.16's `renameat2` flags fail with `EINVAL` on ecryptfs and some network mounts, and Zig treats that as a programmer bug and aborts |
 | `TROUPE_PROVIDER` | `apps/troupe_core/lib/troupe/config.ex:141` | `anthropic`, `openai`, `fake` |
 | `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL` | `config.ex:142-144` | provider endpoint, key, model. `TROUPE_BASE_URL` means the LLM endpoint here and the plane's public URL on a plane ([../AUDIT.md](../AUDIT.md) §3.4) |
 | `TROUPE_FAKE_SCRIPT` | `config.ex:145`; `apps/troupe_core/lib/troupe/session.ex:114-122` | path to a JSON script for the fake provider; raises if the file is missing. Used by the CI smoke tests (`ci.yml:333-334`) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | `apps/troupe_core/lib/troupe/llm/providers/anthropic.ex:264`, `openai.ex:312` | fallback when `api_key` is unset |
 | `TROUPE_STATE_HOME` | `apps/troupe_core/lib/troupe/paths.ex:33-38` | overrides the state directory (`sessions/`); test helpers delete it and case templates pass `state_dir` through config instead (`apps/troupe_core/test/test_helper.exs:9`, `test/support/session_case.ex:35-38`) |
-| `TROUPE_CONFIG_HOME` | `paths.ex:16`; `apps/troupe_ctl/lib/troupe/ctl/credentials.ex:20` | overrides the config directory; every client test helper points it at a fresh temp dir (`apps/troupe_core/test/test_helper.exs:4-8`) |
+| `TROUPE_CONFIG_HOME` | `paths.ex:16` | overrides the config directory; the core's test helper points it at a fresh temp dir (`apps/troupe_core/test/test_helper.exs:4-8`) |
 | `XDG_CONFIG_HOME`, `XDG_STATE_HOME`, `XDG_RUNTIME_DIR`, `APPDATA`, `LOCALAPPDATA` | `paths.ex:81-93`; `apps/troupe_protocol/lib/troupe/protocol/endpoint.ex` | platform defaults behind the two above and the daemon socket path |
 | `TROUPE_DAEMON_SOCKET` | `apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:27-33` | `tcp` forces loopback TCP; any other value is a Unix socket path |
-| `TROUPE_DAEMON_COMMAND` | `apps/troupe_protocol/lib/troupe/protocol/daemon.ex:234-243` | the command a client spawns to start a daemon; wins over the packaged binary's own path |
-| `TROUPE_MCP_CONFIG` | `apps/troupe_tui/lib/troupe/ui/tui/connectors.ex:35-36,69` | path to the TUI's personal MCP connector file; default `$XDG_CONFIG_HOME/troupe/mcp.json` |
-| `TROUPE_TEST_LOGS` | `apps/troupe_ctl/test/test_helper.exs:15-17` only | when set, that suite logs at `:debug` and stops capturing logs |
+| `TROUPE_DAEMON_COMMAND` | `apps/troupe_protocol/lib/troupe/protocol/daemon.ex` | the command a client spawns to start a local daemon. It is now the only answer: the packaged-binary fallback went with the binary, and a caller that does not set it gets `:no_daemon_command`. Unused in this repository's own own path |
 | `KUBECONFIG` | `apps/troupe_operator/lib/troupe/operator/conn.ex:57`; `apps/troupe_plane/lib/troupe/plane/enrolment.ex:183` | kubeconfig for the operator outside a pod and for the cluster suites; default `~/.kube/config` |
 | `TROUPE_KUBE_CONTEXT` | `conn.ex:49`; `enrolment.ex:175` | context within that kubeconfig |
 

@@ -2,13 +2,13 @@ defmodule Troupe.Plane.Admin do
   @moduledoc """
   Everything an administrator can do, in one place.
 
-  The panel, the admin JSON-RPC and `troupe admin` are three renderings of this module
-  and nothing else. That is the Forbidden list's "any client, including our own TUI and
-  panel, using anything but public APIs" made structural rather than remembered: a
-  LiveView that reached into `Fleet` or `Identity` directly would be a private path into
-  the plane, and a panel with a button the CLI cannot press would be a feature only one
-  kind of operator has. `Troupe.Plane.AdminParityTest` enumerates this module and asserts
-  each function has both an API method and a CLI command.
+  The panel, the admin JSON-RPC and the MCP tool list are three renderings of this module
+  and nothing else. That is the Forbidden list's "any client, including our own panel,
+  using anything but public APIs" made structural rather than remembered: a LiveView that
+  reached into `Fleet` or `Identity` directly would be a private path into the plane, and
+  a panel with a button no other client can press would be a feature only one kind of
+  operator has. `Troupe.Plane.AdminParityTest` enumerates this module and asserts each
+  function has both a method and a tool.
 
   ## Two roles
 

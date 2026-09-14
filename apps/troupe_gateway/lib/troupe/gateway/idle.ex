@@ -2,8 +2,8 @@ defmodule Troupe.Gateway.Idle do
   @moduledoc """
   Shuts the daemon down after a quiet period.
 
-  A daemon that clients spawn on demand has to go away on its own, or every `troupe
-  ctl` invocation leaves a process behind forever. It stops only when there is nothing
+  A daemon that clients spawn on demand has to go away on its own, or every invocation
+  that starts one leaves a process behind forever. It stops only when there is nothing
   to lose: no clients attached and no session running. Sessions that are merely
   dormant do not hold it open — they are durable in their logs and come back on the
   next activating command.

@@ -1,8 +1,11 @@
 # The Troupe protocol, version 1
 
 This document is complete on its own. Everything needed to write a Troupe client is
-here; no Elixir is involved. A reference client in ~180 lines of Python standard
-library lives at [`clients/python/troupe_client.py`](clients/python/troupe_client.py).
+here; no Elixir is involved — and every Troupe client is written this way, because none
+of them lives in the repository that implements the server. A reference client in ~220
+lines of Python standard library sits in that repository as a test fixture, at
+[`apps/troupe_gateway/test/conformance/troupe.py`](apps/troupe_gateway/test/conformance/troupe.py),
+with the conformance script CI runs against a real daemon beside it.
 
 A Troupe **session** is an agent doing work in a workspace. A **client** attaches to
 sessions to watch them and to steer them. The client never holds session state: it

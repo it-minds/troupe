@@ -43,14 +43,20 @@ defmodule Troupe.Plane.Web.Index do
   The document, as a string.
 
   `:url` is what the commands are written against — this plane's own base URL. `:app_url`
-  is where the GUI is mounted, or `nil` on a plane that was not given one, in which case
-  the page does not offer a door that would be a 404.
+  is where the GUI is mounted and `:cli_url` is where the terminal client is published;
+  either is `nil` on a plane that was not given one, and the page then does not offer a
+  door that would be a 404 or a link to a download that is not there.
+
+  Both are clients from other repositories. This one serves neither of them and cannot
+  tell whether they exist, which is why each is a URL somebody configured rather than
+  something discovered.
   """
   @spec render(keyword()) :: String.t()
   def render(opts) do
     name = Keyword.get(opts, :name, "troupe")
     url = Keyword.fetch!(opts, :url)
     app_url = Keyword.get(opts, :app_url)
+    cli_url = Keyword.get(opts, :cli_url)
 
     Page.render(
       title: "#{name} — Troupe plane",
@@ -60,11 +66,11 @@ defmodule Troupe.Plane.Web.Index do
       url: url,
       name: name,
       nav: :index,
-      body: body(name, url, app_url)
+      body: body(name, url, app_url, cli_url)
     )
   end
 
-  defp body(name, url, app_url) do
+  defp body(name, url, app_url, cli_url) do
     """
     #{hero(name, url)}
     #{doors(app_url)}
@@ -72,7 +78,7 @@ defmodule Troupe.Plane.Web.Index do
       <h2>Start in one minute</h2>
 
       <div class="steps">
-        #{Page.step("Step one", "Get the binary", binary_step())}
+        #{Page.step("Step one", "Get the binary", binary_step(cli_url))}
         #{Page.step("Step two", "Log in, once", login_step(url))}
         #{Page.step("Step three", "Give it something to do", run_step())}
       </div>
@@ -180,11 +186,27 @@ defmodule Troupe.Plane.Web.Index do
 
   # -- the three steps --------------------------------------------------------
 
-  defp binary_step do
+  # The terminal client is built and published somewhere else — this host runs in a
+  # cluster and has no binary of anybody's to hand out. With `TROUPE_CLI_URL` set it links
+  # to wherever that is; without it, it says the true thing rather than a broken link.
+  defp binary_step(nil) do
     """
     <p>
-        One executable, nothing alongside it. Ask your administrator where your
-        organisation publishes it.
+        One executable, nothing alongside it. It is published separately from this host,
+        so ask your administrator where your organisation keeps it.
+      </p>
+    """
+  end
+
+  defp binary_step(cli_url) do
+    """
+    <p>
+        One executable, nothing alongside it:
+        <a class="inline-door" href="#{Page.e(cli_url)}">get the terminal client</a>.
+      </p>
+      <p class="note">
+        It is a separate release with its own version, and it talks to this plane over the
+        protocol like any other client.
       </p>
     """
   end

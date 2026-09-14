@@ -2017,3 +2017,65 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      is true for the next one. The connection that made the call is relabelled where it
      stands, because having to reconnect to see your own name is the kind of thing that
      reads as a bug.
+
+## The remote alone
+
+319. **This repository is deployed, not installed.** It builds four container images and
+     a Helm chart, and nothing else. The `troupe` release — `troupe_tui` and `troupe_ctl`
+     wrapped by Burrito into an executable for five targets — is gone, with `install.sh`,
+     `install.ps1`, `scripts/build-local`, `scripts/test-install.*` and the four CI jobs
+     that built, smoke-tested and installed it.
+
+     The reason is that they were work for a deliverable this repository does not have.
+     A client is a separate release from a separate repository; it speaks `PROTOCOL.md`
+     and is published wherever an organisation publishes it. Keeping a second kind of
+     artifact here meant a build matrix on four native runners, a clean-container check,
+     two installer harnesses, an unresolvable default download URL and a cross-compilation
+     constraint (`rustler_precompiled` resolving the ExRatatui NIF against the build host)
+     that shaped the whole pipeline — for a binary nobody was going to install from a
+     private repository's release assets.
+
+     What is left is one build path: `docker/Dockerfile`, four times, for `linux/amd64`.
+
+320. **The two client apps were deleted rather than kept as a test harness.** The TUI had
+     been reduced to "the protocol's test harness rather than the product's face", and it
+     was a real one: `mix troupe.boundaries` held both apps to `troupe_protocol`, which
+     was the mechanical proof that the built-in clients had no private access.
+
+     Deleting them gives that proof up, and the replacement is weaker in one way and
+     stronger in another. Weaker: 6,700 lines of client exercising the protocol on every
+     run are gone. Stronger: there is no longer any client inside the boundary to be
+     special, so "no private access" is a property of where the code lives rather than of
+     a rule someone enforces. What carries it now is
+     `apps/troupe_gateway/test/conformance/conformance.py` — a client written against
+     `PROTOCOL.md` in another language with no access to this source — which is why it
+     moved under the suite that runs it rather than being deleted as another client.
+
+     `git show 20fe871 -- apps/troupe_tui apps/troupe_ctl` is where they are.
+
+321. **Two clients, two URLs, no discovery.** The front page at `/` links to the graphical
+     client through `TROUPE_APP_URL` and to the terminal client through `TROUPE_CLI_URL`,
+     both empty-able, neither with a default that guesses. A plane cannot tell whether a
+     GUI is mounted on its host or where an organisation publishes a binary, and the
+     failure modes of guessing are a door to a 404 and a download link that is not there.
+     Unset, the page says what is true: ask your administrator.
+
+322. **A release tag publishes the chart.** The `release` job used to attach binaries and
+     a `SHA256SUMS` to a GitHub release. It now runs `helm package` with `--version` and
+     `--app-version` set to the tag without its `v`, and attaches the tarball — so an
+     install of that file pulls the images the same run published, rather than whatever
+     `values.yaml` was last edited to say. `chart` gates it, because publishing a chart
+     `kubeconform` has not seen would be worse than publishing nothing.
+
+323. **A server release carries Linux reapers only.** `Troupe.Release.build_reapers/1` set
+     `TROUPE_REAPER_TARGETS=all`, which cross-compiled five Zig binaries into every worker
+     image — three of which no pod can execute. It now sets the two Linux triples. The
+     macOS and Windows triples stay in `mix compile.reaper`'s own table because a
+     developer's `mix test` runs `shell` on their own machine, which is the only place
+     they are built now.
+
+324. **The launcher watchdog went with the launcher.** `Troupe.Wrapper` halted the VM when
+     Burrito's launcher process disappeared, so that `kill -9` on the visible `troupe`
+     process could not leave an orphaned BEAM holding the reaper pipes open. In a pod
+     there is no launcher: the VM is the container's main process and the kubelet kills
+     the whole thing. The watchdog was a fix for a problem that no longer exists.

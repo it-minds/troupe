@@ -1,8 +1,8 @@
-# One Dockerfile for the four server releases. `RELEASE` picks which.
+# One Dockerfile for the four releases this repository has. `RELEASE` picks which.
 #
 # Two stages: build against the full Elixir image, run on a slim Debian with only what
-# the release needs at runtime. The client binary is not built here — it is a Burrito
-# executable for a user's laptop, and CI builds it on a native runner per target.
+# the release needs at runtime. There is nothing else to build: every deliverable here
+# is an image that `charts/troupe` deploys, and the clients are in other repositories.
 
 ARG ELIXIR_VERSION=1.20.4
 ARG OTP_VERSION=28.5.0.5
@@ -21,8 +21,8 @@ RUN apt-get update -y \
 # PATH, prints a warning and builds nothing. The image then starts perfectly well and
 # answers every `shell` call with `:reaper_missing`, a failure that only ever shows up
 # in a pod. A laptop's prebuilt `priv/reaper` cannot stand in: `.dockerignore` excludes
-# it on purpose, because it would be the wrong architecture under the right name. Same
-# version Burrito pins, so one toolchain builds the reaper everywhere.
+# it on purpose, because it would be the wrong architecture under the right name. One
+# Zig cross-compiles every triple, so this is the whole of the native toolchain.
 ARG ZIG_VERSION=0.16.0
 RUN if [ "${RELEASE}" = "troupe_worker" ]; then \
       set -eux; \
@@ -46,8 +46,6 @@ COPY mix.exs mix.lock ./
 COPY apps/troupe_core/mix.exs apps/troupe_core/
 COPY apps/troupe_protocol/mix.exs apps/troupe_protocol/
 COPY apps/troupe_gateway/mix.exs apps/troupe_gateway/
-COPY apps/troupe_tui/mix.exs apps/troupe_tui/
-COPY apps/troupe_ctl/mix.exs apps/troupe_ctl/
 COPY apps/troupe_worker/mix.exs apps/troupe_worker/
 COPY apps/troupe_plane/mix.exs apps/troupe_plane/
 COPY apps/troupe_operator/mix.exs apps/troupe_operator/
@@ -68,7 +66,7 @@ RUN mix deps.compile && mix compile && mix release ${RELEASE} --overwrite \
 # The reaper is the one thing in this image whose absence is silent, so it is checked
 # here rather than discovered by the first `shell` call in a pod.
 RUN if [ "${RELEASE}" = "troupe_worker" ]; then \
-      ls /app/release/lib/troupe_core-*/priv/reaper/x86_64-linux-musl/reaper \
+      ls /app/release/lib/troupe_core-*/priv/reaper/*-linux-musl/reaper \
         || { echo "the worker release has no reaper: mix compile.reaper built nothing" >&2; exit 1; }; \
     fi
 

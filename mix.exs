@@ -24,8 +24,7 @@ defmodule Troupe.Umbrella.MixProject do
   # are the tools that run across all of them.
   defp deps do
     [
-      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
-      {:burrito, "~> 1.6", runtime: false}
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false}
     ]
   end
 
@@ -41,12 +40,13 @@ defmodule Troupe.Umbrella.MixProject do
     ]
   end
 
-  # Five releases from one umbrella.
+  # Four releases from one umbrella, and every one of them is a container image.
   #
-  # `troupe` is the client binary — the TUI, the CLI, and the local daemon in one
-  # executable, wrapped by Burrito so it needs nothing installed alongside it. The
-  # other four are plain Mix releases built into OCI images: they run in a cluster
-  # where an Erlang runtime is the container's business, not the user's.
+  # This repository is the remote: it is deployed to Kubernetes by `charts/troupe` and
+  # it is not installed on anybody's machine. So there is no packaged executable here,
+  # no target matrix, and nothing cross-built — each release is a plain Mix release
+  # that runs where an Erlang runtime is the container's business rather than the
+  # user's. Clients live in their own repositories and reach a plane over the protocol.
   defp releases do
     [
       troupe_operator: [
@@ -73,31 +73,6 @@ defmodule Troupe.Umbrella.MixProject do
         ],
         include_executables_for: [:unix],
         steps: [:assemble, &Troupe.Release.build_reapers/1, :tar]
-      ],
-      troupe: [
-        applications: [
-          troupe_core: :permanent,
-          troupe_protocol: :permanent,
-          troupe_gateway: :permanent,
-          troupe_tui: :permanent,
-          troupe_ctl: :permanent
-        ],
-        include_executables_for: [:unix, :windows],
-        steps: [
-          :assemble,
-          &Troupe.Release.build_reapers/1,
-          &Troupe.Release.verify_linux_nif/1,
-          &Burrito.wrap/1
-        ],
-        burrito: [
-          targets: [
-            linux_x86_64: [os: :linux, cpu: :x86_64],
-            linux_aarch64: [os: :linux, cpu: :aarch64],
-            macos_x86_64: [os: :darwin, cpu: :x86_64],
-            macos_aarch64: [os: :darwin, cpu: :aarch64],
-            windows_x86_64: [os: :windows, cpu: :x86_64]
-          ]
-        ]
       ]
     ]
   end

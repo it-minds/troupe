@@ -12,7 +12,7 @@ defmodule Troupe.Plane.Admin.MCP do
   Nothing is written twice: a method added to that table appears here with its summary and
   its schema, and `Troupe.Plane.AdminParityTest` fails if it arrives without them. There is
   no privileged path — this goes through the same context, with the same actor, as the
-  panel and `troupe admin`.
+  panel and the JSON-RPC methods.
 
   ## What is deliberately not here
 
@@ -221,7 +221,7 @@ defmodule Troupe.Plane.Admin.MCP do
     %{
       "name" => tool_name(method.name),
       # The method's own name, so the same string appears in the tool list, the audit log
-      # and `troupe admin`.
+      # and every client that calls the method.
       "title" => method.name,
       "description" => description(method),
       "inputSchema" => input_schema(method),

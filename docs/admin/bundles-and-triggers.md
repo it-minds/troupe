@@ -51,7 +51,8 @@ The plane adds the egress rule through `ClusterPolicy.egress_allowed?/1` (`bundl
 
 ### The directory `troupe admin bundle publish CHANNEL DIR` assembles
 
-`Troupe.Ctl.Admin.bundle_from_directory/1` (`apps/troupe_ctl/lib/troupe/ctl/admin.ex:172-282`):
+The client assembles it and posts the result; the layout it expects, which the plane
+validates against `Troupe.Protocol.Bundle`, is:
 
 ```
 agents/<name>.md          one agent definition each; the name is the file name

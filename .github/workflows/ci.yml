@@ -1,5 +1,6 @@
-# Continuous integration: the quality gate on one runner, then a build matrix with
-# one target per native runner.
+# Continuous integration for a thing that is only ever deployed to Kubernetes: the
+# quality gate, the chart, the protocol, and four images. There is no build matrix and
+# no per-platform artifact, because nothing here is installed on anybody's machine.
 #
 # GitHub Actions syntax, which Forgejo Actions also runs. Nothing here depends on
 # github.com specifically except the marketplace actions, which Forgejo resolves from
@@ -13,10 +14,10 @@ on:
   pull_request:
 
 # A branch under active work can have three full pipelines in flight at once, each of
-# them ten suite runs and five native builds, all measuring the same thing and only the
+# them ten suite runs and four image builds, all measuring the same thing and only the
 # last of them answering a question anyone still has. Superseded runs on a branch are
-# cancelled; `main` and release tags are not, because their runs produce images and
-# binaries somebody may already be waiting on.
+# cancelled; `main` and release tags are not, because their runs publish images somebody
+# may already be waiting on.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
@@ -276,247 +277,48 @@ jobs:
           git diff --exit-code protocol/schema/v1 \
             || { echo "protocol/schema/v1 is stale: run mix troupe.schema.gen and commit"; exit 1; }
 
-      # A client written against PROTOCOL.md in another language, with no access to
-      # this source. It is the only check that actually proves the built-in clients
-      # have no private access.
+      # A client written against PROTOCOL.md in another language, with no access to this
+      # source. Every client is now outside this repository, and this is the check that
+      # proves the protocol is enough to be one.
       - name: Python reference client, end to end
         run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
 
-  build:
-    name: build ${{ matrix.target }}
-    needs: [check, protocol]
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          # One target per native runner. Cross-building is possible for the Zig
-          # wrapper but not for the payload: rustler_precompiled resolves the
-          # ExRatatui NIF against the build host, so a macOS binary built on Linux
-          # would carry a Linux .so and fail at NIF load.
-          #
-          # No `windows_x86_64`. `ezstd` — zstd for session segments and snapshots,
-          # and a hard dependency of `troupe_protocol` — declares
-          # `{pre_hooks, [{"(linux|darwin)", compile, "make compile_nif"}]}`, so on
-          # Windows nothing builds its NIF and the build stops at "Missing artifact
-          # priv/ezstd_nif.so". That is upstream's decision rather than a gap in this
-          # runner, so there is no Windows binary to publish and this matrix does not
-          # claim one. `install.ps1` and `scripts/test-install.ps1` stay in the tree
-          # against the day there is.
-          - { os: ubuntu-latest, target: linux_x86_64 }
-          - { os: ubuntu-24.04-arm, target: linux_aarch64 }
-          - { os: macos-15-intel, target: macos_x86_64 }
-          - { os: macos-14, target: macos_aarch64 }
-
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install xz (macOS)
-        if: startsWith(matrix.os, 'macos')
-        run: brew install xz || true
-
-      # `scripts/build-local`, because every one of its details is load-bearing and a
-      # second copy of them here would drift: the musl ABI the Linux wrapper's ERTS
-      # needs, the Zig cache directories that keep `renameat2` off a filesystem that
-      # refuses it, `EX_RATATUI_BUILD` unset so the NIF is not rebuilt against the
-      # host's libc — and the release *name*, without which `mix release` refuses to
-      # guess between the umbrella's five. It reads `BURRITO_TARGET` and writes
-      # `burrito_out/troupe-<version>-<target>`, which is the name this job publishes.
-      - name: Build the release
-        shell: bash
-        env:
-          BURRITO_TARGET: ${{ matrix.target }}
-        run: bash scripts/build-local
-
-      - name: Name the artifact
-        id: artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          name=$(basename "$(ls burrito_out/troupe-*-${{ matrix.target }})")
-          echo "name=${name}" >> "$GITHUB_OUTPUT"
-
-      - name: Smoke test the artifact
-        shell: bash
-        run: |
-          set -euo pipefail
-          binary="burrito_out/${{ steps.artifact.outputs.name }}"
-
-          "./$binary" --version
-
-          mkdir -p smoke/ws
-          cat > smoke/script.json <<'JSON'
-          {"steps": [
-            {"tools": [{"name": "write_file", "input": {"path": "hello.txt", "content": "packaged\n"}}]},
-            {"tools": [{"name": "shell", "input": {"command": "echo shell-ran-ok"}}]},
-            {"text": "Both tools worked."}
-          ]}
-          JSON
-
-          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/smoke/script.json" \
-            "./$binary" run "smoke" --headless --workspace smoke/ws --auto-approve
-
-          # write_file went through the tool; shell went through reaper.
-          grep -q packaged smoke/ws/hello.txt
-
-          # And the same binary is the daemon: a client run finds or starts one, and
-          # `troupe sessions` then lists what it did.
-          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/smoke/script.json" \
-            "./$binary" sessions --workspace smoke/ws | grep -q "Sessions for\|No sessions" 
-
-      # Before the report, not after it: the binary is what this job is for, and three
-      # jobs wait on it. A step that only writes numbers into the run summary should not
-      # be able to lose it — which is exactly what happened on both macOS legs, where
-      # the report was the last step and it failed.
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.artifact.outputs.name }}
-          path: burrito_out/${{ steps.artifact.outputs.name }}
-          if-no-files-found: error
-
-      - name: Report size and start-up cost
-        shell: bash
-        run: |
-          binary="burrito_out/${{ steps.artifact.outputs.name }}"
-          size=$(wc -c < "$binary")
-          echo "### ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
-          echo "- binary size: $((size / 1024 / 1024)) MiB ($size bytes)" >> "$GITHUB_STEP_SUMMARY"
-
-          # `date +%s%N` is a GNU extension. BSD date prints a literal "N", so on macOS
-          # this arithmetic got `1789385995N` and said "value too great for base" —
-          # which is a sentence about a nanosecond, not about the build. Perl's
-          # Time::HiRes is core and is on all three runner images.
-          now_ms() { perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'; }
-
-          # The first run pays for extraction; the second is the warm path.
-          "./$binary" maintenance uninstall >/dev/null 2>&1 <<< "y" || true
-          cold_start=$(now_ms)
-          "./$binary" --version > /dev/null
-          cold_end=$(now_ms)
-          warm_start=$(now_ms)
-          "./$binary" --version > /dev/null
-          warm_end=$(now_ms)
-
-          echo "- cold start: $(( cold_end - cold_start )) ms" >> "$GITHUB_STEP_SUMMARY"
-          echo "- warm start: $(( warm_end - warm_start )) ms" >> "$GITHUB_STEP_SUMMARY"
-
-  containers:
-    name: clean-container check (linux x86_64)
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-linux_x86_64
-          merge-multiple: true
-          path: dist
-
-      - name: Run in glibc and musl containers with nothing installed
-        run: |
-          set -euo pipefail
-          binary=$(ls dist/troupe-*-linux_x86_64)
-          chmod +x "$binary"
-          cp "$binary" ./troupe
-
-          cat > check.sh <<'SH'
-          #!/bin/sh
-          set -e
-          cd /work
-          for c in erl elixir mix inotifywait; do
-            command -v $c >/dev/null 2>&1 && { echo "$c unexpectedly present"; exit 1; }
-          done
-          ./troupe --version
-          rm -rf ws && mkdir ws
-          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
-            ./troupe run "smoke" --headless --workspace ws --auto-approve
-          grep -q packaged ws/hello.txt
-
-          # Watch mode has to fall back to polling with no inotify-tools installed.
-          # This used to grep the output for "polling for changes", which is not a
-          # string this program has ever printed: the notice reads "watch: no native
-          # file watcher available, polling every Nms", and it is published as an
-          # ephemeral event while the session is being created — before any client has
-          # subscribed — so a fresh headless run never prints it at all. What a clean
-          # container can honestly check is that the fallback happens rather than the
-          # session dying with no backend, which is what the run finishing means.
-          rm -rf wws && mkdir wws
-          TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
-            ./troupe run "watch" --headless --watch --workspace wws --auto-approve
-          grep -q packaged wws/hello.txt
-          SH
-          chmod +x check.sh
-
-          cat > script.json <<'JSON'
-          {"steps": [
-            {"tools": [{"name": "write_file", "input": {"path": "hello.txt", "content": "packaged\n"}}]},
-            {"tools": [{"name": "shell", "input": {"command": "echo ok"}}]},
-            {"text": "done"}
-          ]}
-          JSON
-
-          for image in ubuntu:24.04 alpine:latest; do
-            echo "=== $image"
-            docker run --rm -v "$PWD:/work" "$image" /work/check.sh
-          done
-
-  installer-sh:
-    name: install.sh (clean ubuntu container, zsh user)
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-linux_x86_64
-          merge-multiple: true
-          path: dist
-
-      - name: Install, upgrade, reject a corrupt artifact, uninstall
-        run: |
-          set -euo pipefail
-          mkdir -p release
-          cp dist/troupe-*-linux_x86_64 release/
-          (cd release && sha256sum troupe-* > SHA256SUMS)
-
-          docker run --rm -v "$PWD:/src" ubuntu:24.04 /src/scripts/test-install.sh
-
   release:
-    name: publish
-    # No `installer-ps1`: there is no Windows binary for it to install, because there
-    # is no Windows build. `scripts/test-install.ps1` is still in the tree and still
-    # the scenario the Windows installer has to pass, on the day it can be run.
-    needs: [build, containers, installer-sh]
+    name: publish the chart
+    # The images are published by `images` on the same tag, under the version without its
+    # `v` — which is the tag `values.yaml` names. This adds the one artifact a person
+    # still has to fetch by hand: the chart that deploys them.
+    needs: [check, protocol, chart, images]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*
-          merge-multiple: true
-          path: dist
+      - uses: actions/checkout@v4
 
-      - name: Checksums
+      - uses: azure/setup-helm@v4
+
+      # The chart's own version and the images' tag are the release's version, so a
+      # `helm install` of this file pulls the images this run built rather than whatever
+      # `values.yaml` was last edited to say.
+      - name: Package the chart at this version
         run: |
-          cd dist
-          sha256sum troupe-* > SHA256SUMS
-          cat SHA256SUMS
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          helm package charts/troupe \
+            --version "$version" --app-version "$version" \
+            --destination dist
 
       - uses: softprops/action-gh-release@v2
         with:
-          files: |
-            dist/troupe-*
-            dist/SHA256SUMS
+          files: dist/troupe-*.tgz
+          body: |
+            Deployed with `charts/troupe`; there is nothing to install on a machine.
+
+                helm upgrade --install troupe \
+                  https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/troupe-${{ github.ref_name }}.tgz \
+                  --namespace troupe-system --create-namespace \
+                  --values my-values.yaml
+
+            Images for this tag: `troupe-plane`, `troupe-operator`, `troupe-worker` and
+            `troupe-a2a`, each tagged `${{ github.ref_name }}` without the `v`.

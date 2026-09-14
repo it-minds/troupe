@@ -4,11 +4,12 @@ defmodule Troupe.Plane.Admin.API do
 
   Every entry here is a rename: a method name to a `Troupe.Plane.Admin` function and its
   arguments. That is deliberate and is the point of the module — if a method needed logic
-  of its own, the panel and the CLI would not be getting the same behaviour, and the
-  parity this whole arrangement exists to guarantee would be a claim rather than a fact.
+  of its own, the panel and everything else would not be getting the same behaviour, and
+  the parity this whole arrangement exists to guarantee would be a claim rather than a
+  fact.
 
   `Troupe.Plane.AdminParityTest` enumerates `Admin` and asserts each function appears
-  here, in `troupe admin`, and in the MCP tool list.
+  here and in the MCP tool list.
 
   ## Why the table carries prose and types
 
