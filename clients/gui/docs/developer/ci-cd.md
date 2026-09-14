@@ -1,120 +1,151 @@
-> Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
-
 # CI and CD
 
-There is one workflow file, `.github/workflows/ci.yml`. **It is untracked — not in any
-commit — and has never run** (AUDIT §1.5, §2). Everything below describes what it would
-do if committed and pushed to a GitHub repository. There is no deploy job anywhere; a
-person runs `scripts/deploy` (`ci.yml:4-6`; `DECISIONS.md` #34).
+Three workflows, and the line between them is the point.
 
-Discrepancy: `REPORT.md:290-291` says there is no CI configuration; `README.md:113-119`
-describes this file as if it were live. Open question AUDIT §4.7: whether to commit it
-and which jobs gate a merge.
-
-## Triggers and concurrency
-
-| Setting | Value | Line |
+| workflow | when | what it proves or does |
 |---|---|---|
-| `name` | `ci` | `ci.yml:8` |
-| `on.push.branches` | `["**"]` — every branch | `:12` |
-| `on.push.tags` | `["v*"]` | `:13` |
-| `on.pull_request` | any | `:14` |
-| `concurrency.group` | `${{ github.workflow }}-${{ github.ref }}` | `:18` |
-| `concurrency.cancel-in-progress` | `true` — a newer push cancels the older run | `:19` |
-| `env.NODE_VERSION` | `"24"` | `:22` |
+| `ci.yml` | every push, every pull request | the code is right, and an image exists for the commit |
+| `desktop.yml` | pushes to `main`, `v*` tags, and pull requests that touch the app | it can be installed on macOS, Windows and Linux |
+| `deploy.yml` | only when a person starts it | one named build is rolled onto a cluster |
 
-## Job `check` — "typecheck, test, build"
+**CI builds; a person deploys** (`DECISIONS.md` #34). Pushing an image and changing
+production are different decisions with different blast radii, and a workflow that did
+both would make every merge a production change. `deploy.yml` does not weaken that — it
+runs on `workflow_dispatch` alone, and it takes the tag as an input so nobody can deploy
+without naming the build they mean.
 
-`ci.yml:25-51`, `ubuntu-latest`, no `needs`.
+---
 
-| Step | Line | Covered in |
+## `ci` — typecheck, test, build; image; chart
+
+### `check`
+
+`pnpm install --frozen-lockfile`, then `tokens:check`, `typecheck`, `build`, `test`.
+
+`tokens:check` is there because `apps/desktop/src/tokens.css` and `src/mark.ts` are
+generated from `docs/design/themes/*.tokens.json` and committed. A theme changed without
+running `pnpm tokens` would otherwise reach a deployment as a file nobody regenerated.
+
+`build` runs before `test` and after `typecheck`: the bench resolves `@troupe/client`
+through the package's `exports` rather than through a `paths` alias, so on a clean runner
+its types do not exist until the client has been built. That was a real failure, fixed in
+`5c3df60`.
+
+### `image`
+
+Runs on a push only — a pull request from a fork has no credential, and a pull request is
+not a commit worth naming a tag after.
+
+**Where it pushes, and how it gets in, are one decision.** The four secrets are named to
+match the server's workflow so one set configures both repositories:
+
+| secret | meaning | when unset |
 |---|---|---|
-| `actions/checkout@v4` | `:29` | — |
-| `pnpm/action-setup@v4` (reads `packageManager`) | `:31` | [tech-stack.md](tech-stack.md) |
-| `actions/setup-node@v4` with `node-version: 24`, `cache: pnpm` | `:33-36` | [tech-stack.md](tech-stack.md) |
-| `pnpm install --frozen-lockfile` | `:38` | [local-setup.md](local-setup.md) |
-| "The committed design tokens match the design file": `pnpm tokens:check` | `:42-43` | [conventions.md](conventions.md), [repo-structure.md](repo-structure.md) |
-| `pnpm typecheck` | `:45` | [local-setup.md](local-setup.md) |
-| `pnpm build` | `:49` | [build.md](build.md) |
-| `pnpm test` | `:51` | [testing.md](testing.md) |
+| `REGISTRY` | registry host | `ghcr.io` |
+| `REGISTRY_NAMESPACE` | namespace inside it | the repository owner |
+| `REGISTRY_USERNAME` | who to log in as | `nologin` — what Scaleway, Harbor and most others want beside a secret key |
+| `REGISTRY_PASSWORD` | the credential | see below |
 
-### The ordering risk (AUDIT §3.3)
+There are two configurations and no third. **Nothing set** is a fork or a first run, and
+the image goes to this repository's own packages on ghcr.io with GitHub's token.
+**Everything set** is a deployment, and the image goes where it says. **A registry named
+with no credential is refused**, with a message saying which secret to add — because the
+fallbacks used to be per-secret, so a repository that set `REGISTRY` and stopped there
+pointed at somebody else's registry and then offered it GitHub's own token, which cannot
+work and fails at the login rather than at the configuration that caused it. Quietly
+publishing somewhere else instead would be worse: a green run whose images the deployment
+will never pull.
 
-The comment at `ci.yml:47-48` says "The protocol client has to be built before the app
-typechecks against its types in a clean checkout" — and then the file runs `pnpm
-typecheck` (`:45`) *before* `pnpm build` (`:49`). The desktop app is unaffected because
-its `tsconfig` aliases `@troupe/client` to source (`apps/desktop/tsconfig.json:17-19`).
-The bench is not: `packages/bench/tsconfig.json:1-4` has no alias, so `tsc` resolves
-`@troupe/client` through the package's `exports` to `./dist/index.d.ts`
-(`packages/client/package.json:8-13`), which does not exist until `pnpm build` has run.
-On a developer machine that has built once, `dist/` is present and the order is
-harmless; on a clean runner `pnpm -r typecheck` may fail in `@troupe/bench`. Untested,
-because the workflow has never run. Swapping the two steps, or giving the bench the
-same `paths` entry, would remove the doubt.
+**Tags are never floating.** Every push is `sha-<first 7>`; a `v1.2.3` tag also publishes
+`1.2.3`. A reused tag plus `imagePullPolicy: IfNotPresent` means the node keeps the image
+it has, no pod restarts because the Deployment's spec did not change, and `helm upgrade`
+reports success over code that never changed. This has happened on this cluster.
 
-## Job `image`
+`TROUPE_GUI_BASE` is baked in at build time because Vite writes it into every asset URL,
+so an image built for `/app/` cannot be served at `/`. The repository variable `GUI_BASE`
+sets it; it defaults to `app` and must match the chart's `basePath`.
 
-`ci.yml:53-114`, `needs: [check]` (`:55`), `if: github.event_name == 'push'` (`:58`) —
-so never on a pull request, and never without a credential. Permissions `contents:
-read`, `packages: write` (`:60-62`).
+### `chart`
 
-| Step | Line | What it does |
-|---|---|---|
-| `actions/checkout@v4` | `:64` | |
-| "Resolve the registry and the tags" | `:71-92` | `registry = ${REGISTRY:-ghcr.io}`; `namespace = ${REGISTRY_NAMESPACE:-$GITHUB_REPOSITORY_OWNER}`; image name lower-cased as `<registry>/<namespace>/troupe-gui` (`:77-79`). Tags: always `sha-<first 7 of GITHUB_SHA>` (`:86`); on a `refs/tags/v*` push also `<version without v>` (`:87-89`). Never a floating tag (`:81-85`) |
-| `docker/setup-buildx-action@v3` | `:94` | |
-| `docker/login-action@v3` | `:96-100` | `username: secrets.REGISTRY_USERNAME \|\| github.actor`, `password: secrets.REGISTRY_PASSWORD \|\| secrets.GITHUB_TOKEN` |
-| `docker/build-push-action@v6` | `:105-114` | `context: .`, `file: Dockerfile`, `build-args: TROUPE_GUI_BASE=${{ vars.GUI_BASE \|\| 'app' }}`, `platforms: linux/amd64`, `push: true`, GHA layer cache (`cache-from`/`cache-to: type=gha,mode=max`) |
+`helm lint`, then `helm template` piped into `kubeconform` against real Kubernetes
+schemas — because a chart that only ever fails at `helm upgrade` fails in front of a
+cluster rather than in front of a reviewer.
 
-### Secrets and variables
+Still untested: the chart with `basePath: /`, which takes the other branch of the
+ingress template.
 
-| Name | Kind | Default when unset | Line |
-|---|---|---|---|
-| `REGISTRY` | secret | `ghcr.io` | `:74`, `:77` |
-| `REGISTRY_NAMESPACE` | secret | the repository owner | `:75`, `:78` |
-| `REGISTRY_USERNAME` | secret | `github.actor` | `:99` |
-| `REGISTRY_PASSWORD` | secret | `GITHUB_TOKEN` | `:100` |
-| `GUI_BASE` | repository variable | `app` | `:109` |
+---
 
-The four secrets are named to match the server's workflow so one set configures both
-repositories (`:66-70`; `README.md:115-117`). Unconfirmed: which registry the recorded
-deployment's image (`rg.fr-par.scw.cloud/troupe/troupe-gui:0.1.1`, `REPORT.md:247`) was
-pushed to by what; the chart's default repository is `ghcr.io/objective-mj/troupe-gui`
-(`charts/troupe-gui/values.yaml:6`) and the tag `0.1.1` matches neither `sha-…` nor any
-`v*` tag in the history (AUDIT §3.5).
+## `desktop` — installers
 
-### Tags
+One runner per platform; slow, so it is separate from `ci` and does not repeat the tests.
 
-| Event | Tags pushed |
+Ubuntu **22.04** is deliberate: it is the glibc floor, the oldest Ubuntu carrying
+`libwebkit2gtk-4.1-dev`. Building on 24.04 raises the required glibc and silently breaks
+every 22.04 user.
+
+Unsigned until the signing secrets exist. Every signing step is written out and gated on
+one — `APPLE_CERTIFICATE` for macOS, `AZURE_ENDPOINT` for Windows — and there are two
+build steps rather than one with a conditional environment block, because an undefined
+secret is not an absent variable: GitHub substitutes an empty string, `tauri-action` reads
+the name's presence as "set up a signing keychain", and then fails importing nothing. See
+[install.md](../install.md) for what each secret is and what it costs.
+
+---
+
+## `deploy` — the human half, in one place
+
+`workflow_dispatch` only. Inputs: the tag to deploy (required), the environment, the
+namespace and release, and a dry run.
+
+It runs `scripts/deploy` — the same script a person runs on a laptop — rather than
+reimplementing it. Two implementations of "deploy" is how the documented one stops being
+what actually happens.
+
+(`scripts/deploy` was committed without its executable bit, which a Windows checkout
+cannot preserve. Nothing noticed, because nothing but a person on their own machine had
+ever run it. It is `100755` now.)
+
+| secret | what it is |
 |---|---|
-| Push to any branch | `<image>:sha-<7>` |
-| Push of tag `v1.2.3` | `<image>:sha-<7>` and `<image>:1.2.3` |
-| Pull request | none — the job does not run |
+| `KUBECONFIG` | the cluster's kubeconfig, written to `.local/kubeconfig.yaml` where the script looks |
+| `DEPLOY_VALUES` | the Helm values file for the deployment, the one kept out of the repository under `.local/` |
 
-## Job `chart`
+Without both, the run stops at its first step and says which is missing rather than
+half-deploying. The credentials are removed at the end of the job whatever happened.
 
-`ci.yml:116-134`, `ubuntu-latest`, no `needs` — runs in parallel with `check`.
+**Approval lives on the environment**, not in this file: configure required reviewers on
+the `production` environment and a deploy waits for a second person. Concurrency is one
+roll at a time per environment — two overlapping `helm upgrade`s on one release is a race
+whose winner nobody chose.
 
-| Step | Line | What it does |
-|---|---|---|
-| `actions/checkout@v4`, `azure/setup-helm@v4` | `:120-121` | |
-| `helm lint charts/troupe-gui --set ingress.host=example.test` | `:123` | `ingress.host` is required when the ingress is enabled (`templates/ingress.yaml:3-5`) |
-| "The rendered manifests are valid Kubernetes" | `:128-134` | `helm template … --set ingress.host=example.test --set ingress.tlsSecretName=example-tls \| docker run ghcr.io/yannh/kubeconform:v0.6.7 -strict -summary -kubernetes-version 1.31.0 -` |
+The digest of what is actually running is printed into the run summary, for the same
+reason `scripts/deploy` prints it: the tag is not evidence.
 
-Nothing tests the chart with `basePath: /` (the `Prefix` branch of the ingress,
-`templates/ingress.yaml:43-46`).
+---
 
-## What is missing
+## Dependencies
 
-- **No deploy job**, by decision (`ci.yml:4-6`; `DECISIONS.md` #34). Deployment is
-  [deployment.md](deployment.md).
-- **No browser tests** (`REPORT.md:288`).
-- **No `pnpm typecheck` after `pnpm build`**, see above.
-- **No cache for the Docker layer on a fresh runner** beyond `type=gha`.
-- **No branch protection or required check** can exist for a workflow that has not run.
+`.github/dependabot.yml` covers the three ecosystems this repository has — GitHub
+Actions weekly, npm and cargo monthly, grouped so a patch bump is not a pull request of
+its own.
+
+The actions ecosystem is the one that actually bit: with no configuration at all, only
+GitHub's default security updates ran, every action sat on a major pinned to a Node
+runtime GitHub is removing, and nothing was watching. `glib` is ignored with a reason —
+it arrives through gtk3 and webkit2gtk, which is the stack Tauri 2 uses on Linux, and no
+version answers both the advisory and Tauri's pin, so Dependabot errored on it weekly.
+
+---
+
+## What is still missing
+
+- **No browser tests.** `spec.md` asks for Playwright in CI; there is none.
+- **No required checks or branch protection.** Nothing yet stops a merge over a red `ci`.
+- **The chart is not rendered with `basePath: /`.**
 
 ## Related
 
 - [build.md](build.md) — what the `image` job builds.
-- [deployment.md](deployment.md) — the human half.
+- [deployment.md](deployment.md) — the cluster it goes to.
 - [testing.md](testing.md) — what `pnpm test` covers.

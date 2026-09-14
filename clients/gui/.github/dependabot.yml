@@ -1,0 +1,56 @@
+# Keeping the three ecosystems this repository actually has from rotting.
+#
+# There was no configuration here, so only GitHub's default security updates ran — and
+# those produced one thing: a weekly failure on a `glib` advisory with no version that
+# fixes it. Meanwhile every workflow action sat on a major pinned to a Node runtime
+# GitHub is removing, which nothing was watching at all.
+#
+# Grouped and monthly on purpose. A pull request per patch bump is how a repository
+# learns to ignore Dependabot, and an ignored bot is worse than no bot.
+
+version: 2
+
+updates:
+  # The one that actually broke. An action pinned to a major whose Node runtime is
+  # removed stops working on a schedule GitHub chooses, not one we do.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    groups:
+      actions:
+        patterns: ["*"]
+    commit-message:
+      prefix: ci
+
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      # React and Vite move together often enough that separate pull requests mean
+      # resolving the same lockfile twice.
+      frontend:
+        patterns: ["react*", "@types/react*", "vite", "@vitejs/*"]
+      tooling:
+        patterns: ["typescript", "tsx", "@types/node", "@tauri-apps/*"]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: cargo
+    directory: /apps/desktop/src-tauri
+    schedule:
+      interval: monthly
+    groups:
+      tauri:
+        patterns: ["tauri*"]
+    ignore:
+      # `glib` 0.18 arrives through gtk3 and webkit2gtk, which is the stack Tauri 2 uses
+      # on Linux. There is no 0.18.x that answers the advisory and no 0.19 that Tauri
+      # will accept, so Dependabot cannot produce an update and errors out every time it
+      # tries. Ignored until Tauri's Linux backend moves; revisit on the next Tauri major
+      # rather than on the next advisory.
+      - dependency-name: glib
+        versions: ["0.18.x"]
+    commit-message:
+      prefix: deps
