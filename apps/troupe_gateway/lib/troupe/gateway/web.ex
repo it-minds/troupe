@@ -68,15 +68,40 @@ defmodule Troupe.Gateway.Web do
   # knows exactly which origins host its GUI lists them and nothing else gets an upgrade.
   # `*` in the list says the permissive default was chosen on purpose.
   defp origin_allowed?(conn) do
-    case {Plug.Conn.get_req_header(conn, "origin"), allowed_origins()} do
+    case {Plug.Conn.get_req_header(conn, "origin"), allowed_origins(conn)} do
       {[], _allowed} -> true
       {_origin, nil} -> true
       {_origin, []} -> true
-      {[origin | _], allowed} -> "*" in allowed or origin in allowed
+      {[origin | _], allowed} -> "*" in allowed or Enum.any?(allowed, &origin_matches?(&1, origin))
     end
   end
 
-  defp allowed_origins, do: Application.get_env(:troupe_gateway, :allowed_origins)
+  # A development server's port is whatever was free, so the daemon's own allowlist has
+  # to be able to say "localhost, any port" — and only that. The wildcard is one
+  # trailing `*` on the port, never a substring match: `http://localhost.evil.example`
+  # must not pass a rule written for `http://localhost:*`.
+  defp origin_matches?(pattern, origin) do
+    case String.split(pattern, ":*", parts: 2) do
+      [^pattern] -> pattern == origin
+      [prefix, ""] -> origin == prefix or (String.starts_with?(origin, prefix <> ":") and port_only?(origin, prefix))
+      _ -> false
+    end
+  end
+
+  defp port_only?(origin, prefix) do
+    rest = binary_part(origin, byte_size(prefix) + 1, byte_size(origin) - byte_size(prefix) - 1)
+    rest != "" and String.match?(rest, ~r/^[0-9]+$/)
+  end
+
+  # Configured per listener where there is one — a daemon serves a person's own browser
+  # and a pod serves whatever its deployment says — and from the application environment
+  # otherwise, which is how a worker has always been told.
+  defp allowed_origins(conn) do
+    case conn.private[:troupe_allowed_origins] do
+      nil -> Application.get_env(:troupe_gateway, :allowed_origins)
+      configured -> configured
+    end
+  end
 
   # The token may arrive in a header, which is what a browser and a reverse proxy are
   # comfortable with, or in `auth.token` on `initialize`, which is what a client with no
@@ -102,7 +127,7 @@ defmodule Troupe.Gateway.Web do
     endpoint = Keyword.fetch!(opts, :endpoint)
     ready = Keyword.get(opts, :ready)
 
-    plug = {__MODULE__, endpoint: endpoint, ready: ready}
+    plug = {__MODULE__, endpoint: endpoint, ready: ready, allowed_origins: Keyword.get(opts, :allowed_origins)}
 
     # A frame is a whole message, and the connection refuses a message over 64 MiB with
     # `payload_too_large` — but only once it has the whole thing in memory, and before
@@ -134,6 +159,7 @@ defmodule Troupe.Gateway.Web do
     conn
     |> Plug.Conn.put_private(:troupe_endpoint, Keyword.fetch!(opts, :endpoint))
     |> Plug.Conn.put_private(:troupe_ready, Keyword.get(opts, :ready))
+    |> Plug.Conn.put_private(:troupe_allowed_origins, Keyword.get(opts, :allowed_origins))
     |> super(opts)
   end
 end

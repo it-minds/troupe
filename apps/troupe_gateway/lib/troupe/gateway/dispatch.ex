@@ -15,6 +15,7 @@ defmodule Troupe.Gateway.Dispatch do
   """
 
   alias Troupe.Gateway.{ClientTool, Commands, Presence, Session, Worktrees}
+  alias Troupe.Identity
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Mounts
   alias Troupe.Protocol.Error
@@ -70,7 +71,13 @@ defmodule Troupe.Gateway.Dispatch do
     "session.unpin" => :admin,
     "session.erase" => :admin,
     "worktree.remove" => :admin,
-    "watch.set" => :admin
+    "watch.set" => :admin,
+    # Saying who this machine's user is changes the name on every subsequent event, so
+    # it takes the scope that everything else which changes the daemon takes. Reading it
+    # back does not, because a client needs to know whether to offer the control at all.
+    "identity.get" => :observe,
+    "identity.link" => :admin,
+    "identity.unlink" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -454,6 +461,34 @@ defmodule Troupe.Gateway.Dispatch do
         {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
     end
+  end
+
+  # -- identity ---------------------------------------------------------------
+
+  defp handle("identity.get", _params, _context) do
+    {:ok, Identity.to_json(Identity.get())}
+  end
+
+  defp handle("identity.link", params, context) do
+    with {:ok, subject} <- fetch(params, "subject") do
+      case Identity.link(Map.put(params, "subject", subject)) do
+        {:ok, identity} ->
+          # The connection that linked is relabelled where it stands; everything else
+          # reads the file at its next handshake.
+          send(context.connection, {:principal_changed, Identity.principal(subject)})
+          {:ok, Identity.to_json(identity)}
+
+        {:error, :invalid_subject} ->
+          {:error, Error.new(:invalid_params, %{reason: "subject must be a non-empty string"})}
+      end
+    end
+  end
+
+  defp handle("identity.unlink", _params, context) do
+    Identity.unlink()
+    user = System.get_env("USER") || System.get_env("USERNAME") || "local"
+    send(context.connection, {:principal_changed, Identity.principal(user)})
+    {:ok, Identity.to_json(nil)}
   end
 
   defp handle(method, _params, _context) do

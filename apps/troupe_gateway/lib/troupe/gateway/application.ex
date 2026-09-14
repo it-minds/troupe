@@ -13,7 +13,9 @@ defmodule Troupe.Gateway.Application do
   def start(_type, _args) do
     children =
       if Application.get_env(:troupe_gateway, :autostart, false) do
-        [Troupe.Gateway.Daemon]
+        # A real daemon serves a person, and a person may be looking at a graphical
+        # client, which has no way to reach a Unix socket or a raw TCP one.
+        [{Troupe.Gateway.Daemon, loopback: [enabled: true]}]
       else
         []
       end

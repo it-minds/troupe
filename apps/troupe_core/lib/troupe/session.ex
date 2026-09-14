@@ -167,7 +167,10 @@ defmodule Troupe.Session do
          fake: Keyword.get(opts, :fake),
          bundle: bundle,
          kind: Keyword.get(opts, :kind, :local),
-         origin: Keyword.get(opts, :origin)
+         origin: Keyword.get(opts, :origin),
+         # A pod is told whose session this is; a daemon is not, and works it out from
+         # whoever has linked their identity to it.
+         owner: Keyword.get(opts, :owner)
        ]}
     end
   end

@@ -59,6 +59,13 @@ defmodule Troupe do
     end
   end
 
+  defp linked_owner do
+    case Troupe.Identity.get() do
+      nil -> nil
+      identity -> identity.subject
+    end
+  end
+
   defp shared_mounts?(nil), do: false
 
   defp shared_mounts?(%Mounts{entries: entries}), do: Enum.any?(entries, &(&1.kind != :session))
@@ -78,6 +85,10 @@ defmodule Troupe do
     }
     |> put_present("bundle_version", bundle && bundle[:version] && to_string(bundle[:version]))
     |> put_present("origin", Keyword.get(session_opts, :origin))
+    # Who it belongs to. A worker is told; a daemon works it out from the link, and a
+    # daemon nobody has linked leaves the field out rather than writing a username that
+    # means nothing anywhere else.
+    |> put_present("owner", Keyword.get(session_opts, :owner) || linked_owner())
   end
 
   defp put_present(data, _key, nil), do: data

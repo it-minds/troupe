@@ -130,25 +130,76 @@ defmodule Troupe.Protocol.Endpoint do
     Path.join([base, "troupe", "daemon.json"])
   end
 
-  @doc "Record a TCP endpoint where clients can find it. A no-op for Unix sockets."
+  @doc """
+  Record where clients can find this daemon.
+
+  Every local transport, not only TCP. It used to be TCP alone, because a Unix socket is
+  found at a known path and needs no file to say so — but the daemon now also serves a
+  WebSocket for clients that can use neither, and that entry has to live somewhere. One
+  file describing the daemon is better than one file per transport, so a Unix socket
+  writes its path here too and the WebSocket is a second key beside it.
+  """
   @spec publish!(t()) :: :ok
-  def publish!(%__MODULE__{kind: :unix}), do: :ok
+  def publish!(%__MODULE__{kind: :unix, path: path}) do
+    merge!(%{"transport" => "unix", "path" => path})
+  end
 
   def publish!(%__MODULE__{kind: :remote}), do: :ok
 
   def publish!(%__MODULE__{kind: :tcp} = endpoint) do
+    merge!(%{
+      "transport" => "tcp",
+      "port" => endpoint.port,
+      "token" => endpoint.token
+    })
+  end
+
+  # One file, written by two things that know different halves of it. Merging rather
+  # than replacing means the primary transport and the WebSocket can be published in
+  # either order, and a listener that restarts does not take the other one out with it.
+  defp merge!(entry) do
     path = discovery_path()
     File.mkdir_p!(Path.dirname(path))
 
-    contents =
-      Jason.encode!(%{
-        "transport" => "tcp",
-        "port" => endpoint.port,
-        "token" => endpoint.token
-      })
+    existing =
+      with {:ok, contents} <- File.read(path),
+           {:ok, json} when is_map(json) <- Jason.decode(contents) do
+        json
+      else
+        _ -> %{}
+      end
 
-    File.write!(path, contents)
+    File.write!(path, Jason.encode!(Map.merge(existing, entry)))
     File.chmod!(path, 0o600)
+    :ok
+  end
+
+  @doc """
+  Record a loopback WebSocket *beside* whatever the primary transport published.
+
+  A browser cannot open a Unix socket and cannot open a raw TCP one, so the daemon's
+  own transport is unreachable from a page whichever of the two it is using. The
+  WebSocket is a second door to the same daemon, and it is published as a second entry
+  rather than as a second file so that a client reads one path and finds everything.
+
+  Merged rather than written, so this and the primary transport can be published in
+  either order and neither takes the other out of the file.
+  """
+  @spec publish_ws!(t()) :: :ok
+  def publish_ws!(%__MODULE__{port: port, token: token}) when is_integer(port) do
+    merge!(%{"ws" => %{"port" => port, "token" => token}})
+  end
+
+  @doc "Remove the WebSocket entry, leaving the primary transport's alone."
+  @spec retract_ws() :: :ok
+  def retract_ws do
+    path = discovery_path()
+
+    with {:ok, contents} <- File.read(path),
+         {:ok, json} when is_map(json) <- Jason.decode(contents) do
+      File.write!(path, Jason.encode!(Map.delete(json, "ws")))
+    end
+
     :ok
   end
 
@@ -156,6 +207,7 @@ defmodule Troupe.Protocol.Endpoint do
   @spec retract(t()) :: :ok
   def retract(%__MODULE__{kind: :unix, path: path}) do
     File.rm(path)
+    File.rm(discovery_path())
     :ok
   end
 
@@ -179,9 +231,31 @@ defmodule Troupe.Protocol.Endpoint do
   end
 
   defp read_discovery do
+    case File.read(discovery_path()) do
+      {:ok, contents} -> contents |> Jason.decode() |> from_discovery()
+      _ -> {:error, :not_running}
+    end
+  end
+
+  defp from_discovery({:ok, %{"transport" => "unix", "path" => path}}),
+    do: {:ok, %__MODULE__{kind: :unix, path: path}}
+
+  defp from_discovery({:ok, %{"port" => port} = json}),
+    do: {:ok, %__MODULE__{kind: :tcp, port: port, token: Map.get(json, "token")}}
+
+  defp from_discovery(_other), do: {:error, :not_running}
+
+  @doc """
+  The WebSocket a graphical client should dial, if this daemon published one.
+
+  Separate from `discover/0` because it answers a different question: `discover/0` finds
+  the best transport *this* process can use, and a page has only one choice.
+  """
+  @spec discover_ws() :: {:ok, %{port: :inet.port_number(), token: String.t()}} | {:error, :not_running}
+  def discover_ws do
     with {:ok, contents} <- File.read(discovery_path()),
-         {:ok, %{"port" => port} = json} <- Jason.decode(contents) do
-      {:ok, %__MODULE__{kind: :tcp, port: port, token: Map.get(json, "token")}}
+         {:ok, %{"ws" => %{"port" => port, "token" => token}}} <- Jason.decode(contents) do
+      {:ok, %{port: port, token: token}}
     else
       _ -> {:error, :not_running}
     end

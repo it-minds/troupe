@@ -13,6 +13,7 @@ defmodule Troupe.Gateway.Daemon do
       ├── Commands      idempotency ledger: command_id -> acknowledgement
       ├── Connections   DynamicSupervisor, one process per attached client
       ├── Listener      accepts on the transport and hands sockets to Connections
+      ├── Loopback      a WebSocket on 127.0.0.1, which is the only door a browser has
       └── Idle          shuts the daemon down after a quiet period
 
   `Troupe.Sessions` and the session trees themselves live in `troupe_core`'s own
@@ -22,7 +23,7 @@ defmodule Troupe.Gateway.Daemon do
 
   use Supervisor
 
-  alias Troupe.Gateway.{Commands, Connections, Idle, Listener}
+  alias Troupe.Gateway.{Commands, Connections, Idle, Listener, Loopback}
 
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
@@ -62,6 +63,9 @@ defmodule Troupe.Gateway.Daemon do
       {Commands, opts},
       {Connections, opts},
       {Listener, opts},
+      # After the Listener, so that `rest_for_one` republishes the WebSocket entry if
+      # the Listener ever restarts and rewrites the discovery file underneath it.
+      {Loopback, Keyword.get(opts, :loopback, [])},
       {Idle, opts}
     ]
 
