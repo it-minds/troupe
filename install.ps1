@@ -36,7 +36,7 @@ $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
 
 if (-not $ReleaseUrl) {
-    $ReleaseUrl = 'https://github.com/objective-mj/troupe/releases/latest/download'
+    $ReleaseUrl = 'https://github.com/it-minds/troupe-remote/releases/latest/download'
 }
 
 if (-not $InstallDir) {

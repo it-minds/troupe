@@ -16,6 +16,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
   alias Troupe.Plane.{Fleet, Repo}
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.PlaneHelper
   alias Troupe.Worker.RecordingProxy
 
   @moduletag timeout: 180_000
@@ -154,8 +155,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       # replica behind a Service looks like from here. Its connections go with it: a
       # listener that stops does not close the sockets it has already handed over.
       port = context.port
-      stop_supervised!(Listener)
-      stop_supervised!(Connections)
+      PlaneHelper.stop_plane()
       eventually(fn -> not Link.connected?(link) end)
 
       start_supervised!(Connections)
@@ -174,8 +174,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
       assert {:ok, _} = activate(context, report: Link.reporter(link))
 
       port = context.port
-      stop_supervised!(Listener)
-      stop_supervised!(Connections)
+      PlaneHelper.stop_plane()
       eventually(fn -> not Link.connected?(link) end)
 
       # Sealing does not depend on the plane being up, so this still reaches object
@@ -186,7 +185,13 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
       start_supervised!(Connections)
       start_supervised!({Listener, port: port, verify: &verify/1})
-      eventually(fn -> Link.connected?(link) end, 10_000)
+
+      # Not the done item's ten seconds: that claim is about the worker's backoff and
+      # the test above measures it, with a plane that was down for no time at all. Here
+      # the plane was down for a whole turn and a seal, and this wait is incidental to
+      # what is being proved — so it gets a budget that a loaded runner cannot miss,
+      # rather than one that turns scheduler starvation into a red suite.
+      eventually(fn -> Link.connected?(link) end, 30_000)
 
       eventually(fn ->
         session = PlaneSessions.get(context.session_id)

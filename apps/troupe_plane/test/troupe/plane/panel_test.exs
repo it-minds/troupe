@@ -12,6 +12,7 @@ defmodule Troupe.Plane.PanelTest do
   use Troupe.Plane.PanelCase, async: false
 
   alias Troupe.Plane.{Admin, Bundles, Fleet, Identity, Principals, Sessions, Triggers}
+  alias Troupe.Plane.Web.Live.ProfileEditor
 
   @moduletag timeout: 60_000
 
@@ -456,7 +457,7 @@ defmodule Troupe.Plane.PanelTest do
 
     test "a blank field is absent from the spec rather than empty in it" do
       draft =
-        Troupe.Plane.Web.Live.ProfileEditor.draft(%{
+        ProfileEditor.draft(%{
           fields: %{
             "name" => "dev",
             "image" => "ghcr.io/troupe/worker:1",
@@ -483,7 +484,7 @@ defmodule Troupe.Plane.PanelTest do
 
     test "an MCP row with no url is a row being typed, not a server" do
       draft =
-        Troupe.Plane.Web.Live.ProfileEditor.draft(%{
+        ProfileEditor.draft(%{
           fields: %{"name" => "dev", "image" => "ghcr.io/troupe/worker:1"},
           servers: [
             %{"name" => "jira", "url" => "https://mcp.example.test", "timeoutMs" => "5000"},

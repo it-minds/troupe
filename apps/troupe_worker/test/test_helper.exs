@@ -9,4 +9,8 @@ case Troupe.Plane.Repo.start_link(pool: Ecto.Adapters.SQL.Sandbox) do
   {:error, _reason} -> :ok
 end
 
+# Taking a real plane down, for the handful of tests that bring one up. A script, so
+# it stays out of this app's beams and out of the boundary check; see its moduledoc.
+Code.require_file("support/plane_helper.exs", __DIR__)
+
 ExUnit.start(capture_log: true)

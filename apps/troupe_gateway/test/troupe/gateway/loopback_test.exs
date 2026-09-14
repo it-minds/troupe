@@ -168,7 +168,7 @@ defmodule Troupe.Gateway.LoopbackTest do
       {:ok, client} = connect_ws(context.ws)
 
       assert {:error, %{code: code}} = Client.call(client, "identity.link", %{"command_id" => "c-x", "subject" => ""})
-      assert code == -32602
+      assert code == -32_602
       assert Identity.get() == nil
 
       Client.close(client)

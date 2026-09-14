@@ -12,6 +12,15 @@ on:
     tags: ["v*"]
   pull_request:
 
+# A branch under active work can have three full pipelines in flight at once, each of
+# them ten suite runs and five native builds, all measuring the same thing and only the
+# last of them answering a question anyone still has. Superseded runs on a branch are
+# cancelled; `main` and release tags are not, because their runs produce images and
+# binaries somebody may already be waiting on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
 env:
   ELIXIR_VERSION: "1.20.4"
   OTP_VERSION: "28.5.0.5"
@@ -21,26 +30,6 @@ jobs:
   check:
     name: compile, format, credo, boundaries, test
     runs-on: ubuntu-latest
-    # The plane is the one app that needs a database, and without one its suite skips
-    # itself — loudly in the log, silently in the exit code, so a green run proved
-    # nothing about the plane. `config/config.exs` points the test repo at
-    # localhost:55432, the port `scripts/dev-up` uses so a laptop's own Postgres is
-    # left alone, and the service is mapped onto that same port so CI and a laptop run
-    # from one configuration. (`DATABASE_URL` is read only by a `prod` release and
-    # would be ignored here.)
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: troupe
-          POSTGRES_PASSWORD: troupe
-          POSTGRES_DB: troupe_plane_test
-        ports: ["55432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U troupe -d troupe_plane_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
     steps:
       - uses: actions/checkout@v4
 
@@ -49,14 +38,34 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      # The native watch backend needs this; without it those tests skip and the
-      # polling backend is all that gets covered.
-      - name: Install inotify-tools
-        run: sudo apt-get update && sudo apt-get install -y inotify-tools
+      # inotify-tools: the native watch backend needs it; without it those tests skip
+      # and the polling backend is all that gets covered — and the done item that says
+      # a written file reaches subscribers inside a second is not met by polling.
+      # bubblewrap: `Troupe.SandboxTest` is the only thing that proves one session
+      # cannot see another's workspace, and it needs a real sandbox to prove it in.
+      - name: Install inotify-tools and bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y inotify-tools bubblewrap
+
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and
+          # an unprivileged user namespace is the whole of how bubblewrap builds a
+          # sandbox without being root. Left on, bwrap answers every one of those tests
+          # with "setting up uid map: Permission denied" — which looks like a sandbox
+          # that refused, and is a runner that refused.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      # Postgres, MinIO and OpenBao, from the same compose file a laptop uses, on the
+      # same ports `config/config.exs` names. Not three `services:` blocks: the bucket
+      # needs versioning enabled and OpenBao needs a transit engine and a signing key
+      # before anything can mint a token, and `services:` has nowhere to put that. Two
+      # thirds of the suite — the object store, the KMS, every worker test that wants a
+      # durable tier — used to fail here for want of them.
+      - name: Postgres, MinIO and OpenBao
+        run: scripts/dev-up
 
       - uses: actions/cache@v4
         with:
@@ -73,6 +82,17 @@ jobs:
 
       - run: mix format --check-formatted
       - run: mix credo --strict
+
+      # Three files that are generated and committed: the console's bundle, its design
+      # tokens, and the theme stylesheet a browser is served. Each task's own moduledoc
+      # says CI checks it with `--check`, and CI never did — so a token changed without
+      # regenerating would have reached a browser as whatever was there before, and the
+      # only evidence would have been a colour that was slightly wrong.
+      - name: Generated assets are current
+        run: |
+          MIX_ENV=test mix troupe.admin.assets --check
+          MIX_ENV=test mix troupe.admin.tokens --check
+          MIX_ENV=test mix troupe.theme --check
 
       # The architecture is a claim about coupling, and claims like that decay
       # silently. This is the thing that makes it fail loudly instead.
@@ -144,23 +164,40 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Where the images go. Three secrets — `REGISTRY`, `REGISTRY_USERNAME`,
-      # `REGISTRY_PASSWORD` — name a registry and how to log in to it, and a fourth,
-      # `REGISTRY_NAMESPACE`, the path under it (Scaleway's registry wants its
-      # namespace there, not the GitHub owner). Without them the images go to this
-      # repository's own packages on ghcr.io with the workflow's token, which is what a
-      # fork or a first run wants.
+      # Where the images go. Four secrets: `REGISTRY` and `REGISTRY_NAMESPACE` name it
+      # and the path under it (Scaleway's registry wants its namespace there, not the
+      # GitHub owner), `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` are how to log in.
+      #
+      # All four, or none. There used to be a fallback — `${REGISTRY:-ghcr.io}` with the
+      # workflow's own token — described as what a fork or a first run wants. What it
+      # actually did the first time this job ran was take a registry *password* that had
+      # been set on its own, pair it with the ghcr.io the missing `REGISTRY` defaulted
+      # to, and answer `denied: denied`: a credential for one registry offered to
+      # another. A half-configured registry is not a state worth guessing about, so
+      # publishing requires the pair, and the summary says which secrets are missing.
       - name: Resolve the registry and the tags
         id: registry
         env:
           REGISTRY: ${{ secrets.REGISTRY }}
           REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
           RELEASE: ${{ matrix.release }}
         run: |
-          registry="${REGISTRY:-ghcr.io}"
+          if [ -z "${REGISTRY}" ] || [ -z "${REGISTRY_PASSWORD}" ]; then
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ${RELEASE}: not published"
+              echo
+              echo "No registry is configured. Set the repository secrets \`REGISTRY\`,"
+              echo "\`REGISTRY_NAMESPACE\`, \`REGISTRY_USERNAME\` and \`REGISTRY_PASSWORD\`,"
+              echo "and this job will build and push the image."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
           namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
           # Registries want lower case, and a GitHub owner need not be.
-          image=$(echo "${registry}/${namespace}/${RELEASE//_/-}" | tr '[:upper:]' '[:lower:]')
+          image=$(echo "${REGISTRY}/${namespace}/${RELEASE//_/-}" | tr '[:upper:]' '[:lower:]')
 
           # `sha-<short>` on every push, so every commit is pullable; and the version on
           # a release tag, without its `v`, because that is what the values files write.
@@ -169,21 +206,25 @@ jobs:
             refs/tags/v*) tags="${tags},${image}:${GITHUB_REF_NAME#v}" ;;
           esac
 
-          echo "registry=${registry}" >> "$GITHUB_OUTPUT"
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
           echo "tags=${tags}" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
+        if: steps.registry.outputs.publish == 'true'
 
       - uses: docker/login-action@v3
+        if: steps.registry.outputs.publish == 'true'
         with:
           registry: ${{ steps.registry.outputs.registry }}
-          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
-          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
 
       # linux/amd64 only: that is what the node pool is, and an arm64 build of the
-      # umbrella under emulation is an hour nobody has asked for. The three images share
+      # umbrella under emulation is an hour nobody has asked for. The four images share
       # every layer up to `mix release`, so one cache serves the whole matrix.
       - uses: docker/build-push-action@v6
+        if: steps.registry.outputs.publish == 'true'
         with:
           context: .
           file: docker/Dockerfile
@@ -205,7 +246,7 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -253,11 +294,19 @@ jobs:
           # wrapper but not for the payload: rustler_precompiled resolves the
           # ExRatatui NIF against the build host, so a macOS binary built on Linux
           # would carry a Linux .so and fail at NIF load.
-          - { os: ubuntu-latest, target: linux_x86_64, ext: "" }
-          - { os: ubuntu-24.04-arm, target: linux_aarch64, ext: "" }
-          - { os: macos-15-intel, target: macos_x86_64, ext: "" }
-          - { os: macos-14, target: macos_aarch64, ext: "" }
-          - { os: windows-latest, target: windows_x86_64, ext: ".exe" }
+          #
+          # No `windows_x86_64`. `ezstd` — zstd for session segments and snapshots,
+          # and a hard dependency of `troupe_protocol` — declares
+          # `{pre_hooks, [{"(linux|darwin)", compile, "make compile_nif"}]}`, so on
+          # Windows nothing builds its NIF and the build stops at "Missing artifact
+          # priv/ezstd_nif.so". That is upstream's decision rather than a gap in this
+          # runner, so there is no Windows binary to publish and this matrix does not
+          # claim one. `install.ps1` and `scripts/test-install.ps1` stay in the tree
+          # against the day there is.
+          - { os: ubuntu-latest, target: linux_x86_64 }
+          - { os: ubuntu-24.04-arm, target: linux_aarch64 }
+          - { os: macos-15-intel, target: macos_x86_64 }
+          - { os: macos-14, target: macos_aarch64 }
 
     steps:
       - uses: actions/checkout@v4
@@ -267,7 +316,7 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
-      - uses: mlugg/setup-zig@v1
+      - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
@@ -275,43 +324,26 @@ jobs:
         if: startsWith(matrix.os, 'macos')
         run: brew install xz || true
 
-      - name: Install xz and 7zip (Windows)
-        if: startsWith(matrix.os, 'windows')
-        run: choco install -y xz 7zip
-
-      - run: mix deps.get
-
+      # `scripts/build-local`, because every one of its details is load-bearing and a
+      # second copy of them here would drift: the musl ABI the Linux wrapper's ERTS
+      # needs, the Zig cache directories that keep `renameat2` off a filesystem that
+      # refuses it, `EX_RATATUI_BUILD` unset so the NIF is not rebuilt against the
+      # host's libc — and the release *name*, without which `mix release` refuses to
+      # guess between the umbrella's five. It reads `BURRITO_TARGET` and writes
+      # `burrito_out/troupe-<version>-<target>`, which is the name this job publishes.
       - name: Build the release
         shell: bash
         env:
-          MIX_ENV: prod
           BURRITO_TARGET: ${{ matrix.target }}
-          TROUPE_REAPER_TARGETS: all
-        run: |
-          # Burrito's Linux wrapper carries a musl ERTS, so the bundled NIF must be
-          # the musl variant; a glibc .so cannot load there.
-          case "${{ matrix.target }}" in
-            linux_*) export TARGET_ABI=musl ;;
-          esac
-
-          # Zig 0.16 uses renameat2 flags that some filesystems reject with EINVAL,
-          # which it treats as a programmer bug and aborts on.
-          export ZIG_LOCAL_CACHE_DIR="${RUNNER_TEMP}/zig-local"
-          export ZIG_GLOBAL_CACHE_DIR="${RUNNER_TEMP}/zig-global"
-          mkdir -p "$ZIG_LOCAL_CACHE_DIR" "$ZIG_GLOBAL_CACHE_DIR"
-
-          mix release --overwrite
+        run: bash scripts/build-local
 
       - name: Name the artifact
         id: artifact
         shell: bash
         run: |
-          version=$(mix run --no-start -e 'IO.write(Mix.Project.config()[:version])')
-          name="troupe-${version}-${{ matrix.target }}${{ matrix.ext }}"
-          mv "burrito_out/troupe_${{ matrix.target }}${{ matrix.ext }}" "burrito_out/${name}"
-          chmod +x "burrito_out/${name}" || true
+          set -euo pipefail
+          name=$(basename "$(ls burrito_out/troupe-*-${{ matrix.target }})")
           echo "name=${name}" >> "$GITHUB_OUTPUT"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
 
       - name: Smoke test the artifact
         shell: bash
@@ -341,6 +373,16 @@ jobs:
           TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/smoke/script.json" \
             "./$binary" sessions --workspace smoke/ws | grep -q "Sessions for\|No sessions" 
 
+      # Before the report, not after it: the binary is what this job is for, and three
+      # jobs wait on it. A step that only writes numbers into the run summary should not
+      # be able to lose it — which is exactly what happened on both macOS legs, where
+      # the report was the last step and it failed.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.artifact.outputs.name }}
+          path: burrito_out/${{ steps.artifact.outputs.name }}
+          if-no-files-found: error
+
       - name: Report size and start-up cost
         shell: bash
         run: |
@@ -349,23 +391,23 @@ jobs:
           echo "### ${{ matrix.target }}" >> "$GITHUB_STEP_SUMMARY"
           echo "- binary size: $((size / 1024 / 1024)) MiB ($size bytes)" >> "$GITHUB_STEP_SUMMARY"
 
+          # `date +%s%N` is a GNU extension. BSD date prints a literal "N", so on macOS
+          # this arithmetic got `1789385995N` and said "value too great for base" —
+          # which is a sentence about a nanosecond, not about the build. Perl's
+          # Time::HiRes is core and is on all three runner images.
+          now_ms() { perl -MTime::HiRes=time -e 'printf("%.0f\n", time() * 1000)'; }
+
           # The first run pays for extraction; the second is the warm path.
           "./$binary" maintenance uninstall >/dev/null 2>&1 <<< "y" || true
-          cold_start=$(date +%s%N)
+          cold_start=$(now_ms)
           "./$binary" --version > /dev/null
-          cold_end=$(date +%s%N)
-          warm_start=$(date +%s%N)
+          cold_end=$(now_ms)
+          warm_start=$(now_ms)
           "./$binary" --version > /dev/null
-          warm_end=$(date +%s%N)
+          warm_end=$(now_ms)
 
-          echo "- cold start: $(( (cold_end - cold_start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
-          echo "- warm start: $(( (warm_end - warm_start) / 1000000 )) ms" >> "$GITHUB_STEP_SUMMARY"
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.artifact.outputs.name }}
-          path: burrito_out/${{ steps.artifact.outputs.name }}
-          if-no-files-found: error
+          echo "- cold start: $(( cold_end - cold_start )) ms" >> "$GITHUB_STEP_SUMMARY"
+          echo "- warm start: $(( warm_end - warm_start )) ms" >> "$GITHUB_STEP_SUMMARY"
 
   containers:
     name: clean-container check (linux x86_64)
@@ -399,10 +441,19 @@ jobs:
           TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
             ./troupe run "smoke" --headless --workspace ws --auto-approve
           grep -q packaged ws/hello.txt
+
           # Watch mode has to fall back to polling with no inotify-tools installed.
+          # This used to grep the output for "polling for changes", which is not a
+          # string this program has ever printed: the notice reads "watch: no native
+          # file watcher available, polling every Nms", and it is published as an
+          # ephemeral event while the session is being created — before any client has
+          # subscribed — so a fresh headless run never prints it at all. What a clean
+          # container can honestly check is that the fallback happens rather than the
+          # session dying with no backend, which is what the run finishing means.
           rm -rf wws && mkdir wws
           TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=/work/script.json \
-            ./troupe run "watch" --headless --watch --workspace wws --auto-approve | grep -q "polling for changes"
+            ./troupe run "watch" --headless --watch --workspace wws --auto-approve
+          grep -q packaged wws/hello.txt
           SH
           chmod +x check.sh
 
@@ -441,35 +492,12 @@ jobs:
 
           docker run --rm -v "$PWD:/src" ubuntu:24.04 /src/scripts/test-install.sh
 
-  installer-ps1:
-    name: install.ps1 (windows runner)
-    needs: build
-    runs-on: windows-latest
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-windows_x86_64.exe
-          merge-multiple: true
-          path: dist
-
-      - name: Install, upgrade, reject a corrupt artifact, uninstall
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Path release -Force | Out-Null
-          Copy-Item dist/troupe-*-windows_x86_64.exe release/
-          Push-Location release
-          Get-ChildItem troupe-* | ForEach-Object {
-            "$((Get-FileHash $_ -Algorithm SHA256).Hash.ToLower())  $($_.Name)"
-          } | Set-Content SHA256SUMS
-          Pop-Location
-
-          ./scripts/test-install.ps1 -ReleaseDir release
-
   release:
     name: publish
-    needs: [build, containers, installer-sh, installer-ps1]
+    # No `installer-ps1`: there is no Windows binary for it to install, because there
+    # is no Windows build. `scripts/test-install.ps1` is still in the tree and still
+    # the scenario the Windows installer has to pass, on the day it can be run.
+    needs: [build, containers, installer-sh]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:

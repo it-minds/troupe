@@ -49,8 +49,17 @@ defmodule Troupe.ObjectStoreTest do
 
     assert {:ok, _} = ObjectStore.put(store, key, "contents")
     assert {:ok, "contents"} = ObjectStore.get(store, key)
-    assert {:ok, keys} = ObjectStore.list(store, prefix <> "workspace/")
-    assert length(keys) == 1
+
+    # By name, not by count. This asserted `length(keys) == 1` and passed for months
+    # while the listing said `a file with spaces &amp; a +plus.tar`: S3 escapes XML in
+    # the values it returns, and an escaped key is a key that does not exist. Deleting
+    # one that does not exist succeeds, so erasure reported this object gone on every
+    # run and never touched it.
+    assert {:ok, [^key]} = ObjectStore.list(store, prefix <> "workspace/")
+
+    assert {:ok, [%{key: ^key}]} = ObjectStore.list_versions(store, prefix <> "workspace/")
+    assert {:ok, 1} = ObjectStore.delete_prefix(store, prefix <> "workspace/")
+    assert {:ok, []} = ObjectStore.list_versions(store, prefix <> "workspace/")
   end
 
   describe "versioning" do

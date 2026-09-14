@@ -19,6 +19,7 @@ defmodule Troupe.Plane.MCPAuthTest do
   import Plug.Conn
   import Plug.Test
 
+  alias Troupe.Plane.OIDC
   alias Troupe.Plane.Web.Router
 
   @issuer "https://login.example.test/9c5b/v2.0"
@@ -117,31 +118,31 @@ defmodule Troupe.Plane.MCPAuthTest do
 
   describe "which tokens the door takes" do
     test "a token addressed to the client id is this plane's caller" do
-      assert @client in Troupe.Plane.OIDC.audiences()
+      assert @client in OIDC.audiences()
     end
 
     test "so is one addressed to the API that client exposes" do
       # An id_token is addressed to the client; an access token for a scope the client
       # exposes is addressed to the API. Which of the two a client holds is not something
       # the client chooses, so refusing either would refuse the client.
-      assert "api://#{@client}" in Troupe.Plane.OIDC.audiences()
+      assert "api://#{@client}" in OIDC.audiences()
     end
 
     test "so is one addressed to the endpoint's own URL" do
       # The third identifier URI of the same registration. Which name an access token
       # carries depends on the provider and on the name the client asked under, neither of
       # which the caller chooses.
-      assert "https://troupe.example.test/mcp" in Troupe.Plane.OIDC.audiences()
+      assert "https://troupe.example.test/mcp" in OIDC.audiences()
     end
 
     test "and nothing else" do
-      refute "https://graph.microsoft.com" in Troupe.Plane.OIDC.audiences()
-      assert length(Troupe.Plane.OIDC.audiences()) == 3
+      refute "https://graph.microsoft.com" in OIDC.audiences()
+      assert length(OIDC.audiences()) == 3
     end
 
     test "a plane with no client configured accepts no provider token at all" do
       Application.put_env(:troupe_plane, :oidc, issuer: @issuer)
-      assert Troupe.Plane.OIDC.audiences() == []
+      assert OIDC.audiences() == []
     end
 
     test "a garbled token is refused, not crashed on" do

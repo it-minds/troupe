@@ -283,7 +283,7 @@ defmodule Troupe.ObjectStore do
 
   defp extract(xml, tag) do
     case Regex.run(~r/<#{tag}>([^<]*)<\/#{tag}>/, xml) do
-      [_, value] -> value
+      [_, value] -> unescape(value)
       _ -> nil
     end
   end
@@ -291,7 +291,30 @@ defmodule Troupe.ObjectStore do
   defp extract_all(xml, tag) do
     ~r/<#{tag}>([^<]*)<\/#{tag}>/
     |> Regex.scan(xml)
-    |> Enum.map(fn [_, value] -> value end)
+    |> Enum.map(fn [_, value] -> unescape(value) end)
+  end
+
+  # S3 escapes the values it puts in XML, so an object named `a & b` comes back as
+  # `a &amp; b`. Read literally, that is a key which does not exist — and deleting a key
+  # which does not exist *succeeds*, so `delete_prefix/2` reported everything gone and
+  # left the object exactly where it was. Erasure is the one thing here that has to be
+  # exact, and this was the shape of it being quietly wrong.
+  #
+  # `&amp;` is decoded last, or `&amp;lt;` — which is how S3 writes the literal text
+  # `&lt;` — would come back as `<`.
+  defp unescape(value) do
+    value
+    |> then(&Regex.replace(~r/&#x([0-9A-Fa-f]+);/, &1, fn _, hex ->
+      <<String.to_integer(hex, 16)::utf8>>
+    end))
+    |> then(&Regex.replace(~r/&#([0-9]+);/, &1, fn _, digits ->
+      <<String.to_integer(digits)::utf8>>
+    end))
+    |> String.replace("&lt;", "<")
+    |> String.replace("&gt;", ">")
+    |> String.replace("&quot;", "\"")
+    |> String.replace("&apos;", "'")
+    |> String.replace("&amp;", "&")
   end
 
   defp extract_versions(xml) do

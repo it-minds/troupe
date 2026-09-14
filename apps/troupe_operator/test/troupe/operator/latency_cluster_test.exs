@@ -28,6 +28,7 @@ defmodule Troupe.Operator.LatencyClusterTest do
   alias Troupe.Protocol.Client
   alias Troupe.Protocol.Token
 
+  @moduletag :cluster
   @moduletag timeout: 600_000
 
   @namespace "troupe-system"

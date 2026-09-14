@@ -24,8 +24,8 @@ defmodule Troupe.Plane.Web.Router do
   use Plug.Router
 
   alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens}
-  alias Troupe.Plane.Web.Index
   alias Troupe.Plane.Admin.API, as: AdminAPI
+  alias Troupe.Plane.Web.Index
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
   require Logger
@@ -274,13 +274,15 @@ defmodule Troupe.Plane.Web.Router do
   # A plane token is tried first because it is the cheaper check and the commoner caller.
   # Both are verified in full; the difference is who signed them, not how much is trusted.
   defp authenticate_tool_caller(conn) do
-    with {:ok, jwt} <- bearer(conn) do
-      case authenticate(conn) do
-        {:ok, user} -> {:ok, user}
-        {:error, _plane_token} -> from_provider(jwt)
-      end
-    else
-      {:error, :no_token} -> {:error, Error.new(:unauthenticated, %{reason: "no token"})}
+    case bearer(conn) do
+      {:ok, jwt} ->
+        case authenticate(conn) do
+          {:ok, user} -> {:ok, user}
+          {:error, _plane_token} -> from_provider(jwt)
+        end
+
+      {:error, :no_token} ->
+        {:error, Error.new(:unauthenticated, %{reason: "no token"})}
     end
   end
 

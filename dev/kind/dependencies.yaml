@@ -113,7 +113,7 @@ spec:
     spec:
       containers:
         - name: minio
-          image: minio/minio:RELEASE.2025-04-22T22-12-26Z
+          image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
           args: ["server", "/data", "--console-address", ":9001"]
           env:
             - {name: MINIO_ROOT_USER, value: troupe}
@@ -140,7 +140,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: mc
-          image: minio/mc:RELEASE.2025-04-16T18-13-26Z
+          image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
           command: ["/bin/sh", "-c"]
           args:
             - |
