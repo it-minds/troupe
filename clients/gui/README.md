@@ -11,7 +11,7 @@ Three packages in one pnpm workspace:
 | --- | --- |
 | `packages/client` | `@troupe/client` — the protocol in TypeScript. JSON-RPC 2.0 over WebSocket, the plane's HTTP surface (discovery, device-grant login, `/auth/exchange`, `/rpc`), and a `SessionView` that folds events and turns "send a prompt, wait for the turn" into a promise. Runs in a browser or Node; no dependencies. |
 | `packages/bench` | `@troupe/bench` — the throughput test. N clients, one session each, K prompts each, every milestone timed. |
-| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane, shows one list of sessions, streams a session, and answers approvals. The bundle is plain web; a Tauri or Electron shell would load it unchanged and add two things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
+| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane, shows one list of every session — the team's on worker pods and the person's own on the daemon in front of them — streams a session, answers approvals, reviews what ran unattended, and administers the platform for whoever may. The bundle is plain web; the Tauri shell in [`src-tauri/`](apps/desktop/src-tauri) loads it unchanged and adds the things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
 
 ## The path a client takes
 
@@ -82,7 +82,7 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # 20 tests: stage 1's done items, the fold, the fleet store
+pnpm test                        # 49 tests: stage 1 and 2's done items, PKCE, the fold, the fleet store
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
 ```
@@ -92,7 +92,9 @@ imitating a screen: a real WebSocket, a hash-chained log, replay from a cursor w
 closed boundary, a device grant that answers `slow_down` and rotates its refresh token,
 token expiry with `auth.expiring` and `auth.refresh`, blob range caps, and approvals
 where the first answer wins. `browserFetch` puts a browser's same-origin policy in front
-of Node's `fetch`, so the CORS behaviour is tested here rather than assumed.
+of Node's `fetch`, so the CORS behaviour is tested here rather than assumed. `daemon.ts`
+is the other half: one token for the whole machine, several sessions live on one socket,
+directories it owns, and an actor that changes when an identity is linked.
 
 What none of it proves is the *server's* half. See [REPORT.md](REPORT.md).
 
@@ -221,6 +223,8 @@ packages/client/src
   attach.ts       SessionAttachment — one session's socket kept alive across expiry and drops
   transcript.ts   the fold: events → a transcript. Pure, and the reason two clients agree
   fleet.ts        FleetStore — one list from however many sources there are
+  daemon.ts       DaemonClient — the machine in front of you: one socket, many sessions
+  admin.ts        the plane's administrative surface, one call per method
 
 apps/desktop/src
   shell.ts        the whole contract between the web bundle and a desktop shell
@@ -228,7 +232,8 @@ apps/desktop/src
   theme.ts        which theme and mode this person reads in; the only place that knows
   tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
   mark.ts         the mask's geometry, generated from the same files — do not edit
-  views/          SignIn · Sessions · Session · Approval · Approvals · Files · bits
+  views/          SignIn · Sessions · Session · Approval · Approvals · Files · Review
+                  Local · Admin (Fleet · Bundles · Teams · Automation · Audit · Settings)
 ```
 
 `SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so

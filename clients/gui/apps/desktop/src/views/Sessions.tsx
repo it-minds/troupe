@@ -14,7 +14,7 @@ import type { JSX } from "react";
 import { filterRows } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow, SessionKind } from "@troupe/client";
 import { StartSession } from "./StartSession";
-import { Cost, RowStatus, statusOf, When, Where } from "./bits";
+import { Cost, RowStatus, statusOf, Sync, When, Where } from "./bits";
 
 export function Sessions({
   auth,
@@ -181,6 +181,7 @@ function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void
               <span className="meta">
                 <RowStatus row={r} />
                 <Where kind={r.kind} />
+                <Sync state={r.sync} />
                 <span className="when">{r.profile}</span>
                 <Cost micros={r.costMicros} />
                 <When iso={r.lastActiveAt} />

@@ -8,7 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import type { FleetRow, SessionKind } from "@troupe/client";
+import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
 /** The nine states a session can be in, as the design names them. */
@@ -74,6 +74,28 @@ export function Where({ kind }: { kind: SessionKind }): JSX.Element {
       {kind === "team" ? "Team" : "This computer"}
     </span>
   );
+}
+
+/**
+ * Whether a private session's copy here is the copy everywhere.
+ *
+ * Only private sessions have one, because only they are stored anywhere but the machine
+ * that ran them. `conflict` is the one that needs a person: two devices resumed inside
+ * one epoch, the platform fenced one of them, and nothing is merged — so the row says
+ * which device won rather than pretending the two can be reconciled.
+ */
+export function Sync({ state, device }: { state: SyncState | null; device?: string | null }): JSX.Element | null {
+  if (!state) return null;
+  if (state === "conflict") {
+    return (
+      <Pill status="error" title={device ? `${device} has the copy that counts` : "Another device resumed this first"}>
+        Conflict
+      </Pill>
+    );
+  }
+  if (state === "pending") return <Pill status="queued" title="Sealing; the platform does not have it all yet">Syncing</Pill>;
+  if (state === "this-device-only") return <Pill status="offline" title="Nothing has been stored off this machine">Here only</Pill>;
+  return <Pill status="allowed" title="The platform holds this session's sealed copy">Synced</Pill>;
 }
 
 /** Micros as money. Nothing reported is "—", which is not the same as free. */
