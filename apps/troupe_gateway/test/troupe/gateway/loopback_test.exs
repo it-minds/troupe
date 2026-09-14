@@ -182,7 +182,16 @@ defmodule Troupe.Gateway.LoopbackTest do
         id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
       )
 
-    {:ok, session} = Troupe.start_session(workspace: context.workspace, fake: fake)
+    {:ok, session} =
+      Troupe.start_session(
+        workspace: context.workspace,
+        fake: fake,
+        config_overrides: [provider: "fake", auto_approve: true, model: "fake", state_dir: context.state_dir]
+      )
+
+    # Stopped when the test ends. The session index is one process for the whole run, so
+    # a session left behind is one another file's "nothing is running yet" would find.
+    on_exit(fn -> Troupe.stop_session(session.id) end)
     session
   end
 
