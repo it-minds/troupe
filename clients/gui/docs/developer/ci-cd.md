@@ -108,8 +108,23 @@ ever run it. It is `100755` now.)
 
 | secret | what it is |
 |---|---|
-| `KUBECONFIG` | the cluster's kubeconfig, written to `.local/kubeconfig.yaml` where the script looks |
+| `KUBECONFIG` | a kubeconfig **with a token in it**, written to `.local/kubeconfig.yaml` where the script looks |
 | `DEPLOY_VALUES` | the Helm values file for the deployment, the one kept out of the repository under `.local/` |
+
+**Not a person's kubeconfig.** The one Scaleway issues has an *exec plugin* for its user:
+it shells out to `scw` on the machine using it to mint a token. On a runner that is
+`executable scw not found`, and the token it would have minted is that person's, which
+is cluster-admin — rather more than rolling one Deployment needs.
+
+`deploy/ci-deployer.yaml` is the identity CI deploys as instead: a service account in
+`troupe-system` with a Role covering a Deployment, a Service and an Ingress, the Secrets
+Helm keeps its release history in, and read-only access to the Pods it watches while
+waiting. Nothing cluster-scoped and nothing in another namespace. `scripts/ci-kubeconfig`
+reads its token and prints the kubeconfig to upload.
+
+The token Secret is declared rather than left to `kubectl create token`, because that one
+expires — right for a person, wrong for a runner that has to still work in three months
+without anybody remembering why it stopped.
 
 Without both, the run stops at its first step and says which is missing rather than
 half-deploying. The credentials are removed at the end of the job whatever happened.
