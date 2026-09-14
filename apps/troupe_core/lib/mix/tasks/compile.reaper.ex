@@ -39,6 +39,14 @@ defmodule Mix.Tasks.Compile.Reaper do
     source = source_path()
 
     cond do
+      # `@recursive` is how this reaches `troupe_core` when `mix compile.reaper` is run
+      # from the umbrella root — and it also reaches every *other* app, each of which
+      # would then cross-compile all five targets into a `priv/reaper` nothing reads.
+      # The binaries belong to `troupe_core`; that cost forty-odd redundant Zig builds
+      # on every image build and put six extra copies in every release.
+      Mix.Project.config()[:app] != :troupe_core ->
+        {:noop, []}
+
       not File.exists?(source) ->
         {:noop, []}
 

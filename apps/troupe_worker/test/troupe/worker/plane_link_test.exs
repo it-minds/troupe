@@ -186,7 +186,13 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
       start_supervised!(Connections)
       start_supervised!({Listener, port: port, verify: &verify/1})
-      eventually(fn -> Link.connected?(link) end, 10_000)
+
+      # Not the done item's ten seconds: that claim is about the worker's backoff and
+      # the test above measures it, with a plane that was down for no time at all. Here
+      # the plane was down for a whole turn and a seal, and this wait is incidental to
+      # what is being proved — so it gets a budget that a loaded runner cannot miss,
+      # rather than one that turns scheduler starvation into a red suite.
+      eventually(fn -> Link.connected?(link) end, 30_000)
 
       eventually(fn ->
         session = PlaneSessions.get(context.session_id)
