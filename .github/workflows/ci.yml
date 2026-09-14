@@ -66,6 +66,17 @@ jobs:
       - run: mix format --check-formatted
       - run: mix credo --strict
 
+      # Three files that are generated and committed: the console's bundle, its design
+      # tokens, and the theme stylesheet a browser is served. Each task's own moduledoc
+      # says CI checks it with `--check`, and CI never did — so a token changed without
+      # regenerating would have reached a browser as whatever was there before, and the
+      # only evidence would have been a colour that was slightly wrong.
+      - name: Generated assets are current
+        run: |
+          MIX_ENV=test mix troupe.admin.assets --check
+          MIX_ENV=test mix troupe.admin.tokens --check
+          MIX_ENV=test mix troupe.theme --check
+
       # The architecture is a claim about coupling, and claims like that decay
       # silently. This is the thing that makes it fail loudly instead.
       - name: Boundaries
