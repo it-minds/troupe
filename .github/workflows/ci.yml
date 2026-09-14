@@ -12,6 +12,15 @@ on:
     tags: ["v*"]
   pull_request:
 
+# A branch under active work can have three full pipelines in flight at once, each of
+# them ten suite runs and five native builds, all measuring the same thing and only the
+# last of them answering a question anyone still has. Superseded runs on a branch are
+# cancelled; `main` and release tags are not, because their runs produce images and
+# binaries somebody may already be waiting on.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+
 env:
   ELIXIR_VERSION: "1.20.4"
   OTP_VERSION: "28.5.0.5"
