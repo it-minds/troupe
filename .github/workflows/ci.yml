@@ -168,13 +168,13 @@ jobs:
       # and the path under it (Scaleway's registry wants its namespace there, not the
       # GitHub owner), `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` are how to log in.
       #
-      # There used to be a fallback to this repository's own packages on ghcr.io with
-      # the workflow's token, described as what a fork or a first run wants. On this
-      # organisation it is not: `docker login ghcr.io` answers `denied: denied` even
-      # with `Packages: write` on the token, because publishing packages is disallowed
-      # org-wide. A fallback that cannot work turns every push red for a reason that has
-      # nothing to do with the code, so publishing now requires a registry that was
-      # configured on purpose, and says so in the summary when there is none.
+      # All four, or none. There used to be a fallback — `${REGISTRY:-ghcr.io}` with the
+      # workflow's own token — described as what a fork or a first run wants. What it
+      # actually did the first time this job ran was take a registry *password* that had
+      # been set on its own, pair it with the ghcr.io the missing `REGISTRY` defaulted
+      # to, and answer `denied: denied`: a credential for one registry offered to
+      # another. A half-configured registry is not a state worth guessing about, so
+      # publishing requires the pair, and the summary says which secrets are missing.
       - name: Resolve the registry and the tags
         id: registry
         env:

@@ -135,13 +135,16 @@ the worker release and fails the build if the binary is not in the assembled rel
 (audit §3.21, now closed).
 
 Secrets used: `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`.
-**None of them is set on `it-minds/troupe-remote`, so this job builds nothing and says so
-in the run summary.** There used to be a fallback to `ghcr.io/<owner>` with the workflow's
-own token, described as what a fork or a first run wants; on this organisation
-`docker login ghcr.io` answers `denied: denied` even with `Packages: write` on the token,
-because publishing packages is disallowed org-wide. A fallback that cannot work turns
-every push red for a reason unrelated to the code, so publishing now requires a registry
-someone configured on purpose. With none set the
+On `it-minds/troupe-remote` they name the Scaleway registry the cluster already pulls
+from — `rg.fr-par.scw.cloud/troupe` — with the push key `create-ci-key.sh` mints, which
+is the same credential `push-images.sh` uses by hand.
+
+`REGISTRY` and `REGISTRY_PASSWORD` are now required together. There used to be a fallback
+to `ghcr.io/<owner>` with the workflow's own token, described as what a fork or a first
+run wants; the first time this job ran, a `REGISTRY_PASSWORD` that had been set on its own
+was paired with the `ghcr.io` the absent `REGISTRY` defaulted to, and `docker login`
+answered `denied: denied` — a credential for one registry offered to another. Without
+both, the job builds nothing and names the missing secrets in the run summary. With none set the
 images go to `ghcr.io/<owner>/troupe-<release>`. `REGISTRY_NAMESPACE` exists because
 "Scaleway's registry wants its namespace there, not the GitHub owner" (`:149-150`).
 
