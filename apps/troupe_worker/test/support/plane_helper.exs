@@ -20,18 +20,23 @@ defmodule Troupe.Worker.PlaneHelper do
   these tests use to simulate a killed replica kills it where it stands — and where it
   stands is sometimes inside a query. The sandbox hands every process one shared
   connection, so a client that exits mid-checkout takes that connection down with it,
-  and the next plane process fails with an `OwnershipError` a hundred lines from the
-  `stop_supervised!` that caused it.
+  and the next plane process fails with an `OwnershipError` or a "client exited" a
+  hundred lines from the `stop_supervised!` that caused it.
 
   `GenServer.stop/3` goes through the process's own loop instead: each connection
   finishes the callback it is in, runs `terminate/2`, and closes its socket. What the
   worker sees is the same either way — a socket that went.
+
+  Every child of the supervisor, not `Connections.for_profile/1`: a connection registers
+  itself at *enrolment*, not when the socket arrives, so one that is still proving which
+  pod it is has no profile name and is in no registry. That is precisely the one that
+  was still being killed mid-query, because enrolment is the part that writes.
   """
-  @spec stop_plane(String.t()) :: :ok
-  def stop_plane(profile \\ "dev") do
+  @spec stop_plane() :: :ok
+  def stop_plane do
     ExUnit.Callbacks.stop_supervised!(Listener)
 
-    for pid <- Connections.for_profile(profile) do
+    for {_id, pid, _type, _modules} <- DynamicSupervisor.which_children(Connections), is_pid(pid) do
       try do
         GenServer.stop(pid, :normal, 5_000)
       catch
