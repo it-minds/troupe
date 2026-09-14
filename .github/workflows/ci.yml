@@ -39,7 +39,15 @@ jobs:
       # bubblewrap: `Troupe.SandboxTest` is the only thing that proves one session
       # cannot see another's workspace, and it needs a real sandbox to prove it in.
       - name: Install inotify-tools and bubblewrap
-        run: sudo apt-get update && sudo apt-get install -y inotify-tools bubblewrap
+        run: |
+          sudo apt-get update && sudo apt-get install -y inotify-tools bubblewrap
+
+          # Ubuntu 24.04 restricts unprivileged user namespaces through AppArmor, and
+          # an unprivileged user namespace is the whole of how bubblewrap builds a
+          # sandbox without being root. Left on, bwrap answers every one of those tests
+          # with "setting up uid map: Permission denied" — which looks like a sandbox
+          # that refused, and is a runner that refused.
+          sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
 
       # Postgres, MinIO and OpenBao, from the same compose file a laptop uses, on the
       # same ports `config/config.exs` names. Not three `services:` blocks: the bucket
