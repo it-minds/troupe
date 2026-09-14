@@ -168,6 +168,14 @@ defmodule Troupe.Gateway.Connection do
     {:stop, :normal, state}
   end
 
+  # `identity.link` changes who this daemon says its user is. The connection that made
+  # the change is relabelled in place rather than having to reconnect to see it; every
+  # other connection picks it up at its next `initialize`, because the principal is read
+  # from disk there and not cached.
+  def handle_info({:principal_changed, principal}, state) do
+    {:noreply, %{state | principal: principal}}
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
 
   defp read(data, state) do
@@ -462,9 +470,12 @@ defmodule Troupe.Gateway.Connection do
 
   defp constant_time_equal?(_a, _b), do: false
 
+  # The operating system's user, unless somebody has said who they actually are. A
+  # `identity.link` makes every subsequent connection carry the provider's subject, which
+  # is what lets a local session be listed by a plane and opened from another device.
   defp local_principal do
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
-    %{"subject" => "local:" <> user, "display_name" => user, "kind" => "user"}
+    Troupe.Identity.principal(user)
   end
 
   # -- expiry and renewal -----------------------------------------------------

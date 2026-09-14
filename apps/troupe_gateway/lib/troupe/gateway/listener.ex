@@ -67,6 +67,10 @@ defmodule Troupe.Gateway.Listener do
   def terminate(_reason, %__MODULE__{} = state) do
     :gen_tcp.close(state.socket)
     Endpoint.retract(state.endpoint)
+    # The WebSocket entry lives in the same file and outlives a Unix socket's removal,
+    # so a daemon that has gone away must not leave a port behind that it claims to be
+    # listening on.
+    Endpoint.retract_ws()
     :ok
   end
 

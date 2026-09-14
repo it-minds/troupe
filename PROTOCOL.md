@@ -38,6 +38,30 @@ with a random 32-byte token:
 The file is created with owner-only permissions. Framing is the same NDJSON. The
 first message must be `initialize` carrying the token in `auth.token`.
 
+### Loopback WebSocket (graphical clients)
+
+A browser cannot open a Unix socket and cannot open a raw TCP one, so neither of the
+transports above is reachable from a page — in a tab, or inside a desktop shell's
+webview. The daemon therefore also serves the WebSocket transport on `127.0.0.1`, at a
+port the kernel chose, and publishes it as a second entry in the same discovery file:
+
+```json
+{"transport": "unix", "path": "/run/user/1000/troupe/daemon.sock",
+ "ws": {"port": 49312, "token": "b64url…"}}
+```
+
+The discovery file is now written for **every** local transport, not only TCP: a Unix
+socket records its path there so that one file describes the daemon whichever door a
+client uses. `ws.token` is its own token and goes in `auth.token` on `initialize`, the
+same as the TCP one.
+
+The upgrade also checks `Origin`, which is a second fence rather than the first — a page
+on another origin cannot read the token out of a user-only file. By default the daemon
+admits `http://localhost:*`, `http://127.0.0.1:*` and a desktop shell's own origin;
+`TROUPE_ALLOWED_ORIGINS` replaces that list, the same mechanism and the same variable a
+worker uses. The wildcard applies to the port and nothing else, so a rule written for
+`http://localhost:*` does not admit `http://localhost.evil.example`.
+
 ### WebSocket (remote)
 
 `wss://<host>/v1/socket`. One JSON-RPC message per **text** frame; no newline
@@ -195,7 +219,7 @@ Durable:
 
 | type | `data` |
 | --- | --- |
-| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `origin` |
+| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
 | `user_input` | `source` (`user`/`watch`/`tui_todo_edit`), `text` |
@@ -401,6 +425,40 @@ effect.
 ```
 `action` is `add` (with `content`), `cancel`, or `complete`.
 
+### Identity
+
+*(Local transports only. A worker pod knows who is calling from the token it was given.)*
+
+A daemon authenticates by the socket's permissions, or by the token in a user-only file.
+Either way it knows the *operating system's* user and calls them `local:<username>`,
+which means nothing off this machine — so nothing it records could be billed, listed by a
+plane, or opened from another device.
+
+A client that is signed in tells it who that is, once.
+
+#### `identity.get` → `{"linked": false}`, or
+```json
+{"linked": true, "subject": "ada@example.test", "display_name": "Ada",
+ "plane_url": "https://troupe.example", "linked_at": "2026-09-14T08:00:00Z"}
+```
+
+#### `identity.link`
+```json
+{"command_id": "c-2", "subject": "ada@example.test", "display_name": "Ada",
+ "plane_url": "https://troupe.example"}
+```
+Every connection made after this carries that subject as its principal, and the one that
+made the call is relabelled where it stands. `session_created` gains an `owner` field
+naming it. A blank subject is `invalid_params`.
+
+#### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
+they were written with.
+
+**This is a label, not authentication.** Nothing here verifies a token, and nothing
+should: anything that can reach the daemon can already do everything on it, and what
+linking changes is the name in the record. A daemon reachable by somebody who should not
+be linking has a much larger problem than the label.
+
 ### Reading
 
 #### `blob.get`
@@ -508,9 +566,9 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `watch.set` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `watch.set`, `identity.link`, `identity.unlink` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

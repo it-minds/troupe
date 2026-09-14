@@ -1964,3 +1964,56 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      a credential into a configuration file, where it is stale by lunchtime and committed by
      Friday. The bridge interprets nothing, because a bridge that understood the protocol
      would be a second implementation of it.
+
+315. **The daemon serves a WebSocket on loopback, and it is the same server a pod runs.**
+     A browser cannot open a Unix socket, cannot open a raw TCP socket, and cannot be told
+     to speak NDJSON over one — so every transport the daemon had was unreachable from a
+     page, in a tab or inside a desktop shell's webview. A graphical client therefore had
+     no way to reach the machine in front of the person using it. The fix is one line of
+     configuration rather than a second implementation: `Gateway.Web` bound to `127.0.0.1`
+     on a kernel-chosen port, with `Gateway.Connection` behind the upgrade exactly as on a
+     pod. A second copy of the handshake, the scopes and the subscription semantics for the
+     local case is how the local case and the remote case start disagreeing about what
+     `subscribe` replays, and that disagreement is invisible until somebody's transcript
+     has a hole in it.
+
+     It is off unless asked for, like the daemon itself: the release is both the daemon and
+     the clients that talk to it, and a `troupe ctl` run must not open a listening socket or
+     write a discovery file just by booting.
+
+316. **One discovery file, describing the daemon rather than one transport.**
+     `daemon.json` used to be written only by the loopback-TCP transport, because a Unix
+     socket is found at a known path and needs nothing to say so. With a second door there
+     are now two things to publish and one of them has no fixed address, so every local
+     transport records itself in one file and the WebSocket is a `ws` key beside the
+     primary entry. The two are merged rather than written, so they can be published in
+     either order and a listener that restarts does not take the other one out with it.
+
+     The alternative — a second file — means a client reads one path, finds nothing, and
+     has to know to look somewhere else. One file that describes the daemon is the shape a
+     client actually wants.
+
+317. **`Origin` is the daemon's second fence, and the wildcard is on the port only.**
+     The token in a user-only file is what admits a connection: a page on another origin
+     cannot read it. So the origin check stops a stray attempt at the handshake rather than
+     being the thing that keeps anybody out. What it has to be careful about is the
+     wildcard: a development server's port is whatever was free, so the default list says
+     `http://localhost:*` — and that must not admit `http://localhost.evil.example`, which
+     a substring match would. The pattern splits on `:*` and requires the remainder to be
+     digits.
+
+318. **A linked identity is a label, not a sign-in.**
+     A daemon knows the operating system's user and calls them `local:<username>`, which
+     means nothing off the machine — so nothing it records could be billed, listed by a
+     plane, or opened from another device. `identity.link` records the subject the provider
+     issued, and from then on every actor in every log is that person.
+
+     It deliberately verifies nothing. The daemon's trust boundary is the file mode on its
+     socket, and anything that can reach it can already do everything on it; asking it to
+     check a token would be security theatre with a JWKS fetch in it. A daemon reachable by
+     somebody who should not be linking has a much larger problem than the label.
+
+     Read from disk on every handshake rather than cached, so a link made on one connection
+     is true for the next one. The connection that made the call is relabelled where it
+     stands, because having to reconnect to see your own name is the kind of thing that
+     reads as a bug.
