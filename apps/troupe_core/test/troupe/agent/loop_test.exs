@@ -90,18 +90,37 @@ defmodule Troupe.Agent.LoopTest do
 
       Troupe.subscribe(session.id)
 
-      started = System.monotonic_time(:millisecond)
       Troupe.send_input(session.id, "run three things")
       await_state(session.id, [:idle], 10_000)
-      elapsed = System.monotonic_time(:millisecond) - started
 
+      started_events = events_of_type(session.id, "tool_call_started")
       completed = events_of_type(session.id, "tool_call_completed")
+
+      assert length(started_events) == 3
       assert length(completed) == 3
       assert Enum.all?(completed, & &1.data["ok"])
 
-      # Serial execution would take at least 1500ms; the concurrency budget is the
-      # 500ms of real work plus process and log overhead.
-      assert elapsed < 1_000, "three concurrent 500ms calls took #{elapsed}ms"
+      # The claim is that the three calls overlap, and the event timestamps say so
+      # directly: the last of them started before the first of them finished, so there
+      # was an instant at which all three were in flight. Serial execution cannot
+      # produce that ordering however slow the machine is.
+      #
+      # This used to be a stopwatch — three 500ms calls inside a 1000ms budget — which
+      # says the same thing only on an idle machine. It failed at 2041ms on a runner
+      # where a single 500ms call no longer cost 500ms either, and that is a fact about
+      # the runner rather than about the loop.
+      last_start = started_events |> Enum.map(&timestamp/1) |> Enum.max(DateTime)
+      first_finish = completed |> Enum.map(&timestamp/1) |> Enum.min(DateTime)
+
+      assert DateTime.before?(last_start, first_finish),
+             "the calls ran one after another: the last started at " <>
+               "#{DateTime.to_iso8601(last_start)}, the first finished at " <>
+               "#{DateTime.to_iso8601(first_finish)}"
     end
+  end
+
+  defp timestamp(event) do
+    {:ok, at, _offset} = DateTime.from_iso8601(event.ts)
+    at
   end
 end
