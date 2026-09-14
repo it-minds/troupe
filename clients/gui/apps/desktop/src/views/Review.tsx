@@ -15,7 +15,7 @@
 import { useCallback, useMemo, useState } from "react";
 import type { JSX } from "react";
 import { rowFromPlane } from "@troupe/client";
-import type { AdminApi, AuthSession, FleetRow, SessionRow, TriggerRun } from "@troupe/client";
+import type { AdminApi, AuthSession, DaemonClient, FleetRow, SessionRow, TriggerRun } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { InlineApprovals } from "./Approvals";
 import { Cost, Loading, RowStatus, When } from "./bits";
@@ -30,11 +30,13 @@ function wentWrong(row: FleetRow): boolean {
 export function Review({
   auth,
   admin,
+  daemon,
   teams,
   onOpen,
 }: {
   auth: AuthSession;
   admin: AdminApi | null;
+  daemon: DaemonClient | null;
   teams: string[];
   onOpen: (id: string) => void;
 }): JSX.Element {
@@ -150,6 +152,7 @@ export function Review({
                 <Run
                   key={row.id}
                   auth={auth}
+                  daemon={daemon}
                   row={row}
                   run={runByKey.get(String(row.origin?.["run"] ?? ""))}
                   reviewedBy={reviewed[row.id] ?? row.reviewedBy}
@@ -176,6 +179,7 @@ function worstFirst(a: FleetRow, b: FleetRow): number {
 
 function Run({
   auth,
+  daemon,
   row,
   run,
   reviewedBy,
@@ -185,6 +189,7 @@ function Run({
   onAnswered,
 }: {
   auth: AuthSession;
+  daemon: DaemonClient | null;
   row: FleetRow;
   run: TriggerRun | undefined;
   reviewedBy: string | null;
@@ -235,7 +240,7 @@ function Run({
         )}
       </div>
 
-      {row.pendingApprovals > 0 && <InlineApprovals auth={auth} row={row} onAnswered={onAnswered} />}
+      {row.pendingApprovals > 0 && <InlineApprovals auth={auth} daemon={daemon} row={row} onAnswered={onAnswered} />}
 
       <footer className="run-actions">
         {reviewedBy ? (

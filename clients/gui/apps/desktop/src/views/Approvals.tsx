@@ -7,20 +7,22 @@
 // work, and there is no side door — so a row opens that session while it is on screen
 // and lets go again.
 
-import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import { awaitingApproval, emptyTranscript, fold, openApprovals, SessionAttachment } from "@troupe/client";
-import type { AuthSession, FleetRow, TranscriptState } from "@troupe/client";
+import { awaitingApproval, openApprovals } from "@troupe/client";
+import type { AuthSession, DaemonClient, FleetRow } from "@troupe/client";
+import { useSessionView } from "../hooks";
 import { ApprovalPanel } from "./Approval";
 import { Loading, When, Where } from "./bits";
 
 export function Approvals({
   auth,
+  daemon,
   rows,
   onOpen,
   onAnswered,
 }: {
   auth: AuthSession;
+  daemon: DaemonClient | null;
   rows: FleetRow[];
   onOpen: (id: string) => void;
   onAnswered: () => void;
@@ -43,7 +45,7 @@ export function Approvals({
       ) : (
         <ul className="inbox">
           {waiting.map((row) => (
-            <Waiting key={row.id} auth={auth} row={row} onOpen={onOpen} onAnswered={onAnswered} />
+            <Waiting key={row.id} auth={auth} daemon={daemon} row={row} onOpen={onOpen} onAnswered={onAnswered} />
           ))}
         </ul>
       )}
@@ -53,11 +55,13 @@ export function Approvals({
 
 function Waiting({
   auth,
+  daemon,
   row,
   onOpen,
   onAnswered,
 }: {
   auth: AuthSession;
+  daemon: DaemonClient | null;
   row: FleetRow;
   onOpen: (id: string) => void;
   onAnswered: () => void;
@@ -73,7 +77,7 @@ function Waiting({
         <span className="spacer" />
         <When iso={row.lastActiveAt} />
       </header>
-      <InlineApprovals auth={auth} row={row} onAnswered={onAnswered} />
+      <InlineApprovals auth={auth} daemon={daemon} row={row} onAnswered={onAnswered} />
     </li>
   );
 }
@@ -91,39 +95,19 @@ function Waiting({
  */
 export function InlineApprovals({
   auth,
+  daemon,
   row,
   onAnswered,
 }: {
   auth: AuthSession;
+  daemon: DaemonClient | null;
   row: FleetRow;
   onAnswered: () => void;
 }): JSX.Element {
-  const [state, setState] = useState<TranscriptState>(emptyTranscript);
-  const [attachment, setAttachment] = useState<SessionAttachment | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  useEffect(() => {
-    let live = true;
-    let opened: SessionAttachment | null = null;
-    SessionAttachment.open({
-      sessionId: row.id,
-      mode: "read",
-      open: (mode) => auth.rpc("session.open", { session_id: row.id, mode }),
-      mint: () => auth.rpc("token.mint", { session_id: row.id }),
-      hooks: { onEvent: (e) => live && setState((s) => fold(s, e)) },
-    })
-      .then((a) => {
-        opened = a;
-        if (!live) return void a.close();
-        setAttachment(a);
-      })
-      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)));
-
-    return () => {
-      live = false;
-      void opened?.close();
-    };
-  }, [auth, row.id]);
+  // `read` never wakes a sleeping session: looking at what is waiting must not be what
+  // starts it. Answering is, and that is the person's choice. Where the session runs
+  // decides which socket carries the answer and nothing else.
+  const { view, state, error } = useSessionView(auth, row.id, { daemon, kind: row.kind, mode: "read" });
 
   const open = openApprovals(state);
   const answered = state.entries.find((e) => e.kind === "approval" && e.decision !== undefined);
@@ -135,7 +119,7 @@ export function InlineApprovals({
           <p>{error}</p>
         </div>
       )}
-      {!attachment && !error && (
+      {!view && !error && (
         <div style={{ padding: "var(--space-4)" }}>
           <Loading what="Reading what it is waiting for…" />
         </div>
@@ -148,13 +132,13 @@ export function InlineApprovals({
           canAnswer={row.yourRole !== "viewer"}
           others={[]}
           onAnswer={async (d) => {
-            await attachment?.view.respondApproval(entry.callId, d);
+            await view?.respondApproval(entry.callId, d);
             onAnswered();
           }}
         />
       ))}
 
-      {attachment && open.length === 0 && answered && (
+      {view && open.length === 0 && answered && (
         <div style={{ padding: "var(--space-4)" }}>
           <p className="note">
             Answered by {(answered as Extract<typeof answered, { kind: "approval" }>).resolvedBy ?? "somebody else"} already. Nothing is

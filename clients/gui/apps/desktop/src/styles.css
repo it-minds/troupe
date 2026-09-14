@@ -1646,3 +1646,25 @@ button.danger {
 .run-actions .note {
   margin: 0;
 }
+
+/* -- this computer ---------------------------------------------------------- */
+
+/* Recent workspaces are chips you can press. A chip is normally a fact, so the one that
+   is a control says so by behaving like one. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip.as-button {
+  cursor: pointer;
+  margin: 0;
+  font-family: var(--font-mono);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip.as-button:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}

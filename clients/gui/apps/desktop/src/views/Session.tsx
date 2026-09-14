@@ -13,25 +13,40 @@
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import { isBlobRef, isBusy, openApprovals, rootState } from "@troupe/client";
-import type { AttachStatus, AuthSession, BlobRef, Entry, FleetRow, ProfileOffering, TranscriptState } from "@troupe/client";
+import type {
+  AttachStatus,
+  AuthSession,
+  BlobRef,
+  DaemonClient,
+  Entry,
+  FleetRow,
+  ProfileOffering,
+  TranscriptState,
+} from "@troupe/client";
 import { useProfiles, useSessionView } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { Files } from "./Files";
+import { LocalControls } from "./LocalControls";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
 export function Session({
   auth,
+  daemon,
   row,
   sessionId,
   onBack,
 }: {
   auth: AuthSession;
+  daemon: DaemonClient | null;
   row: FleetRow | undefined;
   sessionId: string;
   onBack: () => void;
 }): JSX.Element {
-  const view = useSessionView(auth, sessionId);
+  // Where it runs decides which socket it is reached over and nothing else about this
+  // screen: the transcript, the approvals and the composer are the same protocol either
+  // way, which is the whole point of the client library.
+  const view = useSessionView(auth, sessionId, { daemon, kind: row?.kind ?? "team" });
   const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
   const self = auth.me?.subject;
@@ -78,7 +93,7 @@ export function Session({
           )}
         </div>
 
-        {backstage && <Backstage view={view} row={row} self={self} />}
+        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} />}
       </div>
     </section>
   );
@@ -448,7 +463,17 @@ function inline(text: string): (string | JSX.Element)[] {
   return out;
 }
 
-function Backstage({ view, row, self }: { view: SessionHandle; row: FleetRow | undefined; self: string | undefined }): JSX.Element {
+function Backstage({
+  view,
+  daemon,
+  row,
+  self,
+}: {
+  view: SessionHandle;
+  daemon: DaemonClient | null;
+  row: FleetRow | undefined;
+  self: string | undefined;
+}): JSX.Element {
   const [pane, setPane] = useState<"tasks" | "files">("tasks");
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
 
@@ -482,7 +507,7 @@ function Backstage({ view, row, self }: { view: SessionHandle; row: FleetRow | u
         </section>
       ) : (
         <section style={{ padding: 0 }}>
-          <Files attachment={view.attachment} />
+          <Files view={view.view} />
         </section>
       )}
 
@@ -498,6 +523,8 @@ function Backstage({ view, row, self }: { view: SessionHandle; row: FleetRow | u
           </ul>
         </section>
       )}
+
+      {daemon && row && row.kind !== "team" && <LocalControls daemon={daemon} row={row} />}
 
       <section>
         <h3>This session</h3>

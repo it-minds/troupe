@@ -46,3 +46,13 @@ export type {
   Trigger,
   TriggerRun,
 } from "./admin.js";
+export { DaemonClient, DaemonSource, daemonUrl, rowFromDaemon } from "./daemon.js";
+export type {
+  CreateLocalParams,
+  DaemonEndpoint,
+  DaemonHooks,
+  DaemonIdentity,
+  DaemonSessionRow,
+  RecentWorkspace,
+  Worktree,
+} from "./daemon.js";
