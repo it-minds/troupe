@@ -26,6 +26,9 @@ serde_json = "1"
 tauri-plugin-http = "2"
 # `target="_blank"` does nothing in a webview and the device grant needs a real browser.
 tauri-plugin-opener = "2"
+# A workspace is a directory on this computer, and the browser build can only ask for a
+# path typed in. The native picker is the difference between the two builds here.
+tauri-plugin-dialog = "2"
 # Windows Credential Manager / macOS Keychain / Secret Service. The refresh token lives
 # here and nowhere else; see src/secrets.rs.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

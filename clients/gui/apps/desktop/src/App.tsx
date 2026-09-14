@@ -8,22 +8,34 @@ import { useCallback, useState } from "react";
 import type { JSX } from "react";
 import { awaitingApproval } from "@troupe/client";
 import type { AuthSession } from "@troupe/client";
-import { useFleet } from "./hooks";
+import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { capabilities } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
+import { Admin } from "./views/Admin";
 import { Approvals } from "./views/Approvals";
+import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
+import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { SignIn } from "./views/SignIn";
 import { Eye, Wordmark } from "./views/brand";
 
-type Where = { screen: "sessions" } | { screen: "approvals" } | { screen: "appearance" } | { screen: "session"; id: string };
+type Where =
+  | { screen: "sessions" }
+  | { screen: "approvals" }
+  | { screen: "review" }
+  | { screen: "local" }
+  | { screen: "admin" }
+  | { screen: "appearance" }
+  | { screen: "session"; id: string };
 
 export function App(): JSX.Element {
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const [where, setWhere] = useState<Where>({ screen: "sessions" });
-  const { snapshot, refresh } = useFleet(auth);
+  const daemon = useDaemon();
+  const { snapshot, refresh } = useFleet(auth, daemon.client);
+  const admin = useAdmin(auth);
   const appearance = useAppearance();
   // Asked once, on this person's first sign-in, and never again. Tracked per subject:
   // two people on one computer are two first sign-ins, and the second should not
@@ -58,6 +70,7 @@ export function App(): JSX.Element {
   const planeError = snapshot.sources["plane"]?.error ?? null;
   const row = where.screen === "session" ? snapshot.rows.find((r) => r.id === where.id) : undefined;
   const caps = capabilities();
+  const local = snapshot.rows.filter((r) => r.kind !== "team").length;
 
   return (
     <div className="app">
@@ -76,6 +89,20 @@ export function App(): JSX.Element {
               </span>
             )}
           </button>
+          <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
+            Review
+          </button>
+          <button aria-current={where.screen === "local" ? "page" : undefined} onClick={() => setWhere({ screen: "local" })}>
+            This computer
+            {daemon.status === "connected" && <span className="count muted">{local}</span>}
+          </button>
+          {/* Offered only to somebody who administers something. `admin.overview` is
+              what decides, because the other role is in no claim a client can read. */}
+          {admin.available && (
+            <button aria-current={where.screen === "admin" ? "page" : undefined} onClick={() => setWhere({ screen: "admin" })}>
+              Administration
+            </button>
+          )}
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
           </button>
@@ -97,6 +124,8 @@ export function App(): JSX.Element {
         {where.screen === "sessions" && (
           <Sessions
             auth={auth}
+            daemon={daemon.client}
+            linked={Boolean(daemon.identity?.linked)}
             rows={snapshot.rows}
             loading={snapshot.loading}
             error={planeError}
@@ -108,14 +137,48 @@ export function App(): JSX.Element {
           />
         )}
 
+        {where.screen === "local" && (
+          <Local
+            daemon={daemon}
+            me={auth.me ? { subject: auth.me.subject, display_name: auth.me.display_name } : null}
+            planeUrl={auth.planeUrl}
+          />
+        )}
+
+        {where.screen === "review" && (
+          <Review auth={auth} admin={admin.api} daemon={daemon.client} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
+        )}
+
+        {where.screen === "admin" && admin.available && admin.api && (
+          <Admin
+            auth={auth}
+            api={admin.api}
+            platform={admin.platform}
+            overview={admin.overview}
+            onOpen={(id) => setWhere({ screen: "session", id })}
+          />
+        )}
+
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
 
         {where.screen === "approvals" && (
-          <Approvals auth={auth} rows={snapshot.rows} onOpen={(id) => setWhere({ screen: "session", id })} onAnswered={refresh} />
+          <Approvals
+            auth={auth}
+            daemon={daemon.client}
+            rows={snapshot.rows}
+            onOpen={(id) => setWhere({ screen: "session", id })}
+            onAnswered={refresh}
+          />
         )}
 
         {where.screen === "session" && (
-          <Session auth={auth} row={row} sessionId={where.id} onBack={() => setWhere({ screen: "sessions" })} />
+          <Session
+            auth={auth}
+            daemon={daemon.client}
+            row={row}
+            sessionId={where.id}
+            onBack={() => setWhere({ screen: "sessions" })}
+          />
         )}
       </main>
     </div>

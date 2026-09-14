@@ -1,13 +1,14 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "What the GUI may ask the shell to do, and nothing more. The HTTP scope is http(s) to anywhere because the plane and its workers are wherever the person's organisation put them; the opener is one verb; the credential store is three commands that take a key and no path. No filesystem, shell or process access: when the local daemon lands, those arrive as named commands with their own capability rather than by widening this one.",
+  "description": "What the GUI may ask the shell to do, and nothing more. The HTTP scope is http(s) to anywhere because the plane and its workers are wherever the person's organisation put them; the opener is one verb; the credential store is three commands that take a key and no path; the daemon is two commands that take no path and answer with a port and a token. The directory picker is the dialog plugin's open verb, which returns what the person chose and can reach nothing they did not. Still no filesystem, shell or process permission: `daemon_start` runs one named program and is a command of ours rather than a widened capability.",
   "windows": [
     "main"
   ],
   "permissions": [
     "core:default",
     "opener:allow-open-url",
+    "dialog:allow-open",
     {
       "identifier": "http:default",
       "allow": [

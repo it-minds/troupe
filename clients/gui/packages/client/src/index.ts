@@ -28,3 +28,31 @@ export { fold, addPending, dropPending, emptyTranscript, isBlobRef, isRoot, isBu
 export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember } from "./transcript.js";
 export { FleetStore, PlaneSource, rowFromPlane, filterRows, awaitingApproval, totalCostMicros } from "./fleet.js";
 export type { FleetRow, FleetSource, FleetFilter, FleetSnapshot, SessionKind, SyncState } from "./fleet.js";
+export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
+export type {
+  AdminFilter,
+  AdminPod,
+  AdminProfile,
+  AdminSessionRow,
+  AdminTeam,
+  AuditRow,
+  BundleDetail,
+  BundleSummary,
+  FleetOverview,
+  IdentityCheck,
+  PlatformSetting,
+  ServicePrincipal,
+  TeamSpend,
+  Trigger,
+  TriggerRun,
+} from "./admin.js";
+export { DaemonClient, DaemonSource, daemonUrl, rowFromDaemon } from "./daemon.js";
+export type {
+  CreateLocalParams,
+  DaemonEndpoint,
+  DaemonHooks,
+  DaemonIdentity,
+  DaemonSessionRow,
+  RecentWorkspace,
+  Worktree,
+} from "./daemon.js";

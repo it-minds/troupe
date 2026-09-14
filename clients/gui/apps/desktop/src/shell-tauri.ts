@@ -17,10 +17,12 @@
 //                 `tauri://localhost` — an origin every installation would otherwise
 //                 have to be told about.
 //
-// Stage 2's `findDaemon` and `pickDirectory` belong here too; they are named in
-// `shell.ts` and deliberately absent until the daemon exists to be found.
+//   findDaemon    the daemon on this computer publishes its port and token into a file
+//                 outside anything a page may open, and a page cannot start a program
+//   pickDirectory a workspace is a directory, and a browser build can only take a path
+//                 somebody typed
 
-import type { TokenStore } from "@troupe/client";
+import type { DaemonEndpoint, TokenStore } from "@troupe/client";
 import type { TroupeShell } from "./shell";
 
 /** True inside a Tauri webview. v2 injects this before any of our code runs. */
@@ -51,6 +53,27 @@ function keychainStore(): TokenStore {
 }
 
 /**
+ * The daemon on this computer, started if it is not running.
+ *
+ * Reading first and starting second, because the common case is that it is already up —
+ * a `troupe` session in a terminal, or the last time this app was opened. Starting is
+ * safe to ask for regardless: the daemon takes a lock, so two callers produce one
+ * daemon rather than a race.
+ */
+async function findDaemon(): Promise<DaemonEndpoint | null> {
+  const { invoke } = await import("@tauri-apps/api/core");
+  const running = await invoke<DaemonEndpoint | null>("daemon_endpoint");
+  if (running) return running;
+  return (await invoke<DaemonEndpoint | null>("daemon_start", { binary: null })) ?? null;
+}
+
+async function pickDirectory(): Promise<string | null> {
+  const { open } = await import("@tauri-apps/plugin-dialog");
+  const chosen = await open({ directory: true, multiple: false, title: "Choose a workspace" });
+  return typeof chosen === "string" ? chosen : null;
+}
+
+/**
  * Install the shell on `window.troupe`, which is where `shell.ts` looks for it.
  * Called from `main.tsx` before the app renders, and only inside the shell.
  */
@@ -72,6 +95,8 @@ export async function installShell(): Promise<void> {
     // browser to `AuthSession`, while its origin is one no provider will have
     // registered as a redirect URI.
     signInFlow: "device",
+    findDaemon,
+    pickDirectory,
   };
   (globalThis as { window?: Window }).window!.troupe = shell;
 }

@@ -6,10 +6,10 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import type { FsEntry, SessionAttachment } from "@troupe/client";
+import type { FsEntry, SessionView } from "@troupe/client";
 import { Loading } from "./bits";
 
-export function Files({ attachment }: { attachment: SessionAttachment | null }): JSX.Element {
+export function Files({ view }: { view: SessionView | null }): JSX.Element {
   const [path, setPath] = useState(".");
   const [entries, setEntries] = useState<FsEntry[]>([]);
   const [open, setOpen] = useState<{ path: string; content: string; hash: string } | null>(null);
@@ -18,11 +18,11 @@ export function Files({ attachment }: { attachment: SessionAttachment | null }):
 
   const list = useCallback(
     async (at: string) => {
-      if (!attachment) return;
+      if (!view) return;
       setLoading(true);
       setError(null);
       try {
-        const r = await attachment.view.fsList(at);
+        const r = await view.fsList(at);
         setPath(r.path);
         setEntries([...r.entries].sort(byKindThenName));
       } catch (e) {
@@ -31,7 +31,7 @@ export function Files({ attachment }: { attachment: SessionAttachment | null }):
         setLoading(false);
       }
     },
-    [attachment],
+    [view],
   );
 
   useEffect(() => {
@@ -40,17 +40,17 @@ export function Files({ attachment }: { attachment: SessionAttachment | null }):
 
   // A file the agent wrote should not need a manual refresh to appear.
   useEffect(() => {
-    if (!attachment) return;
-    return attachment.view.listen((e) => {
+    if (!view) return;
+    return view.listen((e) => {
       if (e.type === "fs_changed") void list(path);
     });
-  }, [attachment, list, path]);
+  }, [view, list, path]);
 
   const read = async (entry: FsEntry): Promise<void> => {
-    if (!attachment) return;
+    if (!view) return;
     setError(null);
     try {
-      const file = await attachment.view.fsRead(entry.path);
+      const file = await view.fsRead(entry.path);
       setOpen({ path: file.path, content: file.content, hash: file.hash });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
