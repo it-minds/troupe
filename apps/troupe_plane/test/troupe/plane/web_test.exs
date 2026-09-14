@@ -120,6 +120,72 @@ defmodule Troupe.Plane.WebTest do
     end
   end
 
+  # The other half of the front door. `/` is this host; `/docs` is what any of it means.
+  # What matters here is that the route answers and that the two pages point at each
+  # other — a front door with one half missing is how a link in the bar becomes a 404.
+  describe "the docs page" do
+    setup do
+      on_exit(fn -> Application.delete_env(:troupe_plane, :app_url) end)
+    end
+
+    test "answers, in html, with the pictures on it", context do
+      assert {:ok, %{status: 200, body: body, headers: headers}} = get(context, "/docs")
+
+      assert ["text/html" <> _] = headers["content-type"]
+      assert body =~ "<!DOCTYPE html>"
+      assert body =~ "Five pictures and a glossary"
+
+      # Five figures, each an inline SVG. A count rather than a list, because what would
+      # break this is the body losing a section, not a caption being reworded.
+      assert length(Regex.scan(~r|<figure class="fig">|, body)) == 5
+    end
+
+    test "draws its pictures rather than loading a library to draw them", context do
+      assert {:ok, %{body: body}} = get(context, "/docs")
+
+      # The suite's diagrams are Mermaid, which renders in the browser from a CDN. This
+      # page may not: the root of a plane has to render on a network that reaches the
+      # plane and nothing else, so every picture here is SVG already in the document.
+      refute body =~ "<script"
+      assert body =~ "<svg viewBox="
+    end
+
+    test "the two pages name each other in the bar", context do
+      assert {:ok, %{body: index}} = get(context, "/")
+      assert {:ok, %{body: docs}} = get(context, "/docs")
+
+      assert index =~ ~s(<a href="/docs">What it is</a>)
+      assert docs =~ ~s(<a href="/">This plane</a>)
+    end
+
+    test "writes its commands against the plane's own URL", context do
+      assert {:ok, %{body: body}} = get(context, "/docs")
+
+      assert body =~ "troupe login " <> context.url
+    end
+
+    test "offers the browser only where an app is mounted", context do
+      Application.put_env(:troupe_plane, :app_url, "")
+
+      assert {:ok, %{status: 200, body: body}} = get(context, "/docs")
+
+      refute body =~ ~s(href="/app")
+      assert body =~ "for the full terminal UI"
+    end
+
+    test "carries nothing from the audit or the configuration reference", context do
+      assert {:ok, %{body: body}} = get(context, "/docs")
+
+      # This page has no authentication in front of it, so its content boundary is a
+      # disclosure boundary. These are the shapes of the material that must not drift
+      # onto it from the suite it was drawn from.
+      refute body =~ "Audited against"
+      refute body =~ "TROUPE_", "no environment variable belongs on an unauthenticated page"
+      refute body =~ "Open questions"
+      refute body =~ "Sources:"
+    end
+  end
+
   describe "discovery" do
     test "says where to log in and what to call this plane", context do
       assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/troupe")

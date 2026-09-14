@@ -3,6 +3,7 @@ defmodule Troupe.Plane.Web.Router do
   The plane's HTTP surface, which is deliberately small.
 
       GET  /                           the connection guide, for a browser
+      GET  /docs                       what Troupe is, for a browser
       GET  /healthz                    liveness, for Kubernetes
       GET  /.well-known/troupe         where to log in, and what to call this plane
       GET  /.well-known/jwks.json      the keys workers verify session tokens against
@@ -25,7 +26,7 @@ defmodule Troupe.Plane.Web.Router do
 
   alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens}
   alias Troupe.Plane.Admin.API, as: AdminAPI
-  alias Troupe.Plane.Web.Index
+  alias Troupe.Plane.Web.{Docs, Index}
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
   require Logger
@@ -55,6 +56,20 @@ defmodule Troupe.Plane.Web.Router do
     |> send_resp(
       200,
       Index.render(name: config(:plane_name, "troupe"), url: base_url(conn), app_url: app_url())
+    )
+  end
+
+  # The other half of the front door. `/` says what this host is and how to point a client
+  # at it; this says what any of that means, in pictures, for the person who was handed
+  # the URL and has not decided to read anything yet. It discloses nothing `/` does not —
+  # the concepts are the product's, and the only surface it names is the one the endpoint
+  # table on `/` already lists.
+  get "/docs" do
+    conn
+    |> put_resp_content_type("text/html")
+    |> send_resp(
+      200,
+      Docs.render(name: config(:plane_name, "troupe"), url: base_url(conn), app_url: app_url())
     )
   end
 
