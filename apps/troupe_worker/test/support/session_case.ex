@@ -17,6 +17,7 @@ defmodule Troupe.Worker.SessionCase do
   alias Troupe.Plane.Control.Listener
   alias Troupe.Protocol.Event
   alias Troupe.Sessions.Storage
+  alias Troupe.Worker.Drain
   alias Troupe.Worker.Sessions
 
   using do
@@ -63,6 +64,15 @@ defmodule Troupe.Worker.SessionCase do
       # because every test in this app is `async: false`.
       previous_state_home = System.get_env("TROUPE_STATE_HOME")
       System.put_env("TROUPE_STATE_HOME", state_dir)
+
+      # `Drain` keeps "this pod has stopped taking new work" in `:persistent_term`, and
+      # deliberately never undoes it — a pod that started draining has. That is right in
+      # a pod and wrong across a suite: a drained pod stays drained for every test after
+      # it in the same VM, and the readiness probe test then reads 503 before it has
+      # asked for one. Which tests that hits depends on the seed, which is what made it
+      # look like flakiness.
+      Drain.reset()
+      ExUnit.Callbacks.on_exit(&Drain.reset/0)
 
       start_supervised!(Sessions)
 

@@ -44,8 +44,6 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
        http_port: http_port}
     )
 
-    on_exit(&Drain.reset/0)
-
     Map.merge(context, %{auth: auth, http_port: http_port, socket_port: socket_port})
   end
 
