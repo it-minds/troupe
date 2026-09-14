@@ -15,8 +15,8 @@ defmodule Troupe.Gateway.Dispatch do
   """
 
   alias Troupe.Gateway.{ClientTool, Commands, Presence, Session, Worktrees}
-  alias Troupe.Identity
   alias Troupe.Gateway.Session.Subscription
+  alias Troupe.Identity
   alias Troupe.Mounts
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event

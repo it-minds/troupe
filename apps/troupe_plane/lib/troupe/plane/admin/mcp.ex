@@ -134,13 +134,15 @@ defmodule Troupe.Plane.Admin.MCP do
   # -- calling a tool ---------------------------------------------------------
 
   defp invoke(%Method{} = method, arguments, actor) do
-    with :ok <- confirmed(method, arguments) do
-      case API.call(method.name, arguments, actor) do
-        {:ok, answer} -> content(answer)
-        {:error, %Error{} = failure} -> refusal(describe(failure))
-      end
-    else
-      {:error, message} -> refusal(message)
+    case confirmed(method, arguments) do
+      :ok ->
+        case API.call(method.name, arguments, actor) do
+          {:ok, answer} -> content(answer)
+          {:error, %Error{} = failure} -> refusal(describe(failure))
+        end
+
+      {:error, message} ->
+        refusal(message)
     end
   end
 

@@ -18,6 +18,7 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
 
   use ExUnit.Case, async: true
 
+  alias Troupe.Plane.Web.Endpoint
   alias Troupe.Plane.Web.Index
 
   @static_root Application.app_dir(:troupe_plane, "priv/static")
@@ -98,7 +99,7 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
   # starts the bare `Router` and the static plugs are on the `Endpoint`.
   test "the endpoint actually serves what the page asks for" do
     for asset <- referenced_assets() do
-      conn = Troupe.Plane.Web.Endpoint.call(Plug.Test.conn(:get, "/static/" <> asset), [])
+      conn = Endpoint.call(Plug.Test.conn(:get, "/static/" <> asset), [])
 
       assert conn.status == 200, "GET /static/#{asset} answered #{conn.status}"
 
@@ -110,7 +111,7 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
   end
 
   test "a file outside the allowlist is not served just because it is in priv/static" do
-    conn = Troupe.Plane.Web.Endpoint.call(Plug.Test.conn(:get, "/static/app.js"), [])
+    conn = Endpoint.call(Plug.Test.conn(:get, "/static/app.js"), [])
 
     refute conn.status == 200
   end

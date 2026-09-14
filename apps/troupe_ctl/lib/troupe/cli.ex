@@ -25,7 +25,7 @@ defmodule Troupe.CLI do
   use Task
 
   alias Troupe.CLI.Options
-  alias Troupe.Ctl.{Admin, Credentials, Login, Remote, Verify}
+  alias Troupe.Ctl.{Admin, Credentials, Login, MCP, Remote, Verify}
   alias Troupe.Protocol.{Client, Daemon, Endpoint}
   alias Troupe.UI.Headless
 
@@ -91,7 +91,7 @@ defmodule Troupe.CLI do
   # Not `troupe admin mcp`: `admin mcp check` is already an admin method, and this is not
   # a method at all — it is the transport that carries every one of them.
   def dispatch(%Options{command: :mcp, plane: plane}, _opts) do
-    Troupe.Ctl.MCP.bridge([], plane: plane)
+    MCP.bridge([], plane: plane)
   end
 
   def dispatch(%Options{command: :daemon} = options, _opts) do

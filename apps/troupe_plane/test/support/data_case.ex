@@ -11,6 +11,7 @@ defmodule Troupe.Plane.DataCase do
 
   alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.Plane.Repo
+  alias Troupe.Plane.Settings
 
   using do
     quote do
@@ -31,8 +32,8 @@ defmodule Troupe.Plane.DataCase do
     # wrong across a rollback: a setting written by one test and rolled back would still be
     # cached when the next one read it, and the failure would land in whichever test ran
     # within five seconds rather than in the one that caused it.
-    Troupe.Plane.Settings.invalidate()
-    on_exit(&Troupe.Plane.Settings.invalidate/0)
+    Settings.invalidate()
+    on_exit(&Settings.invalidate/0)
 
     :ok
   end
