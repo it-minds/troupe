@@ -5,14 +5,24 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addPending,
+  AdminApi,
+  ErrorCodes,
   dropPending,
   emptyTranscript,
   fold,
   FleetStore,
   PlaneSource,
   SessionAttachment,
+  TroupeRpcError,
 } from "@troupe/client";
-import type { AttachStatus, AuthSession, FleetSnapshot, ProfileOffering, TranscriptState } from "@troupe/client";
+import type {
+  AttachStatus,
+  AuthSession,
+  FleetOverview,
+  FleetSnapshot,
+  ProfileOffering,
+  TranscriptState,
+} from "@troupe/client";
 
 /** The fleet, polled. The plane pushes nothing, so a poll is what liveness is here. */
 export function useFleet(auth: AuthSession | null, intervalMs = 4_000): { snapshot: FleetSnapshot; store: FleetStore | null; refresh: () => void } {
@@ -149,4 +159,102 @@ export function useSessionView(auth: AuthSession | null, sessionId: string | nul
   }, []);
 
   return { state, status, detail, attachment, send, respond, cancel, switchProfile, readBlob, error };
+}
+
+/**
+ * Whether this person administers anything, and the API if they do.
+ *
+ * Asked rather than inferred. `platform_admin` on `me` is one of the two roles; the
+ * other, `team_admin`, is assigned per team and appears in no claim a client can read.
+ * So the probe is `admin.overview` itself: it is the cheapest administrative read, it
+ * is scoped to whatever the caller administers, and a person who administers nothing is
+ * refused — which is exactly the question the navigation is asking.
+ */
+export function useAdmin(auth: AuthSession | null): {
+  api: AdminApi | null;
+  available: boolean;
+  platform: boolean;
+  overview: FleetOverview | null;
+  checking: boolean;
+  error: string | null;
+  refresh: () => void;
+} {
+  const api = useMemo(() => (auth ? new AdminApi((m, p) => auth.rpc(m, p)) : null), [auth]);
+  const [available, setAvailable] = useState(false);
+  const [platform, setPlatform] = useState(false);
+  const [overview, setOverview] = useState<FleetOverview | null>(null);
+  const [checking, setChecking] = useState(Boolean(auth));
+  const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState(0);
+
+  useEffect(() => {
+    if (!api || !auth) return;
+    let live = true;
+    setChecking(true);
+    void (async () => {
+      try {
+        const [me, over] = await Promise.all([
+          auth.rpc<{ platform_admin?: boolean }>("me", {}).catch(() => ({}) as { platform_admin?: boolean }),
+          api.overview(),
+        ]);
+        if (!live) return;
+        setPlatform(Boolean(me.platform_admin));
+        setOverview(over);
+        setAvailable(true);
+        setError(null);
+      } catch (e) {
+        if (!live) return;
+        // Refused is an answer, not a failure: it means this person administers
+        // nothing, and the navigation should not offer what every call would refuse.
+        setAvailable(false);
+        setError(e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden ? null : e instanceof Error ? e.message : String(e));
+      } finally {
+        if (live) setChecking(false);
+      }
+    })();
+    return () => {
+      live = false;
+    };
+  }, [api, auth, round]);
+
+  return { api, available, platform, overview, checking, error, refresh: useCallback(() => setRound((n) => n + 1), []) };
+}
+
+/**
+ * One administrative read, kept simple on purpose.
+ *
+ * Every admin screen is the same shape — call one method, render rows, offer actions
+ * that call one more — so the loading, the error and the reload live here once. `deps`
+ * is what the call depends on; passing `null` means "not yet, do not call".
+ */
+export function useAdminQuery<T>(run: (() => Promise<T>) | null, deps: unknown[]): {
+  data: T | null;
+  loading: boolean;
+  error: string | null;
+  reload: () => void;
+} {
+  const [data, setData] = useState<T | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [round, setRound] = useState(0);
+
+  useEffect(() => {
+    if (!run) return;
+    let live = true;
+    setLoading(true);
+    run()
+      .then((d) => {
+        if (!live) return;
+        setData(d);
+        setError(null);
+      })
+      .catch((e: unknown) => live && setError(e instanceof Error ? e.message : String(e)))
+      .finally(() => live && setLoading(false));
+    return () => {
+      live = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [...deps, round]);
+
+  return { data, loading, error, reload: useCallback(() => setRound((n) => n + 1), []) };
 }

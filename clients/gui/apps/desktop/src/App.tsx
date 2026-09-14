@@ -8,22 +8,31 @@ import { useCallback, useState } from "react";
 import type { JSX } from "react";
 import { awaitingApproval } from "@troupe/client";
 import type { AuthSession } from "@troupe/client";
-import { useFleet } from "./hooks";
+import { useAdmin, useFleet } from "./hooks";
 import { capabilities } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
+import { Admin } from "./views/Admin";
 import { Approvals } from "./views/Approvals";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
+import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { SignIn } from "./views/SignIn";
 import { Eye, Wordmark } from "./views/brand";
 
-type Where = { screen: "sessions" } | { screen: "approvals" } | { screen: "appearance" } | { screen: "session"; id: string };
+type Where =
+  | { screen: "sessions" }
+  | { screen: "approvals" }
+  | { screen: "review" }
+  | { screen: "admin" }
+  | { screen: "appearance" }
+  | { screen: "session"; id: string };
 
 export function App(): JSX.Element {
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const [where, setWhere] = useState<Where>({ screen: "sessions" });
   const { snapshot, refresh } = useFleet(auth);
+  const admin = useAdmin(auth);
   const appearance = useAppearance();
   // Asked once, on this person's first sign-in, and never again. Tracked per subject:
   // two people on one computer are two first sign-ins, and the second should not
@@ -76,6 +85,16 @@ export function App(): JSX.Element {
               </span>
             )}
           </button>
+          <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
+            Review
+          </button>
+          {/* Offered only to somebody who administers something. `admin.overview` is
+              what decides, because the other role is in no claim a client can read. */}
+          {admin.available && (
+            <button aria-current={where.screen === "admin" ? "page" : undefined} onClick={() => setWhere({ screen: "admin" })}>
+              Administration
+            </button>
+          )}
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
           </button>
@@ -105,6 +124,20 @@ export function App(): JSX.Element {
               refresh();
               setWhere({ screen: "session", id });
             }}
+          />
+        )}
+
+        {where.screen === "review" && (
+          <Review auth={auth} admin={admin.api} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
+        )}
+
+        {where.screen === "admin" && admin.available && admin.api && (
+          <Admin
+            auth={auth}
+            api={admin.api}
+            platform={admin.platform}
+            overview={admin.overview}
+            onOpen={(id) => setWhere({ screen: "session", id })}
           />
         )}
 

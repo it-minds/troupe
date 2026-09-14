@@ -62,6 +62,42 @@ function Waiting({
   onOpen: (id: string) => void;
   onAnswered: () => void;
 }): JSX.Element {
+  return (
+    <li>
+      <header>
+        <button className="link subject" onClick={() => onOpen(row.id)}>
+          {row.title ?? row.id}
+        </button>
+        <Where kind={row.kind} />
+        <span className="when">{row.profile}</span>
+        <span className="spacer" />
+        <When iso={row.lastActiveAt} />
+      </header>
+      <InlineApprovals auth={auth} row={row} onAnswered={onAnswered} />
+    </li>
+  );
+}
+
+/**
+ * One session's open approvals, answerable where they are.
+ *
+ * Opened in `read` mode: looking at what is waiting must not be what wakes a sleeping
+ * session — answering is, and that is the person's choice. The attachment lasts as long
+ * as the panel is on screen and is closed when it leaves, so an inbox of thirty is not
+ * thirty sockets for longer than it is thirty rows.
+ *
+ * Shared by the inbox and by Review, because "answer it without opening it" is the same
+ * promise in both and a second copy is how two screens start disagreeing about it.
+ */
+export function InlineApprovals({
+  auth,
+  row,
+  onAnswered,
+}: {
+  auth: AuthSession;
+  row: FleetRow;
+  onAnswered: () => void;
+}): JSX.Element {
   const [state, setState] = useState<TranscriptState>(emptyTranscript);
   const [attachment, setAttachment] = useState<SessionAttachment | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -71,8 +107,6 @@ function Waiting({
     let opened: SessionAttachment | null = null;
     SessionAttachment.open({
       sessionId: row.id,
-      // `read` never wakes a sleeping session: looking at what is waiting must not be
-      // what starts it. Answering is what wakes it, and that is the person's choice.
       mode: "read",
       open: (mode) => auth.rpc("session.open", { session_id: row.id, mode }),
       mint: () => auth.rpc("token.mint", { session_id: row.id }),
@@ -95,17 +129,7 @@ function Waiting({
   const answered = state.entries.find((e) => e.kind === "approval" && e.decision !== undefined);
 
   return (
-    <li>
-      <header>
-        <button className="link subject" onClick={() => onOpen(row.id)}>
-          {row.title ?? row.id}
-        </button>
-        <Where kind={row.kind} />
-        <span className="when">{row.profile}</span>
-        <span className="spacer" />
-        <When iso={row.lastActiveAt} />
-      </header>
-
+    <>
       {error && (
         <div className="banner error">
           <p>{error}</p>
@@ -138,6 +162,6 @@ function Waiting({
           </p>
         </div>
       )}
-    </li>
+    </>
   );
 }

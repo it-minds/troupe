@@ -1480,3 +1480,169 @@ main {
     max-width: none;
   }
 }
+
+/* -- administration and review ---------------------------------------------- */
+
+/* Structure from hairlines and alignment, here as everywhere: a table is ruled rows
+   inside one bordered block, not a grid of boxes. It scrolls sideways on its own so the
+   page never does — the one exception DESIGN.md allows. */
+.table-scroll {
+  overflow-x: auto;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.table thead th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+.table tbody tr + tr {
+  border-top: var(--bw-hairline) solid var(--divider);
+}
+.table tbody th {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.table td {
+  color: var(--text-secondary);
+}
+.table td .link + .link {
+  margin-left: var(--space-3);
+}
+
+/* The facts grid widens for administration, where a value is a sentence rather than a
+   word and wrapping at the second column is what keeps the labels in a line. */
+.facts.wide {
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+/* A chip is a fact, not a state: no glyph, no reserved colour, never clickable. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--space-2);
+  margin-right: var(--space-2);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.inline-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.inline-form input,
+.inline-form select {
+  min-width: 10rem;
+}
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+label.inline input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+}
+
+fieldset {
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+fieldset legend {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 0 var(--space-2);
+}
+
+h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.dialog.wide {
+  width: min(760px, 100%);
+}
+
+/* One sentence per problem, against the document that caused them. */
+.problems {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  font-size: 13px;
+}
+.problems li + li {
+  margin-top: 4px;
+}
+
+/* A diff is keyed by the path it changed, which is how the platform wrote it. */
+.diff {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+.diff .was {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.diff .now {
+  color: var(--text-primary);
+}
+
+/* The one place a secret is ever on screen. Selectable, and nothing else beside it. */
+.payload.secret {
+  user-select: all;
+  font-size: 13px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* An irreversible button says so in its own right, not only in the dialog's words. */
+button.danger {
+  border-color: var(--error-bd);
+  color: var(--error-fg);
+}
+
+/* Review: a run is a header, its facts, and what it is waiting for. */
+.run {
+  padding: var(--space-3) var(--space-4);
+}
+.run-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 0 var(--space-4) var(--space-3);
+}
+.run-actions .note {
+  margin: 0;
+}
