@@ -21,26 +21,6 @@ jobs:
   check:
     name: compile, format, credo, boundaries, test
     runs-on: ubuntu-latest
-    # The plane is the one app that needs a database, and without one its suite skips
-    # itself — loudly in the log, silently in the exit code, so a green run proved
-    # nothing about the plane. `config/config.exs` points the test repo at
-    # localhost:55432, the port `scripts/dev-up` uses so a laptop's own Postgres is
-    # left alone, and the service is mapped onto that same port so CI and a laptop run
-    # from one configuration. (`DATABASE_URL` is read only by a `prod` release and
-    # would be ignored here.)
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_USER: troupe
-          POSTGRES_PASSWORD: troupe
-          POSTGRES_DB: troupe_plane_test
-        ports: ["55432:5432"]
-        options: >-
-          --health-cmd "pg_isready -U troupe -d troupe_plane_test"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 12
     steps:
       - uses: actions/checkout@v4
 
@@ -53,10 +33,22 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      # The native watch backend needs this; without it those tests skip and the
-      # polling backend is all that gets covered.
-      - name: Install inotify-tools
-        run: sudo apt-get update && sudo apt-get install -y inotify-tools
+      # inotify-tools: the native watch backend needs it; without it those tests skip
+      # and the polling backend is all that gets covered — and the done item that says
+      # a written file reaches subscribers inside a second is not met by polling.
+      # bubblewrap: `Troupe.SandboxTest` is the only thing that proves one session
+      # cannot see another's workspace, and it needs a real sandbox to prove it in.
+      - name: Install inotify-tools and bubblewrap
+        run: sudo apt-get update && sudo apt-get install -y inotify-tools bubblewrap
+
+      # Postgres, MinIO and OpenBao, from the same compose file a laptop uses, on the
+      # same ports `config/config.exs` names. Not three `services:` blocks: the bucket
+      # needs versioning enabled and OpenBao needs a transit engine and a signing key
+      # before anything can mint a token, and `services:` has nowhere to put that. Two
+      # thirds of the suite — the object store, the KMS, every worker test that wants a
+      # durable tier — used to fail here for want of them.
+      - name: Postgres, MinIO and OpenBao
+        run: scripts/dev-up
 
       - uses: actions/cache@v4
         with:

@@ -12,6 +12,7 @@ defmodule Troupe.Plane.EnrolmentTest do
 
   alias Troupe.Plane.{Enrolment, Fleet}
 
+  @moduletag :cluster
   @moduletag timeout: 120_000
 
   setup_all do
