@@ -1,40 +1,65 @@
 defmodule Troupe.Plane.FrontPageAssetsTest do
   @moduledoc """
-  The front page asks for files and obeys one rule about colour; both are checked here.
+  The two public pages ask for files and obey two rules about colour; all of it is here.
 
   Sibling of `console_assets_test.exs`, and for the same reason it exists: nothing else
   checks the contract between a document and the file system. `web_test.exs` fetches `/`
-  over a socket, but it mounts the bare `Router` — the static plug lives on the
-  `Endpoint`, so a stylesheet the page names and the endpoint does not serve would pass
+  and `/docs` over a socket, but it mounts the bare `Router` — the static plug lives on
+  the `Endpoint`, so a stylesheet a page names and the endpoint does not serve would pass
   every test in that file and render as unstyled HTML in front of whoever was handed the
   plane's URL.
 
-  The colour rule is the other half. `docs/design/themes/THEMES.md` reserves one hue per
-  theme — magenta in Signal — for a single meaning: *stopped, a person must decide*. A
-  page that spends it on a heading or a button spends the meaning too, and the loss is
-  invisible until somebody misses a real approval. So the front page's use of it is
-  pinned to one place, and the inline stylesheet is checked for colours of its own.
+  Every check runs over **both** documents. When `/docs` was added, the asset and colour
+  checks here knew only about `Troupe.Plane.Web.Index`, which would have left the second
+  public page — the one written for the reader who knows least — with no cover at all.
+
+  ## The colour rules
+
+  `docs/design/themes/THEMES.md` reserves one hue per theme — magenta in Signal — for a
+  single meaning: *stopped, a person must decide*. It reserves the **meaning**, not a
+  count (THEMES.md:30, :133). A page that spends the hue on a heading or a button spends
+  the meaning too, and the loss is invisible until somebody misses a real approval.
+
+  So there are two licensed uses and the tests below pin each to its place:
+
+  1. **The mark**, on both pages, in `--color-status-waiting-solid`. The mask's filled
+     half is the brand, and it is the only thing on `/` that has the hue at all.
+  2. **The approval figure**, on `/docs` only, in the `waiting` status *trio*
+     (`-bg`, `-border`, `-fg`) — the same tokens an approval pill wears in the console.
+     That drawing is the reserved meaning itself, which is the one thing the rule exists
+     to protect rather than something it forbids.
+
+  Anything else with the hue, on either page, fails here.
   """
 
   use ExUnit.Case, async: true
 
+  alias Troupe.Plane.Web.Docs
   alias Troupe.Plane.Web.Endpoint
   alias Troupe.Plane.Web.Index
 
   @static_root Application.app_dir(:troupe_plane, "priv/static")
   @endpoint_source Path.join(__DIR__, "../../../lib/troupe/plane/web/endpoint.ex")
 
-  defp document do
-    Index.render(name: "a plane", url: "https://plane.example.test", app_url: "/app")
-  end
+  @opts [name: "a plane", url: "https://plane.example.test", app_url: "/app"]
+
+  defp index, do: Index.render(@opts)
+  defp docs, do: Docs.render(@opts)
+
+  # Both public documents, each with the path it is served at, so a failure names the page.
+  defp documents, do: [{"/", index()}, {"/docs", docs()}]
 
   # `/static/brand/favicon.svg` is the reference; `brand/favicon.svg` is the path under
   # `priv/static`. The `og:image` names the same file absolutely, hence the dedup.
-  defp referenced_assets do
+  defp referenced_assets(document) do
     ~r{/static/(?<file>[A-Za-z0-9._-]+(?:/[A-Za-z0-9._-]+)*)}
-    |> Regex.scan(document(), capture: ["file"])
+    |> Regex.scan(document, capture: ["file"])
     |> List.flatten()
     |> Enum.uniq()
+  end
+
+  defp all_referenced_assets do
+    documents() |> Enum.flat_map(fn {_path, doc} -> referenced_assets(doc) end) |> Enum.uniq()
   end
 
   defp allowlist(at) do
@@ -43,77 +68,93 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
     String.split(allowed, ~r/\s+/, trim: true)
   end
 
-  test "the page names the theme, the mask and every icon format a browser asks for" do
-    assets = referenced_assets()
+  describe "the assets each page names" do
+    test "the front page names the theme, the mask and every icon format a browser asks for" do
+      assets = referenced_assets(index())
 
-    assert "theme.css" in assets
-    assert "brand/mask.png" in assets, "the front page is the photograph of the mask"
-    assert "brand/favicon.svg" in assets
-    assert "brand/favicon.ico" in assets, "an SVG favicon alone leaves older clients blank"
-    assert "brand/apple-touch-icon.png" in assets
-  end
-
-  test "every asset the page names exists on disk and is not empty" do
-    for asset <- referenced_assets() do
-      path = Path.join(@static_root, asset)
-
-      assert File.exists?(path), """
-      The front page references /static/#{asset} and there is no such file.
-
-      `theme.css` is generated by `mix troupe.theme` from the Signal kit; the files under
-      `brand/` are authored by hand, apart from the two bitmaps `scripts/brand-icons.py`
-      rasterises. All of them are committed.
-      """
-
-      assert File.stat!(path).size > 0, "#{asset} is empty"
+      assert "theme.css" in assets
+      assert "brand/mask.png" in assets, "the front page is the photograph of the mask"
+      assert "brand/favicon.svg" in assets
+      assert "brand/favicon.ico" in assets, "an SVG favicon alone leaves older clients blank"
+      assert "brand/apple-touch-icon.png" in assets
     end
-  end
 
-  test "every asset the page names is in the front page's static allowlist" do
-    # Read from the source rather than the endpoint's compiled plug list: the compiled
-    # list would be testing Plug, and the source is the thing that goes wrong.
-    allowed = allowlist("/static")
+    test "the docs page names the theme and the icons, and draws rather than photographs" do
+      assets = referenced_assets(docs())
 
-    for asset <- referenced_assets() do
-      root = asset |> Path.split() |> hd()
+      assert "theme.css" in assets
+      assert "brand/favicon.svg" in assets
+      assert "brand/favicon.ico" in assets
+      assert "brand/apple-touch-icon.png" in assets
 
-      assert root in allowed, """
-      /static/#{asset} is referenced by the page but `#{root}` is not in the static plug's
-      `only:` list, so it is served as a 404 however present the file is.
-
-      Allowed: #{inspect(allowed)}
-      """
+      # The mask still appears in the `og:image`, which is what a link preview shows, but
+      # nothing on the page itself is a bitmap: every picture on `/docs` is inline SVG, so
+      # the page renders whole on a connection that can reach the plane and nothing else.
+      refute docs() =~ ~s(<img), "every picture on /docs is drawn, not fetched"
     end
-  end
 
-  test "the two static mounts stay separate" do
-    # The console's own allowlist is checked by `console_assets_test.exs`; what matters
-    # here is that adding the front page's mount did not fold the two together. A single
-    # mount would mean the front page's stylesheet is only reachable behind `/admin`.
-    assert allowlist("/admin/static") == ~w(app.js tokens.css console.css)
-    refute "theme.css" in allowlist("/admin/static")
-  end
+    test "every asset either page names exists on disk and is not empty" do
+      for asset <- all_referenced_assets() do
+        path = Path.join(@static_root, asset)
 
-  # The allowlist checks above read the source. This one runs the real pipeline, which is
-  # the only way to find out that a mount answers — `web_test.exs` cannot, because it
-  # starts the bare `Router` and the static plugs are on the `Endpoint`.
-  test "the endpoint actually serves what the page asks for" do
-    for asset <- referenced_assets() do
-      conn = Endpoint.call(Plug.Test.conn(:get, "/static/" <> asset), [])
+        assert File.exists?(path), """
+        A public page references /static/#{asset} and there is no such file.
 
-      assert conn.status == 200, "GET /static/#{asset} answered #{conn.status}"
+        `theme.css` is generated by `mix troupe.theme` from the Signal kit; the files under
+        `brand/` are authored by hand, apart from the two bitmaps `scripts/brand-icons.py`
+        rasterises. All of them are committed.
+        """
 
-      # `Plug.Static` answers with `send_file`, which leaves the conn in `:file` rather
-      # than `:sent`; what matters is that it answered at all, rather than falling
-      # through to the router's 404.
-      assert conn.state in [:file, :sent]
+        assert File.stat!(path).size > 0, "#{asset} is empty"
+      end
     end
-  end
 
-  test "a file outside the allowlist is not served just because it is in priv/static" do
-    conn = Endpoint.call(Plug.Test.conn(:get, "/static/app.js"), [])
+    test "every asset either page names is in the front page's static allowlist" do
+      # Read from the source rather than the endpoint's compiled plug list: the compiled
+      # list would be testing Plug, and the source is the thing that goes wrong.
+      allowed = allowlist("/static")
 
-    refute conn.status == 200
+      for asset <- all_referenced_assets() do
+        root = asset |> Path.split() |> hd()
+
+        assert root in allowed, """
+        /static/#{asset} is referenced by a public page but `#{root}` is not in the static
+        plug's `only:` list, so it is served as a 404 however present the file is.
+
+        Allowed: #{inspect(allowed)}
+        """
+      end
+    end
+
+    test "the two static mounts stay separate" do
+      # The console's own allowlist is checked by `console_assets_test.exs`; what matters
+      # here is that adding the public mount did not fold the two together. A single mount
+      # would mean the public stylesheet is only reachable behind `/admin`.
+      assert allowlist("/admin/static") == ~w(app.js tokens.css console.css)
+      refute "theme.css" in allowlist("/admin/static")
+    end
+
+    # The allowlist checks above read the source. This one runs the real pipeline, which is
+    # the only way to find out that a mount answers — `web_test.exs` cannot, because it
+    # starts the bare `Router` and the static plugs are on the `Endpoint`.
+    test "the endpoint actually serves what the pages ask for" do
+      for asset <- all_referenced_assets() do
+        conn = Endpoint.call(Plug.Test.conn(:get, "/static/" <> asset), [])
+
+        assert conn.status == 200, "GET /static/#{asset} answered #{conn.status}"
+
+        # `Plug.Static` answers with `send_file`, which leaves the conn in `:file` rather
+        # than `:sent`; what matters is that it answered at all, rather than falling
+        # through to the router's 404.
+        assert conn.state in [:file, :sent]
+      end
+    end
+
+    test "a file outside the allowlist is not served just because it is in priv/static" do
+      conn = Endpoint.call(Plug.Test.conn(:get, "/static/app.js"), [])
+
+      refute conn.status == 200
+    end
   end
 
   describe "the stylesheet against the theme" do
@@ -124,63 +165,165 @@ defmodule Troupe.Plane.FrontPageAssetsTest do
       assert @theme =~ "docs/design/themes/signal.tokens.json"
     end
 
-    test "every custom property the page uses is defined by the generated theme" do
+    test "every custom property either page uses is defined by the generated theme" do
       defined =
         ~r/^\s*(--[a-zA-Z0-9-]+)\s*:/m
         |> Regex.scan(@theme, capture: :all_but_first)
         |> List.flatten()
         |> MapSet.new()
 
-      used =
-        ~r/var\((--[a-zA-Z0-9-]+)\)/
-        |> Regex.scan(document(), capture: :all_but_first)
-        |> List.flatten()
-        |> MapSet.new()
+      for {path, document} <- documents() do
+        used =
+          ~r/var\((--[a-zA-Z0-9-]+)\)/
+          |> Regex.scan(document, capture: :all_but_first)
+          |> List.flatten()
+          |> MapSet.new()
 
-      missing = MapSet.difference(used, defined)
+        missing = MapSet.difference(used, defined)
 
-      assert MapSet.size(missing) == 0, """
-      The front page uses custom properties the theme does not define, so those rules
-      silently do nothing:
+        assert MapSet.size(missing) == 0, """
+        #{path} uses custom properties the theme does not define, so those rules silently
+        do nothing:
 
-      #{missing |> MapSet.to_list() |> Enum.sort() |> Enum.join("\n")}
-      """
+        #{missing |> MapSet.to_list() |> Enum.sort() |> Enum.join("\n")}
+        """
+      end
     end
 
-    test "the page contains no colour of its own" do
-      hexes = ~r/#[0-9a-fA-F]{3,8}\b/ |> Regex.scan(document()) |> List.flatten()
+    test "neither page contains a colour of its own" do
+      for {path, document} <- documents() do
+        hexes = ~r/#[0-9a-fA-F]{3,8}\b/ |> Regex.scan(document) |> List.flatten()
 
-      assert hexes == [], """
-      #{length(hexes)} literal colour(s) on the front page: #{inspect(Enum.uniq(hexes))}
+        assert hexes == [], """
+        #{length(hexes)} literal colour(s) on #{path}: #{inspect(Enum.uniq(hexes))}
 
-      Change `docs/design/themes/signal.tokens.json` and run `mix troupe.theme` instead.
-      """
+        Change `docs/design/themes/signal.tokens.json` and run `mix troupe.theme` instead.
+        """
+      end
     end
   end
 
   describe "the reserved colour" do
-    test "magenta is spent once, on the mask, and nowhere else" do
-      uses =
-        ~r/var\(--color-status-waiting-solid\)/
-        |> Regex.scan(document())
-        |> length()
+    test "the solid magenta is spent once per page, on the mask, and nowhere else" do
+      for {path, document} <- documents() do
+        uses =
+          ~r/var\(--color-status-waiting-solid\)/
+          |> Regex.scan(document)
+          |> length()
 
-      assert uses == 1, """
-      The reserved colour appears #{uses} times on the front page. It means one thing —
-      stopped, a person must decide — and the front page's one licensed use of it is the
-      filled half of the mask. Anything else spends the meaning.
-      """
+        assert uses == 1, """
+        The reserved colour's solid variant appears #{uses} times on #{path}. It means one
+        thing — stopped, a person must decide — and the licensed use of the solid is the
+        filled half of the mask. Anything else spends the meaning.
+        """
+      end
     end
 
-    test "the one use is inside the mark" do
-      [_all, mark] = Regex.run(~r|(<svg class="mark".*?</svg>)|s, document())
+    test "the one solid use is inside the mark, on both pages" do
+      for {path, document} <- documents() do
+        [_all, mark] = Regex.run(~r|(<svg class="mark".*?</svg>)|s, document)
 
-      assert mark =~ "var(--color-status-waiting-solid)"
-      # The kit drops the seam line below 32px and flattens the eyes below 24px; this
-      # mark is 20px, so it is the small geometry at the heavy stroke.
-      assert mark =~ ~s(width="20")
-      assert mark =~ ~s(stroke-width="3.4")
-      refute mark =~ "M24 8 L24 42", "the seam line does not belong under 32px"
+        assert mark =~ "var(--color-status-waiting-solid)", "#{path} lost the mask's half"
+        # The kit drops the seam line below 32px and flattens the eyes below 24px; this
+        # mark is 20px, so it is the small geometry at the heavy stroke.
+        assert mark =~ ~s(width="20")
+        assert mark =~ ~s(stroke-width="3.4")
+        refute mark =~ "M24 8 L24 42", "the seam line does not belong under 32px"
+      end
+    end
+
+    test "the front page does not touch the waiting status trio at all" do
+      # `/` has no approval figure, so it has no licensed use of the trio. A rule or an
+      # element that acquires one here is the failure this whole file is about: the hue
+      # leaking out of its meaning and into decoration.
+      for token <- ~w(bg border fg) do
+        refute index() =~ "--color-status-waiting-#{token}", """
+        `/` uses --color-status-waiting-#{token}. The front page's only licensed use of the
+        reserved hue is the mask's filled half, in the solid variant.
+        """
+      end
+    end
+
+    test "on the docs page the waiting trio appears only in the approval figure" do
+      # Two licensed homes, and this strips both before looking for leaks: the `.d-stop*`
+      # rules that style the figure, and the figure's own SVG (its marker names the border
+      # token as an attribute, because a class on a marker's path does not inherit the
+      # referencing element's context in every engine).
+      remainder =
+        docs()
+        |> String.replace(~r/^\s*\.d-stop[^\n]*$/m, "")
+        |> String.replace(
+          ~r|<svg viewBox="0 0 880 250" role="img" aria-labelledby="appr-t".*?</svg>|s,
+          ""
+        )
+
+      for token <- ~w(bg border fg) do
+        refute remainder =~ "--color-status-waiting-#{token}", """
+        /docs uses --color-status-waiting-#{token} outside the approval figure and the
+        `.d-stop` rules that style it.
+
+        The figure is licensed because it draws the reserved meaning itself — stopped, a
+        person must decide. Nothing else on the page may borrow the hue.
+        """
+      end
+    end
+
+    test "the approval figure is actually there to justify the licence" do
+      assert docs() =~ ~s(class="d-stop"), "the licensed figure is missing its stop node"
+      assert docs() =~ "a person must decide"
+    end
+  end
+
+  describe "the two pages as one site" do
+    test "each names the other in the bar, and marks itself as current" do
+      assert index() =~ ~s(<span aria-current="page">This plane</span>)
+      assert index() =~ ~s(<a href="/docs">What it is</a>)
+
+      assert docs() =~ ~s(<span aria-current="page">What it is</span>)
+      assert docs() =~ ~s(<a href="/">This plane</a>)
+    end
+
+    test "both write their commands against this plane's own URL" do
+      for {path, document} <- documents() do
+        assert document =~ "troupe login https://plane.example.test",
+               "#{path} should give a command the reader can copy, not one to adapt"
+      end
+    end
+
+    test "the endpoint table names /docs, so the page is discoverable from the surface list" do
+      assert index() =~ ~s(<code>/docs</code>)
+    end
+
+    test "no id is used twice in one document" do
+      # Two SVGs in one page share an id space. A duplicate `id` is silent: the second
+      # diagram's `url(#...)` resolves to the first one's element, and the arrowheads or
+      # the clip come out of the wrong drawing.
+      for {path, document} <- documents() do
+        ids =
+          ~r/\sid="([^"]+)"/
+          |> Regex.scan(document, capture: :all_but_first)
+          |> List.flatten()
+
+        duplicates = ids -- Enum.uniq(ids)
+
+        assert duplicates == [], """
+        #{path} defines these ids more than once: #{inspect(Enum.uniq(duplicates))}
+
+        Every `<marker>`, `<clipPath>` and `<title>` in a diagram needs an id prefixed
+        with that diagram's name.
+        """
+      end
+    end
+
+    test "every diagram is labelled for a reader who cannot see it" do
+      # `aria-labelledby` pointing at a `<title>` is what makes a drawing readable at all;
+      # a diagram that loses it is invisible rather than merely undescribed.
+      for svg <- Regex.scan(~r|<svg(?![^>]*class="mark")[^>]*>|, docs()) |> List.flatten() do
+        assert svg =~ "aria-labelledby", "a diagram on /docs has no accessible name: #{svg}"
+      end
+
+      titles = Regex.scan(~r|<title id="([^"]+)"|, docs()) |> List.flatten()
+      assert length(titles) >= 5, "expected a title per diagram on /docs"
     end
   end
 end
