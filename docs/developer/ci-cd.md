@@ -134,9 +134,14 @@ no symptom until a pod ran a command. The build stage now installs the pinned Zi
 the worker release and fails the build if the binary is not in the assembled release
 (audit §3.21, now closed).
 
-Secrets used: `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`;
-`GITHUB_TOKEN` as the fallback password (`:167-172,175-177,200-201`). None of the four is
-set on `it-minds/troupe-remote`, so images go to `ghcr.io/it-minds/troupe-<release>`. With none set the
+Secrets used: `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`.
+**None of them is set on `it-minds/troupe-remote`, so this job builds nothing and says so
+in the run summary.** There used to be a fallback to `ghcr.io/<owner>` with the workflow's
+own token, described as what a fork or a first run wants; on this organisation
+`docker login ghcr.io` answers `denied: denied` even with `Packages: write` on the token,
+because publishing packages is disallowed org-wide. A fallback that cannot work turns
+every push red for a reason unrelated to the code, so publishing now requires a registry
+someone configured on purpose. With none set the
 images go to `ghcr.io/<owner>/troupe-<release>`. `REGISTRY_NAMESPACE` exists because
 "Scaleway's registry wants its namespace there, not the GitHub owner" (`:149-150`).
 
