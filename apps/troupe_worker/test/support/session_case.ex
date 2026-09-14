@@ -196,20 +196,40 @@ defmodule Troupe.Worker.SessionCase do
   """
   @spec await_sealed(pos_integer(), pos_integer()) :: map()
   def await_sealed(timeout \\ 20_000, quiet_ms \\ 400) do
+    await_seal_report(System.monotonic_time(:millisecond) + timeout, timeout, quiet_ms)
+  end
+
+  defp await_seal_report(deadline, timeout, quiet_ms) do
+    remaining = max(deadline - System.monotonic_time(:millisecond), 0)
+
     receive do
-      {:sealed, report} -> drain_sealed(report, quiet_ms)
+      {:sealed, report} ->
+        if seal?(report),
+          do: drain_sealed(report, quiet_ms),
+          else: await_seal_report(deadline, timeout, quiet_ms)
     after
-      timeout -> ExUnit.Assertions.flunk("nothing was sealed within #{timeout}ms")
+      remaining -> ExUnit.Assertions.flunk("nothing was sealed within #{timeout}ms")
     end
   end
 
   defp drain_sealed(report, quiet_ms) do
     receive do
-      {:sealed, next} -> drain_sealed(next, quiet_ms)
+      {:sealed, next} -> drain_sealed(if(seal?(next), do: next, else: report), quiet_ms)
     after
       quiet_ms -> report
     end
   end
+
+  # Everything a session tells the plane goes down one `report` callback: the sealer's
+  # segments, and the manager's `session.status` and `session.dormant`. Only a segment
+  # carries `last_seq` and `head_hash` with no `"type"` on it.
+  #
+  # A status report is debounced, so it arrives *after* the seal — and "the newest
+  # report" was then a status one with no `last_seq` in it. That read as `nil`, and
+  # `nil` compares greater than every number in Erlang's term order, so
+  # `assert sealed["last_seq"] > 0` passed on it and the assertion after that failed,
+  # pointing at the wrong line in the wrong test.
+  defp seal?(report), do: not Map.has_key?(report, "type")
 
   @doc "This session's data key, for a test that wants to read a segment back."
   @spec data_key(map()) :: binary()

@@ -104,7 +104,14 @@ defmodule Troupe.Worker.Cache do
   @spec entries(Path.t() | nil) :: [map()]
   def entries(state_dir \\ nil) do
     case File.ls(root(state_dir)) do
-      {:ok, names} -> names |> Enum.map(&entry(&1, state_dir)) |> Enum.sort_by(& &1.accessed_at)
+      # `DateTime`, not the default term order. Comparing two `%DateTime{}` structurally
+      # compares their fields in key order — `:calendar, :day, :hour, :microsecond,
+      # :minute, :month, :second, ...` — so microseconds outrank seconds and
+      # `10:00:01.900` sorts after `10:00:02.100`. Least-recently-used is the whole
+      # claim this function makes, and across a second boundary it was making it
+      # backwards, which is a cache evicting the wrong session's workspace.
+      {:ok, names} ->
+        names |> Enum.map(&entry(&1, state_dir)) |> Enum.sort_by(& &1.accessed_at, DateTime)
       {:error, _reason} -> []
     end
   end
