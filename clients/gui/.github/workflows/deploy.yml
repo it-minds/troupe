@@ -1,0 +1,118 @@
+# Rolling a build onto a cluster. The other half of `ci`, and still a person's decision.
+#
+# `ci` builds and pushes an image for every commit; nothing here happens on a merge.
+# This runs only when somebody starts it and names the build they mean, because pushing
+# an image and changing production are different decisions with different blast radii —
+# a workflow that did both would make every merge a production change.
+#
+# What it adds over running `scripts/deploy` on a laptop is not automation. It is that
+# the credentials live in one place instead of on several people's machines, the run is
+# recorded with the person who started it, and an `environment` can require a second
+# person to approve before it proceeds.
+#
+# It runs the same `scripts/deploy` a person runs, deliberately: two implementations of
+# "deploy" is how the documented one stops being what actually happens.
+
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Image tag to deploy, as ci published it (sha-1a2b3c4, or a release version)"
+        required: true
+        type: string
+      environment:
+        description: "Which deployment"
+        required: true
+        default: production
+        type: choice
+        options: [production]
+      namespace:
+        description: "Namespace"
+        required: false
+        default: troupe-system
+        type: string
+      release:
+        description: "Helm release"
+        required: false
+        default: troupe-gui
+        type: string
+      dry_run:
+        description: "Render and change nothing"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # One roll at a time. Two overlapping `helm upgrade`s on one release is a race whose
+  # loser is whichever finished second, which is not a thing anybody chose.
+  group: deploy-${{ inputs.environment }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: ${{ inputs.dry_run && 'render' || 'roll' }} ${{ inputs.tag }}
+    runs-on: ubuntu-latest
+    # The environment is where approval lives. Configure required reviewers on it and a
+    # deploy waits for a second person; leave it open and it does not.
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: azure/setup-helm@v5
+
+      # Refused here rather than half-way through: a missing credential should stop the
+      # run before it has told anybody it is deploying.
+      - name: Check this deployment is configured
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          missing=""
+          [ -n "${KUBECONFIG_CONTENT}" ] || missing="${missing} KUBECONFIG"
+          [ -n "${VALUES_CONTENT}" ] || missing="${missing} DEPLOY_VALUES"
+          if [ -n "${missing}" ]; then
+            echo "::error title=Deployment not configured::This repository has no${missing}. KUBECONFIG is the cluster's kubeconfig; DEPLOY_VALUES is the Helm values file for this deployment — the one kept out of the repository under .local/. Until both exist, deploy with scripts/deploy from a machine that has them."
+            exit 1
+          fi
+
+      # Written where `scripts/deploy` looks by default, so the script takes the same
+      # path here as on somebody's laptop and there is nothing to keep in step.
+      - name: Lay out the credentials
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          mkdir -p .local
+          printf '%s' "${KUBECONFIG_CONTENT}" > .local/kubeconfig.yaml
+          printf '%s' "${VALUES_CONTENT}" > .local/values.itminds.yaml
+          chmod 600 .local/kubeconfig.yaml .local/values.itminds.yaml
+
+      - name: ${{ inputs.dry_run && 'Render it' || 'Roll it' }}
+        env:
+          TAG: ${{ inputs.tag }}
+          NAMESPACE: ${{ inputs.namespace }}
+          RELEASE: ${{ inputs.release }}
+        run: |
+          if [ "${{ inputs.dry_run }}" = "true" ]; then
+            scripts/deploy --dry-run
+          else
+            scripts/deploy | tee deploy.log
+            # The digest, not the tag. A tag that already exists in the registry plus
+            # `imagePullPolicy: IfNotPresent` means the node keeps the image it has and
+            # no pod is restarted, so `helm upgrade` reports success over code that never
+            # changed. `scripts/deploy` prints what is actually running for that reason;
+            # this puts it where somebody reading the run can see it.
+            {
+              echo "### Running after the roll"
+              echo
+              echo '```'
+              sed -n '/^POD/,$p' deploy.log
+              echo '```'
+            } >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Forget the credentials
+        if: always()
+        run: rm -rf .local

@@ -26,11 +26,11 @@ jobs:
     name: typecheck, test, build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: pnpm/action-setup@v4
+      - uses: pnpm/action-setup@v6
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: pnpm
@@ -61,21 +61,46 @@ jobs:
       contents: read
       packages: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Four secrets, exactly as the remote's workflow takes them, so one set of
       # repository secrets configures both: `REGISTRY` and `REGISTRY_NAMESPACE` say
       # where, `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` say how to get in. With none
       # of them the image goes to this repository's own packages on ghcr.io, which is
       # what a fork or a first run wants.
+      #
+      # **Where and how-to-get-in are one decision, not four.** They used to fall back
+      # one secret at a time, so a repository that set `REGISTRY` and stopped there
+      # pointed at somebody else's registry and then offered it GitHub's own token. That
+      # cannot work, and it fails at the login rather than at the configuration that
+      # caused it: the registry says the credential is unknown, and nothing says the
+      # credential was never configured.
+      #
+      # So there are two configurations and no third. Nothing set is a fork or a first
+      # run, and the image goes to this repository's own packages. Everything set is a
+      # deployment, and the image goes where it says. A registry named with no credential
+      # is neither, and is refused here — quietly publishing somewhere else would be a
+      # green run whose images no deployment will ever pull.
       - name: Resolve the registry and the tags
         id: registry
         env:
           REGISTRY: ${{ secrets.REGISTRY }}
           REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
         run: |
-          registry="${REGISTRY:-ghcr.io}"
-          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          if [ -n "${REGISTRY_PASSWORD}" ]; then
+            configured=true
+            registry="${REGISTRY:-ghcr.io}"
+            namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          elif [ -n "${REGISTRY}" ] && [ "${REGISTRY}" != "ghcr.io" ]; then
+            echo "::error title=Registry named but no credential::REGISTRY is set to ${REGISTRY}, but REGISTRY_PASSWORD is not set, so there is no way to push there. Add REGISTRY_PASSWORD (and REGISTRY_USERNAME if that registry wants a real user name), or remove REGISTRY to publish to this repository's own packages on ghcr.io instead. Publishing elsewhere without saying so would leave the deployment pulling from ${REGISTRY} on whatever it already had."
+            exit 1
+          else
+            configured=false
+            registry="ghcr.io"
+            namespace="${GITHUB_REPOSITORY_OWNER}"
+          fi
+
           image=$(echo "${registry}/${namespace}/troupe-gui" | tr '[:upper:]' '[:lower:]')
 
           # `sha-<short>` on every push, so every commit is pullable by a name that can
@@ -88,21 +113,41 @@ jobs:
             refs/tags/v*) tags="${tags},${image}:${GITHUB_REF_NAME#v}" ;;
           esac
 
-          echo "registry=${registry}" >> "$GITHUB_OUTPUT"
-          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          {
+            echo "registry=${registry}"
+            echo "configured=${configured}"
+            echo "tags=${tags}"
+          } >> "$GITHUB_OUTPUT"
 
-      - uses: docker/setup-buildx-action@v3
+          echo "Pushing ${tags}" >> "$GITHUB_STEP_SUMMARY"
 
-      - uses: docker/login-action@v3
+      - uses: docker/setup-buildx-action@v4
+
+      # Two logins rather than one with fallbacks inside it, because the credential has
+      # to match the registry the step above actually chose.
+      - name: Sign in to the configured registry
+        if: steps.registry.outputs.configured == 'true'
+        uses: docker/login-action@v4
         with:
           registry: ${{ steps.registry.outputs.registry }}
-          username: ${{ secrets.REGISTRY_USERNAME || github.actor }}
-          password: ${{ secrets.REGISTRY_PASSWORD || secrets.GITHUB_TOKEN }}
+          # Scaleway, Harbor and most others take a fixed name beside a secret key;
+          # `nologin` is the conventional one, and a registry that wants a real user
+          # is told which by `REGISTRY_USERNAME`.
+          username: ${{ secrets.REGISTRY_USERNAME || 'nologin' }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Sign in to this repository's own packages
+        if: steps.registry.outputs.configured != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       # `TROUPE_GUI_BASE` is baked in: Vite writes it into every asset URL, so an image
       # built for one mount point cannot be served at another. `GUI_BASE` as a repository
       # variable lets a deployment that serves the GUI at its own root set it to `/`.
-      - uses: docker/build-push-action@v6
+      - uses: docker/build-push-action@v7
         with:
           context: .
           file: Dockerfile
@@ -117,8 +162,8 @@ jobs:
     name: chart
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: azure/setup-helm@v4
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
 
       - run: helm lint charts/troupe-gui --set ingress.host=example.test
 
