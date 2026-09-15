@@ -18,7 +18,8 @@ defmodule Troupe.Worker.Session.Reader do
 
   use GenServer, restart: :temporary
 
-  alias Troupe.Worker.Session.{Context, Restore}
+  alias Troupe.Sessions.Context
+  alias Troupe.Worker.Session.Restore
   alias Troupe.Worker.Sessions
 
   require Logger

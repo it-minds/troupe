@@ -50,7 +50,7 @@ defmodule Troupe.KMS.OpenBao do
 
     # `metadata`, not `data`: this is the call that removes every version. Deleting the
     # data would leave the key readable at its previous version, which is not erasure.
-    case request(:delete, "/v1/#{mount(opts)}/metadata/#{path}", nil, opts) do
+    case request(:delete, "/v1/#{mount(opts)}/metadata/#{encode(path)}", nil, opts) do
       {:ok, status, _body} when status in 200..299 or status == 404 -> :ok
       {:ok, status, _body} -> {:error, {:unexpected_status, status}}
       error -> error
@@ -62,10 +62,24 @@ defmodule Troupe.KMS.OpenBao do
     match?({:ok, _}, fetch(team, session_id, opts))
   end
 
+  # A key path is a *logical* path — it is what the policy matches on and what the store
+  # files the secret under — and a URL is not. `idp|ada` is a perfectly ordinary subject
+  # (Auth0 writes every one of them that way) and a perfectly invalid request target, so
+  # a person's key would fail at the HTTP client with `:invalid_request_target` and never
+  # reach OpenBao at all.
+  #
+  # Segment by segment, so the separators survive: the whole path encoded in one call
+  # would turn every `/` into `%2F` and address one secret with a very long name.
+  defp encode(path) do
+    path
+    |> String.split("/")
+    |> Enum.map_join("/", &URI.encode(&1, fn char -> URI.char_unreserved?(char) end))
+  end
+
   # -- the KV v2 surface ------------------------------------------------------
 
   defp read_key(path, opts) do
-    case request(:get, "/v1/#{mount(opts)}/data/#{path}", nil, opts) do
+    case request(:get, "/v1/#{mount(opts)}/data/#{encode(path)}", nil, opts) do
       {:ok, 200, body} -> decode_key(body)
       {:ok, 404, _body} -> {:error, :not_found}
       {:ok, 403, _body} -> {:error, :forbidden}
@@ -88,7 +102,7 @@ defmodule Troupe.KMS.OpenBao do
   end
 
   defp write(path, data, opts) do
-    case request(:post, "/v1/#{mount(opts)}/data/#{path}", %{"data" => data}, opts) do
+    case request(:post, "/v1/#{mount(opts)}/data/#{encode(path)}", %{"data" => data}, opts) do
       {:ok, status, _body} when status in 200..299 -> :ok
       {:ok, status, _body} -> {:error, {:unexpected_status, status}}
       error -> error

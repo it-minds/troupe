@@ -1427,6 +1427,49 @@ been written together, which is the real case — the union across a person's te
 listing is that union while a session gets one team's set, because a session belongs to
 one team and an intersection in a listing would hide something a person can have.
 
+## R1c — one sealer, and a second tenant in the key store
+
+`Sealer` and the `Context` it needs moved from `troupe_worker` into `troupe_protocol`,
+beside `Storage`, `Cipher` and `Snapshot`. A move, not a fork: there is one
+implementation, and a session sealed by one host restores on the other because there is
+nothing else it could be sealed by. The sealer no longer knows how events reach it —
+`:subscribe` is a function the host passes in, because the protocol cannot call back into
+core, and because getting events into storage is what the process is *for*.
+
+```
+$ scripts/toolbox mix troupe.boundaries
+boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+$ scripts/toolbox bash -c 'cd apps/troupe_worker && mix test'
+Result: 109 passed
+```
+
+`Troupe.KMS.path/2` takes an owner — a team, or `{:person, subject}` — and R1's fourth
+done item is proven against a real OpenBao with real tokens rather than against this
+code's belief about it:
+
+```
+$ scripts/toolbox mix test apps/troupe_protocol/test/troupe/kms/open_bao_test.exs
+Result: 13 passed
+```
+
+* *a pod's KMS token cannot read a key under `people/`* — "a pod cannot read a key under
+  people/, and a person cannot read one under teams/", with a token carrying
+  `Policy.worker/2`, refused by OpenBao;
+* *a person's token cannot read one under `teams/`* — same test, with a token carrying the
+  person policy, refused both for another person's key and for a team's;
+* *the plane's token can delete metadata under both* — "the plane can destroy metadata
+  under both subtrees, and read neither", which also asserts the two reads are forbidden
+  first.
+
+**One defect found by writing those tests.** A subject is opaque and `idp|ada` is what
+Auth0 puts in `sub`. That is a fine path segment and an invalid request target, so a
+person's key failed at the HTTP client with `:invalid_request_target` and never reached
+OpenBao. A key path is a *logical* path — the policy matches it unencoded and the store
+files the secret under it — so the encoding belongs in the adapter, segment by segment.
+Team paths were unaffected because a team name is `[a-z0-9-]`, which is why it survived
+until a person's key was written.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was

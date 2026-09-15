@@ -98,6 +98,16 @@ defmodule Troupe.KMS.OpenBaoTest do
     assert KMS.path("ux", "s-1") == "troupe/teams/ux/sessions/s-1"
   end
 
+  test "a person's keys are addressed by subject, under a subtree of their own" do
+    assert KMS.path({:person, "idp|ada"}, "s-1") == "troupe/people/idp|ada/sessions/s-1"
+
+    # Not sanitised, refused: a subject with a slash in it would address somebody else's
+    # subtree, and a mangled subject would silently be a different person — or, worse,
+    # two people who mangled the same way sharing a key.
+    assert_raise ArgumentError, fn -> KMS.path({:person, "idp|a/b"}, "s-1") end
+    assert_raise ArgumentError, fn -> KMS.path({:person, ""}, "s-1") end
+  end
+
   test "a credential scoped to one team cannot read another team's keys", context do
     %{session: session} = requires_bao(context)
 
@@ -153,6 +163,59 @@ defmodule Troupe.KMS.OpenBaoTest do
 
       assert {:ok, _} = OpenBao.fetch("granted-to-dev", session, options(token: dev))
       assert {:error, :forbidden} = OpenBao.fetch("granted-to-ux", session, options(token: dev))
+    end
+
+    test "a pod cannot read a key under people/, and a person cannot read one under teams/",
+         context do
+      %{session: session, team: team} = requires_bao(context)
+      ada = "idp|ada-#{System.unique_integer([:positive])}"
+      bo = "idp|bo-#{System.unique_integer([:positive])}"
+
+      {:ok, _} = OpenBao.create(team, session, options())
+      {:ok, _} = OpenBao.create({:person, ada}, session, options())
+      {:ok, _} = OpenBao.create({:person, bo}, session, options())
+
+      on_exit(fn ->
+        OpenBao.destroy(team, session, options())
+        OpenBao.destroy({:person, ada}, session, options())
+        OpenBao.destroy({:person, bo}, session, options())
+      end)
+
+      pod = token_for(Policy.worker(mount(), [team]))
+      hers = token_for(Policy.person_for(mount(), ada))
+
+      # A pod may read its own team's key and nothing under `people/` at all. No pod rule
+      # mentions that subtree, and OpenBao denies by default, so this is an absence being
+      # enforced rather than a deny somebody could narrow later.
+      assert {:ok, _} = OpenBao.fetch(team, session, options(token: pod))
+      assert {:error, :forbidden} = OpenBao.fetch({:person, ada}, session, options(token: pod))
+
+      # A person may read their own and neither anybody else's nor any team's.
+      assert {:ok, _} = OpenBao.fetch({:person, ada}, session, options(token: hers))
+      assert {:error, :forbidden} = OpenBao.fetch({:person, bo}, session, options(token: hers))
+      assert {:error, :forbidden} = OpenBao.fetch(team, session, options(token: hers))
+    end
+
+    test "the plane can destroy metadata under both subtrees, and read neither", context do
+      %{session: session, team: team} = requires_bao(context)
+      ada = "idp|ada-#{System.unique_integer([:positive])}"
+
+      {:ok, _} = OpenBao.create(team, session, options())
+      {:ok, _} = OpenBao.create({:person, ada}, session, options())
+
+      plane = token_for(Policy.plane(mount()))
+
+      assert {:error, :forbidden} = OpenBao.fetch(team, session, options(token: plane))
+      assert {:error, :forbidden} = OpenBao.fetch({:person, ada}, session, options(token: plane))
+
+      # Erasure is erasure: a private session gets the same finality a team's does, and a
+      # plane that could erase one and not the other would have two answers to one
+      # promise.
+      assert :ok = OpenBao.destroy(team, session, options(token: plane))
+      assert :ok = OpenBao.destroy({:person, ada}, session, options(token: plane))
+
+      assert {:error, :not_found} = OpenBao.fetch(team, session, options())
+      assert {:error, :not_found} = OpenBao.fetch({:person, ada}, session, options())
     end
 
     test "a pod cannot destroy a key, even one of its own team", context do

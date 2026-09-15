@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.Session.Context do
+defmodule Troupe.Sessions.Context do
   @moduledoc """
   What a worker needs to know to make one session durable.
 

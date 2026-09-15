@@ -13,13 +13,14 @@ defmodule Troupe.Worker.Plane.Commands do
 
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
+  alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
   alias Troupe.Worker.Bundles
   alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.Session.{Manager, Reader, Sealer, Workspace}
+  alias Troupe.Worker.Session.{Manager, Reader, Workspace}
   alias Troupe.Worker.Sessions
 
   require Logger

@@ -13,8 +13,8 @@ defmodule Troupe.Worker.SnapshotTest do
 
   alias Troupe.Protocol.Event
   alias Troupe.Session.Summary
-  alias Troupe.Sessions.Snapshot
-  alias Troupe.Worker.Session.{Context, Restore}
+  alias Troupe.Sessions.{Context, Snapshot}
+  alias Troupe.Worker.Session.Restore
 
   @moduletag timeout: 180_000
 

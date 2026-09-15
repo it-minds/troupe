@@ -1092,3 +1092,35 @@ already reads the bundle:
   its own list. A session that may not use `jira` does not see `mcp.jira.*`; the pod still
   knows the tools exist.
 
+### 16.3 One sealer, two hosts, two key subtrees
+
+`Sealer` and the `Context` it needs moved from `troupe_worker` into `troupe_protocol`,
+beside `Storage`, `Cipher` and `Snapshot`. A worker pod is not the only thing that seals:
+a daemon sealing a person's private session writes the same segments, in the same layout,
+under the same cipher, to the same bucket, and a session sealed by one host has to restore
+on the other. Two implementations of that are two chances to disagree about a byte.
+
+Which means the sealer cannot know how events reach it — the protocol is what core is
+built on and cannot call back into it. `:subscribe` is a function of a session id the host
+passes in. That is what the process is for: getting events into object storage. Where they
+come from is the host's business.
+
+`Troupe.KMS.path/2` takes an **owner**, which is a team or `{:person, subject}`:
+
+```
+troupe/teams/<team>/sessions/<id>       a pod reads this, scoped to its granted teams
+troupe/people/<subject>/sessions/<id>   a person's daemon reads this, and nothing else
+```
+
+Neither credential reaches the other's subtree. No pod rule mentions `people/` at all —
+an absence rather than a deny, because OpenBao denies by default and a deny rule invites
+somebody to narrow it later. The person policy is templated on the subject OpenBao itself
+put on the entity when it verified the identity provider's token, so there is one policy
+for everybody and a daemon cannot name somebody else's subtree by asking. The plane's
+policy covers both subtrees and is still metadata-delete only: erasure is erasure, and a
+plane that could erase one and not the other would have two answers to one promise.
+
+A subject is opaque and may be `idp|ada`. That is a fine path segment and an invalid URL,
+so the adapter percent-encodes segment by segment; a subject containing a `/` is refused
+at the one place the path is built, because sanitising it would silently make it a
+different person.

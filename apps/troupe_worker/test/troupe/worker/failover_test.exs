@@ -19,10 +19,11 @@ defmodule Troupe.Worker.FailoverTest do
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Plane.{EnrolmentStub, Fleet, Placement, Replica, Repo}
   alias Troupe.Plane.Sessions, as: PlaneSessions
+  alias Troupe.Sessions.Sealer
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.PlaneHelper
   alias Troupe.Worker.Service
-  alias Troupe.Worker.Session.{Manager, Sealer}
+  alias Troupe.Worker.Session.Manager
 
   @moduletag timeout: 300_000
 

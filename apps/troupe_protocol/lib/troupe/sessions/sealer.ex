@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.Session.Sealer do
+defmodule Troupe.Sessions.Sealer do
   @moduledoc """
   Gets a session's events into object storage, and says how far it has got.
 
@@ -13,13 +13,27 @@ defmodule Troupe.Worker.Session.Sealer do
   segment in storage the plane has not heard of is merely un-anchored, and the next
   report fixes it. If the plane is unreachable the sealing carries on and the reports
   queue, because durability must not depend on the plane being up.
+
+  ## Why it lives here
+
+  A worker pod is not the only thing that seals. A daemon sealing a person's private
+  session writes the same segments, in the same layout, under the same cipher, to the
+  same bucket — and a session sealed by one has to restore on the other. Two
+  implementations of that would be two chances to disagree about a byte, so there is
+  one, and it sits beside `Storage` and `Cipher` in the protocol rather than inside
+  either host.
+
+  Which means it cannot know how events reach it. `:subscribe` is a function of a
+  session id that the host passes in — `&Troupe.subscribe/1` from both, today — because
+  `troupe_protocol` is what `troupe_core` is built on and cannot call back into it. That
+  is not a workaround: what this process is *for* is getting events into storage, and
+  where they arrive from is the host's business.
   """
 
   use GenServer
 
   alias Troupe.Protocol.Event
-  alias Troupe.Sessions.{Snapshot, Storage}
-  alias Troupe.Worker.Session.Context
+  alias Troupe.Sessions.{Context, Snapshot, Storage}
 
   require Logger
 
@@ -67,7 +81,11 @@ defmodule Troupe.Worker.Session.Sealer do
     # the unsealed tail gets one last chance at object storage.
     Process.flag(:trap_exit, true)
 
-    Troupe.subscribe(context.session_id)
+    # How events reach this process. Passed in rather than called, because the protocol
+    # cannot reach into core — and because a sealer is about storage, not about where
+    # the events came from.
+    subscribe = Keyword.get(opts, :subscribe, fn _session_id -> :ok end)
+    subscribe.(context.session_id)
 
     state = %__MODULE__{
       context: context,

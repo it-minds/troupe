@@ -2263,3 +2263,66 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      an event that already carried optional fields, so `mix troupe.schema.diff` sees an
      additive change.
 
+## R1 — one sealer, and a second tenant in the key store
+
+344. **`Sealer` and `Context` moved to `troupe_protocol`, a move and not a fork.**
+     `Storage`, `Cipher` and `Snapshot` were already there; the sealer and the context it
+     needs were the two that were not. A daemon sealing a person's private session writes
+     the same segments, in the same layout, under the same cipher, to the same bucket —
+     and a session sealed by one host has to restore on the other. Two implementations of
+     that are two chances to disagree about a byte.
+
+345. **The sealer no longer knows how events reach it.** `troupe_protocol` is what
+     `troupe_core` is built on, so a sealer living there cannot call `Troupe.subscribe/1`.
+     `:subscribe` is a function of a session id that the host passes in — the worker
+     passes `&Troupe.subscribe/1`, and so will the daemon.
+
+     That is not a workaround for the dependency direction; it is what the process is
+     actually for. A sealer gets events into object storage. Where the events come from
+     is the host's business, and a module that had to know would be a module that could
+     only ever have one host.
+
+346. **`KMS.path/2` takes an owner, which is a team or `{:person, subject}`.** Two shapes
+     and one function, because a path built in two places is a path that will one day be
+     built two ways. A team session's key is under `teams/<team>/`, read by a pod with a
+     credential scoped to that team; a private session's is under `people/<subject>/`,
+     read by that person's daemon with a credential the identity provider vouched for.
+     Neither credential can reach the other's subtree, which is what makes "no worker
+     profile is involved in a private session" a property rather than an intention.
+
+347. **A subject with a slash in it raises rather than being sanitised.** A subject is
+     opaque and comes from the identity provider; every shape we have seen —
+     `idp|ada`, an email address, a UUID — is a fine path segment, and one with a `/`
+     is not. Sanitising it would silently make it a *different* person, and two
+     subjects that sanitised the same way would share a key. So `KMS.person_segment/1`
+     refuses it, loudly, at the one place the path is built.
+
+348. **A key path is a logical path, and the OpenBao adapter encodes it for the URL.**
+     Found by the first test that used a realistic subject: `idp|ada` is what Auth0 puts
+     in `sub` and is not a valid request target, so `Req` refused it with
+     `:invalid_request_target` and the request never reached OpenBao. The policy matches
+     the *unencoded* path and the store files the secret under it, so the encoding
+     belongs in the adapter and nowhere else — segment by segment, so the separators
+     survive. Team paths were unaffected because a team name is `[a-z0-9-]`, which is why
+     this survived until a person's key was written.
+
+349. **The plane's erasure policy covers `people/` as well as `teams/`.** Erasure is
+     erasure: a person asking for their private session to be destroyed gets the same
+     finality a team's session gets, and a plane that could erase one and not the other
+     would have two answers to one promise. Still metadata-delete only, still no rule for
+     the data path at all — an absence rather than a deny, because OpenBao denies by
+     default and a deny rule invites somebody to "fix" it later by narrowing it.
+
+350. **The person policy is templated, and a test renders it with a literal subject.**
+     `Policy.person/2` templates on `identity.entity.aliases.<accessor>.name`, which is
+     the subject OpenBao itself put on the entity when it verified the provider's token —
+     so a daemon cannot name somebody else's subtree by asking, and adding a person is the
+     identity provider's business rather than an operator's.
+
+     `Policy.person_for/2` renders the same policy with the subject already in it, which
+     is exactly what OpenBao evaluates the template to. The isolation tests issue a token
+     with that, rather than standing up a JWT auth mount and an identity provider to
+     arrive at the same string. What the template decides is *which* subject lands in the
+     rule; what the test proves is what the rule then permits, which is the half that
+     could be wrong.
+
