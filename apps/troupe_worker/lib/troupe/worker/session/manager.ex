@@ -239,6 +239,10 @@ defmodule Troupe.Worker.Session.Manager do
       GenServer.stop(state.sealer, :normal, 60_000)
     end
 
+    # The key-manager token this session's person-mode servers were reaching through.
+    # Held for the life of the session and no longer, exactly as the data key is.
+    Troupe.Worker.Connections.forget(state.session_id)
+
     :ok
   end
 

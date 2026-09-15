@@ -163,6 +163,52 @@ defmodule Troupe.Plane.ControlTest do
     end
   end
 
+  describe "an assertion for a session's owner" do
+    test "names the owner off the row, whatever the pod asks for", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-ada", owner_subject: "idp|ada", profile: "dev"})
+      {:ok, _} = Sessions.place("s-ada", pod)
+
+      assert {:ok, %{"assertion" => assertion, "expires_at" => expires_at}} =
+               call(worker, "kms.assertion", %{"session_id" => "s-ada"})
+
+      # The subject is not the pod's to choose: it is read off the session row, so the
+      # only thing a pod can influence is *which of its own sessions* it asks about.
+      assert %{"sub" => "idp|ada", "aud" => "troupe-kms"} = payload_of(assertion)
+      assert is_integer(expires_at)
+    end
+
+    test "refuses a session this pod is not holding", %{port: port} do
+      mine = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(mine, [])
+
+      theirs = enrolled(port, "dev-token", "troupe-w-dev-1")
+      answer_index(theirs, [])
+
+      [_, other] = Enum.sort_by(Fleet.list_workers("dev"), & &1.pod_name)
+      {:ok, _} = Sessions.create(%{id: "s-theirs", owner_subject: "idp|bo", profile: "dev"})
+      {:ok, _} = Sessions.place("s-theirs", other)
+
+      # A pod holds what the index says it holds. Asking for somebody else's session is
+      # how one pod would read another's person's credentials, and the plane is the only
+      # thing in a position to refuse it.
+      assert {:error, error} = call(mine, "kms.assertion", %{"session_id" => "s-theirs"})
+      assert error["message"] == "not_found"
+
+      assert {:error, missing} = call(mine, "kms.assertion", %{"session_id" => "s-nowhere"})
+      assert missing["message"] == "not_found"
+
+      # A session with no owner is not a case that has to be handled here: the index
+      # requires one, so there is no row this could be asked about.
+      assert {:error, changeset} = Sessions.create(%{id: "s-nobody", profile: "dev"})
+      assert changeset.errors[:owner_subject]
+    end
+
+  end
+
   describe "a pod that restarted" do
     test "gives up the sessions the plane still thought it was holding", %{port: port} do
       first = enrolled(port, "dev-token", "troupe-w-dev-0")
@@ -521,5 +567,12 @@ defmodule Troupe.Plane.ControlTest do
       %{rows: rows} = Repo.query!("select * from #{table}")
       inspect(rows)
     end)
+  end
+  # The claims, without verifying the signature: what is being checked here is which
+  # subject the plane put in, and OpenBao is what checks the rest.
+  defp payload_of(jwt) do
+    [_header, payload, _signature] = String.split(jwt, ".")
+    padded = payload <> String.duplicate("=", rem(4 - rem(byte_size(payload), 4), 4))
+    padded |> Base.url_decode64!() |> Jason.decode!()
   end
 end

@@ -18,6 +18,7 @@ defmodule Troupe.Plane.Control.Connection do
   alias Troupe.Plane.{Bundles, Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
   alias Troupe.Plane.Control.{Connections, Router}
   alias Troupe.Plane.Fleet.Bundle
+  alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.{Error, JSONRPC}
 
   require Logger
@@ -376,6 +377,35 @@ defmodule Troupe.Plane.Control.Connection do
   # the pod verifies the document against before materialising it, or by channel and
   # version for a session pinned to one the pod has never been told about. The document
   # is configuration an admin published, not session content, so it may cross here.
+  # An assertion a pod exchanges for the key-manager token of a session's *owner*.
+  #
+  # Asked for rather than pushed, because the token it buys is short-lived and a session
+  # can outlive it: a pod that had been handed one at activation would lose its person's
+  # credentials twenty minutes in and have no way to ask for another. The plane is the
+  # only thing that can sign one, so this is the only way to ask.
+  #
+  # The subject is **not** the pod's to choose. It is read from the session row, so a pod
+  # asking for a session it is not holding — or naming somebody else — gets the owner of
+  # the session it actually has, or nothing.
+  defp dispatch("kms.assertion", params, state) do
+    case session_of(params["session_id"], state.worker) do
+      %Session{owner_subject: owner} when is_binary(owner) ->
+        case Tokens.mint_kms_assertion(owner) do
+          {:ok, assertion, claims} ->
+            {:ok, %{"assertion" => assertion, "expires_at" => claims["exp"]}, state}
+
+          {:error, reason} ->
+            {:error, Error.new(:unavailable, %{reason: inspect(reason)}), state}
+        end
+
+      %Session{} ->
+        {:error, Error.new(:not_found, %{reason: "that session has no owner"}), state}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
   defp dispatch("bundle.fetch", params, state) do
     case fetch_bundle(params, state.worker) do
       %Bundle{} = bundle ->
@@ -396,6 +426,17 @@ defmodule Troupe.Plane.Control.Connection do
   defp dispatch(method, _params, state) do
     {:error, Error.new(:method_not_found, %{method: method}), state}
   end
+
+  # A pod may ask about the sessions it is holding and no others. Enrolment decided which
+  # pod this is; the index decides which sessions are its.
+  defp session_of(session_id, worker) when is_binary(session_id) do
+    case Sessions.get(session_id) do
+      %Session{worker_id: held} = session when held == worker.id -> session
+      _other -> nil
+    end
+  end
+
+  defp session_of(_session_id, _worker), do: nil
 
   defp fetch_bundle(%{"hash" => hash}, worker) when is_binary(hash) do
     Bundles.by_hash(hash, channel: channel_of(worker))

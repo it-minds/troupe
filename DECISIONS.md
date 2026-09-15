@@ -2476,3 +2476,34 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      apart — and every anchor in it misses on a checkout that stores CRLF, which reads
      like `fold_event/2` having no clauses at all. It reads source rather than data, so
      the normalisation belongs there.
+370. **An assertion is asked for, not handed over at activation.** The token it buys
+     lives twenty minutes and a session can live all day, so a pod given one at activation
+     would lose its person's credentials mid-afternoon with no way to ask for another.
+     `kms.assertion` is a worker→plane control call, which is a round trip the plane is on
+     the path of either way, and the refresh is the same call again.
+
+371. **The pod does not choose whose assertion it gets.** It names a *session*; the plane
+     reads the owner off the row. A pod naming a session another pod holds is told
+     `not_found`, which is the difference between one pod being able to read another
+     person's credentials and not — and the plane is the only thing in a position to
+     refuse it, because it is the only thing that knows which pod holds what.
+
+     A session with no owner is not a case that had to be handled: the index requires one,
+     so there is no row to ask about.
+
+372. **The pod holds the token, never the value.** A slot is read at the moment a call
+     needs it and the value is gone as soon as the call is made. What stays in memory is a
+     token that can read that person's slots — exactly the shape the session's data key
+     already has, in memory for the life of the session and never on disk — and it goes
+     when the session's manager terminates.
+
+373. **One ETS table for the pod, not one process per session.** This is on the path of
+     every call to a person-mode server, and a lookup that queued behind a session's own
+     manager would put a session's latency on its own tool calls. Losing the table costs a
+     round trip per live session: there is nothing in it that is not derivable from an
+     assertion the plane will sign again.
+
+374. **A refused read is retried exactly once, after throwing the token away.** An expired
+     token and a wrong one are indistinguishable from here and the first answer to both is
+     the same. Once, not in a loop: a second refusal is a policy problem, and a retry would
+     only repeat it.

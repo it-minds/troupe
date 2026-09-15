@@ -409,6 +409,17 @@ newest version the pod holds, which is what `bundles.adoption` compares against 
 channel's current version — a pod holding a newer, since-retired version is ahead, not
 behind.
 
+Key-manager assertions are fetched the same way, and for a sharper reason.
+`kms.assertion {session_id}` answers a short-lived JWT the pod exchanges for a token that
+can read *that session owner's* slots — and the subject is read off the session row, so
+the only thing a pod can influence is which of its own sessions it asks about. A pod
+naming a session another pod holds is told `not_found`, which is the difference between
+one pod reading another person's credentials and not.
+
+It is asked for rather than handed over at activation because the token it buys lives
+twenty minutes and a session can live all day: a pod given one at activation would lose
+its person's credentials mid-afternoon with no way to ask for another.
+
 A pod is attached to exactly one replica, and rarely the one a harness reached, so
 pushes are *routed*: try locally, otherwise ask the other replicas, each of which
 answers with a single registry lookup.

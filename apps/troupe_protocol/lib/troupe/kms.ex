@@ -66,12 +66,26 @@ defmodule Troupe.KMS do
   """
   @spec path(owner(), session_id()) :: String.t()
   def path({:person, subject}, session_id) do
-    "troupe/people/#{person_segment(subject)}/sessions/#{session_id}"
+    person_prefix(subject) <> "/sessions/#{session_id}"
   end
 
   def path(team, session_id) when is_binary(team) do
     "troupe/teams/#{team}/sessions/#{session_id}"
   end
+
+  @doc """
+  Where a person's credential for one MCP server's slot lives.
+
+  The second tenant under a person, beside their private sessions' data keys, and the
+  reason the person policy covers the whole subtree rather than one prefix of it.
+
+      iex> Troupe.KMS.slot_path("idp|ada", "jira")
+      "troupe/people/idp|ada/mcp/jira"
+  """
+  @spec slot_path(String.t(), String.t()) :: String.t()
+  def slot_path(subject, slot), do: person_prefix(subject) <> "/mcp/#{slot}"
+
+  defp person_prefix(subject), do: "troupe/people/#{person_segment(subject)}"
 
   @doc """
   A subject as one path segment, or a raise.

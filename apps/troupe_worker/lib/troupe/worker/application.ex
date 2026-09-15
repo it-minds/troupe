@@ -22,11 +22,14 @@ defmodule Troupe.Worker.Application do
 
   # The MCP registry before the bundles, because a bundle hands its servers to the
   # registry; the bundles before the link, because the link's enrolment claims the
-  # bundle hash the pod already has.
+  # bundle hash the pod already has. `Connections` before the registry, because a
+  # person-mode server discovered at start-up is one whose credentials may be asked for
+  # on the first turn.
   defp children do
     [
       Troupe.Worker.Sessions,
       Troupe.Worker.Auth,
+      Troupe.Worker.Connections,
       Troupe.Worker.MCP,
       Troupe.Worker.Bundles,
       Troupe.Worker.Usage,
