@@ -502,14 +502,25 @@ defmodule Troupe.Plane.Bundles do
           %{"name" => server["name"], "url" => server["url"]}
           |> put_unless_nil("header", server["header"])
           |> put_unless_nil("timeoutMs", server["timeout_ms"])
-          |> put_credential(server["name"], server["credential_ref"])
+          |> put_credential(server["name"], server["credential_mode"], server["credential_ref"])
         end)
     end
   end
 
-  defp put_credential(entry, _name, nil), do: entry
+  defp put_credential(entry, _name, _mode, nil), do: entry
 
-  defp put_credential(entry, name, ref) do
+  # A person-mode server has no Secret and no environment variable: its value is in the
+  # key manager under the person, and neither the plane nor the operator can read it. So
+  # the projection carries the *slot* and says which mode it is, and the operator has
+  # nothing to mount. Writing a `secretRef` here for a server nobody configured a Secret
+  # for is how a pod would fail to start over a credential it was never meant to hold.
+  defp put_credential(entry, _name, "person", slot) do
+    entry
+    |> Map.put("credentialMode", "person")
+    |> Map.put("credentialSlot", slot)
+  end
+
+  defp put_credential(entry, name, _profile_mode, ref) do
     entry
     |> Map.put("credentialRef", ref)
     |> Map.put("secretRef", %{"name" => secret_name(name), "key" => "token"})

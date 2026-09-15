@@ -82,7 +82,23 @@ spec:
                         pattern: '^[A-Z][A-Z0-9_]*$'
                         description: >-
                           The environment variable the token is injected as. Absent means
-                          TROUPE_MCP_<NAME>_TOKEN.
+                          TROUPE_MCP_<NAME>_TOKEN. Profile mode only.
+                      credentialMode:
+                        type: string
+                        enum: [profile, person]
+                        default: profile
+                        description: >-
+                          Whose credential goes out with a call. `profile` is the service
+                          account in secretRef, the same for every session. `person` is
+                          the session's owner, read from the key manager at
+                          troupe/people/<subject>/mcp/<slot> by the pod alone — there is
+                          no Secret and nothing here for the operator to mount.
+                      credentialSlot:
+                        type: string
+                        pattern: '^[a-z][a-z0-9-]*$'
+                        description: >-
+                          Person mode only: the slot under the person the value lives in.
+                          A name, never a value.
                       header:
                         type: string
                         description: The header the token is sent in. Absent means authorization.

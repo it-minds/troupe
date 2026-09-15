@@ -2374,3 +2374,29 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      always answers `false`, as a fact about the design rather than a setting: a private
      session is sealed under its person's own key in a subtree no pod credential can
      reach.
+## R1 — a credential that belongs to a person
+
+356. **`credential_mode` on a bundle's MCP server entry, `profile` by default.** A
+     published bundle needs no migration and every profile behaves exactly as it did,
+     which is the same shape the entitlement table took and for the same reason: the
+     old behaviour is the default rather than a setting.
+
+357. **In person mode `credential_ref` is a slot, and it defaults to the server's name.**
+     The two modes read the same field differently because they are the same question —
+     *where is this server's credential* — asked of two different places. A slot is
+     narrower than an environment variable name by design: lowercase, no separators,
+     because it becomes a path segment under `troupe/people/<subject>/mcp/`. Defaulting
+     it to the server's own name is what keeps "connect Jira as yourself" from needing a
+     second name invented for it.
+
+358. **A `secret_ref` beside `credential_mode: person` is refused at publish.** Not
+     resolved at run time in favour of one of them — refused, with the reason. A server
+     with two credentials is a server whose identity depends on which code path ran, and
+     that is not a thing to find out from a log six weeks later.
+
+359. **A person-mode server projects a slot and no `secretRef` at all.** The plane writes
+     `credentialMode` and `credentialSlot` onto the `WorkerProfile` and nothing else:
+     there is no Secret, no environment variable, and nothing for the operator to mount.
+     Writing a `secretRef` for a server nobody configured a Secret for is how a pod would
+     fail to start over a credential it was never meant to hold. The entry is still
+     projected, because egress has to see the host either way.
