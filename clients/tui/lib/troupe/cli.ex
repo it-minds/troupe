@@ -5,7 +5,7 @@ defmodule Troupe.CLI do
       troupe                       open the TUI in the current directory
       troupe --watch               TUI with watch mode on
       troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--workspace DIR]
-      troupe resume [SESSION_ID]
+      troupe resume [SESSION_ID]   no id: reopen the last session here, picker open
       troupe config                show the resolved providers and models (keys masked)
       troupe models [--refresh]    list every model, its window and its price
       troupe --version

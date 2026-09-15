@@ -21,8 +21,12 @@ scripts/build-local                               # Burrito binary for this host
 ```
 
 Rebuild the binary only when the user needs one. After rebuilding the same
-version, delete Burrito's extracted payload or the old code keeps running:
-`rm -rf ~/.local/share/.burrito/troupe_erts-*`.
+version, Burrito's extracted payload has to go or the old code keeps running —
+`scripts/build-local` does it, but the dir is platform-specific and is
+`~/Library/Application Support/.burrito/troupe_erts-*` on macOS,
+`~/.local/share/.burrito/troupe_erts-*` on Linux. A binary that behaves like a
+build from before your change is this, not a build failure: check `troupe
+config` against `scripts/dev config`.
 
 Manual smoke without a model: `TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/fake_scripts/smoke.json scripts/dev run code smoke --headless --auto-approve`.
 Real providers come from `~/.config/troupe/config.yaml`, env (`TROUPE_*`), or

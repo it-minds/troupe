@@ -10,6 +10,7 @@ defmodule Troupe.CLI.Runner do
   use Task
 
   alias Troupe.CLI
+  alias Troupe.Session.Index
   alias Troupe.UI.Headless.Printer
   alias Troupe.UI.TUI
 
@@ -60,6 +61,7 @@ defmodule Troupe.CLI.Runner do
 
       {:ok, %{mode: :config} = args} ->
         IO.puts(Troupe.Config.describe(Troupe.Config.load(args.workspace)))
+        0
 
       {:ok, %{mode: :models} = args} ->
         IO.puts(models_report(args))
@@ -128,27 +130,36 @@ defmodule Troupe.CLI.Runner do
     end
   end
 
+  # With an id: reopen that session. Without one: reopen the one this directory
+  # last worked in and land on the session picker, so the others are one keypress away.
   defp resume(args) do
-    sid =
-      args.session_id ||
-        case Troupe.sessions(args.workspace) do
-          [latest | _] -> latest.session_id
-          [] -> nil
-        end
+    sid = args.session_id || newest(args.workspace)
+    page = if args.session_id, do: [], else: [page: :sessions]
 
     case sid && Troupe.resume(sid, auto_approve: args.auto_approve, watch: args.watch) do
-      {:ok, sid} -> tui(sid)
-      nil -> fail("no session to resume")
+      {:ok, sid} -> tui(sid, page)
+      nil -> fail("no session to resume in #{args.workspace}")
       {:error, reason} -> fail("could not resume: #{inspect(reason)}")
     end
   end
 
-  defp tui(sid) do
+  # The most recently written session that got as far as a branch; an abandoned
+  # empty one is not worth reopening when a real one is right behind it.
+  defp newest(workspace) do
+    entries = Index.list(workspace)
+
+    case Enum.find(entries, &(Index.live_branches(&1) != [])) || List.first(entries) do
+      nil -> nil
+      entry -> entry.session_id
+    end
+  end
+
+  defp tui(sid, extra \\ []) do
     spec = %{
       id: TUI.Server,
       start:
         {TUI.Server, :start_link,
-         [[session_id: sid, name: TUI.Server.via(sid), mouse_capture: true]]},
+         [[session_id: sid, name: TUI.Server.via(sid), mouse_capture: true] ++ extra]},
       # a crash restarts and redraws; a deliberate quit (normal exit) does not come back
       restart: :transient
     }

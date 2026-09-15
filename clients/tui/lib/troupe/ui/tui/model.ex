@@ -163,9 +163,20 @@ defmodule Troupe.UI.TUI.Model do
         %{m | notices: Enum.take(["watch: #{e.data.kind} request from AI comments" | m.notices], 3)}
 
       _ ->
-        update_window(m, root, fn w -> apply_to_window(w, e) end)
+        update_window(m, root, fn w -> w |> apply_to_window(e) |> settle(e) end)
     end
   end
+
+  # `needs_input` only means anything while something is outstanding, and the
+  # agent that would log `branch_state :running` may never get to: a killed
+  # subagent cannot answer its own request, and a `y` on a budget question
+  # resumes the turn. Deriving the clear from `pending` keeps the strip, the
+  # status line and Enter's "go to the branch that needs you" honest whichever
+  # way the last request went away.
+  defp settle(%{state: :needs_input, pending: []} = w, %Event{ts: ts}),
+    do: set_state(w, :running, ts)
+
+  defp settle(w, _e), do: w
 
   defp apply_to_window(w, %Event{type: type, agent_path: path, data: d, ts: ts}) do
     case type do
@@ -258,10 +269,18 @@ defmodule Troupe.UI.TUI.Model do
 
       t when t in [:approval_answered, :question_answered] ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
+
       :branch_state ->
         case d.state do
           :done_unread ->
             %{w | state: :done_unread, badge: true, ended_at: ts, summary: d[:summary] || w.summary}
+
+          # `branch_state` is window-scoped but each agent emits it from its own
+          # outstanding calls, so the root answering would clear the window while a
+          # delegated subagent still waits — leaving it stuck with no signal in the
+          # strip, the status line or Enter's "go to the branch that needs you".
+          :running when w.pending != [] ->
+            w
 
           :running ->
             set_state(w, :running, ts)
@@ -295,7 +314,7 @@ defmodule Troupe.UI.TUI.Model do
         |> Map.put(:diff_stat, d[:diff_stat])
 
       :cancelled ->
-        push(ensure_agent(w, path), path, {:system, "cancelled"})
+        w |> ensure_agent(path) |> push(path, {:system, "cancelled"}) |> drop_pending(path)
 
       :llm_error ->
         push(ensure_agent(w, path), path, {:system, "LLM error: #{d.message}"})
@@ -312,6 +331,7 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(d.child_path)
         |> update_agent(d.child_path, fn a -> %{a | ended_at: ts} end)
+        |> drop_pending(d.child_path)
 
       :profile_switched ->
         w |> push(path, {:system, "profile switched to #{d.name}"}) |> Map.put(:profile, d.name)
@@ -351,6 +371,23 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   defp set_state(w, state, _ts), do: %{w | state: state}
+
+  # An agent that is gone never logs `approval_answered`/`question_answered`, so
+  # its request would sit in `pending` forever: unanswerable (Approvals dropped
+  # its entry when the pid died) and, because of the guard above, blocking every
+  # later `:running`. Delegation ending and cancellation are the two points where
+  # the whole subtree is known to be dead.
+  defp drop_pending(w, path) do
+    prefix = path <> "/"
+
+    %{
+      w
+      | pending:
+          Enum.reject(w.pending, fn p ->
+            p.agent_path == path or String.starts_with?(p.agent_path, prefix)
+          end)
+    }
+  end
 
   defp new_tool(id, name, input) do
     %{
@@ -1021,6 +1058,11 @@ defmodule Troupe.UI.TUI.Model do
               {:blank, ""},
               {:pending, "#{who}BUDGET EXHAUSTED: continue anyway? (y yes / n stop / a always)"}
             ]
+
+          # Never raise here: the renderer's caller drops the frame on an
+          # exception, which reads as a frozen terminal.
+          %{kind: kind} ->
+            [{:blank, ""}, {:pending, "#{who}WAITING: #{kind}"}]
         end
       end)
     ]

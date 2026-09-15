@@ -19,7 +19,9 @@ defmodule Troupe.SettingsTest do
       cfg = %Config{}
 
       for field <- Settings.fields() do
-        assert Settings.get(cfg, field.key) != nil, field.key
+        # `nil` is a real value for an override that means "inherit"; every other
+        # field must have a default, and all of them must render.
+        assert Settings.get(cfg, field.key) != nil or field.type == :effort, field.key
         assert is_binary(Settings.format(cfg, field.key)), field.key
       end
     end
@@ -173,13 +175,7 @@ defmodule Troupe.SettingsTest do
       press(pid, "enter")
       assert screen_text(pid, session) =~ "Run every tool call without asking"
 
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
+      to_setting(pid, "max_branches")
       text = screen_text(pid, session)
       assert text =~ "max branches  (max_branches)"
       assert text =~ "How many branches may be running"
@@ -209,13 +205,7 @@ defmodule Troupe.SettingsTest do
 
       type(pid, "settings")
       press(pid, "enter")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
-      press(pid, "down")
+      to_setting(pid, "max_branches")
 
       press(pid, "enter")
       assert screen_text(pid, session) =~ "max_branches = (Enter saves, Esc cancels)"

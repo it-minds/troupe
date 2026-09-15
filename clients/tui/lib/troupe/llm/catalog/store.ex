@@ -72,12 +72,12 @@ defmodule Troupe.LLM.Catalog.Store do
       cfg.providers
       |> Enum.sort()
       |> Enum.filter(fn {_name, p} -> p.api_key not in [nil, ""] end)
-      |> Enum.map(fn {name, p} -> {name, p.type, p.base_url, p.api_key} end)
+      |> Enum.map(fn {name, p} -> {name, p.type, p.base_url, p.api_key, p.auth} end)
 
     session =
       case cfg.provider do
         type when type in [:anthropic, :openai] and cfg.api_key not in [nil, ""] ->
-          [{nil, type, cfg.base_url, cfg.api_key}]
+          [{nil, type, cfg.base_url, cfg.api_key, cfg.auth}]
 
         _ ->
           []
@@ -86,9 +86,9 @@ defmodule Troupe.LLM.Catalog.Store do
     named ++ session
   end
 
-  defp fetch({name, :anthropic, base_url, key}) do
-    headers = [{"x-api-key", key}, {"anthropic-version", @anthropic_version}]
-    url = Path.join(trim(base_url) || @anthropic_url, "/v1/models")
+  defp fetch({name, :anthropic, base_url, key, auth}) do
+    headers = [anthropic_auth(auth, key), {"anthropic-version", @anthropic_version}]
+    url = HTTP.api_url(trim(base_url) || @anthropic_url, "/v1/models")
 
     case anthropic_pages(url, headers, nil, [], @max_pages) do
       {:ok, entries} -> {:ok, name, entries}
@@ -99,7 +99,7 @@ defmodule Troupe.LLM.Catalog.Store do
   # A LiteLLM proxy prices its models at `/model_group/info` and is the only
   # OpenAI-compatible server that prices anything; a vanilla one answers
   # `/v1/models` with ids and, if it is generous, windows.
-  defp fetch({name, :openai, base_url, key}) do
+  defp fetch({name, :openai, base_url, key, _auth}) do
     headers = [{"authorization", "Bearer " <> key}]
     base = trim(base_url)
 
@@ -111,7 +111,11 @@ defmodule Troupe.LLM.Catalog.Store do
     end
   end
 
-  defp fetch({name, type, _base_url, _key}), do: {:error, name, {:unsupported_provider, type}}
+  defp fetch({name, type, _base_url, _key, _auth}),
+    do: {:error, name, {:unsupported_provider, type}}
+
+  defp anthropic_auth(:bearer, key), do: {"authorization", "Bearer " <> key}
+  defp anthropic_auth(_auth, key), do: {"x-api-key", key}
 
   defp litellm(nil, _headers), do: {:error, :no_base_url}
 

@@ -8,6 +8,28 @@ defmodule Troupe.LLM.HTTP do
   alias Troupe.LLM.SSE
 
   @doc """
+  Joins a base URL and an API path, without doubling a version segment the base
+  already carries: a gateway is configured as `https://host/anthropic/v1` and
+  `/v1/messages` has to land on `https://host/anthropic/v1/messages`, while
+  `https://api.anthropic.com` still gets the whole path.
+  """
+  @spec api_url(String.t(), String.t()) :: String.t()
+  def api_url(base, path) do
+    base = String.trim_trailing(base, "/")
+    path = "/" <> String.trim_leading(path, "/")
+
+    case String.split(path, "/", parts: 3) do
+      ["", segment, rest] ->
+        if String.ends_with?(base, "/" <> segment),
+          do: base <> "/" <> rest,
+          else: base <> path
+
+      _ ->
+        base <> path
+    end
+  end
+
+  @doc """
   GETs JSON. Used by the model catalog, which is a request-response call and
   not a stream. Returns `{:error, reason}` for every failure — a provider that
   will not describe its models is not a reason to take a session down.

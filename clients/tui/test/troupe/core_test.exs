@@ -96,14 +96,41 @@ defmodule Troupe.CoreTest do
   end
 
   # Done item 8
-  test "budget: max_turns 2 stops with :budget_exhausted after exactly 2 Fake calls" do
+  test "budget: max_turns 2 asks after exactly 2 Fake calls; deny stops with :budget_exhausted" do
     ws = tmp_workspace(%{"f.txt" => "x"})
     script = List.duplicate({:tool, "read_file", %{"path" => "f.txt"}}, 10)
     {sid, fake, _} = start_session!(workspace: ws, script: script)
     {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 2}})
+
+    ask = await_event(path, :budget_ask_started)
+    await_state(path, :needs_input)
+    assert Fake.call_count(fake) == 2
+
+    :ok = Troupe.approve(sid, ask.data.call_id, :deny)
     await_state(path, :done_unread)
     assert window(sid, path).reason == :budget_exhausted
     assert Fake.call_count(fake) == 2
+  end
+
+  test "budget: allowing the question lets that one agent past its budget, without a second ask" do
+    ws = tmp_workspace(%{"f.txt" => "x"})
+
+    script = [
+      {:tool, "read_file", %{"path" => "f.txt"}},
+      {:tool, "read_file", %{"path" => "f.txt"}},
+      {:finish, "done"}
+    ]
+
+    {sid, fake, _} = start_session!(workspace: ws, script: script)
+    {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
+
+    ask = await_event(path, :budget_ask_started)
+    :ok = Troupe.approve(sid, ask.data.call_id, :allow)
+
+    await_state(path, :done_unread)
+    assert window(sid, path).reason == :finished
+    assert Fake.call_count(fake) == 3
+    assert length(events_of(sid, path, :budget_ask_started)) == 1
   end
 
   # Done item 10

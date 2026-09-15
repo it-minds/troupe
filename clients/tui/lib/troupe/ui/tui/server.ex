@@ -11,7 +11,8 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
   alias Troupe.Events
-  alias Troupe.Session.{Dispatcher, Log, Memory, Watcher}
+  alias Troupe.Session
+  alias Troupe.Session.{Dispatcher, Index, Log, Memory, Watcher}
   alias Troupe.Settings
   alias Troupe.UI.TUI.{Model, View}
 
@@ -20,8 +21,9 @@ defmodule Troupe.UI.TUI.Server do
 
   @type state :: %{
           session_id: String.t(),
+          workspace: String.t(),
           model: Model.t(),
-          focus: :command | {:window, String.t()} | :settings | :observer,
+          focus: :command | {:window, String.t()} | :settings | :observer | :sessions,
           cmd_text: String.t(),
           win_text: String.t(),
           commands: [String.t()],
@@ -35,6 +37,7 @@ defmodule Troupe.UI.TUI.Server do
           size: {non_neg_integer(), non_neg_integer()},
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
+          sessions: sessions() | nil,
           slow_render_ms: non_neg_integer(),
           on_quit: (-> any())
         }
@@ -68,6 +71,13 @@ defmodule Troupe.UI.TUI.Server do
   @typedoc "An open menu: the choices offered and where the cursor sits (past the end means type one)."
   @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer()}
 
+  @typedoc """
+  Session-picker state: the sessions found on disk for the directory the TUI was
+  opened in, and where the cursor sits. Read once when the page opens (`r`
+  refreshes it), never while a frame is drawn.
+  """
+  @type sessions :: %{entries: [Index.entry()], cursor: non_neg_integer()}
+
   def via(sid), do: {:via, Registry, {Troupe.Registry, {:tui, sid}}}
 
   ## ExRatatui.App
@@ -76,10 +86,12 @@ defmodule Troupe.UI.TUI.Server do
   def mount(opts) do
     sid = Keyword.fetch!(opts, :session_id)
     :ok = Events.subscribe(sid)
+    model = rebuild(sid)
 
     state = %{
       session_id: sid,
-      model: rebuild(sid),
+      workspace: model.workspace,
+      model: model,
       focus: :command,
       cmd_text: "",
       win_text: "",
@@ -93,11 +105,16 @@ defmodule Troupe.UI.TUI.Server do
       pane: fresh_pane(),
       settings: nil,
       observer: nil,
+      sessions: nil,
       quitting: false,
       size: initial_size(opts),
       slow_render_ms: Keyword.get(opts, :slow_render_ms, 0),
       on_quit: Keyword.get(opts, :on_quit, fn -> Troupe.CLI.Runner.quit() end)
     }
+
+    # `troupe resume` with no id opens on the picker: the newest session is live
+    # behind it, and the list says what else this directory holds.
+    state = if Keyword.get(opts, :page) == :sessions, do: open_sessions(state), else: state
 
     {:ok, schedule_tick(state)}
   end
@@ -119,7 +136,13 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # After switching sessions the old session's actors may still be publishing:
+  # anything from a session this window no longer shows is not ours to fold in.
   @impl true
+  def handle_info({:troupe_event, %{session_id: other}}, %{session_id: sid} = state)
+      when other != sid,
+      do: {:noreply, state, render?: false}
+
   def handle_info({:troupe_event, %{type: :llm_delta} = event}, state) do
     state = state |> apply_event(event) |> drain_mailbox()
     {:noreply, schedule_tick(%{state | dirty: true}), render?: false}
@@ -199,6 +222,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :observer} = state),
     do: {:noreply, observer_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :sessions} = state),
+    do: {:noreply, sessions_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
     if Map.has_key?(state.model.windows, path),
       do: {:noreply, window_key(key, path, %{state | quit_armed: false})},
@@ -217,19 +243,20 @@ defmodule Troupe.UI.TUI.Server do
       :command -> {:noreply, %{state | cmd_text: state.cmd_text <> content}}
       {:window, _} -> {:noreply, %{state | win_text: state.win_text <> content}}
       :observer -> {:noreply, state, render?: false}
+      :sessions -> {:noreply, state, render?: false}
       :settings -> {:noreply, paste_into_settings(state, content)}
     end
   end
 
   def handle_event(%Mouse{kind: "down"}, %{focus: focus} = state)
-      when focus in [:settings, :observer],
+      when focus in [:settings, :observer, :sessions],
       do: {:noreply, state, render?: false}
 
   def handle_event(%Mouse{kind: "down", button: "left", x: x, y: y}, state) do
     case clicked_window(state, x, y) do
       nil -> {:noreply, state, render?: false}
       path when state.focus == {:window, path} -> {:noreply, follow(state)}
-      _ when state.focus in [:settings, :observer] -> {:noreply, state, render?: false}
+      _ when state.focus in [:settings, :observer, :sessions] -> {:noreply, state, render?: false}
       path -> {:noreply, activate(%{state | quit_armed: false}, path)}
     end
   end
@@ -247,6 +274,11 @@ defmodule Troupe.UI.TUI.Server do
         {rows, cursor} = View.observer_view(state)
         cursor = cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(rows) - 1, 0))
         {:noreply, %{state | observer: %{state.observer | cursor: cursor}}}
+
+      :sessions ->
+        {entries, cursor} = View.sessions_view(state)
+        cursor = cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(entries) - 1, 0))
+        {:noreply, %{state | sessions: %{state.sessions | cursor: cursor}}}
 
       :settings when state.settings.picker != nil ->
         p = state.settings.picker
@@ -380,11 +412,8 @@ defmodule Troupe.UI.TUI.Server do
         "agents" ->
           {:notice, "agents: " <> Enum.map_join(state.commands, ", ", & &1)}
 
-        "sessions" ->
-          {:notice, "sessions: " <> Enum.map_join(Troupe.sessions(), ", ", & &1.session_id)}
-
-        "resume" ->
-          {:notice, "resume from the shell: troupe resume #{args}"}
+        n when n in ["resume", "sessions"] ->
+          {:sessions, args}
 
         "memory" ->
           memory_command(sid, String.trim(args))
@@ -400,6 +429,8 @@ defmodule Troupe.UI.TUI.Server do
       :settings -> open_settings(state)
       :models -> open_models(state)
       :observer -> %{state | focus: :observer, cmd_text: "", observer: %{cursor: 0}}
+      {:sessions, ""} -> open_sessions(state)
+      {:sessions, arg} -> resume_by_arg(state, arg)
       {:ok, _} -> state
       :ok -> state
       {:notice, text} -> notice(state, text)
@@ -463,6 +494,159 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp observer_key(_key, state), do: state
+
+  ## Session picker
+
+  # Sessions this window offers to switch to: the ones on disk for the directory the
+  # TUI was opened in that got as far as a branch, plus the session on screen (which
+  # may still be empty) so the list always says where you are.
+  defp pickable_sessions(state) do
+    state.workspace
+    |> Index.list()
+    |> Enum.filter(&(&1.branches != [] or &1.session_id == state.session_id))
+  end
+
+  defp open_sessions(state) do
+    entries = pickable_sessions(state)
+    cursor = Enum.find_index(entries, &(&1.session_id == state.session_id)) || 0
+
+    %{state | focus: :sessions, cmd_text: "", sessions: %{entries: entries, cursor: cursor}}
+  end
+
+  defp sessions_key(%Key{code: "esc"}, state), do: %{state | focus: :command, sessions: nil}
+
+  defp sessions_key(%Key{code: code}, %{sessions: s} = state) when code in ["up", "k"],
+    do: %{state | sessions: %{s | cursor: max(s.cursor - 1, 0)}}
+
+  defp sessions_key(%Key{code: code}, %{sessions: s} = state) when code in ["down", "j"] do
+    {entries, cursor} = View.sessions_view(state)
+    %{state | sessions: %{s | cursor: min(cursor + 1, max(length(entries) - 1, 0))}}
+  end
+
+  # The list is a snapshot of the state dir; `r` takes another one without losing your place.
+  defp sessions_key(%Key{code: "r"}, %{sessions: s} = state) do
+    state = open_sessions(state)
+    entries = state.sessions.entries
+    %{state | sessions: %{state.sessions | cursor: min(s.cursor, max(length(entries) - 1, 0))}}
+  end
+
+  defp sessions_key(%Key{code: "enter"}, state) do
+    {entries, cursor} = View.sessions_view(state)
+
+    case Enum.at(entries, cursor) do
+      nil -> %{state | focus: :command, sessions: nil}
+      entry -> switch_to(state, entry)
+    end
+  end
+
+  defp sessions_key(_key, state), do: state
+
+  # `/resume 2` (the row's number) or `/resume MU0W4A78` (an id or the start of one).
+  defp resume_by_arg(state, arg) do
+    entries = pickable_sessions(state)
+
+    found =
+      case Integer.parse(arg) do
+        {n, ""} -> Enum.at(entries, n - 1)
+        _ -> Enum.find(entries, &String.starts_with?(&1.session_id, arg))
+      end
+
+    case found do
+      nil -> notice(state, "no session here matching #{arg}; /resume lists them")
+      entry -> switch_to(state, entry)
+    end
+  end
+
+  defp switch_to(%{session_id: sid} = state, %{session_id: sid}),
+    do: notice(%{state | focus: :command, sessions: nil}, "already in this session")
+
+  defp switch_to(state, entry) do
+    case ensure_running(state, entry) do
+      {:ok, sid} ->
+        adopt(state, sid)
+
+      {:error, reason} ->
+        notice(state, "could not resume #{entry.session_id}: #{inspect(reason)}")
+    end
+  end
+
+  # The session you switch to starts with the settings you have on screen — the
+  # provider it resolved, the models, and any toggle you flipped this run — rather
+  # than a fresh read of the config files, which would surprise you mid-run.
+  defp ensure_running(state, entry) do
+    case Session.whereis(entry.session_id, :session) do
+      nil ->
+        {_workspace, config} = Dispatcher.context(state.session_id)
+
+        Troupe.start_session(
+          session_id: entry.session_id,
+          workspace: entry.workspace,
+          provider: Dispatcher.provider(state.session_id),
+          config: Map.from_struct(config)
+        )
+
+      _pid ->
+        {:ok, entry.session_id}
+    end
+  end
+
+  # Swaps the session this window shows: unsubscribe, subscribe, and rebuild every
+  # window by folding the other log — the same function a restart uses, so there is
+  # nothing session-specific left in the process but the name it is registered
+  # under, which follows (Decision 65).
+  defp adopt(state, sid) do
+    previous = state.session_id
+    :ok = Events.unsubscribe(previous)
+    :ok = Events.subscribe(sid)
+    rename(previous, sid)
+
+    state = %{
+      state
+      | session_id: sid,
+        model: rebuild(sid),
+        commands: Dispatcher.commands(sid),
+        focus: :command,
+        cmd_text: "",
+        win_text: "",
+        expanded: false,
+        pane: fresh_pane(),
+        settings: nil,
+        observer: nil,
+        sessions: nil,
+        dirty: true
+    }
+
+    retire(previous)
+    notice(state, "resumed #{sid}")
+  end
+
+  defp rename(previous, sid) do
+    if {:tui, previous} in Registry.keys(Troupe.Registry, self()) do
+      Registry.unregister(Troupe.Registry, {:tui, previous})
+      _ = Registry.register(Troupe.Registry, {:tui, sid}, nil)
+    end
+
+    :ok
+  end
+
+  # A session with no branches is the scratch session `troupe` opens before you have
+  # dispatched anything: nothing in its log will be read again, and leaving it running
+  # would keep a watcher and a memory refresher alive behind the session you switched to.
+  # One that did something keeps running, so its agents finish and you can switch back.
+  defp retire(sid) do
+    case Session.whereis(sid, :dispatcher) do
+      nil ->
+        :ok
+
+      _pid ->
+        if Dispatcher.windows(sid) == [] do
+          _ = Troupe.stop_session(sid)
+          :ok
+        else
+          :ok
+        end
+    end
+  end
 
   ## Settings page
 
@@ -666,14 +850,17 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: code}, path, %{win_text: ""} = state) when code in ["y", "n", "a"] do
     w = Map.fetch!(state.model.windows, path)
 
-    case Enum.find(w.pending, &(&1.kind == :approval)) do
+    case answerable(w, state.pane.agent || path) do
       nil ->
         %{state | win_text: code}
 
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
-        Troupe.approve(state.session_id, call_id, decision)
-        follow(state)
+
+        case Troupe.approve(state.session_id, call_id, decision) do
+          :ok -> follow(state)
+          {:error, _} -> notice(follow(state), "that request is no longer outstanding")
+        end
     end
   end
 
@@ -709,7 +896,7 @@ defmodule Troupe.UI.TUI.Server do
       String.starts_with?(text, "/todo add ") ->
         Troupe.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})
 
-      question = Enum.find(w.pending, &(&1.kind == :question)) ->
+      question = pending_of(w, state.pane.agent || path, [:question]) ->
         Troupe.answer(sid, question.call_id, text)
 
       true ->
@@ -724,6 +911,17 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp window_key(_key, _path, state), do: state
+
+  # y/n/a answers approvals and the budget question — a delegated subagent raises
+  # both, and its pending item lives in the branch's window like the root's. When
+  # more than one is outstanding the agent whose pane is open wins, so the keys
+  # answer the request the reader is looking at rather than the oldest one.
+  defp answerable(w, viewed), do: pending_of(w, viewed, [:approval, :budget])
+
+  defp pending_of(w, viewed, kinds) do
+    pending = Enum.filter(w.pending, &(&1.kind in kinds))
+    Enum.find(pending, &(&1.agent_path == viewed)) || List.first(pending)
+  end
 
   ## Helpers
 
@@ -836,8 +1034,10 @@ defmodule Troupe.UI.TUI.Server do
   defp drain(state, 0), do: state
 
   defp drain(state, n) do
+    sid = state.session_id
+
     receive do
-      {:troupe_event, e} -> drain(apply_event(state, e), n - 1)
+      {:troupe_event, %{session_id: ^sid} = e} -> drain(apply_event(state, e), n - 1)
     after
       0 -> state
     end
@@ -888,7 +1088,7 @@ defmodule Troupe.UI.TUI.Server do
           text,
           state.commands ++
             @path_commands ++
-            ~w(settings help observer models watch agents sessions memory quit)
+            ~w(settings help observer models watch agents sessions resume memory quit)
         )
 
       true ->

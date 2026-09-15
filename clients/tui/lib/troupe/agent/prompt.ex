@@ -17,6 +17,7 @@ defmodule Troupe.Agent.Prompt do
       messages: State.conversation(s),
       tools: Tools.specs(def, s.spec.definitions),
       max_tokens: 8192,
+      reasoning_effort: def.reasoning_effort || cfg.reasoning_effort,
       agent_path: s.spec.agent_path,
       session_id: s.spec.session_id,
       purpose: :turn

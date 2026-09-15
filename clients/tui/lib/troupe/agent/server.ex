@@ -130,9 +130,14 @@ defmodule Troupe.Agent.Server do
       st.budget_ask_pending ->
         resume_budget_ask(data)
 
-      st.current_calls != [] and not State.turn_complete?(st) -> resume_acting(data)
-      State.needs_llm?(st) -> start_turn(data)
-      true -> :keep_state_and_data
+      st.current_calls != [] and not State.turn_complete?(st) ->
+        resume_acting(data)
+
+      State.needs_llm?(st) ->
+        start_turn(data)
+
+      true ->
+        :keep_state_and_data
     end
   end
 
@@ -273,13 +278,15 @@ defmodule Troupe.Agent.Server do
       true ->
         data = log(data, :budget_ask_answered, %{call_id: call_id, decision: decision})
 
-        case decision do
-          :deny ->
-            data = log(data, :branch_state, %{state: :running})
-            finish(data, :budget_exhausted, data.state.finish_summary)
+        # Every answer to a budget question has to log `branch_state` — including
+        # `y`/`a`, which used to resume the turn silently and leave the window
+        # blinking `needs_input` for good. A subagent's `finished` carries no
+        # `branch_state` either, so nothing downstream would ever clear it.
+        data = after_user_answer(data)
 
-          _ ->
-            {:next_state, :idle, data, [{:next_event, :internal, :start_turn}]}
+        case decision do
+          :deny -> finish(data, :budget_exhausted, data.state.finish_summary)
+          _ -> {:next_state, :idle, data, [{:next_event, :internal, :start_turn}]}
         end
 
       false ->
@@ -377,6 +384,12 @@ defmodule Troupe.Agent.Server do
       not Budget.exhausted?(data.spec.budget, st.usage, State.elapsed_ms(st)) ->
         launch_turn(data)
 
+      # `y` on the budget question overrides this agent's budget (folded into its
+      # own state); `a` overrides the whole session. Without the first check the
+      # question comes straight back and `y` can never make progress.
+      st.budget_overridden ->
+        launch_turn(data)
+
       Approvals.budget_overridden?(data.spec.session_id) ->
         launch_turn(data)
 
@@ -397,38 +410,36 @@ defmodule Troupe.Agent.Server do
 
   defp ask_budget(%Data{} = data) do
     call_id = "budget-#{System.unique_integer([:positive])}"
-
-    :ok =
-      Approvals.register(
-        data.spec.session_id,
-        call_id,
-        self(),
-        data.spec.agent_path,
-        :budget,
-        %{}
-      )
+    :ok = register_budget(data, call_id)
 
     data = log(data, :budget_ask_started, %{call_id: call_id})
     data = log(data, :branch_state, %{state: :needs_input})
     {:next_state, :acting, data}
   end
 
-  # Re-registers an outstanding budget question after a restart.
+  defp register_budget(%Data{} = data, call_id) do
+    Approvals.register(
+      data.spec.session_id,
+      call_id,
+      self(),
+      data.spec.agent_path,
+      :budget,
+      %{}
+    )
+  end
+
+  # Re-registers an outstanding budget question after a restart, under its original
+  # id and without logging again: the UIs already folded that event, so a fresh id
+  # would leave a duplicate pending item that nothing can ever answer.
   defp resume_budget_ask(%Data{} = data) do
-    call_id = "budget-#{System.unique_integer([:positive])}"
+    case data.state.budget_call_id do
+      nil ->
+        ask_budget(data)
 
-    :ok =
-      Approvals.register(
-        data.spec.session_id,
-        call_id,
-        self(),
-        data.spec.agent_path,
-        :budget,
-        %{}
-      )
-
-    data = log(data, :budget_ask_started, %{call_id: call_id})
-    {:next_state, :acting, data}
+      call_id ->
+        :ok = register_budget(data, call_id)
+        {:next_state, :acting, data}
+    end
   end
 
   defp continue_turn(%Data{} = data) do
@@ -635,8 +646,8 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  defp after_user_answer(%Data{} = data) do
-    if State.awaiting_user(data.state) == [],
+  defp after_user_answer(%Data{state: st} = data) do
+    if State.awaiting_user(st) == [] and not st.budget_ask_pending,
       do: log(data, :branch_state, %{state: :running}),
       else: data
   end

@@ -51,22 +51,46 @@ defmodule Troupe.LLM.Provider do
 
   @callback stream(config :: term(), Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
 
+  @typedoc """
+  What an adapter is handed: the endpoint, the key and how to present it, plus
+  what the config says about the model being asked for. `reasoning_effort` and
+  `max_output` are `nil` unless a provider's `models:` block declares them.
+  """
+  @type config :: %{
+          api_key: String.t() | nil,
+          base_url: String.t() | nil,
+          auth: Troupe.Config.auth(),
+          reasoning_effort: String.t() | nil,
+          max_output: pos_integer() | nil
+        }
+
   @doc "Resolves the configured provider to `{module, config}`."
   @spec from_config(Troupe.Config.t()) :: {module(), term()}
   def from_config(%Troupe.Config{provider: {mod, cfg}}) when is_atom(mod), do: {mod, cfg}
 
   def from_config(%Troupe.Config{provider: :anthropic} = c),
-    do: {Troupe.LLM.Anthropic, %{api_key: c.api_key, base_url: c.base_url}}
+    do: {Troupe.LLM.Anthropic, session_config(c)}
 
   def from_config(%Troupe.Config{provider: :openai} = c),
-    do: {Troupe.LLM.OpenAI, %{api_key: c.api_key, base_url: c.base_url}}
+    do: {Troupe.LLM.OpenAI, session_config(c)}
 
   def from_config(%Troupe.Config{provider: :fake}), do: {Troupe.LLM.Fake, Troupe.LLM.Fake}
+
+  defp session_config(%Troupe.Config{} = c) do
+    %{
+      api_key: c.api_key,
+      base_url: c.base_url,
+      auth: c.auth,
+      reasoning_effort: nil,
+      max_output: nil
+    }
+  end
 
   @doc """
   Picks the adapter for one request. A fixed `{module, config}` (tests, `TROUPE_PROVIDER=fake`)
   always wins; with `:auto` a `provider/model` prefix selects a named provider from the
-  config and the bare model name is sent to it.
+  config, and what the model goes out as is the id that provider declares for it
+  (a gateway renames models) or the bare name when it declares none.
   """
   @spec resolve({module(), term()} | :auto, Troupe.Config.t(), String.t()) ::
           {module(), term(), String.t()}
@@ -74,17 +98,42 @@ defmodule Troupe.LLM.Provider do
 
   def resolve(:auto, %Troupe.Config{} = config, model) do
     case Troupe.Config.split_model(config, model) do
-      {%{type: :anthropic} = p, bare} ->
-        {Troupe.LLM.Anthropic, %{api_key: p.api_key, base_url: p.base_url}, bare}
+      {%{type: type} = p, bare} ->
+        {id, effort, max_output} = model_options(Map.get(p.models, bare), bare)
 
-      {%{type: :openai} = p, bare} ->
-        {Troupe.LLM.OpenAI, %{api_key: p.api_key, base_url: p.base_url}, bare}
+        cfg = %{
+          api_key: p.api_key,
+          base_url: p.base_url,
+          auth: p.auth,
+          reasoning_effort: effort,
+          max_output: max_output
+        }
+
+        {adapter(type), cfg, id}
 
       {nil, ^model} ->
         {mod, cfg} = from_config(config)
         {mod, cfg, model}
     end
   end
+
+  defp model_options(%{id: id, reasoning_effort: effort, max_output: max_output}, _bare),
+    do: {id, effort, max_output}
+
+  defp model_options(_none, bare), do: {bare, nil, nil}
+
+  @doc """
+  The effort for one request: what the agent's definition asked for, else what the
+  provider declares for the model. The definition wins because it knows how much
+  thinking the work is worth — a cheap profile answering an `AI?` comment should
+  not inherit the budget the same model uses for a coding branch.
+  """
+  @spec effort(Request.t(), map()) :: String.t() | nil
+  def effort(%Request{reasoning_effort: e}, _config) when is_binary(e), do: e
+  def effort(%Request{}, config), do: config[:reasoning_effort]
+
+  defp adapter(:anthropic), do: Troupe.LLM.Anthropic
+  defp adapter(:openai), do: Troupe.LLM.OpenAI
 
   @doc """
   Retries `fun` (which returns `{:ok, v} | {:retry, reason} | {:error, reason}`)

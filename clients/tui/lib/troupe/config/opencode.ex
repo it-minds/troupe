@@ -3,18 +3,27 @@ defmodule Troupe.Config.OpenCode do
   Reads provider definitions from opencode's `opencode.jsonc` (and keys from
   its `auth.json`) so an existing opencode setup works with Troupe unchanged.
 
-  Only `provider.<name>.options.baseURL`, `options.apiKey`, `npm` (to detect an
-  Anthropic SDK provider) and `models.<id>.limit.context` are read. Keys are
-  used at session start and never written anywhere by Troupe.
+  Read from `provider.<name>`: `options.baseURL`, `options.apiKey`,
+  `options.authToken` (a bearer token, which is how a gateway in front of the
+  Anthropic API is usually keyed), `npm` (to detect an Anthropic SDK provider),
+  and per model `models.<name>.id` (the id the gateway wants on the wire),
+  `limit.context`, `limit.output` and `options.reasoningEffort`. Keys are used at
+  session start and never written anywhere by Troupe.
+
+  Not read: `variants` (Troupe has no variant cycling — put the effort you want
+  on the model), `agent`, `permission`, `mcp`, `lsp` and everything else
+  opencode keeps in the same file.
   """
 
+  alias Troupe.Config
   alias Troupe.Config.JSONC
 
   @type provider :: %{
           type: :openai | :anthropic,
           base_url: String.t() | nil,
           api_key: String.t() | nil,
-          windows: %{optional(String.t()) => pos_integer()},
+          auth: Config.auth(),
+          models: %{optional(String.t()) => Config.model()},
           source: :opencode
         }
 
@@ -65,29 +74,59 @@ defmodule Troupe.Config.OpenCode do
   end
 
   defp provider(name, def, auth) when is_map(def) do
-    options = Map.get(def, "options") || %{}
-    models = Map.get(def, "models") || %{}
-
-    windows =
-      for {id, m} <- models,
-          is_map(m),
-          ctx = get_in(m, ["limit", "context"]),
-          is_integer(ctx),
-          into: %{},
-          do: {id, ctx}
+    options = sub_map(def, "options")
+    key = Map.get(options, "apiKey")
+    token = Map.get(options, "authToken")
 
     %{
       type:
-        if(String.contains?(Map.get(def, "npm", ""), "anthropic"), do: :anthropic, else: :openai),
+        if(String.contains?(Map.get(def, "npm") || "", "anthropic"),
+          do: :anthropic,
+          else: :openai
+        ),
       base_url: Map.get(options, "baseURL"),
-      api_key: Map.get(options, "apiKey") || Map.get(auth, name),
-      windows: windows,
+      api_key: key || token || Map.get(auth, name),
+      auth: if(is_nil(key) and is_binary(token), do: :bearer, else: :api_key),
+      models: models(Map.get(def, "models")),
       source: :opencode
     }
   end
 
   defp provider(_name, _def, _auth),
-    do: %{type: :openai, base_url: nil, api_key: nil, windows: %{}, source: :opencode}
+    do: %{
+      type: :openai,
+      base_url: nil,
+      api_key: nil,
+      auth: :api_key,
+      models: %{},
+      source: :opencode
+    }
+
+  # opencode's model shape, translated into Troupe's: the window and the output
+  # cap live under `limit`, the effort under the model's own `options`.
+  defp models(map) when is_map(map) do
+    Map.new(map, fn {name, m} ->
+      m = if is_map(m), do: m, else: %{}
+      limit = sub_map(m, "limit")
+
+      {name,
+       %{
+         id: to_string(Map.get(m, "id") || name),
+         context: Config.positive(Map.get(limit, "context")),
+         max_output: Config.positive(Map.get(limit, "output")),
+         reasoning_effort: Config.effort(Map.get(sub_map(m, "options"), "reasoningEffort"))
+       }}
+    end)
+  end
+
+  defp models(_), do: %{}
+
+  defp sub_map(map, key) do
+    case Map.get(map, key) do
+      sub when is_map(sub) -> sub
+      _ -> %{}
+    end
+  end
 
   defp read_config(path) do
     with {:ok, text} <- File.read(path),

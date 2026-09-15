@@ -27,8 +27,17 @@ mv "burrito_out/troupe_$TARGET" "$INSTALL_DIR/troupe"
 chmod +x "$INSTALL_DIR/troupe"
 
 # Burrito extracts its payload once per version, so without this a rebuild at
-# the same version keeps running the previous build.
-rm -rf "$HOME/.local/share/.burrito/troupe_erts-"*
+# the same version keeps running the previous build. The data dir it extracts
+# into is the platform's, not always XDG's: macOS unpacks into
+# ~/Library/Application Support/.burrito, so sweep every location install.sh does.
+for base in "$HOME/.local/share/.burrito" "${XDG_DATA_HOME:-}/.burrito" "$HOME/Library/Application Support/.burrito"; do
+  [ -n "$base" ] && [ -d "$base" ] || continue
+  for d in "$base"/troupe_*; do
+    [ -d "$d" ] || continue
+    echo "removing payload cache $d"
+    rm -rf "$d"
+  done
+done
 
 echo "installed $INSTALL_DIR/troupe"
 case ":$PATH:" in

@@ -43,6 +43,7 @@ defmodule Troupe.Agent.State do
           summary: String.t() | nil,
           finish_summary: String.t() | nil,
           budget_ask_pending: boolean(),
+          budget_call_id: String.t() | nil,
           budget_overridden: boolean(),
           started_at: integer() | nil,
           child_counters: %{optional(String.t()) => pos_integer()},
@@ -63,6 +64,7 @@ defmodule Troupe.Agent.State do
             summary: nil,
             finish_summary: nil,
             budget_ask_pending: false,
+            budget_call_id: nil,
             budget_overridden: false,
             started_at: nil,
             child_counters: %{},
@@ -146,14 +148,17 @@ defmodule Troupe.Agent.State do
     update_call(s, id, fn c -> %{c | status: :pending} end)
   end
 
-  defp do_apply(s, :budget_ask_started, _data), do: %{s | budget_ask_pending: true}
+  # The id is kept so a restart re-registers the same question instead of logging a
+  # second one, which would leave an unanswerable duplicate in every UI.
+  defp do_apply(s, :budget_ask_started, data),
+    do: %{s | budget_ask_pending: true, budget_call_id: Map.get(data, :call_id)}
 
   defp do_apply(s, :budget_ask_answered, %{decision: :deny}) do
-    %{s | budget_ask_pending: false}
+    %{s | budget_ask_pending: false, budget_call_id: nil}
   end
 
   defp do_apply(s, :budget_ask_answered, %{decision: _}) do
-    %{s | budget_ask_pending: false, budget_overridden: true}
+    %{s | budget_ask_pending: false, budget_call_id: nil, budget_overridden: true}
   end
 
   defp do_apply(s, :delegation_started, %{call_id: id, child_path: child_path}) do

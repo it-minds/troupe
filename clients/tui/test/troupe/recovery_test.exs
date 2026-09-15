@@ -59,6 +59,38 @@ defmodule Troupe.RecoveryTest do
     assert Enum.count(events_of(sid, path, :assistant_message)) == 3
   end
 
+  # A restart used to mint a new call_id and log a second `budget_ask_started`, so
+  # every UI folded a duplicate pending item that no answer could ever remove.
+  test "restarting an agent re-registers its budget question under the same id, logging none" do
+    ws = tmp_workspace(%{"f.txt" => "x"})
+    script = List.duplicate({:tool, "read_file", %{"path" => "f.txt"}}, 10)
+    {sid, _fake, _} = start_session!(workspace: ws, script: script, auto_approve: true)
+    {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
+
+    ask = await_event(path, :budget_ask_started)
+    await_state(path, :needs_input)
+
+    call_id = ask.data.call_id
+    old = Troupe.agent_pid(sid, path)
+    Process.exit(old, :kill)
+
+    # Re-registered under the original id, against the restarted process.
+    eventually(fn ->
+      live = Troupe.agent_pid(sid, path)
+
+      live && live != old &&
+        Enum.any?(Session.Approvals.pending(sid), &(&1.call_id == call_id and &1.agent_pid == live))
+    end)
+
+    assert [^ask] = events_of(sid, path, :budget_ask_started)
+
+    # So the id the UI still holds answers the restarted agent, rather than the late
+    # DOWN from the dead one having orphaned the request.
+    eventually(fn -> Troupe.approve(sid, call_id, :deny) == :ok end)
+    await_state(path, :done_unread, 15_000)
+    assert window(sid, path).reason == :budget_exhausted
+  end
+
   # Done item 6
   test "cancel during a shell sleep kills child and grandchild within 1s (by OS pid)" do
     ws = tmp_workspace()

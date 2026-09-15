@@ -1,6 +1,11 @@
 defmodule Troupe.Agents.Definition do
   @moduledoc """
   An agent definition: YAML frontmatter plus a markdown body (the system prompt).
+
+  `reasoning_effort` is the most specific of the three places an effort can come
+  from — a definition beats the provider's `models:` declaration, which beats the
+  global `reasoning_effort` config key. Cheap, short-lived profiles set it low so
+  a one-line question does not buy a full thinking budget on every turn.
   """
 
   alias Troupe.Frontmatter
@@ -10,6 +15,7 @@ defmodule Troupe.Agents.Definition do
           description: String.t(),
           mode: :primary | :subagent,
           model: String.t(),
+          reasoning_effort: String.t() | nil,
           isolation: :shared | :worktree,
           tools: :all | [String.t()],
           permissions: %{optional(String.t()) => :auto | :ask | :deny},
@@ -26,6 +32,7 @@ defmodule Troupe.Agents.Definition do
             description: "",
             mode: :primary,
             model: "default",
+            reasoning_effort: nil,
             isolation: :shared,
             tools: :all,
             permissions: %{},
@@ -48,6 +55,7 @@ defmodule Troupe.Agents.Definition do
          description: Map.get(meta, "description", ""),
          mode: parse_mode(Map.get(meta, "mode", "primary")),
          model: Map.get(meta, "model", "default"),
+         reasoning_effort: Troupe.Config.effort(Map.get(meta, "reasoning_effort")),
          isolation: parse_isolation(Map.get(meta, "isolation", "shared")),
          tools: parse_tools(Map.get(meta, "tools", "all")),
          permissions: parse_permissions(Map.get(meta, "permissions", %{})),

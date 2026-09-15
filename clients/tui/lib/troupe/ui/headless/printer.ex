@@ -99,6 +99,14 @@ defmodule Troupe.UI.Headless.Printer do
     state
   end
 
+  # Without this the branch waits for an answer nobody can type and the run never
+  # rests. Stopping is the safe default: a headless run has a budget for a reason.
+  defp print(%{type: :budget_ask_started, agent_path: p, data: d}, state) do
+    line(state, p, "budget exhausted; headless mode stops here (raise the budget to go further)")
+    Troupe.approve(state.session_id, d.call_id, :deny)
+    state
+  end
+
   defp print(%{type: :branch_state, agent_path: p, data: d}, state),
     do: say(state, p, "[#{d.state}]#{if d[:summary], do: " " <> d.summary, else: ""}")
 

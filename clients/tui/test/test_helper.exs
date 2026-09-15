@@ -7,6 +7,8 @@ System.delete_env("TROUPE_PROVIDER")
 System.delete_env("TROUPE_MODEL")
 System.delete_env("TROUPE_API_KEY")
 System.delete_env("TROUPE_BASE_URL")
+System.delete_env("TROUPE_AUTH")
+System.delete_env("TROUPE_AUTH_TOKEN")
 System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(tmp, "no-opencode.jsonc"))
 System.put_env("TROUPE_OPENCODE_AUTH", Path.join(tmp, "no-auth.json"))
 

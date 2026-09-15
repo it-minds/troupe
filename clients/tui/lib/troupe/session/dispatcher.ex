@@ -107,6 +107,13 @@ defmodule Troupe.Session.Dispatcher do
   @spec context(String.t()) :: {String.t(), Troupe.Config.t()}
   def context(sid), do: GenServer.call(Session.via(sid, :dispatcher), :context)
 
+  @doc """
+  The provider the session was started with, so a session resumed from inside a
+  running VM (the TUI's session picker) keeps it instead of resolving one again.
+  """
+  @spec provider(String.t()) :: {module(), term()} | :auto
+  def provider(sid), do: GenServer.call(Session.via(sid, :dispatcher), :provider)
+
   @doc "Replaces the config used for branches dispatched from now on."
   @spec put_config(String.t(), Troupe.Config.t()) :: :ok
   def put_config(sid, config),
@@ -167,6 +174,8 @@ defmodule Troupe.Session.Dispatcher do
   end
 
   def handle_call(:context, _from, state), do: {:reply, {state.workspace, state.config}, state}
+
+  def handle_call(:provider, _from, state), do: {:reply, state.provider, state}
 
   def handle_call({:put_config, config}, _from, %__MODULE__{} = state),
     do: {:reply, :ok, %__MODULE__{state | config: config}}

@@ -83,10 +83,40 @@ models:
   cheap: portal/qwen3.6-35b
 ```
 
+### Behind a gateway
+
+A gateway usually renames the models, and one in front of Anthropic normally
+takes a bearer token instead of `x-api-key`. Both are declared per provider, and
+each model may carry the effort level and the output cap to ask for:
+
+```yaml
+providers:
+  lego-anthropic:
+    type: anthropic
+    base_url: https://api.genai.example.com/anthropic/v1   # /v1 is not doubled
+    auth_token: ...                    # Authorization: Bearer (api_key: sends x-api-key)
+    models:
+      claude-opus-5:                   # the name you address
+        id: eu.anthropic.claude-opus-5 # the name that goes on the wire
+        context: 400000
+        max_output: 64000
+        reasoning_effort: medium       # none | minimal | low | medium | high | xhigh
+```
+
+`reasoning_effort` goes to an OpenAI-compatible provider verbatim (with
+`max_completion_tokens`, which is what a reasoning model wants); for Anthropic it
+becomes a thinking budget and raises the output cap to fit. An agent definition's
+own `reasoning_effort:` overrides it, and a top-level `reasoning_effort:` (or
+`TROUPE_REASONING_EFFORT`) is the fallback when neither says anything. The
+session-wide provider takes `auth_token:` too, or `TROUPE_AUTH_TOKEN`.
+
 If Troupe has no API key of its own, it reads the providers from opencode's
 `~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
 opencode's `model` as the default, so an existing opencode setup works with no
-Troupe config at all. `troupe config` prints what was resolved with keys
+Troupe config at all — `options.baseURL`, `options.apiKey`, `options.authToken`,
+and per model `id`, `limit.context`, `limit.output` and
+`options.reasoningEffort`. `variants`, `agent` and `permission` are not read;
+agents are files (see below). `troupe config` prints what was resolved with keys
 masked.
 
 ## Use
@@ -96,7 +126,7 @@ troupe                                  # TUI in the current directory
 troupe --watch                          # TUI with watch mode on
 troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
-troupe resume [SESSION_ID]
+troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
 troupe models [--refresh]               # every model, its window and its price
 troupe --version
 ```
@@ -114,7 +144,8 @@ Inside the TUI, everything starts with `/`:
 | `/watch` | toggle AI-comment watch mode |
 | `/cancel [n]` | stop branch `n` and remove it: the window goes, and so does the worktree Troupe made for it |
 | `/dismiss`, `/merge`, `/discard` `[n]` | act on the activated window or the one on tile `n` (a path works too) |
-| `/agents`, `/sessions` | list agents / persisted sessions |
+| `/agents` | list the agents you can dispatch |
+| `/resume`, `/sessions` | this directory's sessions, newest first: Enter switches the window to one (`/resume <n\|ID>` goes straight there) |
 | `/settings`, `/help` | settings page: tweak settings and read the curated help |
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
@@ -206,25 +237,40 @@ toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the
 wheel scrolls the help, Esc goes back.
 
 A change applies to the running session immediately (`auto_approve`, watch mode
-and its timings, `max_branches`) or to branches dispatched from then on (models,
-compaction, timeouts, delegation depth), and is written to the config file that
+with its timings and profiles, `max_branches`) or to branches dispatched from
+then on (models, reasoning effort, compaction, timeouts, delegation depth), and
+is written to the config file that
 owns it: the project's `.troupe/config.yaml` when the project has one, else the
 global `config.yaml`. Environment variables still win over both, so a setting
 masked by `TROUPE_MODEL` is saved but not in effect.
 
 ### Watch mode
 
-Any comment ending in `AI!` is a change request and spawns a `/code` branch;
-`AI?` is a question and spawns a `/plan` branch; bare `AI` comments are
-collected as context. On Linux, native watching needs `inotifywait`; without
-it Troupe falls back to polling and says so.
+Any comment ending in `AI!` is a change request and spawns a `/quick` branch;
+`AI?` is a question and spawns an `/answer` branch; bare `AI` comments are
+collected as context. Both profiles run on the cheap model with a small
+reasoning budget and few turns, because saving a comment is a cheap gesture and
+the branch it starts should be one too. Point them somewhere heavier with
+`watch.change_command` / `watch.question_command` (`code` and `plan` are the
+obvious ones) when a comment deserves the full treatment.
+
+On Linux, native watching needs `inotifywait`; without it Troupe falls back to
+polling and says so.
 
 ### Agents
 
 Agent definitions are markdown files with YAML frontmatter; the filename is
 the name and every `primary` one is a command. Project `.troupe/agents/`
 overrides the global `agents/` dir which overrides the built-ins (`code`,
-`worktree`, `plan`, `ask`, and the subagents `general` and `explore`).
+`worktree`, `plan`, `workflow`, `ask`, the watch-mode pair `quick` and `answer`,
+and the subagents `general`, `explore` and `librarian`).
+
+A definition's `model:` is `default`, `cheap`, or a model named outright, and
+`reasoning_effort:` (`none` | `minimal` | `low` | `medium` | `high` | `xhigh`,
+or a token budget) says how much thinking its turns are worth. That beats what a
+provider declares for the model, which beats the global `reasoning_effort`
+setting — so a cheap, short-lived profile is not stuck with the budget the same
+model uses for a coding branch.
 
 The tools a definition can list are `read_file`, `write_file`, `edit_file`,
 `list_files`, `grep`, `shell`, `web_fetch`, `todo_write` / `todo_read`,
@@ -254,6 +300,12 @@ Every session is an append-only JSONL event log under the platform state dir
 that log, so crashes restart from it and `troupe resume` continues running
 branches. Tool calls that started but never completed are re-run on resume
 (at-least-once); completed calls are never executed twice.
+
+The directory decides what you can come back to: sessions are keyed by a hash
+of the workspace path, so `/resume` inside the TUI (or `troupe resume` with no
+id) lists what *this* directory has — when each session was last touched, its
+branches and how they came to rest, and the first prompt as a title — and Enter
+replays the one you pick into the window you are already looking at.
 
 ## Development
 

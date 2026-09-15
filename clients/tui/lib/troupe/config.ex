@@ -3,7 +3,9 @@ defmodule Troupe.Config do
   Harness configuration: platform config dir `config.yaml`, overridden key-wise
   by the project's `.troupe/config.yaml`, overridden by environment variables
   (`TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`), then
-  by explicit overrides passed to `Troupe.start_session/1`.
+  by explicit overrides passed to `Troupe.start_session/1`. `TROUPE_AUTH_TOKEN`
+  is `TROUPE_API_KEY` sent as `Authorization: Bearer`, for a gateway that speaks
+  a provider's API but not its authentication.
   """
 
   alias Troupe.Paths
@@ -12,14 +14,22 @@ defmodule Troupe.Config do
           provider: :anthropic | :openai | :fake | {module(), term()},
           base_url: String.t() | nil,
           api_key: String.t() | nil,
+          auth: auth(),
           models: %{
             default: String.t(),
             cheap: String.t(),
             windows: %{optional(String.t()) => pos_integer()}
           },
+          reasoning_effort: String.t() | nil,
           max_branches: pos_integer(),
           compaction: %{fraction: float(), keep_last_turns: pos_integer()},
-          watch: %{debounce_ms: pos_integer(), poll_interval_ms: pos_integer(), enabled: boolean()},
+          watch: %{
+            debounce_ms: pos_integer(),
+            poll_interval_ms: pos_integer(),
+            enabled: boolean(),
+            change_command: String.t(),
+            question_command: String.t()
+          },
           memory: %{
             enabled: boolean(),
             auto_refresh: boolean(),
@@ -37,22 +47,55 @@ defmodule Troupe.Config do
           catalog: %{optional(String.t()) => Troupe.LLM.Catalog.t()}
         }
 
+  @typedoc """
+  How the key is presented. `:api_key` is each provider's own scheme (Anthropic's
+  `x-api-key`, OpenAI's bearer token); `:bearer` forces `Authorization: Bearer`,
+  which is what an Anthropic-compatible gateway in front of the real API wants
+  (opencode writes that key as `authToken`).
+  """
+  @type auth :: :api_key | :bearer
+
   @typedoc "A named provider, addressable as `<name>/<model>` in model aliases."
   @type provider :: %{
           type: :openai | :anthropic,
           base_url: String.t() | nil,
           api_key: String.t() | nil,
-          windows: %{optional(String.t()) => pos_integer()},
+          auth: auth(),
+          models: %{optional(String.t()) => model()},
           source: :yaml | :opencode
+        }
+
+  @typedoc """
+  One model a provider declares, keyed by the name Troupe addresses it with.
+  `id` is what goes on the wire — a gateway usually renames models, so
+  `lego-anthropic/claude-opus-5` may send `eu.anthropic.claude-opus-5`.
+  `context` is the window it declares (`nil` when it declares none),
+  `max_output` the output cap to ask for and `reasoning_effort` the effort level
+  to request, verbatim for an OpenAI-compatible provider and as a thinking
+  budget for an Anthropic one.
+  """
+  @type model :: %{
+          id: String.t(),
+          context: pos_integer() | nil,
+          max_output: pos_integer() | nil,
+          reasoning_effort: String.t() | nil
         }
 
   defstruct provider: :anthropic,
             base_url: nil,
             api_key: nil,
+            auth: :api_key,
             models: %{default: "claude-sonnet-5", cheap: "claude-haiku-4-5-20251001", windows: %{}},
+            reasoning_effort: nil,
             max_branches: 8,
             compaction: %{fraction: 0.8, keep_last_turns: 4},
-            watch: %{debounce_ms: 300, poll_interval_ms: 500, enabled: false},
+            watch: %{
+              debounce_ms: 300,
+              poll_interval_ms: 500,
+              enabled: false,
+              change_command: "quick",
+              question_command: "answer"
+            },
             memory: %{
               enabled: true,
               auto_refresh: true,
@@ -124,8 +167,8 @@ defmodule Troupe.Config do
     if default, do: %{cfg | models: %{cfg.models | default: default, cheap: default}}, else: cfg
   end
 
-  defp first_model(%{windows: windows}, name) when map_size(windows) > 0,
-    do: name <> "/" <> (windows |> Map.keys() |> Enum.sort() |> hd())
+  defp first_model(%{models: models}, name) when map_size(models) > 0,
+    do: name <> "/" <> (models |> Map.keys() |> Enum.sort() |> hd())
 
   defp first_model(_provider, name), do: name <> "/"
 
@@ -138,6 +181,19 @@ defmodule Troupe.Config do
     case String.split(model, "/", parts: 2) do
       [name, bare] when is_map_key(cfg.providers, name) -> {Map.fetch!(cfg.providers, name), bare}
       _ -> {nil, model}
+    end
+  end
+
+  @doc """
+  What the provider declares about one addressable model (`provider/model`), or
+  `nil` — for a bare id, for a provider that lists no models, and for a model
+  typed by hand that the provider does not list.
+  """
+  @spec model_spec(t(), String.t()) :: model() | nil
+  def model_spec(%__MODULE__{} = cfg, id) when is_binary(id) do
+    case split_model(cfg, id) do
+      {%{models: models}, bare} -> Map.get(models, bare)
+      {nil, _} -> nil
     end
   end
 
@@ -169,13 +225,13 @@ defmodule Troupe.Config do
       Enum.flat_map(cfg.providers, fn {name, p} ->
         key? = p.api_key not in [nil, ""]
 
-        case Enum.sort(p.windows) do
+        case Enum.sort(p.models) do
           [] ->
             [choice(name <> "/", name, nil, nil, p.source, key?)]
 
-          windows ->
-            Enum.map(windows, fn {id, ctx} ->
-              choice(name <> "/" <> id, name, id, ctx, p.source, key?)
+          models ->
+            Enum.map(models, fn {id, m} ->
+              choice(name <> "/" <> id, name, id, m.context, p.source, key?)
             end)
         end
       end)
@@ -230,7 +286,7 @@ defmodule Troupe.Config do
 
     known =
       cfg.providers
-      |> Enum.flat_map(fn {n, p} -> Enum.map(p.windows, &(n <> "/" <> elem(&1, 0))) end)
+      |> Enum.flat_map(fn {n, p} -> Enum.map(p.models, &(n <> "/" <> elem(&1, 0))) end)
 
     session_key? = cfg.api_key not in [nil, ""]
 
@@ -293,15 +349,14 @@ defmodule Troupe.Config do
       |> Enum.sort()
       |> Enum.map_join("\n", fn {name, p} ->
         "  #{name}: #{p.type} #{p.base_url || "(default url)"} key=#{mask(p.api_key)} source=#{p.source}" <>
-          if(p.windows == %{},
-            do: "",
-            else: " models=" <> Enum.map_join(Map.keys(p.windows), ",", & &1)
-          )
+          if(p.auth == :bearer, do: " auth=bearer", else: "") <>
+          if(p.models == %{}, do: "", else: " models=" <> describe_models(p.models))
       end)
 
     """
-    provider: #{inspect(cfg.provider)} base_url=#{cfg.base_url || "(default)"} key=#{mask(cfg.api_key)}
-    models: default=#{cfg.models.default} cheap=#{cfg.models.cheap}
+    provider: #{inspect(cfg.provider)} base_url=#{cfg.base_url || "(default)"} key=#{mask(cfg.api_key)} auth=#{cfg.auth}
+    models: default=#{cfg.models.default} cheap=#{cfg.models.cheap} reasoning_effort=#{cfg.reasoning_effort || "(provider default)"}
+    watch: #{if cfg.watch.enabled, do: "on", else: "off"} AI!=/#{cfg.watch.change_command} AI?=/#{cfg.watch.question_command}
     named providers (use as <name>/<model>):
     #{if providers == "", do: "  (none; add `providers:` to config.yaml or set up opencode)", else: providers}
     models Troupe can address (use one as models.default):
@@ -309,6 +364,19 @@ defmodule Troupe.Config do
     config dir: #{Paths.config_dir()}   opencode: #{Troupe.Config.OpenCode.config_path()}
     """
   end
+
+  # The name Troupe addresses, and the id that leaves the machine when a gateway
+  # renamed the model — the two differing silently is the confusing case.
+  defp describe_models(models) do
+    models
+    |> Enum.sort()
+    |> Enum.map_join(",", fn {name, %{id: id} = m} ->
+      if id == name, do: name <> effort_suffix(m), else: "#{name}->#{id}#{effort_suffix(m)}"
+    end)
+  end
+
+  defp effort_suffix(%{reasoning_effort: nil}), do: ""
+  defp effort_suffix(%{reasoning_effort: effort}), do: " (effort #{effort})"
 
   defp models_list(cfg) do
     case models(cfg) do
@@ -417,9 +485,9 @@ defmodule Troupe.Config do
   @spec context_window(t(), String.t()) :: pos_integer()
   def context_window(%__MODULE__{} = cfg, model) do
     declared =
-      case split_model(cfg, model) do
-        {%{windows: windows}, bare} -> Map.get(windows, bare) || Map.get(cfg.models.windows, model)
-        {nil, _} -> Map.get(cfg.models.windows, model)
+      case model_spec(cfg, model) do
+        %{context: context} when is_integer(context) -> context
+        _ -> Map.get(cfg.models.windows, model)
       end
 
     declared || catalog_window(cfg, model) || cfg.default_window
@@ -457,12 +525,14 @@ defmodule Troupe.Config do
       cfg
       | provider: parse_provider(Map.get(yaml, "provider"), cfg.provider),
         base_url: Map.get(yaml, "base_url", cfg.base_url),
-        api_key: Map.get(yaml, "api_key", cfg.api_key),
+        api_key: Map.get(yaml, "auth_token") || Map.get(yaml, "api_key", cfg.api_key),
+        auth: parse_auth(Map.get(yaml, "auth_token"), Map.get(yaml, "auth"), cfg.auth),
         models: %{
           default: Map.get(models, "default", cfg.models.default),
           cheap: Map.get(models, "cheap", cfg.models.cheap),
           windows: Map.get(models, "windows", cfg.models.windows)
         },
+        reasoning_effort: effort(Map.get(yaml, "reasoning_effort")) || cfg.reasoning_effort,
         max_branches: Map.get(yaml, "max_branches", cfg.max_branches),
         auto_approve: Map.get(yaml, "auto_approve", cfg.auto_approve),
         compaction: %{
@@ -472,7 +542,9 @@ defmodule Troupe.Config do
         watch: %{
           debounce_ms: Map.get(watch, "debounce_ms", cfg.watch.debounce_ms),
           poll_interval_ms: Map.get(watch, "poll_interval_ms", cfg.watch.poll_interval_ms),
-          enabled: Map.get(watch, "enabled", cfg.watch.enabled)
+          enabled: Map.get(watch, "enabled", cfg.watch.enabled),
+          change_command: Map.get(watch, "change_command", cfg.watch.change_command),
+          question_command: Map.get(watch, "question_command", cfg.watch.question_command)
         },
         memory: %{
           enabled: Map.get(memory, "enabled", cfg.memory.enabled),
@@ -492,22 +564,15 @@ defmodule Troupe.Config do
   defp parse_providers(map) when is_map(map) do
     Map.new(map, fn {name, p} ->
       p = if is_map(p), do: p, else: %{}
-      models = Map.get(p, "models") || %{}
-
-      windows =
-        for {id, m} <- models,
-            is_map(m),
-            ctx = Map.get(m, "context"),
-            is_integer(ctx),
-            into: %{},
-            do: {to_string(id), ctx}
+      token = Map.get(p, "auth_token")
 
       {to_string(name),
        %{
          type: if(Map.get(p, "type") == "anthropic", do: :anthropic, else: :openai),
          base_url: Map.get(p, "base_url"),
-         api_key: Map.get(p, "api_key"),
-         windows: windows,
+         api_key: token || Map.get(p, "api_key"),
+         auth: parse_auth(token, Map.get(p, "auth"), :api_key),
+         models: parse_models(Map.get(p, "models")),
          source: :yaml
        }}
     end)
@@ -515,12 +580,60 @@ defmodule Troupe.Config do
 
   defp parse_providers(_), do: %{}
 
+  @doc """
+  Parses one provider's `models:` block into model specs. Public because
+  `Troupe.Config.OpenCode` maps opencode's own shape onto the same specs.
+  """
+  @spec parse_models(term()) :: %{optional(String.t()) => model()}
+  def parse_models(map) when is_map(map) do
+    Map.new(map, fn {name, m} ->
+      m = if is_map(m), do: m, else: %{}
+      name = to_string(name)
+
+      {name,
+       %{
+         id: to_string(Map.get(m, "id") || name),
+         context: positive(Map.get(m, "context")),
+         max_output: positive(Map.get(m, "max_output")),
+         reasoning_effort: effort(Map.get(m, "reasoning_effort"))
+       }}
+    end)
+  end
+
+  def parse_models(_), do: %{}
+
+  @doc false
+  @spec positive(term()) :: pos_integer() | nil
+  def positive(n) when is_integer(n) and n > 0, do: n
+  def positive(_), do: nil
+
+  @doc false
+  @spec effort(term()) :: String.t() | nil
+  def effort(e) when is_binary(e) and e != "", do: e
+  def effort(e) when is_integer(e) and e > 0, do: Integer.to_string(e)
+  def effort(_), do: nil
+
+  # An `auth_token` says bearer by itself: writing the token down is the whole
+  # declaration, exactly as it is in opencode's config.
+  defp parse_auth(token, _auth, _default) when is_binary(token) and token != "", do: :bearer
+  defp parse_auth(_token, "bearer", _default), do: :bearer
+  defp parse_auth(_token, "api_key", _default), do: :api_key
+  defp parse_auth(_token, _auth, default), do: default
+
   defp apply_env(cfg) do
     cfg
     |> maybe_put(:provider, System.get_env("TROUPE_PROVIDER"), &parse_provider(&1, cfg.provider))
     |> maybe_put(:base_url, System.get_env("TROUPE_BASE_URL"))
     |> maybe_put(:api_key, System.get_env("TROUPE_API_KEY"))
+    |> maybe_put(:auth, System.get_env("TROUPE_AUTH"), &parse_auth(nil, &1, cfg.auth))
+    |> then(fn c ->
+      case System.get_env("TROUPE_AUTH_TOKEN") do
+        token when is_binary(token) and token != "" -> %{c | api_key: token, auth: :bearer}
+        _ -> c
+      end
+    end)
     |> maybe_put(:fake_script, System.get_env("TROUPE_FAKE_SCRIPT"))
+    |> maybe_put(:reasoning_effort, System.get_env("TROUPE_REASONING_EFFORT"))
     |> then(fn c ->
       case System.get_env("TROUPE_MODEL") do
         nil -> c

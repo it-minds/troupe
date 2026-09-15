@@ -42,6 +42,7 @@ defmodule Troupe.Session.Approvals do
   def answer(sid, call_id, decision) do
     GenServer.call(Session.via(sid, :approvals), {:answer, call_id, decision})
   end
+
   @spec pending(String.t()) :: [map()]
   def pending(sid), do: GenServer.call(Session.via(sid, :approvals), :pending)
 
@@ -68,6 +69,9 @@ defmodule Troupe.Session.Approvals do
 
   @impl true
   def handle_call({:register, call_id, pid, path, kind, payload}, _from, state) do
+    # A restarted agent re-registers under its original call_id, so drop the dead
+    # process's monitor rather than leaving it to fire against the live entry.
+    state = forget(state, call_id)
     ref = Process.monitor(pid)
 
     entry = %{
@@ -124,6 +128,21 @@ defmodule Troupe.Session.Approvals do
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # Retires whatever is registered under `call_id`, monitor included. `:flush` is
+  # what makes re-registration safe: without it the dead agent's DOWN can arrive
+  # after the restarted one registered and delete the live entry, orphaning a request
+  # the user can still see and can no longer answer.
+  defp forget(%__MODULE__{} = state, call_id) do
+    case Map.pop(state.pending, call_id) do
+      {nil, _} ->
+        state
+
+      {entry, pending} ->
+        Process.demonitor(entry.monitor, [:flush])
+        %{state | pending: pending, monitors: Map.delete(state.monitors, entry.monitor)}
+    end
+  end
 
   defp forward(%{kind: :question} = entry, {:text, text}, state) do
     send(entry.agent_pid, {:answer, entry.call_id, text})

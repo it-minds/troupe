@@ -12,7 +12,7 @@ defmodule Troupe.Settings do
 
   alias Troupe.{Config, Paths}
 
-  @type type :: :bool | :int | :float | :string | :model
+  @type type :: :bool | :int | :float | :string | :model | :effort
   @type effect :: :now | :new_branches
 
   @type field :: %{
@@ -51,8 +51,10 @@ defmodule Troupe.Settings do
       effect: :now,
       help: """
       Watch the workspace for `AI!` / `AI?` comments and dispatch a branch when
-      you save one. `AI!` asks for a change, `AI?` asks a question; the marker
-      is removed from the file once the branch is dispatched.
+      you save one. `AI!` asks for a change, `AI?` asks a question; a bare `AI`
+      comment is context the branch is told about but is not triggered by. The
+      agent is asked to delete the marker as part of its work, so a branch that
+      fails leaves the comment behind and the next save triggers it again.
 
       Same thing as the /watch command, and the status line shows the backend
       in use (file_system, or polling where inotify is unavailable).
@@ -82,6 +84,33 @@ defmodule Troupe.Settings do
       Interval for the polling backend, used where filesystem events are not
       available (network mounts, some containers). Ignored by the file_system
       backend.
+      """
+    },
+    %{
+      key: "watch.change_command",
+      label: "watch AI! profile",
+      type: :string,
+      path: [:watch, :change_command],
+      yaml: ["watch", "change_command"],
+      effect: :now,
+      help: """
+      The agent profile a saved `AI!` comment dispatches. The default `quick` is a
+      cheap, few-turn editor for the small local change a comment usually asks
+      for; name `code` here instead if you want the full workhorse profile, with
+      the default model and the token bill that goes with it.
+      """
+    },
+    %{
+      key: "watch.question_command",
+      label: "watch AI? profile",
+      type: :string,
+      path: [:watch, :question_command],
+      yaml: ["watch", "question_command"],
+      effect: :now,
+      help: """
+      The agent profile a saved `AI?` comment dispatches. The default `answer`
+      reads at most a file or two on the cheap model and replies in its summary;
+      `plan` investigates properly and writes a task list, for a lot more tokens.
       """
     },
     %{
@@ -181,6 +210,25 @@ defmodule Troupe.Settings do
       """
     },
     %{
+      key: "reasoning_effort",
+      label: "reasoning effort",
+      type: :effort,
+      path: [:reasoning_effort],
+      yaml: ["reasoning_effort"],
+      effect: :new_branches,
+      help: """
+      How much thinking to buy on every turn: none, minimal, low, medium, high,
+      xhigh, or a token budget as a number. Anthropic turns the level into a
+      thinking budget (low is 4k tokens, high is 16k) and raises the output cap to
+      fit it; an OpenAI-compatible provider gets the level verbatim.
+
+      This is the weakest of three: an agent definition's own `reasoning_effort:`
+      wins, then what a named provider declares for the model, then this. Leave it
+      unset to inherit, and set it to none when a session is costing more in
+      thinking than the answers are worth.
+      """
+    },
+    %{
       key: "default_window",
       label: "default context window",
       type: :int,
@@ -274,6 +322,7 @@ defmodule Troupe.Settings do
     case get(cfg, key) do
       true -> "on"
       false -> "off"
+      nil -> "(inherit)"
       "" -> "(unset)"
       value when is_binary(value) -> value
       value -> to_string(value)
@@ -309,10 +358,30 @@ defmodule Troupe.Settings do
     end
   end
 
+  # "inherit" is a real value here — it is how you take the override back off and
+  # fall through to the provider's own declaration for the model.
+  def parse(%{type: :effort, key: key}, text) do
+    case String.downcase(String.trim(text)) do
+      t when t in ~w(inherit default provider -) or t == "" -> {:ok, nil}
+      t when t in ~w(none off minimal low medium high xhigh) -> {:ok, t}
+      t -> effort_number(t, key)
+    end
+  end
+
   def parse(%{type: type, key: key}, text) when type in [:string, :model] do
     case String.trim(text) do
       "" -> {:error, "#{key} cannot be empty"}
       value -> {:ok, value}
+    end
+  end
+
+  defp effort_number(text, key) do
+    case Integer.parse(text) do
+      {n, ""} when n >= 1_024 ->
+        {:ok, Integer.to_string(n)}
+
+      _ ->
+        {:error, "#{key} must be inherit, none, minimal, low, medium, high, xhigh or ≥1024 tokens"}
     end
   end
 
@@ -398,6 +467,9 @@ defmodule Troupe.Settings do
     end
   end
 
+  # "inherit" is the absence of a key, not a key holding nothing: written out as a
+  # value it would come back as the empty string and read as a bogus effort level.
+  defp put_in_yaml(map, [key], nil), do: Map.delete(map, key)
   defp put_in_yaml(map, [key], value), do: Map.put(map, key, value)
 
   defp put_in_yaml(map, [key | rest], value) do
@@ -483,11 +555,15 @@ defmodule Troupe.Settings do
        [
          "/watch                toggle; also the watch setting on the left",
          "Leave `AI!` in a comment and save: a branch picks the task up.",
-         "`AI?` asks a question instead. The marker is removed when it is taken."
+         "`AI?` asks a question instead, answered in that branch's summary.",
+         "A bare `AI` comment is context the branch is told about, not a trigger.",
+         "Both go to a cheap, few-turn profile (`quick` / `answer`); point them at",
+         "`code` / `plan` on the left when a comment deserves the full treatment.",
+         "The agent deletes the marker, so a failed branch retriggers on next save."
        ]},
       {"Sessions",
        [
-         "/sessions             list sessions on disk",
+         "/resume  /sessions    pick another session here (/resume <n|ID> switches)",
          "troupe resume [ID]    reopen one from the shell (the log replays the UI)",
          "/quit, Ctrl-D, Ctrl-Q, or Ctrl-C twice exits.",
          "Everything is a log of events: the screen you see is a fold over it."

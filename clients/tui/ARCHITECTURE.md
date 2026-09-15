@@ -163,6 +163,15 @@ The ledger is a fold over persisted events:
 | `cancelled`                        | marks the window cancelled (no state change) |
 | `window_dismissed`                 | -> `:dismissed`                              |
 
+Every answer to a request logs `branch_state` — an approval, a question, and a
+budget question whichever way it went — because that event is the only thing the
+ledger and the UI can see, and an agent that resumed silently would leave the
+window blinking for good. The TUI's window additionally treats `needs_input`
+with nothing pending as `running`, and drops the pending requests of an agent
+whose delegation ended or that was cancelled: a request whose agent is gone can
+never be answered, and Approvals discards its own entry on `:DOWN` without
+logging anything.
+
 `:done_unread` and `:failed_unread` are resting states. Nothing is removed
 without a `window_dismissed` event, and that event is only written when the
 user asks — `{:dismiss, agent_path}`, or `{:cancel, agent_path}`, which stops
@@ -239,7 +248,7 @@ reports natively (Decision 59). A budget spends `input_tokens + cache_write`.
 | `{:input, :user, prompt}`                 | parent -> child (initial prompt is in the Node spec instead, so the child logs it itself) |
 | `{:DOWN, ...}`                            | Node monitors -> Dispatcher / parent             |
 | `{:expect_write, path, content_hash}`     | write/edit tools -> Watcher                      |
-| `{:command, "code" | "plan", payload, :watch}` | Watcher -> Dispatcher (cast)                |
+| `{:command, watch.change_command | watch.question_command, payload, :watch}` | Watcher -> Dispatcher (cast) |
 
 ### 4.5 Published events (`Troupe.Events`)
 
@@ -353,8 +362,9 @@ a session never blocks on a provider being reachable and works offline. A
 refresh asks every provider that has a key and records the ones that answered,
 so one unreachable gateway does not lose the rest.
 
-Precedence is config first: a `windows:` entry written by hand wins over the
-catalog, which wins over `default_window`. The catalog fills gaps, supplies the
+Precedence is config first: a `context:` written by hand under a provider's
+`models:` (or under `models.windows:` for a bare id) wins over the catalog,
+which wins over `default_window`. The catalog fills gaps, supplies the
 prices config has no way to state, and contributes models nobody declared.
 `troupe models` flags a hand-written window the provider now contradicts rather
 than silently overruling it either way.
@@ -362,6 +372,38 @@ than silently overruling it either way.
 `cost/2` prices the four disjoint token classes of §4.5 separately — a cache
 read is a fraction of fresh input and a cache write a premium on it — falling
 back to the input rate for providers that quote no cache rates.
+
+## 4.9 Providers on the wire
+
+A named provider in `config.yaml` (or one read out of opencode's config) is
+`%{type, base_url, api_key, auth, models, source}`, and each entry under
+`models:` is `%{id, context, max_output, reasoning_effort}` keyed by the name
+Troupe addresses — `Troupe.Config.model_spec/2` looks one up.
+
+`Provider.resolve/3` turns `provider/model` into `{adapter, config, wire_id}`,
+where `config` is `Provider.config()` — `api_key`, `base_url`, `auth`,
+`reasoning_effort`, `max_output` — and `wire_id` is the `id` that provider
+declares for the model, so a gateway that renames models is addressed by the
+name in `config.yaml` and asked by the name it wants. A model the provider does
+not list goes out as typed with nothing added.
+
+  * `auth` is `:api_key` (Anthropic's `x-api-key`, OpenAI's bearer token) or
+    `:bearer`, which sends the key as `Authorization: Bearer` — what a gateway
+    speaking the Messages API in front of Anthropic wants.
+  * `HTTP.api_url/2` joins the base URL and the API path without doubling a
+    version segment the base already carries, since a gateway is configured as
+    `https://host/anthropic/v1` and the adapter asks for `/v1/messages`.
+  * `reasoning_effort` goes to an OpenAI-compatible provider verbatim, alongside
+    `max_completion_tokens` instead of `max_tokens` (a reasoning model rejects
+    the latter and counts its reasoning against the former). Anthropic takes a
+    budget rather than a level, so the effort becomes `thinking.budget_tokens`
+    and the output cap is raised to fit it.
+  * `Provider.effort/2` resolves the level for one request: `Request.reasoning_effort`
+    (from the agent definition's `reasoning_effort:`, else the global config key)
+    wins, and the provider's declaration for the model is the fallback. The
+    definition is the more specific of the two — how much thinking work is worth
+    is a property of the agent, not of the model it happens to run on.
+  * `max_output` overrides the request's own `max_tokens` for that model.
 
 ## 5. Tools
 
@@ -414,6 +456,16 @@ persisted session with no running Log, which is safe because a stopped session
 has no writer. `session_closed` is a terminal record: nothing folds it, so
 replay is unaffected and it reaches the TUI model through the same inert path as
 `session_started`. Starting or resuming a session drops `closed_at` again.
+
+`Session.Index.list/1` reads that directory back: one entry per session under
+`sessions/<workspace-hash>/` with its `meta.json`, the log's mtime as the last
+activity, the creation time decoded from the id, and the branches folded out of
+the log — the Dispatcher's ledger narrowed to `branch_spawned`, `branch_state`,
+`branch_failed` and `window_dismissed`, with every other line skipped before it
+is decoded. Nothing starts a session to be listed. It backs the TUI's session
+picker (`/resume`, Decision 65) and `troupe resume` without an id; the picker
+switches the live session by re-subscribing and folding the other log with the
+same `UI.TUI.Model.rebuild/3` a restart uses.
 
 ## 8. Concurrency rules
 

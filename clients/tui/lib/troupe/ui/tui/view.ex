@@ -12,6 +12,7 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph, Scrollbar}
   alias ExRatatui.Widgets.Block.Title
+  alias Troupe.Session.Index
   alias Troupe.Settings
   alias Troupe.UI.TUI.Model
 
@@ -26,6 +27,12 @@ defmodule Troupe.UI.TUI.View do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     observer_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  def render(%{focus: :sessions} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    sessions_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
   def render(state, frame) do
@@ -330,12 +337,18 @@ defmodule Troupe.UI.TUI.View do
 
       pending ->
         ["", "waiting for you"] ++
-          Enum.map(pending, fn
-            %{kind: :approval, name: name} -> "  approval: #{name} (y / n / a in the window)"
-            %{kind: :question, question: q} -> "  question: #{q}"
-          end)
+          Enum.map(pending, &("  " <> pending_summary(&1, "y / n / a in the window")))
     end
   end
+
+  # One line per outstanding request, shared by the observer's detail pane and the
+  # side panel. The catch-all clause is load-bearing: an unmatched `kind` raises
+  # inside `render/2`, which ExRatatui rescues by dropping the frame — the screen
+  # would freeze on stale content while the app kept consuming keys.
+  defp pending_summary(%{kind: :approval, name: name}, keys), do: "approval: #{name} (#{keys})"
+  defp pending_summary(%{kind: :budget}, keys), do: "budget exhausted (#{keys})"
+  defp pending_summary(%{kind: :question, question: q}, _keys), do: "question: #{q} (type + Enter)"
+  defp pending_summary(%{kind: kind}, _keys), do: "#{kind} (see the window)"
 
   defp recent_block(agent) do
     case agent.transcript |> Enum.filter(&match?({:tool, _}, &1)) |> Enum.take(-6) do
@@ -346,6 +359,174 @@ defmodule Troupe.UI.TUI.View do
         ["", "recent tool calls"] ++
           Enum.map(tools, fn {:tool, t} -> "  " <> Model.tool_head(t) end)
     end
+  end
+
+  ## Session picker
+
+  @doc "The picker's sessions and the clamped cursor, given the model and page state."
+  @spec sessions_view(map()) :: {[Index.entry()], non_neg_integer()}
+  def sessions_view(state) do
+    entries = state.sessions.entries
+    {entries, min(state.sessions.cursor, max(length(entries) - 1, 0))}
+  end
+
+  defp sessions_page(state, rect) do
+    {entries, cursor} = sessions_view(state)
+    [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 3}, {:fill, 2}])
+
+    list = %ExRatatui.Widgets.List{
+      items:
+        entries
+        |> Enum.with_index(1)
+        |> Enum.map(fn {entry, n} ->
+          session_line(entry, n, state, max(list_rect.width - 4, 20))
+        end),
+      selected: if(entries == [], do: nil, else: cursor),
+      highlight_symbol: "▸ ",
+      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      block: %Block{
+        title: sessions_title(entries, state, list_rect.width - 2),
+        borders: [:all],
+        border_type: :double
+      }
+    }
+
+    detail = %Paragraph{
+      text: session_detail(Enum.at(entries, cursor), state, max(detail_rect.width - 2, 20)),
+      wrap: true,
+      block: %Block{title: " detail — Enter resumes this session ", borders: [:all]}
+    }
+
+    [{list, list_rect}, {detail, detail_rect}]
+  end
+
+  defp sessions_title(entries, state, width) do
+    count = "#{length(entries)} session(s)"
+
+    [
+      " #{count} in #{state.workspace} ",
+      " #{count} in #{Path.basename(state.workspace)} ",
+      " #{count} "
+    ]
+    |> fit(width)
+  end
+
+  # One row per session: its number (`/resume 2` takes it), whether it is this one,
+  # how long ago it was written to, what its branches came to, and the prompt the
+  # first one was given.
+  defp session_line(entry, n, state, width) do
+    head =
+      [
+        String.pad_leading(Integer.to_string(n), 2),
+        session_marker(entry, state),
+        String.pad_trailing(age(entry.updated_at, state.now), 10),
+        String.pad_trailing(branch_count(entry), 11),
+        String.pad_trailing(branch_states(entry), 24)
+      ]
+      |> Enum.join(" ")
+
+    room = max(width - Model.cell_width(head) - 1, 8)
+    String.trim_trailing(head <> " " <> clip(Model.one_line(entry.title), room))
+  end
+
+  defp session_marker(%{session_id: sid}, %{session_id: sid}), do: "●"
+  defp session_marker(%{running?: true}, _state), do: "○"
+  defp session_marker(_entry, _state), do: " "
+
+  defp branch_count(entry) do
+    case length(Index.live_branches(entry)) do
+      1 -> "1 branch"
+      n -> "#{n} branches"
+    end
+  end
+
+  @branch_order [:needs_input, :running, :failed_unread, :done_unread]
+
+  defp branch_states(entry) do
+    entry
+    |> Index.live_branches()
+    |> Enum.frequencies_by(& &1.state)
+    |> Enum.sort_by(fn {state, _n} -> Enum.find_index(@branch_order, &(&1 == state)) || 9 end)
+    |> Enum.map_join(" · ", &state_count/1)
+  end
+
+  defp state_count({:needs_input, 1}), do: "1 needs you"
+  defp state_count({:needs_input, n}), do: "#{n} need you"
+  defp state_count({:running, n}), do: "#{n} running"
+  defp state_count({:done_unread, n}), do: "#{n} done"
+  defp state_count({:failed_unread, n}), do: "#{n} failed"
+  defp state_count({state, n}), do: "#{n} #{state}"
+
+  # "just now", "12m ago", "3h ago", "2d ago" — a picker row is read at a glance.
+  defp age(nil, _now), do: "unknown"
+
+  defp age(ts, now) do
+    s = div(max(now - ts, 0), 1000)
+
+    cond do
+      s < 60 -> "just now"
+      s < 3600 -> "#{div(s, 60)}m ago"
+      s < 86_400 -> "#{div(s, 3600)}h ago"
+      true -> "#{div(s, 86_400)}d ago"
+    end
+  end
+
+  defp clip(text, room) do
+    if Model.cell_width(text) <= room,
+      do: text,
+      else: String.slice(text, 0, max(room - 1, 1)) <> "…"
+  end
+
+  defp session_detail(nil, _state, _width),
+    do:
+      "No sessions in this directory yet.\n\n" <>
+        "Dispatch a branch and this session shows up here; " <>
+        "`troupe` in another directory keeps its own list."
+
+  defp session_detail(entry, state, width) do
+    branches = Index.live_branches(entry)
+
+    ([
+       "#{entry.session_id}  (#{where(entry, state)})",
+       "",
+       field("workspace", entry.workspace),
+       field("started", stamp(entry.created_at)),
+       field("last event", "#{age(entry.updated_at, state.now)} · #{stamp(entry.updated_at)}"),
+       field("closed", if(entry.closed_at, do: stamp(entry.closed_at), else: "no")),
+       field("branches", "#{length(branches)}#{dismissed_note(entry, branches)}")
+     ] ++ branch_block(branches, width))
+    |> Enum.join("\n")
+  end
+
+  defp where(%{session_id: sid}, %{session_id: sid}), do: "this session"
+  defp where(%{running?: true}, _state), do: "running in this VM"
+  defp where(_entry, _state), do: "on disk — Enter replays it"
+
+  defp dismissed_note(entry, branches) do
+    case length(entry.branches) - length(branches) do
+      0 -> ""
+      n -> " (#{n} dismissed)"
+    end
+  end
+
+  defp branch_block([], _width), do: ["", "No branches yet."]
+
+  defp branch_block(branches, width) do
+    ["", "branches"] ++
+      Enum.map(branches, fn b ->
+        head =
+          "  " <>
+            String.pad_trailing(b.path, 12) <>
+            String.pad_trailing(b.name, 10) <> String.pad_trailing(to_string(b.state), 13)
+
+        head <> clip(Model.one_line(b.prompt), max(width - Model.cell_width(head), 12))
+      end)
+  end
+
+  defp stamp(nil), do: "unknown"
+
+  defp stamp(ms) do
+    ms |> DateTime.from_unix!(:millisecond) |> Calendar.strftime("%Y-%m-%d %H:%M UTC")
   end
 
   ## Settings page
@@ -627,7 +808,7 @@ defmodule Troupe.UI.TUI.View do
   defp hint_title(g, state) do
     w = g.window
     agents = length(Model.agent_paths(w))
-    approval? = Enum.any?(w.pending, &(&1.kind == :approval))
+    approval? = Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
     verb = if state.expanded, do: "collapses", else: "expands"
 
     pieces = [
@@ -739,10 +920,7 @@ defmodule Troupe.UI.TUI.View do
 
         items ->
           [{:blank, ""}, {:system, "Waiting for you:"}] ++
-            Enum.map(items, fn
-              %{kind: :approval, name: name} -> {:pending, "  approval: #{name} — y / n / a"}
-              %{kind: :question, question: q} -> {:pending, "  question: #{q} — type and Enter"}
-            end)
+            Enum.map(items, &{:pending, "  " <> pending_summary(&1, "y / n / a")})
       end
 
     [{:system, "Tokens:"}] ++
@@ -816,6 +994,9 @@ defmodule Troupe.UI.TUI.View do
 
         :observer ->
           {"", " agents — ↑↓ move · Enter opens the agent · Esc back "}
+
+        :sessions ->
+          {"", " sessions — ↑↓ move · Enter resumes · r refreshes · Esc back "}
       end
 
     focused_cmd? = state.focus == :command

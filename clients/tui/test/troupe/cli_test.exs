@@ -55,4 +55,29 @@ defmodule Troupe.CLITest do
     assert out =~ "#{path}> [done_unread] wrote and read"
     assert Enum.all?(String.split(String.trim(out), "\n"), &String.starts_with?(&1, "code-1> "))
   end
+
+  # Nobody can press a key in headless mode, so a budget question the printer does
+  # not answer leaves the run blocked in `wait()` until the user kills it.
+  test "headless printer stops a branch whose budget ran out instead of waiting forever" do
+    ws = tmp_workspace(%{"f.txt" => "x"})
+    script = List.duplicate({:tool, "read_file", %{"path" => "f.txt"}}, 10)
+    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, _} =
+      Printer.start_link(
+        session_id: sid,
+        target: "code-1",
+        io: io,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
+    assert_receive {:rest, 0}, 10_000
+
+    {_, out} = StringIO.contents(io)
+    assert out =~ "#{path}> budget exhausted; headless mode stops here"
+    assert window(sid, path).reason == :budget_exhausted
+  end
 end

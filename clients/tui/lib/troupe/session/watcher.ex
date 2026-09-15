@@ -194,7 +194,7 @@ defmodule Troupe.Session.Watcher do
       state
     else
       kind = if Enum.any?(triggers, &(&1.kind == :change)), do: :change, else: :question
-      command = if kind == :change, do: "code", else: "plan"
+      command = command_for(kind, state.config.watch)
       context = context_markers(state.workspace, Enum.map(triggers, & &1.path))
       payload = payload(state.workspace, triggers, context)
 
@@ -215,6 +215,14 @@ defmodule Troupe.Session.Watcher do
       state
     end
   end
+
+  # Saving a file is not a considered request: an `AI?` is one question and an
+  # `AI!` is a small local edit, so both go to a cheap, few-turn profile rather
+  # than to `/code` or `/plan` with a full thinking budget and a task list. The
+  # profile is a config key because "quick and cheap" is a judgement about the
+  # user's repository, not a fact about the harness.
+  defp command_for(:change, %{change_command: c}), do: c
+  defp command_for(:question, %{question_command: c}), do: c
 
   defp context_markers(workspace, exclude_paths) do
     workspace

@@ -31,9 +31,10 @@ defmodule Troupe.WorkflowTest do
     end
 
     test "available lists on-disk workflows, default when none" do
-      ws = tmp_workspace(%{
-        ".troupe/workflows/custom.json" => ~s|[{"name":"a","prompt":"do a"}]|
-      })
+      ws =
+        tmp_workspace(%{
+          ".troupe/workflows/custom.json" => ~s|[{"name":"a","prompt":"do a"}]|
+        })
 
       assert Workflow.available(ws) == ["custom"]
       ws2 = tmp_workspace()
@@ -41,10 +42,11 @@ defmodule Troupe.WorkflowTest do
     end
 
     test "load reads a named workflow (and rejects an invalid one, falling back to default)" do
-      ws = tmp_workspace(%{
-        ".troupe/workflows/custom.json" =>
-          ~s|[{"name":"build","prompt":"build it"},{"name":"deploy","prompt":"ship it"}]|
-      })
+      ws =
+        tmp_workspace(%{
+          ".troupe/workflows/custom.json" =>
+            ~s|[{"name":"build","prompt":"build it"},{"name":"deploy","prompt":"ship it"}]|
+        })
 
       assert Workflow.load(ws, "custom") == [
                %{name: "build", prompt: "build it"},

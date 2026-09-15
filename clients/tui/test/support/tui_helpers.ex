@@ -79,4 +79,17 @@ defmodule Troupe.TUIHelpers do
     do: :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "down", button: "left", x: x, y: y})
 
   def user_state(pid), do: :sys.get_state(pid).user_state
+
+  @doc """
+  Walks the settings cursor to a setting by key. Counting `down` presses breaks
+  every time a setting is added, and these tests are about the page, not about
+  where one row sits in it.
+  """
+  def to_setting(pid, key) do
+    target = Enum.find_index(Troupe.Settings.fields(), &(&1.key == key))
+    if target == nil, do: raise("no setting #{key}")
+    for _ <- 1..target, do: press(pid, "down")
+    ^target = user_state(pid).settings.cursor
+    :ok
+  end
 end

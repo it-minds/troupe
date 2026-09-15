@@ -1,7 +1,10 @@
 defmodule Troupe.LLM.Anthropic do
   @moduledoc """
   Anthropic Messages API adapter with native tool use and SSE streaming.
-  Config: `%{api_key, base_url}`; `ANTHROPIC_API_KEY` is the fallback key.
+  Config is `Troupe.LLM.Provider.config()`: `api_key` (`ANTHROPIC_API_KEY` is the
+  fallback), `base_url`, `auth` (`:bearer` sends the key as `Authorization: Bearer`
+  for a gateway that speaks the Messages API but not `x-api-key`),
+  `reasoning_effort` and `max_output`.
   """
 
   @behaviour Troupe.LLM.Provider
@@ -12,20 +15,16 @@ defmodule Troupe.LLM.Anthropic do
 
   @impl true
   def stream(config, %Request{} = request, reply_to, ref) do
-    url =
-      (config[:base_url] || "https://api.anthropic.com")
-      |> String.trim_trailing("/")
-      |> Kernel.<>("/v1/messages")
-
+    url = HTTP.api_url(config[:base_url] || "https://api.anthropic.com", "/v1/messages")
     key = config[:api_key] || System.get_env("ANTHROPIC_API_KEY") || ""
 
     headers = [
-      {"x-api-key", key},
+      auth_header(config[:auth], key),
       {"anthropic-version", @version},
       {"content-type", "application/json"}
     ]
 
-    body = encode(request)
+    body = encode(request, config)
 
     acc0 = %{
       blocks: %{},
@@ -47,11 +46,14 @@ defmodule Troupe.LLM.Anthropic do
     :ok
   end
 
+  defp auth_header(:bearer, key), do: {"authorization", "Bearer " <> key}
+  defp auth_header(_auth, key), do: {"x-api-key", key}
+
   @doc false
-  def encode(%Request{} = r) do
+  def encode(%Request{} = r, config \\ %{}) do
     %{
       model: r.model,
-      max_tokens: r.max_tokens,
+      max_tokens: config[:max_output] || r.max_tokens,
       stream: true,
       system: r.system,
       messages: Enum.map(r.messages, &encode_message/1),
@@ -62,6 +64,37 @@ defmodule Troupe.LLM.Anthropic do
         )
     }
     |> then(fn m -> if r.tools == [], do: Map.delete(m, :tools), else: m end)
+    |> put_thinking(Provider.effort(r, config))
+  end
+
+  # Anthropic takes a thinking budget in tokens where an OpenAI-compatible
+  # provider takes an effort level, so a configured effort becomes a budget. The
+  # budget has to fit inside `max_tokens`, so enabling thinking raises the output
+  # cap along with it rather than failing the request.
+  defp put_thinking(body, effort) do
+    case budget(effort) do
+      nil ->
+        body
+
+      budget ->
+        body
+        |> Map.put(:thinking, %{type: "enabled", budget_tokens: budget})
+        |> Map.put(:max_tokens, max(body.max_tokens, budget + 4_096))
+    end
+  end
+
+  defp budget(effort) when effort in [nil, "none", "off"], do: nil
+  defp budget("minimal"), do: 1_024
+  defp budget("low"), do: 4_096
+  defp budget("medium"), do: 8_192
+  defp budget("high"), do: 16_384
+  defp budget("xhigh"), do: 32_768
+
+  defp budget(other) when is_binary(other) do
+    case Integer.parse(other) do
+      {n, ""} when n >= 1_024 -> n
+      _ -> nil
+    end
   end
 
   defp encode_message(%{role: role, content: blocks}) do

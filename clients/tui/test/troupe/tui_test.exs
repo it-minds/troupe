@@ -419,6 +419,8 @@ defmodule Troupe.TUIWorktreeCompletionTest do
   import Troupe.TestHelpers
   import Troupe.TUIHelpers
 
+  alias Troupe.UI.TUI.Model
+
   test "/worktree <Tab> completes the user's checked-out worktrees by path or branch" do
     ws = tmp_workspace() |> git_init!()
     run_git!(ws, ["worktree", "add", "feature/design", "-b", "design"])
@@ -522,7 +524,7 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     press(pid, "enter")
 
     # Settings field: move to a non-bool field (watch debounce, an int), edit it and paste.
-    press(pid, "down")
+    to_setting(pid, "watch.debounce_ms")
     press(pid, "enter")
     assert is_binary(user_state(pid).settings.editing)
     before_editing = user_state(pid).settings.editing
@@ -574,5 +576,214 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     await_state("code-1", :done_unread)
     [answered] = events_of(sid, "code-1", :question_answered)
     assert answered.data.text == "answer\ntwo"
+  end
+
+  # A delegated subagent runs on a share of its parent's budget, so it is the agent
+  # that hits the budget question first. The side panel used to have no clause for
+  # it and raised inside render/2, which the renderer turns into a dropped frame —
+  # the screen froze on stale content while the app kept eating keys — and y/n/a
+  # only matched approvals, so nothing could answer it either.
+  test "a subagent's budget question renders in the pane and side panel, and n answers it" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      "code-1" => [
+        {:tool, "delegate", %{"agent" => "explore", "prompt" => "look"}},
+        {:finish, "done"}
+      ],
+      "code-1/explore-1" => [
+        {:tool, "list_files", %{"path" => "."}},
+        {:finish, "looked"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", %{prompt: "go", budget: %{max_turns: 1}})
+    await_event("code-1/explore-1", :budget_ask_started, 15_000)
+
+    eventually(fn -> user_state(pid).model.windows["code-1"].pending != [] end)
+
+    assert [%{kind: :budget, agent_path: "code-1/explore-1"}] =
+             user_state(pid).model.windows["code-1"].pending
+
+    press(pid, "1")
+    text = screen_text(pid, session)
+    assert text =~ "[code-1/explore-1] BUDGET EXHAUSTED"
+    assert text =~ "budget exhausted (y / n / a)", "the side panel renders instead of raising"
+    assert text =~ "y/n/a"
+
+    # ←→ views the subagent, so its request is the one y/n/a answers.
+    press(pid, "right")
+    assert user_state(pid).pane.agent == "code-1/explore-1"
+    press(pid, "n")
+
+    answered = await_event("code-1/explore-1", :budget_ask_answered, 15_000)
+    assert answered.data.decision == :deny
+    assert user_state(pid).win_text == "", "n answered the question instead of being typed"
+
+    # The root spent the same budget, so it asks in its turn; n rests the branch.
+    await_event("code-1", :budget_ask_started, 15_000)
+    eventually(fn -> Enum.any?(user_state(pid).model.windows["code-1"].pending) end)
+    press(pid, "left")
+    press(pid, "n")
+    await_state("code-1", :done_unread, 15_000)
+  end
+
+  # `y` and `a` on a budget question used to resume the turn without logging
+  # `branch_state`, and `budget_ask_answered` only clears the pending item — so the
+  # window kept blinking "waiting for you" with nothing outstanding. A subagent made
+  # it permanent: its `finished` carries no `branch_state` either, so nothing after
+  # it ever cleared the flag.
+  test "allowing a subagent's budget question stops the window needing input" do
+    ws =
+      tmp_workspace(%{
+        # Its own definition caps the turns, so the child runs out of budget while the
+        # root has plenty and never asks a question of its own.
+        ".troupe/agents/tiny.md" => """
+        ---
+        description: One turn and out.
+        mode: subagent
+        tools: [list_files, finish]
+        max_turns: 1
+        ---
+        You look once.
+        """
+      })
+
+    scripts = %{
+      "code-1" => [
+        {:tool, "delegate", %{"agent" => "tiny", "prompt" => "look"}},
+        {:finish, "done"}
+      ],
+      "code-1/tiny-1" => [
+        {:tool, "list_files", %{"path" => "."}},
+        {:finish, "looked"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, _session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "go")
+    await_event("code-1/tiny-1", :budget_ask_started, 15_000)
+
+    eventually(fn -> user_state(pid).model.windows["code-1"].state == :needs_input end, 15_000)
+
+    press(pid, "1")
+    press(pid, "right")
+    assert user_state(pid).pane.agent == "code-1/tiny-1"
+    press(pid, "y")
+
+    answered = await_event("code-1/tiny-1", :budget_ask_answered, 15_000)
+    assert answered.data.decision == :allow
+
+    eventually(fn -> user_state(pid).model.windows["code-1"].pending == [] end, 15_000)
+    eventually(fn -> user_state(pid).model.windows["code-1"].state != :needs_input end, 15_000)
+
+    # The ledger reads the same log, so it has to be told too.
+    assert %{data: %{state: :running}} =
+             sid |> events_of("code-1/tiny-1", :branch_state) |> List.last()
+
+    await_state("code-1", :done_unread, 15_000)
+  end
+
+  # A request whose agent is gone can never be answered: Approvals drops its entry
+  # when the pid dies without logging anything, so the item stayed in `pending`
+  # forever and the `pending != []` guard then blocked every later `:running`.
+  test "a request left behind by a dead subagent does not pin the window" do
+    events =
+      [
+        {"code-1", :branch_spawned, %{name: "code", isolation: :shared}},
+        {"code-1", :delegation_started, %{child_path: "code-1/general-1", agent: "general"}},
+        {"code-1/general-1", :question_asked, %{call_id: "q1", question: "Which directory?"}},
+        {"code-1/general-1", :branch_state, %{state: :needs_input}}
+      ]
+      |> Enum.with_index(1)
+      |> Enum.map(fn {{path, type, data}, seq} ->
+        %Troupe.Event{
+          session_id: "S",
+          seq: seq,
+          ts: seq,
+          agent_path: path,
+          type: type,
+          data: data
+        }
+      end)
+
+    waiting = Model.rebuild("S", "/ws", events)
+    assert [%{call_id: "q1"}] = waiting.windows["code-1"].pending
+    assert waiting.windows["code-1"].state == :needs_input
+
+    for ending <- [
+          {"code-1", :delegation_completed, %{child_path: "code-1/general-1", ok: false}},
+          {"code-1/general-1", :cancelled, %{}}
+        ] do
+      {path, type, data} = ending
+
+      settled =
+        Model.apply(waiting, %Troupe.Event{
+          session_id: "S",
+          seq: 5,
+          ts: 5,
+          agent_path: path,
+          type: type,
+          data: data
+        })
+
+      assert settled.windows["code-1"].pending == [], inspect(type)
+      assert settled.windows["code-1"].state == :running, inspect(type)
+    end
+  end
+
+  # `branch_state` is window-scoped but each agent emits it from its own calls, so
+  # the root answering used to flip the window back to running while a subagent was
+  # still waiting: no badge, no attention count, and Enter no longer went there.
+  test "the window keeps needing input while a subagent waits, after the root is answered" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      # Both in one turn, so the root and its subagent wait on the user at once.
+      "code-1" => [
+        {:tools,
+         [
+           {"delegate", %{"agent" => "general", "prompt" => "look"}},
+           {"ask_user", %{"question" => "Which database?"}}
+         ]},
+        {:finish, "done"}
+      ],
+      "code-1/general-1" => [
+        {:tool, "ask_user", %{"question" => "Which directory?"}},
+        {:finish, "looked"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "go")
+
+    eventually(fn -> length(user_state(pid).model.windows["code-1"].pending) == 2 end, 15_000)
+
+    # Answer the root's question; the subagent's is still outstanding.
+    press(pid, "1")
+    type(pid, "postgres")
+    press(pid, "enter")
+
+    eventually(fn -> length(user_state(pid).model.windows["code-1"].pending) == 1 end, 15_000)
+    assert user_state(pid).model.windows["code-1"].state == :needs_input
+    assert screen_text(pid, session) =~ "[code-1/general-1] QUESTION: Which directory?"
+
+    # Now answer the subagent's; only then does the window stop needing input.
+    press(pid, "right")
+    type(pid, "lib")
+    press(pid, "enter")
+
+    eventually(fn -> user_state(pid).model.windows["code-1"].pending == [] end, 15_000)
+    eventually(fn -> user_state(pid).model.windows["code-1"].state != :needs_input end, 15_000)
+
+    assert [%{data: %{text: "postgres"}}] = events_of(sid, "code-1", :question_answered)
+    assert [%{data: %{text: "lib"}}] = events_of(sid, "code-1/general-1", :question_answered)
   end
 end
