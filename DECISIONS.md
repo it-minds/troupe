@@ -2782,3 +2782,38 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      in the request, which is what `kubectl --server --certificate-authority --token`
      does. This is the same rule as everywhere else in this report: a passing response is
      not proof of what you think passed.
+
+## R1 — the cluster suite finds its second and third
+
+416. **`required: true` was declared on forty admin arguments and enforced on none.** A
+     missing one arrived at the context as `nil` and became whatever that function did with
+     a nil; for `admin.bundles.list` it was an Ecto comparison against nil, which is an
+     ArgumentError, which is a 500 on a public endpoint. `AdminAPI.invoke/3` now checks
+     before applying, and the test covers *every* method with a required argument rather
+     than the one that happened to crash — the defect was never about bundles.
+
+417. **The placement actor recounts before it refuses.** Its in-memory count is the
+     authority between reloads, and a reload happens only when it meets a pod it has never
+     seen — so a count that drifts upward never comes down, and the profile is full for
+     ever while the database says it is empty. The refusal path now reloads and tries
+     again: the one moment where being wrong is expensive, and the one moment where a
+     group-by costs nothing, because the alternative is a request that fails.
+
+418. **And the drift was mine.** `Placement.release/2` gives a slot back only where it
+     finds a `worker_id` to clear, and `strand/2` called `Sessions.dormant/1` first — which
+     since the dormancy fix earlier in this branch clears exactly that field. Every pod
+     that lost a session to a restart stayed charged for it. The order is now release then
+     dormant, and there is a test for the order as well as one for the drift, because the
+     structural fix would otherwise hide the local bug from the next person.
+
+419. **The e2e suite owns what it enrols.** The enrolment probe registered a worker whose
+     pod does not exist and whose name parses to the same ordinal as the real one. It is
+     drained on the way out. A world that leaves litter is a world the next test reads.
+
+420. **A restored session is proven by its chain, not by its head.** The first version of
+     the claim asserted the head hash was unchanged across a pod deletion, which is wrong:
+     resuming appends `session_resumed`, so the head moves. What continuity means is that
+     some event names the old head as its `prev_hash` and that every link holds — read off
+     the replacement pod over a real WebSocket, because the plane is not on the path of a
+     session's content and a suite that read it from the plane would be proving the wrong
+     thing.

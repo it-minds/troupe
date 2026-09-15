@@ -14,7 +14,7 @@ defmodule Troupe.E2E.EnrolmentTest do
 
   use ExUnit.Case, async: false
 
-  alias Troupe.E2E.World
+  alias Troupe.E2E.{Plane, World}
 
   @moduletag :e2e
   @moduletag timeout: 300_000
@@ -94,6 +94,12 @@ defmodule Troupe.E2E.EnrolmentTest do
       # refused everything.
       assert {:ok, result} = enrol(port, token, "e2e-probe-0")
       assert is_binary(result["worker_id"])
+
+      # A world owns what it created. This one enrolled a pod that does not exist, and
+      # left alone it sits in the fleet for ever with a name that parses to the same
+      # ordinal as the real pod — which is the sort of thing a later test reads and a
+      # later person has to explain.
+      on_exit(fn -> Plane.call("admin.pod.drain", %{"worker_id" => result["worker_id"], "confirm" => result["worker_id"]}) end)
     end
   end
 

@@ -85,19 +85,28 @@ defmodule Troupe.Plane.Placement do
         {:reply, {:error, :no_healthy_worker}, state}
 
       nil ->
-        {:reply, {:error, :at_capacity}, state}
+        # Before refusing, count again.
+        #
+        # This actor's own numbers are the authority between reloads, and a reload only
+        # happens when it meets a pod it has never seen. That is right on the happy path
+        # and wrong in exactly one place: a count that has drifted upward is a count that
+        # never comes down, and the profile is then full for ever while the database says
+        # it is empty. It is not hypothetical — `release/2` gives a slot back only when it
+        # finds a `worker_id` to clear, and a caller that marked the session dormant first
+        # had already cleared it.
+        #
+        # So the refusal path, and only the refusal path, pays for a group-by. It is the
+        # one moment where being wrong is expensive and the one moment where the cost does
+        # not matter, because the alternative is a request that fails.
+        reloaded = load(state)
+
+        case choose(reloaded, workers) do
+          nil -> {:reply, {:error, :at_capacity}, reloaded}
+          worker -> grant(worker, session_id, reloaded)
+        end
 
       worker ->
-        # Written before it is granted. A reservation that existed only in this process
-        # would be lost the moment the replica holding it went away, and the next actor
-        # would hand the same slot out again.
-        case Sessions.place(session_id, worker) do
-          {:ok, _session} ->
-            {:reply, {:ok, %{worker: worker, profile: state.profile}}, charge(state, worker.id, 1)}
-
-          {:error, reason} ->
-            {:reply, {:error, reason}, state}
-        end
+        grant(worker, session_id, state)
     end
   end
 
@@ -136,6 +145,20 @@ defmodule Troupe.Plane.Placement do
   end
 
   # -- choosing ---------------------------------------------------------------
+
+  # Written before it is granted. A reservation that existed only in this process would be
+  # lost the moment the replica holding it went away, and the next actor would hand the
+  # same slot out again. The slot is charged only where the write succeeded, so a failed
+  # placement does not leave this actor believing a pod is fuller than it is.
+  defp grant(worker, session_id, state) do
+    case Sessions.place(session_id, worker) do
+      {:ok, _session} ->
+        {:reply, {:ok, %{worker: worker, profile: state.profile}}, charge(state, worker.id, 1)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
+  end
 
   defp choose(state, workers) do
     workers

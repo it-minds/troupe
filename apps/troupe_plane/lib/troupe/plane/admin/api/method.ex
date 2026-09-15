@@ -18,4 +18,10 @@ defmodule Troupe.Plane.Admin.API.Method do
   @doc "The argument names, in the order the context takes them."
   @spec argument_names(t()) :: [String.t()]
   def argument_names(%__MODULE__{arguments: arguments}), do: Enum.map(arguments, & &1.name)
+
+  @doc "The ones a caller must send. Declared here and, since this, enforced."
+  @spec required_names(t()) :: [String.t()]
+  def required_names(%__MODULE__{arguments: arguments}) do
+    arguments |> Enum.filter(& &1.required) |> Enum.map(& &1.name)
+  end
 end

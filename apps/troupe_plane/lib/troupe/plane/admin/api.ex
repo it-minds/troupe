@@ -755,9 +755,39 @@ defmodule Troupe.Plane.Admin.API do
   end
 
   defp invoke(%Method{} = method, params, actor) do
-    arguments = Enum.map(Method.argument_names(method), &argument(&1, params))
-    Kernel.apply(Admin, method.function, [actor | arguments])
+    case missing(method, params) do
+      [] ->
+        arguments = Enum.map(Method.argument_names(method), &argument(&1, params))
+        Kernel.apply(Admin, method.function, [actor | arguments])
+
+      missing ->
+        {:error, Error.new(:invalid_params, %{method: method.name, missing: missing})}
+    end
   end
+
+  # `required: true` was declared on forty arguments and enforced on none of them: a
+  # missing one arrived at the context as `nil` and became whatever that function did
+  # with a nil — for `admin.bundles.list`, an Ecto comparison against nil, which is an
+  # ArgumentError, which is a 500 on a public endpoint. A declaration nothing reads is a
+  # comment.
+  #
+  # The flat forms are honoured here too, because `argument/2` honours them: a client may
+  # send a profile as `{"profile": {...}}` or as the params map itself, and a method whose
+  # required argument is satisfied that way is not missing it.
+  defp missing(%Method{} = method, params) do
+    method
+    |> Method.required_names()
+    |> Enum.reject(&present?(&1, params))
+  end
+
+  defp present?(name, params) when name in ~w(profile principal trigger) do
+    is_map(params[name]) or map_size(Map.drop(params, ["confirm"])) > 0
+  end
+
+  defp present?("content", params), do: is_map(params["content"])
+  defp present?("attrs", params), do: is_map(params["attrs"])
+  defp present?("filter", params), do: is_map(params)
+  defp present?(name, params), do: not is_nil(params[name])
 
   # `filter` and `attrs` are the two shapes a method takes a bag of options in; the rest
   # are plain values. A keyword list for the former because that is what the context

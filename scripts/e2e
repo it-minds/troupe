@@ -47,15 +47,19 @@ kind get kubeconfig --internal --name "$cluster" > "$work/kubeconfig"
 
 # Every ingress hostname resolves to 127.0.0.1 on the host, which inside a container is
 # the container. The node serves the ingress controller on its own port 80, so each name
-# is pointed there instead. Wildcards cannot be added this way, so a worker's per-pod
-# hostname is resolved by the suite itself against this same address.
+# is pointed there instead. `--add-host` takes no wildcards, so a worker's per-pod name is
+# spelled out for the first two ordinals — which is every pod a development profile has.
+# A profile scaled past that in a test adds its own, or reaches the pod by its Service.
 node_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$node")"
+profile="${TROUPE_PROFILE_NAME:-dev}"
 [ -n "$node_ip" ] || { echo "e2e: could not find $node on the kind network" >&2; exit 1; }
 
 exec docker run --rm --interactive $([ -t 0 ] && echo --tty) \
   --network kind \
   --add-host "plane.localtest.me:${node_ip}" \
   --add-host "dex.localtest.me:${node_ip}" \
+  --add-host "0-${profile}.workers.localtest.me:${node_ip}" \
+  --add-host "1-${profile}.workers.localtest.me:${node_ip}" \
   --volume "$host_pwd:/workspace" \
   --volume troupe-toolbox-build:/workspace/_build \
   --volume troupe-toolbox-deps:/workspace/deps \
@@ -67,5 +71,6 @@ exec docker run --rm --interactive $([ -t 0 ] && echo --tty) \
   --env TROUPE_E2E_PLANE_URL="http://plane.localtest.me" \
   --env TROUPE_E2E_ISSUER="http://dex.localtest.me/dex" \
   --env TROUPE_E2E_NODE_IP="$node_ip" \
+  --env TROUPE_E2E_INGRESS_PORT=80 \
   --entrypoint mix \
   "$image" troupe.e2e "$@"

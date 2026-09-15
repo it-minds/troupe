@@ -250,6 +250,25 @@ defmodule Troupe.E2E.World do
     ])
   end
 
+  @doc """
+  The same URL, reachable from wherever this suite is running.
+
+  A worker's endpoint is the one the *outside* uses — `…workers.localtest.me:30080`,
+  where 30080 is the port kind publishes on the host. Run from a container on Docker's
+  `kind` network, as `scripts/e2e` does, the node is reached at its own address on port
+  80 instead. On CI the suite runs on the host and there is nothing to rewrite.
+
+  Only the port, and only when told: the host name is what the ingress routes on, so
+  rewriting that would reach a different pod, or none at all.
+  """
+  @spec reachable(String.t()) :: String.t()
+  def reachable(url) do
+    case System.get_env("TROUPE_E2E_INGRESS_PORT") do
+      nil -> url
+      port -> URI.to_string(%{URI.parse(url) | port: String.to_integer(port)})
+    end
+  end
+
   @doc "The kubeconfig context this run is pinned to."
   @spec context() :: String.t()
   def context, do: System.get_env("TROUPE_E2E_CONTEXT") || "kind-troupe-dev"

@@ -105,6 +105,39 @@ defmodule Troupe.Plane.PlacementTest do
     assert {:ok, _} = Placement.reserve("dev", "s-2")
   end
 
+  test "a slot given back by a session that was already unplaced is still given back" do
+    profile("dev", 1, per_pod: 1)
+    session("s-1", "dev")
+    session("s-2", "dev")
+
+    assert {:ok, _} = Placement.reserve("dev", "s-1")
+
+    # The order `strand/2` used to do these in: dormant first, which clears `worker_id`,
+    # and then release — which gives a slot back only where it finds one to clear. The
+    # pod stayed charged for a session that was no longer on it, and a profile whose
+    # count only ever goes up is full for ever while the database says it is empty.
+    {:ok, _} = Sessions.dormant("s-1")
+    :ok = Placement.release("dev", "s-1")
+
+    assert {:ok, _} = Placement.reserve("dev", "s-2")
+  end
+
+  test "a count that drifted upward does not make a profile full for ever" do
+    profile("dev", 1, per_pod: 1)
+    session("s-1", "dev")
+
+    # However it happened — this is the state, and the question is whether the plane can
+    # get out of it. Before recounting on the refusal path it could not: nothing reloads
+    # while every pod is one this actor has already seen, so the drift was permanent
+    # until the plane restarted.
+    assert {:ok, _} = Placement.reserve("dev", "s-1")
+    {:ok, _} = Sessions.unplace("s-1")
+    {:ok, _} = Sessions.dormant("s-1")
+
+    session("s-2", "dev")
+    assert {:ok, _} = Placement.reserve("dev", "s-2")
+  end
+
   test "a draining pod takes nothing new" do
     [first, second] = profile("dev", 2, per_pod: 4)
     {:ok, _} = Fleet.drain(second)
