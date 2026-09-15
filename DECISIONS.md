@@ -2895,3 +2895,16 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      fresh cluster then has none of the images however recently they were built: the
      failure arrives as a pre-install hook that never starts, "trying and failing to pull
      image", several steps from anything that mentions building.
+
+431. **The `optional` on an MCP credential's `secretKeyRef` is the claim, and it spans
+     four hops no unit test sees together**: a bundle names the environment variable it
+     wants, the plane projects a `secretRef` onto the profile, the operator writes a
+     `secretKeyRef`, and Kubernetes injects it or, being told it is optional, does not.
+     Without the optional, a profile naming a credential nobody has configured yet is a
+     profile whose pods will not start, so one unconfigured server takes out every session
+     on it. Proven from inside the pod, because a spec that *asks* for a variable and a
+     process that *has* one are different facts.
+
+432. **And the other half is proven too.** Creating the Secret and restarting fills the
+     variable in. Without that, "the variable is absent" would be satisfied by a mechanism
+     that never injects anything at all.

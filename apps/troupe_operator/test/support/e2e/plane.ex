@@ -146,12 +146,14 @@ defmodule Troupe.E2E.Plane do
   # Tests that need more publish their own.
   defp default_bundle do
     %{
-      "version" => 1,
+      "schema" => 1,
       "agents" => [
         %{
-          "name" => "build",
-          "description" => "The development agent",
-          "prompt" => "You are a helpful assistant running on a cluster."
+          "name" => "prober",
+          "definition" => "---
+mode: primary
+---
+You are a helpful assistant on a cluster."
         }
       ]
     }

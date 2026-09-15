@@ -132,8 +132,11 @@ defmodule Troupe.E2E.BundleTest do
   # keeps the difference in one place a reader can see.
   defp bundle(prompt) do
     %{
-      "version" => 1,
-      "agents" => [%{"name" => "build", "description" => "The development agent", "prompt" => prompt}]
+      "schema" => 1,
+      "agents" => [%{"name" => "prober", "definition" => "---
+mode: primary
+---
+" <> prompt}]
     }
   end
 end
