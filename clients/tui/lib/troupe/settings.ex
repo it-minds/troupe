@@ -13,7 +13,7 @@ defmodule Troupe.Settings do
   alias Troupe.{Config, Paths}
 
   @type type :: :bool | :int | :float | :string | :model | :effort
-  @type effect :: :now | :new_branches
+  @type effect :: :now | :new_branches | :next_run
 
   @type field :: %{
           key: String.t(),
@@ -40,6 +40,28 @@ defmodule Troupe.Settings do
 
       Turn it on for a sandbox or a worktree branch you intend to review as a
       diff; leave it off when agents work in your own checkout.
+      """
+    },
+    %{
+      key: "mouse",
+      label: "mouse reporting",
+      type: :bool,
+      path: [:mouse],
+      yaml: ["mouse"],
+      effect: :next_run,
+      help: """
+      Let Troupe see the mouse: clicking a tile activates that window and the
+      wheel scrolls the pane under the cursor.
+
+      The cost is that the terminal hands every click to Troupe, so your own
+      click-and-drag selection — and with it the terminal's copy — stops
+      working inside the TUI. Turn this off if you select and copy text with
+      the mouse; you keep 1-9 for windows and PgUp/PgDn, ↑↓ and End for
+      scrolling, and Ctrl-Y (or /copy) copies a whole transcript either way.
+
+      Most terminals also let you hold a modifier to bypass mouse reporting
+      for one selection (Option on iTerm2 and Terminal.app, Shift on
+      GNOME Terminal, Konsole and most X11 terminals).
       """
     },
     %{
@@ -537,8 +559,10 @@ defmodule Troupe.Settings do
          "x                     stop the branch and remove its window (see /cancel)",
          "d                     dismiss a resting branch, keeping its worktree",
          "e                     expand tool output in the transcript",
+         "Ctrl-Y or /copy       copy the activated transcript to the clipboard",
          "Tab                   switch the branch's agent profile (plan → build)",
-         "type + Enter          answer a question, or send follow-up input"
+         "type + Enter          answer a question, or send follow-up input",
+         "Alt-Enter or Ctrl-J   a newline in the input box instead of sending"
        ]},
       {"Isolation and review",
        [

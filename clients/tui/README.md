@@ -124,6 +124,7 @@ masked.
 ```
 troupe                                  # TUI in the current directory
 troupe --watch                          # TUI with watch mode on
+troupe --no-mouse                       # TUI without mouse reporting (terminal selection works)
 troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
@@ -149,14 +150,27 @@ Inside the TUI, everything starts with `/`:
 | `/settings`, `/help` | settings page: tweak settings and read the curated help |
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
+| `/copy [n]` | copy the activated transcript (or tile `n`'s) to the system clipboard |
 
 Keys: `1`–`9`, Enter, or a mouse click on its tile activate a window; Esc returns to the command line;
 `y`/`n`/`a` answer an approval (allow / deny / allow for session); typing +
-Enter sends input or answers a question; Tab switches the window's profile
+Enter sends input or answers a question, and when a question offers options a
+digit picks one (with `multiple`, digits tick and untick and Enter sends the
+ticked set); Alt-Enter (or Ctrl-J) puts a newline in the box instead of
+sending; Tab switches the window's profile
 (`/plan` → Tab to `code` → "go" is plan-then-build); `x` cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `d`
-dismisses a finished window, keeping its worktree; `e` expands tool output; `@file` completes paths;
+dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
+transcript you are reading to the clipboard; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <id>` and `/todo add <text>` edit the
 activated branch's task list.
+
+Selecting text with the mouse: Troupe asks the terminal for mouse reporting, which is what makes
+tiles clickable and the wheel scroll — and it takes click-and-drag selection away from the terminal
+while the TUI is up. Most terminals let you hold a modifier to select anyway (Option on iTerm2 and
+Terminal.app, Shift on GNOME Terminal, Konsole and most X11 terminals). To get the terminal's own
+selection back permanently, start with `troupe --no-mouse` or turn the `mouse` setting off in
+`/settings`; windows are still `1`–`9` and the pane still scrolls with PgUp/PgDn, ↑/↓ and End.
+Either way `Ctrl-Y` and `/copy` copy a whole transcript, which no drag across a scrolling pane can.
 
 Reading a transcript: replies are rendered rather than printed raw. Headings,
 bullets, quotes and rules read as such, `inline code` and **bold** keep their

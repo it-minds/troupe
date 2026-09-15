@@ -85,6 +85,15 @@ defmodule Troupe.SettingsTest do
       ws = tmp_workspace()
       assert Settings.target_path(ws) == Path.join(Troupe.Paths.config_dir(), "config.yaml")
     end
+
+    # Mouse reporting is on unless the user turns it off, and turning it off is
+    # what gives the terminal its own text selection back.
+    test "mouse defaults to on and persists off" do
+      ws = workspace_with_config()
+      assert Config.load(ws).mouse
+      assert {:ok, _path} = Settings.persist(ws, "mouse", false)
+      refute Config.load(ws).mouse
+    end
   end
 
   describe "put_setting on a live session" do

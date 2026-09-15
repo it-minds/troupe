@@ -39,6 +39,7 @@ defmodule Troupe.Config do
           },
           tool_timeout_ms: pos_integer(),
           auto_approve: boolean(),
+          mouse: boolean(),
           max_delegation_depth: pos_integer(),
           default_window: pos_integer(),
           fake_script: String.t() | nil,
@@ -105,6 +106,7 @@ defmodule Troupe.Config do
             },
             tool_timeout_ms: 120_000,
             auto_approve: false,
+            mouse: true,
             max_delegation_depth: 3,
             default_window: 200_000,
             fake_script: nil,
@@ -554,6 +556,7 @@ defmodule Troupe.Config do
           survey_chars: Map.get(memory, "survey_chars", cfg.memory.survey_chars)
         },
         tool_timeout_ms: Map.get(yaml, "tool_timeout_ms", cfg.tool_timeout_ms),
+        mouse: Map.get(yaml, "mouse", cfg.mouse),
         max_delegation_depth: Map.get(yaml, "max_delegation_depth", cfg.max_delegation_depth),
         default_window: Map.get(yaml, "default_window", cfg.default_window),
         providers: providers,

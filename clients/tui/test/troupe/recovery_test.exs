@@ -91,6 +91,53 @@ defmodule Troupe.RecoveryTest do
     assert window(sid, path).reason == :budget_exhausted
   end
 
+  # The options a question offered are part of the request, so a restart has to
+  # put them back in front of the user rather than degrade it to a blank box.
+  test "restarting an agent re-registers its question with the options it offered" do
+    ws = tmp_workspace()
+
+    script = [
+      {:tool, "ask_user",
+       %{
+         "question" => "Which database?",
+         "options" => ["postgres", "sqlite"],
+         "multiple" => true
+       }},
+      {:finish, "chose"}
+    ]
+
+    {sid, _fake, _} = start_session!(workspace: ws, script: script)
+    {:ok, path} = Troupe.dispatch(sid, "code", "ask me")
+
+    asked = await_event(path, :question_asked)
+    await_state(path, :needs_input)
+
+    # The log carries the normalised offer, so any later reader agrees with the UI.
+    assert Enum.map(asked.data.options, & &1.label) == ["postgres", "sqlite"]
+    assert asked.data.multiple
+
+    call_id = asked.data.call_id
+    old = Troupe.agent_pid(sid, path)
+    Process.exit(old, :kill)
+
+    eventually(fn ->
+      live = Troupe.agent_pid(sid, path)
+
+      live && live != old &&
+        Enum.any?(Session.Approvals.pending(sid), fn p ->
+          p.call_id == call_id and p.agent_pid == live and
+            Enum.map(p.payload.options, & &1.label) == ["postgres", "sqlite"] and
+            p.payload.multiple
+        end)
+    end)
+
+    # Asked once, not twice: no duplicate pending item for the user to puzzle over.
+    assert [^asked] = events_of(sid, path, :question_asked)
+
+    eventually(fn -> Troupe.answer(sid, call_id, "postgres, sqlite") == :ok end)
+    await_state(path, :done_unread, 15_000)
+  end
+
   # Done item 6
   test "cancel during a shell sleep kills child and grandchild within 1s (by OS pid)" do
     ws = tmp_workspace()

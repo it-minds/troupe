@@ -79,7 +79,7 @@ defmodule Troupe.CLI.Runner do
                watch: args.watch,
                auto_approve: args.auto_approve
              ) do
-          {:ok, sid} -> tui(sid)
+          {:ok, sid} -> tui(sid, mouse_opts(args))
           {:error, reason} -> fail("could not start session: #{inspect(reason)}")
         end
 
@@ -121,7 +121,7 @@ defmodule Troupe.CLI.Runner do
 
       {:ok, sid} ->
         case dispatch.(sid) do
-          {:ok, _path} -> tui(sid)
+          {:ok, _path} -> tui(sid, mouse_opts(args))
           {:error, reason} -> fail("could not start: #{inspect(reason)}")
         end
 
@@ -137,7 +137,7 @@ defmodule Troupe.CLI.Runner do
     page = if args.session_id, do: [], else: [page: :sessions]
 
     case sid && Troupe.resume(sid, auto_approve: args.auto_approve, watch: args.watch) do
-      {:ok, sid} -> tui(sid, page)
+      {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
       nil -> fail("no session to resume in #{args.workspace}")
       {:error, reason} -> fail("could not resume: #{inspect(reason)}")
     end
@@ -154,12 +154,27 @@ defmodule Troupe.CLI.Runner do
     end
   end
 
-  defp tui(sid, extra \\ []) do
+  # Mouse reporting: `--mouse`/`--no-mouse` beats the `mouse` setting, which
+  # defaults to on. Off means the terminal keeps its own click-and-drag
+  # selection, at the cost of clicking tiles and wheel scrolling.
+  defp mouse_opts(args) do
+    mouse? =
+      case args.mouse do
+        nil -> Troupe.Config.load(args.workspace).mouse
+        flag -> flag
+      end
+
+    [mouse_capture: mouse?]
+  end
+
+  defp tui(sid, extra) do
+    # `extra` first: a Keyword lookup takes the earliest match, so the caller's
+    # `mouse_capture:` beats the default here.
+    opts = extra ++ [session_id: sid, name: TUI.Server.via(sid), mouse_capture: true]
+
     spec = %{
       id: TUI.Server,
-      start:
-        {TUI.Server, :start_link,
-         [[session_id: sid, name: TUI.Server.via(sid), mouse_capture: true] ++ extra]},
+      start: {TUI.Server, :start_link, [opts]},
       # a crash restarts and redraws; a deliberate quit (normal exit) does not come back
       restart: :transient
     }

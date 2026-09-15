@@ -279,7 +279,7 @@ Persisted event types and data:
 | `tool_call_completed`  | agent           | `%{call_id, ok, content}`                                            |
 | `approval_requested`   | agent           | `%{call_id, name, input, preview}`                                   |
 | `approval_answered`    | agent           | `%{call_id, decision}`                                               |
-| `question_asked`       | agent           | `%{call_id, question}`                                               |
+| `question_asked`       | agent           | `%{call_id, question, options, multiple}`                             |
 | `question_answered`    | agent           | `%{call_id, text}`                                                   |
 | `delegation_started`   | agent           | `%{call_id, child_path, agent, prompt}`                              |
 | `delegation_completed` | agent           | `%{call_id, child_path, ok, content, usage}`                         |

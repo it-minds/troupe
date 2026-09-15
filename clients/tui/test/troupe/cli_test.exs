@@ -24,6 +24,15 @@ defmodule Troupe.CLITest do
     assert CLI.version() =~ "troupe 0.1.0"
   end
 
+  # nil, not false: no flag has to stay distinguishable from `--mouse`, because
+  # only then can the `mouse` setting decide.
+  test "the mouse flag is tri-state" do
+    assert {:ok, %{mode: :tui, mouse: nil}} = CLI.parse([])
+    assert {:ok, %{mode: :tui, mouse: false}} = CLI.parse(["--no-mouse"])
+    assert {:ok, %{mode: :tui, mouse: true}} = CLI.parse(["--mouse"])
+    assert {:ok, %{mode: :resume, mouse: false}} = CLI.parse(["resume", "--no-mouse"])
+  end
+
   test "headless printer prints agent_path-prefixed lines and reports rest" do
     ws = tmp_workspace()
 
@@ -79,5 +88,59 @@ defmodule Troupe.CLITest do
     {_, out} = StringIO.contents(io)
     assert out =~ "#{path}> budget exhausted; headless mode stops here"
     assert window(sid, path).reason == :budget_exhausted
+  end
+
+  # With options offered the first is a better stand-in than boilerplate prose:
+  # it is an answer the model can actually act on.
+  test "headless printer answers a question with its first option when one is offered" do
+    ws = tmp_workspace()
+
+    script = [
+      {:tool, "ask_user", %{"question" => "Which database?", "options" => ["postgres", "sqlite"]}},
+      {:finish, "chose one"}
+    ]
+
+    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, _} =
+      Printer.start_link(
+        session_id: sid,
+        target: "code-1",
+        io: io,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    {:ok, path} = Troupe.dispatch(sid, "code", "ask me")
+    assert_receive {:rest, 0}, 10_000
+
+    {_, out} = StringIO.contents(io)
+    assert out =~ ~s|#{path}> question: Which database? (headless: answered "postgres")|
+
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "postgres"
+  end
+
+  test "headless printer falls back to judgement prose when a question offers no options" do
+    ws = tmp_workspace()
+    script = [{:tool, "ask_user", %{"question" => "Anything?"}}, {:finish, "guessed"}]
+    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, _} =
+      Printer.start_link(
+        session_id: sid,
+        target: "code-1",
+        io: io,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    {:ok, _path} = Troupe.dispatch(sid, "code", "ask me")
+    assert_receive {:rest, 0}, 10_000
+
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text =~ "proceed with your best judgement"
   end
 end

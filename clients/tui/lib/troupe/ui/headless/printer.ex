@@ -83,19 +83,18 @@ defmodule Troupe.UI.Headless.Printer do
     state
   end
 
+  # A headless run has nobody to ask. With options offered the first is the least
+  # surprising stand-in (models list them best-first); without any, the branch is
+  # told to use its judgement so the run can rest rather than block forever.
   defp print(%{type: :question_asked, agent_path: p, data: d}, state) do
-    line(
-      state,
-      p,
-      "question: #{d.question} (headless: answered 'proceed with your best judgement')"
-    )
+    answer =
+      case List.wrap(d[:options]) do
+        [%{label: label} | _] -> label
+        _ -> "No user is available; proceed with your best judgement."
+      end
 
-    Troupe.answer(
-      state.session_id,
-      d.call_id,
-      "No user is available; proceed with your best judgement."
-    )
-
+    line(state, p, "question: #{d.question} (headless: answered #{inspect(answer)})")
+    Troupe.answer(state.session_id, d.call_id, answer)
     state
   end
 

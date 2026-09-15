@@ -89,31 +89,3 @@ defmodule Troupe.Tools.Finish do
   @impl true
   def run(_args, _ctx), do: {:error, "finish is executed by the agent"}
 end
-
-defmodule Troupe.Tools.AskUser do
-  @moduledoc "Schema only; executed by `Agent.Server` through `Session.Approvals`."
-  @behaviour Troupe.Tool
-
-  @impl true
-  def name, do: "ask_user"
-
-  @impl true
-  def description,
-    do:
-      "Ask the user a question and wait for the answer. Use it only when you genuinely cannot proceed without a decision from the user."
-
-  @impl true
-  def schema do
-    %{
-      "type" => "object",
-      "properties" => %{"question" => %{"type" => "string"}},
-      "required" => ["question"]
-    }
-  end
-
-  @impl true
-  def default_permission, do: :auto
-
-  @impl true
-  def run(_args, _ctx), do: {:error, "ask_user is executed by the agent"}
-end

@@ -547,35 +547,156 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     assert answered.data.text == "a multi-\nline answer"
   end
 
-  test "shift-enter inserts a newline; a multiline window input shows a pasted marker and sends whole" do
+  test "a question with options renders a numbered menu and a digit answers it" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      "code-1" => [
+        {:tool, "ask_user",
+         %{
+           "question" => "Which database?",
+           "options" => [
+             %{"label" => "postgres", "description" => "what production runs"},
+             "sqlite"
+           ]
+         }},
+        {:finish, "ok"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me")
+    await_state("code-1", :needs_input)
+
+    press(pid, "1")
+    text = screen_text(pid, session)
+    assert text =~ "QUESTION: Which database?"
+    assert text =~ "1. postgres"
+    assert text =~ "what production runs"
+    assert text =~ "2. sqlite"
+    assert text =~ "press a digit to choose"
+
+    # The digit is the answer: nothing lands in the input box.
+    press(pid, "2")
+    assert user_state(pid).win_text == ""
+    await_state("code-1", :done_unread)
+
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "sqlite"
+
+    [asked] = events_of(sid, "code-1", :question_asked)
+    assert Enum.map(asked.data.options, & &1.label) == ["postgres", "sqlite"]
+    refute asked.data.multiple
+  end
+
+  test "a multiple-choice question ticks with digits and sends the ticked set on Enter" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      "code-1" => [
+        {:tool, "ask_user",
+         %{
+           "question" => "Which targets?",
+           "options" => ["linux", "macos", "windows"],
+           "multiple" => true
+         }},
+        {:finish, "ok"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me")
+    await_state("code-1", :needs_input)
+
+    press(pid, "1")
+    assert screen_text(pid, session) =~ "Enter sends the ticked options"
+
+    # Tick two, then untick and re-tick one to show a digit toggles.
+    press(pid, "1")
+    press(pid, "3")
+    assert user_state(pid).answer.selected == ["linux", "windows"]
+    press(pid, "3")
+    assert user_state(pid).answer.selected == ["linux"]
+    press(pid, "2")
+    assert user_state(pid).answer.selected == ["linux", "macos"]
+
+    text = screen_text(pid, session)
+    assert text =~ "[x] linux"
+    assert text =~ "[x] macos"
+    assert text =~ "[ ] windows"
+
+    press(pid, "enter")
+    await_state("code-1", :done_unread)
+
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "linux, macos"
+    assert user_state(pid).answer == nil
+  end
+
+  # An option list is a shortcut, not a cage: the reader may always type instead.
+  test "a free-text answer still works when options are offered" do
+    ws = tmp_workspace()
+
+    scripts = %{
+      "code-1" => [
+        {:tool, "ask_user", %{"question" => "Which database?", "options" => ["postgres"]}},
+        {:finish, "ok"}
+      ]
+    }
+
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, _session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me")
+    await_state("code-1", :needs_input)
+
+    press(pid, "1")
+    # A letter starts free text; from then on digits are ordinary characters.
+    type(pid, "mysql8")
+    assert user_state(pid).win_text == "mysql8"
+    press(pid, "enter")
+    await_state("code-1", :done_unread)
+
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "mysql8"
+  end
+
+  test "a modified Enter or Ctrl-J inserts a newline; a multiline window input sends whole" do
     ws = tmp_workspace()
     scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => "Tell me?"}}, {:finish, "ok"}]}
     {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
     {pid, session} = start_tui(sid)
 
-    # Command line: shift-enter inserts a newline; the marker appears.
+    # Command line: every newline key inserts one, and the marker appears.
     press(pid, "enter", ["shift"])
+    press(pid, "enter", ["alt"])
+    press(pid, "j", ["ctrl"])
     press(pid, "w")
-    assert user_state(pid).cmd_text == "\nw"
+    assert user_state(pid).cmd_text == "\n\n\nw"
     assert user_state(pid).focus == :command
-    text = screen_text(pid, session)
-    assert text =~ "pasted 1 line"
+    assert screen_text(pid, session) =~ "pasted 1 line"
     press(pid, "esc")
 
-    # Window input: type, split with shift-enter, marker shows, Enter sends the whole text.
+    # Window input: type, split with alt-enter, marker shows, Enter sends the whole text.
     {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me something")
     await_state("code-1", :needs_input)
     press(pid, "1")
     type(pid, "answer")
-    press(pid, "enter", ["shift"])
+    press(pid, "enter", ["alt"])
     type(pid, "two")
-    assert user_state(pid).win_text == "answer\ntwo"
-    assert screen_text(pid, session) =~ "pasted 2 lines"
+    press(pid, "j", ["ctrl"])
+    type(pid, "three")
+    assert user_state(pid).win_text == "answer\ntwo\nthree"
+    assert screen_text(pid, session) =~ "pasted 3 lines"
 
     press(pid, "enter")
     await_state("code-1", :done_unread)
     [answered] = events_of(sid, "code-1", :question_answered)
-    assert answered.data.text == "answer\ntwo"
+    assert answered.data.text == "answer\ntwo\nthree"
   end
 
   # A delegated subagent runs on a share of its parent's budget, so it is the agent

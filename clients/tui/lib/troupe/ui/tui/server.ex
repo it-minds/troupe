@@ -14,6 +14,7 @@ defmodule Troupe.UI.TUI.Server do
   alias Troupe.Session
   alias Troupe.Session.{Dispatcher, Index, Log, Memory, Watcher}
   alias Troupe.Settings
+  alias Troupe.UI.Clipboard
   alias Troupe.UI.TUI.{Model, View}
 
   @tick_ms 33
@@ -35,6 +36,7 @@ defmodule Troupe.UI.TUI.Server do
           expanded: boolean(),
           pane: pane(),
           size: {non_neg_integer(), non_neg_integer()},
+          answer: answer() | nil,
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
@@ -72,6 +74,14 @@ defmodule Troupe.UI.TUI.Server do
   @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer()}
 
   @typedoc """
+  A multiple-choice answer being assembled: which question it belongs to and the
+  labels ticked so far. Held in the UI rather than the log because it is a
+  cursor, not a decision — nothing outside this process may depend on it, and
+  it is dropped the moment the question leaves `pending`.
+  """
+  @type answer :: %{call_id: String.t(), selected: [String.t()]}
+
+  @typedoc """
   Session-picker state: the sessions found on disk for the directory the TUI was
   opened in, and where the cursor sits. Read once when the page opens (`r`
   refreshes it), never while a frame is drawn.
@@ -104,6 +114,7 @@ defmodule Troupe.UI.TUI.Server do
       expanded: false,
       pane: fresh_pane(),
       settings: nil,
+      answer: nil,
       observer: nil,
       sessions: nil,
       quitting: false,
@@ -336,9 +347,14 @@ defmodule Troupe.UI.TUI.Server do
   defp command_key(%Key{code: "tab"}, state),
     do: %{state | cmd_text: complete_command(state.cmd_text, state)}
 
-  # Shift-Enter inserts a newline rather than running: the box can hold multiline
-  # (typed or pasted) input, folded to a `<pasted N lines>` marker in the title.
-  defp command_key(%Key{code: "enter", modifiers: ["shift"]}, state),
+  # A newline in the box rather than running the command: any modifier on Enter,
+  # and Ctrl-J. The box holds multiline (typed or pasted) input, folded to a
+  # `<pasted N lines>` marker in the title. Shift-Enter alone is not enough:
+  # most terminals send a bare `\r` for it, indistinguishable from Enter.
+  defp command_key(%Key{code: "enter", modifiers: mods}, state) when mods != [],
+    do: %{state | cmd_text: state.cmd_text <> "\n"}
+
+  defp command_key(%Key{code: "j", modifiers: ["ctrl"]}, state),
     do: %{state | cmd_text: state.cmd_text <> "\n"}
 
   defp command_key(%Key{code: "enter"}, %{cmd_text: ""} = state) do
@@ -418,6 +434,9 @@ defmodule Troupe.UI.TUI.Server do
         "memory" ->
           memory_command(sid, String.trim(args))
 
+        "copy" ->
+          copy_command(state, String.trim(args))
+
         cmd ->
           Troupe.dispatch(sid, cmd, args)
       end
@@ -436,6 +455,27 @@ defmodule Troupe.UI.TUI.Server do
       {:notice, text} -> notice(state, text)
       {:error, msg} when is_binary(msg) -> notice(state, msg)
       {:error, other} -> notice(state, inspect(other))
+    end
+  end
+
+  ## Copying a transcript
+
+  # `/copy` takes the activated window, `/copy 2` (or `/copy code-2`) any of them,
+  # so a transcript can be copied from the command line without activating it.
+  defp copy_command(state, "") do
+    case state.focus do
+      {:window, _} -> {:notice, copy_result(state)}
+      _ -> {:error, "no window given; activate one or pass its number"}
+    end
+  end
+
+  defp copy_command(state, arg) do
+    path = resolve_window(state, arg)
+
+    if Map.has_key?(state.model.windows, path) do
+      {:notice, copy_result(%{state | focus: {:window, path}, pane: fresh_pane()})}
+    else
+      {:error, "no window #{arg}"}
     end
   end
 
@@ -820,6 +860,12 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(%Key{code: "esc"}, _path, state), do: %{state | focus: :command, win_text: ""}
 
+  # Ctrl-Y copies the transcript to the system clipboard (same as `/copy`): with
+  # mouse reporting on, the terminal's own selection is gone, and this copies the
+  # whole transcript rather than the rows that happen to be on screen. It has to
+  # come before the `y`/`n`/`a` approval clause, which matches any modifier.
+  defp window_key(%Key{code: "y", modifiers: ["ctrl"]}, _path, state), do: copy_pane(state)
+
   # Scrolling: PgUp/PgDn, Home and End always; ↑/↓ while nothing is typed; End (or
   # reaching the bottom) follows the tail again.
   defp window_key(%Key{code: "page_up"}, _path, state), do: page_by(state, -1)
@@ -880,10 +926,45 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(%Key{code: "e"}, _path, %{win_text: ""} = state), do: toggle_expanded(state)
 
-  # Shift-Enter inserts a newline; the box can hold multiline (typed or pasted)
-  # input, folded to a `<pasted N lines>` marker in the title.
-  defp window_key(%Key{code: "enter", modifiers: ["shift"]}, _path, state),
+  # A digit picks an offered option: with a single-choice question it is the
+  # answer, with `multiple` it toggles a tick that Enter later sends. Only while
+  # such a question is on screen — otherwise digits are ordinary typed text.
+  defp window_key(%Key{code: <<d>>}, path, %{win_text: ""} = state) when d in ?1..?9 do
+    w = Map.fetch!(state.model.windows, path)
+
+    case pending_of(w, state.pane.agent || path, [:question]) do
+      %{options: options} = q when options != [] ->
+        case Enum.at(options, d - ?1) do
+          nil -> state
+          %{label: label} -> choose(state, q, label)
+        end
+
+      _ ->
+        %{state | win_text: <<d>>}
+    end
+  end
+
+  # A newline in the input box: any modifier on Enter, and Ctrl-J. Multiline
+  # (typed or pasted) input folds to a `<pasted N lines>` marker in the title.
+  defp window_key(%Key{code: "enter", modifiers: mods}, _path, state) when mods != [],
     do: %{state | win_text: state.win_text <> "\n"}
+
+  defp window_key(%Key{code: "j", modifiers: ["ctrl"]}, _path, state),
+    do: %{state | win_text: state.win_text <> "\n"}
+
+  # Enter with nothing typed sends the ticked options of a multiple-choice
+  # question. With none ticked there is nothing to send, so it falls through.
+  defp window_key(%Key{code: "enter"}, path, %{win_text: "", answer: %{} = answer} = state) do
+    w = Map.fetch!(state.model.windows, path)
+
+    case pending_of(w, state.pane.agent || path, [:question]) do
+      %{call_id: id} when id == answer.call_id and answer.selected != [] ->
+        send_answer(state, id, Troupe.Tools.AskUser.answer_text(answer.selected))
+
+      _ ->
+        state
+    end
+  end
 
   defp window_key(%Key{code: "enter"}, path, %{win_text: text} = state) when text != "" do
     sid = state.session_id
@@ -903,7 +984,9 @@ defmodule Troupe.UI.TUI.Server do
         Troupe.send_input(sid, path, text)
     end
 
-    follow(%{state | win_text: ""})
+    # Any Enter that reaches here either answered the question or replaced it
+    # with fresh input, so a half-built selection is stale either way.
+    follow(%{state | win_text: "", answer: nil})
   end
 
   defp window_key(%Key{code: code, modifiers: mods}, _path, state) when mods in [[], ["shift"]] do
@@ -917,6 +1000,33 @@ defmodule Troupe.UI.TUI.Server do
   # more than one is outstanding the agent whose pane is open wins, so the keys
   # answer the request the reader is looking at rather than the oldest one.
   defp answerable(w, viewed), do: pending_of(w, viewed, [:approval, :budget])
+
+  # A single-choice question is answered by the digit itself; a multiple-choice
+  # one accumulates ticks until Enter, and re-pressing a digit unticks it.
+  defp choose(state, %{multiple: false, call_id: id}, label),
+    do: send_answer(state, id, label)
+
+  defp choose(state, %{call_id: id}, label) do
+    selected =
+      case state.answer do
+        %{call_id: ^id, selected: selected} ->
+          if label in selected, do: List.delete(selected, label), else: selected ++ [label]
+
+        _ ->
+          [label]
+      end
+
+    %{state | answer: %{call_id: id, selected: selected}}
+  end
+
+  defp send_answer(state, call_id, text) do
+    state = %{state | answer: nil}
+
+    case Troupe.answer(state.session_id, call_id, text) do
+      :ok -> follow(state)
+      {:error, _} -> notice(follow(state), "that question is no longer outstanding")
+    end
+  end
 
   defp pending_of(w, viewed, kinds) do
     pending = Enum.filter(w.pending, &(&1.kind in kinds))
@@ -1011,6 +1121,48 @@ defmodule Troupe.UI.TUI.Server do
   defp notice(state, text),
     do: %{state | model: %{state.model | notices: Enum.take([text | state.model.notices], 3)}}
 
+  # The activated pane's transcript as plain text: the same blocks the pane draws,
+  # unstyled and unwrapped, so a copy is the agent's own line breaks rather than
+  # the ones this terminal width happened to impose.
+  @spec pane_text(map()) :: String.t() | nil
+  defp pane_text(state) do
+    case View.pane_geometry(state) do
+      nil ->
+        nil
+
+      g ->
+        g.blocks
+        |> Enum.concat()
+        |> Enum.map_join("\n", &Model.line_text/1)
+        |> String.trim_trailing()
+    end
+  end
+
+  defp copy_pane(state), do: notice(state, copy_result(state))
+
+  # The message the notice line shows: what was copied and by which command, or
+  # why this machine could not.
+  defp copy_result(state) do
+    case pane_text(state) do
+      nil ->
+        "no window is activated"
+
+      "" ->
+        "nothing to copy yet"
+
+      text ->
+        lines = length(String.split(text, "\n"))
+
+        case Clipboard.copy(text) do
+          {:ok, cmd} -> "copied #{lines} #{plural(lines, "line")} to the clipboard (#{cmd})"
+          {:error, msg} -> msg
+        end
+    end
+  end
+
+  defp plural(1, word), do: word
+  defp plural(_n, word), do: word <> "s"
+
   defp apply_event(state, event) do
     model = Model.apply(state.model, event)
 
@@ -1069,13 +1221,13 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  @path_commands ~w(merge discard cancel dismiss)
+  @path_commands ~w(merge discard cancel dismiss copy)
 
   @doc """
   Tab completion on the command line: command names (`wor` → `worktree `), window paths
-  for `/merge`, `/discard`, `/cancel`, `/dismiss` (repeated Tab cycles through the matches),
-  and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches that
-  have finished and are neither merged nor discarded.
+  for `/merge`, `/discard`, `/cancel`, `/dismiss`, `/copy` (repeated Tab cycles through the
+  matches), and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches
+  that have finished and are neither merged nor discarded.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -1155,6 +1307,8 @@ defmodule Troupe.UI.TUI.Server do
 
   defp eligible?("cancel", w), do: w.state != :dismissed
   defp eligible?("dismiss", w), do: w.state in [:done_unread, :failed_unread]
+  # Any window has a transcript worth copying, dismissed ones included.
+  defp eligible?("copy", _w), do: true
 
   # Exact match: rotate through every candidate. Otherwise the first candidate with that prefix.
   defp pick(candidates, arg) do

@@ -132,7 +132,7 @@ defmodule Troupe.UI.TUI.View do
         inner_h = max(left.height - 2, 1)
         agent = viewed_agent(w, state.pane.agent)
         entries = length(Map.get(w.agents, agent, %{transcript: []}).transcript)
-        blocks = Model.pane_blocks(w, agent, state.expanded, state.tick, state.now)
+        blocks = Model.pane_blocks(w, agent, state.expanded, state.tick, state.now, state.answer)
         heights = Enum.map(blocks, &Model.row_count(&1, inner_w))
         total = Enum.sum(heights)
         max_off = max(total - inner_h, 0)
@@ -347,6 +347,10 @@ defmodule Troupe.UI.TUI.View do
   # would freeze on stale content while the app kept consuming keys.
   defp pending_summary(%{kind: :approval, name: name}, keys), do: "approval: #{name} (#{keys})"
   defp pending_summary(%{kind: :budget}, keys), do: "budget exhausted (#{keys})"
+
+  defp pending_summary(%{kind: :question, question: q, options: [_ | _] = opts}, _keys),
+    do: "question: #{q} (#{length(opts)} options — open the window)"
+
   defp pending_summary(%{kind: :question, question: q}, _keys), do: "question: #{q} (type + Enter)"
   defp pending_summary(%{kind: kind}, _keys), do: "#{kind} (see the window)"
 
@@ -628,6 +632,7 @@ defmodule Troupe.UI.TUI.View do
 
   defp effect_line(:now), do: "applies immediately"
   defp effect_line(:new_branches), do: "applies to branches dispatched from now on"
+  defp effect_line(:next_run), do: "applies the next time the TUI starts"
 
   @doc "Rects of the (at most nine) tiles in the strip, in window order."
   @spec tile_rects(Rect.t(), non_neg_integer()) :: [Rect.t()]
@@ -816,6 +821,7 @@ defmodule Troupe.UI.TUI.View do
       {not g.follow?, ["End follows the tail", "End follows", "End"]},
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},
       {true, ["e #{verb} output", "e #{verb}", "e"]},
+      {true, ["Ctrl-Y copies", "Ctrl-Y copy", nil]},
       {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
       {w.state in [:running, :needs_input], ["x cancel & remove", "x cancel", "x"]},
       {w.state in [:done_unread, :failed_unread], ["d dismiss", "d dismiss", "d"]},
@@ -1019,6 +1025,6 @@ defmodule Troupe.UI.TUI.View do
   @spec pasted_title(String.t()) :: String.t()
   def pasted_title(text) do
     lines = text |> String.split("\n") |> Enum.count(&(&1 != "")) |> max(1)
-    " pasted #{lines} lines — Enter sends, Shift-Enter newline, Esc clears "
+    " pasted #{lines} lines — Enter sends, Alt-Enter/Ctrl-J newline, Esc clears "
   end
 end

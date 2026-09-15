@@ -245,7 +245,9 @@ defmodule Troupe.UI.TUI.Model do
                 kind: :question,
                 call_id: d.call_id,
                 agent_path: path,
-                question: one_line(d.question)
+                question: one_line(d.question),
+                options: question_options(d),
+                multiple: d[:multiple] == true
               }
             ]
 
@@ -422,6 +424,25 @@ defmodule Troupe.UI.TUI.Model do
     do: {:tool, %{t | preview: sanitize(d.preview)}}
 
   defp attach_preview(entry, _), do: entry
+
+  # Options come off the log as maps with atom keys (`Codec` restores them) and
+  # from a live event as the same shape, but a session recorded before options
+  # existed has no key at all — hence the default rather than a match.
+  defp question_options(data) do
+    data
+    |> Map.get(:options)
+    |> List.wrap()
+    |> Enum.map(fn opt ->
+      %{
+        label: one_line(Map.get(opt, :label, "")),
+        description: opt |> Map.get(:description) |> describe()
+      }
+    end)
+    |> Enum.reject(&(&1.label == ""))
+  end
+
+  defp describe(nil), do: nil
+  defp describe(text), do: one_line(text)
 
   # What a collapsed tool line says after `name input`: the outcome, in a few words.
   defp summary(%{status: :error, lines: lines}) do
@@ -763,9 +784,15 @@ defmodule Troupe.UI.TUI.Model do
   logical lines: one block per transcript entry, then the text being streamed,
   the activity line and whatever the window is waiting on. Blocks let the view
   keep the same entry at the top when tool output is expanded or collapsed.
+
+  `selection` is the reader's in-progress answer to a multiple-choice question
+  (`%{call_id, selected}`), which lives in the UI process rather than the log:
+  it is a cursor, not a decision, and it dies with the frame if the question is
+  answered elsewhere.
   """
-  @spec pane_blocks(window(), String.t(), boolean(), non_neg_integer(), integer()) :: [[line()]]
-  def pane_blocks(w, agent_path, expanded?, tick, now) do
+  @spec pane_blocks(window(), String.t(), boolean(), non_neg_integer(), integer(), map() | nil) ::
+          [[line()]]
+  def pane_blocks(w, agent_path, expanded?, tick, now, selection \\ nil) do
     agent = Map.get(w.agents, agent_path, new_agent())
     entries = Enum.map(agent.transcript, &entry_lines(&1, expanded?))
 
@@ -774,7 +801,7 @@ defmodule Troupe.UI.TUI.Model do
         do: [],
         else: [streaming_lines(agent.streaming)]
 
-    pending = pending_blocks(w, agent_path)
+    pending = pending_blocks(w, agent_path, selection)
 
     activity =
       case pending == [] && activity_line(w, agent_path, tick, now) do
@@ -1031,9 +1058,9 @@ defmodule Troupe.UI.TUI.Model do
 
   # Whatever the window waits on, shown at the end of every agent's pane so the
   # keys that answer it (y / n / a, Enter) are explained where the reader looks.
-  defp pending_blocks(%{pending: []}, _path), do: []
+  defp pending_blocks(%{pending: []}, _path, _selection), do: []
 
-  defp pending_blocks(w, path) do
+  defp pending_blocks(w, path, selection) do
     [
       Enum.flat_map(w.pending, fn item ->
         who = if item.agent_path == path, do: "", else: "[#{item.agent_path}] "
@@ -1047,11 +1074,8 @@ defmodule Troupe.UI.TUI.Model do
             ]
 
           %{kind: :question, question: q} ->
-            [
-              {:blank, ""},
-              {:pending, "#{who}QUESTION: #{q}"},
-              {:system, "type your answer and press Enter"}
-            ]
+            [{:blank, ""}, {:pending, "#{who}QUESTION: #{q}"}] ++
+              question_lines(item, selection)
 
           %{kind: :budget} ->
             [
@@ -1067,6 +1091,38 @@ defmodule Troupe.UI.TUI.Model do
       end)
     ]
   end
+
+  # A question with no options is still just an input box.
+  defp question_lines(%{options: []}, _selection),
+    do: [{:system, "type your answer and press Enter"}]
+
+  defp question_lines(item, selection) do
+    selected = selected_labels(item, selection)
+
+    options =
+      item.options
+      |> Enum.with_index(1)
+      |> Enum.map(fn {opt, n} -> option_line(opt, n, item.multiple, opt.label in selected) end)
+
+    options ++ [{:system, hint(item.multiple)}]
+  end
+
+  defp option_line(opt, n, multiple?, chosen?) do
+    marker = if multiple?, do: if(chosen?, do: "[x] ", else: "[ ] "), else: ""
+    detail = if opt.description, do: " — " <> opt.description, else: ""
+    tag = if chosen?, do: :pending, else: :body
+    {tag, [{:bullet_marker, "  #{n}. "}, {tag, marker <> opt.label}, {:muted, detail}]}
+  end
+
+  defp hint(true),
+    do: "digits toggle · Enter sends the ticked options · or type an answer and press Enter"
+
+  defp hint(false), do: "press a digit to choose · or type an answer and press Enter"
+
+  # The reader's ticks only count while they belong to the question on screen: a
+  # question answered and replaced by another must not inherit them.
+  defp selected_labels(%{call_id: id}, %{call_id: id, selected: selected}), do: selected
+  defp selected_labels(_item, _selection), do: []
 
   ## Text: sanitising, measuring, wrapping
 

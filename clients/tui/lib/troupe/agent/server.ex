@@ -485,7 +485,7 @@ defmodule Troupe.Agent.Server do
             })
 
           :awaiting_answer ->
-            register(acc, call, :question, %{question: call.input["question"]})
+            register(acc, call, :question, Troupe.Tools.AskUser.normalize(call.input))
 
           :delegating ->
             spawn_child(
@@ -567,20 +567,14 @@ defmodule Troupe.Agent.Server do
         todo_write(data, call)
 
       name == "ask_user" ->
-        question = to_string(Map.get(call.input, "question", ""))
+        %{question: question, options: options, multiple: multiple} =
+          Troupe.Tools.AskUser.normalize(call.input)
 
-        :ok =
-          Approvals.register(
-            data.spec.session_id,
-            call.call_id,
-            self(),
-            data.spec.agent_path,
-            :question,
-            %{question: question}
-          )
+        payload = %{question: question, options: options, multiple: multiple}
+        :ok = ask_user_register(data, call.call_id, payload)
 
         data
-        |> log(:question_asked, %{call_id: call.call_id, question: question})
+        |> log(:question_asked, Map.put(payload, :call_id, call.call_id))
         |> notify_needs_input()
 
       name == "delegate" ->
@@ -626,6 +620,17 @@ defmodule Troupe.Agent.Server do
       )
 
     notify_needs_input(data)
+  end
+
+  defp ask_user_register(%Data{} = data, call_id, payload) do
+    Approvals.register(
+      data.spec.session_id,
+      call_id,
+      self(),
+      data.spec.agent_path,
+      :question,
+      payload
+    )
   end
 
   # The first outstanding request for the user moves the window to :needs_input.
