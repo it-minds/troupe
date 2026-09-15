@@ -14,7 +14,9 @@ defmodule Troupe.Plane.PrivateSessionsTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.ObjectStore
-  alias Troupe.Plane.{Harness, Sessions}
+  alias Troupe.ObjectStore.Signed
+  alias Troupe.Plane.{Harness, Index, Sessions}
+  alias Troupe.Sessions.{Cipher, Storage}
 
   setup do
     ada = person("ada@example.test", [])
@@ -251,7 +253,121 @@ defmodule Troupe.Plane.PrivateSessionsTest do
     end
   end
 
+  describe "sealing with no credential at all" do
+    test "a laptop seals, lists and reads back through the plane's signatures", %{ada: ada} do
+      {:ok, _} = register(ada, %{"session_id" => "p-13", "device" => "laptop"})
+
+      # What a daemon holds: a session key it made itself, and a plane connection. No
+      # object-storage credential anywhere in this test but the plane's own.
+      data_key = :crypto.strong_rand_bytes(32)
+      store = signed_store(ada, "p-13")
+
+      events = [
+        %{"seq" => 1, "type" => "session_created", "data" => %{"kind" => "private"}},
+        %{"seq" => 2, "type" => "message", "data" => %{"text" => "a private thought"}}
+      ]
+
+      assert {:ok, segment} =
+               Storage.seal_segment(store, "p-13", data_key, %{
+                 events: events,
+                 epoch: 1,
+                 head_hash: "sha256:head"
+               })
+
+      assert {:ok, _} =
+               Storage.put_manifest(store, "p-13", %{
+                 owner_subject: ada.subject,
+                 epoch: 1,
+                 last_seq: 2,
+                 head_hash: "sha256:head",
+                 object_bytes: segment.bytes
+               })
+
+      # Listing is the one verb a signature cannot cover, so the plane does it.
+      assert {:ok, [listed]} = Storage.list_segments(store, "p-13")
+      assert listed.key == segment.key
+      assert listed.epoch == 1
+
+      # And the bytes come back, which only somebody holding the session key can do.
+      assert {:ok, ^events} = Storage.read_segment(store, "p-13", data_key, segment.key)
+
+      # The plane holds the same object and cannot read it. This is the claim the whole
+      # arrangement exists for, so it is made against the store rather than inferred.
+      keyed = ObjectStore.from_env()
+      assert {:ok, ciphertext} = ObjectStore.get(keyed, segment.key)
+      refute ciphertext =~ "a private thought"
+      assert {:error, _} = Cipher.open(:crypto.strong_rand_bytes(32), "p-13", ciphertext)
+    end
+
+    test "a rebuild finds a private session without reading a byte of it", %{ada: ada} do
+      {:ok, _} = register(ada, %{"session_id" => "p-14"})
+      data_key = :crypto.strong_rand_bytes(32)
+      store = signed_store(ada, "p-14")
+
+      {:ok, _} =
+        Storage.seal_segment(store, "p-14", data_key, %{
+          events: [%{"seq" => 7, "type" => "message"}],
+          epoch: 1,
+          head_hash: "sha256:seven"
+        })
+
+      {:ok, _} =
+        Storage.put_manifest(store, "p-14", %{
+          kind: "private",
+          owner_subject: ada.subject,
+          epoch: 1,
+          last_seq: 7,
+          head_hash: "sha256:seven"
+        })
+
+      # A presigned PUT cannot carry object metadata — S3 refuses an `x-amz-*` header the
+      # signature does not cover — so the facts a rebuild needs come from the plaintext
+      # manifest and the segment key instead, and this is the test that says so.
+      assert {:ok, %{metadata: metadata}} = ObjectStore.head(ObjectStore.from_env(), key_of(store))
+      assert metadata == %{}
+
+      assert {:ok, "p-14"} = Index.rebuild_one(ObjectStore.from_env(), "p-14")
+
+      row = Sessions.get("p-14")
+      assert row.epoch == 1
+      assert row.last_seq == 7
+      assert row.head_hash == "sha256:seven"
+      # A rebuild is about where a session got to, not whose it is: the kind it already
+      # had is not overwritten by storage that has no opinion about it.
+      assert row.kind == "private"
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  # A daemon's view of object storage: signatures from the plane, listings from the
+  # plane, and no credential of its own.
+  defp signed_store(user, session_id) do
+    %Signed{
+      session_id: session_id,
+      presign: fn method, keys ->
+        case presign(user, session_id, Atom.to_string(method), keys) do
+          {:ok, %{"urls" => urls}} -> {:ok, urls}
+          {:error, error} -> {:error, error}
+        end
+      end,
+      list: fn prefix ->
+        case Harness.call(
+               "session.objects",
+               %{"session_id" => session_id, "prefix" => prefix},
+               as(user)
+             ) do
+          {:ok, %{"keys" => keys}} -> {:ok, keys}
+          {:error, error} -> {:error, error}
+        end
+      end
+    }
+  end
+
+  defp key_of(%Signed{session_id: session_id} = store) do
+    {:ok, [segment]} = Storage.list_segments(store, session_id)
+    segment.key
+  end
 
   defp register(user, params), do: Harness.call("session.register", params, as(user))
 

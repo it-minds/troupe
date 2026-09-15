@@ -69,6 +69,7 @@ defmodule Troupe.Plane.Harness do
     "session.create" => :control,
     "session.register" => :control,
     "session.presign" => :control,
+    "session.objects" => :observe,
     "session.pin" => :control,
     "session.unpin" => :control,
     "session.erase" => :control,
@@ -302,6 +303,24 @@ defmodule Troupe.Plane.Harness do
       })
 
       {:ok, %{"session_id" => session.id, "expires_in" => @presign_seconds, "urls" => urls}}
+    end
+  end
+
+  # What is under this session's prefix. A caller with no object-storage credential
+  # cannot list, because a listing is signed against the bucket rather than against a key
+  # it does not yet know — so the plane lists on its behalf. It gives away nothing it was
+  # not already trusted with: a key is a name, a size and an epoch, and the bytes behind
+  # it stay unreadable to everybody here.
+  defp handle("session.objects", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, session} <- own_private(session_id, user) do
+      prefix = "sessions/#{session.id}/"
+      under = suffix_of(params["prefix"], prefix)
+
+      case ObjectStore.list(ObjectStore.from_env(), under) do
+        {:ok, keys} -> {:ok, %{"session_id" => session.id, "keys" => keys}}
+        {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+      end
     end
   end
 
@@ -610,9 +629,22 @@ defmodule Troupe.Plane.Harness do
     Error.new(:invalid_params, %{reason: inspect(changeset.errors)})
   end
 
+  # A caller may narrow the listing, and may not widen it. An absent prefix is the
+  # session's own; one that does not start with it is ignored rather than refused,
+  # because the only thing it could be asking for is somebody else's.
+  defp suffix_of(nil, prefix), do: prefix
+  defp suffix_of(given, prefix) when is_binary(given) do
+    if String.starts_with?(given, prefix) and not String.contains?(given, ".."),
+      do: given,
+      else: prefix
+  end
+
+  defp suffix_of(_given, prefix), do: prefix
+
   defp presign_method("get"), do: {:ok, :get}
   defp presign_method("put"), do: {:ok, :put}
-  defp presign_method(_other), do: invalid("method is one of get, put")
+  defp presign_method("head"), do: {:ok, :head}
+  defp presign_method(_other), do: invalid("method is one of get, put, head")
 
   # Every key under `sessions/<id>/`, and a bounded number of them, because one request
   # that signs a thousand URLs is a request that hands out a thousand.

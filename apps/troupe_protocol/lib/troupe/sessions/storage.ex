@@ -307,7 +307,7 @@ defmodule Troupe.Sessions.Storage do
   def put_manifest(store, session_id, manifest) do
     body =
       manifest
-      |> Map.take(~w(session_id team owner_subject profile epoch latest_segment key_path last_seq head_hash object_bytes)a)
+      |> Map.take(~w(session_id kind team owner_subject profile epoch latest_segment key_path last_seq head_hash object_bytes)a)
       |> Map.put(:session_id, session_id)
       |> Map.put(:written_at, DateTime.utc_now() |> DateTime.to_iso8601())
       |> Jason.encode!(pretty: true)

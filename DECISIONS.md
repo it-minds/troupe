@@ -2630,3 +2630,42 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `user`/`trigger`/`a2a` and answers "what started this", which for a private session
      is a person. The device goes in `origin` and in its own column, and the kind goes in
      the new column where the filter and the constraint can both reach it.
+
+## R1 — storage for a caller with no credential
+
+394. **`Troupe.ObjectStore.Signed` is a second store, not a second `Storage`.**
+     `Troupe.Sessions.Storage` takes whichever it was handed and never asks which, so one
+     `Sealer` serves a pod with a service account and a laptop with none. The alternative
+     — a daemon-specific storage layer — would have been a second implementation of the
+     layout, and the layout is the thing every rebuild depends on being one.
+
+395. **A presigned PUT cannot carry object metadata, and this is written down rather than
+     discovered.** S3 refuses any request with an `x-amz-*` header the signature does not
+     cover, and a query-string signature covers `host` alone. `Signed.put/4` therefore
+     accepts `:metadata` and drops it. The three facts it would have carried — epoch, last
+     sequence, head hash — reach the plane twice over anyway: in the plaintext manifest
+     and in every `session.register`, with the epoch and sequences in the segment key
+     besides.
+
+396. **Listing is the plane's job, because a listing cannot be signed per-key.** The
+     caller does not yet know the keys, and signing the bucket would be handing over the
+     bucket. `session.objects` lists under `sessions/<id>/` for a session the caller owns,
+     and gives away nothing: a key is a name and an epoch, and the bytes behind it stay
+     unreadable to everybody involved.
+
+397. **A caller may narrow that listing and may not widen it.** A prefix that does not
+     start with the session's own is ignored rather than refused — the only thing it could
+     be asking for is somebody else's, and there is no useful distinction between an
+     attempt and a typo.
+
+398. **Deleting is not on the signed store at all.** Erasure has to remove every *version*
+     of every object, which is a bucket-level operation, and it is a decision with an
+     owner. It stays on `session.erase`, where the plane does it with the credential and
+     the audit row that belong to it.
+
+399. **A rebuild no longer invents a profile.** `Index.attrs/4` fell back to
+     `default_profile` — "unknown" — for anything storage did not name, which for a
+     private session is a value the check constraint refuses, so a rebuild would have
+     failed on exactly the sessions it was most needed for. It now reads `kind` from the
+     manifest and gives a private session neither profile nor team. Found by the test that
+     rebuilds one, which is the only way it would have been found before a customer did.
