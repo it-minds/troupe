@@ -134,6 +134,25 @@ defmodule Troupe.Plane.ProvisionTest do
       assert length(error.data.policy_violations) >= 2
     end
 
+    test "a violation is a sentence, and survives being sent", context do
+      Application.put_env(:troupe_plane, :policy, policy())
+
+      assert {:error, error} =
+               Admin.profile_put(context.actor, %{
+                 name: "bad",
+                 image: "ghcr.io/objective-mj/troupe-worker:dev",
+                 replicas: 1,
+                 sessions_per_pod: 99
+               })
+
+      # A violation is a tuple, and `Jason` refuses tuples: putting them in an error's
+      # data turned a legitimate refusal into a 500 with an HTML body, so a caller who
+      # asked for one thing too many was told nothing whatever about which.
+      assert Enum.all?(error.data.policy_violations, &is_binary/1), inspect(error.data)
+      assert Enum.any?(error.data.policy_violations, &(&1 =~ "99"))
+      assert {:ok, _json} = Jason.encode(error.data)
+    end
+
     test "a profile inside policy is saved", context do
       Application.put_env(:troupe_plane, :policy, policy())
 

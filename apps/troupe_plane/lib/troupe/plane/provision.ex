@@ -47,7 +47,12 @@ defmodule Troupe.Plane.Provision do
         :ok
 
       found ->
-        {:error, Error.new(:invalid_params, %{policy_violations: found})}
+        # Described, not passed through. A violation is a tuple — `{:sessions_per_pod_above_maximum, 8, 4}`
+        # — and `Jason` refuses tuples, so putting them in an error's data turned a
+        # legitimate refusal into a 500 with an HTML body: the caller was told nothing at
+        # all about the one thing they got wrong. `Policy.describe/1` exists for this and
+        # says it in a sentence.
+        {:error, Error.new(:invalid_params, %{policy_violations: Enum.map(found, &Policy.describe/1)})}
     end
   end
 

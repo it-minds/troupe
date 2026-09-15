@@ -107,8 +107,43 @@ defmodule Troupe.E2E.Plane do
     profile!(profile, channel)
     team = team!(group, profile)
     bundle = publish!(channel, Keyword.get(opts, :bundle, default_bundle()))
+    reclaim(profile)
 
     %{profile: profile, team: team["name"] || group, channel: channel, bundle: bundle}
+  end
+
+  @doc """
+  Erase what earlier runs left behind on this profile.
+
+  A world owns what it created, and across runs that has to mean something: a suite that
+  leaves two sessions on a pod with two slots is a suite whose next run cannot place
+  anything — and the failure arrives as `capacity` in whichever test happens to be
+  third, which is a fixture problem wearing a product problem's clothes.
+
+  Erasure rather than archival, because a session that ever ran is erased and because the
+  slot comes back either way. This is only safe on a cluster the suite owns, which is
+  what `mix troupe.e2e` refusing any context but the kind one is for.
+  """
+  @spec reclaim(String.t()) :: :ok
+  def reclaim(profile) do
+    # The admin method, not the harness one. A session a trigger made belongs to a
+    # service principal, and `session.erase` on the harness asks whether the caller
+    # administers *that* session; the platform admin road is the one that always works
+    # and is the one a person clearing up would use.
+    stale =
+      "admin.sessions.list"
+      |> call!(%{"filter" => %{"profile" => profile}})
+      |> List.wrap()
+      |> Enum.reject(&(&1["state"] == "erased"))
+
+    for session <- stale do
+      case call("admin.session.erase", %{"session_id" => session["id"], "confirm" => session["id"]}) do
+        {:ok, _} -> :ok
+        {:error, error} -> raise "could not reclaim #{session["id"]}: #{inspect(error)}"
+      end
+    end
+
+    :ok
   end
 
   @doc "A profile the plane knows about, matching the one the operator is already running."
@@ -119,7 +154,10 @@ defmodule Troupe.E2E.Plane do
         "name" => name,
         "image" => image(),
         "replicas" => 1,
-        "sessions_per_pod" => 2,
+        # As many as the cluster policy allows, because a run of this suite makes several
+        # sessions and a pod with two slots turns the third test into a `capacity` failure
+        # that is about the fixture and reads like the product.
+        "sessions_per_pod" => 4,
         "spec" => %{"configBundleChannel" => channel}
       }
     })

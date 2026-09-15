@@ -2908,3 +2908,23 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 432. **And the other half is proven too.** Creating the Secret and restarting fills the
      variable in. Without that, "the variable is absent" would be satisfied by a mechanism
      that never injects anything at all.
+
+433. **A policy violation reached the caller as an unencodable tuple.** `Provision.check/1`
+     put `{:sessions_per_pod_above_maximum, 8, 4}` straight into an error's data, and
+     `Jason` refuses tuples — so asking for one session too many answered a 500 with an
+     HTML body and said nothing about which limit was exceeded. `Policy.describe/1` has
+     existed for this the whole time. The test asserts the violations are strings *and*
+     that the data encodes, because the second is the property that actually broke.
+
+434. **The e2e world reclaims what earlier runs left.** A suite that leaves two sessions
+     on a pod with two slots is a suite whose next run cannot place anything, and the
+     failure lands on whichever test happens to be third — a fixture problem wearing a
+     product problem's clothes. `ready!` erases what is there through the *admin* method,
+     because a session a trigger made belongs to a service principal and the harness
+     method asks whether the caller administers that session. Only safe on a cluster the
+     suite owns, which is what the context guard is for.
+
+435. **The trigger claim groups runs by idempotency key rather than counting them.** A
+     cron trigger firing every minute produces a run per minute, and a run for the *next*
+     minute arriving while the assertion is made is correct behaviour that a plain count
+     would read as a double fire.
