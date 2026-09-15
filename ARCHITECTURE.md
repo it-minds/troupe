@@ -1135,3 +1135,45 @@ A subject is opaque and may be `idp|ada`. That is a fine path segment and an inv
 so the adapter percent-encodes segment by segment; a subject containing a `/` is refused
 at the one place the path is built, because sanitising it would silently make it a
 different person.
+### 16.4 A credential that belongs to a person
+
+A bundle's MCP server entry says whose credential goes out with a call.
+`credential_mode: profile` is what every bundle meant before there was a mode: one
+service account, the same for every session, injected by the operator from a Secret.
+`credential_mode: person` is the session's **owner** — fixed at activation, recorded in
+`session_created`, and the same for everybody attached, because a session has one
+identity and a collaborator acting through somebody else's credential is a thing people
+should be told once rather than discover.
+
+The two are exclusive per server and the contradiction is refused at publish. A server
+with a `secretRef` *and* a person's credential is a server whose identity depends on which
+code path ran.
+
+```
+troupe/people/<subject>/mcp/<slot>        the value, which only that person may read
+troupe/people/<subject>/sessions/<id>     a private session's data key, same subtree
+```
+
+Nobody in the middle can read either. The pod asks the plane for an **assertion** —
+`kms.assertion {session_id}`, a short-lived JWT signed through the same transit key that
+mints session tokens, whose subject the plane reads off the session row — and exchanges
+it at OpenBao's JWT auth method for a token whose policy is templated on that subject. A
+pod naming a session it does not hold is told `not_found`, which is the half a key manager
+cannot decide because it does not know which pod holds what.
+
+A person connects a server through `me.connections.grant`, which takes no value and
+returns none: it answers the same kind of assertion, for the caller's own subject, and the
+client exchanges it and writes the value itself. The plane is never in possession of a
+credential that could read the slot — stronger than handing back a token it minted, which
+would be a token it held. Removal uses the same grant; the plane's policy has no `delete`
+there at all.
+
+What the plane may see is that a slot has a version: `list` and `read` on KV v2 metadata,
+which is timestamps and never a value. That is what lets a panel say *Ada has connected
+Jira* and the most it should ever be able to say.
+
+Where nobody has connected, the tool answers a result the model can read —
+`{"error": "not_connected", "server": …, "hint": …}` — rather than a 401 it would retry
+four times, and the session carries on. `tool_call_started` records `identity`, `profile`
+or `person:<subject>`, so a reader can tell which credential a call used without knowing
+what the bundle said that day.

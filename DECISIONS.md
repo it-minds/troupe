@@ -2540,3 +2540,36 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      database is sandboxed per test and the key manager is not, so the connection tests
      take a fresh subject each. Found by a listing test that saw `connected: true` before
      it had written anything, because the grant test had run first.
+## R1 — a deprovision that takes effect
+
+380. **`User.active` was written by SCIM and read by nothing.** The flag existed, the SCIM
+     endpoint set it, and no code path anywhere in the plane consulted it — so a
+     deprovisioned person could sign in, call every harness method, and go on doing so.
+     A flag nothing reads is a deprovision that did not happen.
+
+381. **Signing in no longer reactivates somebody the provider deactivated.** `Login`
+     wrote `active: true` on every login, which meant a SCIM deprovision lasted exactly
+     until its subject next authenticated — and the token issued after that is one every
+     other check in the plane then trusts. Only a person we have never seen is created
+     active, which is what a deployment with no SCIM means by the word and the case the
+     default is for.
+
+382. **The harness checks on every call, not only at sign-in.** A plane token outlives the
+     moment it was issued, so a person deactivated at ten o'clock holds a valid one until
+     it expires. Checking at the door would leave every method answering them until then.
+     It reads the *row*: the provider's decision reaches us through SCIM, and nothing
+     re-reads a claim.
+
+383. **`kms.assertion` refuses a deactivated owner, and that is the door that mattered.**
+     A running session needs nobody to sign in. Refusing a deprovisioned person only at
+     the harness would have left their credentials reachable by any pod for as long as
+     anything they had started kept running — indefinitely, since the pod refreshes on its
+     own. Refused here, the window is the pod's existing key-manager token and its lease,
+     and no longer.
+
+384. **A deactivated person's sessions are not stopped.** What a session may still do is
+     the session's question — its history is the team's, and a person leaving is not a
+     reason to lose it — and what it may do *as them* is this one. Stopping them is a
+     policy decision with an owner, and `RELEASE.md` W2 already has the shape of it for
+     service principals: the thing stops doing what it did as that identity and says why,
+     rather than disappearing.

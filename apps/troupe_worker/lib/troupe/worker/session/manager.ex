@@ -41,6 +41,7 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Sessions.{Cipher, Storage}
   alias Troupe.Sessions.{Context, Sealer}
   alias Troupe.Worker.Cache
+  alias Troupe.Worker.Connections
   alias Troupe.Worker.Session.{Restore, Workspace}
   alias Troupe.Worker.Sessions
   alias Troupe.Worker.Usage
@@ -241,7 +242,7 @@ defmodule Troupe.Worker.Session.Manager do
 
     # The key-manager token this session's person-mode servers were reaching through.
     # Held for the life of the session and no longer, exactly as the data key is.
-    Troupe.Worker.Connections.forget(state.session_id)
+    Connections.forget(state.session_id)
 
     :ok
   end

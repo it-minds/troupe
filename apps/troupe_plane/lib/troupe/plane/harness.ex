@@ -26,6 +26,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.{ACL, Session}
   alias Troupe.Plane.{TeamBudget, Tokens, Triggers}
+  alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Error, Token}
 
   # What a session reserves against its team's budget before it starts. A slice rather
@@ -72,11 +73,36 @@ defmodule Troupe.Plane.Harness do
   @doc "Answer one request for one user."
   @spec call(String.t(), map(), context()) :: {:ok, map()} | {:error, Error.t()}
   def call(method, params, context) do
-    case Map.fetch(@methods, method) do
-      :error -> {:error, Error.new(:method_not_found, %{method: method})}
-      {:ok, _scope} -> handle(method, params, context)
+    with {:ok, _scope} <- fetch_method(method),
+         :ok <- still_a_person(context) do
+      handle(method, params, context)
     end
   end
+
+  defp fetch_method(method) do
+    case Map.fetch(@methods, method) do
+      {:ok, scope} -> {:ok, scope}
+      :error -> {:error, Error.new(:method_not_found, %{method: method})}
+    end
+  end
+
+  # Checked on every call rather than only at sign-in, because a token outlives the
+  # moment it was issued: a person deactivated at ten o'clock holds a valid plane token
+  # until it expires, and every method here would otherwise go on answering them. This is
+  # what makes a deprovision take effect now rather than at the next renewal.
+  #
+  # The row, not the token. The identity provider's decision reaches us through SCIM,
+  # which writes a row; nothing re-reads a claim.
+  defp still_a_person(%{user: %User{kind: "service"}}), do: :ok
+
+  defp still_a_person(%{user: %User{subject: subject}}) do
+    case Identity.get_user(subject) do
+      %User{active: false} -> {:error, Error.new(:forbidden, %{reason: "account deactivated"})}
+      _other -> :ok
+    end
+  end
+
+  defp still_a_person(_context), do: :ok
 
   # -- who you are, and what you may use --------------------------------------
 
@@ -943,7 +969,7 @@ defmodule Troupe.Plane.Harness do
   defp person_servers(profile) do
     with %{config_bundle_channel: channel} <- Fleet.get_profile(profile),
          %{} = bundle <- Bundles.current(channel),
-         {:ok, %{mcp_servers: servers}} <- Troupe.Protocol.Bundle.validate(bundle.content) do
+         {:ok, %{mcp_servers: servers}} <- Document.validate(bundle.content) do
       Enum.filter(servers, &(&1.credential_mode == :person))
     else
       _ -> []

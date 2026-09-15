@@ -33,6 +33,7 @@ defmodule Troupe.Worker.Connections do
   use GenServer
 
   alias Troupe.KMS
+  alias Troupe.KMS.Policy
   alias Troupe.MCP.Server
   alias Troupe.Worker.Plane.Link
 
@@ -189,5 +190,5 @@ defmodule Troupe.Worker.Connections do
   defp address, do: config()[:address] || "http://localhost:8200"
   defp mount, do: config()[:mount] || "secret"
   defp auth_path, do: config()[:person_auth_path] || "jwt"
-  defp role, do: config()[:person_role] || Troupe.KMS.Policy.person_policy_name()
+  defp role, do: config()[:person_role] || Policy.person_policy_name()
 end

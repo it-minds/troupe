@@ -17,7 +17,7 @@ defmodule Troupe.Plane.PersonCredentialsTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.KMS.{OpenBao, Policy}
-  alias Troupe.Plane.{Harness, Tokens}
+  alias Troupe.Plane.{Bundles, Fleet, Harness, Tokens}
 
   @moduletag timeout: 60_000
 
@@ -118,14 +118,14 @@ defmodule Troupe.Plane.PersonCredentialsTest do
       ada = person("ada-#{unique()}@example.test", ["engineering"])
 
       {:ok, _} =
-        Troupe.Plane.Fleet.put_profile(%{
+        Fleet.put_profile(%{
           name: "dev",
           config_bundle_channel: "stable",
           replicas: 1
         })
 
       {:ok, _bundle} =
-        Troupe.Plane.Bundles.publish(
+        Bundles.publish(
           "stable",
           %{
             "schema" => 1,
@@ -236,13 +236,11 @@ defmodule Troupe.Plane.PersonCredentialsTest do
            put("/v1/sys/policies/acl/#{Policy.person_policy_name()}", %{
              "policy" => Policy.person(mount(), accessor)
            }),
-         :ok <- put("/v1/auth/#{@auth_path}/config", Policy.person_auth_config([pem])),
-         :ok <-
-           put(
-             "/v1/auth/#{@auth_path}/role/#{@role}",
-             Policy.person_role(@issuer, Tokens.kms_audience())
-           ) do
-      :ok
+         :ok <- put("/v1/auth/#{@auth_path}/config", Policy.person_auth_config([pem])) do
+      put(
+        "/v1/auth/#{@auth_path}/role/#{@role}",
+        Policy.person_role(@issuer, Tokens.kms_audience())
+      )
     end
   end
 

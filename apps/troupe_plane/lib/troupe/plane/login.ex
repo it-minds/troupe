@@ -40,13 +40,26 @@ defmodule Troupe.Plane.Login do
     end
   end
 
+  # A person the identity provider has deactivated is refused here, before anything else
+  # happens, and **is not reactivated by signing in**. `active: true` used to be written
+  # on every login, which meant a SCIM deprovision lasted exactly until its subject next
+  # authenticated — and a token issued after that is a token every other check in the
+  # plane then trusts.
+  #
+  # Only a person we have never seen is created active. That is what a deployment with no
+  # SCIM means by "active", and it is the case the flag defaults for.
   defp upsert(subject, claims) do
-    Identity.upsert_user(%{
+    attrs = %{
       subject: subject,
       email: Map.get(claims, "email"),
-      display_name: Map.get(claims, "name") || Map.get(claims, "preferred_username"),
-      active: true
-    })
+      display_name: Map.get(claims, "name") || Map.get(claims, "preferred_username")
+    }
+
+    case Identity.get_user(subject) do
+      %User{active: false} -> {:error, :deactivated}
+      %User{} -> Identity.upsert_user(attrs)
+      nil -> Identity.upsert_user(Map.put(attrs, :active, true))
+    end
   end
 
   # Groups named in a token but not yet known are created. A group is not access — a

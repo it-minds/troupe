@@ -10,7 +10,7 @@ defmodule Troupe.Plane.ControlTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, Sessions, TeamBudget}
+  alias Troupe.Plane.{Bundles, Fleet, SCIM, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -179,6 +179,31 @@ defmodule Troupe.Plane.ControlTest do
       # only thing a pod can influence is *which of its own sessions* it asks about.
       assert %{"sub" => "idp|ada", "aud" => "troupe-kms"} = payload_of(assertion)
       assert is_integer(expires_at)
+    end
+
+    test "is refused once the session's owner is deactivated", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      ada = person("ada@example.test", ["engineering"])
+      {:ok, _} = Sessions.create(%{id: "s-ada2", owner_subject: ada.subject, profile: "dev"})
+      {:ok, _} = Sessions.place("s-ada2", pod)
+
+      assert {:ok, %{"assertion" => _}} = call(worker, "kms.assertion", %{"session_id" => "s-ada2"})
+
+      {:ok, _} = SCIM.deactivate_user(ada.id)
+
+      # The door that needs nobody to sign in. A running session would otherwise keep
+      # lending a deprovisioned person's credentials for as long as it kept running; now
+      # the pod's existing key-manager token outlives this by its own lease and no longer.
+      assert {:error, error} = call(worker, "kms.assertion", %{"session_id" => "s-ada2"})
+      assert error["message"] == "forbidden"
+      assert error["data"]["reason"] =~ "deactivated"
+
+      # The session is not stopped. Its history is the team's, and what it may still do is
+      # a different question from what it may do *as them*.
+      assert Sessions.get("s-ada2").state == "active"
     end
 
     test "refuses a session this pod is not holding", %{port: port} do

@@ -15,9 +15,21 @@ defmodule Troupe.Plane.Control.Connection do
 
   use GenServer, restart: :temporary
 
-  alias Troupe.Plane.{Bundles, Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
+  alias Troupe.Plane.{
+    Bundles,
+    Enrolment,
+    Erasure,
+    Fleet,
+    Identity,
+    Placement,
+    Sessions,
+    TeamBudget,
+    Tokens
+  }
+
   alias Troupe.Plane.Control.{Connections, Router}
   alias Troupe.Plane.Fleet.Bundle
+  alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.{Error, JSONRPC}
 
@@ -390,16 +402,7 @@ defmodule Troupe.Plane.Control.Connection do
   defp dispatch("kms.assertion", params, state) do
     case session_of(params["session_id"], state.worker) do
       %Session{owner_subject: owner} when is_binary(owner) ->
-        case Tokens.mint_kms_assertion(owner) do
-          {:ok, assertion, claims} ->
-            {:ok, %{"assertion" => assertion, "expires_at" => claims["exp"]}, state}
-
-          {:error, reason} ->
-            {:error, Error.new(:unavailable, %{reason: inspect(reason)}), state}
-        end
-
-      %Session{} ->
-        {:error, Error.new(:not_found, %{reason: "that session has no owner"}), state}
+        mint_for(owner, state)
 
       nil ->
         {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
@@ -425,6 +428,32 @@ defmodule Troupe.Plane.Control.Connection do
 
   defp dispatch(method, _params, state) do
     {:error, Error.new(:method_not_found, %{method: method}), state}
+  end
+
+  # A person the identity provider has deactivated stops being able to lend their
+  # credentials to a pod, and this is where that takes effect. It matters more here than
+  # at the harness: a running session needs nobody to sign in, so refusing a deprovisioned
+  # person at the front door would leave their credentials reachable for as long as
+  # anything they started kept running. The pod's existing key-manager token outlives this
+  # by its own lease and no longer.
+  #
+  # The session is not stopped. What it may still do is the session's question — its
+  # history is the team's, and a person leaving is not a reason to lose it — and what it
+  # may do *as them* is this one.
+  defp mint_for(owner, state) do
+    case Identity.get_user(owner) do
+      %User{active: false} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+      _active ->
+        case Tokens.mint_kms_assertion(owner) do
+          {:ok, assertion, claims} ->
+            {:ok, %{"assertion" => assertion, "expires_at" => claims["exp"]}, state}
+
+          {:error, reason} ->
+            {:error, Error.new(:unavailable, %{reason: inspect(reason)}), state}
+        end
+    end
   end
 
   # A pod may ask about the sessions it is holding and no others. Enrolment decided which

@@ -1513,6 +1513,45 @@ Writing the first of these corrected a comment that had been approximate since s
 it is appended and its own `agent_started` is already in. What it *is* is the event that
 says what the session is, which is the claim a rebuild depends on.
 
+## R1f — credentials that belong to a person
+
+`stage-6.md` §3, and the one part of R1 where every interesting claim is a negative one.
+So the tests stand the real mechanism up — the plane signs through transit, OpenBao's JWT
+auth verifies against the transit key's public half, the policy it issues is templated on
+the subject — rather than asserting what this code believes it sends.
+
+```
+$ scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/person_credentials_test.exs
+Result: 6 passed
+
+$ scripts/toolbox mix test apps/troupe_core/test/troupe/mcp_test.exs
+Result: 11 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/control_test.exs'
+Result: 18 passed
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A profile-mode server behaves exactly as today | `credential_mode` defaults to `profile`; every existing bundle, projection and MCP test passes unchanged |
+| A person-mode server with no connection returns `not_connected` with a hint, and the session continues | "answers not_connected, readably, when nobody has connected it" — which also asserts nothing was sent, and that it is `{:ok, …}` rather than an error |
+| After a grant and a direct write, the call succeeds and the event records `identity: "person:<subject>"` | "grants an assertion and never a value" writes through the real key manager with a client-exchanged token; "sends the owner's credential, and only for the call" and "says which identity a call would go out as" prove the call and the event |
+| A pod holding session A's assertion is refused the slot of session B's owner | "reads that person's slot and is refused everybody else's", refused by OpenBao — and "refuses a session this pod is not holding", refused by the plane, which is the half a key manager cannot decide |
+| The plane's logs and audit rows contain no credential value | no value reaches the plane: `grant` takes none and answers none, asserted directly on the answer |
+| A bundle setting both a `secretRef` and `person` mode is refused at publish, with the reason | "a server with a Secret and a person's credential is refused at publish" |
+
+**Two things deviate from the plan, both in the same direction.** `me.connections.grant`
+answers an assertion rather than a key-manager token, because a token the plane minted is
+a token the plane held; and there is no `me.connections.revoke`, because removal uses the
+same grant and the plane's policy has no `delete` under a person's connections at all.
+`DECISIONS.md` 375–376.
+
+**What is not claimed.** The path from `me.connections.grant` through a real key manager
+into a real tool call is proven in two halves rather than one: the grant and the write
+against OpenBao, and the call and its event against a mock MCP server with the lookup
+injected. Joining them needs a pod, a plane and a key manager at once, which is the
+cluster suite's job and not yet done.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
@@ -1595,8 +1634,9 @@ and nothing here changes what CI runs.
 
 | piece | what is left |
 | --- | --- |
-| Personal credentials (`stage-6.md` §3) | `credential_mode` on a bundle entry, the OpenBao JWT role and assertion at activation, `me.connections.*`, the `not_connected` tool result. The key path and the person policy this needs are built and proven above. |
 | Private sessions, server half | `session.register`, `session.presign`, the daemon sealing through the moved `Sealer`, `session.list` filters, the epoch fence between devices. The loopback WebSocket, `identity.link`, the capability, the key path and policy, and the three log fixes are done. |
 | The cluster suite (`stage-6.md` §5) | `mix troupe.e2e`, the eight claims in its table and the two the brief adds, and the `cluster` CI job. Nothing here has run on a cluster; the paragraph in this report that says so is still true and is not yet replaced. |
+
+Personal credentials are done, bar the end-to-end join named in R1f.
 
 R2 through R9 are untouched.
