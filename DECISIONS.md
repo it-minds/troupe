@@ -2817,3 +2817,32 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      the replacement pod over a real WebSocket, because the plane is not on the path of a
      session's content and a suite that read it from the plane would be proving the wrong
      thing.
+
+421. **A worker's persistent volume was mounted and unused.** The operator mounts the
+     claim at `/var/lib/troupe` and never set `TROUPE_STATE_HOME`, so the worker wrote to
+     `$HOME/.local/state/troupe` — the container's own ephemeral layer. Nothing was lost,
+     because sessions are in object storage and that is what sealing is for; what was lost
+     was every restart's worth of re-fetching and re-unpacking, and the volume's size class
+     decided nothing at all. The mount and the environment now name one constant, and the
+     test asserts they are the *same path* rather than asserting each separately — two
+     values that merely both exist is exactly the state this was in.
+
+422. **`session.get` says which bundle a session is pinned to.** The pin is a real promise
+     — a session whose agent definitions changed underneath it would be a different session
+     halfway through — and until now nothing outside the plane's own database could check
+     it. A promise no client can observe is not one anybody can rely on, and it is also a
+     claim the cluster suite could not make.
+
+423. **The enrolment claim reads the fleet, not the plane's log.** The log is right about
+     what happened and is also thousands of lines of query debug, so "did this happen"
+     becomes "is it still in the last four hundred lines" — a question about log volume.
+     The fleet listing is the plane's own record of who enrolled, and the pod list is
+     Kubernetes' record of what is running; the claim is that they name the same thing,
+     which is two roads to one fact rather than one road twice.
+
+424. **An upgrade is proven by the pod's identity, not by the absence of an error.** A
+     test that checked only that the session was still `active` afterwards would pass on a
+     pod that had been replaced and the session restored — a different promise, and a much
+     slower one. Same uid says it is not a replacement wearing the same name; no restarts
+     says the process inside did not die; the unchanged epoch says the plane did not bring
+     it back.

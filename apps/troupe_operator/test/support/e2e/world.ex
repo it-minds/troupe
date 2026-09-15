@@ -251,6 +251,23 @@ defmodule Troupe.E2E.World do
   end
 
   @doc """
+  Run helm against the same cluster, from the repository root.
+
+  Upgrading the chart is a fault this suite injects, not a step it does on the side: a
+  release re-applied under a running session is the thing being tested.
+  """
+  @spec helm([String.t()]) :: {String.t(), non_neg_integer()}
+  def helm(args) do
+    System.cmd("helm", ["--kube-context", context() | args],
+      stderr_to_stdout: true,
+      cd: repository_root()
+    )
+  end
+
+  # The suite runs from `apps/troupe_operator`, and the chart is at the umbrella's root.
+  defp repository_root, do: Path.expand("../../../../..", __DIR__)
+
+  @doc """
   The same URL, reachable from wherever this suite is running.
 
   A worker's endpoint is the one the *outside* uses — `…workers.localtest.me:30080`,

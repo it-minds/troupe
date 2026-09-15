@@ -47,16 +47,30 @@ defmodule Troupe.E2E.EnrolmentTest do
     pods = World.pods(namespace, "app.kubernetes.io/name=troupe-worker")
     assert pods != [], "no worker pods in #{namespace}"
 
-    # The plane's half, in the plane's own words. Read from the deployment's log rather
-    # than from an API the test could have been told what to expect by.
+    # The plane's half: it lists, under that profile, a pod whose name is one the API
+    # server agrees exists in that profile's namespace. Two roads again — the fleet is
+    # the plane's record of who enrolled, and the pod list is Kubernetes' record of what
+    # is running — and the claim is that they name the same thing.
+    #
+    # Not the plane's log. It was, and the log is right about what happened; it is also
+    # thousands of lines of query debug, so "did this ever happen" turns into "is it
+    # still in the last four hundred lines", which is a question about log volume.
     World.eventually(
-      fn -> World.kubectl!(["logs", "-n", World.namespace(), "deployment/troupe-plane", "--tail=400"]) =~ "enrolled as #{profile}" end,
+      fn -> enrolled(profile) != [] end,
       timeout: 180_000,
       what: "the plane to record an enrolment for #{profile}"
     )
 
-    log = World.kubectl!(["logs", "-n", World.namespace(), "deployment/troupe-plane", "--tail=400"])
-    assert log =~ "#{namespace}/"
+    assert Enum.all?(enrolled(profile), &(&1 in pods)),
+           "the plane lists pods #{inspect(enrolled(profile))} that #{namespace} does not have"
+  end
+
+  defp enrolled(profile) do
+    Plane.call!("admin.profiles.list")
+    |> Enum.find(%{}, &(&1["name"] == profile))
+    |> Map.get("pods", [])
+    |> Enum.filter(& &1["healthy"])
+    |> Enum.map(& &1["pod"])
   end
 
   describe "a token the cluster really issued" do

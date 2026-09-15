@@ -291,6 +291,20 @@ defmodule Troupe.Plane.BundlesTest do
       # A new session gets v2.
       assert {:ok, later} = Harness.call("session.create", %{"profile" => "dev"}, context(user))
       assert Sessions.get(later["session_id"]).bundle_version == v2.version
+
+      # And a client can see all of that. Until this was on `session.get`, the pin was a
+      # promise nothing outside the plane's own database could check — which is the same
+      # as no promise, for anybody trying to explain why a session is behaving like a
+      # bundle that was replaced an hour ago.
+      assert {:ok, pinned} =
+               Harness.call("session.get", %{"session_id" => session.id}, context(user))
+
+      assert pinned["bundle_version"] == v1.version
+
+      assert {:ok, moved} =
+               Harness.call("session.get", %{"session_id" => later["session_id"]}, context(user))
+
+      assert moved["bundle_version"] == v2.version
     end
 
     test "activating on a retired version upgrades, and says so", context do

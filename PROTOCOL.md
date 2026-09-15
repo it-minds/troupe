@@ -891,7 +891,10 @@ sequence numbers, hashes and a `device` name, and nothing else. A team admin doe
 it; a platform admin sees a count and a size.
 
 A session's JSON carries `kind` and, for a private one, the `device` that last sealed
-it. `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
+it, and `bundle_version` — the configuration it was pinned to when it was created,
+which does not move when a newer version is published. A session whose agent
+definitions changed underneath it would be a different session halfway through.
+ `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
 list can show both and either can be asked for on its own. `kind` is not `visibility`:
 `visibility` is who else on the team may see a session and defaults to `private`, so an
 unshared team session has always been visibility-private and is not a private session.

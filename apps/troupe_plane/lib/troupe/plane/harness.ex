@@ -1302,6 +1302,11 @@ defmodule Troupe.Plane.Harness do
       "kind" => session.kind,
       "device" => session.device,
       "visibility" => session.visibility,
+      # Which configuration this session is pinned to, fixed when it was created. A
+      # session whose agent definitions changed underneath it would be a different
+      # session halfway through, so it does not move when a new version is published —
+      # and until this was here, that promise was one no client could check.
+      "bundle_version" => session.bundle_version,
       "state" => session.state,
       "epoch" => session.epoch,
       "title" => session.title,

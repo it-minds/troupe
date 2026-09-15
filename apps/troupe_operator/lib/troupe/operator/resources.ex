@@ -17,6 +17,11 @@ defmodule Troupe.Operator.Resources do
   alias Troupe.WorkerProfile, as: Profile
   alias Troupe.WorkerProfile.MCPServer
 
+  # Where a worker keeps everything it can rebuild: sealed segments, materialised
+  # bundles, restored workspaces. The mount and `TROUPE_STATE_HOME` have to name the same
+  # directory, so they name the same constant.
+  @state_dir "/var/lib/troupe"
+
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
   def for_profile(%Profile{} = profile, %Policy{} = policy, %Settings{} = settings) do
@@ -567,6 +572,15 @@ defmodule Troupe.Operator.Resources do
       # Without this the release boots an empty supervision tree, which is what the same
       # image does on a laptop and must not do here.
       %{"name" => "TROUPE_WORKER_AUTOSTART", "value" => "true"},
+      # And this is what makes the volume below a volume rather than a decoration. Without
+      # it the worker writes to `$HOME/.local/state/troupe`, which is the container's own
+      # ephemeral layer: the sealed-segment cache, the materialised bundles and every
+      # restored workspace went there, and a pod restart threw all of it away while the
+      # PersistentVolumeClaim this profile provisions sat empty. Nothing was *lost* —
+      # sessions are in object storage and that is the point of sealing them — but every
+      # restart paid to fetch and unpack everything again, and the volume's size class
+      # decided nothing at all.
+      %{"name" => "TROUPE_STATE_HOME", "value" => @state_dir},
       %{"name" => "TROUPE_PROFILE", "value" => profile.name},
       %{
         "name" => "TROUPE_NAMESPACE",
@@ -765,7 +779,7 @@ defmodule Troupe.Operator.Resources do
 
   defp volume_mounts(profile) do
     base = [
-      %{"name" => Names.data_volume(), "mountPath" => "/var/lib/troupe"},
+      %{"name" => Names.data_volume(), "mountPath" => @state_dir},
       %{"name" => "enrolment-token", "mountPath" => "/var/run/secrets/troupe", "readOnly" => true}
     ]
 

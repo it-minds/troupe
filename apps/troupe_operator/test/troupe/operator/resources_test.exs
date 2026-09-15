@@ -345,6 +345,22 @@ defmodule Troupe.Operator.ResourcesTest do
       assert %{"mountPath" => "/var/lib/troupe"} =
                Enum.find(container(resources)["volumeMounts"], &(&1["name"] == "data"))
     end
+
+    test "and the worker is told to write there", %{resources: resources} do
+      # The mount was asserted above and the volume was empty on every cluster this has
+      # ever run on: nothing set `TROUPE_STATE_HOME`, so the worker wrote to
+      # `$HOME/.local/state/troupe` — the container's own ephemeral layer — and the claim
+      # this profile provisions held nothing. Sealed segments, materialised bundles and
+      # restored workspaces were all re-fetched on every restart, and the volume's size
+      # class decided nothing.
+      #
+      # Asserted as the *same path* rather than as a literal, because a mount and an
+      # environment variable that merely both exist is exactly the state this was in.
+      env = Map.new(container(resources)["env"], &{&1["name"], &1["value"]})
+      mount = Enum.find(container(resources)["volumeMounts"], &(&1["name"] == "data"))
+
+      assert env["TROUPE_STATE_HOME"] == mount["mountPath"]
+    end
   end
 
   describe "the workload" do
