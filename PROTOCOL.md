@@ -465,11 +465,20 @@ A client that is signed in tells it who that is, once.
 #### `identity.link`
 ```json
 {"command_id": "c-2", "subject": "ada@example.test", "display_name": "Ada",
- "plane_url": "https://troupe.example"}
+ "plane_url": "https://troupe.example", "plane_token": "..."}
 ```
 Every connection made after this carries that subject as its principal, and the one that
 made the call is relabelled where it stands. `session_created` gains an `owner` field
 naming it. A blank subject is `invalid_params`.
+
+`plane_token` is optional and is the one part of this that is not a label. The daemon
+authenticates nobody, so it cannot obtain a plane token and has to be handed one by the
+client that signed in — it needs one to register and seal a private session. It is held
+in memory only: `identity.json` records the name, never the token, because a token on
+disk is a token a backup copies. A restarted daemon therefore has no token until a client
+links again, which costs nothing: the local log is already durable, so a daemon with no
+token seals later rather than losing anything. A client that refreshes its token links
+again.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.
@@ -870,6 +879,8 @@ than an admin uses them:
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own subject, which the client exchanges with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told |
 | `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of `DECISIONS.md` 90 that lets a laptop seal at all |
+| `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
+| `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<subject>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
 
 ### Private sessions
 
@@ -879,7 +890,8 @@ plane's row carries `kind: "private"`, no `team`, no `profile` and no worker —
 sequence numbers, hashes and a `device` name, and nothing else. A team admin does not see
 it; a platform admin sees a count and a size.
 
-`sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
+A session's JSON carries `kind` and, for a private one, the `device` that last sealed
+it. `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
 list can show both and either can be asked for on its own. `kind` is not `visibility`:
 `visibility` is who else on the team may see a session and defaults to `private`, so an
 unshared team session has always been visibility-private and is not a private session.

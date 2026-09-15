@@ -14,7 +14,7 @@ defmodule Troupe.Gateway.Dispatch do
   effect.
   """
 
-  alias Troupe.Gateway.{ClientTool, Commands, Presence, Session, Worktrees}
+  alias Troupe.Gateway.{ClientTool, Commands, Plane, Presence, Private, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.Mounts
@@ -24,6 +24,8 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workspace
+
+  require Logger
 
   defmodule Context do
     @moduledoc "Who is calling, and what they are allowed to do."
@@ -403,10 +405,13 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.create", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
+      private? = Map.get(params, "private", false) == true
+
       opts =
         [workspace: resolved.path, agent: Map.get(params, "profile")]
         |> maybe_put(:task, Map.get(params, "prompt"))
         |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
+        |> maybe_private(private?)
 
       case Troupe.start_session(opts) do
         {:ok, session} ->
@@ -415,7 +420,12 @@ defmodule Troupe.Gateway.Dispatch do
              "session_id" => session.id,
              "workspace" => resolved.path,
              "worktree" => resolved.worktree,
-             "branch" => resolved.branch
+             "branch" => resolved.branch,
+             # Whether it is *actually* being sealed, not whether it was asked for. A
+             # laptop that is offline, or one nobody has linked, creates the session and
+             # says so — the alternative is refusing to work without a network, which is
+             # the coupling the whole idea avoids.
+             "syncing" => private? and start_sealing(session.id, resolved.path)
            }}
 
         {:error, reason} ->
@@ -427,6 +437,10 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.archive", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id") do
       Troupe.stop_session(session_id)
+      # After the tree, so that `session_dormant` is in the log this seals, and a private
+      # session is written down before the daemon says it is dormant. A local session has
+      # no sealer and this is a no-op.
+      Private.stop(session_id)
       {:ok, %{"session_id" => session_id, "state" => "dormant"}}
     end
   end
@@ -473,6 +487,12 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, subject} <- fetch(params, "subject") do
       case Identity.link(Map.put(params, "subject", subject)) do
         {:ok, identity} ->
+          # `plane_token`, if the client sent one, goes to the process that holds it
+          # and nowhere near the file: `identity.json` records a label, and a token is
+          # not a label. A client that sends none links the name alone, which is what a
+          # daemon with only local sessions needs.
+          :ok = Plane.link(Map.put(params, "subject", subject))
+
           # The connection that linked is relabelled where it stands; everything else
           # reads the file at its next handshake.
           send(context.connection, {:principal_changed, Identity.principal(subject)})
@@ -486,6 +506,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("identity.unlink", _params, context) do
     Identity.unlink()
+    :ok = Plane.unlink()
     user = System.get_env("USER") || System.get_env("USERNAME") || "local"
     send(context.connection, {:principal_changed, Identity.principal(user)})
     {:ok, Identity.to_json(nil)}
@@ -493,6 +514,23 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
+  defp maybe_private(opts, false), do: opts
+  defp maybe_private(opts, true), do: [{:kind, :private} | opts]
+
+  # A private session seals to the cluster; a local one does not. Failure here is not
+  # failure of the session: the log is already durable on this disk, and the thing that
+  # could not be reached is asked again the next time somebody signs in.
+  defp start_sealing(session_id, workspace) do
+    case Private.start(session_id, workspace: workspace) do
+      {:ok, _sealer, _context} ->
+        true
+
+      {:error, reason} ->
+        Logger.info("troupe: #{session_id} is local for now: #{inspect(reason)}")
+        false
+    end
   end
 
   # -- helpers ----------------------------------------------------------------

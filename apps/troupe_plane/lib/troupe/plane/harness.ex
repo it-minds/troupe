@@ -21,6 +21,7 @@ defmodule Troupe.Plane.Harness do
   plane replica and it is rarely the one the harness reached.
   """
 
+  alias Troupe.KMS
   alias Troupe.ObjectStore
 
   alias Troupe.Plane.{Audit, Bundles, Connections, Erasure, Fleet, Identity, Placement, Sessions}
@@ -70,6 +71,7 @@ defmodule Troupe.Plane.Harness do
     "session.register" => :control,
     "session.presign" => :control,
     "session.objects" => :observe,
+    "session.assertion" => :control,
     "session.pin" => :control,
     "session.unpin" => :control,
     "session.erase" => :control,
@@ -303,6 +305,21 @@ defmodule Troupe.Plane.Harness do
       })
 
       {:ok, %{"session_id" => session.id, "expires_in" => @presign_seconds, "urls" => urls}}
+    end
+  end
+
+  # What a daemon needs in order to make this session's key: an assertion for its own
+  # owner, and where to spend it. The same shape `me.connections.grant` answers, and for
+  # the same reason — the plane signs a statement of who the caller is and holds no token
+  # that could read what the caller then writes.
+  #
+  # The session has to be registered first. That is not ceremony: it is what makes this a
+  # statement about a session the plane knows is theirs, and it is where a deactivated
+  # person is stopped, since every method here goes through that check.
+  defp handle("session.assertion", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, session} <- own_private(session_id, user) do
+      Connections.assertion(user.subject, KMS.path({:person, user.subject}, session.id))
     end
   end
 

@@ -197,7 +197,8 @@ defmodule Troupe.Sessions.Sealer do
     context = state.context
 
     Storage.put_manifest(context.store, context.session_id, %{
-      team: context.team,
+      kind: Context.kind(context),
+      team: Context.team_name(context),
       owner_subject: context.owner_subject,
       profile: context.profile,
       epoch: context.epoch,

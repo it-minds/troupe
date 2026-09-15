@@ -2669,3 +2669,57 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      failed on exactly the sessions it was most needed for. It now reads `kind` from the
      manifest and gives a private session neither profile nor team. Found by the test that
      rebuilds one, which is the only way it would have been found before a customer did.
+
+## R1 — the daemon seals a person's own session
+
+400. **The plane token lives in memory and the label lives on disk.** `identity.json`
+     records who this machine's person is, because that is a label the daemon goes on
+     applying whether or not it can reach anything. A token is not a label, and a token on
+     disk is a token a backup copies. So a restarted daemon has no token until a client
+     links again — which costs nothing, because sealing is queued work over a log that is
+     already durable locally. The failure mode of the alternative is a stolen file that
+     reads a person's whole estate.
+
+401. **`identity.link` carries the token, because the client is the thing that
+     authenticated.** The daemon authenticates nobody — its trust boundary is the file
+     mode on its socket — so it cannot obtain a plane token and must be handed one. The
+     same call that says who the person is says how to speak for them, and a client
+     refreshing its token links again.
+
+402. **The key manager exchange is a seam, not a bypass.** `Private.start/2` takes
+     `:key_manager`, defaulting to the real assertion exchange. The gateway may not depend
+     on `troupe_plane` — a boundary rule, and the reason for it is that a daemon able to
+     call the plane's modules would eventually do that instead of using the protocol — so
+     a gateway test cannot mint an assertion, because minting one is signing. Making the
+     seam explicit is better than a flag that quietly skips a step, and the exchange itself
+     is proven in the plane's suite. Joining the two is the cluster suite's job.
+
+403. **The fake plane's signing is real and its rows are not.** `session.presign` signs
+     against the same MinIO the daemon then writes to and `session.objects` lists it;
+     faking those would leave the test proving that the daemon can talk to a mock.
+     `session.register` is an Agent that implements the one behaviour the daemon has to
+     cope with, which is the fence.
+
+404. **The manifest names a kind and a team, and a private session's team is `nil`.**
+     `Sealer` wrote `team: context.team` straight into plaintext JSON, and a private
+     session's owner is `{:person, subject}` — a tuple, which `Jason` refuses. So the first
+     private session a daemon ever sealed would have crashed its sealer on the manifest.
+     `Context.kind/1` and `Context.team_name/1` answer both, and the kind is what
+     `Index.attrs/4` now reads to keep a rebuild from inventing a profile.
+
+405. **The sealers are supervised by the daemon, not by whoever asked.** A session's
+     unsealed tail has to outlive the client that created it; a sealer linked to a
+     connection would lose exactly the events nobody had written down yet. They sit under
+     a DynamicSupervisor with a registry keyed by session id, which also makes shutdown
+     free: `Sealer` traps exits and seals in `terminate/2`, so a daemon going away takes
+     its last segments with it.
+
+406. **`session.create` answers `syncing`, which is what it is doing and not what was
+     asked for.** A laptop that is offline, or one nobody has linked, creates the session
+     and says `syncing: false`. Refusing to work without a network is the coupling a
+     private session exists to avoid, and a client that asked for private and got local
+     needs to be told rather than to assume.
+
+407. **`session.archive` seals before it answers.** The sealer would seal on the way down
+     regardless, but a session the daemon has called dormant should be written down by
+     then, not shortly afterwards.

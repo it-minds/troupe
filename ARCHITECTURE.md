@@ -1203,6 +1203,15 @@ said it would not; the reason 90 gave was that the plane must never read content
 signer for ciphertext it has no key for cannot. The prefix is checked rather than trusted,
 because a signer that signs whatever it is handed is that credential with extra steps.
 
+Listing is the one verb a signature cannot cover, because the caller does not yet know
+the keys and signing the bucket would be handing over the bucket. `session.objects` lists
+under the session's own prefix, narrowable and not widenable. Deleting is not on that road
+at all: erasure removes every *version* of every object, which is a bucket operation and a
+decision with an owner, so it stays on `session.erase`. And a presigned PUT cannot set
+object metadata, since S3 refuses an `x-amz-*` header the signature does not cover — the
+epoch, sequence and head hash it would have carried reach the plane through the plaintext
+manifest and through every `session.register` instead.
+
 **The fence** is the epoch, the same field that stops a resurrected pod appending to a
 session that moved on. `session.register` with `claim: true` bumps it conditionally on the
 epoch the device last saw, so two devices waking on the same session both send `epoch: 3`
@@ -1214,3 +1223,28 @@ it: nothing is merged and nothing is lost.
 Registration is idempotent on the id, because a daemon that seals, loses its connection
 and retries must end up with one session rather than two; and `last_seq` never goes
 backwards, because a queue replayed after a restart arrives in the order it was kept.
+
+### 16.6 The daemon's end of it
+
+A private session is sealed by the machine it runs on, which holds neither of the two
+credentials a pod holds. It gets by without them the same way twice.
+
+**The key.** `session.assertion` answers a short-lived statement, signed by the plane,
+that the caller is who they are; the daemon exchanges it at the key manager's JWT auth
+mount for a token whose policy is templated on that subject, and uses it to create the
+session key at `troupe/people/<subject>/sessions/<id>`. The plane signs and never holds:
+a token it minted would be a token it had.
+
+**The bytes.** `Troupe.ObjectStore.Signed`, above.
+
+Everything after that is `Troupe.Sessions.Sealer`, unchanged and unaware of which host it
+is running on. That is what moving it into `troupe_protocol` was for — a session sealed by
+a laptop and one sealed by a pod are the same bytes in the same layout, so either can
+restore the other.
+
+The plane token the daemon needs for all of this comes from the client that signed in, on
+`identity.link`, and is held in memory only. `identity.json` records the person's name,
+which is a label the daemon goes on applying whether or not it can reach anything; a token
+is not a label, and one on disk is one a backup copies. A restarted daemon has no token
+until somebody links again, and loses nothing by it: the durable log is already local, so
+a daemon that cannot reach the plane seals later rather than losing anything.

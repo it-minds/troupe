@@ -1552,6 +1552,132 @@ against OpenBao, and the call and its event against a mock MCP server with the l
 injected. Joining them needs a pod, a plane and a key manager at once, which is the
 cluster suite's job and not yet done.
 
+## R1g — a deprovision that takes effect
+
+Not in the plan, and found by asking what `User.active` was for. SCIM wrote it. Nothing
+read it. A person the identity provider had deprovisioned could sign in, call every
+method, and go on doing so — and `Login` wrote `active: true` on *every* login, so the
+deprovision lasted exactly until its subject next authenticated.
+
+Three doors, because they are three doors and not one.
+
+| door | what was wrong | what it does now |
+| --- | --- | --- |
+| Signing in | reactivated whoever it authenticated | refused, and never reactivates. Only somebody nobody has ever deactivated is created active, which is what a deployment with no SCIM means by the word |
+| The harness | nothing checked | checked on every call rather than at the door, because a plane token outlives the moment it was issued. It reads the row: the provider's decision reaches us through SCIM, and nothing re-reads a claim |
+| `kms.assertion` | nothing checked | refused for a deactivated owner |
+
+The third is the one that mattered. A running session needs nobody to sign in, so
+refusing at the harness alone would have left a deprovisioned person's credentials
+reachable by any pod for as long as anything they had started kept running —
+indefinitely, since a pod refreshes its own token. Refused there, the window is the pod's
+existing key-manager lease and no longer.
+
+```
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/deactivation_test.exs'
+Result: 3 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/control_test.exs'
+Result: 19 passed
+```
+
+**What is deliberately not done.** A deactivated person's sessions keep running. What a
+session may still do is the session's question — its history is the team's, and a person
+leaving is not a reason to lose it — and what it may do *as them* is the one closed here.
+Stopping them is a policy decision with an owner, and `RELEASE.md` W2 already has the
+shape of it for service principals. `DECISIONS.md` 380–384.
+
+## R1h — a session that belongs to a person
+
+`../troupe-gui/docs/plans/local-and-private-sessions.md` §4 and §5, the server half. The
+plane learns that a private session exists and how far it has got; it does not learn a
+profile, a team, a pod or a byte.
+
+```
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/private_sessions_test.exs'
+Result: 14 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix ecto.rollback --to 20260915000014 && mix ecto.migrate'
+== Migrated 20260915000014 in 0.0s   # down
+== Migrated 20260915000014 in 0.0s   # and up again
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A private session's row has no team, no profile and no pod | "creates a row with no team, no profile and no pod" reads the row, not the answer |
+| …and cannot have one, by any path | "the database refuses the shape even when nothing else does" — the changeset refuses it *and* a raw `INSERT` that skips every line of Elixir raises on the check constraint |
+| Registration is idempotent and a seal does not rewind | "is idempotent on the id, and a seal only moves forward": a retry is one session, and an older `last_seq` replayed after a restart is not a rewind |
+| Two devices resuming at once: one wins, the other is told | "one claim wins and the loser is told on its next seal" — both send `epoch: 1`, one moves it, and the loser's *seal* is refused `stale_version` while the winner's succeeds |
+| One list shows both kinds, and either alone | "separates a person's own sessions from their team's": `sessions.list` with no filter returns both, `kind: "private"` returns the one |
+| A private session is nobody else's | "a private session is nobody else's, team or not" — absent from another person's listing and `not_found` to `session.get` |
+| A laptop with no credential seals, lists and reads back | "a laptop seals, lists and reads back through the plane's signatures": `Storage.seal_segment` and `read_segment` through `ObjectStore.Signed`, against the real MinIO |
+| …and the plane cannot read what it signed for | the same test reads the object with the plane's own credential and finds ciphertext: the marker string is absent and `Cipher.open/3` with any other key fails |
+| A signed URL expires | "a signature stops working when it expires" — signed as of an hour ago with its five minutes, refused by MinIO with a 403; a fresh one is 200. The claim is the store's to make, not ours |
+| Signing is confined to the session's own prefix | "signs only keys under this session's prefix" refuses another session's key, a `..` climb out of this one, and a bare key at the root |
+| `mix troupe.index.rebuild` sees a private session | "a rebuild finds a private session without reading a byte of it" — epoch, sequence and head hash recovered from the plaintext manifest, with the segment's own metadata asserted *empty* |
+
+**Two deviations from the plan, both recorded.** `origin.kind` stays what started a
+session (`user`), and the private/team distinction is a column of its own — `origin.kind`
+is validated against three values that answer a different question, and the new column is
+where a filter and a check constraint can both reach it. And `visibility` was not reused:
+it has defaulted to `private` since the first migration, so selecting private sessions on
+it would have returned every unshared team session. `DECISIONS.md` 385–393.
+
+**What writing it found.** `Index.attrs/4` fell back to a `default_profile` of `"unknown"`
+for anything storage did not name. A private session cannot have a profile, so a rebuild
+would have failed on precisely the sessions a rebuild exists for — silently, into a log
+line. `DECISIONS.md` 399.
+
+**What is not claimed.** The daemon does not yet seal through any of this. The transport,
+the fence, the row and the signatures are proven against a real store and a real plane;
+the daemon-side wiring — sealing a private session every 500 events and at dormancy,
+restoring one on a second device, binding it to a directory — is not written, and the
+second-device story is therefore proven at the plane rather than end to end.
+
+## R1i — the daemon's end of a private session
+
+`local-and-private-sessions.md` §4, the sealing half. A laptop holds neither of the two
+credentials a pod holds and seals anyway.
+
+```
+$ scripts/toolbox bash -c 'cd apps/troupe_gateway && mix test test/troupe/gateway/private_test.exs'
+Result: 9 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_gateway && mix test'
+Result: 69/73 passed        # the four are the container's, named under The gate
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A daemon with no object-storage credential writes a session into the cluster's bucket | "writes a session nobody else can read, through signatures it was handed" — `Storage.seal_segment` through `ObjectStore.Signed`, against the real MinIO, with every URL signed by the fake plane against the same bucket |
+| …and nobody else can read it | the same test fetches the object with a keyed store and finds ciphertext: the marker string is absent, and `Cipher.open/3` with any other key fails |
+| …and can read its own back | `read_segment` returns the events, which is the half that needs the session key |
+| Listing works without a credential | `list_segments` through the signed store, which asks the plane |
+| Every seal says how far the session has got | "every seal tells the plane how far the session has got": the row carries `last_seq`, the head hash the sealer computed, and the device |
+| The manifest names a person, not a team | the same test: `kind: "private"`, `team: nil`, and `key_path` under `troupe/people/<subject>/sessions/<id>` |
+| A device that lost the fence stops | "a device that lost the session stops sealing" — another device takes the row to epoch 2, this one reports epoch 1, is refused, and logs that it has stopped. The row is not merged |
+| Claiming is conditional | "claiming bumps the epoch, and a second claim on the old one is refused" |
+| The plane token is never written to disk | "the token is held in memory and never written to disk": a restarted `Plane` is unlinked and every call answers `{:error, :unlinked}` |
+| A daemon with no plane runs local sessions and refuses private ones cleanly | "a session that cannot be registered is refused, and nothing is lost" |
+| `session.create {private: true}` starts one, over a real socket | "a daemon nobody has linked creates the session and says it is not syncing" — the session is created and runs, `session_created` records `kind: "private"`, and `syncing` reports what it is *actually* doing rather than what was asked for |
+| A local session is untouched by any of it | "a local session has no sealer, and stopping one is a no-op" |
+
+**What writing it found.** `Sealer` wrote `team: context.team` straight into the plaintext
+manifest, and a private session's owner is `{:person, subject}` — a tuple, which `Jason`
+refuses. The first private session a daemon ever sealed would have crashed its sealer on
+the manifest, after the segment had gone up. `Context.kind/1` and `Context.team_name/1`
+answer both, and the kind is what stops a rebuild inventing a profile.
+`DECISIONS.md` 404.
+
+**What is not claimed, precisely.** The gateway may not depend on `troupe_plane` — a
+boundary rule — so the test cannot mint an assertion, because minting one is signing.
+`Private.start/2` takes the exchange as `:key_manager` and the test passes one that
+answers a token; the exchange itself is proven in the plane's suite, against a real
+OpenBao JWT mount. Joining the two halves needs a pod, a plane, a key manager and a laptop
+at once, which is the cluster suite. Nor is the far side of it built: no restore runs on a
+second device, and there is no directory binding. `session.create {private: true}` starts
+a sealer and `session.archive` seals it, which is the near half.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
@@ -1634,9 +1760,10 @@ and nothing here changes what CI runs.
 
 | piece | what is left |
 | --- | --- |
-| Private sessions, server half | `session.register`, `session.presign`, the daemon sealing through the moved `Sealer`, `session.list` filters, the epoch fence between devices. The loopback WebSocket, `identity.link`, the capability, the key path and policy, and the three log fixes are done. |
+| Private sessions, the second device | Creating and sealing one is done and proven on both sides, including through a real daemon socket. What is left is the other end: listing a private session on a second device, downloading and verifying its chain, restoring the workspace tar, and the resume-here / bind-to-directory choice. |
 | The cluster suite (`stage-6.md` §5) | `mix troupe.e2e`, the eight claims in its table and the two the brief adds, and the `cluster` CI job. Nothing here has run on a cluster; the paragraph in this report that says so is still true and is not yet replaced. |
 
-Personal credentials are done, bar the end-to-end join named in R1f.
+Personal credentials are done, bar the end-to-end join named in R1f. Deprovisioning was
+not in the plan and is done.
 
 R2 through R9 are untouched.

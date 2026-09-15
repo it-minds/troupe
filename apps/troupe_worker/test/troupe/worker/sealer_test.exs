@@ -131,6 +131,6 @@ defmodule Troupe.Worker.SealerTest do
   end
 
   defp expected_manifest_keys do
-    ~w(epoch head_hash key_path last_seq latest_segment object_bytes owner_subject profile session_id team written_at)
+    ~w(epoch head_hash key_path kind last_seq latest_segment object_bytes owner_subject profile session_id team written_at)
   end
 end

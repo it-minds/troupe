@@ -54,7 +54,22 @@ defmodule Troupe.Plane.Connections do
   The assertion, and where to spend it. No value in, no value out.
   """
   @spec grant(String.t(), String.t()) :: {:ok, map()} | {:error, Error.t()}
-  def grant(subject, slot) do
+  def grant(subject, slot), do: assertion(subject, KMS.slot_path(subject, slot))
+
+  @doc """
+  The same assertion, for any path under this person's own subtree.
+
+  A private session's key is at `troupe/people/<subject>/sessions/<id>`, which the person
+  policy covers for the same reason it covers their MCP slots: it is theirs. The daemon
+  sealing that session needs a key manager token exactly as a pod does, and gets one the
+  same way — a signed statement of who the caller is, exchanged by the caller.
+
+  The path is spelled out rather than left to the client. A client that built its own
+  would one day build one under somebody else, and be refused — which is right, and
+  confusing.
+  """
+  @spec assertion(String.t(), String.t()) :: {:ok, map()} | {:error, Error.t()}
+  def assertion(subject, path) do
     case Tokens.mint_kms_assertion(subject) do
       {:ok, assertion, claims} ->
         {:ok,
@@ -67,10 +82,7 @@ defmodule Troupe.Plane.Connections do
              "mount" => mount(),
              "auth_path" => auth_path(),
              "role" => role(),
-             # The path to write, spelled out, so a client is never in the business of
-             # building one. A client that guessed would one day guess a path under
-             # somebody else — and be refused, which is right, and confusing.
-             "path" => KMS.slot_path(subject, slot)
+             "path" => path
            }
          }}
 
