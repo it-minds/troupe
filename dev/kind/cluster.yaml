@@ -5,6 +5,10 @@
 #
 # 30080/30443 rather than 80/443: binding the privileged ports would fight with whatever
 # else the machine is already serving, and nothing here needs them.
+#
+# The CNI is *not* here. `scripts/kind-up` appends `disableDefaultCNI` when it is asked
+# for a policy-enforcing one, because that is a choice with a consequence — see the
+# comment there.
 kind: Cluster
 apiVersion: kind.x-k8s.io/v1alpha4
 nodes:

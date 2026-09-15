@@ -2846,3 +2846,52 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      slower one. Same uid says it is not a replacement wearing the same name; no restarts
      says the process inside did not die; the unchanged epoch says the plane did not bring
      it back.
+
+425. **The development cluster enforced no network policy at all, and had never been
+     asked to.** kind's default CNI implements pod networking and ignores every
+     NetworkPolicy, so the operator's egress rules were accepted by the API server and
+     enforced by nothing: a worker pod on any `scripts/remote-up` cluster could open a
+     connection to anything on the internet while `kubectl get networkpolicy` showed a
+     tidy list. `dev/kind/cluster.yaml` now disables the default CNI and `remote-up`
+     installs Cilium, which is also what the chart's `CiliumNetworkPolicy` is addressed
+     to — so the development cluster is the one the product is written for rather than a
+     near relative of it.
+
+426. **The egress claim checks that enforcement exists before asserting a refusal, and
+     fails rather than skips when it does not.** A test that found the policy object and
+     stopped would have passed on every cluster this has ever run on, including the ones
+     enforcing nothing. So it dials a host no allowlist mentions and requires that to be
+     refused — and it asserts the plane and the object store are still reachable, because
+     a policy that refused everything would satisfy the negative and break the product.
+     A suite that quietly skipped its only negative claim would be a suite that says
+     egress works.
+
+427. **Cilium under Docker Desktop reports enforcement it does not perform.** The
+     CiliumNetworkPolicy validates, the endpoint reports `policy-enabled: both` with one
+     allowed egress identity, `PolicyAuditMode` is off — and the pod reaches the internet,
+     the plane and the object store alike. Everything the agent says is right and nothing
+     it does is, which is the exact shape of failure this suite exists to catch and the
+     reason the claim is written as a connection rather than as a lookup. On this machine
+     the egress claim therefore **fails**, and that is the correct outcome: it is settled
+     on CI, whose kernel can carry the datapath. A test that skipped here would be a test
+     that reported egress working on a cluster where it does not.
+
+428. **The CNI is a choice with a consequence, and the fallback cannot be mistaken for a
+     pass.** `TROUPE_KIND_CNI` defaults to `cilium`, which is what the product is written
+     for and what CI uses. `default` exists because some kernels cannot carry Cilium's
+     datapath — under Docker Desktop it also fails to implement `hostPort` without
+     kube-proxy replacement, which takes the ingress with it, and disrupts long-lived
+     pod-to-pod TCP, which takes the control channel. A developer there is better served
+     by a cluster honest about enforcing nothing than by one that claims otherwise. The
+     egress claim fails on *either* kind of non-enforcing cluster, so the fallback costs a
+     red test and never a false green.
+
+429. **`kubeProxyReplacement` is not a preference.** Without it Cilium does not implement
+     `hostPort`, and the ingress controller kind installs binds the node's 80 and 443 that
+     way — so the cluster becomes unreachable from outside with no error anywhere except a
+     connection that is refused. Found by the whole suite failing to sign in.
+
+430. **`TROUPE_SKIP_BUILD=1` skips the build and not the load.** It skipped both, and a
+     fresh cluster then has none of the images however recently they were built: the
+     failure arrives as a pre-install hook that never starts, "trying and failing to pull
+     image", several steps from anything that mentions building.

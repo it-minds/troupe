@@ -11,6 +11,11 @@ operator:
     limits: {cpu: "1", memory: 512Mi}
   ingressClassName: nginx
   tlsSecretName: ""
+  # `scripts/remote-up` installs Cilium, because kind's default CNI enforces no policy at
+  # all — so without this the operator would write a CIDR rule where the cluster can
+  # enforce an FQDN one, and the egress claim would be proven against a weaker rule than
+  # the one a deployment runs.
+  ciliumAvailable: true
   # No certificate, and kind maps the host's 30080 onto the ingress controller's 80.
   workersScheme: ws
   workersPort: 30080
