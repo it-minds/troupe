@@ -416,11 +416,37 @@ defmodule Troupe.Gateway.Connection do
   defp server_name(%{endpoint: %{kind: :remote}}), do: "troupe-worker"
   defp server_name(_state), do: "troupe-daemon"
 
+  # A worker never offers private sessions. A private session is sealed under its
+  # person's own key, in a subtree no pod credential can reach, and no worker profile is
+  # involved in one — so this is `false` as a fact about the design rather than as a
+  # setting somebody could turn on.
   defp capabilities(%{endpoint: %{kind: :remote}}) do
-    %{"worktrees" => false, "watch" => true, "remote" => true}
+    %{"worktrees" => false, "watch" => true, "remote" => true, "private_sessions" => false}
   end
 
-  defp capabilities(_state), do: %{"worktrees" => true, "watch" => true, "remote" => false}
+  defp capabilities(state) do
+    %{
+      "worktrees" => true,
+      "watch" => true,
+      "remote" => false,
+      "private_sessions" => private_sessions?(state)
+    }
+  end
+
+  # Computed, never compiled in. This is the capability that un-gates the client's
+  # control, and the two things it needs are things that can be missing at run time: a
+  # person the daemon can name — `local:<username>` means nothing to a plane or to
+  # another device — and somewhere to seal to. A client that offered the checkbox on a
+  # daemon with neither would be offering a session that silently stayed local.
+  defp private_sessions?(state) do
+    linked?(state) and Application.get_env(:troupe_protocol, :object_store) != nil
+  end
+
+  # `Troupe.Identity.principal/2` puts `linked` on the map when a subject has been
+  # recorded, so the answer is already in hand for a connection that has initialised;
+  # the disk read is for the one that has not.
+  defp linked?(%{principal: %{"linked" => true}}), do: true
+  defp linked?(_state), do: Troupe.Identity.get() != nil
 
   defp maybe_put_expiry(result, %{auth: %{expires_at: expires_at}}) when is_integer(expires_at) do
     Map.put(result, "auth", %{"expires_at" => expires_at})

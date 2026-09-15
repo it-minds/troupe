@@ -135,12 +135,29 @@ The response:
 {"jsonrpc": "2.0", "id": 1, "result": {
   "protocol_version": "1",
   "server_info": {"name": "troupe-daemon", "version": "0.2.0", "instance_id": "kP3u_2fQ8xA"},
-  "capabilities": {"worktrees": true, "watch": true, "remote": false},
+  "capabilities": {"worktrees": true, "watch": true, "remote": false,
+                   "private_sessions": true},
   "principal": {"subject": "local:martin", "display_name": "martin", "kind": "user"},
   "scopes": ["observe", "control", "admin"],
   "limits": {"max_message_bytes": 67108864, "outbound_queue": 10000}
 }}
 ```
+
+The server's `capabilities`:
+
+| key | meaning |
+| --- | --- |
+| `worktrees` | this server can make a git worktree for a session |
+| `watch` | `watch.set` is served, and `fs_changed` events arrive |
+| `remote` | this is a worker pod rather than a local daemon |
+| `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
+
+`private_sessions` is computed at every `initialize`, never compiled in, and it is what
+un-gates the client's control. It is true only where both things it needs are true: a
+person the server can name — `local:<username>` means nothing to a plane or to another
+device, so an unlinked daemon says false — and somewhere to seal to. A worker always
+says false: a private session is sealed under its person's own key, in a subtree no pod
+credential can reach, and no worker profile is involved in one.
 
 `server_info.instance_id` identifies the running daemon and changes when it restarts.
 A client that reconnects and finds a different one is talking to a daemon that has been

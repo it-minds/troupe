@@ -2326,3 +2326,51 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      rule; what the test proves is what the rule then permits, which is the half that
      could be wrong.
 
+## R1 — a session is created once and opened many times
+
+351. **`resume/2` appends `session_resumed`, not a second `session_created`.**
+     `resume/2` is `start_session/1` with a session id, so every reopen appended another
+     `session_created`. A log with three of them was a log that had been opened three
+     times, and nothing in it distinguished that from a session that had somehow been
+     created three times. `session_resumed` has been in the schema since stage 2 and was
+     never emitted; it is now, with `dormant_ms` and `moved`.
+
+352. **"Is this a reopen" is asked of what was on disk before the tree started.** The
+     first attempt asked `Log.head_seq/1` after `Sessions.start_session/1`, which is
+     always non-zero: the agent tree appends `agent_started` on its way up. So the
+     question is asked of `Log.read_session/2` *before* the tree starts, and the answer is
+     whether a `session_created` is already there.
+
+     That also corrected a comment that had been approximate since stage 1.
+     `session_created` is not the first event in the file and never was; it is the event
+     that says what the session is, which is the claim that actually matters and the one
+     a rebuild depends on.
+
+353. **`moved` is compared against what `session_created` recorded, and an unknown answer
+     is `false`.** That is the only thing in the log that claims where the session was. A
+     session whose first event is gone — a log truncated by a rebuild — reports not moved
+     rather than moved, because "we do not know" and "it moved" are different things and
+     only one of them is a warning worth showing somebody.
+
+354. **A resume whose directory is gone falls back to the restored tree, and creates
+     nothing.** `Workspace.new/1` refusing a directory that is not there is right, and it
+     is the wrong answer for exactly one case: a session being resumed whose recorded
+     directory has been moved or deleted, whose history is intact and whose tree is under
+     the state directory where a restore put it. Answering `not_a_directory` there loses a
+     session over a checkout somebody tidied up.
+
+     The fallback is in `Session.build_opts/1`, not in `Workspace.new/1`, and it is
+     narrow: only a session that names itself, only to `<state>/workspaces/<id>`, and only
+     when that directory already exists. A session with neither its recorded workspace nor
+     a restored tree still fails — putting an agent in a directory nobody asked for is the
+     thing `Workspace.new/1` is refusing to do, and a fallback that invented one would be
+     doing it quietly.
+
+355. **`private_sessions` at `initialize` is computed, never compiled in.** It is what
+     un-gates the client's control, and the two things it needs can both be missing at run
+     time: a person the daemon can name — `local:<username>` means nothing to a plane or
+     to another device — and somewhere to seal to. A client that offered the checkbox on a
+     daemon with neither would be offering a session that silently stayed local. A worker
+     always answers `false`, as a fact about the design rather than a setting: a private
+     session is sealed under its person's own key in a subtree no pod credential can
+     reach.

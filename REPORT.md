@@ -1470,6 +1470,49 @@ files the secret under it — so the encoding belongs in the adapter, segment by
 Team paths were unaffected because a team name is `[a-z0-9-]`, which is why it survived
 until a person's key was written.
 
+## R1d — the capability that un-gates the client
+
+R1's fifth done item.
+
+```
+$ scripts/toolbox mix test apps/troupe_gateway/test/troupe/gateway/daemon_test.exs
+Result: 22 passed
+```
+
+"private_sessions is false until the daemon can name a person" connects unlinked, asserts
+`false`, links an identity, reconnects and asserts `true`. It is computed at every
+`initialize` rather than compiled in, and a worker always answers `false` — a private
+session is sealed under its person's own key in a subtree no pod credential can reach.
+`PROTOCOL.md` §3 now carries the server capability table this was missing.
+
+## R1e — two of the three log fixes
+
+`../troupe-gui/docs/plans/local-and-private-sessions.md` §7 lists three. Two are done and
+the third was already there — `session_created.data` has carried `kind` and `owner` since
+stage 5.
+
+```
+$ scripts/toolbox mix test apps/troupe_core/test/troupe/session/reopening_test.exs
+Result: 4 passed
+```
+
+*A session is created once and opened many times, and the log now says so.* `resume/2` is
+`start_session/1` with a session id, so every reopen appended a second `session_created`.
+`session_resumed` — in the schema since stage 2, never emitted — carries `dormant_ms` and
+`moved`, and `moved` is the field Cursor's warning is about: a snapshot preserves disk and
+nothing else.
+
+*A resume whose recorded directory is gone falls back to the restored tree.* Narrowly:
+only a session that names itself, only to `<state>/workspaces/<id>`, and only when that
+directory already exists. The fourth test asserts the case that must still fail — neither
+the directory nor a restored tree — because a fallback that invented a directory would be
+doing quietly the thing `Workspace.new/1` refuses to do.
+
+Writing the first of these corrected a comment that had been approximate since stage 1:
+`session_created` is not the first event in the file and never was. The tree starts before
+it is appended and its own `agent_started` is already in. What it *is* is the event that
+says what the session is, which is the claim a rebuild depends on.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
@@ -1492,3 +1535,68 @@ Result: 16 passed
 Result: 16 passed
 ```
 
+## The gate
+
+Every step of `mix check`, plus the schema diff, against the tree as it would be
+committed — not against the working tree, because `mix format` run inside a Linux
+container rewrites a Windows checkout to LF and `Consistency.LineEndings` then has a
+hundred-odd things to say about a difference `git add` undoes. `docs/developer/local-setup.md`
+§1.1 has the incantation.
+
+```
+$ scripts/toolbox mix format --check-formatted
+ok
+
+$ scripts/toolbox bash -c 'MIX_ENV=test mix compile --force --warnings-as-errors'
+Generated troupe_a2a app
+
+$ scripts/toolbox mix troupe.boundaries
+boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+$ scripts/toolbox mix troupe.schema.diff
+schema unchanged: 73 documents
+
+$ # credo, against the tree as it would be committed
+$ git add -A && TREE=$(git write-tree) && git reset
+$ scripts/toolbox bash -c "... git archive $TREE ... mix credo --strict"
+5378 mods/funs, found no issues.
+credo exit=0
+```
+
+```
+$ scripts/toolbox mix test
+==> troupe_protocol
+Result: 95 passed (2 doctests, 93 tests)
+==> troupe_operator
+Result: 38 passed, 14 excluded
+==> troupe_plane
+Result: 376 passed, 9 excluded
+==> troupe_core
+  1) test cancellation cancel kills a shell command and its grandchild, verified by OS pid
+Result: 228/229 passed (3/3 doctests, 1/1 property, 224/225 tests)
+==> troupe_gateway
+  1) test ten concurrent clients spawn exactly one daemon
+  2) test a stale lock left by a killed client does not block start-up forever
+  3) test an idle session stops its tree, and subscribing serves history without starting one
+  4) test kill -9 with three sessions: all come back, the mid-turn one interrupted
+Result: 60/64 passed (2/2 properties, 58/62 tests)
+==> troupe_worker
+Result: 109 passed
+==> troupe_a2a
+Result: 45 passed
+```
+
+951 of 956. The five are the container's, named above and in `DECISIONS.md` 328: one
+OS-pid cancellation test and four that spawn or `kill -9` a daemon. They failed before any
+of this work, on the same container, with this work stashed. CI is where that is settled,
+and nothing here changes what CI runs.
+
+## What R1 still owes
+
+| piece | what is left |
+| --- | --- |
+| Personal credentials (`stage-6.md` §3) | `credential_mode` on a bundle entry, the OpenBao JWT role and assertion at activation, `me.connections.*`, the `not_connected` tool result. The key path and the person policy this needs are built and proven above. |
+| Private sessions, server half | `session.register`, `session.presign`, the daemon sealing through the moved `Sealer`, `session.list` filters, the epoch fence between devices. The loopback WebSocket, `identity.link`, the capability, the key path and policy, and the three log fixes are done. |
+| The cluster suite (`stage-6.md` §5) | `mix troupe.e2e`, the eight claims in its table and the two the brief adds, and the `cluster` CI job. Nothing here has run on a cluster; the paragraph in this report that says so is still true and is not yet replaced. |
+
+R2 through R9 are untouched.

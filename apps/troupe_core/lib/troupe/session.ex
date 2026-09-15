@@ -139,7 +139,7 @@ defmodule Troupe.Session do
     workspace_path = Keyword.get(opts, :workspace, File.cwd!())
     bundle = Keyword.get(opts, :bundle)
 
-    with {:ok, workspace} <- Workspace.new(workspace_path) do
+    with {:ok, workspace} <- open_workspace(workspace_path, opts) do
       config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, []))
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
@@ -185,6 +185,43 @@ defmodule Troupe.Session do
   # The agent names this session's team was granted, or `nil` for no restriction. A
   # local session and a laptop have no bundle and therefore no set, which is the same
   # answer by a shorter route.
+  # `Workspace.new/1` refusing a directory that is not there is right, and it is the
+  # wrong answer for one case: a session being resumed whose recorded directory has been
+  # moved or deleted. Its history is intact and its tree is under the state directory
+  # where a restore put it, and answering `not_a_directory` there loses a session over a
+  # checkout somebody tidied up.
+  #
+  # Only a session that names itself, and only to a directory that already exists.
+  # Nothing is created here: a session with neither its recorded workspace nor a restored
+  # tree still fails, because putting an agent in a directory nobody asked for is the
+  # thing `Workspace.new/1` is refusing to do.
+  defp open_workspace(workspace_path, opts) do
+    case Workspace.new(workspace_path) do
+      {:ok, workspace} ->
+        {:ok, workspace}
+
+      {:error, {:not_a_directory, _path}} = error ->
+        case restored_tree(opts) do
+          nil -> error
+          path -> Workspace.new(path)
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp restored_tree(opts) do
+    with session_id when is_binary(session_id) <- Keyword.get(opts, :session_id),
+         state_dir <- Keyword.get(opts, :config_overrides, [])[:state_dir],
+         path <- Path.join([Troupe.Paths.state_dir(state_dir), "workspaces", session_id]),
+         true <- File.dir?(path) do
+      path
+    else
+      _ -> nil
+    end
+  end
+
   defp entitled_agents(%{entitlements: %{"agents" => names}}) when is_list(names), do: names
   defp entitled_agents(_bundle), do: nil
 

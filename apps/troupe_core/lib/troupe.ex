@@ -30,6 +30,11 @@ defmodule Troupe do
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
     with {:ok, session_opts} <- Session.build_opts(opts),
+         # Read before the tree starts. The tree appends on its way up — `agent_started`
+         # among others — so by the time the first durable event is written the log is
+         # not empty, and "is this a reopen" has to be asked of what was on disk before
+         # any of this run's events were.
+         previously <- previous_events(session_opts),
          {:ok, pid} <- Sessions.start_session(session_opts) do
       session_id = Keyword.fetch!(session_opts, :session_id)
       workspace = Keyword.fetch!(session_opts, :workspace)
@@ -37,9 +42,17 @@ defmodule Troupe do
 
       Index.register(session_id, pid, %{workspace: workspace.root_real, profile: profile})
 
-      # The first durable event says what this session is, so a listing can be
-      # rebuilt from the log alone — which is what makes a dormant session visible.
-      Log.append(session_id, Session.root_path(), :session_created, created_data(session_opts))
+      # The event that says what this session is, so a listing can be rebuilt from the
+      # log alone — which is what makes a dormant session visible. Not the first event
+      # in the file: the tree starts before this is appended and its `agent_started` is
+      # already in, which has been true since stage 1.
+      #
+      # Only the *first*. `resume/2` is `start_session/1` with a session id, so every
+      # resume used to append a second `session_created` — a log with three of them was a
+      # log that had been opened three times, and a reader had no way to tell that from a
+      # session that had been created three times. A resume appends `session_resumed`
+      # instead, which has been in the schema since stage 2 and was never emitted.
+      opened(session_id, session_opts, workspace, previously)
 
       # What this session may touch, and at what mode, recorded once — but only when
       # there is something to say. A local session has `session:/` and nothing else,
@@ -58,6 +71,60 @@ defmodule Troupe do
       {:ok, %{id: session_id, pid: pid, workspace: workspace}}
     end
   end
+
+  defp opened(session_id, session_opts, workspace, previously) do
+    case Enum.find(previously, &(&1.type == "session_created")) do
+      nil ->
+        Log.append(session_id, Session.root_path(), :session_created, created_data(session_opts))
+
+      created ->
+        Log.append(
+          session_id,
+          Session.root_path(),
+          :session_resumed,
+          resumed_data(previously, created, workspace)
+        )
+    end
+  end
+
+  # What was on disk before this run. Empty for a session nobody has opened before,
+  # which is the whole of the test for "created" against "resumed".
+  defp previous_events(session_opts) do
+    Log.read_session(
+      Keyword.fetch!(session_opts, :session_id),
+      Keyword.get(session_opts, :config, %Troupe.Config{}) |> Map.get(:state_dir)
+    )
+  end
+
+  # How long it was asleep, and whether it came back somewhere else. `moved` is the field
+  # Cursor's warning is about and the reason `session_resumed` carries it: a snapshot
+  # preserves disk and nothing else, so a tree restored from an archive is the files and
+  # not the processes, the shell history, or anything else that was running.
+  defp resumed_data(previously, created, workspace) do
+    %{
+      "dormant_ms" => dormant_ms(previously),
+      "moved" => moved?(created, workspace)
+    }
+  end
+
+  defp dormant_ms([]), do: 0
+
+  defp dormant_ms(events) do
+    last = List.last(events)
+
+    case last.ts && DateTime.from_iso8601(to_string(last.ts)) do
+      {:ok, at, _offset} -> max(DateTime.diff(DateTime.utc_now(), at, :millisecond), 0)
+      _ -> 0
+    end
+  end
+
+  # Against what `session_created` recorded, because that is the only thing in the log
+  # that claims where the session was.
+  defp moved?(%{data: %{"workspace" => recorded}}, workspace) when is_binary(recorded) do
+    recorded != workspace.root_real
+  end
+
+  defp moved?(_created, _workspace), do: false
 
   defp linked_owner do
     case Troupe.Identity.get() do
