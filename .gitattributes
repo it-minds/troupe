@@ -14,3 +14,5 @@ scripts/kind-down text eol=lf
 scripts/kind-up text eol=lf
 scripts/pitr-drill text eol=lf
 scripts/remote-up text eol=lf
+scripts/toolbox text eol=lf
+dev/toolbox/entrypoint text eol=lf

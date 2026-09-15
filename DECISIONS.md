@@ -2093,3 +2093,38 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `apps/troupe_gateway/test/conformance/conformance.py`, and nothing that reads "the
      TUI does X" describes code in this tree.
 
+## R1 — a toolchain for a machine that has none
+
+326. **The toolchain is available as a container, because a contributor's machine may
+     have none of it.** `dev/toolbox/` builds the three things `.tool-versions` names —
+     Erlang 28.5.0.5, Elixir 1.20.4, Zig 0.16.0 — plus `inotify-tools` and `bubblewrap`,
+     which are the difference between the watch and sandbox done items being proven and
+     being skipped. `scripts/toolbox` runs a command in it, joined to the network
+     `scripts/dev-up` already creates.
+
+     Two things it does not do. It does not fork the configuration: `config/config.exs`
+     names `localhost:55432`, `localhost:59000` and `localhost:58200`, and the entrypoint
+     carries those three loopback ports to the compose network with `socat` rather than
+     making a second set of values somebody has to keep in step. And it does not share
+     `_build` or `deps` with the host — they are named volumes — because a Linux build
+     and a host build cannot use the same artifacts, and a bind-mounted `_build` on a
+     non-Linux host is the slowest part of a compile by an order of magnitude.
+
+     It is not a deployment artifact and CI does not use it; CI installs the toolchain
+     directly, which is faster there and is the path a release is built on.
+
+327. **The toolbox container needs `SYS_ADMIN` and an unconfined seccomp profile,
+     because bubblewrap does.** Without them `Troupe.SandboxTest` fails six times with
+     "Creating new namespace failed: Operation not permitted" — which reads like a sandbox
+     that refused and is a container that refused. It is the same relaxation CI reaches by
+     turning AppArmor's `restrict_unprivileged_userns` off on the runner, and it applies
+     to the test container only; nothing deployed is run this way.
+
+328. **Five tests do not pass in the toolbox container, and are not made to.**
+     `Troupe.Agent.ResilienceTest`'s OS-pid cancellation test and the four gateway tests
+     that spawn or `kill -9` a daemon (`AutospawnTest`, `RestartTest`) fail in a container
+     and pass on a Linux runner. They were failing before any of this work — checked by
+     stashing it and running them again — and the honest thing is to say so here rather
+     than to weaken them until they pass somewhere they were not written for. CI is where
+     that claim is settled.
+

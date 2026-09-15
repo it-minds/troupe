@@ -1332,3 +1332,39 @@ protocol's proof now is `apps/troupe_gateway/test/conformance/conformance.py`.
 `placement.ex:35`'s comment is untouched, as instructed: it is the sentence that
 justified the design R3 changes, and it goes in R3's commit.
 
+## A toolchain, before anything that had to be run
+
+Nothing below could be proven on the machine this was written on, which had no Erlang,
+no Elixir and no Zig. `dev/toolbox/` builds the three `.tool-versions` names, plus
+`inotify-tools` and `bubblewrap` — the difference between the watch and sandbox done
+items being proven and being skipped — and `scripts/toolbox` runs a command in it,
+joined to the network `scripts/dev-up` already creates.
+
+```
+$ scripts/dev-up
+postgres  postgres://troupe:troupe@localhost:55432/troupe_plane_dev
+minio     http://localhost:59000  (console :59001, troupe / troupe-secret)
+openbao   http://localhost:58200  (dev root token: troupe-dev-root)
+
+$ scripts/toolbox elixir --version
+Erlang/OTP 28 [erts-16.4.0.5] [source] [64-bit] [smp:32:32] [jit:ns]
+Elixir 1.20.4 (compiled with Erlang/OTP 28)
+
+$ scripts/toolbox bwrap --dev-bind / / --unshare-pid echo SANDBOX_OK
+SANDBOX_OK
+```
+
+The configuration is not forked: `config/config.exs` names `localhost:55432`,
+`localhost:59000` and `localhost:58200`, and the container's entrypoint carries those
+three loopback ports to the compose network with `socat` rather than keeping a second set
+of values in step. `_build` and `deps` are named volumes, because a Linux build and a
+host build cannot share either. CI is unchanged and still installs the toolchain
+directly.
+
+**Five tests do not pass in a container and are not made to.**
+`Troupe.Agent.ResilienceTest`'s OS-pid cancellation test and four gateway tests that
+spawn or `kill -9` a daemon (`AutospawnTest`, `RestartTest`) fail here and pass on a
+Linux runner. They failed before any of this work — checked by stashing it and running
+them again on the same container — and `DECISIONS.md` 328 says so rather than weakening
+them until they pass somewhere they were not written for.
+
