@@ -986,3 +986,57 @@ progress. What the next stage owes is the retention decision, not the pipeline.
 And `session.status`'s `cost_micros` now moves, because the summary projection folds the
 same field — so a review queue shows a cost without anyone reading a log, which is what
 §14.2 always claimed and could not yet do.
+---
+
+## 16. A run's provenance, and what a team may see
+
+Two things that were decided somewhere mutable and are now decided somewhere that cannot
+change: which document a trigger run actually ran, and which of a bundle's entries a team
+was allowed to use.
+
+### 16.1 A trigger revision
+
+`trigger_runs` pointed at the `triggers` row. Editing a prompt template therefore
+rewrote the provenance of every run that had used the old one — the rendered prompt
+survived in the session's own log, so the content was never lost, but which document
+produced it, under which terms and as which principal, was.
+
+A run now names a **revision**: the trigger document, frozen, addressed by the `sha256:`
+hash of its canonical form. Same convention as a bundle, same reason — two systems that
+must agree join on something neither of them invented.
+
+```
+trigger_revisions   trigger_id, revision, hash
+                    profile, agent, principal_id, prompt_template, terms,
+                    visibility, review, notify, concurrency, source
+                    reconstructed, created_by, inserted_at    (no updated_at)
+trigger_runs        … revision_id, not null
+```
+
+**The revision is a property of the document, not of the source.** `stage-6.md` §4
+designed this for the scheduler; nothing in the hash says how a firing arrived. The
+`source` document is *inside* the hash rather than beside it, so a schedule and a webhook
+of otherwise identical wording are two revisions — and the seven sources `RELEASE.md` W2
+adds need no second shape. `Triggers.fire/4` resolves once, at the top, before anything is
+written, which every path reaches: the scheduler, `trigger.fire` on `/rpc`,
+`admin.trigger.run`, and whatever comes next. The scheduler learned nothing new.
+
+Three consequences a reader can rely on:
+
+* a `trigger.put` that changes nothing creates no revision, and an edit back to a previous
+  wording lands on that revision rather than making a third — the `(trigger_id, hash)`
+  index decides it;
+* a firing that overlaps an edit uses one document or the other and never a mixture, and
+  a retry re-reads the revision the run recorded rather than the row as it stands;
+* the session a trigger made carries `origin.revision` — the hash — so a session found six
+  weeks later says which wording made it without a join through the run.
+
+`enabled` is deliberately outside the hash. Switching a trigger off changes *whether* a
+run happens, not what it would be, and the panel's switch is a `trigger.put`: a revision
+per toggle would be a history made of noise. `visibility` is inside it, because it decides
+who may open the session a run made.
+
+The migration creates revision 1 for every existing trigger from its current row, marks it
+`reconstructed`, and points every existing run at it. That is honest rather than complete:
+revision 1 is what can be proven, and the column says so.
+

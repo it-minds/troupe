@@ -13,6 +13,13 @@ defmodule Troupe.Plane.Triggers do
   The plane stores the definition and the record. What decides *when* to fire is
   outside — Hatchet where it is deployed, `Triggers.Scheduler` for cron where it is
   not — and both reach the same `fire/4`.
+
+  Every firing names a `Revision`: the trigger's document, frozen and content-addressed
+  at the moment it fired. The row an admin edits is what the *next* firing will resolve;
+  what a run says it ran is immutable. Resolution happens once, at the top of `fire/4`,
+  which is what makes a firing that overlaps an edit use one document or the other and
+  never a mixture — and is why it is not the scheduler's business: a webhook, an API
+  call and a person's hand reach the same line.
   """
 
   import Ecto.Query
@@ -20,7 +27,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
-  alias Troupe.Plane.Triggers.{Run, Template, Trigger}
+  alias Troupe.Plane.Triggers.{Revision, Run, Template, Trigger}
   alias Troupe.Protocol.Error
 
   require Logger
@@ -82,11 +89,99 @@ defmodule Troupe.Plane.Triggers do
       |> Repo.insert_or_update()
       |> case do
         {:ok, trigger} ->
+          # A revision is made here rather than at the next firing, so that the diff an
+          # admin is shown and the audit row that records it can both name the hash
+          # somebody will later see on a run. `revise/2` makes nothing when the document
+          # did not move, which is what makes a partial put of `enabled` free.
+          {:ok, _revision} = revise(trigger, by)
           {:ok, trigger}
 
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
+    end
+  end
+
+  # -- revisions --------------------------------------------------------------
+
+  @doc """
+  The revision of a trigger's document as it stands, made if it does not exist yet.
+
+  Idempotent by content: a document that hashes to a revision this trigger already has
+  returns that revision, so editing a template and editing it back lands on revision 1
+  rather than making a third. Two callers racing produce one row, because the
+  `(trigger_id, hash)` index decides it and the loser reads the winner's.
+  """
+  @spec revise(Trigger.t(), String.t() | nil) :: {:ok, Revision.t()}
+  def revise(%Trigger{} = trigger, by \\ nil) do
+    hash = Revision.hash(trigger)
+
+    case Repo.get_by(Revision, trigger_id: trigger.id, hash: hash) do
+      %Revision{} = revision ->
+        {:ok, revision}
+
+      nil ->
+        insert_revision(trigger, hash, by)
+    end
+  end
+
+  # Retried rather than locked: the two ways this collides are two callers with the same
+  # document (the hash index, and the winner's row is the answer) and two callers with
+  # different documents landing on the same number (the revision index, and the next
+  # number is the answer). Both are settled by reading what is there, and neither is
+  # worth an advisory lock on a table an admin writes to by hand a few times a week.
+  defp insert_revision(trigger, hash, by, attempts \\ 5) do
+    attrs =
+      trigger
+      |> Revision.document()
+      |> Map.merge(%{
+        "trigger_id" => trigger.id,
+        "revision" => next_revision(trigger),
+        "hash" => hash,
+        "created_by" => by
+      })
+
+    case %Revision{} |> Revision.changeset(attrs) |> Repo.insert() do
+      {:ok, revision} ->
+        {:ok, revision}
+
+      {:error, _changeset} when attempts > 1 ->
+        case Repo.get_by(Revision, trigger_id: trigger.id, hash: hash) do
+          %Revision{} = revision -> {:ok, revision}
+          nil -> insert_revision(trigger, hash, by, attempts - 1)
+        end
+
+      {:error, changeset} ->
+        raise "troupe plane: could not revise trigger #{trigger.name}: " <>
+                inspect(changeset.errors)
+    end
+  end
+
+  defp next_revision(trigger) do
+    highest =
+      Repo.one(
+        from(r in Revision, where: r.trigger_id == ^trigger.id, select: max(r.revision))
+      )
+
+    (highest || 0) + 1
+  end
+
+  @doc "A trigger's revisions, newest first."
+  @spec revisions(Trigger.t()) :: [Revision.t()]
+  def revisions(%Trigger{} = trigger) do
+    Repo.all(
+      from(r in Revision, where: r.trigger_id == ^trigger.id, order_by: [desc: r.revision])
+    )
+  end
+
+  @doc "One revision by id, or `nil`."
+  @spec revision(String.t() | nil) :: Revision.t() | nil
+  def revision(nil), do: nil
+
+  def revision(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Revision, uuid)
+      :error -> nil
     end
   end
 
@@ -190,6 +285,7 @@ defmodule Troupe.Plane.Triggers do
 
   @type fired :: %{
           trigger: Trigger.t(),
+          revision: Revision.t(),
           run: Run.t(),
           session: Session.t() | nil,
           endpoint: map() | nil
@@ -205,6 +301,12 @@ defmodule Troupe.Plane.Triggers do
   no session, so the record shows the cron fired and says why nothing happened. A run
   whose create failed is retried by the next call with the same key, which is what lets
   an executor retry blindly.
+
+  The revision is resolved **once**, here, before anything is written. A firing that
+  overlaps an edit therefore uses the document as it was or as it became, and never a
+  mixture — and a run that is retried re-reads the revision it recorded rather than
+  picking up whatever the row says today, so a run names exactly one revision for as
+  long as it exists.
   """
   @spec fire(Trigger.t(), String.t(), map(), String.t()) :: {:ok, fired()} | {:error, Error.t()}
   def fire(%Trigger{enabled: false} = trigger, _key, _event, _by) do
@@ -214,16 +316,23 @@ defmodule Troupe.Plane.Triggers do
   def fire(%Trigger{} = trigger, key, event, by) when is_binary(key) and is_map(event) do
     with :ok <- check_event(event) do
       case Repo.get_by(Run, idempotency_key: key) do
-        nil -> fire_new(trigger, key, event, by)
-        %Run{trigger_id: id} = run when id == trigger.id -> replay(trigger, run)
-        %Run{} -> {:error, Error.new(:conflict, %{reason: "that key belongs to another trigger"})}
+        nil ->
+          {:ok, revision} = revise(trigger)
+          fire_new(trigger, revision, key, event, by)
+
+        %Run{trigger_id: id} = run when id == trigger.id ->
+          replay(trigger, run)
+
+        %Run{} ->
+          {:error, Error.new(:conflict, %{reason: "that key belongs to another trigger"})}
       end
     end
   end
 
-  defp fire_new(trigger, key, event, by) do
+  defp fire_new(trigger, revision, key, event, by) do
     attrs = %{
       trigger_id: trigger.id,
+      revision_id: revision.id,
       idempotency_key: key,
       fired_at: DateTime.utc_now(),
       fired_by: by,
@@ -233,9 +342,9 @@ defmodule Troupe.Plane.Triggers do
 
     case %Run{} |> Run.changeset(attrs) |> Repo.insert() do
       {:ok, run} ->
-        if live_runs(trigger, run) >= trigger.concurrency,
-          do: skip(trigger, run),
-          else: create(trigger, run)
+        if live_runs(trigger, run) >= revision.concurrency,
+          do: skip(trigger, revision, run),
+          else: create(trigger, revision, run)
 
       {:error, changeset} ->
         # The unique key said somebody else fired first, between our lookup and our
@@ -263,23 +372,23 @@ defmodule Troupe.Plane.Triggers do
     ) || 0
   end
 
-  defp skip(trigger, run) do
+  defp skip(trigger, revision, run) do
     {:ok, run} = run |> Run.changeset(%{state: "skipped"}) |> Repo.update()
     Logger.info("troupe plane: trigger #{trigger.name} fired over its concurrency cap; skipped")
-    {:ok, %{trigger: trigger, run: run, session: nil, endpoint: nil}}
+    {:ok, fired(trigger, revision, run, nil, nil)}
   end
 
-  defp create(trigger, run) do
-    with {:ok, user} <- principal_user(trigger),
+  defp create(trigger, revision, run) do
+    with {:ok, user} <- principal_user(revision),
          {:ok, endpoint} <-
-           Harness.call("session.create", create_params(trigger, run), context(user)) do
+           Harness.call("session.create", create_params(trigger, revision, run), context(user)) do
       session_id = endpoint["session_id"]
-      Enum.each(trigger.notify, &let_in(user, session_id, &1))
+      Enum.each(revision.notify, &let_in(user, session_id, &1))
 
       {:ok, run} =
         run |> Run.changeset(%{session_id: session_id, state: "created"}) |> Repo.update()
 
-      {:ok, %{trigger: trigger, run: run, session: Sessions.get(session_id), endpoint: endpoint}}
+      {:ok, fired(trigger, revision, run, Sessions.get(session_id), endpoint)}
     else
       {:error, %Error{} = error} ->
         # Recorded, so the run shows what happened and the next call with the same key
@@ -293,45 +402,74 @@ defmodule Troupe.Plane.Triggers do
   # The same key again. A skipped run stays skipped; a failed one is retried; a run with
   # a session is handed that session and a token minted now, because the one minted the
   # first time has almost certainly expired.
-  defp replay(trigger, %Run{state: "skipped"} = run) do
-    {:ok, %{trigger: trigger, run: run, session: nil, endpoint: nil}}
+  #
+  # Every branch reads the run's own revision rather than resolving the trigger's
+  # current one: a retry of a failed create is the same run, and a run that named two
+  # documents would be exactly the provenance this table exists to prevent.
+  defp replay(trigger, %Run{} = run), do: replay(trigger, revision_of(run), run)
+
+  defp replay(trigger, revision, %Run{state: "skipped"} = run) do
+    {:ok, fired(trigger, revision, run, nil, nil)}
   end
 
-  defp replay(trigger, %Run{state: "failed", session_id: nil} = run), do: create(trigger, run)
-
-  defp replay(trigger, %Run{session_id: nil} = run) do
-    {:ok, %{trigger: trigger, run: run, session: nil, endpoint: nil}}
+  defp replay(trigger, revision, %Run{state: "failed", session_id: nil} = run) do
+    create(trigger, revision, run)
   end
 
-  defp replay(trigger, %Run{session_id: session_id} = run) do
-    with {:ok, user} <- principal_user(trigger),
+  defp replay(trigger, revision, %Run{session_id: nil} = run) do
+    {:ok, fired(trigger, revision, run, nil, nil)}
+  end
+
+  defp replay(trigger, revision, %Run{session_id: session_id} = run) do
+    with {:ok, user} <- principal_user(revision),
          {:ok, endpoint} <-
            Harness.call("token.mint", %{"session_id" => session_id}, context(user)) do
-      {:ok, %{trigger: trigger, run: run, session: Sessions.get(session_id), endpoint: endpoint}}
+      {:ok, fired(trigger, revision, run, Sessions.get(session_id), endpoint)}
     end
   end
 
-  defp create_params(trigger, run) do
+  defp fired(trigger, revision, run, session, endpoint) do
+    %{trigger: trigger, revision: revision, run: run, session: session, endpoint: endpoint}
+  end
+
+  # A run always has one — the column is not null and the migration backfilled every row
+  # that predates it — but a `Repo.get` that answered `nil` here would be a silent fall
+  # back to the mutable row, so it raises instead.
+  defp revision_of(%Run{revision_id: id, id: run_id}) do
+    case Repo.get(Revision, id) do
+      %Revision{} = revision -> revision
+      nil -> raise "troupe plane: run #{run_id} names revision #{id}, which is gone"
+    end
+  end
+
+  defp create_params(trigger, revision, run) do
     values = %{
       "event" => run.event,
-      "trigger" => %{"name" => trigger.name, "profile" => trigger.profile},
+      "trigger" => %{"name" => trigger.name, "profile" => revision.profile},
       "run" => %{
         "idempotency_key" => run.idempotency_key,
-        "fired_at" => DateTime.to_iso8601(run.fired_at)
+        "fired_at" => DateTime.to_iso8601(run.fired_at),
+        "revision" => revision.revision,
+        "revision_hash" => revision.hash
       }
     }
 
     %{
-      "profile" => trigger.profile,
+      "profile" => revision.profile,
       "team" => team_name(trigger),
       "title" => "#{trigger.name} #{Calendar.strftime(run.fired_at, "%Y-%m-%d %H:%M")}",
-      "prompt" => Template.render(trigger.prompt_template, values),
-      "visibility" => trigger.visibility,
-      "terms" => trigger.terms,
-      "origin" => %{"kind" => "trigger", "trigger" => trigger.name, "run" => run.idempotency_key}
+      "prompt" => Template.render(revision.prompt_template, values),
+      "visibility" => revision.visibility,
+      "terms" => revision.terms,
+      "origin" => %{
+        "kind" => "trigger",
+        "trigger" => trigger.name,
+        "run" => run.idempotency_key,
+        "revision" => revision.hash
+      }
     }
     |> then(fn params ->
-      if trigger.agent, do: Map.put(params, "agent", trigger.agent), else: params
+      if revision.agent, do: Map.put(params, "agent", revision.agent), else: params
     end)
   end
 
@@ -351,8 +489,8 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
-  defp principal_user(trigger) do
-    case Principals.fetch(trigger.principal_id) do
+  defp principal_user(%{principal_id: principal_id}) do
+    case Principals.fetch(principal_id) do
       nil ->
         {:error, Error.new(:forbidden, %{reason: "the trigger's principal is gone"})}
 
@@ -380,6 +518,7 @@ defmodule Troupe.Plane.Triggers do
         where: t.team_id == ^team.id,
         order_by: [desc: r.fired_at],
         limit: ^Keyword.get(opts, :limit, 50),
+        preload: [:revision],
         select: {r, t, s}
       )
 
@@ -442,19 +581,28 @@ defmodule Troupe.Plane.Triggers do
 
   @doc "What `trigger.fire` answers: the run, and where the session is."
   @spec fired_json(fired()) :: map()
-  def fired_json(%{run: run, session: session, endpoint: endpoint}) do
-    %{"run" => run_json(run, session)}
+  def fired_json(%{run: run, revision: revision, session: session, endpoint: endpoint}) do
+    %{"run" => run_json(%{run | revision: revision}, session)}
     |> Map.merge(endpoint || %{})
     |> Map.put("session_id", session && session.id)
     |> Map.put("state", state_of(run, session))
   end
 
-  @doc "A run as a listing shows it."
+  @doc """
+  A run as a listing shows it.
+
+  `revision` and `revision_hash` are the question a person reviewing a bad run actually
+  has — *which wording produced this* — and they answer it without a join the caller has
+  to remember, which is why `runs/2` preloads rather than leaving it to each caller.
+  """
   @spec run_json(Run.t(), Session.t() | nil) :: map()
   def run_json(%Run{} = run, session) do
     %{
       "id" => run.id,
       "trigger_id" => run.trigger_id,
+      "revision_id" => run.revision_id,
+      "revision" => revision_number(run),
+      "revision_hash" => revision_hash(run),
       "idempotency_key" => run.idempotency_key,
       "session_id" => run.session_id,
       "fired_at" => DateTime.to_iso8601(run.fired_at),
@@ -470,12 +618,25 @@ defmodule Troupe.Plane.Triggers do
     }
   end
 
-  @doc "A trigger as a listing shows it."
+  defp revision_number(%Run{revision: %Revision{revision: number}}), do: number
+  defp revision_number(%Run{}), do: nil
+
+  defp revision_hash(%Run{revision: %Revision{hash: hash}}), do: hash
+  defp revision_hash(%Run{}), do: nil
+
+  @doc """
+  A trigger as a listing shows it, with the revision its next firing would use.
+
+  `revision` is resolved rather than stored on the row: it is a function of the document
+  and making it a column would be a second copy of a fact the hash already decides.
+  """
   @spec trigger_json(Trigger.t()) :: map()
   def trigger_json(%Trigger{} = trigger) do
     principal = Principals.fetch(trigger.principal_id)
+    {:ok, revision} = revise(trigger)
 
     %{
+      "revision" => Revision.json(revision),
       "id" => trigger.id,
       "team" => team_name(trigger),
       "name" => trigger.name,

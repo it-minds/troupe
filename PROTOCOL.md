@@ -756,11 +756,12 @@ that team.
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
 | `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
 | `admin.principal.rotate` / `admin.principal.disable` | either | `{subject}`: a new secret shown once, or the end of the credential; a disabled principal is `unauthenticated` at its next call |
-| `admin.triggers.list` | either | `{team}` → a team's trigger definitions |
-| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger and the diff |
+| `admin.triggers.list` | either | `{team}` → a team's trigger definitions, each with the `revision` its next firing would use |
+| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger, the diff and the `revision` the document now hashes to |
 | `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not |
 | `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute |
-| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, and the `revision` and `revision_hash` it actually ran |
+| `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 
 Membership is never editable: it comes from the identity provider, and a method to change
 it would be a second source of truth for who is in a team.
@@ -815,6 +816,29 @@ header, minting and renewing the plane token from the credentials `troupe login`
 
     claude mcp add troupe -- troupe mcp
 
+### Trigger revisions
+
+A trigger's row is mutable and a run's provenance is not. Every firing names a
+**revision**: the trigger document as it stood, frozen, and addressed by the `sha256:`
+hash of its canonical form — the same convention a bundle uses, for the same reason.
+
+The document is `profile`, `agent`, `principal_id`, `prompt_template`, `terms`,
+`visibility`, `review`, `notify`, `concurrency` and `source`. It is **a property of the
+document, not of the source**: nothing in the hash says how a firing arrived, so a
+schedule, a webhook, an API call and a person's hand name the same revision when the
+document has not moved. `enabled` is not in it — switching a trigger off does not change
+what a run would be.
+
+Three consequences a client may rely on:
+
+* A `trigger.put` that changes nothing creates no revision, and an edit back to a
+  previous wording lands on that revision rather than making a third.
+* A run names exactly one revision, for as long as the run exists. A firing that
+  overlaps an edit resolves once, before it writes anything; a retry of a failed run
+  re-reads the revision the run recorded.
+* A session made by a trigger carries `origin.revision` — the hash — so the session
+  itself says which wording made it, without a join through the run.
+
 ### Triggers and principals on the harness side
 
 Three methods on the plane's `/rpc` that are not administrative, because a caller other
@@ -822,7 +846,7 @@ than an admin uses them:
 
 | method | scope | who | answers |
 | --- | --- | --- | --- |
-| `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The same key returns the same run and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
+| `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
 

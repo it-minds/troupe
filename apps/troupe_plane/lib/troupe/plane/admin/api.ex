@@ -677,6 +677,22 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.trigger.revisions",
+      function: :trigger_revisions,
+      summary:
+        "Every revision of a trigger, newest first: what each one said and when it was made.",
+      risk: :read,
+      arguments: [
+        %Argument{name: "team", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The trigger's name."
+        }
+      ]
+    },
+    %Method{
       name: "admin.trigger.run",
       function: :trigger_run,
       summary: "Fire a trigger now, by hand. It starts a real session and spends real money.",

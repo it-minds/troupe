@@ -2143,3 +2143,47 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      had the same hole and is fixed with it; `read_only_for/2` already cleared the column
      with an `update_all`, which is what showed the intent.
 
+## R1 — trigger revisions
+
+330. **A trigger revision is a property of the document, not of the cron row.**
+     `stage-6.md` §4 designs revisions for the scheduler, and the brief's second
+     correction generalises them. What that means concretely: the hash covers `profile`,
+     `agent`, `principal_id`, `prompt_template`, `terms`, `visibility`, `review`,
+     `notify`, `concurrency` and `source` — the fields that decide what a run *is* — and
+     nothing in it says how the firing arrived. The `source` document is inside the hash
+     rather than beside it, so a schedule and a webhook of otherwise identical wording
+     are two revisions, and the seven sources `RELEASE.md` W2 adds need no second shape.
+
+     Resolution happens once, at the top of `Triggers.fire/4`, which every path reaches:
+     the scheduler, `trigger.fire` on `/rpc`, `admin.trigger.run`, and whatever W2 adds.
+     The scheduler learned nothing new.
+
+331. **`visibility` is in the hash; `enabled` is not.** Neither is in `stage-6.md` §4's
+     field list, and they go opposite ways for the same reason. Visibility decides who
+     may open the session a run made, so an edit to it changes what a run is and must be
+     a new revision — leaving it out would let that change happen silently. Enabling and
+     disabling changes *whether* a run happens, not what it would be, and the panel's
+     switch is a `trigger.put`: a revision per toggle would be a history made of noise.
+
+332. **A run re-reads the revision it recorded, rather than resolving the current one.**
+     `fire/4` with a known idempotency key replays, and a failed run is retried by the
+     next call with that key. Resolving the trigger's current document at that point
+     would let one run name two revisions across its retries, which is exactly the
+     provenance the table exists to fix. `revision_of/1` raises rather than falling back
+     to the trigger row if the revision is missing, because a silent fall back to the
+     mutable row is the failure this is all for.
+
+333. **The backfilled revision is labelled rather than inferred.** Every existing trigger
+     becomes revision 1 from its current row, with `reconstructed: true` on it, and every
+     existing run points at it. That is not what those runs ran — it is what can be
+     proven about them — and the column says so, rather than a comment in a migration
+     nobody reads. The hash is computed over the same text representation
+     `Revision.document/1` uses at runtime, so the first `trigger.put` after the
+     migration creates a revision only if something actually moved.
+
+334. **A session made by a trigger carries the revision hash in its `origin`.** The run
+     row already joins the two, but a session found six weeks later in a listing, or in
+     an export, or by a person who cannot see the trigger's team, says which wording made
+     it without a join. It is a hash, not content, and `origin` was already a free map
+     naming the trigger and the run.
+

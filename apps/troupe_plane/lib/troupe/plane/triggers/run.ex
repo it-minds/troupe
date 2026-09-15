@@ -11,6 +11,11 @@ defmodule Troupe.Plane.Triggers.Run do
 
   `event` is what the provider filter let through and is capped at 16 KiB: the issue key
   and its title, never the whole webhook body, so the run is a record and not a channel.
+
+  `revision_id` names the trigger document this firing actually used. It is not null and
+  it never changes: the trigger row an admin edits is what the *next* firing resolves,
+  and a run that pointed at it would have its provenance rewritten by somebody fixing a
+  typo six weeks later.
   """
 
   use Ecto.Schema
@@ -25,6 +30,7 @@ defmodule Troupe.Plane.Triggers.Run do
 
   schema "trigger_runs" do
     belongs_to(:trigger, Troupe.Plane.Triggers.Trigger)
+    belongs_to(:revision, Troupe.Plane.Triggers.Revision)
     field(:idempotency_key, :string)
     field(:session_id, :string)
     field(:fired_at, :utc_datetime_usec)
@@ -48,6 +54,7 @@ defmodule Troupe.Plane.Triggers.Run do
     run
     |> cast(attrs, [
       :trigger_id,
+      :revision_id,
       :idempotency_key,
       :session_id,
       :fired_at,
@@ -57,7 +64,7 @@ defmodule Troupe.Plane.Triggers.Run do
       :reviewed_by,
       :reviewed_at
     ])
-    |> validate_required([:trigger_id, :idempotency_key, :fired_at, :state])
+    |> validate_required([:trigger_id, :revision_id, :idempotency_key, :fired_at, :state])
     |> validate_inclusion(:state, @stored_states)
     |> unique_constraint(:idempotency_key)
   end

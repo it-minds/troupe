@@ -47,6 +47,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Fleet.{Bundle, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.Triggers.Revision
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
 
@@ -814,6 +815,11 @@ defmodule Troupe.Plane.Admin do
   Partial on update, so enabling and disabling from the panel is the same call as
   putting a whole file from the CLI. A team admin's action, like a principal's creation
   and for the same reason.
+
+  The audit row names the revision the document now hashes to, so the audit trail and
+  the revision point at each other: a run says which revision it ran, and this says who
+  made that revision and what moved. A put that changes nothing names the revision that
+  was already there, which is the honest answer and not a new one.
   """
   @spec trigger_put(actor(), map()) :: result()
   def trigger_put(actor, attrs) do
@@ -826,8 +832,22 @@ defmodule Troupe.Plane.Admin do
       case Triggers.put(team, attrs, actor.subject) do
         {:ok, trigger} ->
           changes = Audit.diff(comparable(before), comparable(trigger))
-          {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", changes)
-          {:ok, %{trigger: Triggers.trigger_json(trigger), changes: changes}}
+          {:ok, revision} = Triggers.revise(trigger)
+
+          detail =
+            Map.merge(changes, %{
+              "__revision__" => revision.revision,
+              "__revision_hash__" => revision.hash
+            })
+
+          {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", detail)
+
+          {:ok,
+           %{
+             trigger: Triggers.trigger_json(trigger),
+             changes: changes,
+             revision: Revision.json(revision)
+           }}
 
         {:error, %Error{} = error} ->
           {:error, error}
@@ -844,6 +864,30 @@ defmodule Troupe.Plane.Admin do
       {:ok, _} = Audit.record(actor.subject, "trigger.delete", "#{team.name}/#{name}", detail)
       :ok = Triggers.delete(trigger)
       {:ok, %{team: team.name, name: name, deleted: true}}
+    end
+  end
+
+  @doc """
+  Every revision of a trigger, newest first.
+
+  The document each one froze is included, because the question this answers is "what
+  did the run I am looking at actually say" and an answer that was only a hash would
+  send the reader back to the database.
+  """
+  @spec trigger_revisions(actor(), String.t(), String.t()) :: result()
+  def trigger_revisions(actor, team_name, name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name) do
+      revisions =
+        trigger
+        |> Triggers.revisions()
+        |> Enum.map(fn revision ->
+          revision
+          |> Revision.json()
+          |> Map.put("document", Revision.document(revision))
+        end)
+
+      {:ok, revisions}
     end
   end
 

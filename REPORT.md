@@ -1368,6 +1368,38 @@ Linux runner. They failed before any of this work — checked by stashing it and
 them again on the same container — and `DECISIONS.md` 328 says so rather than weakening
 them until they pass somewhere they were not written for.
 
+## R1a — trigger revisions
+
+A run named a mutable row; it now names an immutable, content-addressed revision.
+
+**Generalised beyond the scheduler**, which is the brief's second correction. The hash
+covers the trigger *document* — profile, agent, principal, template, terms, visibility,
+review, notify, concurrency and the `source` document itself — and nothing in it says how
+a firing arrived. `Triggers.fire/4` resolves once, at the top, and every path reaches it:
+the scheduler, `trigger.fire` on `/rpc`, `admin.trigger.run`, and the seven sources
+`RELEASE.md` W2 adds. The scheduler learned nothing new.
+
+The four done items in `stage-6.md` §4, and three more the design implies:
+
+```
+$ scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/triggers_test.exs
+Result: 21 passed
+```
+
+| claim | test |
+| --- | --- |
+| Editing a template creates revision 2; the previous run still reports revision 1 and its text | "an edit makes a revision; the previous run still reports the one it ran" |
+| Editing back to the original creates no third revision | "editing back to the original text makes no third revision" |
+| Every pre-existing run points at a reconstructed revision 1 | the migration's backfill, and `reconstructed` on the row |
+| A firing that overlaps an edit names exactly one revision | "a firing that overlaps an edit names exactly one revision" |
+| Switching a trigger off is not a change to what a run would be | "switching a trigger off is not a change to what a run would be" |
+| The hash is over the document, so a webhook and a schedule of the same wording differ | "the hash is over the document, not over the row" |
+| A run renders from its revision and says which in the listing | "a run renders from its revision, and says which in the listing" |
+
+The session a trigger makes carries `origin.revision` — the hash — so a session found six
+weeks later says which wording made it without a join through the run.
+`admin.trigger.revisions` is new on the admin API and in `PROTOCOL.md`.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
