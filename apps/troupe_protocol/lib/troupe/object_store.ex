@@ -111,6 +111,38 @@ defmodule Troupe.ObjectStore do
   end
 
   @doc """
+  A URL that carries its own authorisation, for a caller who has no credential.
+
+  A laptop sealing a private session cannot hold an object-storage key, and the plane
+  cannot be on the path of the bytes — it has no key for them and must keep it that way.
+  A presigned URL is the shape that satisfies both: the signature authorises one method
+  on one key until it expires, and it is made from a credential that never leaves the
+  plane.
+
+  `UNSIGNED-PAYLOAD` rather than a body digest, because the signer does not have the
+  body — the point of the exercise is that it never will. That is what S3 and MinIO
+  both expect for query-parameter authorisation, and it is why the lifetime has to be
+  short: within it, the URL *is* the authorisation, for whoever holds it.
+  """
+  @spec presign(t(), :get | :put, String.t(), keyword()) :: String.t()
+  def presign(%__MODULE__{} = store, method, key, opts \\ []) when method in [:get, :put] do
+    url = store.endpoint <> build_path(store, key)
+
+    :aws_signature.sign_v4_query_params(
+      store.access_key_id,
+      store.secret_access_key,
+      store.region,
+      "s3",
+      Keyword.get(opts, :now, :calendar.universal_time()),
+      method_string(method),
+      url,
+      ttl: Keyword.get(opts, :ttl, 300),
+      body_digest: "UNSIGNED-PAYLOAD",
+      uri_encode_path: false
+    )
+  end
+
+  @doc """
   Every key under a prefix, following continuation tokens.
 
   Listing is how a rebuild finds what exists, so it has to be complete rather than a

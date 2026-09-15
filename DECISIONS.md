@@ -2573,3 +2573,60 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      policy decision with an owner, and `RELEASE.md` W2 already has the shape of it for
      service principals: the thing stops doing what it did as that identity and says why,
      rather than disappearing.
+
+## R1 — a session that belongs to a person
+
+385. **`kind` is a new column, not a reuse of `visibility`.** They answer different
+     questions and the defaults make the overload dangerous: `visibility` is who else on
+     the team may see a session, and it has defaulted to `private` since the first
+     migration, so every unshared team session is already visibility-private. Selecting
+     "the private sessions" on that column would have quietly returned most of the
+     estate.
+
+386. **The shape is a check constraint, not only a changeset.** A private session has no
+     team, no profile and no worker; a team session has a profile. The row is what a
+     placement reads, and application code is not the only thing that writes it — a
+     rebuild, a migration and a console all bypass the changeset. The changeset is still
+     there, so a caller gets a field and a sentence rather than a constraint error, and
+     the test asserts both halves: `Sessions.create/1` refuses it, and a raw `INSERT`
+     that skips every line of Elixir raises.
+
+387. **`profile` became nullable.** It was `null: false` from the first migration, and a
+     private session has no profile to run on. The constraint keeps the old guarantee
+     where it still applies: a team session without one is refused exactly as before.
+
+388. **The device that loses the fence is told on its next seal, not at the moment it
+     loses.** `claim` bumps the epoch conditionally on the epoch the caller last saw, so
+     two devices sending `epoch: 1` produce one winner. Telling the loser would mean
+     reaching a laptop that may be asleep; a laptop that is awake is about to seal
+     anyway, and that is where it learns. `stale_version` was already the protocol's word
+     for it.
+
+389. **A seal's `last_seq` never goes backwards.** A daemon that queues seals across a
+     restart sends them in whatever order it kept them, and a retry of an older one is
+     not a rewind. `max/2` against the row rather than a refusal, because refusing would
+     make a harmless duplicate an error the client has to reason about.
+
+390. **`session.presign` checks the prefix rather than trusting it.** The plane holds an
+     object-storage credential for the first time — `DECISIONS.md` 90 said it would not —
+     and the narrowness is the whole argument: it signs one method on one key under
+     `sessions/<id>/` of a session the caller owns, for five minutes, and has no key for
+     the ciphertext. A signer that signs whatever it is handed would be an
+     object-storage credential with extra steps, which is the thing 90 was about.
+
+391. **Sixty-four keys a call.** One seal is a segment, a snapshot, a workspace tar and a
+     manifest, plus blobs; a request that signs a thousand URLs is a request that hands
+     out a thousand, and a bound is cheaper than working out afterwards which ones were
+     used.
+
+392. **The presign test uses the URLs.** A signature this suite builds and then compares
+     against its own expectation proves that the code agrees with the test. So the test
+     PUTs ciphertext through the signed URL, GETs it back, and asserts that a URL signed
+     an hour ago with a five-minute lifetime is refused by MinIO with a 403 — which is
+     the claim, and only the store can make it.
+
+393. **`origin` keeps meaning what started a session.** The GUI plan writes
+     `origin: {"kind": "private", "device": …}`, but `origin.kind` is validated against
+     `user`/`trigger`/`a2a` and answers "what started this", which for a private session
+     is a person. The device goes in `origin` and in its own column, and the kind goes in
+     the new column where the filter and the constraint can both reach it.

@@ -20,6 +20,10 @@ defmodule Troupe.Plane.Sessions.Session do
   @foreign_key_type :binary_id
 
   @states ~w(active dormant read_only erased)
+  # Whose session it is, which decides where it can run. A team session is placed on a
+  # pod of a profile; a private one runs on its owner's machine and is never placed at
+  # all. Not the same question as `visibility`, which is who else may see it.
+  @kinds ~w(team private)
   @visibilities ~w(private team)
   # What the worker reports the session is doing. `state` above is the plane's word on
   # whether a tree exists; `status` is the worker's on what the tree is up to.
@@ -31,11 +35,15 @@ defmodule Troupe.Plane.Sessions.Session do
     field(:owner_subject, :string)
     belongs_to(:team, Troupe.Plane.Identity.Team)
     field(:profile, :string)
+    field(:kind, :string, default: "team")
     field(:visibility, :string, default: "private")
     field(:state, :string, default: "active")
 
     field(:epoch, :integer, default: 1)
     belongs_to(:worker, Troupe.Plane.Fleet.Worker)
+    # The machine that last sealed a private session. A name the person chose, not an
+    # identifier we can check, which is all a conflict display needs it to be.
+    field(:device, :string)
 
     field(:title, :string)
     field(:workspace_source, :map)
@@ -82,6 +90,10 @@ defmodule Troupe.Plane.Sessions.Session do
   @spec statuses() :: [String.t()]
   def statuses, do: @statuses
 
+  @doc "Whose session it is: a team's, or a person's own."
+  @spec kinds() :: [String.t()]
+  def kinds, do: @kinds
+
   @doc "The kinds of thing that start a session."
   @spec origins() :: [String.t()]
   def origins, do: @origins
@@ -92,10 +104,12 @@ defmodule Troupe.Plane.Sessions.Session do
     :owner_subject,
     :team_id,
     :profile,
+    :kind,
     :visibility,
     :state,
     :epoch,
     :worker_id,
+    :device,
     :title,
     :workspace_source,
     :bundle_version,
@@ -123,12 +137,34 @@ defmodule Troupe.Plane.Sessions.Session do
   def changeset(session, attrs) do
     session
     |> cast(attrs, @fields)
-    |> validate_required([:id, :owner_subject, :profile])
+    |> validate_required([:id, :owner_subject])
+    |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:state, @states)
     |> validate_inclusion(:visibility, @visibilities)
+    |> validate_shape()
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:pending_approvals, greater_than_or_equal_to: 0)
     |> validate_number(:cost_micros, greater_than_or_equal_to: 0)
     |> validate_number(:usage_seq, greater_than_or_equal_to: 0)
+    |> check_constraint(:kind, name: :sessions_kind_shape)
+  end
+
+  # The database has the same rule as a constraint, because the row is what a placement
+  # reads and application code is not the only thing that writes it. This is here so the
+  # caller gets a field and a sentence rather than a constraint error.
+  defp validate_shape(changeset) do
+    case get_field(changeset, :kind) do
+      "private" -> refute_present(changeset, [:profile, :team_id, :worker_id])
+      _team -> validate_required(changeset, [:profile])
+    end
+  end
+
+  defp refute_present(changeset, fields) do
+    Enum.reduce(fields, changeset, fn field, acc ->
+      case get_field(acc, field) do
+        nil -> acc
+        _set -> add_error(acc, field, "a private session has no #{field}")
+      end
+    end)
   end
 end

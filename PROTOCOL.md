@@ -868,6 +868,21 @@ than an admin uses them:
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own subject, which the client exchanges with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
+| `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told |
+| `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of `DECISIONS.md` 90 that lets a laptop seal at all |
+
+### Private sessions
+
+A private session belongs to a person, not a team. It runs on their own machine, is
+sealed under `troupe/people/<subject>/sessions/<id>`, and is never placed on a pod. The
+plane's row carries `kind: "private"`, no `team`, no `profile` and no worker — sizes,
+sequence numbers, hashes and a `device` name, and nothing else. A team admin does not see
+it; a platform admin sees a count and a size.
+
+`sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
+list can show both and either can be asked for on its own. `kind` is not `visibility`:
+`visibility` is who else on the team may see a session and defaults to `private`, so an
+unshared team session has always been visibility-private and is not a private session.
 
 A person-mode MCP server reaches its far side as the session's **owner**, fixed at
 activation and recorded in `session_created`. The credential is in the key manager under

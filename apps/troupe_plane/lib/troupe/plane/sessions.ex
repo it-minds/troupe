@@ -248,6 +248,128 @@ defmodule Troupe.Plane.Sessions do
     )
   end
 
+  # -- private sessions -------------------------------------------------------
+
+  @doc """
+  Register a session that runs on somebody's own machine.
+
+  The plane learns that it exists and how far it has got. It learns nothing else: the
+  bytes are sealed with a key under `troupe/people/<subject>/sessions/<id>` that no pod
+  and no operator role can read, and the row carries sizes, sequence numbers and hashes.
+
+  Idempotent on the id, because a daemon that seals, loses its connection and retries
+  must not end up with two sessions or a rejected one. A first registration mints epoch
+  1; a later one is a progress report, fenced.
+  """
+  @spec register(String.t(), map()) ::
+          {:ok, Session.t()} | {:error, :stale_epoch | :not_yours | Ecto.Changeset.t()}
+  def register(subject, %{"session_id" => session_id} = params) when is_binary(subject) do
+    case Repo.get(Session, session_id) do
+      nil -> insert_private(subject, session_id, params)
+      %Session{} = session -> reseal_private(subject, session, params)
+    end
+  end
+
+  defp insert_private(subject, session_id, params) do
+    create(%{
+      id: session_id,
+      owner_subject: subject,
+      kind: "private",
+      visibility: "private",
+      state: "active",
+      device: params["device"],
+      title: params["title"],
+      origin: %{"kind" => "user", "device" => params["device"]},
+      last_seq: params["last_seq"] || 0,
+      head_hash: params["head_hash"],
+      object_bytes: params["object_bytes"] || 0,
+      workspace_bytes: params["workspace_bytes"] || 0
+    })
+  end
+
+  # A seal carries the epoch the device believes it holds. The device that lost a claim
+  # still has a log and still wants to write it; this is where it is told not to, and it
+  # is told on the *next seal* rather than at the moment it lost, because nothing reaches
+  # a laptop that is not asking.
+  defp reseal_private(subject, %Session{kind: "private", owner_subject: subject} = session, p) do
+    {count, rows} =
+      Repo.update_all(
+        from(s in Session,
+          where: s.id == ^session.id and s.epoch == ^(p["epoch"] || session.epoch),
+          select: s
+        ),
+        set: seal_fields(session, p)
+      )
+
+    case {count, rows} do
+      {1, [updated]} -> {:ok, updated}
+      {0, _none} -> {:error, :stale_epoch}
+    end
+  end
+
+  defp reseal_private(_subject, %Session{}, _params), do: {:error, :not_yours}
+
+  # `last_seq` never goes backwards. A retry of an older seal is not a rewind, and a
+  # daemon replaying its queue after a restart sends them in whatever order it kept them.
+  defp seal_fields(session, params) do
+    [
+      last_seq: max(params["last_seq"] || 0, session.last_seq),
+      last_active_at: DateTime.utc_now(),
+      updated_at: DateTime.utc_now()
+    ]
+    |> put_present(:head_hash, params["head_hash"])
+    |> put_present(:device, params["device"])
+    |> put_present(:title, params["title"])
+    |> put_present(:object_bytes, params["object_bytes"])
+    |> put_present(:workspace_bytes, params["workspace_bytes"])
+  end
+
+  defp put_present(fields, _key, nil), do: fields
+  defp put_present(fields, key, value), do: Keyword.put(fields, key, value)
+
+  @doc """
+  Take a private session over on this device.
+
+  The fence between two machines. Both read epoch 3 and both try to move past it; the
+  conditional update decides, and the loser learns it lost on its next seal rather than
+  by being told — a laptop that is asleep is not listening, and one that is awake is
+  about to ask anyway.
+
+  Unlike `activate/1` there is no dormancy condition: a private session has no pod whose
+  absence would make it dormant, so "still on the other device" is exactly the case this
+  has to resolve rather than refuse.
+  """
+  @spec claim(String.t(), String.t(), integer(), String.t() | nil) ::
+          {:ok, Session.t()} | {:error, :stale_epoch | :not_found | :not_yours}
+  def claim(session_id, subject, from_epoch, device \\ nil) do
+    {count, rows} =
+      Repo.update_all(
+        from(s in Session,
+          where:
+            s.id == ^session_id and s.epoch == ^from_epoch and s.kind == "private" and
+              s.owner_subject == ^subject and s.state != "erased",
+          select: s
+        ),
+        inc: [epoch: 1],
+        set:
+          [state: "active", last_active_at: DateTime.utc_now(), updated_at: DateTime.utc_now()]
+          |> put_present(:device, device)
+      )
+
+    case {count, rows} do
+      {1, [session]} -> {:ok, session}
+      {0, _none} -> claim_refusal(session_id, subject)
+    end
+  end
+
+  defp claim_refusal(session_id, subject) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      %Session{kind: "private", owner_subject: ^subject} -> {:error, :stale_epoch}
+      %Session{} -> {:error, :not_yours}
+    end
+  end
+
   @doc """
   Record what the worker says a session is doing.
 
@@ -475,6 +597,9 @@ defmodule Troupe.Plane.Sessions do
     Enum.reduce(opts, query, fn
       {:profile, profile}, acc ->
         from(s in acc, where: s.profile == ^profile)
+
+      {:kind, kind}, acc ->
+        from(s in acc, where: s.kind == ^kind)
 
       {:state, states}, acc ->
         from(s in acc, where: s.state in ^List.wrap(states))

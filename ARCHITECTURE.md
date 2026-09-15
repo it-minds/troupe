@@ -1177,3 +1177,40 @@ Where nobody has connected, the tool answers a result the model can read —
 four times, and the session carries on. `tool_call_started` records `identity`, `profile`
 or `person:<subject>`, so a reader can tell which credential a call used without knowing
 what the bundle said that day.
+
+### 16.5 A session that belongs to a person
+
+A private session runs on somebody's own machine and never touches a pod. It is sealed
+with the same `Troupe.Sessions.Sealer` a worker uses, under a key at
+`troupe/people/<subject>/sessions/<id>` that no pod role and no operator role covers, and
+its objects live under the same `sessions/<id>/` prefix as everything else — so
+`mix troupe.index.rebuild` sees one more session rather than a special case.
+
+The plane holds a row and nothing else. `kind: "private"` with no team, no profile and no
+worker, which is a check constraint rather than a convention: the row is what a placement
+reads, and a rebuild, a migration or a console bypasses every changeset. `kind` is not
+`visibility` — `visibility` is who else on the team may see a session and has defaulted to
+`private` since the first migration, so an unshared *team* session is visibility-private
+and is not one of these.
+
+Two things have to cross the gap between a laptop and the cluster, and neither may carry a
+credential the laptop keeps.
+
+**The bytes** go through presigned URLs. `session.presign` signs one method on one key
+under `sessions/<id>/` of a session the caller owns, for five minutes, up to sixty-four
+keys a call. The plane thereby holds an object-storage credential, which `DECISIONS.md` 90
+said it would not; the reason 90 gave was that the plane must never read content, and a
+signer for ciphertext it has no key for cannot. The prefix is checked rather than trusted,
+because a signer that signs whatever it is handed is that credential with extra steps.
+
+**The fence** is the epoch, the same field that stops a resurrected pod appending to a
+session that moved on. `session.register` with `claim: true` bumps it conditionally on the
+epoch the device last saw, so two devices waking on the same session both send `epoch: 3`
+and exactly one moves it. The loser is not told at the moment it loses — that would mean
+reaching a laptop that may be asleep — but on its next seal, which is the moment it was
+going to write. Its local log stays on its own disk, read-only, until the person archives
+it: nothing is merged and nothing is lost.
+
+Registration is idempotent on the id, because a daemon that seals, loses its connection
+and retries must end up with one session rather than two; and `last_seq` never goes
+backwards, because a queue replayed after a restart arrives in the order it was kept.

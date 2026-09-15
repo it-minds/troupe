@@ -21,6 +21,8 @@ defmodule Troupe.Plane.Harness do
   plane replica and it is rarely the one the harness reached.
   """
 
+  alias Troupe.ObjectStore
+
   alias Troupe.Plane.{Audit, Bundles, Connections, Erasure, Fleet, Identity, Placement, Sessions}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.User
@@ -40,6 +42,13 @@ defmodule Troupe.Plane.Harness do
   # one it will carry.
   @max_prompt_bytes 65_536
 
+  # Long enough for a laptop on a slow link to finish one upload, short enough that a
+  # URL copied out of a log is no longer an authorisation by the time anyone reads it.
+  @presign_seconds 300
+
+  # One seal is a segment, a snapshot, a workspace tar and a manifest, plus blobs.
+  @presign_keys 64
+
   # An origin is a label, not a payload.
   @max_origin_bytes 4_096
 
@@ -58,6 +67,8 @@ defmodule Troupe.Plane.Harness do
     "session.open" => :observe,
     "token.mint" => :observe,
     "session.create" => :control,
+    "session.register" => :control,
+    "session.presign" => :control,
     "session.pin" => :control,
     "session.unpin" => :control,
     "session.erase" => :control,
@@ -201,6 +212,7 @@ defmodule Troupe.Plane.Harness do
     options =
       []
       |> put_option(:profile, params["profile"])
+      |> put_option(:kind, params["kind"])
       |> put_option(:state, params["state"])
       |> put_option(:status, params["status"])
       |> put_option(:origin, params["origin"])
@@ -240,6 +252,56 @@ defmodule Troupe.Plane.Harness do
          {:ok, _budget} <- reserve_budget(team, session),
          {:ok, _pushed} <- start_on_pod(worker, session, team, agent, prompt) do
       {:ok, endpoint_for(Sessions.get(session.id), worker, user, "owner")}
+    end
+  end
+
+  # -- private sessions -------------------------------------------------------
+
+  # A session that runs on somebody's laptop and is sealed with a key only they hold.
+  # The plane keeps the row so a second device can find it, and keeps nothing else: no
+  # profile, no team, no pod, and a key path no operator role covers.
+  #
+  # `claim` is the fence. Two devices waking on the same session both send the epoch
+  # they last saw; one moves it and the other is told its copy is stale, on the seal it
+  # was about to make rather than by a message it would not be awake to receive.
+  defp handle("session.register", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         :ok <- registrable(session_id, user) do
+      params = Map.put(params, "session_id", session_id)
+
+      case register_or_claim(params, user) do
+        {:ok, session} -> {:ok, session_json(session, user)}
+        {:error, :stale_epoch} -> {:error, stale(session_id)}
+        {:error, :not_yours} -> {:error, Error.new(:forbidden, %{session_id: session_id})}
+        {:error, :not_found} -> {:error, Error.new(:not_found, %{session_id: session_id})}
+        {:error, %Ecto.Changeset{} = changeset} -> {:error, invalid_row(changeset)}
+      end
+    end
+  end
+
+  # Presigned URLs, because the plane must not be on the path of the bytes and a laptop
+  # must not hold an object-storage credential. The signature covers one method and one
+  # key for five minutes; the key must be under this session's prefix, which is checked
+  # here rather than trusted, because a signer that signs whatever it is handed is an
+  # object-storage credential with extra steps.
+  defp handle("session.presign", params, %{user: user}) do
+    with {:ok, session_id} <- required_string(params, "session_id"),
+         {:ok, session} <- own_private(session_id, user),
+         {:ok, method} <- presign_method(params["method"]),
+         {:ok, keys} <- presign_keys(params, session) do
+      store = ObjectStore.from_env()
+
+      urls =
+        Map.new(keys, fn key ->
+          {key, ObjectStore.presign(store, method, key, ttl: @presign_seconds)}
+        end)
+
+      Audit.record(user.subject, "session.presign", session.id, %{
+        "method" => params["method"],
+        "keys" => map_size(urls)
+      })
+
+      {:ok, %{"session_id" => session.id, "expires_in" => @presign_seconds, "urls" => urls}}
     end
   end
 
@@ -504,6 +566,76 @@ defmodule Troupe.Plane.Harness do
 
   defp event_param(_other), do: invalid("event is an object")
 
+  # An id nobody has used, or one that is already this person's private session. A team
+  # session's id is refused here rather than quietly becoming a private row, and so is
+  # somebody else's: the id space is shared, and `register` is the one method a client
+  # picks the id for.
+  defp registrable(session_id, user) do
+    case Sessions.get(session_id) do
+      nil -> :ok
+      %Session{kind: "private", owner_subject: subject} when subject == user.subject -> :ok
+      %Session{} -> {:error, Error.new(:forbidden, %{session_id: session_id})}
+    end
+  end
+
+  defp register_or_claim(%{"claim" => true} = params, user) do
+    with {:ok, session} <- fetch_for_claim(params["session_id"], user) do
+      Sessions.claim(session.id, user.subject, params["epoch"] || session.epoch, params["device"])
+    end
+  end
+
+  defp register_or_claim(params, user), do: Sessions.register(user.subject, params)
+
+  defp fetch_for_claim(session_id, _user) do
+    case Sessions.get(session_id) do
+      nil -> {:error, :not_found}
+      %Session{} = session -> {:ok, session}
+    end
+  end
+
+  defp own_private(session_id, user) do
+    case Sessions.get(session_id) do
+      %Session{kind: "private", owner_subject: subject} = session when subject == user.subject ->
+        {:ok, session}
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: session_id})}
+
+      %Session{} ->
+        {:error, Error.new(:forbidden, %{session_id: session_id})}
+    end
+  end
+
+  defp invalid_row(changeset) do
+    Error.new(:invalid_params, %{reason: inspect(changeset.errors)})
+  end
+
+  defp presign_method("get"), do: {:ok, :get}
+  defp presign_method("put"), do: {:ok, :put}
+  defp presign_method(_other), do: invalid("method is one of get, put")
+
+  # Every key under `sessions/<id>/`, and a bounded number of them, because one request
+  # that signs a thousand URLs is a request that hands out a thousand.
+  defp presign_keys(params, session) do
+    keys = List.wrap(params["keys"] || params["key"])
+    prefix = "sessions/#{session.id}/"
+
+    cond do
+      keys == [] -> invalid("keys is a non-empty list of object keys")
+      length(keys) > @presign_keys -> invalid("at most #{@presign_keys} keys in one request")
+      not Enum.all?(keys, &is_binary/1) -> invalid("keys is a non-empty list of object keys")
+      not Enum.all?(keys, &String.starts_with?(&1, prefix)) -> invalid("every key is under #{prefix}")
+      Enum.any?(keys, &String.contains?(&1, "..")) -> invalid("every key is under #{prefix}")
+      true -> {:ok, keys}
+    end
+  end
+
+  defp stale(session_id) do
+    Error.new(:stale_version, %{
+      session_id: session_id,
+      reason: "another device holds this session"
+    })
+  end
   # -- the create sequence ----------------------------------------------------
 
   defp team_for(user, profile, wanted) do
@@ -1118,6 +1250,8 @@ defmodule Troupe.Plane.Harness do
       "id" => session.id,
       "owner" => session.owner_subject,
       "profile" => session.profile,
+      "kind" => session.kind,
+      "device" => session.device,
       "visibility" => session.visibility,
       "state" => session.state,
       "epoch" => session.epoch,
