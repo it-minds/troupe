@@ -1250,7 +1250,7 @@ passes alone — the flake already named in stage 5's report.
 * **Nothing has run on a cluster**, which is still the first item on the list. The
   end-to-end test uses real object storage and a real key manager, and a fake plane.
   *(No longer true as of R1j below: it runs on one now, and the first thing it found was
-  that no worker can enrol on one. The sentence stands as what was true when written.)*
+  that no worker could enrol on one. The sentence stands as what was true when written.)*
 * **No rollup pipeline and no retention job.** Raw records and a cached aggregate answer
   everything at this volume. The decision this stage owes the next one is the row count
   at which that stops being true.
@@ -1723,23 +1723,48 @@ $ scripts/remote-up
 
 ```
 $ scripts/e2e
-  1) test a token the cluster really issued for the right ServiceAccount and audience
-     enrols on that profile (Troupe.E2E.EnrolmentTest)
-     right: {:error, %{"code" => -32602, "message" => "invalid_params",
-              "data" => %{"reason" => "{:token_review_failed,
-                %K8s.Client.APIError{message: \"Unauthorized\", reason: \"Unauthorized\"}}"}}}
+  1) test ... enrols on that profile (Troupe.E2E.EnrolmentTest)
+     right: {:error, %{"message" => "invalid_params", "data" => %{"reason" =>
+              "{:token_review_failed, %K8s.Client.APIError{message: \"Unauthorized\"}}"}}}
 Result: 0/4 passed
 ```
 
-The plane's `TokenReview` is refused by the API server. Its RBAC is correct —
-`kubectl auth can-i create tokenreviews --as=system:serviceaccount:troupe-system:troupe-plane`
-answers `yes` — and its own token is accepted when presented by hand, so the request is
-going out without it. **No worker can enrol on a cluster.** Every unit test of enrolment
-uses an injected verifier and passes; this is precisely the half they cannot reach, and it
-is the reason the claim table starts where it does.
+The plane's `TokenReview` was refused by the API server, so no worker could enrol at all.
+**The cause was the second of my own fixes above.** Making the plane's ServiceAccount a
+`pre-install` hook cured the fresh install and broke every upgrade: Helm deletes and
+recreates a hook resource on each run, which gives it a new UID, and a ServiceAccount's
+UID is inside every token the kubelet has already handed to a running pod. The upgraded
+plane's projected token was silently invalidated. It logged nothing. Workers simply never
+appeared.
 
-That defect is open. It is not a defect *this package* introduced — it has been there for
-as long as the plane has run on Kubernetes, which is to say since it was never run there.
+The fix is that the migration gets an account of its own, `troupe-plane-migrate`, held by
+nothing that outlives the Job — so recreating it costs nothing — and the plane's own
+account goes back to being an ordinary resource.
+
+**The first diagnosis was wrong, and the way it was wrong is worth keeping.** It read:
+*the RBAC is correct and the token works by hand, so the request is going out without it.*
+The "works by hand" was `kubectl auth can-i --token=…` against a kubeconfig holding a
+client certificate — which authenticated with the certificate and answered `yes` about the
+wrong identity entirely. Presented with no other credential
+(`kubectl --server --certificate-authority --token`), the same token is refused. A passing
+response is not proof that the thing you meant passed; that rule applies to the person
+reading the suite as much as to the suite.
+
+```
+$ kubectl logs -n troupe-system deployment/troupe-plane | grep enrolled
+17:11:33.187 [info] troupe plane: troupe-w-dev/troupe-w-dev-0 enrolled as dev
+
+$ scripts/e2e        # twice in a row, as the done item asks
+Result: 4 passed
+Result: 4 passed
+```
+
+| claim | fault or witness |
+| --- | --- |
+| A pod enrols as the profile its namespace names | The operator's own pod, and the plane's own words in its log — not an API that could have been told what to say |
+| A ServiceAccount outside any profile's namespace cannot claim one | `default/default`, a real token minted by the real API server for the right audience, refused after a real `TokenReview` |
+| A worker's own token cannot be replayed elsewhere | The same ServiceAccount, projected for the API server rather than for the plane, refused |
+| …and the two refusals are refusals of something that otherwise works | The positive, in the same describe: the right account and the right audience enrol and answer a `worker_id`. Without it a plane that refused everything would satisfy both negatives |
 
 ## A flake that was a defect
 
@@ -1824,7 +1849,7 @@ and nothing here changes what CI runs.
 | piece | what is left |
 | --- | --- |
 | Private sessions, the second device | Creating and sealing one is done and proven on both sides, including through a real daemon socket. What is left is the other end: listing a private session on a second device, downloading and verifying its chain, restoring the workspace tar, and the resume-here / bind-to-directory choice. |
-| The cluster suite (`stage-6.md` §5) | The harness, the guard, the world, the `cluster` CI job and the first claim are built and have run. Nine of the ten claims are not written yet, and the first one **fails**: the plane's `TokenReview` goes out unauthenticated, so no worker can enrol on a cluster. Fixing that comes before writing the other nine, because every one of them needs a pod that enrolled. |
+| The cluster suite (`stage-6.md` §5) | The harness, the guard, the world, the `cluster` CI job and the enrolment claim are built and pass twice in a row on a real cluster. **Nine of the ten claims in the table are still to write** — the bundle by hash, egress, an absent Secret, a cron trigger, a pod deleted mid-session, A2A through the facade, a Helm upgrade mid-session, and the brief's two extra. Every one of them needs a pod that enrolled, which is why that one came first. |
 
 Personal credentials are done, bar the end-to-end join named in R1f. Deprovisioning was
 not in the plan and is done.

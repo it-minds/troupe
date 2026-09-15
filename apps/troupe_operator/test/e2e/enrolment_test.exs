@@ -25,6 +25,13 @@ defmodule Troupe.E2E.EnrolmentTest do
   @control_port 4001
   @audience "troupe-plane"
 
+  # What a refusal looks like. More than one word, because the plane distinguishes a token
+  # Kubernetes would not vouch for at all from one it vouches for as somebody who may not
+  # enrol — and this suite's claim is that neither of them enrols, not which sentence is
+  # printed. The message is included in the failure so a change of wording is read rather
+  # than guessed at.
+  @refusals ~w(unauthenticated unauthorized forbidden invalid_params invalid_request)
+
   setup_all do
     case World.ready?() do
       :ok -> :ok
@@ -64,7 +71,7 @@ defmodule Troupe.E2E.EnrolmentTest do
       token = World.token("default", "default", @audience)
 
       assert {:error, error} = enrol(port, token, "pretender-0")
-      assert error["message"] in ["unauthorized", "forbidden", "invalid_request"]
+      assert error["message"] in @refusals, "the plane answered #{inspect(error)}"
     end
 
     test "for the right ServiceAccount but the wrong audience is refused", %{port: port} do
@@ -75,7 +82,7 @@ defmodule Troupe.E2E.EnrolmentTest do
       token = World.token(World.worker_namespace(profile), "troupe-worker", "https://kubernetes.default.svc")
 
       assert {:error, error} = enrol(port, token, "troupe-w-#{profile}-0")
-      assert error["message"] in ["unauthorized", "forbidden", "invalid_request"]
+      assert error["message"] in @refusals, "the plane answered #{inspect(error)}"
     end
 
     test "for the right ServiceAccount and audience enrols on that profile", %{port: port} do

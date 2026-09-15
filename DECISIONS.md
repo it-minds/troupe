@@ -2764,3 +2764,21 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      never succeed; and the plane's migration hook ran before its ServiceAccount, because
      Helm applies every hook before any ordinary resource and the account was not a hook.
      Each of the three is invisible to anybody whose cluster already works.
+
+414. **The migration's ServiceAccount is its own, and that is the whole point of it.**
+     Making the *plane's* account a `pre-install` hook fixed the fresh install — Helm
+     applies every hook before any ordinary resource, so a Job naming an ordinary account
+     was refused — and broke every upgrade, invisibly. Helm deletes and recreates a hook
+     resource on each run, which gives it a new UID, and a ServiceAccount's UID is in
+     every token the kubelet has already handed to a running pod. The upgraded plane's
+     projected token was therefore silently invalidated: its `TokenReview` came back
+     `Unauthorized`, it logged nothing, and no worker could enrol. `troupe-plane-migrate`
+     is held by nothing that outlives the Job, so recreating it costs nothing.
+
+415. **A `kubectl --token=X` check against a kubeconfig that holds a client certificate
+     proves nothing.** It authenticated with the certificate and answered `yes`, which is
+     how the first diagnosis of the enrolment failure came out wrong — "the RBAC is right
+     and the token works by hand". The token has to be presented with no other credential
+     in the request, which is what `kubectl --server --certificate-authority --token`
+     does. This is the same rule as everywhere else in this report: a passing response is
+     not proof of what you think passed.

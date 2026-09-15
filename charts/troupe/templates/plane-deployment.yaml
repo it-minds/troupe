@@ -32,6 +32,32 @@ spec:
       port: {{ .Values.plane.controlPort }}
       targetPort: control
 ---
+# The account the migration runs as, and only the migration.
+#
+# A hook, because Helm applies every hook before any ordinary resource: a `pre-install`
+# Job naming an ordinary ServiceAccount is refused on a *fresh* install — "serviceaccount
+# not found" — and succeeds on every upgrade, because by then the account exists. A bug
+# nobody with a working cluster can see.
+#
+# Its own account rather than the plane's, and that is the whole point of it. Helm
+# deletes and recreates a hook resource on each run (`before-hook-creation` is the
+# default policy), which gives it a new UID — and a ServiceAccount's UID is in every
+# token the kubelet has already handed to a running pod. Making the *plane's* account a
+# hook therefore fixed the fresh install and broke every upgrade: the running plane's
+# projected token was silently invalidated, its TokenReview came back `Unauthorized`, and
+# no worker could enrol. This account is held by nothing that outlives the Job, so
+# recreating it costs nothing. The migration needs no API access at all; it needs to
+# exist.
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: troupe-plane-migrate
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    "helm.sh/hook": pre-install,pre-upgrade
+    "helm.sh/hook-weight": "-10"
+---
 # Migrations run once per release, before the new pods start, and not from the
 # application's own boot: two replicas starting at once would both migrate, and a
 # migration that failed would look like a plane that would not start.
@@ -54,7 +80,7 @@ spec:
       labels: {{- include "troupe.labels" . | nindent 8 }}
     spec:
       restartPolicy: Never
-      serviceAccountName: troupe-plane
+      serviceAccountName: troupe-plane-migrate
       {{- with .Values.imagePullSecrets }}
       imagePullSecrets:
         {{- range . }}
