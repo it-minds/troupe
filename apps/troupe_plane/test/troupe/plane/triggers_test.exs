@@ -26,7 +26,7 @@ defmodule Troupe.Plane.TriggersTest do
     team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
 
     {:ok, principal, _secret} =
-      Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+      principal!(team, %{name: "nightly", profiles: ["dev"]})
 
     %{port: Listener.port(), team: team, principal: principal}
   end
@@ -334,7 +334,7 @@ defmodule Troupe.Plane.TriggersTest do
 
     test "a schedule is checked when it is written" do
       team = team_with_grant("design", "ux", name: "design")
-      {:ok, _principal, _} = Principals.create(team, %{name: "bot", profiles: ["ux"]}, "root")
+      {:ok, _principal, _} = principal!(team, %{name: "bot", profiles: ["ux"]})
 
       base = %{"name" => "bad", "principal" => "svc:design/bot", "profile" => "ux"}
       put = fn extra -> Triggers.put(team, Map.merge(base, extra), "root") end

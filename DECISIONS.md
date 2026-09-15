@@ -2949,3 +2949,30 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      artifact to corrupt would need a model besides. The hash check is covered in
      `troupe_a2a`'s own suite, where a mismatch can be injected; what the cluster adds
      here is that `message/send` really does reach a pod and make a session.
+
+## R2 — somebody answerable for a principal
+
+439. **A sponsor is required, and is a person the provider knows in that team.** Not
+     merely a string: a principal whose sponsor is a typo has nobody answerable for it and
+     nothing would ever notice, because the field is only read when somebody leaves. Four
+     refusals rather than one — missing, unknown, deactivated, not in this team — because
+     each is a different thing for the person filling the form in.
+
+440. **A principal whose sponsor left is `needs_sponsor`, not `disabled`.** They are
+     different questions: one is a field for somebody to fill in, the other is a decision
+     somebody made. A list that showed both the same way would send people looking for a
+     fault that is not there, so the reason is a column and `state/1` has three answers.
+
+441. **SCIM is where it happens, and the test goes through SCIM.** The requirement is that
+     the provider removing somebody is *enough*; a test that called `Principals.sponsor_left/1`
+     itself would pass on a plane where nothing ever calls it.
+
+442. **The panel's form gained the field with the package.** R8 says a package's console
+     screen lands with the package, and a required field that only an API caller can
+     supply is a feature no administrator has. The refusal is shown in the plane's own
+     words rather than as `invalid_params`, for the same reason there are four of them.
+
+443. **Existing tests were given a sponsor through one helper rather than forty edits.**
+     `DataCase.principal!/3` invents a person in the team's own group where the test does
+     not care who sponsors it, and leaves `:sponsor` alone where it does. A test that
+     spelled out a sponsor it had no opinion about would be a test about sponsorship.

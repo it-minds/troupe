@@ -294,7 +294,7 @@ defmodule Troupe.Plane.WebTest do
       team = team_with_grant("engineering", "dev", name: "engineering")
 
       {:ok, principal, secret} =
-        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+        principal!(team, %{name: "nightly", profiles: ["dev"]})
 
       assert {:ok, %{status: 200, body: body}} =
                post(context, "/auth/exchange", %{
@@ -341,7 +341,7 @@ defmodule Troupe.Plane.WebTest do
       team = team_with_grant("engineering", "dev", name: "engineering")
 
       {:ok, principal, secret} =
-        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+        principal!(team, %{name: "nightly", profiles: ["dev"]})
 
       {:ok, %{status: 200, body: %{"token" => token}}} =
         post(context, "/auth/exchange", %{
@@ -369,7 +369,7 @@ defmodule Troupe.Plane.WebTest do
       team = team_with_grant("engineering", "dev", name: "engineering")
 
       {:ok, principal, old} =
-        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+        principal!(team, %{name: "nightly", profiles: ["dev"]})
 
       {:ok, _, new} = Principals.rotate(principal)
 

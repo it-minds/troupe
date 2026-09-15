@@ -79,7 +79,8 @@ defmodule Troupe.Plane.AdminTest do
                Admin.principal_create(context.lead, "engineering", %{
                  "name" => "nightly-deps",
                  "description" => "the nightly dependency update",
-                 "profiles" => ["dev"]
+                 "profiles" => ["dev"],
+                 "sponsor" => "lead@example.test"
                })
 
       assert made.subject == "svc:engineering/nightly-deps"
@@ -116,7 +117,8 @@ defmodule Troupe.Plane.AdminTest do
       assert {:error, error} =
                Admin.principal_create(context.member, "engineering", %{
                  "name" => "x",
-                 "profiles" => ["dev"]
+                 "profiles" => ["dev"],
+                 "sponsor" => "lead@example.test"
                })
 
       assert error.message == "forbidden"
@@ -145,7 +147,8 @@ defmodule Troupe.Plane.AdminTest do
       {:ok, principal} =
         Admin.principal_create(context.lead, "engineering", %{
           "name" => "bot",
-          "profiles" => ["dev"]
+          "profiles" => ["dev"],
+                 "sponsor" => "lead@example.test"
         })
 
       definition = %{

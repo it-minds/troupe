@@ -29,6 +29,10 @@ defmodule Troupe.Plane.Principals do
   Profiles are checked against the team's grants: a principal may use a subset of what
   its team may, never more, and a name outside the grants is refused here rather than
   discovered at the first `session.create`.
+
+  A sponsor is required, and is checked the same way: a person the identity provider
+  still knows, who is a member of this team. Somebody answerable for what the principal
+  does has to be somebody who could have done it themselves.
   """
   @spec create(Team.t(), map(), String.t()) ::
           {:ok, ServicePrincipal.t(), String.t()} | {:error, Ecto.Changeset.t() | term()}
@@ -36,7 +40,8 @@ defmodule Troupe.Plane.Principals do
     name = attrs[:name] || attrs["name"]
     profiles = List.wrap(attrs[:profiles] || attrs["profiles"])
 
-    with :ok <- check_profiles(team, profiles) do
+    with :ok <- check_profiles(team, profiles),
+         {:ok, sponsor} <- check_sponsor(team, attrs[:sponsor] || attrs["sponsor"]) do
       {secret, hash, salt} = mint_secret()
 
       %ServicePrincipal{}
@@ -48,7 +53,8 @@ defmodule Troupe.Plane.Principals do
         profiles: profiles,
         secret_hash: hash,
         secret_salt: salt,
-        created_by: by
+        created_by: by,
+        sponsor_subject: sponsor
       })
       |> Repo.insert()
       |> case do
@@ -236,6 +242,58 @@ defmodule Troupe.Plane.Principals do
 
     byte_size(presented) == byte_size(principal.secret_hash) and
       :crypto.hash_equals(presented, principal.secret_hash)
+  end
+
+  # A sponsor the provider still knows, in this team. Not merely a string: a principal
+  # whose sponsor is a typo has nobody answerable for it and nothing would ever notice,
+  # because the field is only read when somebody leaves.
+  defp check_sponsor(_team, nil), do: {:error, :no_sponsor}
+  defp check_sponsor(_team, ""), do: {:error, :no_sponsor}
+
+  defp check_sponsor(team, subject) when is_binary(subject) do
+    case Identity.get_user(subject) do
+      %User{active: false} -> {:error, {:sponsor_inactive, subject}}
+      %User{} = user -> in_team(team, user, subject)
+      nil -> {:error, {:no_such_sponsor, subject}}
+    end
+  end
+
+  defp check_sponsor(_team, other), do: {:error, {:no_such_sponsor, other}}
+
+  defp in_team(team, user, subject) do
+    if team.id in Enum.map(Identity.teams_for(user), & &1.id) do
+      {:ok, subject}
+    else
+      {:error, {:sponsor_not_in_team, subject, team.name}}
+    end
+  end
+
+  @doc """
+  Stop every principal a departing person sponsors, and say why.
+
+  Called from the SCIM path when a user is deactivated. The principals are disabled
+  rather than deleted — their sessions name them as owner — and the reason is recorded,
+  so a console can say *needs a sponsor* instead of *disabled*, which is the difference
+  between a field to fill in and a fault to investigate.
+  """
+  @spec sponsor_left(String.t()) :: {:ok, [ServicePrincipal.t()]}
+  def sponsor_left(subject) when is_binary(subject) do
+    now = DateTime.utc_now()
+
+    {_count, stopped} =
+      Repo.update_all(
+        from(p in ServicePrincipal,
+          where: p.sponsor_subject == ^subject and is_nil(p.disabled_at),
+          select: p
+        ),
+        set: [
+          disabled_at: now,
+          disabled_reason: ServicePrincipal.sponsor_left(),
+          updated_at: now
+        ]
+      )
+
+    {:ok, stopped}
   end
 
   defp check_profiles(_team, []), do: {:error, :no_profiles}

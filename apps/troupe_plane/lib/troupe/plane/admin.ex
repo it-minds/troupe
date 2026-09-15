@@ -796,7 +796,8 @@ defmodule Troupe.Plane.Admin do
           {:ok, _} =
             Audit.record(actor.subject, "principal.create", principal.subject, %{
               "team" => team.name,
-              "profiles" => principal.profiles
+              "profiles" => principal.profiles,
+              "sponsor" => principal.sponsor_subject
             })
 
           {:ok, principal |> principal_summary() |> Map.put(:secret, secret)}
@@ -807,6 +808,34 @@ defmodule Troupe.Plane.Admin do
         {:error, {:not_granted, outside}} ->
           reason = "#{team.name} is not granted #{Enum.join(outside, ", ")}"
           {:error, Error.new(:invalid_params, %{reason: reason, profiles: outside})}
+
+        # Named separately from any other refusal, because each one is a different thing
+        # for the person filling the form in: a field left empty, a name spelt wrong, a
+        # person who has left, a person who is not on this team.
+        {:error, :no_sponsor} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             missing: "sponsor",
+             reason: "a principal names a person answerable for what it does"
+           })}
+
+        {:error, {:no_such_sponsor, subject}} ->
+          {:error,
+           Error.new(:invalid_params, %{sponsor: subject, reason: "no such person"})}
+
+        {:error, {:sponsor_inactive, subject}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             sponsor: subject,
+             reason: "that person has been deactivated"
+           })}
+
+        {:error, {:sponsor_not_in_team, subject, team_name}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             sponsor: subject,
+             reason: "#{subject} is not a member of #{team_name}"
+           })}
 
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
@@ -1277,9 +1306,15 @@ defmodule Troupe.Plane.Admin do
       profiles: principal.profiles,
       created_by: principal.created_by,
       created_at: principal.inserted_at,
+      sponsor: principal.sponsor_subject,
       disabled_at: principal.disabled_at,
+      disabled_reason: principal.disabled_reason,
       last_used_at: principal.last_used_at,
-      enabled: ServicePrincipal.enabled?(principal)
+      enabled: ServicePrincipal.enabled?(principal),
+      # Three states, not two. A console that shows `enabled: false` for both a principal
+      # somebody disabled and one whose sponsor left sends people looking for a fault
+      # where there is a field to fill in.
+      state: ServicePrincipal.state(principal)
     }
   end
 

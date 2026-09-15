@@ -626,7 +626,7 @@ defmodule Troupe.Plane.HarnessTest do
       {:ok, _} = Identity.grant(team, "ux")
 
       {:ok, principal, _secret} =
-        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+        principal!(team, %{name: "nightly", profiles: ["dev"]})
 
       robot = Identity.get_user(principal.subject)
       assert robot.kind == "service"

@@ -152,6 +152,14 @@ defmodule Troupe.Plane.Admin.API do
       description: "What this principal is for."
     },
     %Argument{
+      name: "sponsor",
+      type: :string,
+      required: true,
+      description:
+        "The subject of a person in this team who is answerable for what it does. " <>
+          "A principal whose sponsor leaves stops firing at the next SCIM push."
+    },
+    %Argument{
       name: "profiles",
       type: :array,
       description:

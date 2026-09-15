@@ -79,12 +79,16 @@ defmodule Troupe.Plane.Web.Live.Teams do
     attrs = %{
       "name" => params["name"],
       "description" => params["description"],
+      "sponsor" => params["sponsor"],
       "profiles" => params |> Map.get("profiles", "") |> String.split(~r/[,\s]+/, trim: true)
     }
 
     case Admin.principal_create(socket.assigns.actor, name, attrs) do
       {:ok, principal} -> shown_once(socket, principal)
-      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+      # The reason, not only the word. Four things can be wrong with a sponsor and a
+      # form that said "invalid_params" to all of them would leave the person guessing
+      # which.
+      {:error, error} -> {:noreply, assign(socket, flash_message: refusal(error))}
     end
   end
 
@@ -98,6 +102,20 @@ defmodule Troupe.Plane.Web.Live.Teams do
   def handle_event("disable-principal", %{"subject" => subject}, socket) do
     respond(socket, Admin.principal_disable(socket.assigns.actor, subject), "#{subject} disabled")
   end
+
+  # Three states rather than two, because a principal whose sponsor left is a field to
+  # fill in and a principal somebody disabled is a decision, and a list that said
+  # "disabled" to both would send people looking for a fault that is not there.
+  defp state_note(%{state: :needs_sponsor}), do: "· needs a sponsor"
+  defp state_note(%{state: :disabled}), do: "· disabled"
+  defp state_note(_principal), do: ""
+
+  # What the plane refused, in the words it used. `Admin.principal_create/3` distinguishes
+  # a missing sponsor from a misspelt one from one who has left from one on another team,
+  # and every one of those is a different thing to do next.
+  defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
+  defp refusal(%{data: %{missing: field}}) when is_binary(field), do: "#{field} is required"
+  defp refusal(error), do: error.message
 
   defp shown_once(socket, principal) do
     message = "#{principal.subject} — secret, shown once: #{principal.secret}"
@@ -371,7 +389,8 @@ defmodule Troupe.Plane.Web.Live.Teams do
               {Enum.join(p.profiles, ", ")}
               {if p.description, do: "— #{p.description}"}
               {if p.last_used_at, do: "· last used #{p.last_used_at}", else: "· never used"}
-              {if !p.enabled, do: "· disabled"}
+              {if p.sponsor, do: "· sponsored by #{p.sponsor}"}
+              {state_note(p)}
             </span>
             <button :if={p.enabled} phx-click="rotate-principal" phx-value-subject={p.subject}>
               rotate secret
@@ -387,6 +406,17 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <input type="hidden" name="team" value={team.name} />
           <label>name <input name="name" placeholder="nightly-deps" /></label>
           <label>profiles <input name="profiles" placeholder="dev, review" /></label>
+          <label>
+            sponsor
+            <input name="sponsor" list={"members-#{team.name}"} placeholder="somebody in this team" />
+          </label>
+          <datalist id={"members-#{team.name}"}>
+            <option :for={member <- team.members} value={member} />
+          </datalist>
+          <p class="hint">
+            A person in this team, answerable for what it does. If they leave, it stops
+            firing and appears here as needing a sponsor.
+          </p>
           <label>description <input name="description" /></label>
           <button type="submit">create a principal</button>
         </form>
