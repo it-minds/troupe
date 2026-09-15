@@ -36,6 +36,7 @@ defmodule Troupe.Plane.Bundles do
   alias Troupe.Plane.{ClusterPolicy, Fleet, Provision, Repo}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.Bundle
+  alias Troupe.Plane.Identity.Entitlement
   alias Troupe.Protocol.Bundle, as: Document
 
   require Logger
@@ -324,39 +325,75 @@ defmodule Troupe.Plane.Bundles do
   The current version's number and hash, the primaries it may start as, its skills with
   their descriptions, and the names of its MCP servers. A channel with nothing published
   offers the built-ins and nothing else.
-  """
-  @spec offering(String.t() | nil) :: map()
-  def offering(nil), do: offering_of(nil, nil)
 
-  def offering(channel) do
+  The second argument is the entitlement rows of the grant the caller is using, and
+  narrowing happens here so that every caller gets the narrower answer for free: the
+  profile listing shows a person what *they* may use, and `agent_for/2` refuses an agent
+  their team may not run before a pod or a budget is touched. `[]` — the shape every
+  grant has until somebody opens the editor — narrows nothing.
+
+  The bundle is untouched. There are no derived bundles and no per-team hashes; the hash
+  a session pins is the same hash for every team.
+  """
+  @spec offering(String.t() | nil, [map()]) :: map()
+  def offering(channel, entitlements \\ [])
+
+  def offering(nil, entitlements), do: offering_of(nil, nil, entitlements)
+
+  def offering(channel, entitlements) do
     case current(channel) do
-      nil -> offering_of(channel, nil)
-      bundle -> offering_of(channel, bundle)
+      nil -> offering_of(channel, nil, entitlements)
+      bundle -> offering_of(channel, bundle, entitlements)
     end
   end
 
-  defp offering_of(channel, nil) do
+  defp offering_of(channel, nil, entitlements) do
     %{
       channel: channel,
       bundle_version: nil,
       bundle_hash: nil,
-      agents: @builtin_primaries,
+      agents: narrow(@builtin_primaries, entitlements, "agent"),
       skills: [],
       mcp_servers: []
     }
   end
 
-  defp offering_of(channel, bundle) do
+  defp offering_of(channel, bundle, entitlements) do
     parsed = contents(bundle)
+    skills = for skill <- skills_of(parsed), do: %{name: skill.name, description: skill.description}
 
     %{
       channel: channel,
       bundle_version: bundle.version,
       bundle_hash: bundle.hash,
-      agents: primaries(parsed),
-      skills:
-        for(skill <- skills_of(parsed), do: %{name: skill.name, description: skill.description}),
-      mcp_servers: for(server <- servers_of(parsed), do: server.name)
+      agents: narrow(primaries(parsed), entitlements, "agent"),
+      skills: narrow_by(skills, & &1.name, entitlements, "skill"),
+      mcp_servers: narrow(for(server <- servers_of(parsed), do: server.name), entitlements, "mcp_server")
+    }
+  end
+
+  defp narrow(names, entitlements, kind) do
+    Entitlement.resolve(names, Entitlement.of_kind(entitlements, kind))
+  end
+
+  defp narrow_by(items, name_of, entitlements, kind) do
+    kept = items |> Enum.map(name_of) |> narrow(entitlements, kind) |> MapSet.new()
+    Enum.filter(items, &MapSet.member?(kept, name_of.(&1)))
+  end
+
+  @doc """
+  The entitlement set as `session_created` and `session.activate` carry it.
+
+  Names rather than rows: what the log has to answer, years later, is *what was this
+  session allowed to see* — and a reader of that answer should not have to know what the
+  bundle said that day, nor re-run the allow-and-deny rules to find out.
+  """
+  @spec entitlement_set(map()) :: map()
+  def entitlement_set(%{agents: agents, skills: skills, mcp_servers: servers}) do
+    %{
+      "agents" => agents,
+      "skills" => Enum.map(skills, & &1.name),
+      "mcp_servers" => servers
     }
   end
 

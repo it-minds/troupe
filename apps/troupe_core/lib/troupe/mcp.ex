@@ -58,4 +58,26 @@ defmodule Troupe.MCP do
   @doc "The name a server's tool is called by."
   @spec tool_name(String.t(), String.t()) :: String.t()
   def tool_name(server, tool), do: "mcp.#{server}.#{tool}"
+
+  @doc """
+  Which server a tool name belongs to, or `nil` when it belongs to none.
+
+      iex> Troupe.MCP.server_of("mcp.jira.create_issue")
+      "jira"
+      iex> Troupe.MCP.server_of("write_file")
+      nil
+
+  The inverse of `tool_name/2`, and the reason a session's entitlement filter can work
+  on names rather than on the tool values: a client-hosted tool and a built-in are not
+  an MCP server's and must not be narrowed by a set that never names them.
+  """
+  @spec server_of(String.t()) :: String.t() | nil
+  def server_of("mcp." <> rest) do
+    case String.split(rest, ".", parts: 2) do
+      [server, _tool] -> server
+      _ -> nil
+    end
+  end
+
+  def server_of(_name), do: nil
 end

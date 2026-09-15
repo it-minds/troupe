@@ -15,7 +15,7 @@ defmodule Troupe.Plane.Identity do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias Troupe.Plane.Identity.{Grant, Group, Membership, Team, TeamAdmin, User}
+  alias Troupe.Plane.Identity.{Entitlement, Grant, Group, Membership, Team, TeamAdmin, User}
   alias Troupe.Plane.{Principals, Repo, Sessions}
 
   require Logger
@@ -261,16 +261,145 @@ defmodule Troupe.Plane.Identity do
 
   # -- grants -----------------------------------------------------------------
 
-  @doc "Let a team use a profile."
+  @doc """
+  Let a team use a profile.
+
+  `attrs` may carry `entitlements`: a list of `%{kind, name, mode}` that *replaces* the
+  grant's rows. Replacement rather than merge, because the editor that writes them shows
+  three checklists and a partial write of a checklist is a list somebody did not mean.
+  Leaving the key out changes nothing, which is what keeps every existing caller — and
+  every existing grant — exactly as it was.
+  """
   @spec grant(Team.t(), String.t(), map()) :: {:ok, Grant.t()} | {:error, Ecto.Changeset.t()}
   def grant(%Team{} = team, profile, attrs \\ %{}) do
     existing = Repo.get_by(Grant, team_id: team.id, profile: profile)
 
-    attrs = attrs |> Map.put_new(:team_id, team.id) |> Map.put_new(:profile, profile)
+    # String keys throughout, because callers reach here with both — a form's map, a
+    # keyword-ish map from a test, and `Admin.team_grant/4`, which stringifies before it
+    # can look for `entitlements`. Ecto refuses a map with mixed keys, and the mixture
+    # only appears when one caller has already normalised and this function has not.
+    {entitlements, attrs} = attrs |> stringify() |> pop_entitlements()
 
-    (existing || %Grant{})
-    |> Grant.changeset(attrs)
-    |> Repo.insert_or_update()
+    attrs =
+      attrs
+      |> Map.put_new("team_id", team.id)
+      |> Map.put_new("profile", profile)
+
+    with {:ok, grant} <-
+           (existing || %Grant{}) |> Grant.changeset(attrs) |> Repo.insert_or_update() do
+      case entitlements do
+        nil -> {:ok, grant}
+        rows -> put_entitlements(grant, rows)
+      end
+    end
+  end
+
+  defp pop_entitlements(attrs), do: Map.pop(attrs, "entitlements")
+
+  # -- entitlements -----------------------------------------------------------
+
+  @doc """
+  The rows narrowing a grant. None means no restriction.
+  """
+  @spec entitlements(Grant.t()) :: [Entitlement.t()]
+  def entitlements(%Grant{} = grant) do
+    Repo.all(
+      from(e in Entitlement,
+        where: e.grant_id == ^grant.id,
+        order_by: [e.kind, e.name]
+      )
+    )
+  end
+
+  @doc """
+  The rows narrowing what a team may use on a profile, or `[]` where there is no grant.
+
+  `[]` from a team with no grant is not a widening: nothing reaches this without having
+  already been told the team may use the profile at all, and a profile a team has no
+  grant on offers it nothing to narrow.
+  """
+  @spec entitlements_for(Team.t() | nil, String.t()) :: [Entitlement.t()]
+  def entitlements_for(nil, _profile), do: []
+
+  def entitlements_for(%Team{} = team, profile) do
+    Repo.all(
+      from(e in Entitlement,
+        join: g in Grant,
+        on: g.id == e.grant_id,
+        where: g.team_id == ^team.id and g.profile == ^profile,
+        order_by: [e.kind, e.name]
+      )
+    )
+  end
+
+  @doc """
+  Replace a grant's entitlement rows, in one transaction.
+
+  Replacement is the operation the editor has: three checklists, written whole. A row
+  naming something the current bundle does not have is kept rather than refused — a
+  bundle can be rolled back, and an entitlement that vanished with a publish and did not
+  come back with the revert would be a silent widening.
+  """
+  @spec put_entitlements(Grant.t(), [map()]) :: {:ok, Grant.t()} | {:error, Ecto.Changeset.t()}
+  def put_entitlements(%Grant{} = grant, rows) when is_list(rows) do
+    now = DateTime.utc_now()
+
+    prepared =
+      rows
+      |> Enum.map(&stringify/1)
+      |> collapse()
+      |> Enum.map(fn row ->
+        %Entitlement{}
+        |> Entitlement.changeset(%{
+          "grant_id" => grant.id,
+          "kind" => row["kind"],
+          "name" => row["name"],
+          "mode" => row["mode"] || "allow"
+        })
+      end)
+
+    case Enum.find(prepared, &(not &1.valid?)) do
+      %Ecto.Changeset{} = bad ->
+        {:error, bad}
+
+      nil ->
+        rows = Enum.map(prepared, &entitlement_row(&1, now))
+
+        Repo.transaction(fn ->
+          Repo.delete_all(from(e in Entitlement, where: e.grant_id == ^grant.id))
+          Repo.insert_all(Entitlement, rows)
+          grant
+        end)
+    end
+  end
+
+  # `insert_all` takes plain maps rather than changesets, so the defaults a changeset
+  # would have applied have to be applied here — the changeset above is what validated
+  # the row, and this is what writes it.
+  defp entitlement_row(changeset, now) do
+    changeset.changes
+    |> Map.put(:id, Ecto.UUID.generate())
+    |> Map.put_new(:mode, "allow")
+    |> Map.put(:inserted_at, now)
+    |> Map.put(:updated_at, now)
+  end
+
+  defp stringify(row) when is_map(row) do
+    Map.new(row, fn {key, value} -> {to_string(key), value} end)
+  end
+
+  # One row per name, because that is what the unique index holds and what an editor of
+  # three checklists can express. A list that names the same thing twice is a caller
+  # saying two things at once, and the safe reading is the one that grants less — the
+  # same rule `Entitlement.resolve/2` applies when rows arrive together from several
+  # grants, reached here before anything is written rather than after.
+  defp collapse(rows) do
+    rows
+    |> Enum.group_by(&{&1["kind"], &1["name"]})
+    |> Enum.map(fn {_key, group} ->
+      Enum.find(group, List.first(group), &(&1["mode"] == "deny"))
+    end)
+    |> Enum.sort_by(&{&1["kind"], &1["name"]})
   end
 
   @doc "Take a profile away from a team. Its live sessions become read-only."

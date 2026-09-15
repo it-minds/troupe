@@ -80,16 +80,37 @@ defmodule Troupe.Tools do
   @doc """
   The tools a profile may use in one agent's context: everything `for_definition/2`
   gives it, plus the `skill` tool when the session's bundle has skills the profile
-  lists.
+  lists, less any MCP server this session's team is not entitled to.
 
   The skill tool is scoped to the context rather than registered pod-wide because it
   reads the bundle *this session* is pinned to, and two sessions on one pod may be
-  pinned to different versions.
+  pinned to different versions. The entitlement filter is here for the same reason and
+  one more: **discovery stays pod-wide**. Asking four servers for their tool list at
+  every create would put somebody else's latency on the create path, so the pod
+  discovers once and each session composes its own list from what was discovered. A
+  session that may not use `jira` does not see `mcp.jira.*`; the pod still knows the
+  tools exist.
   """
   @spec available(Definition.t(), Ctx.t()) :: [Tool.handle()]
   def available(%Definition{} = definition, %Ctx{} = ctx) do
-    for_definition(definition, ctx.session_id) ++ Skills.tools(ctx.bundle, definition)
+    definition
+    |> for_definition(ctx.session_id)
+    |> entitled_servers(ctx.bundle)
+    |> Kernel.++(Skills.tools(ctx.bundle, definition))
   end
+
+  defp entitled_servers(tools, %{entitlements: %{"mcp_servers" => names}}) when is_list(names) do
+    entitled = MapSet.new(names)
+
+    Enum.reject(tools, fn tool ->
+      case Troupe.MCP.server_of(Tool.name(tool)) do
+        nil -> false
+        server -> not MapSet.member?(entitled, server)
+      end
+    end)
+  end
+
+  defp entitled_servers(tools, _bundle), do: tools
 
   @doc """
   The tool specs to send a provider, with descriptions rendered for this session.

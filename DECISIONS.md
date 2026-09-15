@@ -2187,3 +2187,79 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      it without a join. It is a hash, not content, and `origin` was already a free map
      naming the trigger and the run.
 
+## R1 — entitlements below the profile
+
+335. **One child table on the grant, and absence means everything.** `grant_entitlements`
+     is `(grant_id, kind, name, mode)` and nothing else. No rows for a grant is no
+     restriction, which is exactly what every existing grant meant before the table
+     existed — so the migration needed no backfill, changes nothing for a deployment that
+     never opens the editor, and the old behaviour is the default rather than a setting.
+
+336. **One row per name, and a list that says both collapses to the deny.**
+     `stage-6.md` §2 asks for a unique index on `(grant_id, kind, name)` *and* for deny
+     to win "where both are present". Both cannot be persisted under that index, and the
+     index is the right half to keep: an editor of three checklists has one state per
+     name, and two rows would be a state it could not draw.
+
+     So the rule lives in two places that agree. `Identity.put_entitlements/2` collapses
+     a submitted list before it writes, keeping the deny — a caller saying two things at
+     once is read the way that grants less. `Entitlement.resolve/2` applies deny-wins to
+     rows that arrive *together* without having been written together, which is the real
+     case: the union across a person's teams in `profiles.list`.
+
+337. **A listing is the union over a person's teams; a session gets one team's set.**
+     They differ on purpose. `profiles.list` answers "what may I use", and a person in two
+     teams may use what either gives them — an intersection there would hide something
+     they can have. `session.create` answers "what may *this session* use", and a session
+     belongs to one team, which is the rule that already decides whose budget and whose
+     volume it gets (`harness.ex` `team_for/3`). A person in two teams with different
+     entitlements creates two sessions, which is simpler to explain and simpler to audit
+     than one session with a union nobody granted.
+
+338. **The set rides on the bundle pin, not beside it.** Every place on the pod that has
+     to apply the set is a place that already reads the bundle: the definition search
+     order, the skill tool, the session's composed tool list. A set carried separately is
+     a set one of those would forget. `nil` is no restriction, which is what a laptop, a
+     local session and a plane that has not been told about entitlements all send.
+
+339. **Agents are filtered after the whole search order is merged, and only primaries.**
+     Filtering where the bundle is merged would leave a built-in of the same name
+     standing in for a bundle agent the team was refused — a different agent answering to
+     a name somebody was denied. So `Definitions.load/2` narrows the finished map, and an
+     agent outside the set is not in it at all: not for `fetch/2`, not for `primaries/1`,
+     not for the delegation tool.
+
+     Only primaries. The plane's set names what `Bundles.primaries/1` offers and what
+     `session.create` refuses by name; a subagent is reached only through an agent the
+     team *is* entitled to, and narrowing subagents would break a bundle's own internal
+     delegation for a team that had simply never listed a name it never names.
+
+340. **MCP discovery stays pod-wide and the filter is where a session's tool list is
+     composed.** Asking four servers for their tool list at every create would put
+     somebody else's latency on the create path. So the pod discovers once, and
+     `Tools.available/2` drops `mcp.<server>.*` for servers outside the session's set. A
+     session that may not use `jira` does not see `mcp.jira.*`; the pod still knows the
+     tools exist. `MCP.server_of/1` is the inverse of `tool_name/2` and is what lets the
+     filter work on names — so a built-in and a client-hosted tool, which no set names,
+     are never narrowed by one.
+
+341. **A skill outside the set is `not_found`, not `denied`.** It is the same answer a
+     skill the profile did not list already gets, and the two should not be
+     distinguishable from outside: what a model can tell apart, it can probe. The filter
+     composes *after* the definition's own `skills:` list, because a skill has to be both
+     something this agent consults and something this team was granted.
+
+342. **A row naming something the current bundle does not have is kept, not pruned.** A
+     bundle can be rolled back, and an entitlement that vanished with a publish and did
+     not come back with the revert would be a silent widening. It simply does not appear
+     in any offering until the name does.
+
+343. **`entitlements` on `session_created` and on `config_upgraded`.** The first answers
+     "what was this session allowed to see" for as long as the log exists, without the
+     reader having to know what the bundle said that day. The second is there because a
+     publish can add an entry the team is not entitled to: the set is re-resolved by the
+     plane at every activation, and the event that already says the configuration moved
+     is the right place to say what the session may now see. Both are optional fields on
+     an event that already carried optional fields, so `mix troupe.schema.diff` sees an
+     additive change.
+

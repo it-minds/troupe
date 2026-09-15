@@ -41,6 +41,11 @@ defmodule Troupe.Protocol.Schema do
         "visibility" => required(:string),
         "bundle_version" => optional(:string),
         "kind" => optional(:string),
+        # Who it belongs to, where anybody was told; and what it was allowed to see —
+        # the agent, skill and MCP server names the grant resolved to, or absent for no
+        # restriction, which is what a local session and an unnarrowed grant both mean.
+        "owner" => optional(:string),
+        "entitlements" => optional(:object),
         "origin" => optional(:object)
       },
       "agent_started" => %{
@@ -158,7 +163,11 @@ defmodule Troupe.Protocol.Schema do
         "channel" => required(:string),
         "from" => optional(:integer),
         "to" => required(:integer),
-        "hash" => required(:string)
+        "hash" => required(:string),
+        # Re-resolved at this activation: a publish can add an entry the team is not
+        # entitled to, so the event that says the configuration moved says what the
+        # session may now see.
+        "entitlements" => optional(:object)
       },
       "session_read_only" => %{"reason" => required(:string)},
       "session_archived" => %{},

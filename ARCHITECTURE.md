@@ -1040,3 +1040,55 @@ The migration creates revision 1 for every existing trigger from its current row
 `reconstructed`, and points every existing run at it. That is honest rather than complete:
 revision 1 is what can be proven, and the column says so.
 
+### 16.2 Entitlements below the profile
+
+A grant said only *this team may use this profile*. It may now say which of the bundle's
+agents, skills and MCP servers come with it.
+
+```
+grant_entitlements   grant_id, kind ("agent" | "skill" | "mcp_server"), name,
+                     mode ("allow" | "deny")        unique on (grant_id, kind, name)
+```
+
+**No rows is no restriction** — exactly what every grant meant before the table existed,
+so the migration is a no-op and the old behaviour is the default. Within a kind, `allow`
+rows are an allowlist and `deny` rows subtract; deny wins, and because one row per name is
+what the index holds, a submitted list saying both collapses to the deny before it is
+written. A name the current bundle does not have is kept rather than pruned: a bundle can
+be rolled back, and an entitlement that vanished with a publish and did not come back with
+the revert would be a silent widening.
+
+**The bundle is untouched.** One content-addressed document, one hash, no derived bundles
+and no per-team hashes. What narrows is the *session*.
+
+Resolution happens on the plane, at create, and lands in three places:
+
+* `profiles.list` shows a person what they may use — the **union** over the teams of
+  theirs that may use the profile, because an intersection there would hide something they
+  can have;
+* `session.create` refuses an agent the team may not run, with the names it could have
+  had, before a pod or a budget is touched — and the session gets **one team's** set,
+  because a session belongs to one team, which is the rule that already decides whose
+  budget and whose volume it gets;
+* `session.activate` carries the set to the pod, and `session_created` records it, so the
+  log answers *what was this session allowed to see* without the reader knowing what the
+  bundle said that day. A publish can add an entry a team is not entitled to, so the set
+  is re-resolved at every activation and `config_upgraded` carries the new one.
+
+On the pod the set rides on the bundle pin, because every place that has to apply it
+already reads the bundle:
+
+* **agents** are filtered after the whole definition search order is merged, so an agent
+  outside the set is not in the map at all — filtering where the bundle is merged would
+  leave a built-in of the same name standing in for it, which is a different agent
+  answering to a name somebody was refused. Primaries only: a subagent is reached through
+  an agent the team *is* entitled to;
+* **skills** are filtered after the definition's own `skills:` list, and a skill outside
+  the set answers `not_found` — the same answer a skill the profile did not list gets,
+  because what a model can tell apart it can probe;
+* **MCP discovery stays pod-wide** and the filter is where a session's tool list is
+  composed. Asking four servers for their tool list at every create would put somebody
+  else's latency on the create path, so the pod discovers once and each session composes
+  its own list. A session that may not use `jira` does not see `mcp.jira.*`; the pod still
+  knows the tools exist.
+

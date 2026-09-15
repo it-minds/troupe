@@ -113,7 +113,7 @@ defmodule Troupe.Plane.Harness do
           "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
           "healthy_pods" => Enum.count(workers, & &1.healthy)
         }
-        |> Map.merge(offering_json(profile))
+        |> Map.merge(offering_json(profile, entitlements_of(user, profile)))
       end)
 
     {:ok, %{"profiles" => profiles}}
@@ -154,7 +154,7 @@ defmodule Troupe.Plane.Harness do
     # or term refused here has cost nothing, where one refused after placing would have
     # spent a slot and a reservation on a typo.
     with {:ok, team} <- team_for(user, profile, params["team"]),
-         {:ok, agent} <- agent_for(profile, params["agent"]),
+         {:ok, agent} <- agent_for(profile, team, params["agent"]),
          {:ok, prompt} <- prompt_for(params["prompt"]),
          {:ok, terms} <- terms_for(params["terms"], team),
          {:ok, origin} <- origin_for(params["origin"]),
@@ -272,13 +272,14 @@ defmodule Troupe.Plane.Harness do
   end
 
   # The agent a session starts as must be a primary the pinned bundle defines or a
-  # built-in one, checked here against the same version `create_row` pins: a name the
-  # pod would fail to load is refused with the names it could have had, rather than
-  # placed, budgeted and then failed on the pod.
-  defp agent_for(_profile, nil), do: {:ok, nil}
+  # built-in one *and* one the team is entitled to, checked here against the same
+  # version `create_row` pins: a name the pod would fail to load, or one the grant does
+  # not give, is refused with the names it could have had, rather than placed, budgeted
+  # and then failed on the pod.
+  defp agent_for(_profile, _team, nil), do: {:ok, nil}
 
-  defp agent_for(profile, agent) when is_binary(agent) do
-    %{agents: agents} = offering(profile)
+  defp agent_for(profile, team, agent) when is_binary(agent) do
+    %{agents: agents} = offering(profile, Identity.entitlements_for(team, profile))
 
     if agent in agents do
       {:ok, agent}
@@ -288,7 +289,7 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp agent_for(_profile, other) do
+  defp agent_for(_profile, _team, other) do
     {:error, Error.new(:invalid_params, %{reason: "agent is a name", agent: other})}
   end
 
@@ -550,7 +551,8 @@ defmodule Troupe.Plane.Harness do
         "profile" => session.profile,
         "source" => session.workspace_source,
         "agent" => agent,
-        "usage_seq" => session.usage_seq
+        "usage_seq" => session.usage_seq,
+        "entitlements" => entitlement_set(session, team)
       }
       |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))
@@ -705,7 +707,12 @@ defmodule Troupe.Plane.Harness do
         # Where the ledger got to in this session's log. The pod folds forward from here
         # and reports what is missing, which is how a session that ran while the plane
         # was unreachable still gets charged.
-        "usage_seq" => session.usage_seq
+        "usage_seq" => session.usage_seq,
+        # Re-resolved at every activation rather than read back from the log: a publish
+        # can add an entry the team is not entitled to, and a session that came back
+        # holding the set it was created with would be holding a stale one. The pod
+        # records the re-resolved set on its `config_upgraded`.
+        "entitlements" => entitlement_set(session, team_of(session))
       }
       |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))
@@ -877,17 +884,44 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  # What the channel's current bundle gives a session on this profile. A profile the
-  # plane has no record of follows no channel and offers the built-ins.
-  defp offering(profile) do
+  # What the channel's current bundle gives a session on this profile, narrowed by the
+  # entitlement rows that apply. A profile the plane has no record of follows no channel
+  # and offers the built-ins; no rows narrows nothing, which is every grant until
+  # somebody opens the editor.
+  defp offering(profile, entitlements) do
     case Fleet.get_profile(profile) do
-      nil -> Bundles.offering(nil)
-      %{config_bundle_channel: channel} -> Bundles.offering(channel)
+      nil -> Bundles.offering(nil, entitlements)
+      %{config_bundle_channel: channel} -> Bundles.offering(channel, entitlements)
     end
   end
 
-  defp offering_json(profile) do
-    offering = offering(profile)
+  # A person's own set for a profile, for *listing*: the union over the teams of theirs
+  # that may use it, because a person in two teams may use what either gives them and a
+  # listing that showed an intersection would hide something they can have. A session is
+  # narrower than a listing on purpose — it belongs to one team, and gets that team's
+  # set, which is the rule `team_for/3` already applies to budget and volume.
+  defp entitlements_of(user, profile) do
+    user
+    |> Identity.teams_for()
+    |> Enum.filter(&Identity.may_use?(user, profile, &1))
+    |> Enum.flat_map(&Identity.entitlements_for(&1, profile))
+    |> union_of_sets()
+  end
+
+  # Union across teams, with the same "deny wins" rule applied last: a name denied
+  # everywhere stays denied, and a name allowed anywhere is allowed. Rows are compared
+  # by kind and name, so two teams allowing the same skill is one row.
+  defp union_of_sets(rows) do
+    rows
+    |> Enum.group_by(&{&1.kind, &1.name})
+    |> Enum.map(fn {{kind, name}, group} ->
+      mode = if Enum.all?(group, &(&1.mode == "deny")), do: "deny", else: "allow"
+      %{kind: kind, name: name, mode: mode}
+    end)
+  end
+
+  defp offering_json(profile, entitlements) do
+    offering = offering(profile, entitlements)
 
     %{
       "channel" => offering.channel,
@@ -903,6 +937,20 @@ defmodule Troupe.Plane.Harness do
   # What this session should run on now, and whether that is a change. An upgrade is the
   # only way a session's configuration ever moves, and the worker records it as a durable
   # event so the model is told rather than left to notice.
+  # What this session may see, by name, as `session_created` and `config_upgraded`
+  # record it. One team, one set: a person picks the team they create under, so a
+  # session's set is that team's rather than an intersection over their teams — simpler
+  # to explain and simpler to audit, and a person in two teams with different
+  # entitlements can create two sessions.
+  defp team_of(%{team_id: nil}), do: nil
+  defp team_of(%{team_id: team_id}), do: Identity.fetch_team(team_id)
+
+  defp entitlement_set(session, team) do
+    session.profile
+    |> offering(Identity.entitlements_for(team, session.profile))
+    |> Bundles.entitlement_set()
+  end
+
   defp bundle_params(session) do
     with %{config_bundle_channel: channel} <- Fleet.get_profile(session.profile),
          resolved <- Bundles.resolve(channel, session.bundle_version) do

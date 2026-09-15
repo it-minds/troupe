@@ -319,6 +319,12 @@ defmodule Troupe.Worker.Plane.Commands do
   # skills the session runs under come from that directory. A pod with no bundle
   # registry runs the session on built-ins alone, which is what it did before bundles
   # had content.
+  # The entitlement set rides on the bundle pin rather than beside it, because every
+  # place on the pod that reads the bundle — the definition search order, the skill
+  # tool, the session's MCP tools — is a place that has to apply it, and a set carried
+  # separately is a set one of them would forget. `nil` is no restriction, which is what
+  # a plane that has not been told about entitlements sends and what every grant means
+  # until somebody opens the editor.
   defp bundle_of(params) do
     case params["bundle_version"] do
       nil ->
@@ -328,7 +334,12 @@ defmodule Troupe.Worker.Plane.Commands do
         pin = %{version: version, hash: params["bundle_hash"], channel: params["channel"]}
 
         with {:ok, dir} <- bundle_dir(pin) do
-          {:ok, Map.merge(pin, %{dir: dir, upgraded_from: params["bundle_upgraded_from"]})}
+          {:ok,
+           Map.merge(pin, %{
+             dir: dir,
+             upgraded_from: params["bundle_upgraded_from"],
+             entitlements: params["entitlements"]
+           })}
         end
     end
   end

@@ -153,7 +153,10 @@ defmodule Troupe.Session do
 
       definitions =
         Keyword.get_lazy(opts, :definitions, fn ->
-          Definitions.load(workspace.root_real, bundle_dir: bundle && bundle[:dir])
+          Definitions.load(workspace.root_real,
+            bundle_dir: bundle && bundle[:dir],
+            entitled: entitled_agents(bundle)
+          )
         end)
 
       {:ok,
@@ -178,6 +181,13 @@ defmodule Troupe.Session do
   # Appended rather than merged: the plane's table never names the bundle, because the
   # plane does not know where a pod materialised it. A table that already has a
   # `skills` entry — a session restored with one — keeps it.
+
+  # The agent names this session's team was granted, or `nil` for no restriction. A
+  # local session and a laptop have no bundle and therefore no set, which is the same
+  # answer by a shorter route.
+  defp entitled_agents(%{entitlements: %{"agents" => names}}) when is_list(names), do: names
+  defp entitled_agents(_bundle), do: nil
+
   defp with_skills(%Mounts{} = mounts, bundle) do
     case {Skills.mount(bundle), Mounts.fetch(mounts, "skills")} do
       {nil, _} -> mounts

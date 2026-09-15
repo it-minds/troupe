@@ -336,7 +336,11 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "attrs",
           type: :object,
-          description: "Grant options, such as the volume mode the team gets on this profile."
+          description:
+            "Grant options: the volume mode the team gets on this profile, and " <>
+              "`entitlements`, a list of `{kind, name, mode}` narrowing which of the " <>
+              "bundle's agents, skills and MCP servers this team gets. No entitlements " <>
+              "means no restriction; sending the key replaces the whole list."
         }
       ]
     },

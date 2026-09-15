@@ -326,14 +326,49 @@ defmodule Troupe.Plane.Admin do
   @doc "Give a team access to a profile."
   @spec team_grant(actor(), String.t(), String.t(), map()) :: result()
   def team_grant(actor, name, profile, attrs \\ %{}) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+
     with :ok <- require_platform_admin(actor),
-         {:ok, team} <- fetch_team(actor, name) do
-      {:ok, _} = Identity.grant(team, profile, attrs)
-      {:ok, _} = Audit.record(actor.subject, "team.grant", name, %{"profile" => profile})
+         {:ok, team} <- fetch_team(actor, name),
+         before <- entitlement_names(team, profile),
+         {:ok, _grant} <- granted(team, profile, attrs) do
+      detail = grant_detail(profile, Audit.diff(before, entitlement_names(team, profile)))
+
+      {:ok, _} = Audit.record(actor.subject, "team.grant", name, detail)
       project(profile, actor)
 
       {:ok, team_detail(team)}
     end
+  end
+
+  # An unchanged entitlement list is not a change, and an audit row that recorded one
+  # every time somebody adjusted a volume mode would bury the times it did move.
+  defp grant_detail(profile, changes) when changes == %{}, do: %{"profile" => profile}
+
+  defp grant_detail(profile, changes) do
+    %{"profile" => profile, "entitlements" => changes}
+  end
+
+  defp granted(team, profile, attrs) do
+    case Identity.grant(team, profile, attrs) do
+      {:ok, grant} -> {:ok, grant}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, invalid(changeset)}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # A diff of entitlement names is a diff of names, so nothing about redaction changes.
+  # Grouped by kind, because that is how the editor shows them and how an admin reading
+  # the audit row six weeks later will be thinking about them.
+  defp entitlement_names(team, profile) do
+    team
+    |> Identity.entitlements_for(profile)
+    |> Enum.group_by(& &1.kind, &"#{&1.mode}:#{&1.name}")
+    |> Map.new(fn {kind, names} -> {kind, Enum.sort(names)} end)
+  end
+
+  defp invalid(%Ecto.Changeset{} = changeset) do
+    Error.new(:invalid_params, %{reason: inspect(changeset.errors)})
   end
 
   @doc "Take it away. The team's sessions on that profile become read-only."

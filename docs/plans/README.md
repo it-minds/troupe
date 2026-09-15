@@ -30,7 +30,7 @@ protocol is exactly the argument that was given up.
 | [Remote triggers](remote-triggers.md) | Sessions nobody starts by hand, run by Hatchet through the plane API as service principals, reviewed in HQ. | the bundle's `agent` list for what a trigger runs; nothing else |
 | [The A2A facade](a2a-facade.md) | Other agents delegate tasks to a profile; a task is a session, an artifact is a published file. | service principals, `prompt` through activation and status columns from triggers; skills from the first plan for the agent card |
 | [Local and private sessions](../../../troupe-gui/docs/plans/local-and-private-sessions.md) (in the GUI repository) | The GUI shows local sessions beside team sessions, and a person's private session is sealed to object storage under their own key and follows them to another device. | independent of the other three; shares the sealer with workers |
-| [Stage 6](stage-6.md) | Token accounting as a fold over the log (built), entitlements below the profile, credentials that belong to a person, trigger revisions, and the cluster suite that proves the last three stages. | all of stage 5 |
+| [Stage 6](stage-6.md) | Token accounting as a fold over the log, entitlements below the profile and trigger revisions (all three built), credentials that belong to a person, and the cluster suite that proves the last three stages. | all of stage 5 |
 | [The admin surface](admin-surface.md) (built) | A fourth rendering of the admin context, for a model; platform settings an operator can change without a deploy; and a console that configures the whole of a profile. | the admin context and its parity test |
 
 The order above is the order to build them. Skills first because the others describe a

@@ -84,6 +84,10 @@ defmodule Troupe do
       "kind" => session_opts |> Keyword.get(:kind, :local) |> to_string()
     }
     |> put_present("bundle_version", bundle && bundle[:version] && to_string(bundle[:version]))
+    # What this session was allowed to see, by name. Recorded here so the log answers
+    # "what could this session have used" for as long as the log exists — without the
+    # reader having to know what the bundle said that day, nor which grant the team had.
+    |> put_present("entitlements", bundle && bundle[:entitlements])
     |> put_present("origin", Keyword.get(session_opts, :origin))
     # Who it belongs to. A worker is told; a daemon works it out from the link, and a
     # daemon nobody has linked leaves the field out rather than writing a username that

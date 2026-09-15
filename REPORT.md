@@ -1400,6 +1400,33 @@ The session a trigger makes carries `origin.revision` — the hash — so a sess
 weeks later says which wording made it without a join through the run.
 `admin.trigger.revisions` is new on the admin API and in `PROTOCOL.md`.
 
+## R1b — entitlements below the profile
+
+`stage-6.md` §2's five done items, and the pod half of them.
+
+```
+$ scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/entitlements_test.exs
+Result: 12 passed
+
+$ scripts/toolbox mix test apps/troupe_core/test/troupe/skills_test.exs
+Result: 15 passed
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A grant with no rows behaves exactly as today | "a grant with no rows offers exactly what the bundle has", plus the existing grant tests unchanged |
+| A team entitled to one of two skills gets one in `profiles.list`, one prompt line, `not_found` for the other | "shows one of two skills in the offering…", "narrows the skills a profile may consult, and the prompt says so", "a skill outside the set is not found, exactly as one the profile omits" |
+| An agent the team may not run is refused at `session.create` with the names it could have had, before placement or budget | "refuses an agent the team may not run, before placing or budgeting" — which asserts the empty session list and no push, not merely the error |
+| A session's set is recorded, and re-resolved on a publish | "is told its set, and the set is what the log will record"; `session_created` and `config_upgraded` both carry `entitlements` |
+| A `deny` row beats an `allow` row for the same name | "a list that says allow and deny for one name stores the deny", and `Entitlement.resolve/2`'s doctests |
+
+Two things the plan left to be decided and `DECISIONS.md` 336–337 record. One row per name
+is what the unique index holds, so a submitted list saying both collapses to the deny
+before it is written; deny-wins then applies to rows that arrive *together* without having
+been written together, which is the real case — the union across a person's teams. And a
+listing is that union while a session gets one team's set, because a session belongs to
+one team and an intersection in a listing would hide something a person can have.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was

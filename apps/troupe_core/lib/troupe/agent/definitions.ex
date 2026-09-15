@@ -27,6 +27,13 @@ defmodule Troupe.Agent.Definitions do
   `bundle_dir:` names a materialised bundle whose `agents/` is read as the `:bundle`
   source. Unparseable files are skipped with a warning rather than failing the
   session: one broken custom agent should not stop the user from working.
+
+  `entitled:` is the list of agent names this session's team was granted, or `nil` for
+  no restriction. It is applied *after* the whole search order is merged, so an agent
+  the team may not run is not in the map at all and nothing further has to know — not
+  `fetch/2`, not `primaries/1`, not the delegation tool's list. Filtering at the point
+  the bundle is merged would have left a built-in of the same name standing in for it,
+  which is a different agent answering to a name somebody was refused.
   """
   @spec load(Path.t(), keyword()) :: t()
   def load(workspace_root, opts \\ []) do
@@ -36,8 +43,24 @@ defmodule Troupe.Agent.Definitions do
       |> merge_bundle(Keyword.get(opts, :bundle_dir))
       |> merge_dir(Path.join(Paths.config_dir(), "agents"), :global)
       |> merge_dir(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
+      |> entitled(Keyword.get(opts, :entitled))
 
     %__MODULE__{by_name: by_name}
+  end
+
+  # A subagent is not narrowed by the set: the plane's set names primaries, which is
+  # what `Bundles.primaries/1` offers and what `session.create` refuses by name. A
+  # subagent is reached only by an agent the team *is* entitled to, and narrowing it
+  # here would break a bundle's own internal delegation for a team that had simply not
+  # listed a name it never names.
+  defp entitled(by_name, nil), do: by_name
+
+  defp entitled(by_name, names) when is_list(names) do
+    allowed = MapSet.new(names)
+
+    Map.filter(by_name, fn {name, definition} ->
+      definition.mode != :primary or MapSet.member?(allowed, name)
+    end)
   end
 
   @doc "Build a snapshot directly from definitions. Tests and embedding."
