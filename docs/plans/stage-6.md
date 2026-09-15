@@ -1,4 +1,4 @@
-# Stage 6 — the five things to take, done our way
+# Stage 6 â€” the five things to take, done our way
 
 A review of `different-ai/openwork` found five places where they have something we do
 not. This is the plan to have those five things, built the way this repository builds
@@ -12,14 +12,14 @@ throws most of them away at the plane boundary. The interesting work is deciding
 of their tables we already have as a log, and which of their loops we already have as a
 process.
 
-Part 1 is **built** — `ARCHITECTURE.md` §15 describes what landed and `REPORT.md`'s
+Part 1 is **built** â€” `ARCHITECTURE.md` Â§15 describes what landed and `REPORT.md`'s
 stage 6 section proves it. It stays here as the record of what was intended, including
-the four places where the build deviated (all named in `DECISIONS.md` 287–303). The
+the four places where the build deviated (all named in `DECISIONS.md` 287â€“303). The
 other four are not built.
 
 | Part | One line | Size |
 | --- | --- | --- |
-| [1. Token accounting](#1-token-accounting) — **built** | Cost becomes a fold over the log, batched through a pod-local cache into a ledger that is already built. | large |
+| [1. Token accounting](#1-token-accounting) â€” **built** | Cost becomes a fold over the log, batched through a pod-local cache into a ledger that is already built. | large |
 | [2. Entitlements below the profile](#2-entitlements-below-the-profile) | A grant may name which of a bundle's agents, skills and servers a team gets. | medium |
 | [3. Credentials that belong to a person](#3-credentials-that-belong-to-a-person) | An MCP server may authenticate as the session's owner, with the value in OpenBao and the plane never holding it. | medium |
 | [4. Trigger revisions](#4-trigger-revisions) | A run names an immutable, content-addressed revision instead of a row somebody has since edited. | small |
@@ -34,7 +34,7 @@ other four are not built.
   a pod that has been out of touch catches the plane up by re-folding, not by replaying a
   queue it kept in memory.
 * **A cache may be lost.** Every cache here is ETS owned by a process that can die.
-  Losing one costs a fold, a query or a round trip — never a number, never a decision.
+  Losing one costs a fold, a query or a round trip â€” never a number, never a decision.
 * **Idempotency is content-addressing.** A bundle is its hash, a trigger revision becomes
   its hash, a usage record is the gateway's request id. The same argument each time: two
   systems that must agree join on something neither of them invented.
@@ -60,7 +60,7 @@ always been zero, becomes true.
 and a batch; one new control-channel method; a watermark carried on the session index;
 and a panel page that reads a cached sum.
 
-**Already in place — nearly all of it.**
+**Already in place â€” nearly all of it.**
 
 * `usage_records` exists, is append-only, and is unique on the gateway's request id
   (`priv/repo/migrations/20260101000004_ledger_and_audit.exs:15-30`).
@@ -112,7 +112,7 @@ up would reconcile against itself.
 {"message": {...}, "stop_reason": "end_turn",
  "usage": {"input_tokens": 4120, "output_tokens": 380},
  "model": "anthropic/claude-opus-5",
- "gateway": {"request_id": "…", "cost_micros": 18400}}
+ "gateway": {"request_id": "â€¦", "cost_micros": 18400}}
 ```
 
 Adding keys to an event is what the schema-compatibility rule permits and
@@ -142,7 +142,7 @@ and its next tool call.
 ```
 Troupe.Worker.Usage            (GenServer, owns the table, one per pod)
   table: :troupe_usage         (:public, :set, write_concurrency: true)
-  key:   {session_id, seq}     — the log's own sequence, already monotonic per session
+  key:   {session_id, seq}     â€” the log's own sequence, already monotonic per session
   value: %{model:, input_tokens:, output_tokens:, cost_micros:, request_id:, at:}
 ```
 
@@ -153,7 +153,7 @@ Troupe.Worker.Usage            (GenServer, owns the table, one per pod)
   1 000 rows) with `:ets.select/2`, sends one `usage.batch`, and deletes only what the
   plane acknowledged with `:ets.select_delete/2`. A row written during the flush has a
   higher key and is picked up next time.
-* **`handle_continue(:first_flush, …)`** after `init/1`, so a pod that restarts with a
+* **`handle_continue(:first_flush, â€¦)`** after `init/1`, so a pod that restarts with a
   backlog does not wait an interval to start emptying it.
 * **`terminate/2` flushes best-effort and correctness does not depend on it.** The log
   is the record; a flush lost to a SIGKILL is recovered by the fold.
@@ -176,7 +176,7 @@ permanently missing record, and `Reconcile`'s `missing` category loses its usual
 
 `usage.batch` is added to the control channel; `usage.record` stays for one release, the
 same compatibility rule `config.updated` got in stage 5. A batch is idempotent per
-record — `Ledger.record/1` already is — so a retried batch is a batch of duplicates and
+record â€” `Ledger.record/1` already is â€” so a retried batch is a batch of duplicates and
 moves no total.
 
 #### 1d. Reading it back, and the cache that makes that cheap
@@ -190,7 +190,7 @@ append-only table that only grows.
 (`a2a/plane/cache.ex`), which is the shape this repository already uses for this: a
 named public ETS set, a GenServer that owns it and sweeps, entries with an expiry,
 readers that never call the owner. Keyed on `{team_id, from, to, group_by}`, invalidated
-on write by `TeamBudget` — which is the only writer, and is already one process per
+on write by `TeamBudget` â€” which is the only writer, and is already one process per
 team, so the invalidation is serialised for free.
 
 **Rollups are not in this stage.** OpenWork folds raw rows into hourly and then daily
@@ -218,7 +218,7 @@ is the kind of work that looks like progress.
 
 ### What the build changed
 
-Four deviations, all in `DECISIONS.md` 287–303:
+Four deviations, all in `DECISIONS.md` 287â€“303:
 
 * **The two gateway fields live in a `Troupe.LLM.Gateway` struct** under
   `response.gateway`, not as two flat fields on `Response`. "The gateway said nothing"
@@ -233,7 +233,7 @@ Four deviations, all in `DECISIONS.md` 287–303:
 * **A charge dated in the future is dated now.** Not in the plan; found by a test, because
   a pod with a fast clock writes charges into a window no report asks about.
 
-And one thing the plan asked for that was not built: rollups stay deferred, as §1d said
+And one thing the plan asked for that was not built: rollups stay deferred, as Â§1d said
 they should, and so does the retention setting that would go with them.
 
 ---
@@ -242,14 +242,14 @@ they should, and so does the retention setting that would go with them.
 
 ### The problem
 
-A grant is one row, `(team, profile) → role, volume_mode`, unique on the pair
+A grant is one row, `(team, profile) â†’ role, volume_mode`, unique on the pair
 (`migrations/20260101000001_identity.exs:81-93`). Everyone granted a profile gets the
 whole bundle: every agent, every skill, every MCP server. The only way to give one team
 less is a second profile, which costs a namespace, a `WorkerProfile`, a warm pod and an
 image pull.
 
 OpenWork's answer is a grant table per level of their hierarchy. Ours should not be three
-tables, because we do not have their hierarchy — we have one document per channel, and
+tables, because we do not have their hierarchy â€” we have one document per channel, and
 the thing that needs narrowing is which of its entries a team may see.
 
 ### Design
@@ -284,7 +284,7 @@ that already calls it gets narrower answers for free:
   (`harness.ex:865-877`).
 * `agent_for/2` refuses an agent the team may not run, with the names it could have had,
   before placement and before a budget reservation (`harness.ex:280-289`).
-* `session.activate` gains `entitlements` — the params are already an explicit keyword
+* `session.activate` gains `entitlements` â€” the params are already an explicit keyword
   list with `nil`s rejected (`worker/plane/commands.ex:48-62`), so this is one more key.
 
 The bundle itself is untouched. It stays one content-addressed document with one hash;
@@ -350,9 +350,9 @@ design exists to keep it.
 `mcp_servers[].credential_mode` is added to bundle schema 1, `"profile"` by default,
 which is exactly today's behaviour and needs no migration of any published bundle.
 
-* **`profile`** — unchanged. `credential_ref` names an environment variable, the operator
+* **`profile`** â€” unchanged. `credential_ref` names an environment variable, the operator
   writes a `secretKeyRef`, the pod reads it.
-* **`person`** — `credential_ref` is not a variable name but a *slot* name. The value
+* **`person`** â€” `credential_ref` is not a variable name but a *slot* name. The value
   lives in OpenBao at `troupe/people/<subject>/mcp/<slot>`, and neither the plane nor
   the operator ever reads it.
 
@@ -369,8 +369,8 @@ shape, one path up:
 
 1. OpenBao gets a JWT auth role whose policy is templated:
    `path "troupe/people/{{identity.entity.aliases.<accessor>.metadata.sub}}/mcp/*" { capabilities = ["read"] }`.
-2. At activation the plane mints a short-lived assertion through transit — the same
-   signer that already mints session tokens (`plane/tokens/credential.ex`) — with the
+2. At activation the plane mints a short-lived assertion through transit â€” the same
+   signer that already mints session tokens (`plane/tokens/credential.ex`) â€” with the
    session's `owner_subject` as `sub` and OpenBao as the audience.
 3. The pod exchanges it for a Bao token that can read exactly that person's slots and
    nothing else, and holds it in memory for the life of the session, as it already does
@@ -387,7 +387,7 @@ decided on, which is the argument for it being the right one.
 
 `me.connections.list` and `me.connections.grant` on the harness API. `grant` does **not**
 take a value. It returns a short-lived Bao token scoped to the caller's own slot, and the
-client writes the value to OpenBao directly — the same presign shape the GUI spec uses
+client writes the value to OpenBao directly â€” the same presign shape the GUI spec uses
 for private-session objects, and for the same reason: the plane is not on the path of a
 secret it is not allowed to see.
 
@@ -414,9 +414,11 @@ hit, which is the right place for it in a system where the tool list is already 
   person-mode, calls go out as the session's **owner**, fixed at activation and recorded
   in `session_created`. A collaborator acting through somebody else's credential is a
   thing people should be told once, in the panel and in the log, rather than discover.
-* **This is not taint.** `session_tainted` is for a server a *client* registered
-  (`tui/connectors.ex:5-8`); this one an admin published. What the log does gain is
-  `identity` on the MCP call event — `"profile"` or `"person:<subject>"` — so a reader
+* **This is not taint.** `session_tainted` is for a server a *client* registered — the
+  app that carried that registration is gone (`DECISIONS.md` 320), and the event now
+  lives in `Troupe.Session.ClientTools`, `Troupe.Log.Fold` and `Troupe.Session.Summary`;
+  this one an admin published. What the log does gain is
+  `identity` on the MCP call event â€” `"profile"` or `"person:<subject>"` â€” so a reader
   can tell which credential a call used without knowing what the bundle said that day.
 
 ### Done items
@@ -441,7 +443,7 @@ hit, which is the right place for it in a system where the tool list is already 
 
 `trigger_runs` points at the mutable `triggers` row (`triggers/run.ex:28-37`). Editing a
 prompt template rewrites the provenance of every run that used the old one. The rendered
-prompt does survive in the session's own log, so the *content* is not lost — but which
+prompt does survive in the session's own log, so the *content* is not lost â€” but which
 template produced it, under which terms, as which principal, is.
 
 This is small, and it is the item on the list that becomes impossible rather than merely
@@ -453,17 +455,17 @@ harder if it is left: history that was never recorded cannot be backfilled.
 trigger_revisions
   trigger_id   references triggers on delete: :delete_all
   revision     integer, monotonic per trigger
-  hash         "sha256:…" over canonical JSON of the fields below
+  hash         "sha256:â€¦" over canonical JSON of the fields below
   profile, agent, principal_id, prompt_template, terms,
   concurrency, review, notify, source
-  created_by, inserted_at         — no updated_at; a revision is immutable
+  created_by, inserted_at         â€” no updated_at; a revision is immutable
   unique on (trigger_id, revision) and on (trigger_id, hash)
 ```
 
 * **Content-addressed, like a bundle.** `Troupe.Protocol.Canonical` already gives us a
   stable encoding and `Bundle.hash/1` already establishes the convention. `trigger.put`
   that changes nothing creates no revision, and an admin who edits back to a previous
-  wording lands back on that revision rather than making a third — the same argument the
+  wording lands back on that revision rather than making a third â€” the same argument the
   bundle makes, reached the same way.
 * `trigger_runs.revision_id`, not null for new rows. A backfill creates revision 1 for
   every existing trigger from its current row and points every existing run at it, which
@@ -509,7 +511,7 @@ something that runs that suite without being asked.
 
 `mix troupe.e2e` runs `test/e2e/**`, tagged `:e2e` and excluded from `mix test` by
 default. It takes a kubeconfig context from the environment and refuses to run against a
-context whose name is not the one `scripts/remote-up` created, unless told otherwise —
+context whose name is not the one `scripts/remote-up` created, unless told otherwise â€”
 an end-to-end suite that deletes pods must not be one `KUBECONFIG` away from doing it
 somewhere real.
 
@@ -518,11 +520,11 @@ somewhere real.
 OpenWork's eval framework has a vocabulary we lack, and it is the useful part:
 
 * a **world** is a setup that creates concrete resources and owns exactly what it
-  created — here, an `ExUnit` `setup` returning a handle with an `on_exit` that removes
+  created â€” here, an `ExUnit` `setup` returning a handle with an `on_exit` that removes
   the namespace it made and never the cluster it attached to;
 * a **witness** is a deterministic stand-in that records what it saw. This is already
-  our word — `Troupe.Log.Fold` calls its projection a witness for exactly this reason
-  (`log/fold.ex:18-22`) — and we already have the provider one:
+  our word â€” `Troupe.Log.Fold` calls its projection a witness for exactly this reason
+  (`log/fold.ex:18-22`) â€” and we already have the provider one:
   `Troupe.LLM.Providers.Fake` (`llm/providers/fake.ex`), which the bench already drives.
   In the cluster it runs with its script in a ConfigMap and its transcript read back, so
   "the model was called with the skill in its prompt" is an assertion rather than an
@@ -532,7 +534,7 @@ OpenWork's eval framework has a vocabulary we lack, and it is the useful part:
 
 And the rule that makes the whole thing worth the trouble, which they state and we
 should adopt verbatim: **a passing response is not proof that an action was blocked.**
-Every negative done item is proven by an independent witness — an egress test shows the
+Every negative done item is proven by an independent witness â€” an egress test shows the
 connection failing *from inside the pod*, not that a `CiliumNetworkPolicy` object exists.
 
 #### 5c. What only a cluster can decide
@@ -596,7 +598,7 @@ Two more small things, both cheap and both learned from reading their repository
    to, and because it is the one an admin will notice.
 4. **Personal credentials**, which needs part 3's resolution and OpenBao's second auth
    role.
-5. **The cluster suite** last in the list and first in usefulness — it can start in
+5. **The cluster suite** last in the list and first in usefulness â€” it can start in
    parallel with any of them, and each of the four above should land its own e2e claim
    rather than wait for a suite that does not exist yet.
 
@@ -625,7 +627,7 @@ Two more small things, both cheap and both learned from reading their repository
   is recoverable from the sealed segments, but it is a slower fold. Probably not worth
   coupling two things that fail independently.
 * Entitlements on a *person* as well as a team. The grant is a team's; OpenWork can grant
-  to an individual. Deferred deliberately — a team of one is the answer until somebody
+  to an individual. Deferred deliberately â€” a team of one is the answer until somebody
   shows a case it does not fit.
 * Whether `me.connections.*` belongs on the harness API or on a separate surface. The
   harness API is a fleet API and a credential is not a fleet fact, but a second surface is

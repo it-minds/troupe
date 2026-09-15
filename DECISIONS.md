@@ -2079,3 +2079,17 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      process could not leave an orphaned BEAM holding the reaper pipes open. In a pod
      there is no launcher: the VM is the container's main process and the kubelet kills
      the whole thing. The watchdog was a fix for a problem that no longer exists.
+
+## R0 — three corrections
+
+325. **`docs/plans/README.md` did not carry the sentence R0 asked to be corrected, so the
+     correction was made where the claim still lives.** The brief says that page
+     "describes the client apps as the protocol's test harness". It does not, in those
+     words; what it does is name `apps/troupe_tui` and `apps/troupe_ctl` throughout the
+     five plans it indexes, all of which were written while those apps existed. Deleting
+     the references one by one would edit the record of what was intended, which is the
+     one thing that page exists to keep. So the correction is a preamble: the plans below
+     are history where they name a client, the proof they leaned on is now
+     `apps/troupe_gateway/test/conformance/conformance.py`, and nothing that reads "the
+     TUI does X" describes code in this tree.
+

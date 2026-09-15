@@ -1307,3 +1307,28 @@ keys, so every profile change was recorded as one twenty-line object becoming an
 **What is not claimed.** Identity and Integrations are not their own screens; the erase
 dialog is a two-step confirmation and not the typed identifier the design specifies; Audit
 has no integrity tab. `docs/plans/admin-surface.md` lists what is owed.
+---
+
+# R0 and R1 — the floor, in part
+
+What `docs/brief-remote.md` calls R0 and the first parts of R1. Two of R1's five pieces
+are built and proven; the rest is named at the end of this section with what is left of
+each, because a package listed as done that is not is worse than a package listed as
+owed.
+
+## R0 — the corrections
+
+`docs/plans/stage-6.md` §3e cited `tui/connectors.ex:5-8` for an app that was deleted;
+it now names the three modules `session_tainted` actually lives in, and the distinction
+it draws — a server a *client* registered versus one an *admin* published — is unchanged
+and still correct.
+
+`docs/plans/README.md` did not carry the sentence the brief quotes, so the correction was
+made where the claim still lives: a preamble saying that the five plans below are history
+where they name `apps/troupe_tui` or `apps/troupe_ctl`, and that what carries the
+protocol's proof now is `apps/troupe_gateway/test/conformance/conformance.py`.
+`DECISIONS.md` 325 records why that was the right shape rather than editing the plans.
+
+`placement.ex:35`'s comment is untouched, as instructed: it is the sentence that
+justified the design R3 changes, and it goes in R3's commit.
+

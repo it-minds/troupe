@@ -9,6 +9,21 @@ it brings, what it takes, what is already in place, what the code is missing tod
 `spec.md` and `ARCHITECTURE.md` remain the authority on invariants; nothing here weakens
 them, and where one asks to revise a decision it says so and why.
 
+Where a plan below names `apps/troupe_tui` or `apps/troupe_ctl`, read it as history. Both
+apps were deleted (`DECISIONS.md` 319–320) and with them the argument that a built-in
+client was the protocol's test harness. What carries that proof now is
+`apps/troupe_gateway/test/conformance/conformance.py` — a client written against
+`PROTOCOL.md` in another language, with no access to this source — run by the gateway
+suite that owns it. A client is a separate release from a separate repository; nothing in
+these plans that reads "the TUI does X" describes code in this tree.
+
+A terminal client is expected to come back the way the graphical one did — its own
+repository, its own release, reaching a plane over `PROTOCOL.md` with the scopes its
+principal has. When it does, nothing here changes: what was deleted was a client *inside*
+the boundary, and the reason it went is that there is no longer any client that could be
+special. The conformance suite stays where it is, because a client of ours proving the
+protocol is exactly the argument that was given up.
+
 | Plan | One line | Depends on |
 | --- | --- | --- |
 | [Skills and MCP servers](skills-and-mcp.md) | A profile carries admin-published skills and MCP servers; every session has them from its first turn. | — |
