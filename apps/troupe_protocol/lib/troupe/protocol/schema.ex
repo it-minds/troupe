@@ -89,7 +89,12 @@ defmodule Troupe.Protocol.Schema do
       "tool_call_started" => %{
         "call_id" => required(:string),
         "name" => required(:string),
-        "args" => required(:object)
+        "args" => required(:object),
+        # Which credential an MCP call goes out as: `"profile"` or `"person:<subject>"`.
+        # Absent for every other tool, because a built-in runs as the pod and a
+        # client-hosted tool runs on somebody's laptop, and neither is a choice anybody
+        # made.
+        "identity" => optional(:string)
       },
       "tool_call_completed" => %{
         "call_id" => required(:string),

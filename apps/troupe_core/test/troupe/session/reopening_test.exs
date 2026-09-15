@@ -19,7 +19,7 @@ defmodule Troupe.Session.ReopeningTest do
   describe "opening a session again" do
     test "appends session_resumed, not a second session_created", context do
       %{session: session} = start_session(context, steps: [{:text, "hi"}])
-      :ok = Troupe.stop_session(session.id)
+      :ok = stopped(session.id)
 
       {:ok, _reopened} =
         Troupe.resume(session.id,
@@ -39,12 +39,11 @@ defmodule Troupe.Session.ReopeningTest do
       resumed_at = Enum.find_index(types, &(&1 == "session_resumed"))
       assert created_at < resumed_at
 
-      on_exit(fn -> Troupe.stop_session(session.id) end)
     end
 
     test "session_resumed says how long it slept and whether it moved", context do
       %{session: session} = start_session(context, steps: [{:text, "hi"}])
-      :ok = Troupe.stop_session(session.id)
+      :ok = stopped(session.id)
 
       {:ok, _} =
         Troupe.resume(session.id,
@@ -60,12 +59,11 @@ defmodule Troupe.Session.ReopeningTest do
       # about: a snapshot preserves disk and nothing else.
       assert resumed.data["moved"] == false
 
-      on_exit(fn -> Troupe.stop_session(session.id) end)
     end
 
     test "a resume whose directory is gone falls back to the restored tree", context do
       %{session: session} = start_session(context, steps: [{:text, "hi"}])
-      :ok = Troupe.stop_session(session.id)
+      :ok = stopped(session.id)
 
       # What a restore leaves behind: the archived tree, under the state directory.
       restored = Path.join([context.state_dir, "workspaces", session.id])
@@ -87,12 +85,11 @@ defmodule Troupe.Session.ReopeningTest do
       resumed = session.id |> Log.replay() |> Enum.find(&(&1.type == "session_resumed"))
       assert resumed.data["moved"] == true
 
-      on_exit(fn -> Troupe.stop_session(session.id) end)
     end
 
     test "a resume with neither the directory nor a restored tree still fails", context do
       %{session: session} = start_session(context, steps: [{:text, "hi"}])
-      :ok = Troupe.stop_session(session.id)
+      :ok = stopped(session.id)
 
       File.rm_rf!(context.workspace)
 
@@ -104,6 +101,27 @@ defmodule Troupe.Session.ReopeningTest do
                  workspace: context.workspace,
                  config_overrides: [provider: "fake", state_dir: context.state_dir]
                )
+    end
+  end
+  # `stop_session/1` returns when the session's supervisor has terminated, which is not
+  # quite when the registry has released its names: `Registry` learns of the exit by
+  # message, and a resume that wins that race asks the log for a session id whose process
+  # is still registered to a dead pid. Nothing in production reopens a session
+  # microseconds after closing it in the same VM, so this is the test's problem to solve
+  # and not the daemon's.
+  defp stopped(session_id) do
+    :ok = Troupe.stop_session(session_id)
+    wait_for_release(session_id, 200)
+  end
+
+  defp wait_for_release(_session_id, 0), do: :ok
+
+  defp wait_for_release(session_id, attempts) do
+    if Registry.whereis({:session, session_id}) || Registry.whereis({:log, session_id}) do
+      Process.sleep(5)
+      wait_for_release(session_id, attempts - 1)
+    else
+      :ok
     end
   end
 end

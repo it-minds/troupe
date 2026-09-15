@@ -2430,3 +2430,49 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      widen — which is how this was found: a correct assertion, a correct role, and a
      `forbidden` on a slot the person owned. Everything under a person belongs to that
      person. That is the whole statement and it is the one worth writing down.
+364. **A person-mode call resolves its credential per call, and the pod caches nothing.**
+     A profile-mode server's credential is resolved once at discovery because it is the
+     same for every session. A person's is not the pod's to hold: it belongs to whoever
+     owns the session, and the pod has it for exactly as long as a call takes.
+     `Troupe.MCP.person_credential/2` is a function the host installs, the way
+     `:remote_tools` already is, because reading it needs a key-manager token scoped to
+     that person and `troupe_core` is not where that lives. A host that installs nothing
+     answers `not_connected`, which is what a laptop and a local session both mean.
+
+365. **`not_connected` is `{:ok, …}`, not an error.** Nobody having connected a server is
+     a fact about the session's owner, not a failure of the call, so the model gets a
+     structured refusal it can read and relay rather than a 401 it will retry four times —
+     and the session carries on. The hint names Connections and says the server acts as
+     *you*, because "not connected" without that reads like an outage.
+
+366. **`identity` is on `tool_call_started` and only where there is a question.** An MCP
+     server may act as the profile's service account or as the session's owner, and a
+     reader of the log should be able to tell which without knowing what the bundle said
+     that day. A built-in runs as the pod and a client-hosted tool runs on somebody's
+     laptop; an `identity` on those events would be a field that always said the same
+     thing, so it is absent rather than constant.
+
+367. **A session has one identity, and it is the owner's.** Two people attached to one
+     person-mode session both reach the server as the owner, fixed at activation and
+     recorded in `session_created`. `MCP.owner_of/1` reads it from the attribution the pod
+     was told rather than from whoever is typing. A collaborator acting through somebody
+     else's credential is a thing people should be told once, in the panel and in the log,
+     rather than discover.
+
+368. **`stop_session/1` no longer exits when the log has already gone.** It asked the
+     registry whether the *session* was alive and then wrote through the *log*, and a live
+     session does not imply a live log: the tree is `rest_for_one` with `Log` first, so a
+     session already coming down has lost its log while its supervisor is still
+     terminating. Two callers stopping the same session — ordinary at shutdown — raced
+     exactly there, and the loser exited inside whoever called it.
+
+     Found by a test that flaked about one run in twenty, and pinned by sweeping seeds
+     rather than by re-running until it happened again. Nothing is lost by skipping the
+     append: the events are on disk and `session_dormant` is a marker, not a fact anything
+     is rebuilt from.
+
+369. **A test that reads source normalises line endings first.** `FoldTest` greps
+     `server.ex` for the event types `fold_event/2` handles, so the two cannot drift
+     apart — and every anchor in it misses on a checkout that stores CRLF, which reads
+     like `fold_event/2` having no clauses at all. It reads source rather than data, so
+     the normalisation belongs there.

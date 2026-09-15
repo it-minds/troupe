@@ -27,6 +27,54 @@ defmodule Troupe.MCP do
   require Logger
 
   @doc """
+  The session owner's credential for a person-mode server, or why there is not one.
+
+  A function the host installs, the way `:remote_tools` is installed, because reading it
+  needs a key-manager token scoped to that person and `troupe_core` is not where that
+  lives. A host that installs nothing answers `not_connected`, which is what a laptop
+  and a local session both mean.
+
+  Never cached here. The value belongs to whoever owns the session and the pod holds it
+  for exactly as long as a call takes.
+  """
+  @spec person_credential(Server.t(), Troupe.Tool.Ctx.t()) ::
+          {:ok, String.t()} | {:error, :not_connected | term()}
+  def person_credential(%Server{} = server, ctx) do
+    case Application.get_env(:troupe_core, :person_credentials) do
+      fun when is_function(fun, 2) -> fun.(server, ctx)
+      _none -> {:error, :not_connected}
+    end
+  end
+
+  @doc """
+  Which identity a call to this server goes out as, for the log.
+
+  `"profile"` or `"person:<subject>"`, so a reader can tell which credential a call used
+  without knowing what the bundle said that day.
+  """
+  @spec identity(Server.t(), Troupe.Tool.Ctx.t()) :: String.t()
+  def identity(%Server{credential_mode: :person}, ctx) do
+    case owner_of(ctx) do
+      nil -> "person:unknown"
+      subject -> "person:" <> subject
+    end
+  end
+
+  def identity(%Server{}, _ctx), do: "profile"
+
+  @doc """
+  The subject a session belongs to, from the attribution a pod was told at activation.
+
+  A session has **one** identity. If two people are attached and the server is
+  person-mode, calls go out as the session's *owner*, fixed at activation and recorded in
+  `session_created` — a collaborator acting through somebody else's credential is a thing
+  people should be told once rather than discover.
+  """
+  @spec owner_of(Troupe.Tool.Ctx.t()) :: String.t() | nil
+  def owner_of(%{config: %{attribution: %{owner: owner}}}) when is_binary(owner), do: owner
+  def owner_of(_ctx), do: nil
+
+  @doc """
   Discover a server's tools and present them as Troupe tools.
 
   A server that cannot be reached yields no tools rather than an error: a profile with

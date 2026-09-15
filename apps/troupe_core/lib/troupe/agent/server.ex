@@ -938,18 +938,25 @@ defmodule Troupe.Agent.Server do
     maybe_next_turn(state, :thinking)
   end
 
+  defp put_identity(data, nil), do: data
+  defp put_identity(data, identity), do: Map.put(data, "identity", identity)
+
   defp dispatch_tool(%ToolUse{} = tool_use, state) do
     call = %Call{id: tool_use.id, name: tool_use.name, args: normalize_args(tool_use.input)}
     state = %{state | pending: Map.put(state.pending, call.id, call)}
 
-    log(state, :tool_call_started, %{
-      "call_id" => call.id,
-      "name" => call.name,
-      "args" => call.args
-    })
-
     definition = effective_definition(state)
     ctx = base_ctx(state, call.id)
+
+    # `identity` only where there is a question to answer: an MCP server may act as the
+    # profile's service account or as the session's owner, and a reader of this log
+    # should be able to tell which without knowing what the bundle said that day.
+    log(
+      state,
+      :tool_call_started,
+      %{"call_id" => call.id, "name" => call.name, "args" => call.args}
+      |> put_identity(Tools.identity_of(call.name, ctx))
+    )
 
     case Tools.authorize(call.name, definition, ctx) do
       {:reject, result} ->

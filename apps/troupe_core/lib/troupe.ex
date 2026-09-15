@@ -253,13 +253,26 @@ defmodule Troupe do
   """
   @spec stop_session(String.t()) :: :ok | {:error, :not_found}
   def stop_session(session_id) do
-    if Registry.whereis({:session, session_id}) do
+    # The last word before the tree comes down, and only where there is still somewhere
+    # to write it. A live session does not imply a live log: the tree is `rest_for_one`
+    # with `Log` first, so a session already on its way down has lost its log while its
+    # supervisor is still terminating — and two callers stopping the same session, which
+    # is ordinary at shutdown, race exactly there. Asking the registry for the log rather
+    # than for the session is the difference between a quiet no-op and an exit in
+    # whoever called this.
+    if Registry.whereis({:log, session_id}) do
       Log.append(session_id, Session.root_path(), :session_dormant, %{
         "last_seq" => head_seq(session_id)
       })
     end
 
     Sessions.stop_session(session_id)
+  catch
+    # The log went between the lookup and the call. Nothing is lost that was not already
+    # lost: the events are on disk and `session_dormant` is a marker, not a fact anything
+    # is rebuilt from.
+    :exit, {:noproc, _} -> Sessions.stop_session(session_id)
+    :exit, {:normal, _} -> Sessions.stop_session(session_id)
   end
 
   @doc "Sessions recorded on disk for a workspace, newest first."

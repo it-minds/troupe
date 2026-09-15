@@ -125,6 +125,48 @@ defmodule Troupe.Tools do
   end
 
   @doc """
+  Which credential a call to this tool would go out as, or `nil` where the question does
+  not arise.
+
+  Only an MCP server has two answers, so only an MCP tool gets one. A built-in runs as
+  the pod and a client-hosted tool runs on somebody's laptop; neither is a credential
+  anybody chose, and an `identity` on those events would be a field that always said the
+  same thing.
+  """
+  @spec identity_of(String.t(), Ctx.t()) :: String.t() | nil
+  def identity_of(name, %Ctx{} = ctx) do
+    with server when is_binary(server) <- Troupe.MCP.server_of(name),
+         %Troupe.MCP.Tool{server: ^server} = tool <- find_mcp_tool(name, ctx) do
+      Troupe.MCP.identity(tool_server(tool), ctx)
+    else
+      _ -> nil
+    end
+  end
+
+  defp find_mcp_tool(name, ctx) do
+    Enum.find(all(ctx.session_id), &(Tool.name(&1) == name))
+  end
+
+  # The tool carries its server's name; the configured server is where the mode is. A
+  # tool whose server has gone from the configuration answers as a profile one, which is
+  # what it was before anybody wrote a mode.
+  defp tool_server(%Troupe.MCP.Tool{server: name}) do
+    Enum.find(
+      configured_servers(),
+      %Troupe.MCP.Server{name: name, url: ""},
+      &(&1.name == name)
+    )
+  end
+
+  defp configured_servers do
+    case Application.get_env(:troupe_core, :mcp_servers) do
+      fun when is_function(fun, 0) -> fun.()
+      list when is_list(list) -> list
+      _none -> []
+    end
+  end
+
+  @doc """
   Decide whether a call may proceed at all, before anything is spawned.
 
   Returns `{:run, module, mode}`, or a `Result` the agent hands straight back to the

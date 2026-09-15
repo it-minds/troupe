@@ -20,6 +20,11 @@ defmodule Troupe.MCP.Server do
     :url,
     :credential,
     :credential_ref,
+    # Whose credential goes out with a call. `:profile` is the service account in
+    # `credential`, resolved once at discovery and the same for every session.
+    # `:person` is the session's owner, and there is nothing resolved here at all: the
+    # value is read per session, at call time, from the key manager.
+    credential_mode: :profile,
     header: "authorization",
     timeout_ms: 30_000,
     # What a bundle said about this server's tools: the permission they start at, and
@@ -51,18 +56,37 @@ defmodule Troupe.MCP.Server do
   def from_config(config) do
     config = Map.new(config, fn {key, value} -> {to_string(key), value} end)
     reference = config["credential_ref"] || config["secret_ref"]
+    mode = mode(config["credential_mode"])
 
     %__MODULE__{
       name: config["name"],
       url: config["url"],
       credential_ref: reference,
-      credential: resolve(reference, config["credential"]),
+      credential_mode: mode,
+      # Nothing is resolved for a person-mode server. There is no environment variable
+      # to read and the value is not the pod's to hold: it belongs to whoever owns the
+      # session, and is fetched per call.
+      credential: if(mode == :person, do: nil, else: resolve(reference, config["credential"])),
       header: config["header"] || "authorization",
       timeout_ms: config["timeout_ms"] || 30_000,
       permission: permission(config["permission"]),
       tools: allowlist(config["tools"])
     }
   end
+
+  # Anything but an explicit `person` is `profile`: a typo in a bundle should leave a
+  # server reaching out as the service account it always did, never start sending
+  # somebody's own credential somewhere.
+  defp mode(value) when value in ["person", :person], do: :person
+  defp mode(_value), do: :profile
+
+  @doc """
+  The slot a person-mode server's credential lives in, under its person.
+
+  The bundle's `credential_ref` in person mode, which defaults to the server's name.
+  """
+  @spec slot(t()) :: String.t()
+  def slot(%__MODULE__{credential_ref: ref, name: name}), do: ref || name
 
   # Anything but an explicit `auto` is `ask`. A typo in a bundle should make a tool ask
   # more, never less.
