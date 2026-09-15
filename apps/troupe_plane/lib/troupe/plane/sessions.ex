@@ -136,15 +136,26 @@ defmodule Troupe.Plane.Sessions do
     end
   end
 
-  @doc "Record that a session has gone dormant, with the sequence it sealed at."
+  @doc """
+  Record that a session has gone dormant, with the sequence it sealed at.
+
+  The worker is cleared here rather than being left to whoever calls `Placement.release`
+  next. `put_fields/2` drops nils on purpose — a pod reporting three of four lifecycle
+  fields must not blank the fourth — so `worker_id: nil` through that path was silently
+  discarded, and a dormant session went on naming the pod it was no longer on until a
+  release happened to land. Every reader of `worker_id` filters on `state == "active"`,
+  which is why it took a test asserting the row directly to see it.
+  """
   @spec dormant(String.t(), map()) :: {:ok, Session.t()} | {:error, term()}
   def dormant(session_id, attrs \\ %{}) do
-    put_fields(session_id, Map.merge(attrs, %{state: "dormant", worker_id: nil}))
+    put_fields(session_id, Map.merge(attrs, %{state: "dormant"}), clear: [:worker_id])
   end
 
   @doc "Make a session read-only, because its profile is gone or its team lost the grant."
   @spec read_only(String.t()) :: {:ok, Session.t()} | {:error, term()}
-  def read_only(session_id), do: put_fields(session_id, %{state: "read_only", worker_id: nil})
+  def read_only(session_id) do
+    put_fields(session_id, %{state: "read_only"}, clear: [:worker_id])
+  end
 
   @doc """
   Overwrite a row from a rebuild.
@@ -327,8 +338,17 @@ defmodule Troupe.Plane.Sessions do
   # A field the worker did not report is a field that has not changed. Casting a nil
   # would set the column to NULL instead, which for the counters means a constraint
   # violation and for the rest means losing what was there.
-  defp put_fields(session_id, attrs) do
-    attrs = Map.reject(attrs, fn {_key, value} -> is_nil(value) end)
+  # Nils are dropped because a pod reporting three of four lifecycle fields must not
+  # blank the fourth. `clear:` is how a caller says it means the nil: the fields named
+  # there are set to nil after the rejection, which is the difference between "I have
+  # nothing to say about the worker" and "there is no worker".
+  defp put_fields(session_id, attrs, opts \\ []) do
+    cleared = Map.new(Keyword.get(opts, :clear, []), &{&1, nil})
+
+    attrs =
+      attrs
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.merge(cleared)
 
     case Repo.get(Session, session_id) do
       nil -> {:error, :not_found}

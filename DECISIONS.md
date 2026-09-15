@@ -2128,3 +2128,18 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      than to weaken them until they pass somewhere they were not written for. CI is where
      that claim is settled.
 
+## R1 — a dormant session named the pod it had left
+
+329. **`Sessions.dormant/1` never cleared `worker_id`, and now does.** `put_fields/2`
+     drops nils on purpose — a pod reporting three of four lifecycle fields must not
+     blank the fourth — and `dormant/1` passed `worker_id: nil` through it, so it was
+     silently discarded. A dormant session went on naming the pod it was no longer on
+     until something else happened to call `Placement.release`, which is why
+     `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought
+     it was holding" failed about two runs in three: it asserted the row directly, and
+     every other reader filters on `state == "active"` and could not see it.
+
+     The fix is a `clear:` option, which is how a caller says it means the nil. `read_only/1`
+     had the same hole and is fixed with it; `read_only_for/2` already cleared the column
+     with an `update_all`, which is what showed the intent.
+

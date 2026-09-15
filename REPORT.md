@@ -1368,3 +1368,25 @@ Linux runner. They failed before any of this work — checked by stashing it and
 them again on the same container — and `DECISIONS.md` 328 says so rather than weakening
 them until they pass somewhere they were not written for.
 
+## A flake that was a defect
+
+`ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
+holding" failed about two runs in three, before any of this work.
+
+`Sessions.dormant/1` passed `worker_id: nil` through `put_fields/2`, which drops nils on
+purpose — a pod reporting three of four lifecycle fields must not blank the fourth — so
+it was silently discarded. A dormant session went on naming the pod it was no longer on
+until something else happened to call `Placement.release`, and the test was racing that.
+Every other reader filters on `state == "active"`, which is why it took a test asserting
+the row directly to see it. `read_only/1` had the same hole.
+
+```
+$ for i in 1 2 3 4 5; do scripts/toolbox bash -c \
+    'cd apps/troupe_plane && mix test test/troupe/plane/control_test.exs' | grep Result; done
+Result: 16 passed
+Result: 16 passed
+Result: 16 passed
+Result: 16 passed
+Result: 16 passed
+```
+
