@@ -1630,11 +1630,10 @@ for anything storage did not name. A private session cannot have a profile, so a
 would have failed on precisely the sessions a rebuild exists for — silently, into a log
 line. `DECISIONS.md` 399.
 
-**What is not claimed.** The daemon does not yet seal through any of this. The transport,
-the fence, the row and the signatures are proven against a real store and a real plane;
-the daemon-side wiring — sealing a private session every 500 events and at dormancy,
-restoring one on a second device, binding it to a directory — is not written, and the
-second-device story is therefore proven at the plane rather than end to end.
+**What is not claimed here.** This is the plane's half: the transport, the fence, the row
+and the signatures, against a real store and a real plane. The daemon's half is R1i
+below; the second device — listing a private session there, verifying its chain, restoring
+its workspace — is still owed.
 
 ## R1i — the daemon's end of a private session
 
@@ -1697,19 +1696,14 @@ real API server. `scripts/e2e` is the laptop's way in, because `mix` lives in th
 container and the cluster lives on Docker's `kind` network. A `cluster` job runs it on
 `main` and on tags and uploads the plane's and the operator's logs on failure.
 
-**Four bugs, every one of them invisible to anybody whose cluster already works.**
+**The first four bugs arrived before the suite had a single passing test**, simply from
+installing onto a cluster that had never had one. They are in the table at the end of this
+section with the five that came after.
 
-| what | why nobody saw it |
-| --- | --- |
-| `scripts/remote-up` wrote a temp file to `/tmp` and handed the path to `kubectl` | On a Windows host `kubectl` is a Windows binary reading a different directory. The failure arrives three lines later as "no objects passed to apply" |
-| It pre-created the namespace the chart owns, without the metadata Helm needs to adopt a resource | Only a *first* install fails; every upgrade works |
-| The plane's migration Job ran before its ServiceAccount | Helm applies every hook before any ordinary resource, and the account was not a hook. Again, first install only |
-| `llm-credentials` was created only when `ITM_LLM_GW_KEY` was set, and the script said workers would "start but cannot reach a model" | A pod whose secret is absent does not start at all — `CreateContainerConfigError`. The sentence had been false for as long as it had been there |
-
-A fifth is a wrong tool rather than a bug: `kubectl rollout status` was waited on for a
-worker StatefulSet, which is `OnDelete` on purpose — a rollout that evicted a pod holding
-a session would end the session — and `rollout status` has nothing to say about anything
-but `RollingUpdate`.
+One of the five is a wrong tool rather than a bug: `kubectl rollout status` was waited on
+for a worker StatefulSet, which is `OnDelete` on purpose — a rollout that evicted a pod
+holding a session would end the session — and `rollout status` has nothing to say about
+anything but `RollingUpdate`.
 
 ```
 $ scripts/remote-up
@@ -1735,11 +1729,8 @@ The plane's `TokenReview` was refused by the API server, so no worker could enro
 recreates a hook resource on each run, which gives it a new UID, and a ServiceAccount's
 UID is inside every token the kubelet has already handed to a running pod. The upgraded
 plane's projected token was silently invalidated. It logged nothing. Workers simply never
-appeared.
-
-The fix is that the migration gets an account of its own, `troupe-plane-migrate`, held by
-nothing that outlives the Job — so recreating it costs nothing — and the plane's own
-account goes back to being an ordinary resource.
+appeared. The migration now has an account of its own, held by nothing that outlives the
+Job.
 
 **The first diagnosis was wrong, and the way it was wrong is worth keeping.** It read:
 *the RBAC is correct and the token works by hand, so the request is going out without it.*
@@ -1750,21 +1741,70 @@ wrong identity entirely. Presented with no other credential
 response is not proof that the thing you meant passed; that rule applies to the person
 reading the suite as much as to the suite.
 
-```
-$ kubectl logs -n troupe-system deployment/troupe-plane | grep enrolled
-17:11:33.187 [info] troupe plane: troupe-w-dev/troupe-w-dev-0 enrolled as dev
+## The claims, and what each is proven by
 
-$ scripts/e2e        # twice in a row, as the done item asks
-Result: 4 passed
-Result: 4 passed
+```
+$ scripts/e2e
+Result: 16/17 passed        # the one is egress, below
 ```
 
 | claim | fault or witness |
 | --- | --- |
-| A pod enrols as the profile its namespace names | The operator's own pod, and the plane's own words in its log — not an API that could have been told what to say |
-| A ServiceAccount outside any profile's namespace cannot claim one | `default/default`, a real token minted by the real API server for the right audience, refused after a real `TokenReview` |
-| A worker's own token cannot be replayed elsewhere | The same ServiceAccount, projected for the API server rather than for the plane, refused |
-| …and the two refusals are refusals of something that otherwise works | The positive, in the same describe: the right account and the right audience enrol and answer a `worker_id`. Without it a plane that refused everything would satisfy both negatives |
+| A pod enrols as the profile its namespace names | The plane's fleet listing and the API server's pod list name the same pod — two roads to one fact, rather than one road twice |
+| …and cannot claim another | `default/default`, a real token the real API server minted for the right audience, refused after a real `TokenReview`; and the worker's own account projected for the API server rather than the plane, refused as a replay. Both sit beside a positive in the same describe, so neither is satisfied by a plane that refuses everything |
+| A pod fetches its bundle by hash and materialises it once | The same content published twice is one directory, asserted by inode and mtime on the pod's disk — a plane's belief about what it sent is not evidence |
+| A running session keeps its version; the next one moves | v2 published while a session runs; `session.get` now says which version each is pinned to |
+| A session survives its pod being deleted | `kubectl delete pod`, then the log read off the *replacement* over a real WebSocket: an event whose `prev_hash` is the pre-fault head, and every link in the chain checked |
+| An MCP credential is a `secretKeyRef`, optional when absent | Four hops no unit test sees together, proven both ways: absent, the pod runs and the variable is unset inside it; present, it is filled in |
+| A cron trigger fires on the minute, as a principal, once | A wall clock nobody stubbed, a principal that is not a person, and runs grouped by idempotency key — a run for the *next* minute is correct, and a plain count would call it a double fire |
+| A2A `message/send` reaches a pod through the facade | Three deployments, an ingress, the identity provider's token exchanged at the plane, and a session the plane has a row for |
+| `helm upgrade` leaves a running session running | The pod's uid and restart count and the session's epoch, because a test that checked only for "still active" would pass on a pod that had been replaced and the session restored |
+| Cilium egress admits the bundle's host and refuses everything else | **Not proven.** See below |
+
+**Egress is written, correct, and fails here.** It is a TCP connection the pod attempts,
+never a lookup of the policy object — and writing it that way is what found that *no
+`remote-up` cluster has ever enforced network policy*. kind's own CNI implements pod
+networking and ignores every NetworkPolicy, so the operator's egress rules were accepted
+by the API server and enforced by nothing, while `kubectl get networkpolicy` showed a tidy
+list.
+
+`scripts/remote-up` now installs Cilium, which is what the chart's `CiliumNetworkPolicy`
+is addressed to, with `kubeProxyReplacement` because without it Cilium does not implement
+`hostPort` and the ingress quietly stops answering. On this machine that is still not
+enough: under Docker Desktop, Cilium starts, reports `policy-enabled: both` for the worker
+endpoint, shows the policy Valid — and passes everything, the plane and the object store
+included. Everything it says is right and nothing it does is, which is the exact shape
+this suite exists to catch.
+
+So `TROUPE_KIND_CNI` defaults to `cilium`, and `default` gets a usable local cluster. The
+egress test fails on both, deliberately: a fallback costs a red test and never a false
+green. CI's kernel is where this one is settled.
+
+**The brief's two extra claims are not written, and cannot be yet.** A forked session's log
+naming its parent's head needs `session_forked`, which is R5; a session sealed by a
+non-Kubernetes worker restoring on a pod needs a second provisioner, which is R6. They are
+in the table so that those packages land them.
+
+## What the cluster suite found
+
+Nine defects, every one of them invisible to anybody whose cluster already works.
+
+| what | why nobody saw it |
+| --- | --- |
+| A temp file handed to `kubectl` by a path only one of the two processes understood | Windows hosts only |
+| The namespace pre-created without the metadata Helm needs to adopt it | First install only |
+| The migration hook running before its own ServiceAccount | First install only |
+| …and the fix for that invalidating every running pod's token on upgrade | Upgrades only, and silently |
+| `llm-credentials` created only when a key was set, so "workers start but cannot reach a model" was a pod that does not start at all | Always, and the sentence had been false for as long as it had existed |
+| `required: true` declared on forty admin arguments and enforced on none — a missing one was a 500 on a public endpoint | Any caller omitting any of them |
+| A profile permanently full: the placement actor's count drifted upward and only reloaded for a pod it had never seen | After any pod restart — and *caused* by the dormancy fix earlier on this branch |
+| The worker's persistent volume mounted and unused: bundles, segments and workspaces written to the container's ephemeral layer | Always. Nothing was lost; everything was re-fetched on every restart |
+| A policy violation put into an error as an Elixir tuple, which `Jason` refuses | Any profile outside policy: a 500 with an HTML body instead of the limit's name |
+
+Two of those were mine, made earlier on this branch. That is the argument for the package
+in one line: both fixes were right in the unit suite and wrong on a cluster, and nothing
+short of a cluster was going to say so.
+
 
 ## A flake that was a defect
 
@@ -1812,7 +1852,7 @@ schema unchanged: 73 documents
 $ # credo, against the tree as it would be committed
 $ git add -A && TREE=$(git write-tree) && git reset
 $ scripts/toolbox bash -c "... git archive $TREE ... mix credo --strict"
-5607 mods/funs, found no issues.
+5706 mods/funs, found no issues.
 credo exit=0
 ```
 
@@ -1821,9 +1861,9 @@ $ scripts/toolbox mix test
 ==> troupe_protocol
 Result: 99 passed (2 doctests, 97 tests)
 ==> troupe_operator
-Result: 38 passed, 14 excluded
+Result: 39 passed, 31 excluded        # the 17 e2e are excluded from `mix test` always
 ==> troupe_plane
-Result: 404 passed, 9 excluded
+Result: 409 passed, 9 excluded
 ==> troupe_core
   1) test cancellation cancel kills a shell command and its grandchild, verified by OS pid
 Result: 231/232 passed (3/3 doctests, 1/1 property, 227/228 tests)
@@ -1839,17 +1879,20 @@ Result: 109 passed
 Result: 45 passed
 ```
 
-995 of 1000. The five are the container's, named above and in `DECISIONS.md` 328: one
-OS-pid cancellation test and four that spawn or `kill -9` a daemon. They failed before any
-of this work, on the same container, with this work stashed. CI is where that is settled,
-and nothing here changes what CI runs.
+1001 of 1006 in the unit suite, and 16 of 17 on a cluster.
+
+The five are the container's, named above and in `DECISIONS.md` 328: one OS-pid
+cancellation test and four that spawn or `kill -9` a daemon. They failed before any of
+this work, on the same container, with this work stashed. The one is egress, which fails
+on any cluster that does not enforce network policy and so on every cluster this machine
+can run. CI is where both are settled, and nothing here changes what CI runs.
 
 ## What R1 still owes
 
 | piece | what is left |
 | --- | --- |
 | Private sessions, the second device | Creating and sealing one is done and proven on both sides, including through a real daemon socket. What is left is the other end: listing a private session on a second device, downloading and verifying its chain, restoring the workspace tar, and the resume-here / bind-to-directory choice. |
-| The cluster suite (`stage-6.md` §5) | The harness, the guard, the world, the `cluster` CI job and the enrolment claim are built and pass twice in a row on a real cluster. **Nine of the ten claims in the table are still to write** — the bundle by hash, egress, an absent Secret, a cron trigger, a pod deleted mid-session, A2A through the facade, a Helm upgrade mid-session, and the brief's two extra. Every one of them needs a pod that enrolled, which is why that one came first. |
+| The cluster suite (`stage-6.md` §5) | Eight of the ten claims pass on a real cluster. Egress is written and fails on any cluster that does not enforce, which is every one this machine can run — it is settled on CI. The brief's two extra claims need `session_forked` (R5) and a second provisioner (R6), and land with those packages. |
 
 Personal credentials are done, bar the end-to-end join named in R1f. Deprovisioning was
 not in the plan and is done.
