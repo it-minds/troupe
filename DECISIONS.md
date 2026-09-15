@@ -2723,3 +2723,44 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 407. **`session.archive` seals before it answers.** The sealer would seal on the way down
      regardless, but a session the daemon has called dormant should be written down by
      then, not shortly afterwards.
+
+## R1 — proving it on a cluster
+
+408. **The e2e suite lives in `troupe_operator` and speaks only `kubectl` and the public
+     protocol.** It cannot live in its own app without a boundary rule to describe it, and
+     it cannot live in the plane without the operator's cluster tooling. What settles it is
+     that the suite *is* a client: it asserts what a cluster administrator would see, and
+     asserting it through the `k8s` library the operator itself uses would hide a whole
+     class of failure — a wrong RBAC rule, a missing CRD field, an object the operator only
+     believes it wrote. A second road to the same API server is the point.
+
+409. **`mix troupe.e2e` refuses any context but `kind-troupe-dev`.** The suite deletes
+     pods, removes namespaces and injects faults, and it is one `KUBECONFIG` away from
+     doing that somewhere real. Another context takes both `TROUPE_E2E_CONTEXT` and
+     `TROUPE_E2E_I_MEAN_IT=1`, because naming a context is not the same as meaning it. The
+     check reads the *current* context from `kubectl`, not what the task was told, since
+     the current one is what the suite will act on.
+
+410. **It never creates the cluster.** `scripts/remote-up` does. A suite that could bring
+     up its own would quietly rebuild the thing it was meant to be testing, and the first
+     time the chart was wrong it would say so by taking four minutes longer.
+
+411. **`scripts/e2e` exists because the two halves are in different places on a laptop.**
+     `mix` is in the toolbox container and the cluster is containers on Docker's `kind`
+     network, so the toolbox is run on that network with kind's *internal* kubeconfig and
+     the ingress names pointed at the node. On CI none of that applies — kind, kubectl,
+     helm and Elixir are all on the runner — and `mix troupe.e2e` is run directly. The
+     script is the laptop's version of the one command, not a second way to run the suite.
+
+412. **The cluster definition moved to `dev/kind/cluster.yaml`.** It was a heredoc inside
+     `scripts/kind-up`, which CI could not use, and a CI cluster that differed from a
+     developer's would make "it passes on my machine" a statement about the cluster.
+
+413. **Three bugs, all of them fresh-install only, all found by installing fresh.** This
+     is what the package is for, so they are worth naming: `scripts/remote-up` wrote a
+     temporary file to `/tmp` and handed the path to `kubectl`, which on a Windows host is
+     a Windows binary reading a different directory; it pre-created the namespace the chart
+     owns, without the metadata Helm needs to adopt a resource, so a first install could
+     never succeed; and the plane's migration hook ran before its ServiceAccount, because
+     Helm applies every hook before any ordinary resource and the account was not a hook.
+     Each of the three is invisible to anybody whose cluster already works.

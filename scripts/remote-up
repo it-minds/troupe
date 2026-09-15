@@ -91,6 +91,15 @@ fi
 
 step "4. A database, an object store, a key manager and an identity provider"
 kc create namespace "$namespace" --dry-run=client -o yaml | kc apply -f -
+
+# The dependencies need the namespace before the chart runs, and the chart owns it —
+# `templates/namespace.yaml`. Helm refuses to adopt a resource it did not create unless
+# the resource says it is the release's, so it is told, here, where the namespace is
+# made. Without this a *fresh* cluster fails at step 6 with "cannot be imported into the
+# current release" and an upgraded one never notices, which is the worst shape a bug can
+# have: invisible to everybody who already has it working.
+kc label namespace "$namespace" app.kubernetes.io/managed-by=Helm --overwrite >/dev/null
+kc annotate namespace "$namespace"   meta.helm.sh/release-name=troupe   meta.helm.sh/release-namespace="$namespace" --overwrite >/dev/null
 retry_apply() {
   for attempt in 1 2 3 4 5; do
     if kc apply -f "$1"; then return 0; fi
@@ -103,15 +112,17 @@ retry_apply() {
 retry_apply dev/kind/dependencies.yaml
 
 # The gateway key is the one secret that is never written to a file in this repository.
-if [ -n "${ITM_LLM_GW_KEY:-}" ]; then
-  kc create secret generic llm-credentials \
-    --namespace "$namespace" \
-    --from-literal=api-key="$ITM_LLM_GW_KEY" \
-    --dry-run=client -o yaml | kc apply -f -
-  echo "llm-credentials carries ITM_LLM_GW_KEY from this shell"
-else
-  echo "ITM_LLM_GW_KEY is not set; workers will start but cannot reach a model" >&2
-fi
+#
+# The secret itself is created either way. A worker mounts it as an environment variable,
+# and a pod whose secret is absent does not start at all — `CreateContainerConfigError`,
+# which is not "cannot reach a model", it is "cannot run". The line below has claimed for
+# some time that a worker starts without a key; now it does.
+llm_secret() {
+  kc create secret generic llm-credentials     --namespace "$1"     --from-literal=api-key="${ITM_LLM_GW_KEY:-}"     --dry-run=client -o yaml | kc apply -f -
+}
+
+llm_secret "$namespace"
+llm_secret "troupe-w-${profile}"
 
 # The issuer URL must resolve inside the cluster to the same Dex it resolves to outside.
 # `localtest.me` is 127.0.0.1 everywhere, which inside a pod is the pod — so CoreDNS is
@@ -120,10 +131,18 @@ step "4b. Teaching the cluster where dex.localtest.me is"
 if kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' | grep -q "dex.localtest.me"; then
   echo "the rewrite is already there"
 else
-  kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' > /tmp/troupe-corefile
+  # In the working tree rather than /tmp, and by a relative path. `--from-file` is read
+  # by kubectl, and on a Windows host kubectl is a Windows binary that reads `/tmp/x` as
+  # a path off the system drive while the shell that wrote it meant somewhere else — a
+  # failure that arrives as "no objects passed to apply" three lines later. A
+  # relative path is the one spelling both agree on.
+  work="$(mktemp -d ./.remote-up-XXXXXX)"
+  trap 'rm -rf "$work"' EXIT
+  kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' > "$work/Corefile"
   awk '/^\s*kubernetes cluster\.local/ && !done {print "    rewrite name dex.localtest.me dex-public.troupe-system.svc.cluster.local"; done=1} {print}' \
-    /tmp/troupe-corefile > /tmp/troupe-corefile.new
-  kc create configmap coredns -n kube-system --from-file=Corefile=/tmp/troupe-corefile.new \
+    "$work/Corefile" > "$work/Corefile.new"
+  mv "$work/Corefile.new" "$work/Corefile"
+  kc create configmap coredns -n kube-system --from-file=Corefile="$work/Corefile" \
     --dry-run=client -o yaml | kc apply -f -
   kc rollout restart -n kube-system deployment/coredns
   kc rollout status -n kube-system deployment/coredns --timeout=120s
@@ -215,9 +234,13 @@ kc create secret generic troupe-object-store \
   --from-literal=secret-access-key=troupe-secret \
   --dry-run=client -o yaml | kc apply -f -
 
-kc rollout status -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --timeout=300s || {
+# Not `kubectl rollout status`: a worker's StatefulSet is `OnDelete`, because a rollout
+# that evicted a pod holding a session would end the session, and `rollout status` has
+# nothing to say about anything but `RollingUpdate`. What is waited for is a ready pod.
+kc wait --namespace "troupe-w-${profile}"   --for=condition=ready pod   --selector="app.kubernetes.io/name=troupe-worker"   --timeout=300s || {
   echo "remote-up: the worker did not become ready. Its logs:" >&2
   kc logs -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --tail=60 >&2 || true
+  kc describe pods -n "troupe-w-${profile}" >&2 || true
   exit 1
 }
 

@@ -1,0 +1,24 @@
+# The cluster `scripts/kind-up` creates, and the one CI creates.
+#
+# One file, because a CI cluster that differed from a developer's would make "it passes
+# on my machine" a statement about the cluster rather than about the code.
+#
+# 30080/30443 rather than 80/443: binding the privileged ports would fight with whatever
+# else the machine is already serving, and nothing here needs them.
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      - containerPort: 80
+        hostPort: 30080
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 30443
+        protocol: TCP

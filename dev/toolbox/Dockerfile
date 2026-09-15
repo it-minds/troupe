@@ -35,6 +35,25 @@ RUN set -eux; \
     ln -s /opt/zig/zig /usr/local/bin/zig; \
     zig version
 
+# kubectl, because `mix troupe.e2e` drives a cluster with it and because asserting
+# through the same client library the operator uses would hide a whole class of failure —
+# a wrong RBAC rule, a missing CRD field, an object the operator only believes it wrote.
+# A second road to the same API server is the point. Helm comes with it so that an
+# upgrade mid-session is a fault the suite can inject rather than a step done by hand.
+ARG KUBECTL_VERSION=v1.34.0
+ARG HELM_VERSION=v3.19.0
+RUN set -eux; \
+    arch="$(dpkg --print-architecture)"; \
+    curl -fsSL "https://dl.k8s.io/release/${KUBECTL_VERSION}/bin/linux/${arch}/kubectl" \
+      -o /usr/local/bin/kubectl; \
+    chmod +x /usr/local/bin/kubectl; \
+    curl -fsSL "https://get.helm.sh/helm-${HELM_VERSION}-linux-${arch}.tar.gz" -o /tmp/helm.tgz; \
+    tar -xzf /tmp/helm.tgz -C /tmp; \
+    mv "/tmp/linux-${arch}/helm" /usr/local/bin/helm; \
+    rm -rf /tmp/helm.tgz "/tmp/linux-${arch}"; \
+    kubectl version --client=true; \
+    helm version --short
+
 RUN mix local.hex --force && mix local.rebar --force
 
 COPY entrypoint /usr/local/bin/entrypoint

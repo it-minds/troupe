@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# The cluster suite, against the cluster `scripts/remote-up` built.
+#
+#   scripts/remote-up        # once
+#   scripts/e2e              # as often as you like
+#   scripts/e2e apps/troupe_operator/test/e2e/enrolment_test.exs
+#
+# This exists because the two halves of the suite live in different places on a
+# developer's machine: `mix` is in the toolbox container, and the cluster is a set of
+# containers on Docker's `kind` network. So the toolbox is run on that network instead of
+# the compose one, with a kubeconfig that names the API server the way a container sees
+# it, and with the ingress hostnames pointed at the node.
+#
+# On CI none of that is needed — kind, kubectl, helm and Elixir are all on the runner —
+# and `mix troupe.e2e` is run directly. This script is the laptop's version of the same
+# command, not a second way of running the suite.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+image=troupe-toolbox
+cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
+node="${cluster}-control-plane"
+
+command -v kind >/dev/null || { echo "e2e: kind is required" >&2; exit 1; }
+
+kind get clusters 2>/dev/null | grep -qx "$cluster" || {
+  echo "e2e: no cluster $cluster — run scripts/remote-up first" >&2
+  exit 1
+}
+
+host_pwd="$(pwd -W 2>/dev/null || pwd)"
+export MSYS_NO_PATHCONV=1
+
+docker image inspect "$image" >/dev/null 2>&1 || {
+  echo "building $image (once)" >&2
+  docker build --tag "$image" dev/toolbox >&2
+}
+
+# The internal kubeconfig names the API server `https://<node>:6443`, which is what the
+# API server's own certificate says and what a container on the `kind` network can
+# reach. The one in `~/.kube/config` names a published port on the host, which from
+# inside a container is the container.
+work=".e2e"
+mkdir -p "$work"
+kind get kubeconfig --internal --name "$cluster" > "$work/kubeconfig"
+
+# Every ingress hostname resolves to 127.0.0.1 on the host, which inside a container is
+# the container. The node serves the ingress controller on its own port 80, so each name
+# is pointed there instead. Wildcards cannot be added this way, so a worker's per-pod
+# hostname is resolved by the suite itself against this same address.
+node_ip="$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$node")"
+[ -n "$node_ip" ] || { echo "e2e: could not find $node on the kind network" >&2; exit 1; }
+
+exec docker run --rm --interactive $([ -t 0 ] && echo --tty) \
+  --network kind \
+  --add-host "plane.localtest.me:${node_ip}" \
+  --add-host "dex.localtest.me:${node_ip}" \
+  --volume "$host_pwd:/workspace" \
+  --volume troupe-toolbox-build:/workspace/_build \
+  --volume troupe-toolbox-deps:/workspace/deps \
+  --volume troupe-toolbox-hex:/root/.hex \
+  --volume troupe-toolbox-mix:/root/.mix \
+  --env MIX_ENV=test \
+  --env KUBECONFIG=/workspace/.e2e/kubeconfig \
+  --env TROUPE_E2E_CONTEXT="kind-${cluster}" \
+  --env TROUPE_E2E_PLANE_URL="http://plane.localtest.me" \
+  --env TROUPE_E2E_ISSUER="http://dex.localtest.me/dex" \
+  --env TROUPE_E2E_NODE_IP="$node_ip" \
+  --entrypoint mix \
+  "$image" troupe.e2e "$@"

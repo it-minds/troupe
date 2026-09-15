@@ -1249,6 +1249,8 @@ passes alone — the flake already named in stage 5's report.
 
 * **Nothing has run on a cluster**, which is still the first item on the list. The
   end-to-end test uses real object storage and a real key manager, and a fake plane.
+  *(No longer true as of R1j below: it runs on one now, and the first thing it found was
+  that no worker can enrol on one. The sentence stands as what was true when written.)*
 * **No rollup pipeline and no retention job.** Raw records and a cached aggregate answer
   everything at this volume. The decision this stage owes the next one is the row count
   at which that stops being true.
@@ -1678,6 +1680,67 @@ at once, which is the cluster suite. Nor is the far side of it built: no restore
 second device, and there is no directory binding. `session.create {private: true}` starts
 a sealer and `session.archive` seals it, which is the near half.
 
+## R1j — the suite that needs a cluster
+
+`stage-6.md` §5. This is the package `REPORT.md` has been owing since stage 3, and the
+first thing to say about it is that it worked: the harness exists, it runs, and within an
+hour of existing it had found four defects nobody could have seen without it.
+
+**What was built.** `mix troupe.e2e` runs `apps/troupe_operator/test/e2e/**`, tagged
+`:e2e` and excluded from `mix test` always rather than conditionally. It refuses any
+kubeconfig context but `kind-troupe-dev` unless told twice, because a suite that deletes
+pods is one `KUBECONFIG` away from doing it somewhere real. `Troupe.E2E.World` is the
+world: it attaches to a cluster `scripts/remote-up` built and never makes one, it speaks
+`kubectl` rather than the `k8s` library the operator uses — a second road to the same API
+server, so a wrong RBAC rule is visible — and it mints real ServiceAccount tokens from the
+real API server. `scripts/e2e` is the laptop's way in, because `mix` lives in the toolbox
+container and the cluster lives on Docker's `kind` network. A `cluster` job runs it on
+`main` and on tags and uploads the plane's and the operator's logs on failure.
+
+**Four bugs, every one of them invisible to anybody whose cluster already works.**
+
+| what | why nobody saw it |
+| --- | --- |
+| `scripts/remote-up` wrote a temp file to `/tmp` and handed the path to `kubectl` | On a Windows host `kubectl` is a Windows binary reading a different directory. The failure arrives three lines later as "no objects passed to apply" |
+| It pre-created the namespace the chart owns, without the metadata Helm needs to adopt a resource | Only a *first* install fails; every upgrade works |
+| The plane's migration Job ran before its ServiceAccount | Helm applies every hook before any ordinary resource, and the account was not a hook. Again, first install only |
+| `llm-credentials` was created only when `ITM_LLM_GW_KEY` was set, and the script said workers would "start but cannot reach a model" | A pod whose secret is absent does not start at all — `CreateContainerConfigError`. The sentence had been false for as long as it had been there |
+
+A fifth is a wrong tool rather than a bug: `kubectl rollout status` was waited on for a
+worker StatefulSet, which is `OnDelete` on purpose — a rollout that evicted a pod holding
+a session would end the session — and `rollout status` has nothing to say about anything
+but `RollingUpdate`.
+
+```
+$ scripts/remote-up
+==> 8. Where things are
+  plane      http://plane.localtest.me:30080
+  identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
+  workers    ws://<n>.dev.workers.localtest.me:30080/v1/socket
+```
+
+**And then the suite failed, which is the point of it.**
+
+```
+$ scripts/e2e
+  1) test a token the cluster really issued for the right ServiceAccount and audience
+     enrols on that profile (Troupe.E2E.EnrolmentTest)
+     right: {:error, %{"code" => -32602, "message" => "invalid_params",
+              "data" => %{"reason" => "{:token_review_failed,
+                %K8s.Client.APIError{message: \"Unauthorized\", reason: \"Unauthorized\"}}"}}}
+Result: 0/4 passed
+```
+
+The plane's `TokenReview` is refused by the API server. Its RBAC is correct —
+`kubectl auth can-i create tokenreviews --as=system:serviceaccount:troupe-system:troupe-plane`
+answers `yes` — and its own token is accepted when presented by hand, so the request is
+going out without it. **No worker can enrol on a cluster.** Every unit test of enrolment
+uses an injected verifier and passes; this is precisely the half they cannot reach, and it
+is the reason the claim table starts where it does.
+
+That defect is open. It is not a defect *this package* introduced — it has been there for
+as long as the plane has run on Kubernetes, which is to say since it was never run there.
+
 ## A flake that was a defect
 
 `ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
@@ -1724,34 +1787,34 @@ schema unchanged: 73 documents
 $ # credo, against the tree as it would be committed
 $ git add -A && TREE=$(git write-tree) && git reset
 $ scripts/toolbox bash -c "... git archive $TREE ... mix credo --strict"
-5378 mods/funs, found no issues.
+5607 mods/funs, found no issues.
 credo exit=0
 ```
 
 ```
 $ scripts/toolbox mix test
 ==> troupe_protocol
-Result: 95 passed (2 doctests, 93 tests)
+Result: 99 passed (2 doctests, 97 tests)
 ==> troupe_operator
 Result: 38 passed, 14 excluded
 ==> troupe_plane
-Result: 376 passed, 9 excluded
+Result: 404 passed, 9 excluded
 ==> troupe_core
   1) test cancellation cancel kills a shell command and its grandchild, verified by OS pid
-Result: 228/229 passed (3/3 doctests, 1/1 property, 224/225 tests)
+Result: 231/232 passed (3/3 doctests, 1/1 property, 227/228 tests)
 ==> troupe_gateway
   1) test ten concurrent clients spawn exactly one daemon
   2) test a stale lock left by a killed client does not block start-up forever
   3) test an idle session stops its tree, and subscribing serves history without starting one
   4) test kill -9 with three sessions: all come back, the mid-turn one interrupted
-Result: 60/64 passed (2/2 properties, 58/62 tests)
+Result: 69/73 passed (2/2 properties, 67/71 tests)
 ==> troupe_worker
 Result: 109 passed
 ==> troupe_a2a
 Result: 45 passed
 ```
 
-951 of 956. The five are the container's, named above and in `DECISIONS.md` 328: one
+995 of 1000. The five are the container's, named above and in `DECISIONS.md` 328: one
 OS-pid cancellation test and four that spawn or `kill -9` a daemon. They failed before any
 of this work, on the same container, with this work stashed. CI is where that is settled,
 and nothing here changes what CI runs.
@@ -1761,7 +1824,7 @@ and nothing here changes what CI runs.
 | piece | what is left |
 | --- | --- |
 | Private sessions, the second device | Creating and sealing one is done and proven on both sides, including through a real daemon socket. What is left is the other end: listing a private session on a second device, downloading and verifying its chain, restoring the workspace tar, and the resume-here / bind-to-directory choice. |
-| The cluster suite (`stage-6.md` §5) | `mix troupe.e2e`, the eight claims in its table and the two the brief adds, and the `cluster` CI job. Nothing here has run on a cluster; the paragraph in this report that says so is still true and is not yet replaced. |
+| The cluster suite (`stage-6.md` §5) | The harness, the guard, the world, the `cluster` CI job and the first claim are built and have run. Nine of the ten claims are not written yet, and the first one **fails**: the plane's `TokenReview` goes out unauthenticated, so no worker can enrol on a cluster. Fixing that comes before writing the other nine, because every one of them needs a pod that enrolled. |
 
 Personal credentials are done, bar the end-to-end join named in R1f. Deprovisioning was
 not in the plan and is done.
