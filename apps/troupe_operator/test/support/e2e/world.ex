@@ -30,6 +30,7 @@ defmodule Troupe.E2E.World do
   @namespace "troupe-system"
   @plane "http://plane.localtest.me:30080"
   @dex "http://dex.localtest.me:30080/dex"
+  @a2a "http://a2a.localtest.me:30080"
 
   @doc "The namespace the chart is installed into."
   @spec namespace() :: String.t()
@@ -46,6 +47,10 @@ defmodule Troupe.E2E.World do
   @doc "Where the plane answers, through the cluster's ingress."
   @spec plane_url() :: String.t()
   def plane_url, do: System.get_env("TROUPE_E2E_PLANE_URL") || @plane
+
+  @doc "Where the A2A facade answers, through the cluster's ingress."
+  @spec a2a_url() :: String.t()
+  def a2a_url, do: System.get_env("TROUPE_E2E_A2A_URL") || @a2a
 
   @doc "Where the identity provider answers. The same URL inside the cluster and out."
   @spec issuer() :: String.t()

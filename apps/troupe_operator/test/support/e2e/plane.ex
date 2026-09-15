@@ -312,6 +312,17 @@ You are a helpful assistant on a cluster."
     token
   end
 
+  @doc """
+  The identity provider's own token for the development person.
+
+  The A2A facade takes one of these rather than a plane token: it exchanges the caller's
+  *credential* at the plane on every request and holds nothing of its own, so what
+  crosses is the thing the provider issued. Exposed because the cluster suite has to
+  present what a real caller presents.
+  """
+  @spec id_token!() :: String.t()
+  def id_token!, do: id_token()
+
   defp id_token do
     response =
       Req.post!(World.issuer() <> "/token",

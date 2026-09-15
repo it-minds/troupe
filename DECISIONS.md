@@ -2928,3 +2928,24 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      cron trigger firing every minute produces a run per minute, and a run for the *next*
      minute arriving while the assertion is made is correct behaviour that a plain count
      would read as a double fire.
+
+436. **The A2A facade is on in the development cluster.** It is off by default in the
+     chart for a good reason — a cluster with nothing calling it has no reason to run one
+     — and on here for an equally good one: a facade nobody deploys is a facade nobody
+     tests, and its whole design rests on being able to reach the plane and a pod with
+     the caller's credential and none of its own.
+
+437. **The facade takes the identity provider's token, not a plane token.** It exchanges
+     the caller's credential at the plane on every request and holds nothing between them,
+     which is why it needs no privileges. The suite therefore presents what a real caller
+     presents, and the first version of the test — which sent a plane token — was refused
+     exactly as it should have been.
+
+438. **What the A2A claim does not cover, and why.** An artifact fetched and its hash
+     checked needs the facade to attach to the worker pod at the endpoint the plane names,
+     which is the pod's *public* hostname. On a real cluster that resolves inside as well
+     as outside; on kind it cannot, because `localtest.me` is 127.0.0.1 everywhere and the
+     CoreDNS rewrite covers the one name Dex needs rather than a wildcard. Producing an
+     artifact to corrupt would need a model besides. The hash check is covered in
+     `troupe_a2a`'s own suite, where a mismatch can be injected; what the cluster adds
+     here is that `message/send` really does reach a pod and make a session.
