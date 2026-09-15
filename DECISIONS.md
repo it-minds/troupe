@@ -2400,3 +2400,33 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      Writing a `secretRef` for a server nobody configured a Secret for is how a pod would
      fail to start over a credential it was never meant to hold. The entry is still
      projected, because egress has to see the host either way.
+360. **The assertion is a second token, not a session token with another claim.** A
+     session token's audience is a pod and its claims are about a session; a key-manager
+     assertion's audience is the key manager and its claim is about a person. One token
+     doing both would be a token that works in the second place when the first is
+     compromised, and the JWT role's `bound_audiences` is what makes that concrete —
+     proven by offering it a session token and being refused.
+
+     Sixty seconds, because the pod exchanges it once at activation and then holds the
+     *Bao* token for the life of the session, exactly as it already does for the data key.
+
+361. **The mount's keys and the role's claims are configured separately, because OpenBao
+     keeps them apart.** `jwt_validation_pubkeys` belongs to the auth mount's config and
+     not to the role; a role carrying it is accepted and then answers every login with
+     "could not load configuration", which reads like a broken assertion and is a mount
+     that was never told what a valid signature is. `Policy.person_auth_config/1` and
+     `Policy.person_role/2` are the two halves, rendered here so that what the tests prove
+     and what a cluster installs is one string.
+
+362. **The person policy templates on the mount *accessor*, not the mount path.** A path
+     can be re-used after a mount is deleted and an accessor cannot, so a policy keyed to
+     the path could one day read a subtree written under a different mount. This is
+     OpenBao's own rule; it is recorded because the failure of getting it wrong is a
+     silent `forbidden` that looks exactly like a policy that is working.
+
+363. **The person policy covers the whole subtree under a person, not one prefix.** It was
+     written for `sessions/*` when private sessions were the only tenant; `mcp/*` is the
+     second, and a policy written per prefix is a policy somebody has to remember to
+     widen — which is how this was found: a correct assertion, a correct role, and a
+     `forbidden` on a slot the person owned. Everything under a person belongs to that
+     person. That is the whole statement and it is the one worth writing down.

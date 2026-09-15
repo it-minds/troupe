@@ -189,6 +189,40 @@ defmodule Troupe.KMS.OpenBao do
     end
   end
 
+  @doc """
+  Exchange a plane-minted assertion for a key-manager token of that person.
+
+  The same shape as `kubernetes_login/4` and for the same reason: one login per way of
+  proving who you are, answering the token and its lease. What differs is what is being
+  proved — a pod proves it is a pod of a profile, this proves it is acting for a person
+  the plane vouched for — and OpenBao verifies the signature against the transit key
+  rather than taking anybody's word for it.
+  """
+  @spec jwt_login(String.t(), String.t(), String.t(), String.t()) ::
+          {:ok, %{token: String.t(), lease_duration: non_neg_integer()}} | {:error, term()}
+  def jwt_login(address, auth_path, role, assertion) do
+    case Req.request(
+           method: :post,
+           url: address <> "/v1/auth/#{auth_path}/login",
+           json: %{"role" => role, "jwt" => String.trim(assertion)},
+           decode_body: true,
+           retry: false,
+           receive_timeout: 15_000
+         ) do
+      {:ok, %{status: 200, body: %{"auth" => %{"client_token" => token} = auth}}} ->
+        {:ok, %{token: token, lease_duration: Map.get(auth, "lease_duration", 0)}}
+
+      {:ok, %{status: 200}} ->
+        {:error, :malformed}
+
+      {:ok, %{status: status, body: body}} ->
+        {:error, {:unexpected_status, status, body}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
   defp service_account_token_path do
     Application.get_env(
       :troupe_worker,

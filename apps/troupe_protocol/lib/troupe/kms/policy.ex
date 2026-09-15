@@ -54,6 +54,12 @@ defmodule Troupe.KMS.Policy do
   to one JWT role, and adding a person is the identity provider's business rather than
   an operator's.
 
+  The whole subtree under the person, not one prefix of it. There are two tenants there
+  already — `sessions/` for a private session's data key, `mcp/` for a credential they
+  connected — and a policy written per prefix is a policy somebody has to remember to
+  widen. Everything under a person belongs to that person; that is the whole statement,
+  and it is the one worth writing down.
+
   Read and write, no `delete`, exactly as a pod has: a person must not be able to make
   their own session unreadable outside erasure, for the same reason a pod must not.
   """
@@ -74,11 +80,11 @@ defmodule Troupe.KMS.Policy do
   @spec person_for(String.t(), String.t()) :: String.t()
   def person_for(mount, subject) do
     """
-    path "#{mount}/data/troupe/people/#{subject}/sessions/*" {
+    path "#{mount}/data/troupe/people/#{subject}/*" {
       capabilities = ["create", "read", "update"]
     }
 
-    path "#{mount}/metadata/troupe/people/#{subject}/sessions/*" {
+    path "#{mount}/metadata/troupe/people/#{subject}/*" {
       capabilities = ["read", "list"]
     }
     """
@@ -140,4 +146,49 @@ defmodule Troupe.KMS.Policy do
   @doc "The name the person policy is installed under, and the JWT role that carries it."
   @spec person_policy_name() :: String.t()
   def person_policy_name, do: "troupe-person"
+
+  @doc """
+  The JWT auth role a person's assertion is exchanged through.
+
+  Rendered here for the same reason the policies are: what the tests prove and what a
+  cluster installs should be one string rather than two that drift.
+
+  Every field is a narrowing. `bound_audiences` and `bound_issuer` say the assertion has
+  to be one the plane minted for the key manager — a session token, whose audience is a
+  pod, is refused here. `user_claim: "sub"` is what makes the alias name the person, and
+  the alias name is what the policy templates on, so a caller cannot name somebody else's
+  subtree by asking.
+  """
+  @spec person_role(String.t(), String.t()) :: map()
+  def person_role(issuer, audience) do
+    %{
+      "role_type" => "jwt",
+      "user_claim" => "sub",
+      "bound_audiences" => [audience],
+      "bound_issuer" => issuer,
+      "token_policies" => [person_policy_name()],
+      "token_ttl" => "20m",
+      "token_max_ttl" => "1h",
+      # No renewal and no periodic token: a session that outlives an hour exchanges a
+      # fresh assertion, which is a round trip the plane is on the path of anyway.
+      "token_type" => "service"
+    }
+  end
+
+  @doc """
+  The JWT auth mount's own configuration: which keys a signature is checked against.
+
+  The transit key's public half, in PEM, every version of it — a token minted moments
+  before a rotation is signed by the old one and stays good until it expires, which is
+  the same reason `Tokens.jwks/1` answers with every version.
+
+  Separate from the role because OpenBao keeps them apart: the mount decides what a valid
+  signature is, the role decides what a valid *claim set* is, and a mount with no keys
+  answers every login with "could not load configuration" rather than a refusal anybody
+  could read.
+  """
+  @spec person_auth_config([String.t()]) :: map()
+  def person_auth_config(public_keys) do
+    %{"jwt_validation_pubkeys" => public_keys, "default_role" => person_policy_name()}
+  end
 end
