@@ -21,7 +21,7 @@ defmodule Troupe.Plane.Harness do
   plane replica and it is rarely the one the harness reached.
   """
 
-  alias Troupe.Plane.{Audit, Bundles, Erasure, Fleet, Identity, Placement, Sessions}
+  alias Troupe.Plane.{Audit, Bundles, Connections, Erasure, Fleet, Identity, Placement, Sessions}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.{ACL, Session}
@@ -48,6 +48,8 @@ defmodule Troupe.Plane.Harness do
 
   @methods %{
     "me" => :observe,
+    "me.connections.list" => :observe,
+    "me.connections.grant" => :control,
     "teams.list" => :observe,
     "profiles.list" => :observe,
     "sessions.list" => :observe,
@@ -117,6 +119,54 @@ defmodule Troupe.Plane.Harness do
       end)
 
     {:ok, %{"profiles" => profiles}}
+  end
+
+  # Which of the servers on the caller's profiles act as *them*, and whether they have
+  # connected each one.
+  #
+  # Whether, never what. The plane can see that a slot exists — `list` on the key
+  # manager's metadata, which answers versions and timestamps — and cannot read a value
+  # under `people/` at all. That is the whole of what a panel needs to say "Ada has
+  # connected Jira" and the most it should ever be able to say.
+  defp handle("me.connections.list", _params, %{user: user}) do
+    connections =
+      for {profile, server} <- person_servers_for(user) do
+        slot = server.credential_ref || server.name
+
+        %{
+          "profile" => profile,
+          "server" => server.name,
+          "slot" => slot,
+          "connected" => Connections.connected?(user.subject, slot)
+        }
+      end
+
+    {:ok, %{"connections" => connections}}
+  end
+
+  # What a client needs in order to write its own credential, and nothing it could use to
+  # read anybody's.
+  #
+  # **No value crosses the plane.** `grant` does not take one and does not return one: it
+  # returns an assertion the plane has just signed for the caller's own subject, and the
+  # client exchanges that with the key manager itself for a token scoped to its own
+  # subtree. The plane is never in possession of a credential that could read the slot —
+  # which is stronger than handing back a token it minted, because a token it minted is a
+  # token it held.
+  #
+  # The same grant is how a person *removes* one. Deletion is theirs, always: an admin can
+  # retire a server from the bundle and can neither read nor remove somebody's credential.
+  defp handle("me.connections.grant", params, %{user: user}) do
+    slots =
+      user |> person_servers_for() |> Enum.map(fn {_p, s} -> s.credential_ref || s.name end)
+
+    with {:ok, slot} <- required_string(params, "slot"),
+         :ok <- Connections.known_slot(slots, slot) do
+      case Connections.grant(user.subject, slot) do
+        {:ok, grant} -> {:ok, grant}
+        {:error, %Error{} = error} -> {:error, error}
+      end
+    end
   end
 
   # -- listing sessions -------------------------------------------------------
@@ -881,6 +931,22 @@ defmodule Troupe.Plane.Harness do
     case Fleet.get_profile(profile) do
       nil -> nil
       %{config_bundle_channel: channel} -> Bundles.current(channel) |> then(&(&1 && &1.version))
+    end
+  end
+
+  # The person-mode servers a profile's current bundle carries. A profile with none is
+  # every profile that existed before there was a mode.
+  defp person_servers_for(user) do
+    for profile <- granted_profiles(user), server <- person_servers(profile), do: {profile, server}
+  end
+
+  defp person_servers(profile) do
+    with %{config_bundle_channel: channel} <- Fleet.get_profile(profile),
+         %{} = bundle <- Bundles.current(channel),
+         {:ok, %{mcp_servers: servers}} <- Troupe.Protocol.Bundle.validate(bundle.content) do
+      Enum.filter(servers, &(&1.credential_mode == :person))
+    else
+      _ -> []
     end
   end
 

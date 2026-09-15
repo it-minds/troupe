@@ -14,10 +14,10 @@ defmodule Troupe.Plane.PersonCredentialsTest do
   knows exactly where it is.
   """
 
-  use ExUnit.Case, async: false
+  use Troupe.Plane.DataCase, async: false
 
   alias Troupe.KMS.{OpenBao, Policy}
-  alias Troupe.Plane.Tokens
+  alias Troupe.Plane.{Harness, Tokens}
 
   @moduletag timeout: 60_000
 
@@ -104,6 +104,100 @@ defmodule Troupe.Plane.PersonCredentialsTest do
       # OpenBao rather than against our belief about our own code. The plane can destroy
       # a person's key metadata, because erasure has to work, and it can read nothing.
       assert {:error, :forbidden} = read_slot(plane, ada, "jira")
+    end
+  end
+
+  describe "what a person is told about their own connections" do
+    setup context do
+      requires_bao(context)
+
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      # A subject of its own per test: the database is sandboxed and the key manager is
+      # not, so two tests sharing a subject would share a slot — and one of them writing
+      # to it would decide what the other sees.
+      ada = person("ada-#{unique()}@example.test", ["engineering"])
+
+      {:ok, _} =
+        Troupe.Plane.Fleet.put_profile(%{
+          name: "dev",
+          config_bundle_channel: "stable",
+          replicas: 1
+        })
+
+      {:ok, _bundle} =
+        Troupe.Plane.Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "mcp_servers" => [
+              %{
+                "name" => "jira",
+                "url" => "https://mcp.jira.example/mcp",
+                "credential_mode" => "person"
+              },
+              %{
+                "name" => "shared",
+                "url" => "https://mcp.shared.example/mcp",
+                "credential_ref" => "SHARED_TOKEN"
+              }
+            ]
+          },
+          announce: false
+        )
+
+      %{team: team, ada: ada}
+    end
+
+    test "lists the servers that act as them, and whether they have connected", context do
+      assert {:ok, %{"connections" => [jira]}} =
+               Harness.call("me.connections.list", %{}, as(context.ada))
+
+      # Only the person-mode one: a shared server is nobody's to connect.
+      assert jira["server"] == "jira"
+      assert jira["slot"] == "jira"
+      assert jira["profile"] == "dev"
+      refute jira["connected"]
+
+      write_slot(context.ada.subject, "jira", "ada's jira token")
+
+      assert {:ok, %{"connections" => [connected]}} =
+               Harness.call("me.connections.list", %{}, as(context.ada))
+
+      assert connected["connected"]
+    end
+
+    test "grants an assertion and never a value", context do
+      assert {:ok, grant} =
+               Harness.call("me.connections.grant", %{"slot" => "jira"}, as(context.ada))
+
+      # No value in, no value out. What crosses is a signed statement of who the caller
+      # is, which the plane is entitled to make because it authenticated them.
+      assert %{"sub" => subject} = payload_of(grant["assertion"])
+      assert subject == context.ada.subject
+      assert grant["key_manager"]["path"] == "troupe/people/#{context.ada.subject}/mcp/jira"
+
+      refute Enum.any?(Map.values(grant), &(is_binary(&1) and &1 =~ "ada's"))
+
+      # And it is spendable: the client exchanges it itself, and what it gets can write
+      # its own slot and read nothing of anybody else's.
+      assert {:ok, %{token: token}} =
+               OpenBao.jwt_login(address(), @auth_path, @role, grant["assertion"])
+
+      :ok =
+        put("/v1/#{mount()}/data/#{encode(grant["key_manager"]["path"])}", %{
+          "data" => %{"value" => "written-by-the-client"}
+        })
+
+      assert {:ok, "written-by-the-client"} = read_slot(token, context.ada.subject, "jira")
+    end
+
+    test "refuses a slot no server on the caller's profiles asks for", context do
+      assert {:error, error} =
+               Harness.call("me.connections.grant", %{"slot" => "elsewhere"}, as(context.ada))
+
+      assert error.message == "not_found"
+      assert error.data.reason =~ "no server on your profiles"
+      assert error.data.slots == ["jira"]
     end
   end
 
@@ -249,5 +343,14 @@ defmodule Troupe.Plane.PersonCredentialsTest do
       )
 
     get_in(body, ["auth", "client_token"])
+  end
+  defp as(user), do: %{user: user, platform_admin?: false}
+
+  # The claims, without verifying the signature: what is checked here is which subject the
+  # plane put in, and OpenBao is what checks the rest.
+  defp payload_of(jwt) do
+    [_header, payload, _signature] = String.split(jwt, ".")
+    padded = payload <> String.duplicate("=", rem(4 - rem(byte_size(payload), 4), 4))
+    padded |> Base.url_decode64!() |> Jason.decode!()
   end
 end

@@ -2507,3 +2507,36 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      token and a wrong one are indistinguishable from here and the first answer to both is
      the same. Once, not in a loop: a second refusal is a policy problem, and a retry would
      only repeat it.
+375. **`me.connections.grant` answers an assertion, not a token.** `stage-6.md` §3c
+     sketched it returning "a short-lived Bao token scoped to the caller's own slot". A
+     token the plane minted is a token the plane *held*, and a plane that held one could
+     have read the slot. So it answers the assertion instead — a signed statement of who
+     the caller is, which the plane is entitled to make because it is the thing that
+     authenticated them — and the client exchanges that with the key manager itself.
+
+     The same mechanism a pod uses, which is the argument for it: there is one way to
+     become a person at the key manager, and the plane is on neither side of it.
+
+376. **There is no `me.connections.revoke`, because there is no credential here that
+     could delete one.** The plan lists three methods; removal uses the same grant as
+     writing, and the plane's policy has no `delete` under a person's connections on
+     purpose. An admin can retire a server from the bundle and can neither read nor remove
+     somebody's credential — which is the property the plan states, reached by having no
+     method rather than by having one that refuses.
+
+377. **The plane may see that a slot has a version, and nothing more.** Its policy gains
+     `list` and `read` on `metadata/troupe/people/+/mcp/*` — KV v2 metadata, which is
+     versions and timestamps and never a value. That is exactly what a panel needs in
+     order to say "Ada has connected Jira" and the most it should ever be able to say.
+     No `delete`, for the reason above.
+
+378. **`me.connections.grant` refuses a slot no bundle asks for, and that is not a
+     security boundary.** The key manager's policy is: it would refuse a path under
+     anybody else whatever this said. The refusal is so that a typo does not leave a
+     credential sitting in a slot nothing will ever read, and it names the slots that do
+     exist so the next attempt is right.
+
+379. **A test whose subject is shared is a test that decides what another sees.** The
+     database is sandboxed per test and the key manager is not, so the connection tests
+     take a fresh subject each. Found by a listing test that saw `connected: true` before
+     it had written anything, because the grant test had run first.

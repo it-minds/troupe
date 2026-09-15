@@ -101,6 +101,12 @@ defmodule Troupe.KMS.Policy do
   Both subtrees, because erasure is erasure: a person asking for their private session to
   be destroyed gets the same finality a team's session gets, and a plane that could erase
   one and not the other would have two answers to one promise.
+
+  One widening, and the smallest that answers the question. A person's connections carry
+  `list` and `read` on **metadata only**, which in KV v2 is versions and timestamps and
+  never a value — so a panel can say "Ada has connected Jira" and can say nothing more.
+  No `delete`: removing a credential is the person's, and an admin who could do it is an
+  admin who has a reason to want to.
   """
   @spec plane(String.t()) :: String.t()
   def plane(mount \\ "secret") do
@@ -111,6 +117,10 @@ defmodule Troupe.KMS.Policy do
 
     path "#{mount}/metadata/troupe/people/+/sessions/*" {
       capabilities = ["delete", "list", "read"]
+    }
+
+    path "#{mount}/metadata/troupe/people/+/mcp/*" {
+      capabilities = ["list", "read"]
     }
     """
   end
