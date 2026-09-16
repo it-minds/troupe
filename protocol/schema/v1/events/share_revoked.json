@@ -1,0 +1,18 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/share_revoked.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "reason": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "id"
+  ],
+  "title": "share_revoked",
+  "type": "object"
+}

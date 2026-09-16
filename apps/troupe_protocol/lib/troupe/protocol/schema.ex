@@ -214,6 +214,25 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "size" => required(:integer)
       },
+      # A capability somebody minted over this session: a link that carries a role rather
+      # than a name. Durable, because a share is a decision about who may read what was
+      # said, and a decision of that kind that left no trace would be one nobody could
+      # audit after the fact.
+      #
+      # `id` is the share's public identifier and never the secret — the secret is shown to
+      # whoever minted it, once, and the plane keeps a salted digest. An event carrying it
+      # would put a working credential in a log that outlives the session.
+      #
+      # `role` is `observe` or `control`. Never `admin`: a capability that could administer
+      # a session could grant further capabilities, and a link that can mint links is a link
+      # nobody can reason about.
+      "share_created" => %{
+        "id" => required(:string),
+        "role" => required(:string),
+        "expires_at" => required(:string),
+        "audience" => optional(:string)
+      },
+      "share_revoked" => %{"id" => required(:string), "reason" => optional(:string)},
       "acl_granted" => %{"subject" => required(:string), "role" => required(:string)},
       "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)},
       # Client-hosted tools. Durable, all three, because a tool that ran on somebody's

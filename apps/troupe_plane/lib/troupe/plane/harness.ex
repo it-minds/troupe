@@ -39,7 +39,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Fleet.Scaler
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Provision
-  alias Troupe.Plane.Sessions.{ACL, Session}
+  alias Troupe.Plane.Sessions.{ACL, Session, Share}
   alias Troupe.Plane.Settings
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
@@ -112,7 +112,14 @@ defmodule Troupe.Plane.Harness do
     "session.review" => :control,
     "trigger.fire" => :control,
     "session.spawn" => :control,
-    "session.fork" => :control
+    "session.fork" => :control,
+    "session.share" => :control,
+    "session.share.revoke" => :control,
+    "session.shares" => :control,
+    # Redeeming is the one method whose caller is not yet anybody in this session. They
+    # are still somebody in the deployment — a link is not an account — and what the
+    # capability carries was decided when it was minted, not here.
+    "session.redeem" => :observe
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -423,6 +430,107 @@ defmodule Troupe.Plane.Harness do
         |> Map.reject(fn {_key, value} -> is_nil(value) end),
         context
       )
+    end
+  end
+
+  # -- sharing by capability --------------------------------------------------
+
+  @doc false
+  # A link that carries a role rather than a name.
+  #
+  # The ACL is the right answer when the person has an account and you know which one.
+  # This is the other half of what people mean by sharing: *send them this*, with an end
+  # date on it, revocable on its own without touching anything else they have.
+  #
+  # Everything about what the capability may carry is settled here. The role may not
+  # exceed what the person minting it holds, it is never `admin`, and it is bounded by the
+  # team's ACL — a team whose members may not steer cannot have a link minted that lets
+  # somebody steer. None of it is asked again at redemption, because a link that re-derived
+  # its authority from the sharer would stop working when they changed teams, and what a
+  # recipient can see would depend on something they cannot see.
+  defp handle("session.share", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         {:ok, mine} <- sharer_scope(user, session),
+         {:ok, role} <- share_role(params["role"], mine),
+         :ok <- share_within_team(session, role),
+         {:ok, expires_at} <- share_expiry(params["expires_in_seconds"]) do
+      attrs = %{
+        role: role,
+        created_by: user.subject,
+        expires_at: expires_at,
+        audience: presence(params["audience"])
+      }
+
+      case Sessions.mint_share(session.id, attrs) do
+        {:ok, share, secret} ->
+          announce_share(session, share, "share_created")
+
+          {:ok, _audit} =
+            Audit.record(user.subject, "session.share", session.id, %{
+              "share" => share.id,
+              "role" => share.role,
+              "expires_at" => DateTime.to_iso8601(share.expires_at)
+            })
+
+          # The secret is in the answer and in nothing else: not in the audit row, not in
+          # the event, and not in the row it came from. Whoever minted it has it now or
+          # mints another.
+          {:ok, Map.put(share_json(share), "secret", secret)}
+
+        {:error, changeset} ->
+          {:error, invalid_row(changeset)}
+      end
+    end
+  end
+
+  @doc false
+  # End one capability and nothing else. Removing somebody from the ACL ends every route
+  # they had; this ends this link, and not their membership, their team's view of the
+  # session, or another link they were sent.
+  defp handle("session.share.revoke", params, %{user: user}) do
+    with {:ok, share} <- share_of(params["share"], params["session_id"]),
+         {:ok, session} <- visible(share.session_id, user),
+         {:ok, _mine} <- sharer_scope(user, session),
+         {:ok, revoked} <- Sessions.revoke_share(share, user.subject, presence(params["reason"])) do
+      announce_share(session, revoked, "share_revoked")
+
+      {:ok, _audit} =
+        Audit.record(user.subject, "session.share.revoke", session.id, %{"share" => share.id})
+
+      {:ok, share_json(revoked)}
+    end
+  end
+
+  @doc false
+  # Every link over this session, live, expired and revoked alike. Somebody deciding
+  # whether to revoke one needs to see the ones that already stopped working, or they
+  # revoke the wrong one.
+  defp handle("session.shares", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         {:ok, _mine} <- sharer_scope(user, session) do
+      {:ok,
+       %{
+         "session_id" => session.id,
+         "shares" => session.id |> Sessions.shares_of() |> Enum.map(&share_json/1)
+       }}
+    end
+  end
+
+  @doc false
+  # Presenting a link. Three questions, all of them about the share: does it exist, is it
+  # still live, and — where it named somebody — is this them. What the sharer may do today
+  # is not one of them.
+  defp handle("session.redeem", params, %{user: user}) do
+    with {:ok, secret} <- required_string(params, "secret"),
+         {:ok, share} <- redeemed(secret, user),
+         session when not is_nil(session) <- Sessions.get(share.session_id),
+         {:ok, _audit} <-
+           Audit.record(user.subject, "session.redeem", session.id, %{"share" => share.id}) do
+      minted(session, user, Share.role_name(share))
+    else
+      nil -> {:error, Error.new(:not_found, %{reason: "that session is gone"})}
+      {:error, %Error{} = error} -> {:error, error}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
     end
   end
 
@@ -1435,6 +1543,178 @@ defmodule Troupe.Plane.Harness do
 
   # A parent that is erased, archived or read-only is not a parent: a sibling of a
   # session nobody may write to is a session the caller could not have reached.
+  # -- shares -----------------------------------------------------------------
+
+  # A capability is minted by somebody who could have steered the session themselves. A
+  # viewer minting a link would be a viewer handing out a view they were given, which is
+  # the one thing an `observe` grant is supposed not to be.
+  defp sharer_scope(user, session) do
+    case Sessions.role_for(user, session) do
+      scope when scope in [:admin, :control] ->
+        {:ok, scope}
+
+      _watching ->
+        {:error,
+         Error.new(:forbidden, %{
+           reason: "sharing a session needs control of it, not a view of it"
+         })}
+    end
+  end
+
+  # Never `admin`, whatever the person minting it holds — including its owner. A capability
+  # that could administer a session could mint further capabilities, and a link that mints
+  # links is a link nobody can reason about: not the person who sent it, and not the person
+  # auditing it later.
+  #
+  # The other half of "you cannot share more than you hold" is upstream: `sharer_scope/2`
+  # has already refused a viewer, and the two roles left are the two a share may carry. It
+  # is not restated here, because a second copy of a rule is a second place for it to drift.
+  defp share_role(nil, _mine), do: {:ok, "observe"}
+
+  defp share_role("admin", _mine) do
+    {:error,
+     Error.new(:forbidden, %{
+       reason: "a share is observe or control; a link may not administer a session"
+     })}
+  end
+
+  defp share_role(role, _mine) when role in ["observe", "control"], do: {:ok, role}
+
+  defp share_role(_other, _mine), do: invalid("role is observe or control")
+
+  # Bounded by the team's ACL, through the ladder rather than off the column: a platform
+  # that has turned steering off has turned it off for every team, and a team that turns it
+  # off stops being shareable at `control` on the next request rather than the next edit.
+  defp share_within_team(%Session{team_id: nil}, _role), do: :ok
+  defp share_within_team(%Session{}, "observe"), do: :ok
+
+  defp share_within_team(%Session{} = session, "control") do
+    case team_of(session) do
+      nil ->
+        :ok
+
+      team ->
+        if Ladder.resolve(team).members_may_control do
+          :ok
+        else
+          {:error,
+           Error.new(:forbidden, %{
+             reason: "this team's members may not steer a session, so a link may not either"
+           })}
+        end
+    end
+  end
+
+  # Required, and capped. A share with no end is an ACL entry nobody remembers granting,
+  # and the cap is what stops "share this" quietly meaning "for ever".
+  @share_default_seconds 7 * 24 * 60 * 60
+  @share_max_seconds 30 * 24 * 60 * 60
+
+  defp share_expiry(nil), do: share_expiry(@share_default_seconds)
+
+  defp share_expiry(seconds) when is_integer(seconds) and seconds > 0 do
+    if seconds <= @share_max_seconds do
+      {:ok, DateTime.add(DateTime.utc_now(), seconds, :second)}
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "a share lasts at most #{div(@share_max_seconds, 86_400)} days",
+         max_seconds: @share_max_seconds
+       })}
+    end
+  end
+
+  defp share_expiry(_other), do: invalid("expires_in_seconds is a number of seconds, or absent")
+
+  defp share_of(nil, _session_id), do: {:error, Error.new(:invalid_params, %{missing: "share"})}
+
+  defp share_of(id, session_id) do
+    case Sessions.get_share(id) do
+      nil -> {:error, Error.new(:not_found, %{share: id})}
+      %Share{session_id: ^session_id} = share when is_binary(session_id) -> {:ok, share}
+      %Share{} = share when is_nil(session_id) -> {:ok, share}
+      %Share{} -> {:error, Error.new(:not_found, %{share: id})}
+    end
+  end
+
+  # One sentence for each way a link can fail, because "no" on a link somebody was sent is
+  # a dead end unless it says which kind of no it is: the wrong link, a link whose time is
+  # up, one somebody ended, or one that was not for them.
+  defp redeemed(secret, user) do
+    case Sessions.redeem_share(secret, user.subject) do
+      {:ok, share} ->
+        {:ok, share}
+
+      {:error, :expired} ->
+        {:error, Error.new(:forbidden, %{reason: "that link has expired"})}
+
+      {:error, :revoked} ->
+        {:error, Error.new(:forbidden, %{reason: "that link was revoked"})}
+
+      {:error, :not_for_you} ->
+        {:error, Error.new(:forbidden, %{reason: "that link was made out to somebody else"})}
+
+      {:error, :no_such_share} ->
+        {:error, Error.new(:not_found, %{reason: "no such link"})}
+    end
+  end
+
+  # An empty string is somebody leaving a field blank, which means absent. A share with an
+  # audience of "" would be a share made out to nobody and refused to everybody.
+  defp presence(value) when is_binary(value) do
+    case String.trim(value) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp presence(_other), do: nil
+
+  defp share_json(%Share{} = share) do
+    %{
+      "id" => share.id,
+      "session_id" => share.session_id,
+      "role" => share.role,
+      "state" => Share.state(share, DateTime.utc_now()),
+      "created_by" => share.created_by,
+      "expires_at" => DateTime.to_iso8601(share.expires_at),
+      "audience" => share.audience,
+      "revoked_at" => share.revoked_at && DateTime.to_iso8601(share.revoked_at),
+      "revoked_by" => share.revoked_by,
+      "redeemed_count" => share.redeemed_count,
+      "last_redeemed_at" => share.last_redeemed_at && DateTime.to_iso8601(share.last_redeemed_at)
+    }
+  end
+
+  # The pod holding the session appends the durable event and drops the capability from its
+  # mirror, so a connection already open on a revoked link stops on its next command rather
+  # than at its next token. A dormant session has no pod; the row is the record until it
+  # wakes, and it wakes reading it.
+  defp announce_share(%Session{worker_id: nil}, _share, _type), do: false
+
+  defp announce_share(%Session{} = session, %Share{} = share, type) do
+    case Fleet.get_worker(session.worker_id) do
+      nil ->
+        false
+
+      worker ->
+        match?(
+          {:ok, _pushed},
+          Router.push(worker, "share.changed", %{
+            "session_id" => session.id,
+            "type" => type,
+            "share" => %{
+              "id" => share.id,
+              "role" => share.role,
+              "expires_at" => DateTime.to_iso8601(share.expires_at),
+              "audience" => share.audience,
+              "reason" => share.revoked_reason
+            }
+          })
+        )
+    end
+  end
+
   defp spawnable(%Session{state: state}) when state in ["erased", "archived"] do
     {:error, Error.new(:forbidden, %{reason: "that session is #{state}"})}
   end

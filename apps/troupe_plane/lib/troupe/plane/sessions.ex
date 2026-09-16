@@ -13,7 +13,7 @@ defmodule Troupe.Plane.Sessions do
   alias Troupe.Plane.Fleet.Worker
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Repo
-  alias Troupe.Plane.Sessions.{ACL, Anchor, Session}
+  alias Troupe.Plane.Sessions.{ACL, Anchor, Session, Share}
   alias Troupe.Plane.Settings.Ladder
 
   # -- creating and placing ---------------------------------------------------
@@ -875,6 +875,158 @@ defmodule Troupe.Plane.Sessions do
   def revoke_access(session_id, subject) do
     Repo.delete_all(from(a in ACL, where: a.session_id == ^session_id and a.subject == ^subject))
     :ok
+  end
+
+  # -- shares -----------------------------------------------------------------
+
+  @doc """
+  Mint a capability over a session, and hand back the secret once.
+
+  Once, because the plane keeps a salted digest and not the secret — the same shape a
+  trigger key has, and for the same reason: a dump of this table is not a set of working
+  links. Somebody who loses a share mints another and revokes the first, which is the
+  behaviour to want anyway.
+
+  The caller has already decided this is allowed. Everything here is the record of that
+  decision and none of it is the decision itself.
+  """
+  @spec mint_share(String.t(), map()) :: {:ok, Share.t(), String.t()} | {:error, term()}
+  def mint_share(session_id, attrs) do
+    {id, secret, hash, salt} = mint_secret()
+
+    %Share{}
+    |> Share.changeset(
+      Map.merge(attrs, %{
+        id: id,
+        session_id: session_id,
+        secret_hash: hash,
+        secret_salt: salt
+      })
+    )
+    |> Repo.insert()
+    |> case do
+      {:ok, share} -> {:ok, share, secret}
+      error -> error
+    end
+  end
+
+  @doc """
+  End one capability, leaving every other route to the session alone.
+
+  The difference from `revoke_access/2` is the point of having both. Removing somebody
+  from the ACL ends every way they had in; revoking a share ends this link and not their
+  membership, not their team's visibility, and not another link they were sent.
+
+  Idempotent: revoking a revoked share keeps the first revocation, because *when* it
+  stopped working is a fact and the second attempt is somebody making sure.
+  """
+  @spec revoke_share(Share.t(), String.t(), String.t() | nil) :: {:ok, Share.t()}
+  def revoke_share(%Share{revoked_at: at} = share, _by, _reason) when not is_nil(at),
+    do: {:ok, share}
+
+  def revoke_share(%Share{} = share, by, reason) do
+    share
+    |> Share.revoke_changeset(%{
+      revoked_at: DateTime.utc_now(),
+      revoked_by: by,
+      revoked_reason: reason
+    })
+    |> Repo.update()
+  end
+
+  @doc "One share, by its public id."
+  @spec get_share(String.t()) :: Share.t() | nil
+  def get_share(id) when is_binary(id), do: Repo.get(Share, id)
+  def get_share(_other), do: nil
+
+  @doc "Every capability over a session, newest first, revoked and expired ones included."
+  @spec shares_of(String.t()) :: [Share.t()]
+  def shares_of(session_id) do
+    Repo.all(
+      from(s in Share, where: s.session_id == ^session_id, order_by: [desc: s.inserted_at])
+    )
+  end
+
+  @doc """
+  The share a secret opens, if it still opens one.
+
+  What is asked of the share is only what is true of the share: unexpired, unrevoked, and
+  — where it named somebody — presented by them. Nothing here re-derives the sharer's
+  authority. That was settled at mint, and a link that quietly stopped working because
+  somebody changed teams is not what anybody means by sending somebody a link.
+  """
+  @spec redeem_share(String.t(), String.t() | nil) ::
+          {:ok, Share.t()} | {:error, :no_such_share | :expired | :revoked | :not_for_you}
+  def redeem_share(secret, subject \\ nil)
+
+  def redeem_share(secret, subject) when is_binary(secret) do
+    now = DateTime.utc_now()
+
+    with {:ok, share} <- share_for_secret(secret),
+         :ok <- share_usable(share, now),
+         :ok <- share_audience(share, subject) do
+      {:ok, mark_redeemed(share, now)}
+    end
+  end
+
+  def redeem_share(_secret, _subject), do: {:error, :no_such_share}
+
+  # The secret names its own share, so this is one indexed lookup rather than a scan of
+  # every share in the deployment. The id is public — it is in `share_created` — and the
+  # half after the dot is the part that has to be right; it is compared against a salted
+  # digest, in constant time, and the id on its own opens nothing.
+  defp share_for_secret(secret) do
+    with ["tsh_" <> id, _presented] <- String.split(secret, ".", parts: 2),
+         %Share{} = share <- Repo.get(Share, "shr_" <> id),
+         true <- secret_matches?(share, secret) do
+      {:ok, share}
+    else
+      _no -> {:error, :no_such_share}
+    end
+  end
+
+  defp share_usable(%Share{revoked_at: at}, _now) when not is_nil(at), do: {:error, :revoked}
+
+  defp share_usable(%Share{} = share, now) do
+    if Share.live?(share, now), do: :ok, else: {:error, :expired}
+  end
+
+  # A share made out to somebody is theirs. One with no audience is a link, and was minted
+  # by somebody who chose that.
+  defp share_audience(%Share{audience: nil}, _subject), do: :ok
+  defp share_audience(%Share{audience: subject}, subject), do: :ok
+  defp share_audience(%Share{}, _other), do: {:error, :not_for_you}
+
+  # What it has actually been used for, which is the question somebody asks before revoking
+  # one: has anybody opened this, and when did they last.
+  defp mark_redeemed(%Share{} = share, now) do
+    {1, _updated} =
+      Repo.update_all(
+        from(s in Share, where: s.id == ^share.id),
+        inc: [redeemed_count: 1],
+        set: [last_redeemed_at: now, updated_at: now]
+      )
+
+    %{share | redeemed_count: share.redeemed_count + 1, last_redeemed_at: now}
+  end
+
+  # 256 bits after the id, URL-safe so it survives a chat window, a mail client and a
+  # shell. Prefixed so a secret found in a log says what it is and what to revoke.
+  defp mint_secret do
+    id = 12 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    # A dot between the two halves, because base64url uses `-` and `_` and a separator that
+    # can appear inside an id is a separator that splits the wrong id in half.
+    secret = "tsh_" <> id <> "." <> (32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+    salt = 16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+    {"shr_" <> id, secret, secret_hash(salt, secret), salt}
+  end
+
+  defp secret_hash(salt, secret),
+    do: :sha256 |> :crypto.hash(salt <> secret) |> Base.encode16(case: :lower)
+
+  defp secret_matches?(%Share{secret_hash: hash, secret_salt: salt}, secret) do
+    presented = secret_hash(salt, secret)
+    byte_size(presented) == byte_size(hash) and :crypto.hash_equals(presented, hash)
   end
 
   @doc "Everyone explicitly on a session."

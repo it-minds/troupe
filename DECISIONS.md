@@ -3499,3 +3499,65 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      placement. The copy belongs to the device that holds the key, and the activation
      carries no fork instruction. An import also says which profile it lands on, because a
      private session has none to inherit.
+
+530. **A share is a capability, not an ACL entry.** The ACL answers *who is allowed here*,
+     by subject, and it is the right answer whenever the person has an account and you know
+     which one. A share answers what people actually ask for — *send them this* — and
+     folding one into the other breaks both: an ACL entry for somebody who has never signed
+     in is a row waiting for a subject that may never arrive, and a capability with no end
+     is an ACL entry nobody remembers granting. The three properties an ACL entry does not
+     have are the three that justify the table: it expires, it is revocable on its own, and
+     it is a secret kept as a salted digest.
+
+531. **Refused at mint, never at use.** Everything about what a link may carry is settled
+     when it is made: that the person minting it holds the session, that the role is not
+     `admin`, that the team allows it, that the expiry is inside the ceiling. None of it is
+     asked again. A link that re-derived its authority from the sharer would stop working
+     when they changed teams, and what a recipient could see would depend on something they
+     cannot see. Redemption asks only what is true of the share: unexpired, unrevoked, and
+     — where it named somebody — presented by them.
+
+532. **Never `admin`, including for the owner.** A capability that could administer a
+     session could mint further capabilities, and a link that mints links is a link nobody
+     can reason about: not the person who sent it, and not the person auditing it later.
+     The rule is in the schema, in the changeset and in a database check constraint.
+
+533. **The other half of "not more than you hold" lives upstream.** `sharer_scope/2` refuses
+     a viewer, so the only roles left are the two a share may carry. Restating it in the
+     role check made a clause the compiler could prove unreachable — and a second copy of a
+     rule is a second place for it to drift.
+
+534. **The team's ACL bounds a share through the ladder, not off the column.** A team whose
+     members may not steer cannot have a `control` link minted over its sessions, and a
+     platform that has turned steering off has turned it off for every team. Reading the
+     column directly would have made a link a way round the setting rather than an exception
+     to it.
+
+535. **A share ends by default and cannot be made to last long.** A week unless somebody
+     says otherwise, thirty days at the outside. The cap is what stops "share this" quietly
+     meaning "for ever", which is the failure mode every link-sharing feature has.
+
+536. **The secret names its own share.** `tsh_<id>.<random>`: an indexed lookup rather than
+     a scan of every share in the deployment, with the random half compared against a
+     salted digest in constant time. The id is public — it is in `share_created` and in
+     every listing — and on its own it opens nothing. The separator is a dot, because
+     base64url uses `-` and `_` and a separator that can appear inside an id is a separator
+     that splits the wrong id in half.
+
+537. **Revoking is idempotent and keeps the first revocation.** *When* a link stopped
+     working is a fact; the second attempt is somebody making sure.
+
+538. **A listing shows revoked and expired links too.** Somebody deciding which link to
+     revoke needs to see the ones that already stopped working, or they revoke the wrong
+     one.
+
+539. **The pod's part in a share is the durable event and nothing else.** A redeemed share
+     arrives as an ordinary session token at an ordinary role, the same as every other way
+     in, so there is no share mirror beside the ACL one. And the push is best effort: a
+     dormant session has no tree to append to, and making revocation depend on the session
+     being awake is the opposite of what somebody revoking a link wants.
+
+540. **Revoking a link stops the next token, not the one in flight.** A session token lasts
+     at most fifteen minutes and is checked offline by the pod that holds the session,
+     which is true of every route in and not something shares change. Somebody who needs a
+     connection closed *now* ends the session.

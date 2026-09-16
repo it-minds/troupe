@@ -65,6 +65,8 @@
     "events/session_read_only.json",
     "events/session_resumed.json",
     "events/session_tainted.json",
+    "events/share_created.json",
+    "events/share_revoked.json",
     "events/summary_diff.json",
     "events/todo_updated.json",
     "events/tool_call_completed.json",

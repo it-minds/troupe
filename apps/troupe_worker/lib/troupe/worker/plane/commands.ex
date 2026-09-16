@@ -14,6 +14,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Session.Log
   alias Troupe.Sessions.Context
   alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
@@ -168,6 +169,33 @@ defmodule Troupe.Worker.Plane.Commands do
   # prefix decrypts — not the current objects, not the prior versions a versioned bucket
   # keeps, not a copy in a backup — so the deletion that follows is tidiness rather than
   # the security property.
+  # A capability over this session was minted or ended. The pod's part is the durable
+  # event: the plane holds the row, checks it at redemption and mints the token, and none
+  # of that is in a log anybody replays — so a session whose transcript did not say it had
+  # been shared would be a transcript with the interesting part missing.
+  #
+  # Nothing here is a permission check. A redeemed share arrives at this pod as an ordinary
+  # session token at an ordinary role, the same as every other way in, which is why there
+  # is no share mirror beside the ACL one.
+  #
+  # Best effort, and deliberately: a dormant session has no tree to append to, and the
+  # plane's row is the record until it wakes. Refusing the push would make revoking a link
+  # depend on the session being awake, which is the opposite of what somebody revoking one
+  # wants.
+  defp dispatch("share.changed", params) do
+    session_id = params["session_id"]
+    share = params["share"] || %{}
+
+    case Sessions.whereis(session_id) do
+      nil ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      _tree ->
+        {:ok, seq} = Log.append(session_id, [], params["type"], share_data(params["type"], share))
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
   defp dispatch("session.erase", params) do
     session_id = params["session_id"]
     team = params["team"]
@@ -227,6 +255,28 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
+
+  # -- shares ------------------------------------------------------------------
+
+  # The share's id and never its secret. The id is what a revocation names and what an
+  # audit reads; the secret is a working credential, and a log outlives the session.
+  defp share_data("share_revoked", share) do
+    %{"id" => share["id"]}
+    |> put_present("reason", share["reason"])
+  end
+
+  defp share_data(_created, share) do
+    %{
+      "id" => share["id"],
+      "role" => share["role"],
+      "expires_at" => share["expires_at"]
+    }
+    |> put_present("audience", share["audience"])
+  end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
 
   # -- forking -----------------------------------------------------------------
 
