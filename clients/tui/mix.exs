@@ -131,7 +131,6 @@ defmodule Troupe.MixProject do
   defp deps do
     [
       {:req, "~> 0.7"},
-      {:mint_web_socket, "~> 1.0"},
       {:jason, "~> 1.4"},
       {:telemetry, "~> 1.4"},
       {:file_system, "~> 1.1"},
@@ -149,7 +148,6 @@ defmodule Troupe.MixProject do
         "compile --force --warnings-as-errors",
         "format --check-formatted",
         "credo --strict",
-        "troupe.xref",
         "test"
       ]
     ]

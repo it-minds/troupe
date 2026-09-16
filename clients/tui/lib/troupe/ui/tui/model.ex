@@ -95,8 +95,7 @@ defmodule Troupe.UI.TUI.Model do
           summary: String.t() | nil,
           message: String.t() | nil,
           diff_stat: String.t() | nil,
-          worktree: map() | nil,
-          unconfirmed: %{optional(String.t()) => String.t()}
+          worktree: map() | nil
         }
 
   defstruct session_id: nil,
@@ -104,9 +103,7 @@ defmodule Troupe.UI.TUI.Model do
             windows: %{},
             order: [],
             notices: [],
-            watch: %{enabled: false, backend: nil},
-            remote: nil,
-            files_version: 0
+            watch: %{enabled: false, backend: nil}
 
   @type t :: %__MODULE__{}
 
@@ -146,8 +143,7 @@ defmodule Troupe.UI.TUI.Model do
           summary: nil,
           message: nil,
           diff_stat: nil,
-          worktree: nil,
-          unconfirmed: %{}
+          worktree: nil
         }
 
         order = if e.agent_path in m.order, do: m.order, else: m.order ++ [e.agent_path]
@@ -162,18 +158,6 @@ defmodule Troupe.UI.TUI.Model do
 
       :notice ->
         %{m | notices: Enum.take([e.data.text | m.notices], 3)}
-
-      # What the remote client knows about the session behind this window: the
-      # session's own state, the scopes the token carries, and whether the
-      # worker connection is up. The view reads it to disable what is not
-      # allowed and to say why (Decision 77).
-      :remote_status ->
-        %{m | remote: Map.merge(m.remote || %{}, e.data)}
-
-      # The files panel is a fold too: a bumped version is what tells it its
-      # listing is stale, without the panel subscribing to anything itself.
-      :fs_changed ->
-        %{m | files_version: m.files_version + 1}
 
       :watch_trigger ->
         %{m | notices: Enum.take(["watch: #{e.data.kind} request from AI comments" | m.notices], 3)}
@@ -202,25 +186,7 @@ defmodule Troupe.UI.TUI.Model do
         |> push(path, {:user, d.content})
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> Map.put(:ended_at, nil)
-        |> unconfirmed(d)
         |> set_state(:running, ts)
-
-      # A remote session renders your own input before the server has seen it;
-      # `input.accepted` carrying the same command id is what confirms it.
-      :input_accepted ->
-        %{w | unconfirmed: Map.delete(w.unconfirmed, d[:command_id])}
-
-      # Remote tool calls announce themselves; a local one is announced by the
-      # assistant message that asked for it.
-      :tool_started ->
-        push(
-          ensure_agent(w, path),
-          path,
-          {:tool, new_tool(d.call_id, d.name, summarize_input(d.name, d.input))}
-        )
-
-      :remote_note ->
-        push(ensure_agent(w, path), path, {:system, d.text})
 
       :llm_delta ->
         w
@@ -407,13 +373,6 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   defp set_state(w, state, _ts), do: %{w | state: state}
-
-  # Only the optimistic copy of an input carries a command id worth waiting on:
-  # one that came off the wire is already confirmed by definition.
-  defp unconfirmed(w, %{optimistic: true, command_id: id, content: text}) when is_binary(id),
-    do: %{w | unconfirmed: Map.put(w.unconfirmed, id, text)}
-
-  defp unconfirmed(w, _data), do: w
 
   # An agent that is gone never logs `approval_answered`/`question_answered`, so
   # its request would sit in `pending` forever: unanswerable (Approvals dropped

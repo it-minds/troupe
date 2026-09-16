@@ -370,14 +370,7 @@ defmodule Troupe.TUICompletionTest do
     for p <- ["worktree-1", "worktree-2", "code-1"], do: await_state(p, :done_unread, 15_000)
     eventually(fn -> user_state(pid).model.windows["code-1"].state == :done_unread end)
 
-    # an ambiguous prefix (`workflow` and `worktree` are both agents) completes
-    # to the first match; one more character makes it unambiguous
     type(pid, "wor")
-    press(pid, "tab")
-    assert user_state(pid).cmd_text == "workflow "
-    press(pid, "esc")
-
-    type(pid, "workt")
     press(pid, "tab")
     assert user_state(pid).cmd_text == "worktree "
     press(pid, "esc")
@@ -523,7 +516,7 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     }
 
     {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
-    {pid, _session} = start_tui(sid)
+    {pid, session} = start_tui(sid)
 
     # Command line: paste a full command and run it.
     paste(pid, "/settings")

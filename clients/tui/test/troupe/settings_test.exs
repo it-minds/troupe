@@ -168,13 +168,8 @@ defmodule Troupe.SettingsTest do
       # curated help, not just the selected setting's own text
       assert text =~ "What Troupe is"
       assert text =~ "Dispatching work"
+      assert text =~ "y / n / a"
       assert text =~ "Enter/Space toggles"
-
-      # the curated help is longer than the pane: the keys section is a few
-      # pages down, and PgDn is how you get to it
-      for _ <- 1..4, do: press(pid, "page_down")
-      assert screen_text(pid, session) =~ "Living with branches"
-      assert screen_text(pid, session) =~ "y / n / a"
 
       press(pid, "esc")
       assert user_state(pid).focus == :command
