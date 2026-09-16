@@ -68,7 +68,29 @@ defmodule Troupe.CoreTest do
     {:ok, path} = Troupe.dispatch(sid, "code", "sleep in parallel")
     await_state(path, :done_unread)
     elapsed = System.monotonic_time(:millisecond) - t0
-    assert elapsed < 1_000, "took #{elapsed}ms"
+
+    # What the done item is really about is that the three sleeps overlap: every
+    # one of them started before the first finished. That is exact, and unlike a
+    # stopwatch it does not care how contended the machine is.
+    shell_calls =
+      sid
+      |> events_of(path, :tool_call_started)
+      |> Enum.filter(&(&1.data.name == "shell"))
+
+    ids = Enum.map(shell_calls, & &1.data.call_id)
+    assert length(ids) == 3
+
+    ends =
+      sid
+      |> events_of(path, :tool_call_completed)
+      |> Enum.filter(&(&1.data.call_id in ids))
+      |> Enum.map(& &1.ts)
+
+    assert Enum.max(Enum.map(shell_calls, & &1.ts)) < Enum.min(ends), "the sleeps did not overlap"
+
+    # And the clock still has to rule out serial execution: three 500 ms sleeps
+    # one after another cannot finish inside this, however slow the box is.
+    assert elapsed < 1_400, "took #{elapsed}ms"
 
     [_, second | _] = Fake.requests(fake)
     results = second.messages |> List.last() |> Map.get(:content)
