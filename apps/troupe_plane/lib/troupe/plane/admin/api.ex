@@ -655,6 +655,46 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.person.budget",
+      function: :person_budget,
+      summary:
+        "Set or clear a person's own spend ceiling, in millionths, across every team they are in. 0 or absent is no ceiling.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "subject",
+          type: :string,
+          required: true,
+          description: "The person's subject, as the identity provider spells it."
+        },
+        %Argument{
+          name: "budget_micros",
+          type: :integer,
+          description: "The ceiling. Absent or 0 clears it."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.budget.explain",
+      function: :budget_explain,
+      summary:
+        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, and which rung set it.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "subject",
+          type: :string,
+          required: true,
+          description: "The person's subject."
+        },
+        %Argument{
+          name: "team",
+          type: :string,
+          description: "The team whose ceiling to include. Absent leaves that rung out."
+        }
+      ]
+    },
+    %Method{
       name: "admin.triggers.list",
       function: :triggers_list,
       summary: "A team's triggers: what fires them, what they run, and whether they are enabled.",

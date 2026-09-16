@@ -101,6 +101,19 @@ defmodule Troupe.Plane.Identity do
   def get_user("svc:" <> _ = subject), do: Principals.user_for(subject)
   def get_user(subject), do: Repo.get_by(User, subject: subject)
 
+  @doc """
+  Set or clear a person's own spend ceiling.
+
+  Through `User.budget_changeset/2` rather than the changeset SCIM and a login write, so
+  a provider push cannot reset it. `nil` and `0` both clear it.
+  """
+  @spec set_budget(User.t(), integer() | nil) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def set_budget(%User{} = user, budget_micros) do
+    user
+    |> User.budget_changeset(%{budget_micros: budget_micros})
+    |> Repo.update()
+  end
+
   @doc "A user by the id this plane gave them, or `nil`. SCIM addresses people this way."
   @spec get_user_by_id(Ecto.UUID.t()) :: User.t() | nil
   def get_user_by_id(id) do

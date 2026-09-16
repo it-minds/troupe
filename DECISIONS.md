@@ -3111,3 +3111,68 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      an agent — had to declare itself a webhook, which was a lie about what was expected to
      call it. This is the document's kind and is still not the run's source: a `manual`
      trigger fired by CI is a `ci` run.
+
+465. **A cap is a ceiling at any scope, and the tightest one refuses.** Four rungs —
+     deployment, platform, team, person — over the same reservation, walked narrowest
+     first so the refusal a caller sees is the one closest to them. A person at their own
+     cap inside a team with room to spare is told it is *theirs*, because that is the one
+     they can do something about; "budget exhausted" without a scope sends them to a team
+     admin who cannot help.
+
+466. **A scope with no cap set does not participate.** Zero and `nil` both mean no
+     ceiling, at every rung, exactly as an entitlement's absence does. A person who has
+     never been given a budget should not be unable to work, and a rung that read an unset
+     cap as zero would stop the whole deployment the day it was added.
+
+467. **The deployment's ceiling and the platform's are one rung.** They are two caps over
+     one number — everything this plane has spent and promised — and two actors for two
+     caps on one total would be two answers to one question. The stored one applies only
+     when it is *tighter*: an operator who could raise it from inside the console could
+     raise it past what the people paying for this agreed to. The refusal names which of
+     the two bound.
+
+468. **One promise is one row, written by the ladder after every rung agrees.** Each rung
+     decides and holds; none of them writes. `TeamBudget` used to write the row inside its
+     own grant, which was right when it was the only rung and is wrong now — a row written
+     by the first rung is read by the rungs after it as a promise somebody else made, and
+     the reservation would be counted against itself.
+
+469. **A rung that refuses unwinds the rungs that had already agreed.** Without it, a
+     person who kept failing against their team's ceiling would slowly eat their own, and
+     nothing would say so until they could not start anything anywhere. It is the same
+     compensating shape `session.create` already uses when a pod declines a session the
+     plane had found room for.
+
+470. **`PersonBudget` re-reads the ledger on every decision rather than caching what has
+     been spent.** Charges arrive through the *team's* actor, so a per-person total kept
+     in this process would drift the first time one landed. One query per session create
+     is not a hot path, and this is the lesson the placement actor already taught at a
+     cost: a count held in a process and never reloaded is a count that is permanently
+     wrong from the first thing it did not see. `TeamBudget` now reloads on reserve too,
+     for the same reason.
+
+471. **A person's cap follows them between teams.** One actor per subject, summing across
+     the whole ledger. A cap per team per person would be a cap somebody clears by being
+     added to a second team, which is not a cap.
+
+472. **A principal's spend counts against its sponsor.** The person answerable for the
+     run, not the credential that made it — the subject half of the pair the origin
+     already records. A cap that counted only what somebody typed into would be one they
+     step around by writing a trigger.
+
+473. **A person's ceiling is Troupe's opinion, not the provider's.** It lives on the
+     `users` row but is written through a changeset of its own, never the one SCIM and a
+     login use. A cap that could arrive through the provider's door is a cap the next
+     nightly sync silently resets.
+
+474. **A session's slice is trimmed against the tightest ceiling, not only the team's.** A
+     slice cut to what the team had left and then refused by the person's cap a line later
+     would be a refusal the caller could have been spared, and one that said the wrong
+     thing about why. Trimming rather than refusing is the existing rule kept: a nightly
+     trigger near the end of a period should run on the remainder.
+
+475. **Setting a person's cap is a platform admin's, and it is done from the team page.**
+     The authority is platform-level because the cap crosses teams — a team admin who
+     could set it could cap somebody in a team they do not administer. The *place* is the
+     team page because that is where somebody is standing when they wonder who is near
+     theirs, and the flash says "in every team" so nobody mistakes it for a team setting.

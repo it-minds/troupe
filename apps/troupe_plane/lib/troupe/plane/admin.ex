@@ -35,6 +35,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.{
     Audit,
     Breakglass,
+    Budget,
     Bundles,
     ClusterPolicy,
     Drain,
@@ -952,6 +953,73 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Set or clear a person's own spend ceiling, across every team they are in.
+
+  A platform admin's, not a team admin's. A cap that follows somebody between teams is a
+  statement about the person rather than about any one team, and a team admin who could
+  set it could cap somebody in a team they do not administer.
+
+  `nil` or `0` clears it: absence means everything, exactly as it does at every other
+  rung.
+  """
+  @spec person_budget(actor(), String.t(), integer() | nil) :: result()
+  def person_budget(actor, subject, budget_micros) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, user} <- fetch_user(subject) do
+      before = user.budget_micros
+
+      case Identity.set_budget(user, budget_micros) do
+        {:ok, updated} ->
+          changes = Audit.diff(%{budget_micros: before}, %{budget_micros: updated.budget_micros})
+          {:ok, _} = Audit.record(actor.subject, "person.budget", subject, changes)
+
+          {:ok, %{subject: subject, budget_micros: updated.budget_micros, changes: changes}}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  @doc """
+  Every ceiling that applies to a person here, narrowest first.
+
+  The answer to "why was that refused": four numbers, in the order they are checked,
+  with the one that would bind first at the top. A person told they are over budget
+  should be able to see which of the four without asking anybody.
+  """
+  @spec budget_explain(actor(), String.t(), String.t() | nil) :: result()
+  def budget_explain(actor, subject, team_name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- optional_team(actor, team_name) do
+      {:ok, Budget.ceilings(team, subject)}
+    end
+  end
+
+  defp optional_team(_actor, nil), do: {:ok, nil}
+  defp optional_team(actor, name), do: fetch_team(actor, name)
+
+  defp fetch_user(subject) when is_binary(subject) do
+    case Identity.get_user(subject) do
+      nil -> {:error, Error.new(:not_found, %{subject: subject})}
+      user -> {:ok, user}
+    end
+  end
+
+  defp fetch_user(_other), do: {:error, Error.new(:invalid_params, %{missing: "subject"})}
+
+  defp member_summary(user) do
+    %{
+      subject: user.subject,
+      display_name: user.display_name,
+      budget_micros: user.budget_micros,
+      spent_micros: Ledger.spent_micros_for(user.subject),
+      reserved_micros:
+        user.subject |> Ledger.open_reservations_for() |> Map.values() |> Enum.sum()
+    }
+  end
+
   @doc "Remove a trigger. Its runs go with it; the sessions they created do not."
   @spec trigger_delete(actor(), String.t(), String.t()) :: result()
   def trigger_delete(actor, team_name, name) do
@@ -1287,7 +1355,12 @@ defmodule Troupe.Plane.Admin do
         ),
       # Read-only, always: membership comes from the identity provider and a method to
       # change it would be a second source of truth for who is in a team.
-      members: Enum.map(Identity.members_of_team(team), & &1.subject),
+      #
+      # Their own ceilings come with them, because the question a team admin looking at a
+      # budget asks next is which of their people is near theirs — and a cap that follows
+      # somebody between teams is invisible on a page organised by team unless it is put
+      # here.
+      members: Enum.map(Identity.members_of_team(team), &member_summary/1),
       # What the team has actually spent, against what it promised. Both are aggregates
       # over an append-only table and both go through `Ledger.Cache`, so a page that is
       # reloaded costs a lookup rather than a scan.

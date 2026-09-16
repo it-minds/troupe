@@ -282,13 +282,15 @@ defmodule Troupe.Plane.AdminTest do
     # empty map is `[]` and sums to zero. One open reservation is all it took: the page
     # answered 500 for every admin as soon as a single session was running.
     test "spend is still readable once a team has budget reserved", context do
-      {:ok, _reservation} = Ledger.reserve(context.engineering.id, "s-running", 5_000_000)
+      {:ok, _reservation} =
+        Ledger.reserve(context.engineering.id, "s-running", "lead@example.test", 5_000_000)
 
       assert {:ok, overview} = Admin.overview(context.lead)
       assert [%{name: "engineering", reserved_micros: 5_000_000}] = overview.teams
 
       # And it is a sum over the open ones, not the first or the last.
-      {:ok, _second} = Ledger.reserve(context.engineering.id, "s-also-running", 2_500_000)
+      {:ok, _second} =
+        Ledger.reserve(context.engineering.id, "s-also-running", "lead@example.test", 2_500_000)
       assert {:ok, more} = Admin.overview(context.lead)
       assert [%{reserved_micros: 7_500_000}] = more.teams
 
@@ -349,8 +351,9 @@ defmodule Troupe.Plane.AdminTest do
     test "edit who is in a team", context do
       assert {:ok, [team]} = Admin.teams_list(context.lead)
 
-      # Members are shown and are read-only: the list comes from the identity provider.
-      assert "member@example.test" in team.members
+      # Members are shown and the list is read-only: it comes from the identity provider.
+      # Each carries their own spend ceiling, which is Troupe's and not the provider's.
+      assert "member@example.test" in Enum.map(team.members, & &1.subject)
       refute function_exported?(Admin, :team_members_set, 3)
       refute function_exported?(Admin, :team_member_add, 3)
     end

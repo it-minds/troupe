@@ -329,7 +329,7 @@ defmodule Troupe.Plane.PanelTest do
       {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
 
       assert html =~ "member" or html =~ "Members"
-      assert html =~ "From the identity provider, and read-only here."
+      assert html =~ "From the identity provider, and read-only here"
       refute html =~ "add member"
       refute html =~ "remove member"
     end

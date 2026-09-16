@@ -15,9 +15,9 @@ defmodule Troupe.Plane.Ledger do
 
   import Ecto.Query
 
-  alias Troupe.Plane.Identity.Team
+  alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Ledger.{Cache, Reservation, UsageRecord}
-  alias Troupe.Plane.Repo
+  alias Troupe.Plane.{Repo, Settings}
 
   @doc """
   Record what one model call cost.
@@ -135,19 +135,31 @@ defmodule Troupe.Plane.Ledger do
     Repo.one(from(t in Team, where: t.id == ^team_id, select: t.budget_micros)) || 0
   end
 
-  @doc "Promise part of a team's budget to a session."
-  @spec reserve(Ecto.UUID.t(), String.t(), non_neg_integer()) ::
+  @doc """
+  Promise part of a budget to a session.
+
+  One row per session, against a team *and* a person: the same promise is what both
+  ceilings are checked against, so a session cannot be counted twice by being reserved
+  twice, and cannot be missed by one rung because it was written for the other.
+  """
+  @spec reserve(Ecto.UUID.t(), String.t(), String.t() | nil, non_neg_integer()) ::
           {:ok, Reservation.t()} | {:error, term()}
-  def reserve(team_id, session_id, amount_micros) do
-    attrs = %{team_id: team_id, session_id: session_id, amount_micros: amount_micros}
+  def reserve(team_id, session_id, owner_subject, amount_micros) do
+    attrs = %{
+      team_id: team_id,
+      session_id: session_id,
+      owner_subject: owner_subject,
+      amount_micros: amount_micros,
+      released_at: nil
+    }
 
     (Repo.get_by(Reservation, session_id: session_id) || %Reservation{})
-    |> Reservation.changeset(Map.put(attrs, :released_at, nil))
+    |> Reservation.changeset(attrs)
     |> Repo.insert_or_update()
   end
 
   @doc "Let a promise go, because the session stopped."
-  @spec release(Ecto.UUID.t(), String.t()) :: :ok
+  @spec release(Ecto.UUID.t() | nil, String.t()) :: :ok
   def release(_team_id, session_id) do
     Repo.update_all(
       from(r in Reservation, where: r.session_id == ^session_id and is_nil(r.released_at)),
@@ -167,6 +179,86 @@ defmodule Troupe.Plane.Ledger do
       )
     )
     |> Map.new()
+  end
+
+  @doc "Every open promise on this plane, by session."
+  @spec open_reservations() :: %{String.t() => non_neg_integer()}
+  def open_reservations do
+    Repo.all(
+      from(r in Reservation,
+        where: is_nil(r.released_at),
+        select: {r.session_id, r.amount_micros}
+      )
+    )
+    |> Map.new()
+  end
+
+  @doc """
+  What one person has spent, across every team they are in.
+
+  Attributed by `owner_subject` on the usage record, which for a session a trigger
+  started is the principal's sponsor. A cap on a person that only counted the sessions
+  they typed into would be a cap they could step around by writing a trigger.
+  """
+  @spec spent_micros_for(String.t()) :: non_neg_integer()
+  def spent_micros_for(subject) when is_binary(subject) do
+    Repo.one(
+      from(u in UsageRecord,
+        where: u.owner_subject == ^subject,
+        select: type(coalesce(sum(u.cost_micros), 0), :integer)
+      )
+    ) || 0
+  end
+
+  @doc "Promises one person has outstanding, by session."
+  @spec open_reservations_for(String.t()) :: %{String.t() => non_neg_integer()}
+  def open_reservations_for(subject) when is_binary(subject) do
+    Repo.all(
+      from(r in Reservation,
+        where: r.owner_subject == ^subject and is_nil(r.released_at),
+        select: {r.session_id, r.amount_micros}
+      )
+    )
+    |> Map.new()
+  end
+
+  @doc """
+  What the whole deployment has spent and promised, for the two ceilings above a team.
+
+  Not cached and not held in a process between calls. It is read once per session
+  create, which is not a hot path, and a number that was right a minute ago is exactly
+  the sort of thing that lets a deployment quietly pass its own ceiling.
+  """
+  @spec platform_totals() :: %{spent_micros: non_neg_integer(), reserved_micros: non_neg_integer()}
+  def platform_totals do
+    spent =
+      Repo.one(from(u in UsageRecord, select: type(coalesce(sum(u.cost_micros), 0), :integer))) ||
+        0
+
+    reserved =
+      Repo.one(
+        from(r in Reservation,
+          where: is_nil(r.released_at),
+          select: type(coalesce(sum(r.amount_micros), 0), :integer)
+        )
+      ) || 0
+
+    %{spent_micros: spent, reserved_micros: reserved}
+  end
+
+  @doc """
+  A person's own ceiling, or the platform's default for people who have none.
+
+  A principal has no `users` row and takes the default: a credential's spend is
+  attributed to its sponsor, so the principal's own subject only reaches here when a row
+  predates sponsors and there is nobody else to name.
+  """
+  @spec person_budget_micros(String.t()) :: non_neg_integer()
+  def person_budget_micros(subject) when is_binary(subject) do
+    case Repo.one(from(u in User, where: u.subject == ^subject, select: u.budget_micros)) do
+      nil -> Settings.get("default_person_budget_micros") || 0
+      own -> own
+    end
   end
 
   @doc "Every usage record for a team in a window, for reconciliation and reporting."

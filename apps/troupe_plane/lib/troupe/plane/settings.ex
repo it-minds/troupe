@@ -91,6 +91,26 @@ defmodule Troupe.Plane.Settings do
       effect: :next_team
     },
     %Setting{
+      key: "platform_budget_micros",
+      group: :administration,
+      type: :integer,
+      fallback: 0,
+      summary: "A ceiling on everything this plane spends, in millionths. 0 is no ceiling.",
+      consequence:
+        "Above every team's. It only ever narrows: where the deployment was given a tighter ceiling, that one binds and this is ignored. A reservation refused here names which of the two it was.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "default_person_budget_micros",
+      group: :team_defaults,
+      type: :integer,
+      fallback: 0,
+      summary: "The spend ceiling a person gets, in millionths, across every team.",
+      consequence:
+        "Applied to people who have not been given one of their own. 0 is unlimited, which is what everybody gets today unless you set this.",
+      effect: :immediate
+    },
+    %Setting{
       key: "default_budget_period",
       group: :team_defaults,
       type: :enum,

@@ -41,6 +41,19 @@ defmodule Troupe.Plane.Web.Live.Teams do
     respond(socket, Admin.team_update(socket.assigns.actor, name, attrs), "#{name} updated")
   end
 
+  # A person's own ceiling, set from the team page because that is where somebody is
+  # looking when they wonder who is near theirs. The cap itself is not the team's: it
+  # follows them into every team they are in, which is what the flash says.
+  def handle_event("person-cap", %{"subject" => subject} = params, socket) do
+    micros = params["budget_micros"]
+
+    respond(
+      socket,
+      Admin.person_budget(socket.assigns.actor, subject, cap_of(micros)),
+      "#{subject}: #{cap_note(cap_of(micros))} in every team"
+    )
+  end
+
   def handle_event("grant", %{"team" => name, "profile" => profile}, socket) do
     respond(
       socket,
@@ -129,6 +142,39 @@ defmodule Troupe.Plane.Web.Live.Teams do
   defp respond(socket, {:error, error}, _message) do
     {:noreply, assign(socket, flash_message: error.message)}
   end
+
+  # A blank field clears the cap rather than leaving it alone, which is the opposite of
+  # every other field on this page — and is right here, because "no ceiling" is a value
+  # somebody means and there is no other way to say it.
+  defp cap_of(nil), do: nil
+  defp cap_of(""), do: nil
+
+  defp cap_of(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {number, _rest} when number > 0 -> number
+      _otherwise -> nil
+    end
+  end
+
+  defp cap_note(nil), do: "no spend ceiling"
+  defp cap_note(micros), do: "a ceiling of #{money(micros)}"
+
+  # Never `money/1` for what has been spent: that answers "unlimited" for zero, which is
+  # right for a ceiling and nonsense for a total.
+  defp member_note(member) do
+    spent = :erlang.float_to_binary(member.spent_micros / 1_000_000, decimals: 2)
+
+    promised =
+      if member.reserved_micros > 0,
+        do:
+          ", #{:erlang.float_to_binary(member.reserved_micros / 1_000_000, decimals: 2)} promised",
+        else: ""
+
+    "#{spent} spent#{promised} · #{cap_note(member.budget_micros && positive(member.budget_micros))}"
+  end
+
+  defp positive(micros) when micros > 0, do: micros
+  defp positive(_micros), do: nil
 
   # A field left blank is a field nobody changed, not a field set to nothing. Every one of
   # these has a meaning at its current value and none of them has a meaning as `""`.
@@ -411,7 +457,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
             <input name="sponsor" list={"members-#{team.name}"} placeholder="somebody in this team" />
           </label>
           <datalist id={"members-#{team.name}"}>
-            <option :for={member <- team.members} value={member} />
+            <option :for={member <- team.members} value={member.subject} />
           </datalist>
           <p class="hint">
             A person in this team, answerable for what it does. If they leave, it stops
@@ -422,9 +468,30 @@ defmodule Troupe.Plane.Web.Live.Teams do
         </form>
 
         <h3>Members</h3>
-        <p class="hint">From the identity provider, and read-only here.</p>
+        <p class="hint">
+          From the identity provider, and read-only here — except a person's own spend
+          ceiling, which is Troupe's and follows them into every team they are in.
+          Blank is no ceiling.
+        </p>
         <ul class="members">
-          <li :for={member <- team.members}>{member}</li>
+          <li :for={member <- team.members}>
+            {member.subject}
+            <span class="none">{member_note(member)}</span>
+            <form
+              :if={@actor.role == :platform_admin}
+              id={"cap-#{team.name}-#{member.subject}"}
+              phx-submit="person-cap"
+            >
+              <input type="hidden" name="subject" value={member.subject} />
+              <input
+                type="number"
+                name="budget_micros"
+                value={member.budget_micros}
+                placeholder="no cap"
+              />
+              <button type="submit">set cap</button>
+            </form>
+          </li>
           <li :if={team.members == []} class="none">nobody</li>
         </ul>
       </div>

@@ -15,7 +15,7 @@ defmodule Troupe.Plane.Harness do
   Creating a session is the one interesting path, and it is a sequence of reservations
   that must each be given back if a later one fails:
 
-      capacity (Placement) -> budget (TeamBudget) -> row -> push to the pod -> token
+      capacity (Placement) -> budget (Budget, every rung) -> row -> push to the pod -> token
 
   The pushes are routed rather than broadcast, because a pod is attached to exactly one
   plane replica and it is rarely the one the harness reached.
@@ -24,11 +24,21 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.KMS
   alias Troupe.ObjectStore
 
-  alias Troupe.Plane.{Audit, Bundles, Connections, Erasure, Fleet, Identity, Placement, Sessions}
+  alias Troupe.Plane.{
+    Audit,
+    Budget,
+    Bundles,
+    Connections,
+    Erasure,
+    Fleet,
+    Identity,
+    Placement,
+    Sessions
+  }
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.{ACL, Session}
-  alias Troupe.Plane.{TeamBudget, Tokens, Triggers}
+  alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Error, Token}
@@ -249,8 +259,11 @@ defmodule Troupe.Plane.Harness do
     with {:ok, team} <- team_for(user, profile, params["team"]),
          {:ok, agent} <- agent_for(profile, team, params["agent"]),
          {:ok, prompt} <- prompt_for(params["prompt"]),
-         {:ok, terms} <- terms_for(params["terms"], team),
+         # Before the terms, because whose cap a slice is trimmed against depends on who
+         # the run is answerable to, and that is what the origin says.
          {:ok, origin} <- origin_for(params["origin"]),
+         answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
+         {:ok, terms} <- terms_for(params["terms"], team, answerable),
          session_id = params["session_id"] || generate_id(),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
          {:ok, worker} <- reserve_capacity(session, unwind: true),
@@ -496,38 +509,57 @@ defmodule Troupe.Plane.Harness do
   # that silently did not apply. `approvals` defaults to `wait`; there is no `auto`, since
   # an unattended session that approves its own shell commands is the thing this design
   # refuses — a trigger that needs none gets a profile whose definition says so.
-  defp terms_for(nil, _team), do: {:ok, %{"approvals" => "wait"}}
+  defp terms_for(nil, _team, _subject), do: {:ok, %{"approvals" => "wait"}}
 
-  defp terms_for(%{} = terms, team) do
+  defp terms_for(%{} = terms, team, subject) do
     with :ok <- only_keys(terms, @term_keys, "terms"),
          :ok <- in_range(terms, "budget_micros", 1, nil),
          :ok <- in_range(terms, "max_turns", 1, 500),
          :ok <- in_range(terms, "wall_clock_seconds", 60, 86_400),
          :ok <- one_of(terms, "approvals", ~w(wait deny)) do
-      cap_budget(Map.put_new(terms, "approvals", "wait"), team)
+      cap_budget(Map.put_new(terms, "approvals", "wait"), team, subject)
     end
   end
 
-  defp terms_for(_other, _team), do: invalid("terms is an object")
+  defp terms_for(_other, _team, _subject), do: invalid("terms is an object")
 
-  # A slice larger than what the team has left is trimmed to what is left, rather than
-  # refused: a nightly trigger near the end of a budget period should run on the
-  # remainder, and the ledger stops it when that is spent. Nothing left is a refusal.
-  defp cap_budget(%{"budget_micros" => asked} = terms, team) do
-    case TeamBudget.inspect_state(team) do
-      %{remaining_micros: :unlimited} ->
-        {:ok, terms}
-
-      %{remaining_micros: remaining} when remaining > 0 ->
-        {:ok, Map.put(terms, "budget_micros", min(asked, remaining))}
-
-      %{remaining_micros: _none} ->
-        {:error,
-         Error.new(:budget_exhausted, %{team: team.name, reason: "nothing left to reserve"})}
+  # The bottom rung of the ladder: a session's slice is trimmed to the least any ceiling
+  # above it has left, rather than refused — a nightly trigger near the end of a budget
+  # period should run on the remainder, and the ledger stops it when that is spent.
+  #
+  # Every ceiling, not only the team's. A slice trimmed to what the team has left and
+  # then refused by the person's cap a line later would be a refusal the caller could
+  # have been spared, and one that said the wrong thing about why.
+  defp cap_budget(%{"budget_micros" => asked} = terms, team, subject) do
+    case tightest_remaining(team, subject) do
+      :unlimited -> {:ok, terms}
+      {_scope, remaining} when remaining > 0 -> {:ok, Map.put(terms, "budget_micros", min(asked, remaining))}
+      {scope, _none} -> {:error, nothing_left(team, scope)}
     end
   end
 
-  defp cap_budget(terms, _team), do: {:ok, terms}
+  defp cap_budget(terms, _team, _subject), do: {:ok, terms}
+
+  # Narrowest first, so a tie between two ceilings with the same remainder is reported
+  # as the closer of the two — which is the one the caller can act on.
+  defp tightest_remaining(team, subject) do
+    team
+    |> Budget.ceilings(subject)
+    |> Enum.reject(&(&1.remaining_micros == :unlimited))
+    |> Enum.min_by(& &1.remaining_micros, fn -> nil end)
+    |> case do
+      nil -> :unlimited
+      ceiling -> {ceiling[:bound_by] || ceiling.scope, ceiling.remaining_micros}
+    end
+  end
+
+  defp nothing_left(team, scope) do
+    Error.new(:budget_exhausted, %{
+      scope: scope,
+      team: team && team.name,
+      reason: "nothing left to reserve"
+    })
+  end
 
   # What started this session: a person by default, a trigger or an A2A caller when they
   # say so. Recorded on the row and passed to the pod for `session_created`, so the
@@ -766,16 +798,40 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp reserve_budget(team, session) do
-    case TeamBudget.reserve(team, session.id, slice_of(session)) do
-      {:ok, reservation} ->
-        {:ok, reservation}
+    case Budget.reserve(team, session.id, answerable_for(session), slice_of(session)) do
+      {:ok, ceilings} ->
+        {:ok, ceilings}
 
-      {:error, reason} ->
+      {:error, {:over_budget, scope, summary}} ->
         Placement.release(session.profile, session.id)
         Sessions.delete(session.id)
-        {:error, Error.new(:budget_exhausted, %{team: team.name, reason: inspect(reason)})}
+        {:error, over_budget(team, scope, summary)}
     end
   end
+
+  # Which ceiling refused, and what it has left. "Budget exhausted" without a scope is a
+  # support ticket: a person at their own cap inside a team with room to spare needs to
+  # be told it is *theirs*, because that is the one they can do something about.
+  defp over_budget(team, scope, summary) do
+    Error.new(:budget_exhausted, %{
+      scope: scope,
+      team: team && team.name,
+      budget_micros: summary[:budget_micros],
+      spent_micros: summary[:spent_micros],
+      reserved_micros: summary[:reserved_micros],
+      subject: summary[:subject]
+    })
+  end
+
+  # Whose cap a session's spend counts against. For a person, themselves. For a session
+  # a trigger started, the principal's **sponsor** — the human answerable for the run —
+  # which the origin already records as the subject half of the pair. A cap that counted
+  # only what somebody typed into would be a cap they step around by writing a trigger.
+  defp answerable_for(%{origin: %{"principal" => %{"subject" => subject}}})
+       when is_binary(subject),
+       do: subject
+
+  defp answerable_for(%{owner_subject: subject}), do: subject
 
   # What a session reserves each time it starts: its own terms' slice, already capped by
   # what the team had when it was created, or the default.
@@ -844,7 +900,7 @@ defmodule Troupe.Plane.Harness do
         # The pod could not take it, so nothing may be left holding a slot for it — and
         # the row goes too, because a session that never started is not a session.
         Placement.release(session.profile, session.id)
-        TeamBudget.release(team, session.id)
+        Budget.release(team, session.id, answerable_for(session))
         Sessions.delete(session.id)
 
         {:error,
@@ -923,16 +979,20 @@ defmodule Troupe.Plane.Harness do
   defp reserve_budget_again(%{team_id: nil}), do: :ok
 
   defp reserve_budget_again(session) do
-    case TeamBudget.reserve(session.team_id, session.id, slice_of(session)) do
-      {:ok, _reservation} ->
+    case Budget.reserve(session.team_id, session.id, answerable_for(session), slice_of(session)) do
+      {:ok, _ceilings} ->
         :ok
 
-      {:error, reason} ->
+      {:error, {:over_budget, scope, summary}} ->
         Placement.release(session.profile, session.id)
         Sessions.dormant(session.id)
 
         {:error,
-         Error.new(:budget_exhausted, %{team: team_name(session), reason: inspect(reason)})}
+         Error.new(
+           :budget_exhausted,
+           %{scope: scope, team: team_name(session)}
+           |> Map.merge(Map.take(summary, [:budget_micros, :spent_micros, :subject]))
+         )}
     end
   end
 

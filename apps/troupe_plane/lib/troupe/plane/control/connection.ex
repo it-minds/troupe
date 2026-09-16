@@ -16,6 +16,7 @@ defmodule Troupe.Plane.Control.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Plane.{
+    Budget,
     Bundles,
     Enrolment,
     Erasure,
@@ -502,12 +503,24 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # Every rung, not only the team's. A release that gave back the team's slice and left
+  # the person's held would make somebody's own cap drift upward with every session they
+  # ever put to sleep, and nothing would say so until they could not start one.
   defp release_budget(session_id) do
     case Sessions.get(session_id) do
-      %{team_id: team_id} when is_binary(team_id) -> TeamBudget.release(team_id, session_id)
-      _ -> :ok
+      %{} = session -> Budget.release(session.team_id, session_id, answerable_for(session))
+      _none -> :ok
     end
   end
+
+  # Whose cap this session's spend counts against: the sponsor behind a trigger's run,
+  # and otherwise the owner. The same answer the plane gave when it reserved, because a
+  # release that named a different person would give back somebody else's slice.
+  defp answerable_for(%{origin: %{"principal" => %{"subject" => subject}}})
+       when is_binary(subject),
+       do: subject
+
+  defp answerable_for(%{owner_subject: subject}), do: subject
 
   # Turned into the ledger's shape here rather than trusted as sent: a worker names the
   # call and its cost, and the plane names whose session it was. Nothing a pod says about
