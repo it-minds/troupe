@@ -25,6 +25,10 @@ Troupe.Application (one_for_one)
 │       │       └── Agent.Server    :gen_statem, the agent
 │       ├── Session.Dispatcher GenServer, command parser + window ledger, no model
 │       └── Session.Watcher    GenServer, watch mode (AI comments), started last
+├── Troupe.Remote.Supervisor (one_for_one)    the remote client (§9)
+│   ├── Troupe.Remote.Tokens        GenServer, credential store
+│   ├── Troupe.Remote.Connections   DynamicSupervisor → Troupe.Remote.Plane (one per plane)
+│   └── Troupe.Remote.Sessions      DynamicSupervisor → Troupe.Remote.Journal + Troupe.Remote.Worker (one each per attached session)
 └── Troupe.UI.Supervisor (one_for_one)
     └── Troupe.UI.TUI.Server | Troupe.UI.Headless.Printer | (nothing under `mix test`)
 ```
@@ -477,3 +481,110 @@ same `UI.TUI.Model.rebuild/3` a restart uses.
 * The TUI coalesces deltas and redraws at most 30 times per second; when its
   mailbox exceeds a threshold it collapses queued deltas. It never applies
   backpressure to a session.
+
+## 9. The client boundary and the remote client
+
+### 9.1 `Troupe.Client`
+
+The TUI and HQ call one module. `Troupe.Client` is a behaviour with two
+implementations and a facade that routes by session id:
+
+* `Troupe.Client.Local` wraps the in-process session API (`Troupe`,
+  `Session.Dispatcher`, `Session.Log`, `Session.Index`, …).
+* `Troupe.Client.Remote` speaks the remote contract over the plane and worker
+  connections.
+
+A session's implementation is found in `Troupe.Registry` under `{:client,
+session_id}`; the worker connection registers it while a remote session is
+attached, and everything else is local. Fleet-level calls (teams, profiles,
+listing, creating) take an *origin* — `{:local, workspace}` or `{:remote,
+plane_url}` — instead of a session id.
+
+`mix troupe.xref` fails the build if any module under `Troupe.UI` calls a
+`Troupe.*` module other than `Troupe.Client`, its own namespace, or the pure
+data modules a renderer needs (`Troupe.Config`, `Troupe.Settings`,
+`Troupe.Event`, `Troupe.LLM.Message`, `Troupe.Codec`). It reads the BEAM import
+table of each compiled UI module, so it cannot be argued with.
+
+### 9.2 Processes
+
+```
+Troupe.Remote.Supervisor (one_for_one)
+├── Troupe.Remote.Tokens        GenServer, the credential store (refresh + access + session tokens)
+├── Troupe.Remote.Connections   DynamicSupervisor
+│   └── Troupe.Remote.Plane     GenServer, one per plane, owns its transport
+└── Troupe.Remote.Sessions      DynamicSupervisor
+    ├── Troupe.Remote.Journal   GenServer, one per attached session: JSONL + cursor
+    └── Troupe.Remote.Worker    GenServer, one per attached session, owns its WebSocket
+```
+
+Registry keys: `{:plane, plane_url}`, `{:remote_worker, session_id}`,
+`{:remote_journal, session_id}`, `{:client, session_id}`.
+
+`one_for_one` is the degraded mode: a plane that cannot be reached does not
+touch the attached sessions, which keep streaming from their workers.
+
+### 9.3 Transports
+
+| what | how |
+|---|---|
+| discovery, OIDC, device flow | HTTPS through `Troupe.Remote.HTTP` (Req), TLS verified against the OS trust store plus `TROUPE_CA_FILE` |
+| plane, when discovery gives `plane_ws` | WebSocket (`mint_web_socket`), bearer token on the upgrade |
+| plane, when discovery gives `plane.rpc` | JSON-RPC over `POST`, bearer token in the header (Decision 80) |
+| worker | WebSocket, session token on the upgrade |
+
+`Troupe.Remote.Socket` owns one WebSocket: the upgrade runs synchronously in
+passive mode, then the socket switches to active so frames arrive as messages
+to the owning GenServer. Pings are answered inside it.
+
+### 9.4 Streams, cursors and backpressure
+
+A worker connection subscribes to `session:<id>` from `cursor + 1`, where the
+cursor is the highest `seq` in the session's journal. Durable events are
+translated (§9.5), appended to the journal and published immediately; the
+journal drops a batch whose `seq` it already has, so a reconnect, a
+`resync_required` and a `-32012` all produce the same transcript as an
+unbroken connection.
+
+`llm.delta` is coalesced into one `:llm_delta` event per 33 ms with a 64 KB cap
+between flushes, and dropped past it — ephemeral events are allowed to be
+dropped, and the completed message always arrives as a durable event. Nothing
+in the client waits on the UI: publishing is a `send`, and a slow TUI costs the
+connection process nothing.
+
+### 9.5 Remote events as local ones
+
+`Troupe.Remote.Translate` turns the contract's event types into the harness's
+own, so the TUI model folds a remote session with the same code it folds a
+local one. Five local event types exist only for this (Decision 75):
+
+| local type        | from                                                                 |
+|-------------------|----------------------------------------------------------------------|
+| `:tool_started`   | `tool.started` — a local tool call is announced by its assistant message |
+| `:remote_note`    | `session.resumed`, `config.upgraded`, `acl.*`, `session.tainted`, unknown types |
+| `:remote_status`  | the worker's own capability (state, scopes, connection health)        |
+| `:input_accepted` | `input.accepted`, which reconciles the optimistic input line          |
+| `:fs_changed`     | `fs.changed`, which marks the files panel stale                       |
+
+Everything else maps onto existing types: `input.queued` → `:input`,
+`message.completed` → `:assistant_message`, `tool.completed` →
+`:tool_call_completed`, `approval.requested`/`approval.resolved` →
+`:approval_requested`/`:approval_answered`, `todo.changed` → `:todo_updated`,
+`agent.state` → `:agent_state`. The window a remote session lives in is opened
+by the first event that names an agent.
+
+### 9.6 Sessions that are not active
+
+Browsing uses `session.open` with mode `read`, which never wakes a dormant
+session. The first activating action (input, approval, todo edit, profile
+switch) on a session that is not active calls `session.open` with mode
+`activate` exactly once, from the worker connection, and reconnects to whatever
+endpoint comes back — which may be a different worker. `-32012` is the same
+path, retried with the same `command_id`.
+
+### 9.7 What a remote session cannot do
+
+`merge`, `discard`, watch mode, the project brief and settings belong to a
+local checkout or to the plane; `Client.Remote` answers each with a sentence
+saying so rather than failing silently. `dispatch` (a second branch in the same
+session) is not in the contract: HQ creates another session instead.

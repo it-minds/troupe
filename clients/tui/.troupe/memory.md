@@ -1,64 +1,55 @@
 ---
-built_at: 2026-09-11T16:18:03.569038Z
-head: 59f3453
-files: 137
+built_at: 2026-09-16T08:03:52.126942Z
+head: 5ce4072
+files: 188
 ---
 
 ## Overview
-Troupe is a local coding-agent harness built in Elixir on OTP (the actor model). It ships as one self-contained Burrito binary per platform (Linux, macOS, Windows) so users need no Erlang/Elixir installed. The root of a session is a dispatcher that spawns independent, supervised branch agents for each command (e.g. `/code fix the failing test`); branches run concurrently and the TUI shows them as tiles. Every session is an append-only JSONL event log; agent and window state are folds over that log, so crashes replay from it and `troupe resume` continues running branches. Zero LLM calls/tokens when idle.
+Troupe is a local coding-agent harness built in Elixir on OTP (the actor model). It ships as one self-contained Burrito binary per platform (Linux, macOS, Windows) so users need no Erlang/Elixir installed. The root of a session is a dispatcher that spawns independent, supervised branch agents for each command (e.g. `/code fix the failing test`); branches run concurrently and the TUI shows them as tiles. Every session is an append-only JSONL event log; agent and window state are folds over that log, so crashes replay from it and `troupe resume` continues running branches. Zero LLM calls/tokens when idle. Remote sessions run on a Troupe Remote plane instead of this machine.
 
 ## Layout
 - `lib/troupe/` — the full application
-  - `lib/troupe.ex` — public client API (`Troupe.run/2`, `Troupe.run/3`, etc.)
-  - `lib/troupe/application.ex` — OTP application supervisor (troupe, ui, watch, agents, session)
-  - `lib/troupe/cli.ex` — CLI entry point; `cli/runner.ex` — actual CLI logic (Burrito entry, blocks in the UI supervisor)
-  - `lib/troupe/session/` — Log (JSONL, single-writer), Approvals, Locks, Branches, Dispatcher (window ledger = fold over log), Watcher, Worktree, Memory, Dispatcher
-  - `lib/troupe/agent/` — Spec, Budget, State (fold over agent's own events — replay/live use same function), Prompt, Node (one_for_all), Server (`:gen_statem`)
+  - `lib/troupe.ex` — public client API (`Troupe.start_session/1`, `Troupe.dispatch/3`, `Troupe.subscribe/1`, `Troupe.resume/2`)
+  - `lib/troupe/application.ex` — OTP application supervisor
+  - `lib/troupe/cli.ex` — CLI entry point; runs in `troupe.ex` (Burrito entry point)
+  - `lib/troupe/session/` — Log (JSONL, single-writer), Approvals, Locks, Branches, Dispatcher (window ledger), Watcher, Worktree, Memory, Index
+  - `lib/troupe/agent/` — Spec, Budget, State (fold over agent's own events), Prompt, Node (one_for_all supervision), Server (`:gen_statem` state machine)
   - `lib/troupe/agents/` — `agents.ex` (registry), `agents/definition.ex` (YAML frontmatter parsing for agent profiles)
-  - `lib/troupe/tools/` — one module per tool (read_file, write_file, edit_file, grep, list_files, shell, diff, remember, todo, read_branch, web_fetch); `Tools` holds allowlists/permissions; inline tools (`finish`, `todo_*`, `ask_user`, `delegate`) run inside Agent.Server
-  - `lib/troupe/tool/` — `tool.ex` (base behaviour), `tool/context.ex` (context gathering), `tool/diff.ex` (unified diff output), `tool/runner.ex` (the only module allowed `try/rescue`)
-  - `lib/troupe/llm/` — Provider behaviour, Fake (all tests), Anthropic, OpenAI, HTTP client, SSE streaming, Message/Request structs; `llm/catalog.ex` + `catalog/store.ex` for provider catalog resolution
-  - `lib/troupe/ui/tui/` — Model (fold over events, rebuildable), View (widgets), Server (`ExRatatui.App`); `ui/headless/printer.ex`; `ui/supervisor.ex` (UI child supervisors)
+  - `lib/troupe/tools/` — read_file, write_file, edit_file, grep, list_files, shell, web_fetch, todo_write/todo_read, remember, ask_user, delegate, read_branch, finish; `Tools` holds allowlists/permissions
+  - `lib/troupe/tool/` — `tool.ex` (base behaviour), `tool/context.ex` (context gathering), `tool/diff.ex` (unified diff output), `tool/runner.ex` (only module with try/rescue)
+  - `lib/troupe/llm/` — Provider behaviour, Fake (all tests), Anthropic, OpenAI, HTTP client, SSE streaming, Message/Request structs; catalog store for model resolution
+  - `lib/troupe/ui/tui/` — Model (fold over events), View (widgets), Server (ExRatatui app); headless/printer.ex; supervisor.ex for UI child supervisors
   - `lib/troupe/watch/` — Backend behaviour, File system backend, Polling backend, Ignore patterns, Markers
-  - `lib/troupe/workspace.ex` — Workspace survey, paths, config, settings, memory; `workspace/survey.ex` for directory/file enumeration
-  - Supporting modules: `memory.ex` (brief parse/render/add_note), `codec.ex`, `paths.ex`, `event.ex`/`events.ex`, `frontmatter.ex`, `telemetry.ex`, `settings.ex`; `config/` subdirectory with `jsonc.ex` and `opencode.ex` providers; `os/process.ex` (reaper-wrapped OS processes)
-- `native/reaper/` — `reaper.zig`: process tree reaper; `Mix.Tasks.Compile.Reaper` in `mix.exs` cross-compiles it
-- `priv/agents/` — Built-in agent definitions (markdown + YAML frontmatter): code, plan, ask, explore, general, librarian, worktree
-- `test/` — Unit, property, and TUI tests; `test/support/helpers.ex` (`start_session!`, `await_state`, `eventually`), `test/support/tui_helpers.ex` (headless TUI on `CellSession`, `screen_text`, `press`)
-- `config/` — `config.exs`, dev, test, prod, runtime configs
+  - `lib/troupe/workspace.ex` — Workspace survey, paths, config, settings, memory; workspace/survey.ex for directory/file enumeration
+  - `lib/troupe/remote/` — Client for remote sessions: auth, credentials, discovery, HTTP/socket, plane/journal/worker, tokens, TLS
+  - `lib/troupe/client/` — local and remote client implementations
+  - Supporting modules: memory.ex, codec.ex, paths.ex, event.ex/events.ex, frontmatter.ex, telemetry.ex, settings.ex, reaper.ex, workflow.ex, clipboard.ex; config/ with jsonc.ex and opencode.ex providers; os/process.ex (reaper-wrapped OS processes)
+- `native/reaper/` — reaper.zig: process tree reaper; Mix.Tasks.Compile.Reaper cross-compiles it
+- `priv/agents/` — Built-in agent definitions (markdown + YAML frontmatter): code, worktree, workflow, plan, ask, quick, answer, explore, general, librarian
+- `test/` — Unit, property, and TUI tests; test/support/ has helpers.ex (start_session!, await_state, eventually), tui_helpers.ex, remote_helpers.ex, fake_remote.ex
+- `config/` — config.exs, dev, test, prod, runtime configs
 - `scripts/dev` — Run CLI/TUI from source without a build
-- `scripts/build-local` — Burrito binary for this host → `burrito_out/`
+- `scripts/build-local` — Burrito binary for this host → burrito_out/
 - `.tool-versions` / `mise.toml` — Pinned toolchain: Erlang 28.5, Elixir 1.20.4-otp-28, Zig 0.16.0
 
 ## Commands
-Pinned in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir 1.20.4-otp-28, Zig 0.16.0 (Burrito 1.6 pins exactly that). Always run mix through mise:
+Pinned in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir 1.20.4-otp-28, Zig 0.16.0. Always run mix through mise:
 ```sh
-mise exec -- mix compile --warnings-as-errors   # zero warnings incl. type warnings is the bar
+mise exec -- mix compile --warnings-as-errors   # zero warnings incl. type warnings
 mise exec -- mix format && mise exec -- mix credo --strict
-TROUPE_IDLE_TEST_MS=1000 mise exec -- mix test    # fast loop; without the var the idle test waits 60 s
-mise exec -- mix test test/troupe/tui_test.exs    # one file
-scripts/dev [args]                                # run the CLI/TUI from source, no build (TROUPE_CLI=1 mix run -- ...)
-scripts/build-local                               # Burrito binary for this host -> burrito_out/
+TROUPE_IDLE_TEST_MS=1000 mise exec -- mix test    # faster idle test timeout
+mise exec -- mix check                            # wrapper: compile, format --check, credo --strict, xref, test
+scripts/dev [args]                                # run CLI/TUI from source, no build
+scripts/build-local                               # Burrito binary for this host → burrito_out/
 ```
-Rebuild the binary only when the user needs one. After rebuilding the same version, delete Burrito's extracted payload or the old code keeps running: `rm -rf ~/.local/share/.burrito/troupe_erts-*`.
-
-Manual smoke without a model: `TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/fake_scripts/smoke.json scripts/dev run code smoke --headless --auto-approve`. Real providers come from `~/.config/troupe/config.yaml`, env (`TROUPE_*`), or opencode's `~/.config/opencode/opencode.jsonc` as a fallback; `scripts.dev config` shows the resolution.
-
-`mix check` is a wrapper that runs compile --warnings-as-errors, format --check-formatted, credo --strict, and test. `TROUPE_REAPER_TARGETS=all` cross-compiles the reaper helper for every target.
+Smoke test without a model: `TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/fake_scripts/smoke.json scripts/dev run code smoke --headless --auto-approve`. Real providers from `~/.config/troupe/config.yaml`, env (`TROUPE_*`), or opencode's `~/.config/opencode/opencode.jsonc` as fallback; `scripts/dev config` shows resolution. After rebuilding the binary, delete Burrito's extracted payload or old code keeps running: `rm -rf ~/.local/share/.burrito/troupe_erts-*`. `TROUPE_REAPER_TARGETS=all` cross-compiles reaper for every target.
 
 ## Conventions
-- Let it crash everywhere except `Troupe.Tool.Runner`. No `try/rescue` around the agent loop.
-- No sync calls between agents or from session actors into agents; agents may call Log/Approvals/Locks.
-- Every OS process goes through `Troupe.OS.Process` (reaper). Never `System.cmd` in lib code.
-- Persisted event types and data shapes are listed in ARCHITECTURE.md §4.5; adding one means: emit in Server/Dispatcher, fold in `Agent.State` and/or Dispatcher and `UI.TUI.Model`, and note replay implications.
-- Tests: `assert_receive` on events, never `Process.sleep` to wait. Scripts for the Fake are keyed by agent path (`"code-1"`); the first dispatch is always `<name>-1`.
-- Type checker is the gate: pattern-match structs (`%Config{} = cfg`) before struct updates, avoid `x && y` as a statement.
-- `mix format` reflows code, so anchors you remember from writing a file may no longer exist; re-grep before search/replace edits and make scripted edits assert their matches. Python multi-file edit scripts write file by file — an assertion failure mid-script leaves earlier files changed and later ones not.
-- CI does not cover non-Linux native runners, `install.ps1` on Windows, and two acceptance items needing a real model (35, 36 in the spec). `feature/` is the user's own git worktree; leave it out of the index.
-- Before changing behaviour: read `ARCHITECTURE.md` (contract the code implements) and `DECISIONS.md` (every deviation, numbered; append one line per new deviation). `FINAL_REPORT.md` maps each done item to the test that proves it.
+Let it crash everywhere except `Troupe.Tool.Runner`. No `try/rescue` around the agent loop. No sync calls between agents or from session actors into agents; agents may call Log/Approvals/Locks. Every OS process goes through `Troupe.OS.Process` (reaper), never `System.cmd` in lib code. Persisted event types and data shapes are listed in ARCHITECTURE.md §4.5; adding one means emit in Server/Dispatcher, fold in `Agent.State` and/or Dispatcher and `UI.TUI.Model`, and note replay implications. Tests: `assert_receive` on events, never `Process.sleep` to wait. Scripts for the Fake are keyed by agent path (`"code-1"`); the first dispatch is always `<name>-1`. Type checker is the gate: pattern-match structs (`%Config{} = cfg`) before struct updates, avoid `x && y` as a statement. `mix format` reflows code; re-grep before search/replace edits and make scripted edits assert their matches.
 
 ## Notes
-- 2026-09-16 code-2: TUI mouse selection (Decision 69) is implemented: TUI.Server holds `selection: %{anchor, cursor, dragging?} | nil` as view state (never a log fold), with both ends as *transcript* coordinates `{visual_row, cell_col}` — absolute wrapped-row index, so scrolling and new output do not move a selection, but a %Resize{} must clear it. `View.pane_point/3`/`pane_edge/2` map screen cells to those coordinates; `Model.split_row/3` splits a wrapped row's segments at two cell columns (never cutting a wide glyph) and `Model.row_slice/3` gives its plain text with rail tags (:gutter/:code_rail/:quote_rail/:linenum) dropped. Row splitting lives in Model, re-tagging with `%Style{modifiers: [:reversed]}` in View.highlight/3, so styling stays in one module. Test helpers: `drag/3`, `drag_to/2`, `mouse_up/3`, `screen_cells/2` in test/support/tui_helpers.ex and `clipboard_path/0`/`capture_clipboard_to/1` in test/support/helpers.ex. When locating text on the drawn screen in a test, convert to cells with `Model.cell_width/1` — rail glyphs like `│` are multi-byte, so byte offsets are not columns.
+- 2026-09-16 code-1: 2026-09-16 code-1: the remote-overhaul merge renumbered the TUI mouse-selection decision from 69 to 82 (origin/main's remote decisions took 69–81), and clipboard access from the TUI now goes through `Troupe.Client.copy/1` (which delegates to `Troupe.Clipboard`, moved out of `Troupe.UI.Clipboard`) — `mix troupe.xref` enforces that the UI calls only `Troupe.Client`. Three tests fail on origin/main itself in this environment (`test/troupe/isolation_test.exs` two `/worktree` tests and `test/troupe/tui_test.exs` "/worktree <Tab> completes …"); they are pre-existing, not caused by local changes.
+- 2026-09-16 code-2: TUI mouse selection (Decision 82) is implemented: TUI.Server holds `selection: %{anchor, cursor, dragging?} | nil` as view state (never a log fold), with both ends as *transcript* coordinates `{visual_row, cell_col}` — absolute wrapped-row index, so scrolling and new output do not move a selection, but a %Resize{} must clear it. `View.pane_point/3`/`pane_edge/2` map screen cells to those coordinates; `Model.split_row/3` splits a wrapped row's segments at two cell columns (never cutting a wide glyph) and `Model.row_slice/3` gives its plain text with rail tags (:gutter/:code_rail/:quote_rail/:linenum) dropped. Row splitting lives in Model, re-tagging with `%Style{modifiers: [:reversed]}` in View.highlight/3, so styling stays in one module. Test helpers: `drag/3`, `drag_to/2`, `mouse_up/3`, `screen_cells/2` in test/support/tui_helpers.ex and `clipboard_path/0`/`capture_clipboard_to/1` in test/support/helpers.ex. When locating text on the drawn screen in a test, convert to cells with `Model.cell_width/1` — rail glyphs like `│` are multi-byte, so byte offsets are not columns.
 - 2026-09-16 code-1: TUI mouse: ExRatatui 0.13.1 has no runtime mouse-capture toggle — `mouse_capture:` is only consumed once by `Native.init_terminal/2` (deps/ex_ratatui/native/ex_ratatui/src/terminal.rs:121) and there is no raw-escape passthrough NIF (only `set_terminal_title/1`), so `--no-mouse`/the `mouse` setting can only ever be `:next_run`. crossterm's EnableMouseCapture writes ?1000h ?1002h ?1003h ?1015h ?1006h, i.e. button-event and any-event tracking are already on, so `%Event.Mouse{kind: "drag"|"moved"|"up"}` events already reach `TUI.Server.handle_event/2` (it currently ignores them) — in-app text selection needs no dep change, only `Style{modifiers: [:reversed]}` on the selected segments.
 - 2026-09-15 ask-5: `ask_user` questions may carry `options` (list of `%{label, description}`) and `multiple`; all model input is coerced once by `Troupe.Tools.AskUser.normalize/1` (lib/troupe/tools/ask_user.ex) so the `question_asked` event, the Approvals payload, the TUI and the answer text all agree. The normalised map is what gets logged and what the restart path re-registers, so a crash restores the offer from the log. The TUI holds an in-progress multi-select in `state.answer` (`%{call_id, selected}`) — UI-only, never logged — and `Model.pane_blocks/6` takes it as its last argument.
 - 2026-09-15 code-2: In `UI.TUI.Server.window_key/3` clause order matters: the `y`/`n`/`a` approval clause matches ANY modifier list, so any new Ctrl-<letter> binding for those letters must be defined above it (Ctrl-Y/copy hit this). Shift-Enter cannot be detected in most terminals — crossterm's unix parser maps a bare `\r` to Enter with no modifiers — so newline-in-input is bound to any-modified Enter plus Ctrl-J (in raw mode `\n` = 0x0A parses as Char('j')+CONTROL, verified in crossterm parse.rs). `Troupe.UI.Clipboard` shells to pbcopy/clip/wl-copy/xclip/xsel via a staged temp file because `OS.Process` gives the reaper the child's stdin; `config :troupe, clipboard_command:` overrides it and config/test.exs points it at /dev/null so tests never touch the real clipboard.

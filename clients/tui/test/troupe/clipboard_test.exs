@@ -4,7 +4,7 @@ defmodule Troupe.ClipboardTest do
   import Troupe.TestHelpers
   import Troupe.TUIHelpers
 
-  alias Troupe.UI.Clipboard
+  alias Troupe.Clipboard
 
   describe "Clipboard.copy/1" do
     test "hands the text to the configured command, byte for byte" do

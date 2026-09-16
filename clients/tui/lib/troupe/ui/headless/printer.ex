@@ -7,7 +7,7 @@ defmodule Troupe.UI.Headless.Printer do
 
   use GenServer
 
-  alias Troupe.Events
+  alias Troupe.Client
   alias Troupe.LLM.Message
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
@@ -15,10 +15,10 @@ defmodule Troupe.UI.Headless.Printer do
   @impl true
   def init(opts) do
     sid = Keyword.fetch!(opts, :session_id)
-    :ok = Events.subscribe(sid)
+    :ok = Client.subscribe(sid)
     io = Keyword.get(opts, :io, :stdio)
 
-    case Troupe.Session.Watcher.status(sid) do
+    case Client.watch_status(sid) do
       %{enabled: true, backend: backend} ->
         IO.puts(io, "watcher> watch mode on (backend: #{backend})")
 

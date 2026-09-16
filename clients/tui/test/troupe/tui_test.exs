@@ -370,7 +370,14 @@ defmodule Troupe.TUICompletionTest do
     for p <- ["worktree-1", "worktree-2", "code-1"], do: await_state(p, :done_unread, 15_000)
     eventually(fn -> user_state(pid).model.windows["code-1"].state == :done_unread end)
 
+    # an ambiguous prefix (`workflow` and `worktree` are both agents) completes
+    # to the first match; one more character makes it unambiguous
     type(pid, "wor")
+    press(pid, "tab")
+    assert user_state(pid).cmd_text == "workflow "
+    press(pid, "esc")
+
+    type(pid, "workt")
     press(pid, "tab")
     assert user_state(pid).cmd_text == "worktree "
     press(pid, "esc")
@@ -516,7 +523,7 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     }
 
     {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
-    {pid, session} = start_tui(sid)
+    {pid, _session} = start_tui(sid)
 
     # Command line: paste a full command and run it.
     paste(pid, "/settings")
@@ -803,9 +810,18 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     eventually(fn -> user_state(pid).model.windows["code-1"].pending == [] end, 15_000)
     eventually(fn -> user_state(pid).model.windows["code-1"].state != :needs_input end, 15_000)
 
-    # The ledger reads the same log, so it has to be told too.
-    assert %{data: %{state: :running}} =
-             sid |> events_of("code-1/tiny-1", :branch_state) |> List.last()
+    # The ledger reads the same log, so it has to be told too — and the window
+    # derives `:running` from an empty `pending` before the agent gets to log it,
+    # so this waits for the event rather than for the frame that cleared the flag.
+    eventually(
+      fn ->
+        match?(
+          %{data: %{state: :running}},
+          sid |> events_of("code-1/tiny-1", :branch_state) |> List.last()
+        )
+      end,
+      15_000
+    )
 
     await_state("code-1", :done_unread, 15_000)
   end
