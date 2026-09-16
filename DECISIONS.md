@@ -3434,3 +3434,68 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      second run of that file listed two segments and failed about the first run. The id is
      unique per run now, which is the same lesson `System.unique_integer/1` taught in the
      cluster suite in a different costume.
+
+520. **A fork copies its parent's history; it does not point at it.** The brief's literal
+     reading is a child whose chain starts at `seq: 0` and folds the parent's chain to the
+     fork point and the child's after it, which would leave the child readable only through
+     the parent's key and objects. Two rules already in the design refuse that. *A fork is
+     a new session for budget, retention, key and erasure* — a child that had to be opened
+     with its parent's key does not have one of its own in the sense that matters. And
+     **erasing a parent leaves the child readable**: erasure destroys the parent's objects
+     and its key, so a reference would break on the one operation that must never take
+     something else with it. The brief already says the *workspace* is copied into the
+     child's own prefix, and it would be odd for the working tree to be the child's while
+     its history was not.
+
+521. **Resealing moves the numbering, not the content.** Each copied event keeps its type,
+     data, timestamp, actor and agent path and is given the child's next `seq` with a
+     recomputed `prev_hash`. A child whose events kept the parent's numbers would start
+     above one and follow nothing, and `troupe ctl verify` has to pass on both chains
+     independently. What the original numbering was is not lost: `session_forked` carries
+     the parent's id, the seq forked at and the parent's head hash there.
+
+522. **A fork is of the durable log, so the point is the parent's last seal.** The copy
+     reads segments from object storage, and a turn still in a running pod's memory is not
+     in one. Asking the parent to seal first would be writing to a session that is supposed
+     to be untouched and unaware. So an unspecified fork point resolves to the row's
+     `last_seq`, a point beyond it is refused with the number we do have, and a parent that
+     has sealed nothing cannot be forked yet.
+
+523. **The fork point is resolved at the plane and written to the row.** "The head" stops
+     being true the moment the parent says another word, so a lineage left as *the head*
+     for the pod to work out on arrival would be a lineage nobody could check afterwards.
+
+524. **Forking needs `control` of the parent, not `observe`.** Somebody who may watch a
+     session can already read every word of it — but a fork makes a copy they own, under a
+     key of their own, that outlives the original's erasure. That is a republication, and
+     the person who can authorise it is somebody who could have written the session.
+
+525. **The entitlement set a fork runs under is the intersection, not the inheritance.**
+     The brief says a fork inherits what the parent's `session_created` recorded rather
+     than what the bundle offers today, and the reason given is that a fork must not be a
+     way to reach an agent the team was later denied. Taking the parent's set outright says
+     that and loses the converse: a team narrowed *since* the parent ran would have the
+     narrowing undone by somebody forking an old session. Deny wins, as everywhere else.
+
+526. **The pod does the copying, and only the pod can.** It is the one place both keys are
+     ever in memory. The plane names a session and a number; it never sees an event.
+
+527. **The fork instruction rides on `session.activate` rather than a push of its own.**
+     The copy has to land before the tree starts — a manager restoring an empty log writes
+     a fresh `session_created` at seq 1, and the copied chain would then be a second history
+     arriving after the first. One push also gives the whole thing one idempotency story:
+     the plane retries activation without knowing whether the first attempt landed, and the
+     pod decides by looking for segments the child already has.
+
+528. **`fork` is stripped from client parameters at the door.** It is how `session.fork`
+     tells `session.create` what the child came from. A client that could set it could
+     claim a lineage it has no access to, which is a create that walks off with somebody
+     else's history.
+
+529. **An import is the client's copy to make, not the plane's.** `reason: "import"` is how
+     a private session becomes a team session, and a private session's key lives under a
+     path no pod role covers — so no pod can read the parent, whatever the plane asks it to
+     do. The plane's half is the same either way: the row, the lineage, the budget and the
+     placement. The copy belongs to the device that holds the key, and the activation
+     carries no fork instruction. An import also says which profile it lands on, because a
+     private session has none to inherit.

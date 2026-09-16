@@ -13,6 +13,9 @@ defmodule Troupe.Worker.Plane.Commands do
 
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.Event
+  alias Troupe.Sessions.Context
+  alias Troupe.Sessions.Fork
   alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
@@ -45,7 +48,8 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("session.activate", params) do
     session_id = params["session_id"]
 
-    with {:ok, bundle} <- bundle_of(params) do
+    with {:ok, inherited} <- forked(params),
+         {:ok, bundle} <- bundle_of(narrow(params, inherited)) do
       from_plane =
         Enum.reject(
           [
@@ -223,6 +227,128 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
+
+  # -- forking -----------------------------------------------------------------
+
+  # A child being activated for the first time, whose log is its parent's up to a point.
+  #
+  # Here rather than in a push of its own, because the copy has to happen before the tree
+  # starts: a manager that restored an empty log would write a fresh `session_created` at
+  # seq 1, and the copied chain would then be a second history arriving after the first.
+  # One push also gives the whole thing one idempotency story — the plane retries
+  # activation without knowing whether the first attempt landed, and a child that already
+  # has segments is one that has already been forked.
+  #
+  # Returns the entitlement set the parent recorded, or `nil` where there is nothing to
+  # inherit — which is also what a re-activation returns, because by then the narrowing
+  # is in the child's own `session_created` and re-deriving it would mean opening the
+  # parent again, possibly after it has been erased.
+  defp forked(%{"fork" => %{"parent" => parent_id} = fork} = params) when is_binary(parent_id) do
+    child_id = params["session_id"]
+
+    with {:ok, child} <- Context.open(child_id, Keyword.merge(defaults(), child_opts(params))),
+         {:ok, existing} <- Storage.list_segments(child.store, child_id) do
+      if existing == [] do
+        copy_from_parent(child, fork, params)
+      else
+        Logger.debug("troupe worker: #{child_id} is already forked; activating")
+        {:ok, nil}
+      end
+    else
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp forked(_params), do: {:ok, nil}
+
+  defp copy_from_parent(child, fork, params) do
+    parent_id = fork["parent"]
+
+    parent_opts =
+      Keyword.merge(defaults(), team: fork["parent_team"] || params["team"], session_id: parent_id)
+
+    with {:ok, parent} <- Context.open(parent_id, parent_opts),
+         {:ok, result} <-
+           Fork.copy(parent, child,
+             seq: fork["seq"],
+             reason: fork["reason"] || "attempt",
+             actor: actor_of(fork["actor"])
+           ) do
+      Logger.info(
+        "troupe worker: forked #{parent_id}@#{result.parent_seq} into #{child.session_id}"
+      )
+
+      report_fork(child.session_id, result)
+      {:ok, result.entitlements}
+    else
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: "fork failed: #{inspect(reason)}"})}
+    end
+  end
+
+  # Deny wins, as everywhere else. The brief says a fork inherits what the parent's
+  # `session_created` recorded rather than what the bundle offers today, and the reason is
+  # that a fork must not be a way to reach an agent the team was later denied. The
+  # intersection says that *and* the converse — a team narrowed since the parent ran does
+  # not have the narrowing undone by somebody forking an old session — and a rung that took
+  # the parent's set outright would widen in exactly that case.
+  defp narrow(params, nil), do: params
+
+  defp narrow(params, inherited) when is_map(inherited) do
+    Map.put(params, "entitlements", intersect(params["entitlements"], inherited))
+  end
+
+  # `nil` on the current side is "no restriction", so the parent's set is the whole answer.
+  defp intersect(nil, inherited), do: inherited
+
+  defp intersect(current, inherited) do
+    Map.merge(current, inherited, fn _kind, mine, theirs ->
+      cond do
+        is_list(mine) and is_list(theirs) -> Enum.filter(mine, &(&1 in theirs))
+        is_nil(mine) -> theirs
+        true -> mine
+      end
+    end)
+  end
+
+  defp child_opts(params) do
+    Enum.reject(
+      [
+        session_id: params["session_id"],
+        team: params["team"],
+        epoch: params["epoch"],
+        owner_subject: params["owner_subject"],
+        profile: params["profile"]
+      ],
+      &match?({_key, nil}, &1)
+    )
+  end
+
+  defp actor_of(nil), do: nil
+  defp actor_of(%{} = json), do: Event.Actor.from_json(json)
+  defp actor_of(_other), do: nil
+
+  # The plane learns the child's head the same way it learns any other: a seal report. A
+  # fork that reported through a channel of its own would be a second way for the row's
+  # `last_seq` to move, and one of the two would eventually be wrong.
+  defp report_fork(session_id, result) do
+    case Process.whereis(Link) do
+      nil ->
+        :ok
+
+      _link ->
+        Link.report(%{
+          "type" => "session.sealed",
+          "session_id" => session_id,
+          "epoch" => result.segment.epoch,
+          "last_seq" => result.last_seq,
+          "head_hash" => result.head_hash,
+          "object_bytes" => result.segment.bytes || 0,
+          "segment" => result.segment.key
+        })
+    end
+  end
+
 
   @doc """
   What this pod is holding, as metadata.

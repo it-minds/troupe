@@ -32,6 +32,10 @@ defmodule Troupe.Plane.Sessions.Session do
   # whether a tree exists; `status` is the worker's on what the tree is up to.
   @statuses ~w(idle thinking acting waiting done interrupted)
   @origins ~w(user trigger a2a agent)
+  # Why somebody forked. The same three the child's `session_forked` carries — one list,
+  # asserted in both places, because a row that disagreed with the log would be a lineage
+  # view telling a different story from a replay.
+  @fork_reasons ~w(attempt branch import)
 
   schema "sessions" do
     belongs_to(:owner, Troupe.Plane.Identity.User)
@@ -73,6 +77,14 @@ defmodule Troupe.Plane.Sessions.Session do
     # it still owes; behind is safe and costs a re-fold, ahead is not possible.
     field(:usage_seq, :integer, default: 0)
 
+    # Where this session was forked from, if it was. A projection of the child's first
+    # event, kept here so a lineage view does not have to fetch a key and open a segment
+    # to draw an arrow. Nullable on the parent's erasure: a child outlives its parent, and
+    # the pointer is the only thing that may break.
+    belongs_to(:parent_session, __MODULE__, type: :string, foreign_key: :parent_session_id)
+    field(:parent_seq, :integer)
+    field(:fork_reason, :string)
+
     # Fixed at creation: what started this session, and what it was allowed.
     field(:origin, :map)
     field(:terms, :map)
@@ -103,6 +115,10 @@ defmodule Troupe.Plane.Sessions.Session do
   @spec origins() :: [String.t()]
   def origins, do: @origins
 
+  @doc "Why one session was forked from another."
+  @spec fork_reasons() :: [String.t()]
+  def fork_reasons, do: @fork_reasons
+
   @fields [
     :id,
     :owner_id,
@@ -132,6 +148,9 @@ defmodule Troupe.Plane.Sessions.Session do
     :pending_approvals,
     :cost_micros,
     :usage_seq,
+    :parent_session_id,
+    :parent_seq,
+    :fork_reason,
     :origin,
     :pending_prompt,
     :terms,
@@ -147,6 +166,8 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:state, @states)
     |> validate_inclusion(:visibility, @visibilities)
+    |> validate_inclusion(:fork_reason, @fork_reasons)
+    |> validate_lineage()
     |> validate_shape()
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:pending_approvals, greater_than_or_equal_to: 0)
@@ -155,21 +176,30 @@ defmodule Troupe.Plane.Sessions.Session do
     |> check_constraint(:kind, name: :sessions_kind_shape)
   end
 
+  # A fork says all three things or none of them. Half a lineage — a parent with no point,
+  # or a point with no parent — is a row that draws an arrow nobody can follow.
+  defp validate_lineage(changeset) do
+    case get_field(changeset, :parent_session_id) do
+      nil -> refute_present(changeset, [:parent_seq, :fork_reason], "no fork, so no")
+      _forked -> validate_required(changeset, [:parent_seq, :fork_reason])
+    end
+  end
+
   # The database has the same rule as a constraint, because the row is what a placement
   # reads and application code is not the only thing that writes it. This is here so the
   # caller gets a field and a sentence rather than a constraint error.
   defp validate_shape(changeset) do
     case get_field(changeset, :kind) do
-      "private" -> refute_present(changeset, [:profile, :team_id, :worker_id])
+      "private" -> refute_present(changeset, [:profile, :team_id, :worker_id], "a private session has no")
       _team -> validate_required(changeset, [:profile])
     end
   end
 
-  defp refute_present(changeset, fields) do
+  defp refute_present(changeset, fields, why) do
     Enum.reduce(fields, changeset, fn field, acc ->
       case get_field(acc, field) do
         nil -> acc
-        _set -> add_error(acc, field, "a private session has no #{field}")
+        _set -> add_error(acc, field, "#{why} #{field}")
       end
     end)
   end

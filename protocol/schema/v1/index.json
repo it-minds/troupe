@@ -61,6 +61,7 @@
     "events/session_created.json",
     "events/session_dormant.json",
     "events/session_erased.json",
+    "events/session_forked.json",
     "events/session_read_only.json",
     "events/session_resumed.json",
     "events/session_tainted.json",

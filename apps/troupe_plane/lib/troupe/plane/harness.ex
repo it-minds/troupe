@@ -46,6 +46,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Canonical, Error, Origin, Principal, Token}
+  alias Troupe.Sessions.Fork
 
   require Logger
 
@@ -110,7 +111,8 @@ defmodule Troupe.Plane.Harness do
     "session.grant" => :control,
     "session.review" => :control,
     "trigger.fire" => :control,
-    "session.spawn" => :control
+    "session.spawn" => :control,
+    "session.fork" => :control
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -159,7 +161,10 @@ defmodule Troupe.Plane.Harness do
   def call(method, params, context) do
     with {:ok, _scope} <- fetch_method(method),
          :ok <- still_a_person(context) do
-      handle(method, params, context)
+      # `fork` is not a client's to send. It is how `session.fork` tells `session.create`
+      # what the child came from, and a client that could set it could claim a lineage it
+      # has no access to — which is a create carrying somebody else's history away.
+      handle(method, Map.delete(params, "fork"), context)
     end
   end
 
@@ -371,6 +376,49 @@ defmodule Troupe.Plane.Harness do
               payload_digest: Canonical.hash(%{"prompt" => prompt}),
               principal: Principal.of(parent.owner_subject, user.subject)
             )
+        }
+        |> Map.reject(fn {_key, value} -> is_nil(value) end),
+        context
+      )
+    end
+  end
+
+  @doc false
+  # A second cursor into a log: the same session, from a point, going somewhere else.
+  #
+  # `session.create` with a lineage, and deliberately so. A fork is a new session for
+  # budget, retention, key and erasure — so it goes down the same path as any other create
+  # and pays for itself, rather than being a cheap second view of something already paid
+  # for. What makes it a fork is three columns and one instruction to the pod.
+  #
+  # The pod does the copying, because the pod is the only place both keys are ever in
+  # memory. The plane names the parent and the point; it never sees an event.
+  defp handle("session.fork", params, %{user: user} = context) do
+    with {:ok, parent} <- visible(params["session_id"], user),
+         :ok <- forkable(parent, user),
+         {:ok, reason} <- fork_reason(params["reason"]),
+         {:ok, seq} <- fork_seq(params["seq"], parent),
+         :ok <- fork_shape(parent, reason),
+         {:ok, profile} <- fork_profile(parent, params["profile"]) do
+      session_id = generate_id()
+
+      handle(
+        "session.create",
+        %{
+          "session_id" => session_id,
+          "profile" => profile,
+          "team" => params["team"] || team_name(parent),
+          "title" => params["title"],
+          # As visible as its parent and no more, except an import, which is a private
+          # session becoming a team one and says so by being asked for.
+          "visibility" => if(reason == "import", do: "team", else: parent.visibility),
+          "fork" => %{
+            "parent" => parent.id,
+            "parent_team" => team_name(parent),
+            "seq" => seq,
+            "reason" => reason,
+            "actor" => %{"kind" => "user", "subject" => user.subject}
+          }
         }
         |> Map.reject(fn {_key, value} -> is_nil(value) end),
         context
@@ -1078,6 +1126,9 @@ defmodule Troupe.Plane.Harness do
       workspace_source: params["source"],
       terms: terms,
       origin: origin,
+      parent_session_id: get_in(params, ["fork", "parent"]),
+      parent_seq: get_in(params, ["fork", "seq"]),
+      fork_reason: get_in(params, ["fork", "reason"]),
       # Pinned at creation and kept for the life of the session. A session whose agent
       # definitions changed underneath it would be a different session halfway through.
       bundle_version: bundle_version(profile)
@@ -1116,6 +1167,7 @@ defmodule Troupe.Plane.Harness do
       }
       |> Map.merge(bundle_params(session))
       |> Map.merge(session_terms(session))
+      |> Map.merge(fork_params(session))
       |> then(fn params -> if prompt, do: Map.put(params, "prompt", prompt), else: params end)
 
     case Router.push(worker, "session.activate", params) do
@@ -1393,6 +1445,100 @@ defmodule Troupe.Plane.Harness do
 
   defp spawnable(%Session{}), do: :ok
 
+  defp forkable(%Session{state: state}, _user) when state in ["erased", "archived"] do
+    {:error, Error.new(:forbidden, %{reason: "that session is #{state}"})}
+  end
+
+  # `:control`, not `:observe`. Somebody who may watch a session may already read every
+  # word of it — but a fork makes a copy they own, under a key of their own, that survives
+  # the original's erasure. That is a republication, and the person who can authorise it is
+  # somebody who could have written the session in the first place.
+  defp forkable(%Session{} = parent, user) do
+    case Sessions.role_for(user, parent) do
+      role when role in [:admin, :control] ->
+        :ok
+
+      _watching ->
+        {:error,
+         Error.new(:forbidden, %{
+           reason: "forking a session needs control of it, not a view of it"
+         })}
+    end
+  end
+
+  defp fork_reason(nil), do: {:ok, "attempt"}
+
+  defp fork_reason(reason) when is_binary(reason) do
+    if Fork.reason?(reason),
+      do: {:ok, reason},
+      else: invalid("reason is one of #{Enum.join(Fork.reasons(), ", ")}")
+  end
+
+  defp fork_reason(_other), do: invalid("reason is a name, or absent")
+
+  # Resolved here and written down, rather than left as "the head" for the pod to work out
+  # when it gets there. "The head" stops being true the moment the parent says another
+  # word, and a lineage whose point drifted between the row and the copy would be a
+  # lineage nobody could check.
+  #
+  # The head is the parent's *last sealed* sequence, which is the whole of what a fork can
+  # be made from: the copy reads segments in object storage, and a turn still in a running
+  # pod's memory is not in one. So a session that has just said something is forked at its
+  # last seal, and the seconds between are the seconds a fork does not include.
+  defp fork_seq(nil, %Session{last_seq: head}) when is_integer(head) and head > 0,
+    do: {:ok, head}
+
+  defp fork_seq(nil, %Session{}) do
+    {:error,
+     Error.new(:invalid_params, %{
+       reason: "that session has not sealed anything yet, so there is nothing to fork"
+     })}
+  end
+
+  defp fork_seq(seq, %Session{last_seq: head}) when is_integer(seq) and seq > 0 do
+    if is_integer(head) and seq <= head do
+      {:ok, seq}
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "that session has only sealed through #{head || 0}",
+         sealed_through: head || 0
+       })}
+    end
+  end
+
+  defp fork_seq(_other, _parent), do: invalid("seq is a sequence number in the parent, or absent")
+
+  # An attempt or a branch is a team session forking within its team, which a pod can do:
+  # it holds both keys. An import is a *private* session becoming a team one, and a private
+  # session's key lives under a path no pod role covers — so no pod can read the parent, and
+  # the copy is the client's to make from the machine that holds the key. The plane's part
+  # is the same either way: the row, the lineage, and the budget.
+  defp fork_shape(%Session{team_id: nil}, reason) when reason != "import" do
+    {:error,
+     Error.new(:forbidden, %{
+       reason: "a private session forks as an import, from the device that holds its key"
+     })}
+  end
+
+  defp fork_shape(%Session{team_id: team_id}, "import") when not is_nil(team_id) do
+    {:error, Error.new(:invalid_params, %{reason: "an import starts from a private session"})}
+  end
+
+  defp fork_shape(%Session{}, _reason), do: :ok
+
+  # An attempt or a branch runs what its parent ran. An import has no parent profile to
+  # inherit — a private session runs on somebody's laptop and is never placed — so the
+  # person bringing it in says which profile it lands on, and there is no sensible default
+  # to invent for them.
+  defp fork_profile(%Session{profile: nil}, wanted) when is_binary(wanted), do: {:ok, wanted}
+
+  defp fork_profile(%Session{profile: nil}, _none) do
+    invalid("an import says which profile the session lands on")
+  end
+
+  defp fork_profile(%Session{profile: profile}, _wanted), do: {:ok, profile}
+
   # The parent's offering, not the team's. `nil` is allowed and means the profile's
   # default agent, which the parent could certainly run.
   defp agent_within(_parent, nil), do: {:ok, nil}
@@ -1625,6 +1771,38 @@ defmodule Troupe.Plane.Harness do
     session.profile
     |> offering(Identity.entitlements_for(team, session.profile))
     |> Bundles.entitlement_set()
+  end
+
+  # Sent on every activation of a forked session, not only the first. The plane does not
+  # know whether its last push landed — that is what makes retrying safe — so the pod is
+  # the one that decides, by looking for segments the child already has. A child with a log
+  # is a child that has already been forked.
+  #
+  # An import carries no instruction: its parent is a private session whose key is under a
+  # path no pod role covers, so there is nothing a pod could read. The row still says what
+  # it came from, and the copy is made by the device that holds the key.
+  defp fork_params(%Session{parent_session_id: nil}), do: %{}
+  defp fork_params(%Session{fork_reason: "import"}), do: %{}
+
+  defp fork_params(%Session{} = session) do
+    %{
+      "fork" => %{
+        "parent" => session.parent_session_id,
+        "parent_team" => parent_team(session),
+        "seq" => session.parent_seq,
+        "reason" => session.fork_reason
+      }
+    }
+  end
+
+  # Whose key opens the parent. Usually the child's own team, and not always: a team may
+  # fork a session it was given a view of, and the parent's objects are sealed to whoever
+  # owned it rather than to whoever is reading it now.
+  defp parent_team(%Session{parent_session_id: parent_id}) do
+    case Sessions.get(parent_id) do
+      nil -> nil
+      parent -> team_name(parent)
+    end
   end
 
   defp bundle_params(session) do

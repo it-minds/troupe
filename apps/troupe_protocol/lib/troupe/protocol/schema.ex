@@ -48,6 +48,18 @@ defmodule Troupe.Protocol.Schema do
         "entitlements" => optional(:object),
         "origin" => optional(:object)
       },
+      # The child's first event, and the only place the lineage is written down in the log.
+      # `parent` carries the id, the seq forked at and the parent's head hash there, so a
+      # reader holding only the child can say what it came from and a verifier can say the
+      # claim is about a real point in a real chain.
+      #
+      # The parent gets nothing. It is not amended, not notified, and a fork of a dormant
+      # session does not wake it — which is what makes forking cost the person who forks
+      # and nobody else.
+      "session_forked" => %{
+        "parent" => required(:object),
+        "reason" => required(:string)
+      },
       "agent_started" => %{
         "profile" => required(:string),
         "mode" => required(:string),
