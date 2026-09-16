@@ -381,6 +381,18 @@ defmodule Troupe.Gateway.Dispatch do
         {:error, reason} when reason in @unconsented ->
           challenge(session_id, context, specs, reason)
 
+        # A refusal the model can relay. `forbidden` with a sentence, rather than the
+        # transport error a client would otherwise show: the person asked for their notes
+        # tool and the answer is that this platform does not take client-hosted tools,
+        # which is something they can act on.
+        {:error, :managed_mcp_servers_only} ->
+          {:error,
+           Error.new(:forbidden, %{
+             setting: "managed_mcp_servers_only",
+             reason:
+               "this platform does not accept client-hosted tools; only the profile's MCP servers are available"
+           })}
+
         {:error, reason} ->
           {:error, Error.new(:unavailable, %{reason: to_string(reason)})}
       end

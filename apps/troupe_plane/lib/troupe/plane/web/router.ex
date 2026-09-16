@@ -12,6 +12,7 @@ defmodule Troupe.Plane.Web.Router do
       POST /rpc                        the harness JSON-RPC (§ Plane API)
       POST /trigger/<id>               fire one trigger, with that trigger's own key
       POST /mcp                        the same admin methods, as MCP tools
+      POST /mcp/session                four of them, for an agent already inside
       *    /scim/v2/...                users and groups, pushed by the identity provider
 
   Everything a person's client does goes through `/rpc`, and everything `/rpc` does goes
@@ -192,6 +193,40 @@ defmodule Troupe.Plane.Web.Router do
         |> send_json(401, %{"error" => "unauthenticated", "reason" => error.message})
     end
   end
+
+  # The other projection: four methods for the agent that is already inside the system,
+  # rather than forty for the person administering it. The same bearer token, resolved to
+  # the same person or principal, dispatched through `Harness` — so what an agent may do
+  # here is exactly what its credential may do at `/rpc`, and there is no second opinion
+  # about that anywhere.
+  post "/mcp/session" do
+    case authenticate(conn) do
+      {:ok, user} ->
+        # The door vouches for the source. An agent calling `trigger_fire` here is an
+        # `agent` firing, which a caller at `/rpc` may not claim for itself.
+        context = %{
+          user: user,
+          platform_admin?: platform_admin?(user),
+          vouched_source: "agent"
+        }
+
+        case Harness.MCP.handle(conn.body_params, context) do
+          {:reply, message} -> send_json(conn, 200, message)
+          :noreply -> send_resp(conn, 202, "")
+        end
+
+      {:error, error} ->
+        conn
+        |> put_resp_header("www-authenticate", www_authenticate())
+        |> send_json(401, %{"error" => "unauthenticated", "reason" => error.message})
+    end
+  end
+
+  get("/mcp/session", do: send_json(conn, 405, %{"error" => "this server does not stream"}))
+
+  delete("/mcp/session",
+    do: send_json(conn, 405, %{"error" => "this server has no sessions to end"})
+  )
 
   # No server-initiated stream and no session to end. Both are optional in the transport,
   # and answering them with a 405 is how a client is told so.

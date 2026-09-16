@@ -48,6 +48,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Fleet.{Bundle, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.Revision
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
@@ -308,7 +309,11 @@ defmodule Troupe.Plane.Admin do
   @doc "Change a team's budget, retention or default visibility."
   @spec team_update(actor(), String.t(), map()) :: result()
   def team_update(actor, name, attrs) do
-    with {:ok, team} <- fetch_team(actor, name) do
+    with {:ok, team} <- fetch_team(actor, name),
+         # Before the changeset, so a widening attempt is refused with the ceiling
+         # quoted rather than clamped. An administrator whose form accepted a number the
+         # plane is not using has been told a lie by something that knew better.
+         :ok <- within_the_ladder(team, attrs) do
       before = comparable(team)
 
       case Identity.update_team(team, attrs) do
@@ -321,6 +326,23 @@ defmodule Troupe.Plane.Admin do
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
+    end
+  end
+
+  defp within_the_ladder(team, attrs) do
+    case Ladder.check(team, Map.new(attrs)) do
+      :ok ->
+        :ok
+
+      {:error, refusal} ->
+        {:error,
+         Error.new(:forbidden, %{
+           field: to_string(refusal.field),
+           asked: refusal.asked,
+           ceiling: refusal.ceiling,
+           decided_by: refusal.rung,
+           reason: "a lower rung may only narrow"
+         })}
     end
   end
 
@@ -468,9 +490,43 @@ defmodule Troupe.Plane.Admin do
   @spec settings_list(actor()) :: result()
   def settings_list(actor) do
     with :ok <- require_admin(actor) do
-      groups = Enum.map(Settings.groups(), fn {key, title, blurb} -> %{key: key, title: title, blurb: blurb} end)
+      groups =
+        Enum.map(Settings.groups(), fn {key, title, blurb} ->
+          %{key: key, title: title, blurb: blurb}
+        end)
 
-      {:ok, %{groups: groups, settings: Settings.all()}}
+      {:ok, %{groups: groups, settings: Settings.all(), ladder: Ladder.rungs()}}
+    end
+  end
+
+  @doc """
+  For one setting, the value in force, the rung that decided it, and every rung that had
+  an opinion.
+
+  The thing that makes a ladder usable rather than merely correct. An administrator
+  looking at a retention of thirty days where they set three hundred and sixty-five needs
+  to know *who* said thirty — and a view that answered only the winner would leave them
+  to guess between the deployment, the platform and their own team.
+
+  `team` is optional: without it the answer is the two rungs above every team, which is
+  what a platform admin asks when they want to know what a team may not exceed.
+  """
+  @spec setting_effective(actor(), String.t(), String.t() | nil) :: result()
+  def setting_effective(actor, key, team_name) do
+    with :ok <- require_admin(actor),
+         {:ok, team} <- optional_team(actor, team_name) do
+      case Ladder.effective(key, team) do
+        nil ->
+          {:error,
+           Error.new(:not_found, %{
+             setting: key,
+             reason: "not a setting more than one rung decides",
+             laddered: Ladder.laddered() |> Map.keys() |> Enum.sort()
+           })}
+
+        resolved ->
+          {:ok, Map.put(resolved, :team, team && team.name)}
+      end
     end
   end
 
@@ -1338,6 +1394,11 @@ defmodule Troupe.Plane.Admin do
   defp team_detail(team) do
     %{
       name: team.name,
+      # What the ladder makes of this team's laddered settings: the value in force, the
+      # rung that decided it, and every rung that had an opinion. Beside the team's own
+      # columns rather than instead of them — an administrator looking at a value that is
+      # not the one they set has to be able to see both.
+      effective: Ladder.all(team),
       budget_micros: team.budget_micros,
       budget_period: team.budget_period,
       members_may_control: team.members_may_control,

@@ -156,6 +156,28 @@ defmodule Troupe.Plane.Web.Live.Teams do
     end
   end
 
+  # What the ladder makes of a field, and a parenthetical where that is not what this
+  # team asked for. The team's own number stays in the edit form: this is the answer to
+  # "why is it not what I set", which is a different question from "what did I set".
+  defp in_force(team, field) do
+    case Enum.find(team.effective, &(&1.field == field)) do
+      nil -> Map.get(team, field)
+      setting -> setting.value
+    end
+  end
+
+  defp note(team, field) do
+    case Enum.find(team.effective, &(&1.field == field)) do
+      %{decided_by: rung, value: value} when rung != :team ->
+        if value == Map.get(team, field),
+          do: "",
+          else: " (#{rung}; this team asked for #{Map.get(team, field)})"
+
+      _otherwise ->
+        ""
+    end
+  end
+
   defp cap_note(nil), do: "no spend ceiling"
   defp cap_note(micros), do: "a ceiling of #{money(micros)}"
 
@@ -236,14 +258,26 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <:field label="against budget">
             <.budget team={team} />
           </:field>
-          <:field label="goes dormant after">{team.idle_timeout_seconds}s idle</:field>
-          <:field label="cache kept">{team.cache_eviction_days} days</:field>
-          <:field label="erased after">{team.erase_after_days} days</:field>
+          <:field label="goes dormant after">
+            {in_force(team, :idle_timeout_seconds)}s idle{note(team, :idle_timeout_seconds)}
+          </:field>
+          <:field label="cache kept">
+            {in_force(team, :cache_eviction_days)} days{note(team, :cache_eviction_days)}
+          </:field>
+          <:field label="erased after">
+            {in_force(team, :erase_after_days)} days{note(team, :erase_after_days)}
+          </:field>
           <:field label="members may">
-            {if team.members_may_control, do: "steer sessions", else: "watch only"}
+            {if in_force(team, :members_may_control), do: "steer sessions", else: "watch only"}{note(
+              team,
+              :members_may_control
+            )}
           </:field>
           <:field label="pinning">
-            {if team.pins_allowed, do: "allowed", else: "not allowed"}
+            {if in_force(team, :pins_allowed), do: "allowed", else: "not allowed"}{note(
+              team,
+              :pins_allowed
+            )}
           </:field>
           <:field label="team volume">
             {team.volume_size} on {team.volume_storage_class || "the default class"}
@@ -363,6 +397,35 @@ defmodule Troupe.Plane.Web.Live.Teams do
         </form>
 
         <button :if={@editing != team.name} phx-click="edit" phx-value-team={team.name}>edit</button>
+
+        <h3>Where each value comes from</h3>
+        <p class="hint">
+          A lower rung may only narrow. Where a team's own value is wider than the rung
+          above it, the tighter one is in force and the team's is left where it was — so
+          widening the platform again gives it back.
+        </p>
+        <table class="ladder">
+          <thead>
+            <tr>
+              <th>setting</th>
+              <th>in force</th>
+              <th>decided by</th>
+              <th>every opinion</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={setting <- team.effective}>
+              <td><code>{setting.key}</code></td>
+              <td>{to_string(setting.value)}</td>
+              <td>{setting.decided_by}</td>
+              <td>
+                {setting.opinions
+                |> Enum.map(fn opinion -> "#{opinion.rung} #{opinion.value}" end)
+                |> Enum.join(", ")}
+              </td>
+            </tr>
+          </tbody>
+        </table>
 
         <h3>Spend</h3>
         <p :if={team.spend_by_model == []} class="empty">

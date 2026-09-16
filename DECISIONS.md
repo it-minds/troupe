@@ -3176,3 +3176,75 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      could set it could cap somebody in a team they do not administer. The *place* is the
      team page because that is where somebody is standing when they wonder who is near
      theirs, and the flash says "in every team" so nobody mistakes it for a team setting.
+
+476. **A platform default is also a ceiling.** `default_erase_after_days` used to apply
+     only to teams enabled after it changed, which made a retention policy something a
+     team could lengthen afterwards and nothing would say so. It now narrows every team:
+     the ladder's rule made concrete where it matters most, since retention is only
+     enforceable in one direction.
+
+477. **Narrower is declared per setting, not inferred.** For a duration or a retention it
+     is fewer; for a permission it is `false`. A resolver that guessed from the type would
+     be wrong half the time, so `@laddered` names the direction and `tightness/2` is one
+     comparison over both — which is also why deny-wins falls out rather than being a
+     second resolver.
+
+478. **A team that holds a wider value keeps its row and stops getting it.** The tighter
+     rung is what runs; the team's own column is left exactly where the administrator put
+     it. Writing the tighter value back would save a lookup and destroy their intent — and
+     when the platform widens again they should find their setting, not somebody else's.
+
+479. **Widening is refused, not clamped, and the refusal quotes the ceiling and the rung.**
+     A form that accepted ninety over a system running thirty is a system that knew better
+     and said nothing. The refusal names which rung set the ceiling, because "you may not"
+     and "the deployment says you may not" are different amounts of help.
+
+480. **Anything that acts on a laddered value reads `Ladder.resolve/1`, not the column.**
+     `team_role/2` and the team policy a client is handed both go through it, so a platform
+     that turns `members_may_control` off turns it off at the next request rather than at
+     the next time somebody edits a team.
+
+481. **The console gets the resolved rows from `Admin`, not from the ladder.** A LiveView
+     is an admin API client and `mix troupe.boundaries` enforces it. The first version
+     called `Ladder.laddered/0` from the page to map a column to a key; the fix was to put
+     the column in the row the API already returns, which is the right answer anyway —
+     everything a row needs to render should be in the row.
+
+482. **The two managed switches ride in with the terms and are always sent.** The terms
+     are already the channel for "configuration this session did not choose", and a second
+     one would be a second thing to keep in step. Unlike the terms they are never omitted:
+     absent has to mean *off* rather than unspecified, or a plane that stopped sending them
+     would leave every session running on whatever it last had.
+
+483. **They are re-read at every activation.** A platform admin who turns one on means it
+     for the sessions already running. Those wake often enough that "at the next
+     activation" is a promise worth making, where "only new sessions" would leave the
+     longest-running ones — the ones that matter most — without it.
+
+484. **`managed_mcp_servers_only` refuses before the challenge is examined.** Asking
+     somebody to consent to a thing that will be refused anyway is worse than refusing it.
+     Nothing is registered, logged or tainted, and the refusal is a `forbidden` with a
+     sentence rather than a transport error — the person asked for their notes tool and
+     the answer is something they can act on.
+
+485. **`managed_permission_rules_only` turns `allow_session` into `allow`.** The call in
+     front of the person is answered and nothing standing is created, so the next call asks
+     again. The *log* records `allow`, not `allow_session`: an event naming a standing
+     permission beside a session that has none would be a log disagreeing with itself.
+
+486. **A sibling is `session.spawn`, not `session.create` with an extra argument.** It
+     takes its profile, its team and its visibility from another session, and its ceiling
+     from that session's *offering* rather than the team's grant. A team's grant is usually
+     wider than any one session's, so a sibling that could reach the whole grant would be a
+     way for a session to acquire an agent its own offering excluded.
+
+487. **The in-system MCP projection offers four tools and nothing destructive.** Everything
+     there is something the caller's own credential could already do at `/rpc`, dispatched
+     through the same `Harness` with the same context — the "no client, including ours,
+     gets a private door" rule applied to ourselves once more. A test asserts the absence,
+     because a sentence in a moduledoc is not a guard.
+
+488. **The door vouches for the source; the caller may not claim it.** `/mcp/session` puts
+     `vouched_source: "agent"` in the context, which is how an agent's firing is an `agent`
+     firing. A caller at `/rpc` claiming `agent` is refused, for the same reason it may not
+     claim `schedule`: a discriminator anybody can set discriminates nothing.

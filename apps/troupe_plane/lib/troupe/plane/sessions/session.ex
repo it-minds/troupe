@@ -28,7 +28,7 @@ defmodule Troupe.Plane.Sessions.Session do
   # What the worker reports the session is doing. `state` above is the plane's word on
   # whether a tree exists; `status` is the worker's on what the tree is up to.
   @statuses ~w(idle thinking acting waiting done interrupted)
-  @origins ~w(user trigger a2a)
+  @origins ~w(user trigger a2a agent)
 
   schema "sessions" do
     belongs_to(:owner, Troupe.Plane.Identity.User)

@@ -44,6 +44,17 @@ defmodule Troupe.Config do
             # empty for a local one where there is nobody to bill.
             attribution: %{},
             auto_approve: false,
+            # Two switches a platform sets and a session may not move. Both arrive with
+            # the activation and are re-read at every one, so turning one on reaches
+            # every session at its next wake rather than only new ones.
+            #
+            # `managed_permission_rules_only` — a session may not grant itself a standing
+            # permission: `allow_session` is refused and each call goes back to the rule
+            # the platform's definition carries. `managed_mcp_servers_only` — a client may
+            # not register a tool it hosts at all, so the only MCP servers in play are the
+            # profile's.
+            managed_permission_rules_only: false,
+            managed_mcp_servers_only: false,
             # What happens to an `ask` tool when nobody is attached to answer. `:wait`
             # leaves the request in the log for a person to find; `:deny` answers no at
             # once, which is what an unattended session asks for. There is deliberately

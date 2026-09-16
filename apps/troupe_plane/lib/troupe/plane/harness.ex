@@ -38,10 +38,12 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.{ACL, Session}
+  alias Troupe.Plane.Settings
+  alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.{Error, Token}
+  alias Troupe.Protocol.{Canonical, Error, Origin, Principal, Token}
 
   # What a session reserves against its team's budget before it starts. A slice rather
   # than the whole budget, so one session cannot lock a team out; the ledger records
@@ -66,7 +68,18 @@ defmodule Troupe.Plane.Harness do
 
   @term_keys ~w(budget_micros max_turns wall_clock_seconds approvals)
 
-  @type context :: %{user: User.t(), platform_admin?: boolean()}
+  @typedoc """
+  Who is calling, and through which door.
+
+  `vouched_source` is what the door can say about a firing that the caller cannot say
+  about itself: the in-system MCP projection knows its caller is an agent, and a caller
+  at `/rpc` could only claim it. Absent means `api`, which is what a bare credential is.
+  """
+  @type context :: %{
+          :user => User.t(),
+          :platform_admin? => boolean(),
+          optional(:vouched_source) => String.t()
+        }
 
   @methods %{
     "me" => :observe,
@@ -88,7 +101,8 @@ defmodule Troupe.Plane.Harness do
     "session.erase" => :control,
     "session.grant" => :control,
     "session.review" => :control,
-    "trigger.fire" => :control
+    "trigger.fire" => :control,
+    "session.spawn" => :control
   }
 
   @doc "Every method the plane answers, and the scope each needs."
@@ -273,6 +287,53 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  @doc false
+  # A sibling, started by an agent that is already inside the system.
+  #
+  # `session.create` with the parent's profile and team, and with the parent's offering
+  # as the ceiling: the caller may name an agent the *parent* could have run and not
+  # merely one the team may. That is the guardrail 2e rests on, and it is a real
+  # narrowing rather than a restatement — a team's grant is usually wider than any one
+  # session's, and a sibling that could reach the whole grant would be a way for a
+  # session to acquire an agent its own offering excluded.
+  #
+  # Not called `session.create`, because it is not that method with an extra argument: it
+  # takes its profile, its team and its ceiling from another session, and a caller who
+  # thought otherwise would be surprised by every one of those.
+  defp handle("session.spawn", params, %{user: user} = context) do
+    with {:ok, parent} <- visible(params["parent"], user),
+         :ok <- spawnable(parent),
+         {:ok, agent} <- agent_within(parent, params["agent"]),
+         {:ok, prompt} <- prompt_for(params["prompt"]) do
+      session_id = generate_id()
+
+      handle(
+        "session.create",
+        %{
+          "session_id" => session_id,
+          "profile" => parent.profile,
+          "team" => team_name(parent),
+          "agent" => agent,
+          "prompt" => prompt,
+          "title" => params["title"],
+          "terms" => params["terms"],
+          # A sibling is as visible as its parent and no more. A private session that
+          # could spawn a team-visible one would be a way to publish its own work.
+          "visibility" => parent.visibility,
+          "origin" =>
+            Origin.agent(
+              parent: parent.id,
+              session_id: session_id,
+              payload_digest: Canonical.hash(%{"prompt" => prompt}),
+              principal: Principal.of(parent.owner_subject, user.subject)
+            )
+        }
+        |> Map.reject(fn {_key, value} -> is_nil(value) end),
+        context
+      )
+    end
+  end
+
   # -- private sessions -------------------------------------------------------
 
   # A session that runs on somebody's laptop and is sealed with a key only they hold.
@@ -408,10 +469,10 @@ defmodule Troupe.Plane.Harness do
   # with. It may not say it is a schedule, a person's hand or a trigger key: those are
   # vouched for by which door the firing came through, and a source anybody can claim
   # tells a reader nothing.
-  defp handle("trigger.fire", params, %{user: user}) do
+  defp handle("trigger.fire", params, %{user: user} = context) do
     with {:ok, trigger} <- Triggers.for_caller(params["trigger"], user),
          {:ok, key} <- required_string(params, "idempotency_key"),
-         {:ok, source} <- claimed_source(params["source"]),
+         {:ok, source} <- claimed_source(params["source"], context),
          {:ok, event} <- event_param(params["event"]),
          {:ok, fired} <- Triggers.fire(trigger, source, key, event, user.subject) do
       {:ok, Triggers.fired_json(fired)}
@@ -643,17 +704,20 @@ defmodule Troupe.Plane.Harness do
 
   defp event_param(_other), do: invalid("event is an object")
 
-  # What the caller says it is. Absent means `api`, which is what a credential at `/rpc`
-  # is unless it says otherwise.
-  defp claimed_source(nil), do: {:ok, "api"}
+  # What the caller says it is, or what the door says on its behalf. Absent means
+  # whatever the door vouches for, which for a bare credential at `/rpc` is `api`.
+  defp claimed_source(nil, context), do: {:ok, vouched(context)}
 
-  defp claimed_source(source) when is_binary(source) do
-    if source in Run.claimable_sources(),
+  defp claimed_source(source, context) when is_binary(source) do
+    if source in Run.claimable_sources() or source == vouched(context),
       do: {:ok, source},
       else: invalid("source is one of #{Enum.join(Run.claimable_sources(), ", ")}")
   end
 
-  defp claimed_source(_other), do: invalid("source is a string")
+  defp claimed_source(_other, _context), do: invalid("source is a string")
+
+  defp vouched(%{vouched_source: source}) when is_binary(source), do: source
+  defp vouched(_context), do: "api"
 
   # An id nobody has used, or one that is already this person's private session. A team
   # session's id is refused here rather than quietly becoming a private row, and so is
@@ -1104,6 +1168,38 @@ defmodule Troupe.Plane.Harness do
     }
   end
 
+  # A parent that is erased, archived or read-only is not a parent: a sibling of a
+  # session nobody may write to is a session the caller could not have reached.
+  defp spawnable(%Session{state: state}) when state in ["erased", "archived"] do
+    {:error, Error.new(:forbidden, %{reason: "that session is #{state}"})}
+  end
+
+  defp spawnable(%Session{team_id: nil}) do
+    {:error, Error.new(:forbidden, %{reason: "a private session has no team to spawn into"})}
+  end
+
+  defp spawnable(%Session{}), do: :ok
+
+  # The parent's offering, not the team's. `nil` is allowed and means the profile's
+  # default agent, which the parent could certainly run.
+  defp agent_within(_parent, nil), do: {:ok, nil}
+
+  defp agent_within(%Session{} = parent, agent) when is_binary(agent) do
+    %{agents: agents} = offering(parent.profile, Identity.entitlements_for(team_of(parent), parent.profile))
+
+    if agent in agents do
+      {:ok, agent}
+    else
+      {:error,
+       Error.new(:forbidden, %{
+         reason: "the parent session cannot run an agent named #{agent}",
+         agents: agents
+       })}
+    end
+  end
+
+  defp agent_within(_parent, _other), do: invalid("agent is a name, or absent")
+
   defp visible(nil, _user), do: {:error, Error.new(:invalid_params, %{missing: "session_id"})}
 
   defp visible(session_id, user) do
@@ -1182,6 +1278,19 @@ defmodule Troupe.Plane.Harness do
   defp session_terms(session) do
     %{"terms" => session.terms, "origin" => session.origin}
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
+    |> Map.put("managed", managed_switches())
+  end
+
+  # The platform's two switches, re-read at every activation rather than pinned at
+  # creation. A platform admin who turns one on means it for the sessions that are
+  # already running, and those wake often enough that "at the next activation" is a
+  # promise worth making — where "only new sessions" would leave the ones that matter
+  # most running without it for as long as they stayed awake.
+  defp managed_switches do
+    %{
+      "permission_rules_only" => Settings.get("managed_permission_rules_only") == true,
+      "mcp_servers_only" => Settings.get("managed_mcp_servers_only") == true
+    }
   end
 
   defp role_of(user, session) do
@@ -1349,13 +1458,18 @@ defmodule Troupe.Plane.Harness do
     user |> Identity.profiles_for() |> Enum.map(& &1.profile) |> Enum.uniq() |> Enum.sort()
   end
 
+  # Resolved, not raw. What a client reads here it acts on — whether to offer a steer
+  # button, when to expect a session to go dormant — and a column that the platform is
+  # overriding would have the client showing an affordance the plane will refuse.
   defp team_json(team) do
+    resolved = Ladder.resolve(team)
+
     %{
-      "name" => team.name,
-      "id" => team.id,
-      "budget_micros" => team.budget_micros,
-      "members_may_control" => team.members_may_control,
-      "idle_timeout_seconds" => team.idle_timeout_seconds
+      "name" => resolved.name,
+      "id" => resolved.id,
+      "budget_micros" => resolved.budget_micros,
+      "members_may_control" => resolved.members_may_control,
+      "idle_timeout_seconds" => resolved.idle_timeout_seconds
     }
   end
 

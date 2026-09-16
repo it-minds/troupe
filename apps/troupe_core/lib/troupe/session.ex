@@ -56,11 +56,15 @@ defmodule Troupe.Session do
         {Troupe.Session.Log,
          session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
         {Troupe.Session.Approvals,
-         session_id: session_id, auto_approve: config.auto_approve, mode: config.approvals},
+         session_id: session_id,
+         auto_approve: config.auto_approve,
+         mode: config.approvals,
+         managed_rules_only: config.managed_permission_rules_only},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
-        {Troupe.Session.ClientTools, session_id: session_id}
+        {Troupe.Session.ClientTools,
+         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only}
       ] ++
         fake_child(session_id, config, opts) ++
         [

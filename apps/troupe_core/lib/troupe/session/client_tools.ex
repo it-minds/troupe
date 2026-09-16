@@ -22,6 +22,12 @@ defmodule Troupe.Session.ClientTools do
   participants are entitled to know about — and to decide about — rather than something
   they discover in the transcript afterwards.
 
+  **A platform may turn the whole thing off.** With `managed_mcp_servers_only`, a
+  registration is refused before the challenge is examined — asking a person to consent
+  to something that will be refused anyway is worse than refusing it — and nothing is
+  registered, logged or tainted. The refusal names the switch, so the model can tell the
+  person why rather than reporting a transport failure.
+
   Placed directly under `Session.Log` in the session tree, so a registration can be
   logged and an agent restart does not lose one. A crash here is worth restarting the
   agent for: registrations that are gone must not go on looking present.
@@ -39,7 +45,7 @@ defmodule Troupe.Session.ClientTools do
   # left lying around is not a standing permission.
   @challenge_ttl_ms 5 * 60 * 1000
 
-  defstruct [:session_id, tools: %{}, challenges: %{}, monitors: %{}]
+  defstruct [:session_id, managed_servers_only: false, tools: %{}, challenges: %{}, monitors: %{}]
 
   @typedoc """
   One registered tool, in the shape `Troupe.Tool` accepts as a value.
@@ -125,7 +131,12 @@ defmodule Troupe.Session.ClientTools do
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
     Process.set_label("troupe client tools #{session_id}")
-    {:ok, %__MODULE__{session_id: session_id}}
+
+    {:ok,
+     %__MODULE__{
+       session_id: session_id,
+       managed_servers_only: Keyword.get(opts, :managed_servers_only, false)
+     }}
   end
 
   @impl GenServer
@@ -145,6 +156,13 @@ defmodule Troupe.Session.ClientTools do
 
     {:reply, {:ok, challenge},
      %{state | challenges: Map.put(state.challenges, nonce, entry)}}
+  end
+
+  def handle_call({:register, _connection, _consent, _opts}, _from, %{managed_servers_only: true} = state) do
+    # Before the challenge is even looked at, so a client cannot get as far as prompting
+    # somebody for consent to a thing the platform has already refused. Asking a person
+    # to approve something that will be refused anyway is worse than refusing it.
+    {:reply, {:error, :managed_mcp_servers_only}, state}
   end
 
   def handle_call({:register, connection, consent, opts}, _from, state) do

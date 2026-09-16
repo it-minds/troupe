@@ -56,7 +56,7 @@ defmodule Troupe.Worker.Plane.Commands do
             bundle: bundle,
             agent: params["agent"],
             prompt: params["prompt"],
-            terms: terms_of(params["terms"]),
+            terms: terms_of(params["terms"]) |> with_managed(params["managed"]),
             origin: params["origin"],
             usage_seq: params["usage_seq"]
           ],
@@ -384,6 +384,21 @@ defmodule Troupe.Worker.Plane.Commands do
   end
 
   defp terms_of(_terms), do: nil
+
+  # The platform's switches ride in with the terms, because the terms are already the
+  # channel for "configuration this session did not choose" and a second one would be a
+  # second thing to keep in step. Unlike the terms, these are *always* sent: absent has
+  # to mean off rather than unspecified, or a plane that stopped sending them would leave
+  # every session running on whatever it last had.
+  defp with_managed(overrides, %{} = managed) do
+    (overrides || []) ++
+      [
+        managed_permission_rules_only: managed["permission_rules_only"] == true,
+        managed_mcp_servers_only: managed["mcp_servers_only"] == true
+      ]
+  end
+
+  defp with_managed(overrides, _none), do: overrides
 
   defp positive(n) when is_integer(n) and n > 0, do: n
   defp positive(_), do: nil

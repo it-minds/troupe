@@ -14,6 +14,7 @@ defmodule Troupe.Plane.Sessions do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Repo
   alias Troupe.Plane.Sessions.{ACL, Anchor, Session}
+  alias Troupe.Plane.Settings.Ladder
 
   # -- creating and placing ---------------------------------------------------
 
@@ -703,7 +704,10 @@ defmodule Troupe.Plane.Sessions do
     with team_id when not is_nil(team_id) <- session.team_id,
          %Team{} = team <- Repo.get(Team, team_id),
          true <- member?(user, team) do
-      if team.members_may_control, do: :control, else: :observe
+      # Through the ladder, not off the column: a platform that has turned this off
+      # turns it off for every team, and a team that has it on in its own row stops
+      # being able to steer at the next request rather than at the next edit.
+      if Ladder.resolve(team).members_may_control, do: :control, else: :observe
     else
       _ -> nil
     end

@@ -32,6 +32,62 @@ defmodule Troupe.Gateway.ClientToolsTest do
     "schema" => %{"type" => "object", "properties" => %{"q" => %{"type" => "string"}}}
   }
 
+  describe "a platform that takes no client-hosted tools" do
+    test "refuses the registration with a reason the model can relay", context do
+      %{session: session} =
+        start_session(context,
+          default: {:text, "ok"},
+          config: [auto_approve: true, managed_mcp_servers_only: true]
+        )
+
+      ada = attach(context, @ada)
+
+      assert {:error, %Error{} = error} =
+               Client.call(ada, "tools.register", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => session.id,
+                 "tools" => [@tool],
+                 "consent" => %{"granted" => true}
+               })
+
+      # Not a transport failure and not a consent challenge: the person asked for their
+      # notes tool and the answer is a sentence about this platform, which is something
+      # the model can pass on and they can act on.
+      assert error.message == "forbidden"
+      assert error.data["setting"] == "managed_mcp_servers_only"
+      assert error.data["reason"] =~ "client-hosted"
+
+      # And nothing was registered, logged or tainted on the way past. A refusal that
+      # left a taint behind would say this session had run somebody's laptop code.
+      assert ClientTools.list(session.id) == []
+      assert ClientTools.taint(session.id) == []
+
+      types = session.id |> Troupe.replay_from(0) |> Enum.map(& &1.type)
+      refute "tools_registered" in types
+      refute "session_tainted" in types
+    end
+
+    test "does not even offer a challenge, so nobody is asked to approve it", context do
+      %{session: session} =
+        start_session(context,
+          default: {:text, "ok"},
+          config: [auto_approve: true, managed_mcp_servers_only: true]
+        )
+
+      ada = attach(context, @ada)
+
+      # Without the switch this is the call that answers `consent_required` with a
+      # challenge to show the person. Asking somebody to approve a thing that will be
+      # refused anyway is worse than refusing it.
+      assert {:error, %Error{message: "forbidden"}} =
+               Client.call(ada, "tools.register", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => session.id,
+                 "tools" => [@tool]
+               })
+    end
+  end
+
   describe "consent" do
     test "a registration without consent is rejected, and says what to show", context do
       %{session: session} = start_session(context, default: {:text, "ok"})

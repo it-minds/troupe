@@ -571,6 +571,26 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.setting.effective",
+      function: :setting_effective,
+      summary:
+        "For one setting decided at more than one rung: the value in force, which rung decided it, and every rung that had an opinion.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "key",
+          type: :string,
+          required: true,
+          description: "The setting's key."
+        },
+        %Argument{
+          name: "team",
+          type: :string,
+          description: "Include this team's own rung. Absent answers for the rungs above every team."
+        }
+      ]
+    },
+    %Method{
       name: "admin.setting.reset",
       function: :setting_reset,
       summary:

@@ -86,6 +86,29 @@ defmodule Troupe.Protocol.Origin do
     }
   end
 
+  @doc """
+  An agent already inside the system, starting a sibling: `agent`.
+
+  `parent` is the session that asked. The key is derived from both ids rather than
+  supplied, because a spawn has no natural idempotency key — nobody is retrying it
+  blindly — and a key that named only the parent would make every sibling look like a
+  replay of the first.
+  """
+  @spec agent(keyword()) :: map()
+  def agent(opts) do
+    parent = Keyword.fetch!(opts, :parent)
+    session_id = Keyword.fetch!(opts, :session_id)
+
+    %{
+      "kind" => "agent",
+      "source" => "agent",
+      "parent" => parent,
+      "idempotency_key" => "spawn:#{parent}:#{session_id}",
+      "payload_digest" => Keyword.fetch!(opts, :payload_digest),
+      "principal" => Principal.to_json(Keyword.fetch!(opts, :principal))
+    }
+  end
+
   @doc "How the firing arrived, or `nil` where a person started it."
   @spec source(map() | nil) :: String.t() | nil
   def source(%{"source" => source}) when source in @sources, do: source
