@@ -3724,3 +3724,9 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      timed out of the foreground looked finished. It is worth writing down twice: the
      evidence for "this failure is mine" has to include *what else was running*, or an hour
      goes into reading a stack trace that describes nothing.
+
+     The confirmation is better than "it passed the next time". A second run that also
+     overlapped another suite failed five tests — in `WebTest`, `BundlesTest` and
+     `TriggersTest`, and not one of the module that failed before. Contention fails
+     whatever it lands on; a defect fails the same thing twice. Which set of tests failed
+     was the witness, not how many.
