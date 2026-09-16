@@ -277,7 +277,6 @@ defmodule Troupe.Worker.Plane.Commands do
   defp put_present(map, _key, nil), do: map
   defp put_present(map, key, value), do: Map.put(map, key, value)
 
-
   # -- forking -----------------------------------------------------------------
 
   # A child being activated for the first time, whose log is its parent's up to a point.
@@ -381,7 +380,6 @@ defmodule Troupe.Worker.Plane.Commands do
         })
     end
   end
-
 
   @doc """
   What this pod is holding, as metadata.

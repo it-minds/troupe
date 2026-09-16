@@ -1,0 +1,47 @@
+#!/usr/bin/env bash
+# Credo, as CI runs it: over the tree's bytes rather than the working copy's.
+#
+#   scripts/credo
+#
+# `mix credo --strict` on a Windows checkout is not the same check CI runs, and the
+# difference is not cosmetic. Git checks these files out with CRLF while the repository
+# stores LF, so locally every file trips the line-ending consistency check — ninety-odd
+# findings that are true of nobody else's copy — and, worse, checks that look for `\n\n\n`
+# find nothing in a file whose blank lines are `\r\n\r\n\r\n`. Twice now that has hidden a
+# real "no more than 1 consecutive blank lines" finding behind a wall of noise, and CI has
+# been the thing that noticed.
+#
+# So this writes the index to a tree object and unpacks *that*, which is the same bytes CI
+# clones, and runs credo there. `_build` and `deps` are reused rather than rebuilt, because
+# the check reads source and the compile has already happened.
+#
+# It checks what is staged plus what is modified — `git write-tree` after `git add -A` —
+# so it answers the question worth asking before a push: would CI be happy with this.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+# The index is restored afterwards however this ends, including on a failing credo run:
+# staging everything to take a snapshot must not leave everything staged.
+staged=$(git diff --cached --name-only | head -1)
+
+restore() {
+  if [ -z "$staged" ]; then git reset -q; fi
+}
+trap restore EXIT
+
+git add -A
+tree=$(git write-tree)
+
+# Not `exec`: that replaces this shell and takes the trap with it, so the index would be
+# left staged exactly when credo fails and you most want to keep working.
+./scripts/toolbox bash -c "
+  set -euo pipefail
+  work=\$(mktemp -d)
+  trap 'rm -rf \$work' EXIT
+  git archive $tree | tar -x -C \$work
+  cp -r /workspace/_build \$work/_build 2>/dev/null || true
+  cp -r /workspace/deps \$work/deps 2>/dev/null || true
+  cd \$work
+  mix credo --strict
+"

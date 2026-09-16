@@ -3587,3 +3587,19 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      merely fallen behind recovers between writes, and a flush that frees bytes lets the
      next frame through — which is the design working. The test now fills the kernel
      buffers until the connection has dropped hundreds, and asserts from that point on.
+
+545. **`mix credo --strict` on this checkout is not the check CI runs, so there is a script
+     for the one that is.** Git checks these files out with CRLF while the repository stores
+     LF, so locally every file trips the line-ending consistency check — ninety-odd findings
+     true of nobody else's copy — and checks that look for `
+
+
+` find nothing in a file
+     whose blank lines are `
+
+
+`. That is not noise around a real result; it
+     *hides* one. Twice now a "no more than 1 consecutive blank lines" finding has been
+     invisible locally and failed CI, both times on a section header a patch script inserted.
+     `scripts/credo` writes the index to a tree object, unpacks that — the same bytes CI
+     clones — and runs credo there.
