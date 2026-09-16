@@ -3619,3 +3619,41 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 
      `Troupe.ObjectStoreCase.unique/1` is the one copy now — wall clock for between runs,
      counter for within one — and the gateway's local helper says the same thing.
+
+547. **The working tree is LF, because every tool that reads this repository runs on
+     Linux.** A Windows checkout with CRLF is not a local variant of the same tree; it is a
+     different input, and it was wrong in three places at once. `mix credo --strict`
+     reported a consistency finding for every file and could not see a real one — twice.
+     `mix troupe.admin.assets --check` said the console's bundle did not match its
+     dependencies, which was the line endings and not the dependencies. And a test that
+     writes a shell script from a string literal wrote CRLF into it, which `dash` answers
+     with "Bad fd number" and refuses to parse — so the script never ran and the failure
+     showed up as a daemon that did not start.
+
+     `* text=auto eol=lf` in `.gitattributes`. The index has always been LF, so nothing
+     committed changed; what changed is what lands in a working tree. After it, plain
+     `mix credo --strict` agrees with CI and the assets check passes.
+
+548. **A disconnect may only mark the enrolment it is about.** `Fleet.disconnected/2`
+     marked a worker unhealthy whenever its socket closed, which is right for a pod that
+     has gone and wrong for a pod whose *plane replica* has gone. The pod reconnects to the
+     survivor and enrols there; the dead replica's teardown then arrives and marks the row
+     unhealthy again, and nothing recovers it until the next heartbeat. In between, every
+     create is refused with `no_healthy_worker` — a failover that looks exactly like an
+     outage, and the reason `FailoverTest` failed on the second of CI's ten runs.
+
+     The fence is `enrolled_at`: a teardown updates the row only if it has not been
+     enrolled since. Removing the fence fails exactly one test, which is the one that
+     describes the race.
+
+549. **`scripts/ci` runs what CI runs, including running the suite more than once.** "It
+     passes locally" was wrong four times in a row and each was worth a push and ten
+     minutes: a credo finding the local checkout could not see, a stale generated asset, a
+     session id that collided with an earlier run's objects, and a race that shows up
+     roughly one run in ten. Only the last of those is chance; the rest were a local
+     command that was not the one CI runs.
+
+     `dev/known-local-failures` names the tests that fail in the toolbox container and pass
+     on CI. They are reported and do not fail the run, anything else does, and a name that
+     starts passing is printed as a line to delete — so the list cannot quietly become a
+     place to put inconvenient tests.

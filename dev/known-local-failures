@@ -1,0 +1,23 @@
+# Tests that fail in the toolbox container and pass on CI.
+#
+# `scripts/ci` reports these and does not fail on them; anything else fails the run. A
+# name here is a claim that has been checked against a green CI run, not a way to quieten
+# something inconvenient — and a line that stops being true is a line to delete, which
+# `scripts/ci` says out loud when one of these passes.
+#
+# One name per line, exactly as ExUnit prints it after the number.
+
+# Spawns a real daemon in a real OS process and waits for it to answer on a unix socket.
+# The generated launcher used to be unparseable here because the working tree was CRLF
+# (`.gitattributes` fixes that); with LF it launches, writes its pidfile and creates the
+# socket, and the client still does not get an answer inside the timeout. Unexplained,
+# and green on CI: runs 35135673938 and 35137121967 both pass all 82 gateway tests.
+ten concurrent clients spawn exactly one daemon
+a stale lock left by a killed client does not block start-up forever
+kill -9 with three sessions: all come back, the mid-turn one interrupted
+an idle session stops its tree, and subscribing serves history without starting one
+
+# Verifies a cancelled shell command's grandchild is gone by its OS pid. The container's
+# process tree is not the runner's, and this has failed here since long before the
+# packages that touch sessions.
+cancel kills a shell command and its grandchild, verified by OS pid
