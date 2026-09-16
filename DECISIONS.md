@@ -3595,11 +3595,27 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 
 
 ` find nothing in a file
-     whose blank lines are `
-
-
+     whose blank lines are `
+
+
+
+
+
 `. That is not noise around a real result; it
      *hides* one. Twice now a "no more than 1 consecutive blank lines" finding has been
      invisible locally and failed CI, both times on a section header a patch script inserted.
      `scripts/credo` writes the index to a tree object, unpacks that — the same bytes CI
      clones — and runs credo there.
+
+546. **A test name that becomes an object key is unique between runs, not only within
+     one.** `System.unique_integer/1` restarts in the next VM, so ten consecutive runs of
+     the same file pick the same names ten times — and an object store is not a database,
+     so nothing rolls back and the second run lists what the first one wrote. The plane's
+     `private_sessions_test` was fixed for this once (519); the gateway's `private_test`
+     had its own copy of the same helper and failed CI the same way, asserting a session
+     had exactly one segment when it had one of its own and one from an earlier run. The
+     witness was the store itself: thirty-eight leftover `p-<n>` prefixes, `p-13` and
+     `p-10246` among them, both of which have failed a test by name.
+
+     `Troupe.ObjectStoreCase.unique/1` is the one copy now — wall clock for between runs,
+     counter for within one — and the gateway's local helper says the same thing.

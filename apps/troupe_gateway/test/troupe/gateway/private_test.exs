@@ -283,5 +283,12 @@ defmodule Troupe.Gateway.PrivateTest do
     send(sealer, {:troupe_event, context.session_id, event})
   end
 
-  defp unique(prefix), do: "#{prefix}-#{System.unique_integer([:positive])}"
+  # Unique between runs as well as within one. These become object keys, and an object store
+  # is not a database: nothing rolls back at the end of a test, so a second run that picked
+  # the same id would list what the first one wrote. That is what failed on CI \u2014 one test
+  # here asserts a session has exactly one segment, and it had one of its own plus one from
+  # a run half an hour earlier.
+  defp unique(prefix) do
+    "#{prefix}-#{System.os_time(:millisecond)}-#{System.unique_integer([:positive])}"
+  end
 end

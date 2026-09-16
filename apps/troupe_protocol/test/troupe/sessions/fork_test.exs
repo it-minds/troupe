@@ -37,7 +37,7 @@ defmodule Troupe.Sessions.ForkTest do
 
   defp session(store, role) do
     %Context{
-      session_id: "fork-#{role}-#{System.unique_integer([:positive])}",
+      session_id: unique("fork-#{role}"),
       team: "engineering",
       epoch: 1,
       # Different keys, deliberately. A child that could be opened with its parent's key
