@@ -73,13 +73,27 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :resume} = args} ->
         resume(args)
 
+      {:ok, %{mode: :login} = args} ->
+        Troupe.CLI.Remote.login(args.plane_url)
+
+      {:ok, %{mode: :logout} = args} ->
+        Troupe.CLI.Remote.logout(args.plane_url, all: args.all)
+
+      {:ok, %{mode: :whoami} = args} ->
+        Troupe.CLI.Remote.whoami(args.plane_url)
+
       {:ok, %{mode: :tui} = args} ->
+        # `--remote` opens on HQ. The local session still starts behind it, so
+        # the page can list local sessions next to the plane's and Esc lands
+        # somewhere real.
+        page = if args.remote, do: [page: :hq, plane: plane(args)], else: []
+
         case Troupe.start_session(
                workspace: args.workspace,
                watch: args.watch,
                auto_approve: args.auto_approve
              ) do
-          {:ok, sid} -> tui(sid, mouse_opts(args))
+          {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
           {:error, reason} -> fail("could not start session: #{inspect(reason)}")
         end
 
@@ -89,6 +103,10 @@ defmodule Troupe.CLI.Runner do
         2
     end
   end
+
+  # `troupe --remote https://plane…` beats the plane last logged in to.
+  defp plane(%{plane_url: url}) when is_binary(url), do: url
+  defp plane(_args), do: nil
 
   defp run(args) do
     isolation = if args.worktree, do: :worktree, else: nil
@@ -170,7 +188,16 @@ defmodule Troupe.CLI.Runner do
   defp tui(sid, extra) do
     # `extra` first: a Keyword lookup takes the earliest match, so the caller's
     # `mouse_capture:` beats the default here.
-    opts = extra ++ [session_id: sid, name: TUI.Server.via(sid), mouse_capture: true]
+    # The window tells the runner to quit; the UI itself knows nothing about the
+    # CLI, which is what `mix troupe.xref` enforces.
+    opts =
+      extra ++
+        [
+          session_id: sid,
+          name: TUI.Server.via(sid),
+          mouse_capture: true,
+          on_quit: &__MODULE__.quit/0
+        ]
 
     spec = %{
       id: TUI.Server,

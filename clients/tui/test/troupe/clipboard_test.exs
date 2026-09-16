@@ -4,7 +4,7 @@ defmodule Troupe.ClipboardTest do
   import Troupe.TestHelpers
   import Troupe.TUIHelpers
 
-  alias Troupe.UI.Clipboard
+  alias Troupe.Clipboard
 
   # Copying goes to a file this test owns rather than the machine's clipboard,
   # which is also how a user redirects it (tmux buffer, OSC-52 helper over ssh).
