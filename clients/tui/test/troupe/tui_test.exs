@@ -494,6 +494,76 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     eventually(fn -> map_size(user_state(pid).model.windows) == 0 end)
   end
 
+  # Decision 83: a reply typed into a window used to be read as hotkeys the moment
+  # it began with `d` or `x` — "do it" dismissed the window on the first letter.
+  test "typing a reply that starts with d or x neither dismisses nor cancels the branch" do
+    ws = tmp_workspace()
+    scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => "What next?"}}, {:finish, "ok"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask me something")
+    await_state("code-1", :needs_input)
+    press(pid, "1")
+
+    type(pid, "do it, drop x")
+    assert user_state(pid).win_text == "do it, drop x"
+    assert user_state(pid).win_armed == nil
+    assert user_state(pid).focus == {:window, "code-1"}
+
+    press(pid, "enter")
+    await_state("code-1", :done_unread)
+    [answered] = events_of(sid, "code-1", :question_answered)
+    assert answered.data.text == "do it, drop x"
+    assert events_of(sid, "code-1", :window_dismissed) == []
+
+    # The first press types the letter and says what a second one would do.
+    press(pid, "d")
+    assert user_state(pid).win_text == "d"
+    assert user_state(pid).win_armed == {"code-1", "d"}
+    text = screen_text(pid, session)
+    assert text =~ "press d again to dismiss"
+    assert text =~ "d again dismisses"
+
+    # Any other key disarms and leaves the letter as text.
+    press(pid, "x")
+    assert user_state(pid).win_text == "dx"
+    assert user_state(pid).win_armed == nil
+    press(pid, "esc")
+    assert map_size(user_state(pid).model.windows) == 1
+  end
+
+  # Decision 83
+  test "pressing d twice dismisses the window and x twice cancels the branch" do
+    ws = tmp_workspace()
+    fallback = fn _ -> {:delay, 20_000, {:finish, "never"}} end
+    scripts = %{"code-1" => [{:finish, "done"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts, fallback: fallback)
+    {pid, _} = start_tui(sid)
+
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "finish quickly")
+    await_state("code-1", :done_unread)
+    eventually(fn -> user_state(pid).model.windows["code-1"].state == :done_unread end)
+
+    press(pid, "1")
+    press(pid, "d")
+    press(pid, "d")
+    await_event("code-1", :window_dismissed)
+    assert user_state(pid).focus == :command
+    assert user_state(pid).win_text == ""
+    assert user_state(pid).win_armed == nil
+
+    {:ok, "code-2"} = Troupe.dispatch(sid, "code", "run forever")
+    eventually(fn -> Map.has_key?(user_state(pid).model.windows, "code-2") end)
+
+    press(pid, "1")
+    assert user_state(pid).focus == {:window, "code-2"}
+    press(pid, "x")
+    press(pid, "x")
+    await_event("code-2", :window_dismissed)
+    eventually(fn -> map_size(user_state(pid).model.windows) == 0 end)
+  end
+
   test "a multi-line tool argument renders on one row instead of aborting the frame" do
     ws = tmp_workspace()
     question = "Which of these?\n\n1. the first one\n2. the second one"

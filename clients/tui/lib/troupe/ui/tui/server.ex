@@ -33,6 +33,7 @@ defmodule Troupe.UI.TUI.Server do
           dirty: boolean(),
           tick_scheduled: boolean(),
           quit_armed: boolean(),
+          win_armed: win_armed() | nil,
           expanded: boolean(),
           pane: pane(),
           selection: selection() | nil,
@@ -46,6 +47,16 @@ defmodule Troupe.UI.TUI.Server do
           slow_render_ms: non_neg_integer(),
           on_quit: (-> any())
         }
+
+  @typedoc """
+  A window key that is armed but not yet acted on: `{agent_path, "x" | "d"}`.
+  Both keys take a branch away, and a window is also where the user types, so
+  neither acts on one press (Decision 83): the first press types the letter and
+  arms, and only an immediate second press of the same key acts. Anything else
+  typed clears it, which is why it lives here and not in the log — it is a
+  keystroke, not a decision.
+  """
+  @type win_armed :: {String.t(), String.t()}
 
   @typedoc """
   Activated-pane state: which of the branch's agents is shown (nil = the root),
@@ -139,6 +150,7 @@ defmodule Troupe.UI.TUI.Server do
       dirty: false,
       tick_scheduled: false,
       quit_armed: false,
+      win_armed: nil,
       expanded: false,
       pane: fresh_pane(),
       selection: nil,
@@ -288,7 +300,7 @@ defmodule Troupe.UI.TUI.Server do
 
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
     if Map.has_key?(state.model.windows, path),
-      do: {:noreply, window_key(key, path, %{state | quit_armed: false})},
+      do: {:noreply, window_key(key, path, disarm(%{state | quit_armed: false}, key))},
       else: handle_event(key, to_command_line(state))
   end
 
@@ -305,7 +317,7 @@ defmodule Troupe.UI.TUI.Server do
 
     case state.focus do
       :command -> {:noreply, %{state | cmd_text: state.cmd_text <> content}}
-      {:window, _} -> {:noreply, %{state | win_text: state.win_text <> content}}
+      {:window, _} -> {:noreply, %{state | win_text: state.win_text <> content, win_armed: nil}}
       :observer -> {:noreply, state, render?: false}
       :sessions -> {:noreply, state, render?: false}
       :files -> {:noreply, state, render?: false}
@@ -410,6 +422,14 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_event(_event, state), do: {:noreply, state, render?: false}
+
+  # An armed `x`/`d` (Decision 83) must be confirmed by the very next keystroke:
+  # any other key — including more typing — takes the arming away, so the letter
+  # stays in the input box as text and nothing is cancelled or dismissed.
+  defp disarm(%{win_armed: {_path, code}} = state, %Key{code: pressed}) when pressed != code,
+    do: %{state | win_armed: nil}
+
+  defp disarm(state, _key), do: state
 
   # A press outside the transcript: the tiles are the only other thing a click means.
   defp clicked_tile(state, x, y) do
@@ -790,6 +810,7 @@ defmodule Troupe.UI.TUI.Server do
         focus: :command,
         cmd_text: "",
         win_text: "",
+        win_armed: nil,
         expanded: false,
         pane: fresh_pane(),
         settings: nil,
@@ -1164,7 +1185,8 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: "esc"}, _path, %{selection: %{}} = state),
     do: %{state | selection: nil}
 
-  defp window_key(%Key{code: "esc"}, _path, state), do: %{state | focus: :command, win_text: ""}
+  defp window_key(%Key{code: "esc"}, _path, state),
+    do: %{state | focus: :command, win_text: "", win_armed: nil}
 
   # Ctrl-Y copies: the selection when the mouse made one, and otherwise the whole
   # transcript (same as `/copy`) — with mouse reporting on the terminal's own
@@ -1226,19 +1248,31 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp window_key(%Key{code: "x"}, path, %{win_text: ""} = state) do
+  # `x` and `d` take a branch away, and the window they act in is also where the
+  # user types: a reply that begins with either letter used to cancel or dismiss
+  # on the first keystroke. So the first press is typed text *and* an arming, and
+  # only an immediate second press of the same key acts (Decision 83). The armed
+  # clauses come first: after the first press the box holds the letter, so the
+  # `win_text: ""` clauses below no longer match.
+  defp window_key(%Key{code: "x", modifiers: []}, path, %{win_armed: {armed, "x"}} = state)
+       when armed == path do
     case Client.cancel_branch(state.session_id, path) do
-      :ok -> %{state | focus: :command}
-      {:error, msg} -> notice(state, to_message(msg))
+      :ok -> to_command_line(state)
+      {:error, msg} -> notice(clear_input(state), to_message(msg))
     end
   end
 
-  defp window_key(%Key{code: "d"}, path, %{win_text: ""} = state) do
+  defp window_key(%Key{code: "d", modifiers: []}, path, %{win_armed: {armed, "d"}} = state)
+       when armed == path do
     case Client.dismiss(state.session_id, path) do
-      :ok -> %{state | focus: :command}
-      {:error, msg} -> notice(state, to_message(msg))
+      :ok -> to_command_line(state)
+      {:error, msg} -> notice(clear_input(state), to_message(msg))
     end
   end
+
+  defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
+       when code in ["x", "d"],
+       do: %{state | win_text: code, win_armed: {path, code}}
 
   defp window_key(%Key{code: "e"}, _path, %{win_text: ""} = state), do: toggle_expanded(state)
 
@@ -1362,6 +1396,7 @@ defmodule Troupe.UI.TUI.Server do
       state
       | focus: {:window, path},
         win_text: "",
+        win_armed: nil,
         model: model,
         pane: fresh_pane(agent),
         selection: nil
@@ -1407,7 +1442,17 @@ defmodule Troupe.UI.TUI.Server do
   defp follow(state), do: %{state | pane: %{state.pane | scroll: :follow}}
 
   defp to_command_line(state),
-    do: %{state | focus: :command, win_text: "", pane: fresh_pane(), selection: nil}
+    do: %{
+      state
+      | focus: :command,
+        win_text: "",
+        win_armed: nil,
+        pane: fresh_pane(),
+        selection: nil
+    }
+
+  # Empties the input box without leaving the window, and takes any arming with it.
+  defp clear_input(state), do: %{state | win_text: "", win_armed: nil}
 
   # Expanding or collapsing tool output keeps the entry at the top of the view where it is,
   # instead of throwing the reader to the bottom of a transcript that just changed height.

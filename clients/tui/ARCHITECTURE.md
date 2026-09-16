@@ -149,12 +149,12 @@ Completed tool calls are never re-executed: the fold keeps their results.
 ```
    dispatch          approval/question        answered
   ─────────▶ running ────────────────▶ needs_input ───────▶ running
-               │  finish / budget / cancel / llm_error              d
+               │  finish / budget / cancel / llm_error             dd
                ▼                                                 ─────▶ dismissed
            done_unread ──── input (continue) ────▶ running
                ▲
    Node exceeds restart intensity
-  running ───────────────────────────▶ failed_unread ──── d ────▶ dismissed
+  running ───────────────────────────▶ failed_unread ─── dd ────▶ dismissed
 ```
 
 The ledger is a fold over persisted events:

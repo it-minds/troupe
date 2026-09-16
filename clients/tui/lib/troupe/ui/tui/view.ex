@@ -973,8 +973,12 @@ defmodule Troupe.UI.TUI.View do
       {selection?, ["Ctrl-Y copies the selection", "Ctrl-Y copies selection", "Ctrl-Y sel"]},
       {not selection?, ["drag selects · Ctrl-Y copies all", "drag · Ctrl-Y copy", nil]},
       {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
-      {w.state in [:running, :needs_input], ["x cancel & remove", "x cancel", "x"]},
-      {w.state in [:done_unread, :failed_unread], ["d dismiss", "d dismiss", "d"]},
+      {armed?(state, w.path, "x"), ["x again cancels & removes", "x again cancels", "x again"]},
+      {armed?(state, w.path, "d"), ["d again dismisses", "d again dismisses", "d again"]},
+      {not armed?(state, w.path, "x") and w.state in [:running, :needs_input],
+       ["xx cancel & remove", "xx cancel", "xx"]},
+      {not armed?(state, w.path, "d") and w.state in [:done_unread, :failed_unread],
+       ["dd dismiss", "dd dismiss", "dd"]},
       {true, ["Tab profile", nil, nil]}
     ]
 
@@ -989,6 +993,10 @@ defmodule Troupe.UI.TUI.View do
     end)
     |> fit(g.left.width - 2)
   end
+
+  # `x`/`d` are armed by their first press and act on the second (Decision 83),
+  # so the hint has to say which press the reader is one keystroke away from.
+  defp armed?(state, path, code), do: Map.get(state, :win_armed) == {path, code}
 
   ## Selection highlight
 
@@ -1187,6 +1195,17 @@ defmodule Troupe.UI.TUI.View do
 
   def input_blocked(_state), do: nil
 
+  # The armed half of a double-press: the letter is in the box as text, and the
+  # box's own title is where the reader is looking, so it says what a second
+  # press would do and that anything else typed keeps the letter (Decision 83).
+  defp armed_note(state, path) do
+    case Map.get(state, :win_armed) do
+      {^path, "x"} -> " → #{path} — press x again to cancel & remove, or keep typing "
+      {^path, "d"} -> " → #{path} — press d again to dismiss, or keep typing "
+      _ -> nil
+    end
+  end
+
   defp command_line(state, rect) do
     {text, title} =
       case state.focus do
@@ -1201,6 +1220,7 @@ defmodule Troupe.UI.TUI.View do
           title =
             cond do
               blocked = input_blocked(state) -> " → #{path} — input disabled: #{blocked} "
+              armed = armed_note(state, path) -> armed
               multiline?(state.win_text) -> pasted_title(state.win_text)
               true -> " → #{path} (Enter sends#{target}, Esc back) "
             end
