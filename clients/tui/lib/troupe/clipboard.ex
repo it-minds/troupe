@@ -1,4 +1,4 @@
-defmodule Troupe.UI.Clipboard do
+defmodule Troupe.Clipboard do
   @moduledoc """
   Copies text to the system clipboard with the platform's own clipboard
   command: `pbcopy` on macOS, `clip` on Windows, `wl-copy` under Wayland and

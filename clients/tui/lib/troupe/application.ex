@@ -9,6 +9,7 @@ defmodule Troupe.Application do
       {Registry, keys: :duplicate, name: Troupe.Events},
       {DynamicSupervisor, name: Troupe.Sessions, strategy: :one_for_one},
       {DynamicSupervisor, name: Troupe.Providers, strategy: :one_for_one},
+      Troupe.Remote.Supervisor,
       Troupe.UI.Supervisor
     ]
 
