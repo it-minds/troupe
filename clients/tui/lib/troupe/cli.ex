@@ -7,27 +7,13 @@ defmodule Troupe.CLI do
       troupe --no-mouse            TUI without mouse reporting, so the terminal's own selection works
       troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--workspace DIR]
       troupe resume [SESSION_ID]   no id: reopen the last session here, picker open
-      troupe --remote [PLANE_URL]  open HQ: teams, profiles and sessions on a plane
-      troupe login PLANE_URL       sign in to a plane with the device flow
-      troupe logout [PLANE_URL]    forget a plane's credentials (--all forgets every one)
-      troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
       troupe config                show the resolved providers and models (keys masked)
       troupe models [--refresh]    list every model, its window and its price
       troupe --version
   """
 
   @type args :: %{
-          mode:
-            :tui
-            | :run
-            | :resume
-            | :version
-            | :help
-            | :config
-            | :models
-            | :login
-            | :logout
-            | :whoami,
+          mode: :tui | :run | :resume | :version | :help | :config | :models,
           agent: String.t(),
           task: String.t() | nil,
           headless: boolean(),
@@ -37,10 +23,7 @@ defmodule Troupe.CLI do
           mouse: boolean() | nil,
           workspace: String.t(),
           session_id: String.t() | nil,
-          refresh: boolean(),
-          remote: boolean(),
-          plane_url: String.t() | nil,
-          all: boolean()
+          refresh: boolean()
         }
 
   @spec parse([String.t()]) :: {:ok, args()} | {:error, String.t()}
@@ -56,9 +39,7 @@ defmodule Troupe.CLI do
           workspace: :string,
           version: :boolean,
           help: :boolean,
-          refresh: :boolean,
-          remote: :boolean,
-          all: :boolean
+          refresh: :boolean
         ]
       )
 
@@ -74,10 +55,7 @@ defmodule Troupe.CLI do
       mouse: Keyword.get(opts, :mouse),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),
       session_id: nil,
-      refresh: Keyword.get(opts, :refresh, false),
-      remote: Keyword.get(opts, :remote, false),
-      plane_url: nil,
-      all: Keyword.get(opts, :all, false)
+      refresh: Keyword.get(opts, :refresh, false)
     }
 
     cond do
@@ -95,19 +73,7 @@ defmodule Troupe.CLI do
     end
   end
 
-  # `--remote` on its own opens HQ; `--remote <url>` (or `troupe --remote url`)
-  # picks a plane other than the one last logged in to.
-  defp parse_rest([], %{remote: true} = base), do: {:ok, base}
   defp parse_rest([], base), do: {:ok, base}
-  defp parse_rest([url], %{remote: true} = base), do: {:ok, %{base | plane_url: url}}
-
-  defp parse_rest(["login", url], base), do: {:ok, %{base | mode: :login, plane_url: url}}
-  defp parse_rest(["login"], _base), do: {:error, "usage: troupe login PLANE_URL"}
-  defp parse_rest(["logout"], base), do: {:ok, %{base | mode: :logout}}
-  defp parse_rest(["logout", url], base), do: {:ok, %{base | mode: :logout, plane_url: url}}
-  defp parse_rest(["whoami"], base), do: {:ok, %{base | mode: :whoami}}
-  defp parse_rest(["whoami", url], base), do: {:ok, %{base | mode: :whoami, plane_url: url}}
-
   defp parse_rest(["run", task], base), do: {:ok, %{base | mode: :run, task: task}}
 
   defp parse_rest(["run", agent, task], base),

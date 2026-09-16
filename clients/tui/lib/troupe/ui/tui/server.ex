@@ -1,7 +1,6 @@
 defmodule Troupe.UI.TUI.Server do
   @moduledoc """
-  The terminal UI: an `ExRatatui.App` subscribed to one session through
-  `Troupe.Client`, which is the only module it is allowed to call. It never
+  The terminal UI: an `ExRatatui.App` subscribed to `Troupe.Events`. It never
   slows an agent down: deltas are coalesced and the screen redraws at most
   30 times per second; when the mailbox grows past a threshold the queued
   deltas are collapsed in one pass. After a restart it rebuilds every window
@@ -11,9 +10,11 @@ defmodule Troupe.UI.TUI.Server do
   use ExRatatui.App
 
   alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
-  alias Troupe.Client
+  alias Troupe.Events
+  alias Troupe.Session
+  alias Troupe.Session.{Dispatcher, Index, Log, Memory, Watcher}
   alias Troupe.Settings
-  alias Troupe.UI.HQ
+  alias Troupe.UI.Clipboard
   alias Troupe.UI.TUI.{Model, View}
 
   @tick_ms 33
@@ -23,8 +24,7 @@ defmodule Troupe.UI.TUI.Server do
           session_id: String.t(),
           workspace: String.t(),
           model: Model.t(),
-          focus:
-            :command | {:window, String.t()} | :settings | :observer | :sessions | :files | :hq,
+          focus: :command | {:window, String.t()} | :settings | :observer | :sessions,
           cmd_text: String.t(),
           win_text: String.t(),
           commands: [String.t()],
@@ -40,8 +40,6 @@ defmodule Troupe.UI.TUI.Server do
           settings: settings() | nil,
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
-          files: files() | nil,
-          hq: HQ.t() | nil,
           slow_render_ms: non_neg_integer(),
           on_quit: (-> any())
         }
@@ -88,22 +86,7 @@ defmodule Troupe.UI.TUI.Server do
   opened in, and where the cursor sits. Read once when the page opens (`r`
   refreshes it), never while a frame is drawn.
   """
-  @type sessions :: %{entries: [Troupe.Client.summary()], cursor: non_neg_integer()}
-
-  @typedoc """
-  Files-panel state: the mount and directory being listed, what `fs.list`
-  answered, where the cursor sits, and the file being previewed. `version` is
-  the model's `files_version` as of the last listing, so an `fs.changed` that
-  arrives while the panel is open reloads it.
-  """
-  @type files :: %{
-          path: String.t(),
-          entries: [map()],
-          cursor: non_neg_integer(),
-          preview: {String.t(), [String.t()]} | nil,
-          error: String.t() | nil,
-          version: non_neg_integer()
-        }
+  @type sessions :: %{entries: [Index.entry()], cursor: non_neg_integer()}
 
   def via(sid), do: {:via, Registry, {Troupe.Registry, {:tui, sid}}}
 
@@ -112,7 +95,7 @@ defmodule Troupe.UI.TUI.Server do
   @impl true
   def mount(opts) do
     sid = Keyword.fetch!(opts, :session_id)
-    :ok = Client.subscribe(sid)
+    :ok = Events.subscribe(sid)
     model = rebuild(sid)
 
     state = %{
@@ -122,7 +105,7 @@ defmodule Troupe.UI.TUI.Server do
       focus: :command,
       cmd_text: "",
       win_text: "",
-      commands: Client.commands(sid),
+      commands: Dispatcher.commands(sid),
       tick: 0,
       now: System.system_time(:millisecond),
       dirty: false,
@@ -134,22 +117,15 @@ defmodule Troupe.UI.TUI.Server do
       answer: nil,
       observer: nil,
       sessions: nil,
-      files: nil,
-      hq: nil,
       quitting: false,
       size: initial_size(opts),
       slow_render_ms: Keyword.get(opts, :slow_render_ms, 0),
-      on_quit: Keyword.get(opts, :on_quit, fn -> :ok end)
+      on_quit: Keyword.get(opts, :on_quit, fn -> Troupe.CLI.Runner.quit() end)
     }
 
     # `troupe resume` with no id opens on the picker: the newest session is live
     # behind it, and the list says what else this directory holds.
-    state =
-      case Keyword.get(opts, :page) do
-        :sessions -> open_sessions(state)
-        :hq -> open_hq(state, Keyword.get(opts, :plane))
-        _ -> state
-      end
+    state = if Keyword.get(opts, :page) == :sessions, do: open_sessions(state), else: state
 
     {:ok, schedule_tick(state)}
   end
@@ -196,7 +172,7 @@ defmodule Troupe.UI.TUI.Server do
         tick_scheduled: false
     }
 
-    state = state |> resume_follow() |> refresh_files()
+    state = resume_follow(state)
     needs_blink = Enum.any?(Model.windows(state.model), &(&1.state in [:running, :needs_input]))
 
     if state.dirty or needs_blink do
@@ -208,14 +184,6 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   # Test seam: render synchronously regardless of dirtiness.
-  # A fleet `summary` updates the HQ list in place; with HQ closed there is
-  # nothing to update and the message is dropped.
-  def handle_info({:troupe_fleet, _plane, session_id, diff}, %{hq: hq} = state) when hq != nil,
-    do: {:noreply, %{state | hq: HQ.summary(hq, session_id, diff), dirty: true}, render?: false}
-
-  def handle_info({:troupe_fleet, _plane, _session_id, _diff}, state),
-    do: {:noreply, state, render?: false}
-
   def handle_info(:force_render, state),
     do: {:noreply, %{state | now: System.system_time(:millisecond), dirty: false}, render?: true}
 
@@ -268,12 +236,6 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :sessions} = state),
     do: {:noreply, sessions_key(key, %{state | quit_armed: false})}
 
-  def handle_event(%Key{} = key, %{focus: :files} = state),
-    do: {:noreply, files_key(key, %{state | quit_armed: false})}
-
-  def handle_event(%Key{} = key, %{focus: :hq} = state),
-    do: {:noreply, hq_key(key, %{state | quit_armed: false})}
-
   def handle_event(%Key{} = key, %{focus: {:window, path}} = state) do
     if Map.has_key?(state.model.windows, path),
       do: {:noreply, window_key(key, path, %{state | quit_armed: false})},
@@ -293,14 +255,12 @@ defmodule Troupe.UI.TUI.Server do
       {:window, _} -> {:noreply, %{state | win_text: state.win_text <> content}}
       :observer -> {:noreply, state, render?: false}
       :sessions -> {:noreply, state, render?: false}
-      :files -> {:noreply, state, render?: false}
-      :hq -> {:noreply, state, render?: false}
       :settings -> {:noreply, paste_into_settings(state, content)}
     end
   end
 
   def handle_event(%Mouse{kind: "down"}, %{focus: focus} = state)
-      when focus in [:settings, :observer, :sessions, :files, :hq],
+      when focus in [:settings, :observer, :sessions],
       do: {:noreply, state, render?: false}
 
   def handle_event(%Mouse{kind: "down", button: "left", x: x, y: y}, state) do
@@ -330,11 +290,6 @@ defmodule Troupe.UI.TUI.Server do
         {entries, cursor} = View.sessions_view(state)
         cursor = cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(entries) - 1, 0))
         {:noreply, %{state | sessions: %{state.sessions | cursor: cursor}}}
-
-      :files ->
-        {entries, cursor} = View.files_view(state)
-        cursor = cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(entries) - 1, 0))
-        {:noreply, %{state | files: %{state.files | cursor: cursor}}}
 
       :settings when state.settings.picker != nil ->
         p = state.settings.picker
@@ -450,16 +405,16 @@ defmodule Troupe.UI.TUI.Server do
           toggle_watch(sid, state.model.watch.enabled)
 
         "cancel" ->
-          with_target(target.(), &Client.cancel_branch(sid, &1))
+          with_target(target.(), &Troupe.cancel_branch(sid, &1))
 
         "dismiss" ->
-          with_target(target.(), &Client.dismiss(sid, &1))
+          with_target(target.(), &Troupe.dismiss(sid, &1))
 
         "merge" ->
-          with_target(target.(), &Client.merge(sid, &1))
+          with_target(target.(), &Troupe.merge(sid, &1))
 
         "discard" ->
-          with_target(target.(), &Client.discard(sid, &1))
+          with_target(target.(), &Troupe.discard(sid, &1))
 
         n when n in ["settings", "help", "?"] ->
           :settings
@@ -477,30 +432,19 @@ defmodule Troupe.UI.TUI.Server do
           {:sessions, args}
 
         "memory" ->
-          notice_of(Client.memory(sid, String.trim(args)))
-
-        "upload" ->
-          notice_of(upload(sid, String.trim(args)))
-
-        "files" ->
-          :files
-
-        n when n in ["hq", "remote"] ->
-          {:hq, args}
+          memory_command(sid, String.trim(args))
 
         "copy" ->
           copy_command(state, String.trim(args))
 
         cmd ->
-          Client.dispatch(sid, cmd, args)
+          Troupe.dispatch(sid, cmd, args)
       end
 
     state = %{state | cmd_text: ""}
 
     case result do
       :quit -> %{state | quitting: true}
-      :files -> toggle_files(state)
-      {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
       :models -> open_models(state)
       :observer -> %{state | focus: :observer, cmd_text: "", observer: %{cursor: 0}}
@@ -535,41 +479,37 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  ## Uploads and messages
+  ## Project brief
 
-  # `/upload <path>` sends a local file to the session's own mount. The path is
-  # read here rather than on the worker: the worker has no access to this
-  # machine, which is the point of the mount.
-  defp upload(_sid, ""), do: {:error, "usage: /upload <path>"}
+  defp memory_command(sid, "refresh") do
+    Troupe.dispatch(
+      sid,
+      "librarian",
+      "The project brief is out of date. Revise it against the repository as it is now."
+    )
+  end
 
-  defp upload(sid, path) do
-    case File.read(Path.expand(path)) do
-      {:ok, content} ->
-        target = "session:/" <> Path.basename(path)
+  defp memory_command(sid, "forget") do
+    :ok = Memory.forget(sid)
+    {:notice, "project brief forgotten; /memory refresh writes a new one"}
+  end
 
-        case Client.fs_upload(sid, target, content) do
-          :ok -> {:ok, "uploaded #{path} to #{target}"}
-          {:error, reason} -> {:error, to_message(reason)}
-        end
-
-      {:error, reason} ->
-        {:error, "#{path}: #{:file.format_error(reason)}"}
+  defp memory_command(sid, "") do
+    case Memory.brief(sid) do
+      nil -> {:notice, "no project brief yet; /memory refresh writes one"}
+      brief -> {:notice, brief_summary(sid, brief)}
     end
   end
 
-  # Errors cross the client as strings or as reasons; the notice line takes text.
-  defp to_message(reason) when is_binary(reason), do: reason
-  defp to_message(reason), do: inspect(reason)
+  defp memory_command(_sid, other) do
+    {:notice, "unknown /memory #{other}; use /memory, /memory refresh or /memory forget"}
+  end
 
-  defp approval_error(:unknown_call), do: "that request is no longer outstanding"
-  defp approval_error(reason), do: to_message(reason)
-
-  ## Project brief
-
-  # `/memory` is the client's answer, shown on the notice line either way.
-  defp notice_of({:ok, text}), do: {:notice, text}
-  defp notice_of({:error, reason}) when is_binary(reason), do: {:error, reason}
-  defp notice_of({:error, reason}), do: {:error, inspect(reason)}
+  defp brief_summary(sid, brief) do
+    titles = brief.sections |> Enum.map(&elem(&1, 0)) |> Enum.reject(&(&1 == ""))
+    built = if brief.built_at, do: DateTime.to_date(brief.built_at), else: "never"
+    "project brief (#{Memory.status(sid)}, built #{built}): " <> Enum.join(titles, ", ")
+  end
 
   ## Observer page
 
@@ -601,18 +541,14 @@ defmodule Troupe.UI.TUI.Server do
   # TUI was opened in that got as far as a branch, plus the session on screen (which
   # may still be empty) so the list always says where you are.
   defp pickable_sessions(state) do
-    case Client.sessions({:local, state.workspace}) do
-      {:ok, sessions} ->
-        Enum.filter(sessions, &(&1.branches != [] or &1.id == state.session_id))
-
-      {:error, _reason} ->
-        []
-    end
+    state.workspace
+    |> Index.list()
+    |> Enum.filter(&(&1.branches != [] or &1.session_id == state.session_id))
   end
 
   defp open_sessions(state) do
     entries = pickable_sessions(state)
-    cursor = Enum.find_index(entries, &(&1.id == state.session_id)) || 0
+    cursor = Enum.find_index(entries, &(&1.session_id == state.session_id)) || 0
 
     %{state | focus: :sessions, cmd_text: "", sessions: %{entries: entries, cursor: cursor}}
   end
@@ -652,7 +588,7 @@ defmodule Troupe.UI.TUI.Server do
     found =
       case Integer.parse(arg) do
         {n, ""} -> Enum.at(entries, n - 1)
-        _ -> Enum.find(entries, &String.starts_with?(&1.id, arg))
+        _ -> Enum.find(entries, &String.starts_with?(&1.session_id, arg))
       end
 
     case found do
@@ -661,7 +597,7 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp switch_to(%{session_id: sid} = state, %{id: sid}),
+  defp switch_to(%{session_id: sid} = state, %{session_id: sid}),
     do: notice(%{state | focus: :command, sessions: nil}, "already in this session")
 
   defp switch_to(state, entry) do
@@ -670,7 +606,7 @@ defmodule Troupe.UI.TUI.Server do
         adopt(state, sid)
 
       {:error, reason} ->
-        notice(state, "could not resume #{entry.id}: #{inspect(reason)}")
+        notice(state, "could not resume #{entry.session_id}: #{inspect(reason)}")
     end
   end
 
@@ -678,7 +614,20 @@ defmodule Troupe.UI.TUI.Server do
   # provider it resolved, the models, and any toggle you flipped this run — rather
   # than a fresh read of the config files, which would surprise you mid-run.
   defp ensure_running(state, entry) do
-    Client.open_session(entry.origin, entry.id, :activate, like: state.session_id)
+    case Session.whereis(entry.session_id, :session) do
+      nil ->
+        {_workspace, config} = Dispatcher.context(state.session_id)
+
+        Troupe.start_session(
+          session_id: entry.session_id,
+          workspace: entry.workspace,
+          provider: Dispatcher.provider(state.session_id),
+          config: Map.from_struct(config)
+        )
+
+      _pid ->
+        {:ok, entry.session_id}
+    end
   end
 
   # Swaps the session this window shows: unsubscribe, subscribe, and rebuild every
@@ -687,16 +636,15 @@ defmodule Troupe.UI.TUI.Server do
   # under, which follows (Decision 65).
   defp adopt(state, sid) do
     previous = state.session_id
-    :ok = Client.unsubscribe(previous)
-    :ok = Client.subscribe(sid)
+    :ok = Events.unsubscribe(previous)
+    :ok = Events.subscribe(sid)
     rename(previous, sid)
 
     state = %{
       state
       | session_id: sid,
         model: rebuild(sid),
-        workspace: workspace_of(sid),
-        commands: Client.commands(sid),
+        commands: Dispatcher.commands(sid),
         focus: :command,
         cmd_text: "",
         win_text: "",
@@ -726,178 +674,24 @@ defmodule Troupe.UI.TUI.Server do
   # would keep a watcher and a memory refresher alive behind the session you switched to.
   # One that did something keeps running, so its agents finish and you can switch back.
   defp retire(sid) do
-    if Client.has_session?(sid) and Client.idle?(sid) do
-      _ = Client.stop_session(sid)
-      :ok
-    else
-      :ok
-    end
-  end
+    case Session.whereis(sid, :dispatcher) do
+      nil ->
+        :ok
 
-  ## HQ
-
-  # `/hq` opens the remote page against the plane this machine last logged in
-  # to; `/hq <url>` picks another one. With no plane at all it still opens, on
-  # the local sessions, which is what makes "local sessions stay visible
-  # alongside" true rather than aspirational.
-  defp open_hq(state, plane) do
-    origin =
-      case plane do
-        {:remote, _url} = origin -> ensure_plane(origin)
-        nil -> ensure_plane(Client.default_plane())
-        url when is_binary(url) -> ensure_plane({:remote, url})
-      end
-
-    state = %{state | focus: :hq, cmd_text: "", hq: HQ.open(origin, state.workspace)}
-    _ = origin && Client.subscribe_fleet(origin)
-    state
-  end
-
-  defp ensure_plane(nil), do: nil
-
-  defp ensure_plane({:remote, url}) do
-    case Client.connect_plane(url) do
-      {:ok, origin} -> origin
-      {:error, _reason} -> {:remote, url}
-    end
-  end
-
-  defp plane_arg(""), do: nil
-  defp plane_arg(url), do: url
-
-  defp hq_key(key, state) do
-    case HQ.key(state.hq, key) do
-      :close ->
-        %{state | focus: :command, hq: nil}
-
-      {:ok, hq} ->
-        %{state | hq: hq}
-
-      {:open, _hq, session_id} ->
-        %{state | hq: nil} |> adopt(session_id)
-    end
-  end
-
-  ## Files panel
-
-  # `/files` opens the panel on the session's own mount. It is backed by
-  # `fs.list`/`fs.read` through the client, so a local session shows its
-  # workspace and a remote one its worker's checkout with the same keys.
-  defp toggle_files(%{files: nil} = state),
-    do: load_files(%{state | focus: :files, cmd_text: ""}, "session:/")
-
-  defp toggle_files(state), do: %{state | focus: :command, files: nil}
-
-  defp load_files(state, path) do
-    case Client.fs_list(state.session_id, path) do
-      {:ok, entries} ->
-        %{
-          state
-          | files: %{
-              path: path,
-              entries: entries,
-              cursor: 0,
-              preview: nil,
-              error: nil,
-              version: state.model.files_version
-            }
-        }
-
-      {:error, reason} ->
-        files =
-          state.files || %{path: path, entries: [], cursor: 0, preview: nil, error: nil, version: 0}
-
-        %{state | files: %{files | error: to_message(reason), version: state.model.files_version}}
-    end
-  end
-
-  # `fs.changed` bumps the model's version; an open panel reloads from it, which
-  # is the whole of "live-updated" and costs nothing while the panel is closed.
-  defp refresh_files(%{files: nil} = state), do: state
-
-  defp refresh_files(%{files: %{version: version}} = state) do
-    if version == state.model.files_version, do: state, else: load_files(state, state.files.path)
-  end
-
-  defp files_key(%Key{code: "esc"}, %{files: %{preview: preview}} = state) when preview != nil,
-    do: %{state | files: %{state.files | preview: nil}}
-
-  defp files_key(%Key{code: "esc"}, state), do: %{state | focus: :command, files: nil}
-
-  defp files_key(%Key{code: code}, %{files: f} = state) when code in ["up", "k"],
-    do: %{state | files: %{f | cursor: max(f.cursor - 1, 0)}}
-
-  defp files_key(%Key{code: code}, %{files: f} = state) when code in ["down", "j"] do
-    {entries, cursor} = View.files_view(state)
-    %{state | files: %{f | cursor: min(cursor + 1, max(length(entries) - 1, 0))}}
-  end
-
-  defp files_key(%Key{code: "r"}, state), do: load_files(state, state.files.path)
-
-  defp files_key(%Key{code: code}, state) when code in ["backspace", "left"],
-    do: load_files(state, parent(state.files.path))
-
-  defp files_key(%Key{code: "enter"}, state) do
-    {entries, cursor} = View.files_view(state)
-
-    case Enum.at(entries, cursor) do
-      nil -> state
-      %{dir?: true} = entry -> load_files(state, mount_of(state.files.path) <> entry.path)
-      entry -> preview(state, entry)
-    end
-  end
-
-  defp files_key(_key, state), do: state
-
-  defp preview(state, entry) do
-    path = mount_of(state.files.path) <> entry.path
-
-    case Client.fs_read(state.session_id, path) do
-      {:ok, content} ->
-        lines = content |> Model.sanitize() |> String.split("
-") |> Enum.take(2000)
-        %{state | files: %{state.files | preview: {path, lines}}}
-
-      {:error, reason} ->
-        %{state | files: %{state.files | error: to_message(reason)}}
-    end
-  end
-
-  # Paths in the panel are mount-relative; the mount is carried alongside so a
-  # `team:` mount browses exactly like the session's own.
-  defp mount_of(path) do
-    case String.split(path, ":", parts: 2) do
-      [mount, _rest] -> mount <> ":/"
-      _ -> "session:/"
-    end
-  end
-
-  defp parent(path) do
-    [mount_name | rest] =
-      case String.split(path, ":", parts: 2) do
-        [mount, rest] -> [mount, rest]
-        [only] -> ["session", only]
-      end
-
-    parent =
-      rest
-      |> List.first()
-      |> to_string()
-      |> String.trim_leading("/")
-      |> String.trim_trailing("/")
-      |> Path.dirname()
-
-    case parent do
-      "." -> mount_name <> ":/"
-      "/" -> mount_name <> ":/"
-      dir -> mount_name <> ":/" <> dir
+      _pid ->
+        if Dispatcher.windows(sid) == [] do
+          _ = Troupe.stop_session(sid)
+          :ok
+        else
+          :ok
+        end
     end
   end
 
   ## Settings page
 
   defp open_settings(state) do
-    {_workspace, config} = Client.context(state.session_id)
+    {_workspace, config} = Troupe.config(state.session_id)
 
     %{
       state
@@ -1008,7 +802,7 @@ defmodule Troupe.UI.TUI.Server do
     sid = state.session_id
 
     state =
-      case Client.put_setting(sid, key, value) do
+      case Troupe.put_setting(sid, key, value) do
         {:ok, config, path} ->
           put_settings(state,
             config: config,
@@ -1017,11 +811,11 @@ defmodule Troupe.UI.TUI.Server do
           )
 
         {:error, msg} ->
-          {_workspace, config} = Client.context(sid)
-          put_settings(state, config: config, editing: nil, status: to_message(msg))
+          {_workspace, config} = Troupe.config(sid)
+          put_settings(state, config: config, editing: nil, status: msg)
       end
 
-    %{state | model: %{state.model | watch: Client.watch_status(sid)}}
+    %{state | model: %{state.model | watch: Watcher.status(sid)}}
   end
 
   defp put_settings(state, changes),
@@ -1035,18 +829,13 @@ defmodule Troupe.UI.TUI.Server do
   defp paste_into_settings(state, _content), do: state
 
   defp toggle_watch(sid, true) do
-    case Client.watch(sid, false) do
-      {:error, reason} -> {:error, reason}
-      _ -> {:notice, "watch mode off"}
-    end
+    Watcher.disable(sid)
+    {:notice, "watch mode off"}
   end
 
   defp toggle_watch(sid, false) do
-    case Client.watch(sid, true) do
-      {:ok, backend} -> {:notice, "watch mode on (#{backend})"}
-      :ok -> {:notice, "watch mode on"}
-      {:error, reason} -> {:error, reason}
-    end
+    {:ok, backend} = Watcher.enable(sid)
+    {:notice, "watch mode on (#{backend})"}
   end
 
   defp with_target(nil, _fun), do: {:error, "no window given; activate one or pass its number"}
@@ -1095,20 +884,10 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state) do
     w = Map.fetch!(state.model.windows, path)
-
-    case state.commands do
-      [] ->
-        state
-
-      commands ->
-        idx = Enum.find_index(commands, &(&1 == w.profile)) || -1
-        next = Enum.at(commands, rem(idx + 1, length(commands)))
-
-        case Client.switch_profile(state.session_id, path, next) do
-          :ok -> state
-          {:error, reason} -> notice(state, to_message(reason))
-        end
-    end
+    idx = Enum.find_index(state.commands, &(&1 == w.profile)) || -1
+    next = Enum.at(state.commands, rem(idx + 1, length(state.commands)))
+    Troupe.switch_profile(state.session_id, path, next)
+    state
   end
 
   defp window_key(%Key{code: "tab"}, _path, state),
@@ -1124,24 +903,24 @@ defmodule Troupe.UI.TUI.Server do
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
 
-        case Client.approve(state.session_id, call_id, decision) do
+        case Troupe.approve(state.session_id, call_id, decision) do
           :ok -> follow(state)
-          {:error, reason} -> notice(follow(state), approval_error(reason))
+          {:error, _} -> notice(follow(state), "that request is no longer outstanding")
         end
     end
   end
 
   defp window_key(%Key{code: "x"}, path, %{win_text: ""} = state) do
-    case Client.cancel_branch(state.session_id, path) do
+    case Troupe.cancel_branch(state.session_id, path) do
       :ok -> %{state | focus: :command}
-      {:error, msg} -> notice(state, to_message(msg))
+      {:error, msg} -> notice(state, msg)
     end
   end
 
   defp window_key(%Key{code: "d"}, path, %{win_text: ""} = state) do
-    case Client.dismiss(state.session_id, path) do
+    case Troupe.dismiss(state.session_id, path) do
       :ok -> %{state | focus: :command}
-      {:error, msg} -> notice(state, to_message(msg))
+      {:error, msg} -> notice(state, msg)
     end
   end
 
@@ -1180,7 +959,7 @@ defmodule Troupe.UI.TUI.Server do
 
     case pending_of(w, state.pane.agent || path, [:question]) do
       %{call_id: id} when id == answer.call_id and answer.selected != [] ->
-        send_answer(state, id, Client.answer_text(answer.selected))
+        send_answer(state, id, Troupe.Tools.AskUser.answer_text(answer.selected))
 
       _ ->
         state
@@ -1193,19 +972,16 @@ defmodule Troupe.UI.TUI.Server do
 
     cond do
       String.starts_with?(text, "/todo cancel ") ->
-        Client.edit_todo(sid, path, {:cancel, String.trim_leading(text, "/todo cancel ")})
+        Troupe.edit_todo(sid, path, {:cancel, String.trim_leading(text, "/todo cancel ")})
 
       String.starts_with?(text, "/todo add ") ->
-        Client.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})
-
-      String.starts_with?(text, "/upload ") ->
-        upload(sid, String.trim(String.trim_leading(text, "/upload ")))
+        Troupe.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})
 
       question = pending_of(w, state.pane.agent || path, [:question]) ->
-        Client.answer(sid, question.call_id, text)
+        Troupe.answer(sid, question.call_id, text)
 
       true ->
-        Client.send_input(sid, path, text)
+        Troupe.send_input(sid, path, text)
     end
 
     # Any Enter that reaches here either answered the question or replaced it
@@ -1246,9 +1022,9 @@ defmodule Troupe.UI.TUI.Server do
   defp send_answer(state, call_id, text) do
     state = %{state | answer: nil}
 
-    case Client.answer(state.session_id, call_id, text) do
+    case Troupe.answer(state.session_id, call_id, text) do
       :ok -> follow(state)
-      {:error, reason} -> notice(follow(state), approval_error(reason))
+      {:error, _} -> notice(follow(state), "that question is no longer outstanding")
     end
   end
 
@@ -1377,7 +1153,7 @@ defmodule Troupe.UI.TUI.Server do
       text ->
         lines = length(String.split(text, "\n"))
 
-        case Client.copy(text) do
+        case Clipboard.copy(text) do
           {:ok, cmd} -> "copied #{lines} #{plural(lines, "line")} to the clipboard (#{cmd})"
           {:error, msg} -> msg
         end
@@ -1428,34 +1204,14 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp rebuild(sid) do
-    events = Client.events(sid)
-
     workspace =
-      case Enum.find(events, &(&1.type == :session_started)) do
+      case Enum.find(Log.all(sid), &(&1.type == :session_started)) do
         %{data: %{workspace: ws}} -> ws
-        _ -> workspace_of(sid)
+        _ -> File.cwd!()
       end
 
-    model = Model.rebuild(sid, workspace, events)
-    %{model | watch: Client.watch_status(sid), remote: remote(sid)}
-  end
-
-  # The model learns what a remote session allows from `:remote_status` events,
-  # but a window opened on one that is already attached has missed them: the
-  # capability is read once here so the first frame is honest too.
-  defp remote(sid) do
-    case Client.capability(sid) do
-      %{remote?: true} = capability -> capability
-      _ -> nil
-    end
-  end
-
-  # A remote session has no checkout here; its label is what the client calls it.
-  defp workspace_of(sid) do
-    case Client.context(sid) do
-      {workspace, _config} when is_binary(workspace) -> workspace
-      _ -> File.cwd!()
-    end
+    model = Model.rebuild(sid, workspace, Log.all(sid))
+    %{model | watch: Watcher.status(sid)}
   end
 
   defp split_first(text) do
@@ -1509,13 +1265,12 @@ defmodule Troupe.UI.TUI.Server do
     arg = String.trim(arg)
     workspace = state.model.workspace
 
-    {checked_out, managed} = Client.worktrees(workspace)
-
     names =
-      checked_out
+      workspace
+      |> Troupe.Session.Worktree.list()
       |> Enum.flat_map(&[&1.rel, &1.branch])
       |> Enum.reject(&is_nil/1)
-      |> Enum.concat(Enum.map(managed, &(&1 <> ":")))
+      |> Enum.concat(Enum.map(Troupe.Session.Worktree.managed(workspace), &(&1 <> ":")))
       |> Enum.uniq()
       |> Enum.sort()
 

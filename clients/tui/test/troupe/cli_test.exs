@@ -24,34 +24,6 @@ defmodule Troupe.CLITest do
     assert CLI.version() =~ "troupe 0.1.0"
   end
 
-  test "parses the remote command lines" do
-    assert {:ok, %{mode: :login, plane_url: "https://plane.example"}} =
-             CLI.parse(["login", "https://plane.example"])
-
-    assert {:error, _} = CLI.parse(["login"])
-
-    assert {:ok, %{mode: :logout, plane_url: nil, all: false}} = CLI.parse(["logout"])
-    assert {:ok, %{mode: :logout, all: true}} = CLI.parse(["logout", "--all"])
-
-    assert {:ok, %{mode: :logout, plane_url: "https://plane.example"}} =
-             CLI.parse(["logout", "https://plane.example"])
-
-    assert {:ok, %{mode: :whoami, plane_url: nil}} = CLI.parse(["whoami"])
-
-    assert {:ok, %{mode: :whoami, plane_url: "https://plane.example"}} =
-             CLI.parse(["whoami", "https://plane.example"])
-
-    # `--remote` stays the TUI: HQ is a page, not a mode
-    assert {:ok, %{mode: :tui, remote: true, plane_url: nil}} = CLI.parse(["--remote"])
-
-    assert {:ok, %{mode: :tui, remote: true, plane_url: "https://plane.example"}} =
-             CLI.parse(["--remote", "https://plane.example"])
-
-    assert {:ok, %{mode: :tui, remote: false}} = CLI.parse([])
-    assert CLI.usage() =~ "troupe login"
-    assert CLI.usage() =~ "troupe --remote"
-  end
-
   # nil, not false: no flag has to stay distinguishable from `--mouse`, because
   # only then can the `mouse` setting decide.
   test "the mouse flag is tri-state" do
