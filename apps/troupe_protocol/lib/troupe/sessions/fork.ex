@@ -135,6 +135,35 @@ defmodule Troupe.Sessions.Fork do
     end
   end
 
+  @doc """
+  What a child may run: the parent's recorded set narrowed by the team's current one.
+
+  The design says a fork inherits the entitlement set recorded in the parent's
+  `session_created` rather than what the bundle offers today, and gives the reason — a fork
+  of a six-month-old session is not a way to reach an agent the team was later denied.
+  Taking the parent's set outright says that and loses the converse: a team narrowed *since*
+  the parent ran would have the narrowing undone by somebody forking an old session.
+
+  So it is the intersection. Deny wins, as everywhere else.
+
+  `nil` on either side is *no restriction*, which is what a local session and an unnarrowed
+  grant both mean — so the other side is the whole answer. It is not the same as an empty
+  set, which is a session allowed nothing at all.
+  """
+  @spec narrow(map() | nil, map() | nil) :: map() | nil
+  def narrow(nil, inherited), do: inherited
+  def narrow(current, nil), do: current
+
+  def narrow(current, inherited) do
+    Map.merge(current, inherited, fn _kind, mine, theirs ->
+      cond do
+        is_list(mine) and is_list(theirs) -> Enum.filter(mine, &(&1 in theirs))
+        is_nil(mine) -> theirs
+        true -> mine
+      end
+    end)
+  end
+
   # -- reading the parent -----------------------------------------------------
 
   # Only the live epochs. A segment written by a pod that was presumed lost is not part of

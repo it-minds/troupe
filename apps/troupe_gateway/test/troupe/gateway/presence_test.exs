@@ -82,6 +82,31 @@ defmodule Troupe.Gateway.PresenceTest do
       assert event.ephemeral?
     end
 
+    test "two clients see each other within 500 ms", context do
+      %{session: session} = start_session(context, default: {:text, "ok"})
+
+      ada = attach(context, @ada)
+      bob = attach(context, @bob)
+      {:ok, _} = Client.subscribe(bob, "presence:#{session.id}")
+
+      # Ada's own subscription announces her arriving, so the clock starts before it and
+      # the measurement includes the round trip a real client pays.
+      started = System.monotonic_time(:millisecond)
+      {:ok, _} = Client.subscribe(ada, "presence:#{session.id}")
+
+      assert_receive {:troupe_event, _t, _i,
+                      %Event{
+                        type: "presence",
+                        data: %{"state" => "joined", "subject" => @ada}
+                      }},
+                     2_000
+
+      elapsed = System.monotonic_time(:millisecond) - started
+
+      assert elapsed < 500,
+             "presence took #{elapsed}ms to cross, and the budget is 500ms"
+    end
+
     test "is not delivered twice to somebody watching both", context do
       %{session: session} = start_session(context, default: {:text, "ok"})
 

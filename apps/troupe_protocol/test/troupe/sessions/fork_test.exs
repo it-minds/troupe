@@ -255,6 +255,38 @@ defmodule Troupe.Sessions.ForkTest do
     end
   end
 
+  describe "what a child may run" do
+    test "is what the parent recorded, narrowed by what the team has now" do
+      recorded = %{"agents" => ["reviewer", "migrator"], "mcp_servers" => ["jira"]}
+
+      # The case the rule exists for. The team lost `migrator` since the parent ran, and
+      # forking an old session is not a way to get it back.
+      now = %{"agents" => ["reviewer"], "mcp_servers" => ["jira", "slack"]}
+
+      assert Fork.narrow(now, recorded) == %{
+               "agents" => ["reviewer"],
+               "mcp_servers" => ["jira"]
+             }
+    end
+
+    test "is nil on either side meaning no restriction, and not an empty set" do
+      # A local session and an unnarrowed grant both record nothing, and nothing is not
+      # the same as a session allowed nothing at all.
+      assert Fork.narrow(nil, %{"agents" => ["reviewer"]}) == %{"agents" => ["reviewer"]}
+      assert Fork.narrow(%{"agents" => ["reviewer"]}, nil) == %{"agents" => ["reviewer"]}
+      assert is_nil(Fork.narrow(nil, nil))
+
+      # An empty list is a real answer and stays one.
+      assert Fork.narrow(%{"agents" => ["reviewer"]}, %{"agents" => []}) == %{"agents" => []}
+    end
+
+    test "keeps a kind only one side mentions, from whichever side mentions it" do
+      # Deny wins per kind, and a kind nobody has narrowed is not narrowed by silence.
+      assert Fork.narrow(%{"agents" => ["a"]}, %{"skills" => ["s"]}) ==
+               %{"agents" => ["a"], "skills" => ["s"]}
+    end
+  end
+
   describe "the workspace" do
     test "comes from the nearest archive at or before the fork point", context do
       {parent, child} = contexts(context)

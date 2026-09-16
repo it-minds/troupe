@@ -751,6 +751,51 @@ defmodule Troupe.Plane.HarnessTest do
     end
   end
 
+  describe "a share and the pod holding the session" do
+    test "the pod is told, by id, with no secret in what crosses the wire", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, created} =
+        Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
+      session_id = created["session_id"]
+      assert_receive {:pushed, "session.activate", _activated}, 5_000
+
+      assert {:ok, share} =
+               Harness.call(
+                 "session.share",
+                 %{"session_id" => session_id, "role" => "observe"},
+                 context(user)
+               )
+
+      # The pod appends the durable event; this is the instruction that asks it to. It
+      # names the share and never the secret — a log outlives the session, and a working
+      # credential in one is a credential nobody can revoke by revoking the share.
+      assert_receive {:pushed, "share.changed", minted}, 5_000
+      assert minted["type"] == "share_created"
+      assert minted["session_id"] == session_id
+      assert minted["share"]["id"] == share["id"]
+      assert minted["share"]["role"] == "observe"
+      refute minted |> inspect() =~ share["secret"]
+
+      assert {:ok, _revoked} =
+               Harness.call(
+                 "session.share.revoke",
+                 %{"session_id" => session_id, "share" => share["id"]},
+                 context(user)
+               )
+
+      assert_receive {:pushed, "share.changed", ended}, 5_000
+      assert ended["type"] == "share_revoked"
+      assert ended["share"]["id"] == share["id"]
+
+      assert pod.worker_id
+      assert team.name == "engineering"
+    end
+  end
+
   describe "sessions.list filters" do
     test "by status, origin, trigger and what still needs a review" do
       team = team_with_grant("engineering", "dev", name: "engineering")

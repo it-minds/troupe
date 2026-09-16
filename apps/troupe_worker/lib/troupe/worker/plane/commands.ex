@@ -336,29 +336,12 @@ defmodule Troupe.Worker.Plane.Commands do
     end
   end
 
-  # Deny wins, as everywhere else. The brief says a fork inherits what the parent's
-  # `session_created` recorded rather than what the bundle offers today, and the reason is
-  # that a fork must not be a way to reach an agent the team was later denied. The
-  # intersection says that *and* the converse — a team narrowed since the parent ran does
-  # not have the narrowing undone by somebody forking an old session — and a rung that took
-  # the parent's set outright would widen in exactly that case.
+  # The rule itself is `Troupe.Sessions.Fork.narrow/2`, beside the fork it is about. This is
+  # only where it is applied: on the way in, once, before anything reads the set.
   defp narrow(params, nil), do: params
 
   defp narrow(params, inherited) when is_map(inherited) do
-    Map.put(params, "entitlements", intersect(params["entitlements"], inherited))
-  end
-
-  # `nil` on the current side is "no restriction", so the parent's set is the whole answer.
-  defp intersect(nil, inherited), do: inherited
-
-  defp intersect(current, inherited) do
-    Map.merge(current, inherited, fn _kind, mine, theirs ->
-      cond do
-        is_list(mine) and is_list(theirs) -> Enum.filter(mine, &(&1 in theirs))
-        is_nil(mine) -> theirs
-        true -> mine
-      end
-    end)
+    Map.put(params, "entitlements", Fork.narrow(params["entitlements"], inherited))
   end
 
   defp child_opts(params) do

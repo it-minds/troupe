@@ -1898,3 +1898,165 @@ Personal credentials are done, bar the end-to-end join named in R1f. Deprovision
 not in the plan and is done.
 
 R2 through R9 are untouched.
+
+# R5 — sessions people share
+
+Three pieces: a fork, a share, and presence on a topic of its own. `RELEASE.md` numbers
+this W3; the brief numbers it R5.
+
+## R5a — a fork copies, and the copy is the argument
+
+The brief's literal shape is a child whose chain opens at `seq: 0` and whose reader folds
+the parent's chain to the fork point and the child's after it. That is a reference, and two
+rules already in the design refuse one.
+
+* *A fork is a new session for budget, retention, key and erasure.* A child that had to be
+  opened with its parent's key does not have a key of its own in the sense that matters.
+* **Erasing a parent leaves the child readable** — done item 3. Erasure destroys the
+  parent's objects *and its key*, so a reference breaks on the one operation that must never
+  take something else with it.
+
+The brief already says the *workspace* is copied into the child's own prefix. Symmetry did
+the rest: the events are too. `Troupe.Sessions.Fork.copy/3` reads the parent's live segments
+under the parent's key, opens the child's chain with `session_forked`, and reseals the
+parent's events up to `seq` under the child's key with the child's own numbering.
+
+Resealing moves the numbering and nothing else. Each copied event keeps its type, data,
+timestamp, actor and agent path; what the original numbering was is in `session_forked`,
+which carries the parent's id, the seq forked at and the parent's head hash there.
+
+`DECISIONS.md` 520–529.
+
+```
+$ scripts/toolbox mix test apps/troupe_protocol/test/troupe/sessions/fork_test.exs --trace
+  * test the copy takes the parent's events up to seq and no further
+  * test the copy opens with session_forked, which is where the lineage is written
+  * test the copy verifies as a chain of its own
+  * test the copy keeps what each event said and changes only its numbering
+  * test the copy at no seq at all is a fork at the head
+  * test the parent is not written to, and does not learn it was forked
+  * test the parent can be erased and the child is still readable
+  * test what the child may run is what the parent's session_created recorded, not what is on offer now
+  * test what the child may run is nil where the parent recorded nothing, which is not the same as nothing
+  * test what a child may run is what the parent recorded, narrowed by what the team has now
+  * test what a child may run is nil on either side meaning no restriction, and not an empty set
+  * test what a child may run keeps a kind only one side mentions, from whichever side mentions it
+  * test the workspace comes from the nearest archive at or before the fork point
+  * test the workspace is absent rather than invented when the parent has none before the point
+  * test refusals a reason nobody defined
+  * test refusals a seq the parent never reached
+  * test refusals a parent with no history
+  * test refusals forking a session into itself
+Result: 18 passed
+```
+
+Against real MinIO, not a double: what the layout does with versioning and listings is the
+behaviour being relied on.
+
+**The plane's half.** `session.fork` is `session.create` with three columns — it pays its
+own budget, gets its own key, is placed like anything else. The pod does the copying,
+because it is the only place both keys are ever in memory; the plane names a session and a
+number and never sees an event. The instruction rides on `session.activate` rather than a
+push of its own, because the copy has to land before the tree starts — a manager restoring
+an empty log writes a fresh `session_created` at seq 1 and the copied chain arrives second.
+
+```
+$ scripts/toolbox mix cmd --app troupe_plane mix test test/troupe/plane/harness_test.exs
+Result: 33 passed
+```
+
+The eight new ones there are `session.fork`: the row, the instruction that reaches the pod,
+the fork point written down rather than left to drift, a point the parent has not sealed,
+control rather than a view, a reason nobody defined, a session nobody may see, a lineage a
+client tried to claim for itself, and an import.
+
+## R5b — a share is a link that carries a role
+
+The ACL answers *who is allowed here*, by subject, and it is the right answer when the
+person has an account and you know which one. A share answers the other question — *send
+them this* — with three properties an ACL entry does not have: it ends, it is revocable on
+its own, and it is a secret the plane keeps only a salted digest of.
+
+**Refused at mint, never at use.** That the sharer holds the session, that the role is not
+`admin`, that the team allows steering, that the expiry is inside the ceiling — all settled
+when the link is made. Redemption asks only what is true of the share.
+
+`DECISIONS.md` 530–540.
+
+```
+$ scripts/toolbox mix cmd --app troupe_plane mix test test/troupe/plane/shares_test.exs
+Result: 12 passed
+```
+
+Done item 6 — *a link the team's grant would not admit is refused at mint, not at use* — is
+`test is bounded by the team's ACL, through the ladder`, which also shows the converse: a
+team that turns steering on makes `control` shareable at the next request rather than the
+next edit.
+
+## R5c — presence, on a topic of its own
+
+`presence:<id>` beside `fleet` and `session:<id>`. No `seq`, never persisted, and the first
+thing shed when a client stops reading — and shedding it is now a decision about one
+subscription rather than something that touches the session's stream.
+
+```
+$ scripts/toolbox mix cmd --app troupe_gateway mix test test/troupe/gateway/presence_test.exs
+Result: 7 passed
+```
+
+Done item 7 is both halves of one test file: `two clients see each other within 500 ms`, and
+`presence stops entirely and the durable order is identical on both clients` — the latter
+against a socket nobody reads, with a healthy client watching the same two topics beside it,
+comparing `{seq, type, data}` lists.
+
+**A real bug came out of it.** Following a session was registered once per *subscription*
+rather than once per connection, so a client watching a session and its presence — or one
+session at two levels — was in the fan-out twice and received everything twice; and because
+`Registry.unregister/2` drops all of a process's entries for a key, dropping one subscription
+would have silenced the other. Latent before; the presence topic made it routine.
+`Troupe.Events.subscribe/1` is idempotent now and the connection unregisters only when
+nothing else still wants the session. `DECISIONS.md` 543.
+
+## The done items
+
+| # | claim | proven by |
+| --- | --- | --- |
+| 1 | a fork renders parent and continuation as one transcript, and both chains verify independently | `fork_test` — *takes the parent's events up to seq and no further*, *verifies as a chain of its own* |
+| 2 | a fork of a session whose team lost an agent still cannot run it | `fork_test` — *narrowed by what the team has now* |
+| 3 | erasing a parent leaves the child readable | `fork_test` — *the parent can be erased and the child is still readable* |
+| 4 | a private session imported into a team names the private one, and the original is unchanged | **partly** — see below |
+| 5 | a watch link cannot send input, a prompt link can, and both appear in the session's log | **partly** — see below |
+| 6 | a link the team's grant would not admit is refused at mint, not at use | `shares_test` — *bounded by the team's ACL, through the ladder* |
+| 7 | presence within 500 ms; with the queue saturated it stops and the order is identical | `presence_test` — both halves |
+
+## What is not proven here, and why
+
+**Done item 4, the copy half.** An import is `reason: "import"`, and the plane refuses to
+ask a pod to make it. A private session's key lives under a path no pod role covers, so no
+pod can read the parent whatever it is told to do — the copy belongs to the device that
+holds the key. The plane's half is the same as any other fork and is tested: the row carries
+the lineage, the child is a team session, the activation carries no fork instruction, and an
+import is refused if it does not say which profile it lands on. The client half is the TUI's
+and is not in this repository. `DECISIONS.md` 529.
+
+**Done item 5, the "cannot send input" half.** A redeemed share becomes an ordinary session
+token at an ordinary role, which is the whole of why there is no share mirror on the pod.
+That a `viewer` token cannot steer is already asserted — `collaboration_test`, *an observer
+cannot steer* — and is not re-asserted for a token that arrived by link, because it is the
+same token. The `share_created` event reaching the session's own log is proven at the push:
+`harness_test`, *the pod is told, by id, with no secret in what crosses the wire*.
+
+**The `troupe ctl verify` CLI.** Done item 1 names it. `Event.verify/1` is what the CLI
+calls and is what the test calls; the CLI wrapper over a forked pair is not exercised here.
+
+**The cluster.** None of R5 has run on kind. The plane image there is behind R3's later
+fixes, R4 and the CI work as well.
+
+## What R2, R3 and R4 still owe this report
+
+This report stops at R1 and resumes at R5. R2 (the webhook and principal work, the budget and
+policy ladders, the in-system MCP server), R3 (capacity) and R4 (teams linking to groups) are
+built, committed and covered by their own tests, and none of them is written up here. Their
+decisions are recorded in `DECISIONS.md`, through to 519; what is missing is this
+document's half — the
+command output beside each done item.
