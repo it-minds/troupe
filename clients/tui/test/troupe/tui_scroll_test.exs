@@ -336,6 +336,14 @@ defmodule Troupe.TUIScrollTest do
     g = View.pane_geometry(user_state(pid))
     assert g.side == nil
     assert g.left.width == 80
+
+    # The tool result reaches the transcript before the agent announces that it
+    # is back on the model, and the activity line is drawn from that state: wait
+    # for it rather than for the frame that happens to follow the result.
+    eventually(fn ->
+      get_in(user_state(pid).model.windows, ["code-1", :activity, "code-1"]) == :thinking
+    end)
+
     text = screen_text(pid, session)
     assert text =~ "code-1 (code) — Esc back"
     assert text =~ "✓ read_file big.txt · 300 lines"

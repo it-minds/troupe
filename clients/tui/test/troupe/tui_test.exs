@@ -810,9 +810,18 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     eventually(fn -> user_state(pid).model.windows["code-1"].pending == [] end, 15_000)
     eventually(fn -> user_state(pid).model.windows["code-1"].state != :needs_input end, 15_000)
 
-    # The ledger reads the same log, so it has to be told too.
-    assert %{data: %{state: :running}} =
-             sid |> events_of("code-1/tiny-1", :branch_state) |> List.last()
+    # The ledger reads the same log, so it has to be told too — and the window
+    # derives `:running` from an empty `pending` before the agent gets to log it,
+    # so this waits for the event rather than for the frame that cleared the flag.
+    eventually(
+      fn ->
+        match?(
+          %{data: %{state: :running}},
+          sid |> events_of("code-1/tiny-1", :branch_state) |> List.last()
+        )
+      end,
+      15_000
+    )
 
     await_state("code-1", :done_unread, 15_000)
   end
