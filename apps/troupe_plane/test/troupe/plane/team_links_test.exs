@@ -14,10 +14,14 @@ defmodule Troupe.Plane.TeamLinksTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Identity, Sessions}
+  alias Troupe.Plane.{Admin, Harness, Identity, Sessions}
   alias Troupe.Plane.Identity.TeamGroupLink
 
   setup do
+    # The budget ladder's actors live under it, and one of these tests takes a create far
+    # enough to reach them.
+    start_supervised!(Troupe.Plane.Singleton)
+
     Application.put_env(:troupe_plane, :platform_admin_group, "platform")
     on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
 
@@ -137,6 +141,33 @@ defmodule Troupe.Plane.TeamLinksTest do
       assert delivery.budget_micros == 100
       assert timesheets.budget_micros == 500
       refute delivery.id == timesheets.id
+
+      # And a create has to ask which. The answer decides whose budget pays and whose
+      # volume is mounted, so guessing would be picking one of those for somebody — and
+      # this is the shape that makes it happen, since one group in the provider is now
+      # two teams here.
+      assert {:error, error} =
+               Harness.call(
+                 "session.create",
+                 %{"profile" => "dev", "prompt" => "hello"},
+                 %{user: ada, platform_admin?: false}
+               )
+
+      assert error.message == "invalid_params"
+      assert error.data.reason == "choose a team"
+      assert Enum.sort(error.data.teams) == ["delivery", "timesheets"]
+
+      # Named, and it is taken.
+      assert {:error, refused} =
+               Harness.call(
+                 "session.create",
+                 %{"profile" => "dev", "team" => "timesheets", "prompt" => "hello"},
+                 %{user: ada, platform_admin?: false}
+               )
+
+      # Far enough to have chosen: past the team question and stopped at the fleet, which
+      # this test has none of.
+      refute refused.data[:reason] == "choose a team"
     end
   end
 
