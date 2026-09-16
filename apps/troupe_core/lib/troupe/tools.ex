@@ -133,7 +133,7 @@ defmodule Troupe.Tools do
   anybody chose, and an `identity` on those events would be a field that always said the
   same thing.
   """
-  @spec identity_of(String.t(), Ctx.t()) :: String.t() | nil
+  @spec identity_of(String.t(), Ctx.t()) :: Troupe.Protocol.Principal.t() | nil
   def identity_of(name, %Ctx{} = ctx) do
     with server when is_binary(server) <- Troupe.MCP.server_of(name),
          %Troupe.MCP.Tool{server: ^server} = tool <- find_mcp_tool(name, ctx) do

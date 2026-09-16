@@ -23,6 +23,7 @@ defmodule Troupe.MCP do
   """
 
   alias Troupe.MCP.{Client, Server, Tool}
+  alias Troupe.Protocol.Principal
 
   require Logger
 
@@ -47,20 +48,35 @@ defmodule Troupe.MCP do
   end
 
   @doc """
-  Which identity a call to this server goes out as, for the log.
+  Which identity a call to this server goes out as, for the log — both halves of it.
 
-  `"profile"` or `"person:<subject>"`, so a reader can tell which credential a call used
-  without knowing what the bundle said that day.
+  `subject` is whose credential went out: the profile's service account, or a person's.
+  `actor` is who was running the session when it did: a person, or the principal a
+  trigger fires as. They are usually the same person and are written anyway, because a
+  field omitted when it matches is a field nobody can read afterwards — absent because
+  they were equal, or absent because that day's code did not write it, are not
+  distinguishable after the fact.
+
+  The case worth the trouble is a person-mode server in a session a trigger started: the
+  credential is a person's and the session is a principal's, and a single value had to
+  pick one and hide the other.
   """
-  @spec identity(Server.t(), Troupe.Tool.Ctx.t()) :: String.t()
+  @spec identity(Server.t(), Troupe.Tool.Ctx.t()) :: Principal.t()
   def identity(%Server{credential_mode: :person}, ctx) do
     case owner_of(ctx) do
-      nil -> "person:unknown"
-      subject -> "person:" <> subject
+      nil -> Principal.of("person:unknown", actor_of(ctx))
+      subject -> Principal.of(subject, actor_of(ctx))
     end
   end
 
-  def identity(%Server{}, _ctx), do: "profile"
+  # A profile-mode server's credential belongs to nobody: it is the service account the
+  # operator injected, the same for every session. `"profile"` is the whole answer and
+  # naming a person there would be a lie about whose it is.
+  def identity(%Server{}, ctx), do: Principal.of("profile", actor_of(ctx))
+
+  # Who the session runs as. The same value `session_created` recorded as its owner, so a
+  # reader joining the two does not have to know which spelling each used.
+  defp actor_of(ctx), do: owner_of(ctx) || "unknown"
 
   @doc """
   The subject a session belongs to, from the attribution a pod was told at activation.

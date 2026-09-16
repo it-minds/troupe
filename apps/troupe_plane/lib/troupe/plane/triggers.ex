@@ -28,7 +28,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Revision, Run, Template, Trigger}
-  alias Troupe.Protocol.Error
+  alias Troupe.Protocol.{Error, Principal}
 
   require Logger
 
@@ -379,9 +379,13 @@ defmodule Troupe.Plane.Triggers do
   end
 
   defp create(trigger, revision, run) do
-    with {:ok, user} <- principal_user(revision),
+    with {:ok, user, principal} <- principal_user(revision),
          {:ok, endpoint} <-
-           Harness.call("session.create", create_params(trigger, revision, run), context(user)) do
+           Harness.call(
+             "session.create",
+             create_params(trigger, revision, run, principal),
+             context(user)
+           ) do
       session_id = endpoint["session_id"]
       Enum.each(revision.notify, &let_in(user, session_id, &1))
 
@@ -421,7 +425,7 @@ defmodule Troupe.Plane.Triggers do
   end
 
   defp replay(trigger, revision, %Run{session_id: session_id} = run) do
-    with {:ok, user} <- principal_user(revision),
+    with {:ok, user, _principal} <- principal_user(revision),
          {:ok, endpoint} <-
            Harness.call("token.mint", %{"session_id" => session_id}, context(user)) do
       {:ok, fired(trigger, revision, run, Sessions.get(session_id), endpoint)}
@@ -442,7 +446,7 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
-  defp create_params(trigger, revision, run) do
+  defp create_params(trigger, revision, run, principal) do
     values = %{
       "event" => run.event,
       "trigger" => %{"name" => trigger.name, "profile" => revision.profile},
@@ -465,7 +469,11 @@ defmodule Troupe.Plane.Triggers do
         "kind" => "trigger",
         "trigger" => trigger.name,
         "run" => run.idempotency_key,
-        "revision" => revision.hash
+        "revision" => revision.hash,
+        # Who fired it, and on whose authority. The principal is the actor; its sponsor
+        # is the person answerable for what it does, and a run with no sponsor is a run
+        # nobody is — which is why a principal cannot exist without one.
+        "principal" => Principal.to_json(principal_pair(principal))
       }
     }
     |> then(fn params ->
@@ -497,10 +505,19 @@ defmodule Troupe.Plane.Triggers do
       principal ->
         case Principals.user_for(principal) do
           nil -> {:error, Error.new(:forbidden, %{reason: "the trigger's principal is disabled"})}
-          user -> {:ok, user}
+          user -> {:ok, user, principal}
         end
     end
   end
+
+  # A principal acts on its sponsor's authority. Where the sponsor is gone the principal
+  # is already disabled and never reaches here; where a row predates sponsors the
+  # principal stands for itself, which is what it did before there was anybody else to
+  # name.
+  defp principal_pair(%{subject: subject, sponsor_subject: sponsor}) when is_binary(sponsor),
+    do: Principal.of(sponsor, subject)
+
+  defp principal_pair(%{subject: subject}), do: Principal.of(subject)
 
   defp context(user), do: %{user: user, platform_admin?: false}
 

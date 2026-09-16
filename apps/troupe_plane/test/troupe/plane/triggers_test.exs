@@ -150,6 +150,15 @@ defmodule Troupe.Plane.TriggersTest do
       assert %{"kind" => "trigger", "trigger" => "triage", "run" => "hook:1"} =
                pushed["origin"]
 
+      # Who fired it, and on whose authority. The principal is what acted; its sponsor is
+      # the person answerable for what it did, and a run six weeks old is exactly when
+      # somebody wants to know which human stands behind it.
+      assert %{"actor" => "svc:engineering/nightly", "subject" => sponsor} =
+               pushed["origin"]["principal"]
+
+      assert sponsor == context.principal.sponsor_subject
+      refute sponsor == "svc:engineering/nightly"
+
       assert pushed["origin"]["revision"] == fired.revision.hash
 
       session = fired.session

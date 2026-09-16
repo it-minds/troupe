@@ -43,6 +43,7 @@ defmodule Troupe.Agent.Server do
   }
 
   alias Troupe.Protocol.Event
+  alias Troupe.Protocol.Principal
   alias Troupe.Session.{Approvals, Blobs, Log}
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Watch.Trigger
@@ -939,7 +940,12 @@ defmodule Troupe.Agent.Server do
   end
 
   defp put_identity(data, nil), do: data
-  defp put_identity(data, identity), do: Map.put(data, "identity", identity)
+
+  # Both halves, always. `Principal.to_json/1` writes `subject` and `actor` even where
+  # they are equal, which is what lets a reader of an old event tell "the same person"
+  # from "nobody wrote the second one".
+  defp put_identity(data, %Principal{} = principal),
+    do: Map.put(data, "identity", Principal.to_json(principal))
 
   defp dispatch_tool(%ToolUse{} = tool_use, state) do
     call = %Call{id: tool_use.id, name: tool_use.name, args: normalize_args(tool_use.input)}

@@ -13,6 +13,7 @@ defmodule Troupe.MCPTest do
 
   alias Troupe.MCP
   alias Troupe.MCP.{Client, Server}
+  alias Troupe.Protocol.Principal
   alias Troupe.{Tool, Tools, Workspace}
   alias Troupe.Tool.Ctx
 
@@ -238,10 +239,37 @@ defmodule Troupe.MCPTest do
       on_exit(fn -> Application.delete_env(:troupe_core, :remote_tools) end)
 
       assert [%{name: name}] = tools
-      assert Tools.identity_of(name, owned_ctx("idp|ada")) == "person:idp|ada"
+
+      # Both halves. Ada is running her own session, so they are equal — and are written
+      # anyway, because a field omitted when it matches cannot be read afterwards: absent
+      # because they were the same, or absent because nothing wrote it, look identical.
+      assert %Principal{subject: "idp|ada", actor: "idp|ada"} =
+               Tools.identity_of(name, owned_ctx("idp|ada"))
+
+      refute Principal.delegated?(Tools.identity_of(name, owned_ctx("idp|ada")))
 
       # A built-in is not a credential anybody chose, so there is no question to answer.
       assert Tools.identity_of("write_file", owned_ctx("idp|ada")) == nil
+    end
+
+    test "names the credential's owner and the session's owner separately", context do
+      Application.put_env(:troupe_core, :mcp_servers, [context.person])
+      on_exit(fn -> Application.delete_env(:troupe_core, :mcp_servers) end)
+
+      tools = MCP.tools(context.person)
+      _listing = assert_request()
+      Application.put_env(:troupe_core, :remote_tools, tools)
+      on_exit(fn -> Application.delete_env(:troupe_core, :remote_tools) end)
+
+      [%{name: name}] = tools
+
+      # A profile-mode server's credential belongs to nobody in particular: it is the
+      # service account the operator injected, the same for every session. Naming a person
+      # there would be a lie about whose credential went out.
+      Application.put_env(:troupe_core, :mcp_servers, [%{context.person | credential_mode: :profile}])
+
+      assert %Principal{subject: "profile", actor: "idp|ada"} =
+               Tools.identity_of(name, owned_ctx("idp|ada"))
     end
   end
 

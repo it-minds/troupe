@@ -2976,3 +2976,30 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `DataCase.principal!/3` invents a person in the team's own group where the test does
      not care who sponsors it, and leaves `:sponsor` alone where it does. A test that
      spelled out a sponsor it had no opinion about would be a test about sponsorship.
+
+444. **Both halves are written even when they are the same.** A field omitted where the
+     subject and the actor match is a field nobody can read afterwards: absent because
+     they were equal, and absent because that day's code did not write it, are not
+     distinguishable once the rows are a year old. The migration backfills every existing
+     audit row with `on_behalf_of = actor` for the same reason — whatever the actor was, it
+     was also the authority, because there was no other kind of row.
+
+445. **`Audit.record/5` takes a `Principal` whole, or either half.** A caller that had to
+     take the pair apart and hand the halves over one at a time is a caller that can put
+     them back the wrong way round, and nothing downstream could tell.
+
+446. **A principal acts on its sponsor's authority.** A trigger's session records
+     `actor: svc:…, subject: <sponsor>` in its origin, which is where a reader six weeks
+     later finds the human behind a run that happened at four in the morning. A principal
+     with no sponsor cannot exist, so the fallback — a principal standing for itself —
+     only ever applies to rows written before sponsors did.
+
+447. **A profile-mode MCP call names `"profile"` as the credential's owner.** It is the
+     service account the operator injected, the same for every session; naming a person
+     there would be a lie about whose credential went out. The actor half still names the
+     session's owner, so the two questions stay separable.
+
+448. **The test for a trigger's pair goes through the real firing path.** The first
+     version added a `create_params_for_test/4` to `Triggers` — a seam with no purpose but
+     the test, which is the thing this codebase keeps refusing elsewhere. The existing
+     firing test already asserts the origin a pod is pushed; the pair is asserted there.
