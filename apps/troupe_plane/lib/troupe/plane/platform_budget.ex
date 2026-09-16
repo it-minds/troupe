@@ -55,6 +55,20 @@ defmodule Troupe.Plane.PlatformBudget do
   def inspect_state, do: Singleton.call(__MODULE__, @key, :inspect)
 
   @doc """
+  Whether anybody has set a ceiling here at all.
+
+  Cheap on purpose: two settings and no database. A deployment with no cap and no platform
+  cap is the common case, and this rung then has nothing to decide — so
+  `Troupe.Plane.Budget` skips it rather than queuing every session create in the whole
+  deployment behind one actor summing the whole ledger to answer "yes, fine".
+
+  That is not an optimisation bolted on: absence means everything is already the rule, and
+  a rung with no opinion should cost nothing to ask.
+  """
+  @spec capped?() :: boolean()
+  def capped?, do: ceiling() != :unlimited
+
+  @doc """
   The tighter of a set of ceilings, treating zero and `nil` as no ceiling at all.
 
   The ladder's rule in one function, and worth being able to test on its own: an unset

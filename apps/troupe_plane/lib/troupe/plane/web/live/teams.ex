@@ -1,11 +1,17 @@
 defmodule Troupe.Plane.Web.Live.Teams do
   @moduledoc """
-  Teams, their grants, budgets and retention — and their members, read-only.
+  Teams, the groups they draw their members from, their grants, budgets and retention —
+  and their members, read-only.
 
   Members are shown and cannot be edited. Showing them matters: an administrator setting
   a team's budget wants to know how many people it is for. Editing them is not on offer
   because membership comes from the identity provider, and a panel that let somebody add
   a member would be a second source of truth for who is in a team.
+
+  What *is* editable is which groups count. A team draws its members from any number of
+  them and its membership is the union, so linking a group is how a team gets people —
+  and unlinking one is destructive enough to want the count first, which is the whole of
+  the confirmation here.
   """
 
   use Phoenix.LiveView, layout: false
@@ -16,14 +22,19 @@ defmodule Troupe.Plane.Web.Live.Teams do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(flash_message: nil, editing: nil) |> load()}
+    {:ok,
+     socket
+     |> assign(flash_message: nil, editing: nil, unlinking: nil, unlink_effect: nil)
+     |> load()}
   end
 
   @impl Phoenix.LiveView
   def handle_event("edit", %{"team" => name}, socket),
     do: {:noreply, assign(socket, editing: name)}
 
-  def handle_event("cancel", _params, socket), do: {:noreply, assign(socket, editing: nil)}
+  def handle_event("cancel", _params, socket) do
+    {:noreply, assign(socket, editing: nil, unlinking: nil, unlink_effect: nil, confirming: nil)}
+  end
 
   def handle_event("save", %{"team" => name} = params, socket) do
     attrs =
@@ -51,6 +62,34 @@ defmodule Troupe.Plane.Web.Live.Teams do
       socket,
       Admin.person_budget(socket.assigns.actor, subject, cap_of(micros)),
       "#{subject}: #{cap_note(cap_of(micros))} in every team"
+    )
+  end
+
+  def handle_event("link", %{"team" => name, "group" => group}, socket) do
+    respond(
+      socket,
+      Admin.team_link(socket.assigns.actor, name, group),
+      "#{name} now draws its members from #{group} as well"
+    )
+  end
+
+  # The count before the deed, like every other irreversible action. Somebody unlinking a
+  # group is usually right about which group and often wrong about how many people are in
+  # the team *only* through it.
+  def handle_event("confirm-unlink", %{"team" => name, "group" => group}, socket) do
+    case Admin.team_unlink_preview(socket.assigns.actor, name, group) do
+      {:ok, effect} -> {:noreply, assign(socket, unlinking: {name, group}, unlink_effect: effect)}
+      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+    end
+  end
+
+  def handle_event("unlink", %{"team" => name, "group" => group}, socket) do
+    socket = assign(socket, unlinking: nil, unlink_effect: nil)
+
+    respond(
+      socket,
+      Admin.team_unlink(socket.assigns.actor, name, group),
+      "#{name} no longer draws its members from #{group}"
     )
   end
 
@@ -178,6 +217,17 @@ defmodule Troupe.Plane.Web.Live.Teams do
     end
   end
 
+  # The sentence a dialog puts in front of somebody. Sessions do not move — a session's
+  # team is recorded at create and stays — and people assume the opposite, so it says so.
+  defp unlink_warning(nil), do: ""
+
+  defp unlink_warning(effect) do
+    "removes #{effect.lose_access} of #{effect.in_group} people; " <>
+      "#{effect.keep_access} keep access through another group. " <>
+      "They lose #{effect.sessions_they_can_open} session(s) they can open now. " <>
+      "The sessions stay with the team — only who may open them changes."
+  end
+
   defp cap_note(nil), do: "no spend ceiling"
   defp cap_note(micros), do: "a ceiling of #{money(micros)}"
 
@@ -216,12 +266,14 @@ defmodule Troupe.Plane.Web.Live.Teams do
 
   defp load(socket) do
     with {:ok, teams} <- Admin.teams_list(socket.assigns.actor),
-         {:ok, profiles} <- Admin.profiles_list(socket.assigns.actor) do
+         {:ok, profiles} <- Admin.profiles_list(socket.assigns.actor),
+         {:ok, groups} <- Admin.groups_list(socket.assigns.actor) do
       principals = Map.new(teams, &{&1.name, principals_of(socket.assigns.actor, &1.name)})
 
       assign(socket,
         teams: teams,
         profiles: Enum.map(profiles, & &1.name),
+        groups: groups,
         principals: principals,
         error: nil
       )
@@ -528,6 +580,48 @@ defmodule Troupe.Plane.Web.Live.Teams do
           </p>
           <label>description <input name="description" /></label>
           <button type="submit">create a principal</button>
+        </form>
+
+        <h3>Groups</h3>
+        <p class="hint">
+          A team draws its members from any number of the identity provider's groups, and
+          its membership is the union — somebody in two of them is in the team once. This
+          list is what an administrator edits. Who is in the groups is still the provider's
+          answer and is not editable here.
+        </p>
+        <ul class="groups">
+          <li :for={group <- team.groups}>
+            <code>{group.external_id}</code> — {group.display_name}
+            <button
+              :if={@actor.role == :platform_admin and @unlinking != {team.name, group.external_id}}
+              phx-click="confirm-unlink"
+              phx-value-team={team.name}
+              phx-value-group={group.external_id}
+            >
+              unlink
+            </button>
+            <span :if={@unlinking == {team.name, group.external_id}} class="confirm">
+              {unlink_warning(@unlink_effect)}
+              <button phx-click="unlink" phx-value-team={team.name} phx-value-group={group.external_id}>
+                unlink it
+              </button>
+              <button phx-click="cancel">no</button>
+            </span>
+          </li>
+          <li :if={team.groups == []} class="none">
+            no groups yet, so no members — which is what a team looks like while you are
+            still deciding which groups belong in it
+          </li>
+        </ul>
+
+        <form id={"link-#{team.name}"} :if={@actor.role == :platform_admin} phx-submit="link">
+          <input type="hidden" name="team" value={team.name} />
+          <select name="group">
+            <option :for={group <- @groups} value={group.external_id}>
+              {group.external_id} — {group.display_name}
+            </option>
+          </select>
+          <button type="submit">link a group</button>
         </form>
 
         <h3>Members</h3>

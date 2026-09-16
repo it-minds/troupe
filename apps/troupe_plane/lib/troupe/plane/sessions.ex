@@ -657,12 +657,20 @@ defmodule Troupe.Plane.Sessions do
   # `users` row to join through.
   defp member_team_ids(%User{kind: "service", principal: %{team_id: team_id}}), do: [team_id]
 
+  # Through the team's links, because a team is a union of groups rather than one. The
+  # raw table names are deliberate — `Sessions` may not reach into `Identity`'s schemas
+  # any more than a LiveView may reach into `Admin`'s — and `distinct` is load-bearing: a
+  # person in two of a team's groups would otherwise put the team in this list twice, and
+  # every listing would show their sessions twice.
   defp member_team_ids(%User{id: id}) when is_binary(id) do
     Repo.all(
       from(t in Team,
+        join: l in "team_group_links",
+        on: l.team_id == type(t.id, :binary_id),
         join: m in "memberships",
-        on: m.group_id == type(t.group_id, :binary_id),
+        on: m.group_id == type(l.group_id, :binary_id),
         where: m.user_id == type(^id, :binary_id),
+        distinct: t.id,
         select: t.id
       )
     )
@@ -760,6 +768,43 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  How many sessions these people can currently open.
+
+  What an unlink dialog quotes. Counted rather than listed, because the question is *how
+  much am I about to take away* and a list of twenty-three session ids is not an answer to
+  it. Sessions they own, sessions they are on the ACL of, and their teams' shared ones —
+  the same three roads `visible_to/2` takes, because a number that did not match what they
+  can actually open would be worse than no number.
+  """
+  @spec count_visible_to([String.t()]) :: non_neg_integer()
+  def count_visible_to([]), do: 0
+
+  def count_visible_to(subjects) do
+    Repo.one(
+      from(s in Session,
+        left_join: a in ACL,
+        on: a.session_id == s.id and a.subject in ^subjects,
+        left_join: t in Team,
+        on: t.id == s.team_id,
+        left_join: l in "team_group_links",
+        on: l.team_id == type(t.id, :binary_id),
+        left_join: m in "memberships",
+        on: m.group_id == type(l.group_id, :binary_id),
+        left_join: u in User,
+        on: u.id == type(m.user_id, :binary_id) and u.subject in ^subjects,
+        where:
+          s.state != "erased" and
+            (s.owner_subject in ^subjects or not is_nil(a.id) or
+               (s.visibility == "team" and not is_nil(u.id))),
+        distinct: s.id,
+        select: s.id
+      )
+      |> subquery()
+      |> select([s], count(s.id))
+    )
+  end
+
+  @doc """
   What a user may do with one session, or `nil` when they may not see it.
 
   Owner administers, collaborator steers, viewer watches. Team visibility gives observe,
@@ -797,8 +842,9 @@ defmodule Troupe.Plane.Sessions do
   defp member?(%User{id: id}, team) when is_binary(id) do
     Repo.exists?(
       from(m in "memberships",
-        where:
-          m.user_id == type(^id, :binary_id) and m.group_id == type(^team.group_id, :binary_id)
+        join: l in "team_group_links",
+        on: l.group_id == m.group_id,
+        where: m.user_id == type(^id, :binary_id) and l.team_id == type(^team.id, :binary_id)
       )
     )
   end

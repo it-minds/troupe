@@ -394,6 +394,92 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Every group the identity provider has told this plane about.
+
+  What an administrator links a team to. Mirrored, never authored: this list is what SCIM
+  pushed or what somebody's `groups` claim created at login, and a group absent from it is
+  a group nobody from has signed in yet.
+  """
+  @spec groups_list(actor()) :: result()
+  def groups_list(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok,
+       Enum.map(Identity.list_groups(), fn group ->
+         %{external_id: group.external_id, display_name: group.display_name}
+       end)}
+    end
+  end
+
+  @doc """
+  Draw a team's members from one more identity-provider group.
+
+  Membership is still never typed here. What this adds is *which groups count*; who is in
+  them stays the provider's answer, arriving by SCIM or in a `groups` claim at login. A
+  person in two of a team's groups is in the team once.
+  """
+  @spec team_link(actor(), String.t(), String.t()) :: result()
+  def team_link(actor, name, group_id) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name),
+         %Identity.Group{} = group <- Identity.get_group(group_id) do
+      {:ok, _link} = Identity.link_group(team, group, actor.subject)
+      {:ok, _} = Audit.record(actor.subject, "team.link", name, %{"group" => group_id})
+
+      {:ok, %{team: name, group: group_id, members: length(Identity.members_of_team(team))}}
+    else
+      nil -> {:error, Error.new(:not_found, %{group: group_id})}
+      other -> other
+    end
+  end
+
+  @doc """
+  What unlinking a group would do, before anybody does it.
+
+  The count comes first, like every other irreversible action. Somebody unlinking a group
+  is usually right about which group and often wrong about how many people are in the
+  team *only* through it — which is the number this answers and the one worth putting in
+  front of them.
+
+  Sessions do not move. A session's team is recorded at create and stays; unlinking
+  changes who may open it, not what it belongs to. People assume that the other way round,
+  so the answer says how many sessions those people can currently open.
+  """
+  @spec team_unlink_preview(actor(), String.t(), String.t()) :: result()
+  def team_unlink_preview(actor, name, group_id) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name),
+         %Identity.Group{} = group <- Identity.get_group(group_id) do
+      {:ok, Identity.unlink_effect(team, group)}
+    else
+      nil -> {:error, Error.new(:not_found, %{group: group_id})}
+      other -> other
+    end
+  end
+
+  @doc """
+  Stop drawing a team's members from a group.
+
+  Destructive, and confirmed by typing the group's identifier. What it removes is access
+  for everybody who was in the team only through this group; `team_unlink_preview/3` says
+  how many that is and is meant to be shown first.
+  """
+  @spec team_unlink(actor(), String.t(), String.t()) :: result()
+  def team_unlink(actor, name, group_id) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name),
+         %Identity.Group{} = group <- Identity.get_group(group_id) do
+      effect = Identity.unlink_effect(team, group)
+      :ok = Identity.unlink_group(team, group)
+      {:ok, _} = Audit.record(actor.subject, "team.unlink", name, effect)
+
+      {:ok, effect}
+    else
+      nil -> {:error, Error.new(:not_found, %{group: group_id})}
+      other -> other
+    end
+  end
+
   @doc "Give a team access to a profile."
   @spec team_grant(actor(), String.t(), String.t(), map()) :: result()
   def team_grant(actor, name, profile, attrs \\ %{}) do
@@ -1471,6 +1557,18 @@ defmodule Troupe.Plane.Admin do
           Identity.grants_for_team(team),
           &%{profile: &1.profile, volume_mode: &1.volume_mode}
         ),
+      # The groups this team draws its members from. A team links to any number of them
+      # and its membership is the union, so this is the list an administrator edits —
+      # rather than the members, which are still nobody's here to edit.
+      groups:
+        Enum.map(Identity.links_of(team), fn link ->
+          %{
+            external_id: link.group.external_id,
+            display_name: link.group.display_name,
+            issuer: link.issuer,
+            linked_by: link.linked_by
+          }
+        end),
       # Read-only, always: membership comes from the identity provider and a method to
       # change it would be a second source of truth for who is in a team.
       #

@@ -18,8 +18,8 @@ defmodule Troupe.Plane.ScalingTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakePod, Fleet, Harness, Placement, Sessions}
-  alias Troupe.Plane.Fleet.{Scaler, SizeClass}
+  alias Troupe.Plane.{Drain, FakePod, Fleet, Harness, Placement, Sessions}
+  alias Troupe.Plane.Fleet.{Scaler, SizeClass, Worker}
 
   @moduletag timeout: 60_000
 
@@ -143,6 +143,42 @@ defmodule Troupe.Plane.ScalingTest do
     end
   end
 
+  describe "a pod that stops answering" do
+    test "leaves its sessions dormant rather than active on a worker that is gone", context do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+
+      assert {:ok, created} = create(context)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      session_id = created["session_id"]
+
+      # Silence, which is the failure this exists for: not a pod that said goodbye but one
+      # that cannot say anything. A scale-down removes a pod that never comes back, so the
+      # re-enrolment reconciliation that used to be the only thing marking these dormant
+      # never runs at all.
+      gone_quiet()
+
+      assert [worker] = Fleet.lost()
+      assert worker.pod_name == "troupe-w-dev-0"
+
+      assert [^session_id] = Drain.strand(worker)
+
+      # Left `active` on a dead pod, opening this session takes the already-running
+      # branch, tells nobody to restore, and answers `not_found` to every retry for ever.
+      # Dormant is the answer: the log is sealed and the next open replays it elsewhere.
+      assert Sessions.get(session_id).state == "dormant"
+      assert is_nil(Sessions.get(session_id).worker_id)
+
+      # And the slot came back. Released *before* the session was marked dormant, because
+      # `dormant/1` clears the `worker_id` that `release/2` needs to find.
+      assert %{used: 0} = Placement.inspect_state("dev")
+
+      # Idempotent: a session that is already dormant is not on a worker, so the next
+      # sweep has nothing to find and this does not run every five seconds for ever.
+      assert Fleet.lost() == []
+    end
+  end
+
   describe "a session on a full profile" do
     test "waits, and is given no endpoint to pretend with", context do
       {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
@@ -254,6 +290,15 @@ defmodule Troupe.Plane.ScalingTest do
   # -- helpers ----------------------------------------------------------------
 
   defp plan(_context), do: Scaler.plan(Fleet.get_profile("dev"))
+
+  # Every worker of the profile, last heard from a minute ago. The lease is fifteen
+  # seconds, so this is a pod the plane has every reason to presume lost.
+  defp gone_quiet do
+    Repo.update_all(
+      from(w in Worker, where: w.profile == "dev"),
+      set: [last_heartbeat_at: DateTime.add(DateTime.utc_now(), -60, :second)]
+    )
+  end
 
   defp create(context, opts \\ []) do
     Harness.call(

@@ -648,11 +648,8 @@ defmodule Troupe.Plane.Control.Connection do
       "troupe plane: #{session_id} is not on #{worker.pod_name} any more, marking it dormant"
     )
 
-    # Released first, and the order matters. `Placement.release/2` gives the slot back
-    # only when it finds a `worker_id` to clear, and `dormant/1` clears it — so doing
-    # these the other way round marked the session dormant, found nothing to unplace, and
-    # left the pod charged for a session that was no longer on it. A profile whose count
-    # only ever went up is a profile that is eventually full for ever.
+    # The order is load-bearing and lives in one place now — `Drain.strand/1` — because it
+    # was fixed here once and was still the wrong way round in the other two callers.
     Placement.release(worker.profile, session_id)
     Sessions.dormant(session_id)
     release_budget(session_id)

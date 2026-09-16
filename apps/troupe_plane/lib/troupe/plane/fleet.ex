@@ -12,6 +12,7 @@ defmodule Troupe.Plane.Fleet do
 
   alias Troupe.Plane.Fleet.{Profile, Worker}
   alias Troupe.Plane.Repo
+  alias Troupe.Plane.Sessions.Session
 
   # Past this with no heartbeat a pod is presumed lost. Fifteen seconds is the done
   # item's number, and heartbeats are every five.
@@ -156,7 +157,14 @@ defmodule Troupe.Plane.Fleet do
     :ok
   end
 
-  @doc "Mark pods that have stopped heartbeating as unhealthy, and say which."
+  @doc """
+  Mark pods that have stopped heartbeating as unhealthy, and say which.
+
+  Stopping placement, which is the easy half. The other half — what becomes of the
+  sessions such a pod was believed to be holding — is `lost/0`, because they are two
+  questions: a pod with nothing on it needs nothing done about it, and a pod that was
+  marked unhealthy an hour ago still holds whatever it held.
+  """
   @spec sweep() :: [Worker.t()]
   def sweep do
     cutoff = DateTime.add(DateTime.utc_now(), -lease_timeout_ms(), :millisecond)
@@ -168,6 +176,38 @@ defmodule Troupe.Plane.Fleet do
       )
 
     workers || []
+  end
+
+  @doc """
+  Pods past their lease that are still believed to be holding sessions.
+
+  Nothing ever did anything about these. They stayed `active`, pointing at a worker that
+  was gone, and opening one took the already-running branch — it hands the client an
+  endpoint and never tells the pod to restore — so `subscribe` answered `not_found` for as
+  long as anybody cared to retry. No timeout expired and no retry helped.
+
+  It only ever looked handled because a pod that comes *back* reconciles what it holds on
+  re-enrolment, and until the plane scaled profiles itself a pod nearly always came back.
+  A pod removed by a scale-down does not.
+
+  Health is not in the question. A worker marked unhealthy the moment its socket closed
+  is exactly the one whose sessions need rescuing, and asking only about healthy ones
+  would skip it. Idempotent because a session that has been marked dormant is not on a
+  worker: once rescued, there is nothing here to find.
+  """
+  @spec lost() :: [Worker.t()]
+  def lost do
+    cutoff = DateTime.add(DateTime.utc_now(), -lease_timeout_ms(), :millisecond)
+
+    Repo.all(
+      from(w in Worker,
+        join: s in Session,
+        on: s.worker_id == w.id and s.state == "active",
+        where: w.last_heartbeat_at < ^cutoff,
+        distinct: w.id,
+        select: w
+      )
+    )
   end
 
   @doc "Stop placing on a pod. Running turns finish; the sessions then go dormant."

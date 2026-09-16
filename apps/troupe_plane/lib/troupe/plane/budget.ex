@@ -41,6 +41,7 @@ defmodule Troupe.Plane.Budget do
   @type scope :: :person | :team | :platform | :deployment
   @type rung :: %{
           scope: scope(),
+          capped?: (-> boolean()),
           reserve: (String.t(), non_neg_integer() -> {:ok, map()} | {:error, term()}),
           release: (String.t() -> :ok),
           inspect: (-> map())
@@ -102,6 +103,7 @@ defmodule Troupe.Plane.Budget do
     [
       %{
         scope: :person,
+        capped?: fn -> PersonBudget.capped?(subject) end,
         reserve: &PersonBudget.reserve(subject, &1, &2),
         release: &PersonBudget.release(subject, &1),
         inspect: fn -> PersonBudget.inspect_state(subject) end
@@ -119,6 +121,10 @@ defmodule Troupe.Plane.Budget do
     [
       %{
         scope: :team,
+        # Always asked. A team's ceiling is the one people actually set, and the actor is
+        # per team rather than per deployment — so it is neither a shared bottleneck nor a
+        # rung that is usually unset.
+        capped?: fn -> true end,
         reserve: &TeamBudget.reserve(id, &1, &2),
         release: &TeamBudget.release(id, &1),
         inspect: fn -> TeamBudget.inspect_state(id) end
@@ -131,6 +137,7 @@ defmodule Troupe.Plane.Budget do
   defp platform_rung do
     %{
       scope: :platform,
+      capped?: &PlatformBudget.capped?/0,
       reserve: &PlatformBudget.reserve/2,
       release: &PlatformBudget.release/1,
       inspect: &PlatformBudget.inspect_state/0
@@ -141,7 +148,19 @@ defmodule Troupe.Plane.Budget do
     {:ok, taken |> Enum.reverse() |> Enum.map(fn {_rung, summary} -> summary end)}
   end
 
+  # A rung nobody has set a ceiling at is skipped, not consulted and waved through. The
+  # difference is a `:global` round trip and a pair of aggregates per session create — and
+  # for the platform rung it is *one* actor for the whole deployment, so fifty concurrent
+  # creates queue behind fifty full-ledger sums to be told what absence already says.
   defp walk([rung | rest], session_id, amount, taken) do
+    if rung.capped?.() do
+      take(rung, rest, session_id, amount, taken)
+    else
+      walk(rest, session_id, amount, taken)
+    end
+  end
+
+  defp take(rung, rest, session_id, amount, taken) do
     case rung.reserve.(session_id, amount) do
       {:ok, summary} ->
         walk(rest, session_id, amount, [{rung, Map.put(summary, :scope, rung.scope)} | taken])

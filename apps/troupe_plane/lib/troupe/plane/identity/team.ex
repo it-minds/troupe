@@ -1,10 +1,17 @@
 defmodule Troupe.Plane.Identity.Team do
   @moduledoc """
-  A group a platform admin has enabled.
+  A Troupe object that draws its members from identity-provider groups.
 
-  Enabling is the only thing Troupe adds to a group, and it is what a grant, a budget
-  and a volume hang off. Membership is still the IdP's: removing someone from the group
-  removes them from the team, everywhere, at the next login or SCIM push.
+  It used to *be* a group, one for one and for ever, which meant the shape of a team was
+  whatever shape the provider's groups happened to have. It links to any number of them
+  now — `Troupe.Plane.Identity.TeamGroupLink` — and its membership is the union.
+
+  `group_id` is which group it was first enabled from. It is a record rather than a
+  resolution: nothing derives membership from it any more.
+
+  Everything a team owns is the team's: budget, retention, default visibility, volume,
+  grants and administrators. Membership is still the provider's — removing somebody from
+  a linked group removes them from the team, everywhere, at the next login or SCIM push.
 
   Retention lives here because it is a property of the team's work rather than of any
   one session — how long an idle session keeps its actor tree, how long a dormant one
@@ -68,7 +75,10 @@ defmodule Troupe.Plane.Identity.Team do
     |> validate_required([:group_id, :name])
     |> validate_inclusion(:budget_period, ["monthly", "never"])
     |> validate_number(:idle_timeout_seconds, greater_than: 0)
-    |> unique_constraint(:group_id)
+    # The name, not the group. A team is addressed by name everywhere — a grant, a
+    # session's team, an audit row — so two called `engineering` would be two answers to
+    # one question; but one group may be two teams, which is the whole of what a link
+    # table is for.
     |> unique_constraint(:name)
   end
 end

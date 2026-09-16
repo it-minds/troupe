@@ -58,6 +58,22 @@ defmodule Troupe.Plane.PersonBudget do
     call(subject, {:reserve, session_id, amount_micros})
   end
 
+  @doc """
+  Whether this person has a ceiling at all.
+
+  One indexed lookup, and no actor. A person with no cap — which is everybody until
+  somebody sets one — has nothing for this rung to decide, and asking anyway would put a
+  `:global` round trip and a pair of aggregates on the path of every session create for an
+  answer that was always going to be yes.
+  """
+  @spec capped?(String.t()) :: boolean()
+  def capped?(subject) do
+    case Ledger.person_budget_micros(subject) do
+      cap when is_integer(cap) and cap > 0 -> true
+      _none -> false
+    end
+  end
+
   @doc "Give a promise back."
   @spec release(String.t(), String.t()) :: :ok
   def release(subject, session_id), do: call(subject, {:release, session_id})

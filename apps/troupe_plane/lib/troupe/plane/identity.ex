@@ -15,8 +15,18 @@ defmodule Troupe.Plane.Identity do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias Troupe.Plane.Identity.{Entitlement, Grant, Group, Membership, Team, TeamAdmin, User}
-  alias Troupe.Plane.{Principals, Repo, Sessions}
+  alias Troupe.Plane.{Principals, Repo, Sessions, Settings}
+
+  alias Troupe.Plane.Identity.{
+    Entitlement,
+    Grant,
+    Group,
+    Membership,
+    Team,
+    TeamAdmin,
+    TeamGroupLink,
+    User
+  }
 
   require Logger
 
@@ -179,22 +189,37 @@ defmodule Troupe.Plane.Identity do
   """
   @spec enable_team(Group.t(), map()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
   def enable_team(%Group{} = group, attrs \\ %{}) do
-    existing = Repo.get_by(Team, group_id: group.id)
-
     # String keys throughout, whoever called. `Map.put_new(:group_id, ...)` on a map that
     # arrived from JSON produced a map with mixed keys, which Ecto refuses to cast — so
     # enabling a team with any attributes at all worked from the panel and raised from the
     # CLI and the API.
+    wanted = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    name = wanted["name"] || default_team_name(group)
+
+    # By name, not by group. Keying on the group meant enabling one under a second name
+    # silently *renamed* the first team instead of making another — one group, one team,
+    # for ever, which is the assumption this package exists to remove.
+    existing = Repo.get_by(Team, name: name)
+
     attrs =
-      attrs
-      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      wanted
       |> Map.put_new("group_id", group.id)
-      |> Map.put_new("name", default_team_name(group))
+      |> Map.put("name", name)
       |> Map.put_new("enabled_at", DateTime.utc_now())
 
     (existing || %Team{})
     |> Team.changeset(attrs)
     |> Repo.insert_or_update()
+    |> case do
+      {:ok, team} ->
+        # A team enabled from a group starts linked to it, which is what enabling one has
+        # always meant. Everything after that is `link_group/3`.
+        {:ok, _link} = link_group(team, group, "enable_team")
+        {:ok, team}
+
+      error ->
+        error
+    end
   end
 
   # A name a person will type: the display name, lowercased, with anything that is not
@@ -240,11 +265,17 @@ defmodule Troupe.Plane.Identity do
   end
 
   def teams_for(%User{} = user) do
+    # Through the links, and `distinct` because a person in two of a team's groups is in
+    # the team *once*. Without it they get every team twice and a listing shows their
+    # budget as two budgets.
     Repo.all(
       from(t in Team,
+        join: l in TeamGroupLink,
+        on: l.team_id == t.id,
         join: m in Membership,
-        on: m.group_id == t.group_id,
+        on: m.group_id == l.group_id,
         where: m.user_id == ^user.id,
+        distinct: t.id,
         order_by: t.name
       )
     )
@@ -462,11 +493,127 @@ defmodule Troupe.Plane.Identity do
       from(u in User,
         join: m in Membership,
         on: m.user_id == u.id,
-        where: m.group_id == type(^team.group_id, :binary_id),
+        join: l in TeamGroupLink,
+        on: l.group_id == m.group_id and l.team_id == type(^team.id, :binary_id),
+        distinct: u.id,
         order_by: u.subject
       )
     )
   end
+
+  @doc """
+  The groups a team draws its members from, newest link last.
+
+  What the console lists and what an administrator adds to. A team with none has no
+  members, which is valid: it is what a team looks like while somebody is still deciding
+  which groups belong in it.
+  """
+  @spec links_of(Team.t()) :: [TeamGroupLink.t()]
+  def links_of(%Team{} = team) do
+    Repo.all(
+      from(l in TeamGroupLink,
+        where: l.team_id == type(^team.id, :binary_id),
+        order_by: l.inserted_at,
+        preload: [:group]
+      )
+    )
+  end
+
+  @doc """
+  Draw a team's members from one more group.
+
+  Idempotent on the pair: linking a group twice is the same link, not a person counted
+  twice — which matters because membership is a union and a union over duplicates is a
+  listing with everybody in it twice.
+  """
+  @spec link_group(Team.t(), Group.t(), String.t()) ::
+          {:ok, TeamGroupLink.t()} | {:error, Ecto.Changeset.t()}
+  def link_group(%Team{} = team, %Group{} = group, by) do
+    attrs = %{team_id: team.id, group_id: group.id, issuer: issuer(), linked_by: by}
+
+    (Repo.get_by(TeamGroupLink, team_id: team.id, group_id: group.id) || %TeamGroupLink{})
+    |> TeamGroupLink.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  @doc """
+  Stop drawing a team's members from a group.
+
+  Removes access for everybody who was in the team *only* through it. `unlink_effect/2`
+  is what says how many that is, and is meant to be shown before this is called.
+  """
+  @spec unlink_group(Team.t(), Group.t()) :: :ok
+  def unlink_group(%Team{} = team, %Group{} = group) do
+    Repo.delete_all(
+      from(l in TeamGroupLink,
+        where: l.team_id == type(^team.id, :binary_id) and l.group_id == type(^group.id, :binary_id)
+      )
+    )
+
+    :ok
+  end
+
+  @doc """
+  Who loses access if this link goes, and who does not.
+
+  The count comes first and the identifier is typed, like every other irreversible
+  action. Somebody unlinking a group is usually right about which group and often wrong
+  about how many people are only in the team through it — that is exactly the number this
+  answers, and it is the one worth putting in front of them.
+  """
+  @spec unlink_effect(Team.t(), Group.t()) :: map()
+  def unlink_effect(%Team{} = team, %Group{} = group) do
+    in_group = MapSet.new(members_of_group(group), & &1.subject)
+    remaining = team |> members_without(group) |> MapSet.new(& &1.subject)
+
+    losing = MapSet.difference(in_group, remaining)
+
+    %{
+      team: team.name,
+      group: group.external_id,
+      in_group: MapSet.size(in_group),
+      keep_access: MapSet.size(MapSet.intersection(in_group, remaining)),
+      lose_access: MapSet.size(losing),
+      losing: losing |> MapSet.to_list() |> Enum.sort(),
+      # Sessions do not move. A session's team is recorded at create and stays; unlinking
+      # changes who may open it, not what it belongs to — which is the thing people assume
+      # the other way round, so the dialog says it.
+      sessions_they_can_open: sessions_open_to(team, losing)
+    }
+  end
+
+  defp members_without(%Team{} = team, %Group{} = group) do
+    Repo.all(
+      from(u in User,
+        join: m in Membership,
+        on: m.user_id == u.id,
+        join: l in TeamGroupLink,
+        on: l.group_id == m.group_id and l.team_id == type(^team.id, :binary_id),
+        where: l.group_id != type(^group.id, :binary_id),
+        distinct: u.id
+      )
+    )
+  end
+
+  defp members_of_group(%Group{} = group) do
+    Repo.all(
+      from(u in User,
+        join: m in Membership,
+        on: m.user_id == u.id,
+        where: m.group_id == type(^group.id, :binary_id),
+        order_by: u.subject
+      )
+    )
+  end
+
+  # What those people could open today. Team-visible sessions of this team, plus the ones
+  # they own or are on the ACL of — counted rather than listed, because a dialog wants a
+  # number and a list of twenty-three session ids is not one.
+  defp sessions_open_to(_team, losing) do
+    if MapSet.size(losing) == 0, do: 0, else: Sessions.count_visible_to(MapSet.to_list(losing))
+  end
+
+  defp issuer, do: Settings.get("issuer")
 
   # -- team administrators ----------------------------------------------------
 
@@ -541,8 +688,10 @@ defmodule Troupe.Plane.Identity do
       from(g in Grant,
         join: t in Team,
         on: t.id == g.team_id,
+        join: l in TeamGroupLink,
+        on: l.team_id == t.id,
         join: m in Membership,
-        on: m.group_id == t.group_id,
+        on: m.group_id == l.group_id,
         where: m.user_id == ^user.id,
         order_by: [g.profile, t.name],
         preload: [team: t]

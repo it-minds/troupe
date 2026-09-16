@@ -8,14 +8,22 @@ defmodule Troupe.Plane.Fleet.Sweeper do
   silence.
 
   So presence is a lease. A heartbeat renews it, and a pod past the timeout is marked
-  unhealthy, which stops placement immediately and makes its sessions candidates for
-  activation elsewhere. The sweep runs on every replica; marking a pod unhealthy twice
-  is the same as marking it once.
+  unhealthy, which stops placement immediately — and its sessions are marked dormant,
+  which is what actually makes them activatable elsewhere.
+
+  That second half was a sentence here and nothing in the code. A session left `active` on
+  a pod that is gone is unreachable for good: opening it takes the already-running branch,
+  tells nobody to restore, and answers `not_found` to every retry. It looked fixed because
+  a pod that comes *back* reconciles what it holds on re-enrolment, and until the plane
+  scaled profiles itself a pod nearly always came back.
+
+  The sweep runs on every replica, and stranding is idempotent: a session that is already
+  dormant is not on a worker, so the next sweep has nothing to find.
   """
 
   use GenServer
 
-  alias Troupe.Plane.Fleet
+  alias Troupe.Plane.{Drain, Fleet}
 
   require Logger
 
@@ -38,17 +46,21 @@ defmodule Troupe.Plane.Fleet.Sweeper do
 
   @impl GenServer
   def handle_info(:sweep, state) do
-    case Fleet.sweep() do
-      [] ->
-        :ok
+    # Two passes because they are two questions. Marking a pod unhealthy stops placement;
+    # rescuing what it was holding is about sessions, and a pod marked unhealthy an hour
+    # ago still holds whatever it held.
+    for worker <- Fleet.sweep() do
+      Logger.warning(
+        "troupe plane: #{worker.namespace}/#{worker.pod_name} stopped heartbeating; " <>
+          "it will take no more sessions"
+      )
+    end
 
-      lost ->
-        for worker <- lost do
-          Logger.warning(
-            "troupe plane: #{worker.namespace}/#{worker.pod_name} stopped heartbeating; " <>
-              "its sessions can be activated elsewhere"
-          )
-        end
+    for worker <- Fleet.lost(), stranded = Drain.strand(worker), stranded != [] do
+      Logger.warning(
+        "troupe plane: #{worker.namespace}/#{worker.pod_name} is gone with " <>
+          "#{length(stranded)} session(s) on it; they are dormant and can be activated elsewhere"
+      )
     end
 
     schedule(state.interval_ms)

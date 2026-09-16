@@ -343,6 +343,62 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.groups.list",
+      function: :groups_list,
+      summary:
+        "Every identity-provider group this plane knows about, which is what a team links to.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.team.link",
+      function: :team_link,
+      summary:
+        "Draw a team's members from one more identity-provider group. Membership stays the provider's; this says which groups count.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "group",
+          type: :string,
+          required: true,
+          description: "The group's identifier, as the provider spells it."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.team.unlink.preview",
+      function: :team_unlink_preview,
+      summary:
+        "What unlinking a group would do: how many people are in the team only through it, how many keep access another way, and how many sessions they can currently open. Read this first.",
+      risk: :read,
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "group",
+          type: :string,
+          required: true,
+          description: "The group's identifier."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.team.unlink",
+      function: :team_unlink,
+      summary:
+        "Stop drawing a team's members from a group. Removes access for everybody who was in the team only through it. Sessions do not move: their team is fixed at create.",
+      risk: :destructive,
+      confirm: "group",
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "group",
+          type: :string,
+          required: true,
+          description: "The group's identifier."
+        }
+      ]
+    },
+    %Method{
       name: "admin.team.grant",
       function: :team_grant,
       summary: "Give a team access to a profile. Effective for sessions started after it.",

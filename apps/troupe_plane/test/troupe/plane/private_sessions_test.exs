@@ -255,12 +255,16 @@ defmodule Troupe.Plane.PrivateSessionsTest do
 
   describe "sealing with no credential at all" do
     test "a laptop seals, lists and reads back through the plane's signatures", %{ada: ada} do
-      {:ok, _} = register(ada, %{"session_id" => "p-13", "device" => "laptop"})
+      # A session id nothing else has used. The object store is not a database: what a
+      # test writes there survives the sandbox rolling back, so a fixed id means the
+      # second run of this file lists two segments and fails about the first run.
+      id = "p-#{System.system_time(:microsecond)}"
+      {:ok, _} = register(ada, %{"session_id" => id, "device" => "laptop"})
 
       # What a daemon holds: a session key it made itself, and a plane connection. No
       # object-storage credential anywhere in this test but the plane's own.
       data_key = :crypto.strong_rand_bytes(32)
-      store = signed_store(ada, "p-13")
+      store = signed_store(ada, id)
 
       events = [
         %{"seq" => 1, "type" => "session_created", "data" => %{"kind" => "private"}},
@@ -268,14 +272,14 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       ]
 
       assert {:ok, segment} =
-               Storage.seal_segment(store, "p-13", data_key, %{
+               Storage.seal_segment(store, id, data_key, %{
                  events: events,
                  epoch: 1,
                  head_hash: "sha256:head"
                })
 
       assert {:ok, _} =
-               Storage.put_manifest(store, "p-13", %{
+               Storage.put_manifest(store, id, %{
                  owner_subject: ada.subject,
                  epoch: 1,
                  last_seq: 2,
@@ -284,19 +288,19 @@ defmodule Troupe.Plane.PrivateSessionsTest do
                })
 
       # Listing is the one verb a signature cannot cover, so the plane does it.
-      assert {:ok, [listed]} = Storage.list_segments(store, "p-13")
+      assert {:ok, [listed]} = Storage.list_segments(store, id)
       assert listed.key == segment.key
       assert listed.epoch == 1
 
       # And the bytes come back, which only somebody holding the session key can do.
-      assert {:ok, ^events} = Storage.read_segment(store, "p-13", data_key, segment.key)
+      assert {:ok, ^events} = Storage.read_segment(store, id, data_key, segment.key)
 
       # The plane holds the same object and cannot read it. This is the claim the whole
       # arrangement exists for, so it is made against the store rather than inferred.
       keyed = ObjectStore.from_env()
       assert {:ok, ciphertext} = ObjectStore.get(keyed, segment.key)
       refute ciphertext =~ "a private thought"
-      assert {:error, _} = Cipher.open(:crypto.strong_rand_bytes(32), "p-13", ciphertext)
+      assert {:error, _} = Cipher.open(:crypto.strong_rand_bytes(32), id, ciphertext)
     end
 
     test "a rebuild finds a private session without reading a byte of it", %{ada: ada} do

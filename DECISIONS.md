@@ -3383,3 +3383,54 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `ada@example.test` and the plane knows that person as `CgNhZGESBWxvY2Fs`. Everything
      the plane matches a person by matches the subject, so the suite asks `me` rather than
      assuming the two are the same string.
+
+511. **A pod past its lease has its sessions marked dormant, not only its placement
+     stopped.** The sweeper's own docstring said its sessions become "candidates for
+     activation elsewhere" and nothing made that true: they stayed `active` pointing at a
+     worker that was gone, and opening one took the already-running branch and answered
+     `not_found` to every retry for ever. It looked handled because a pod that comes *back*
+     reconciles what it holds on re-enrolment — and until the plane scaled profiles itself,
+     a pod nearly always came back.
+
+512. **`Fleet.sweep/0` and `Fleet.lost/0` are two questions.** Marking a pod unhealthy
+     stops placement; rescuing what it was holding is about sessions. A pod with nothing on
+     it needs nothing done, and a pod marked unhealthy an hour ago still holds whatever it
+     held — so health is not in the second question at all.
+
+513. **Stranding lives in one place.** The order is load-bearing — `Placement.release/2`
+     gives a slot back only when it finds a `worker_id`, and `Sessions.dormant/1` clears it
+     — and it had been fixed once in the control connection while `Drain` still had it the
+     wrong way round. `Drain.strand/1` is the one copy.
+
+514. **A rung with no ceiling is skipped, not consulted.** Fifty concurrent creates timed
+     out: the ladder put three `:global` actors on every create, and the platform one is a
+     single actor for the whole deployment summing the entire ledger to answer a question
+     nobody had asked it. Absence means everything was already the rule; this makes a rung
+     with no opinion cost nothing to ask. The team's rung is always consulted — it is the
+     ceiling people actually set, and its actor is per team rather than per deployment.
+
+515. **A team is keyed by its name, not by its group.** `enable_team/2` looked the team up
+     by `group_id`, so enabling one group under a second name silently *renamed* the first
+     team instead of making another. One group, one team, for ever was the assumption and
+     it was in the lookup as well as in the schema.
+
+516. **`teams.group_id` loses its unique index and keeps the column.** The index was the
+     1:1 assumption written into the database. The column records which group a team was
+     first enabled from, which is worth keeping and is no longer what membership derives
+     from. Dropping a column is not the same operation as not reading one.
+
+517. **The team's *name* stays unique.** It is what a team is addressed by everywhere — a
+     grant, a session's team, an audit row — so two called `engineering` would be two
+     answers to one question.
+
+518. **Unlinking quotes the count before it happens, and says sessions do not move.**
+     Somebody unlinking a group is usually right about which group and often wrong about
+     how many people are in the team only through it. And a session's team is recorded at
+     create and stays: unlinking changes who may open it, not what it belongs to — which
+     people assume the other way round, so the dialog says it.
+
+519. **An object store is not a database.** `private_sessions_test` wrote under a fixed
+     session id, and what a test writes to MinIO survives the sandbox rolling back — so the
+     second run of that file listed two segments and failed about the first run. The id is
+     unique per run now, which is the same lesson `System.unique_integer/1` taught in the
+     cluster suite in a different costume.
