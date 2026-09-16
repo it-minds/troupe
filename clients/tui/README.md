@@ -129,6 +129,10 @@ troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
 troupe models [--refresh]               # every model, its window and its price
+troupe login PLANE_URL                  # sign in to a Troupe Remote plane (device flow)
+troupe logout [PLANE_URL] [--all]       # forget a plane's credentials
+troupe whoami [PLANE_URL]               # who the plane says you are, and your teams
+troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a plane
 troupe --version
 ```
 
@@ -148,6 +152,9 @@ Inside the TUI, everything starts with `/`:
 | `/agents` | list the agents you can dispatch |
 | `/resume`, `/sessions` | this directory's sessions, newest first: Enter switches the window to one (`/resume <n\|ID>` goes straight there) |
 | `/settings`, `/help` | settings page: tweak settings and read the curated help |
+| `/hq`, `/remote` | HQ: a plane's teams, profiles and sessions, with this machine's own listed alongside |
+| `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
+| `/upload <path>` | send a local file into the session's own mount |
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
 | `/copy [n]` | copy the activated transcript (or tile `n`'s) to the system clipboard |
@@ -306,6 +313,55 @@ tools: [read_file, grep, list_files, finish]
 You are a security reviewer...
 ```
 
+## Remote sessions
+
+A session can run on a Troupe Remote deployment instead of this machine: a
+*plane* that knows who you are and hands out sessions, and *workers* that run
+them. Sign in once per plane:
+
+```
+troupe login https://plane.example
+```
+
+It reads the plane's `/.well-known/troupe`, runs the OAuth device flow against
+the issuer it names, and prints a code to enter in a browser. The refresh token
+lands in `~/.config/troupe/credentials.json` (`%APPDATA%\troupe` on Windows) as
+a file only your account can read — `0600` on unix, an ACL naming only you on
+Windows. `troupe whoami` says who you are and which teams you are in;
+`troupe logout` forgets one plane, `troupe logout --all` every one.
+
+```
+troupe --remote
+```
+
+opens HQ: the teams you are in, the profiles each can run with their health and
+free capacity, and the sessions on the plane — with this machine's own sessions
+in the same list, labelled `local`. ↑↓ moves, ←/→ or Tab changes column, Enter
+opens a session, `n` creates one (profile, source, visibility, prompt) and
+attaches to it, `r` refreshes. A remote session looks exactly like a local one
+once it is open: the same window, transcript, approvals and keys.
+
+What is different, and why:
+
+* **Browsing never wakes anything.** Opening a dormant session reads it; the
+  first thing you actually do (input, an approval, a todo edit, a profile
+  switch) activates it, once, and follows the worker it is given.
+* **Your input appears before the server has seen it**, and is reconciled when
+  the worker accepts it. Someone else's input appears when it is queued.
+* **What your token does not allow is disabled, with the reason on the input
+  box** — a read-only session, or a token with only the `observe` scope.
+* **If the plane goes down, attached sessions keep streaming.** HQ says that
+  creating and activating are unavailable, and still lists what it knows.
+* **`/files` and `/upload`** work against the worker's checkout over the
+  session's mount, and refresh themselves when the worker says files changed.
+
+TLS is verified against your operating system's trust store. For a deployment
+behind a private CA, `TROUPE_CA_FILE=/path/to/ca.pem` adds it — it is added to
+the trust store, never swapped for it.
+
+`mix troupe.remote.smoke` runs login, list, attach and one input against a real
+deployment when `TROUPE_REMOTE_URL` is set, and skips itself otherwise.
+
 ## Persistence
 
 Every session is an append-only JSONL event log under the platform state dir
@@ -314,6 +370,11 @@ Every session is an append-only JSONL event log under the platform state dir
 that log, so crashes restart from it and `troupe resume` continues running
 branches. Tool calls that started but never completed are re-run on resume
 (at-least-once); completed calls are never executed twice.
+
+A remote session keeps a journal of the same shape under
+`.../remote/<plane-hash>/<session-id>/events.jsonl`: its transcript survives a
+restart, and the highest `seq` in it is the cursor the next subscription
+resumes from, so reattaching costs no replay and shows no line twice.
 
 The directory decides what you can come back to: sessions are keyed by a hash
 of the workspace path, so `/resume` inside the TUI (or `troupe resume` with no
@@ -346,6 +407,7 @@ original specification.
 
 ## Out of scope (for now)
 
+Offering this machine's tools to a remote session, a GUI for the remote side,
 Web UI, MCP client, multi-node distribution, a resident assistant or free-text
 routing at the dispatcher, auto-commit or undo in the user's checkout,
 auto-update, code signing and notarization, native Windows ARM builds.

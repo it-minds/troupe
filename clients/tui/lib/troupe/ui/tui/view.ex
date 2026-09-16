@@ -12,7 +12,7 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, Paragraph, Scrollbar}
   alias ExRatatui.Widgets.Block.Title
-  alias Troupe.Session.Index
+  alias Troupe.Client
   alias Troupe.Settings
   alias Troupe.UI.TUI.Model
 
@@ -33,6 +33,20 @@ defmodule Troupe.UI.TUI.View do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     sessions_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  def render(%{focus: :hq} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+
+    Troupe.UI.HQ.render(state.hq, page_rect, state) ++
+      [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  def render(%{focus: :files} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    files_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
   def render(state, frame) do
@@ -323,6 +337,7 @@ defmodule Troupe.UI.TUI.View do
   end
 
   defp isolation_text(%{isolation: :worktree}), do: "worktree (not created yet)"
+  defp isolation_text(%{isolation: :remote}), do: "a worker on the plane"
   defp isolation_text(_), do: "shared checkout"
 
   defp todo_block(%{todos: []}), do: []
@@ -368,7 +383,7 @@ defmodule Troupe.UI.TUI.View do
   ## Session picker
 
   @doc "The picker's sessions and the clamped cursor, given the model and page state."
-  @spec sessions_view(map()) :: {[Index.entry()], non_neg_integer()}
+  @spec sessions_view(map()) :: {[Client.summary()], non_neg_integer()}
   def sessions_view(state) do
     entries = state.sessions.entries
     {entries, min(state.sessions.cursor, max(length(entries) - 1, 0))}
@@ -433,22 +448,45 @@ defmodule Troupe.UI.TUI.View do
     String.trim_trailing(head <> " " <> clip(Model.one_line(entry.title), room))
   end
 
-  defp session_marker(%{session_id: sid}, %{session_id: sid}), do: "●"
-  defp session_marker(%{running?: true}, _state), do: "○"
+  defp session_marker(%{id: sid}, %{session_id: sid}), do: "●"
+  defp session_marker(%{state: :active}, _state), do: "○"
   defp session_marker(_entry, _state), do: " "
 
   defp branch_count(entry) do
-    case length(Index.live_branches(entry)) do
+    case length(live_branches(entry)) do
       1 -> "1 branch"
       n -> "#{n} branches"
     end
   end
 
+  # A remote summary has no branches to count: it says where it lives instead,
+  # which is the thing a mixed list needs to make plain.
+  defp live_branches(%{branches: branches}) when is_list(branches),
+    do: Enum.reject(branches, &(&1.state == :dismissed))
+
+  defp live_branches(_entry), do: []
+
+  @doc false
+  @spec origin_label(Client.origin() | nil) :: String.t()
+  def origin_label({:remote, plane}), do: "remote · " <> host(plane)
+  def origin_label({:local, _workspace}), do: "local"
+  def origin_label(_origin), do: "local"
+
+  defp host(url) do
+    case URI.parse(url) do
+      %URI{host: host} when is_binary(host) -> host
+      _ -> url
+    end
+  end
+
   @branch_order [:needs_input, :running, :failed_unread, :done_unread]
+
+  defp branch_states(%{origin: {:remote, _plane}} = entry),
+    do: String.trim("#{entry.state} #{entry.status || ""}")
 
   defp branch_states(entry) do
     entry
-    |> Index.live_branches()
+    |> live_branches()
     |> Enum.frequencies_by(& &1.state)
     |> Enum.sort_by(fn {state, _n} -> Enum.find_index(@branch_order, &(&1 == state)) || 9 end)
     |> Enum.map_join(" · ", &state_count/1)
@@ -488,26 +526,28 @@ defmodule Troupe.UI.TUI.View do
         "`troupe` in another directory keeps its own list."
 
   defp session_detail(entry, state, width) do
-    branches = Index.live_branches(entry)
+    branches = live_branches(entry)
 
     ([
-       "#{entry.session_id}  (#{where(entry, state)})",
+       "#{entry.id}  (#{where(entry, state)})",
        "",
-       field("workspace", entry.workspace),
-       field("started", stamp(entry.created_at)),
+       field("origin", origin_label(entry.origin)),
+       field("workspace", entry.workspace || "on the worker"),
        field("last event", "#{age(entry.updated_at, state.now)} · #{stamp(entry.updated_at)}"),
-       field("closed", if(entry.closed_at, do: stamp(entry.closed_at), else: "no")),
+       field("owner", entry.owner || "you"),
+       field("profile", entry.profile || "—"),
        field("branches", "#{length(branches)}#{dismissed_note(entry, branches)}")
      ] ++ branch_block(branches, width))
     |> Enum.join("\n")
   end
 
-  defp where(%{session_id: sid}, %{session_id: sid}), do: "this session"
-  defp where(%{running?: true}, _state), do: "running in this VM"
+  defp where(%{id: sid}, %{session_id: sid}), do: "this session"
+  defp where(%{origin: {:remote, _plane}} = entry, _state), do: "on the plane — #{entry.state}"
+  defp where(%{state: :active}, _state), do: "running in this VM"
   defp where(_entry, _state), do: "on disk — Enter replays it"
 
   defp dismissed_note(entry, branches) do
-    case length(entry.branches) - length(branches) do
+    case length(List.wrap(entry.branches)) - length(branches) do
       0 -> ""
       n -> " (#{n} dismissed)"
     end
@@ -532,6 +572,79 @@ defmodule Troupe.UI.TUI.View do
   defp stamp(ms) do
     ms |> DateTime.from_unix!(:millisecond) |> Calendar.strftime("%Y-%m-%d %H:%M UTC")
   end
+
+  ## Files panel
+
+  @doc "The files panel's entries and the clamped cursor."
+  @spec files_view(map()) :: {[map()], non_neg_integer()}
+  def files_view(%{files: %{entries: entries, cursor: cursor}}),
+    do: {entries, min(cursor, max(length(entries) - 1, 0))}
+
+  def files_view(_state), do: {[], 0}
+
+  defp files_page(state, rect) do
+    {entries, cursor} = files_view(state)
+    [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
+
+    list = %ExRatatui.Widgets.List{
+      items: Enum.map(entries, &file_line(&1, max(list_rect.width - 4, 12))),
+      selected: if(entries == [], do: nil, else: cursor),
+      highlight_symbol: "▸ ",
+      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      block: %Block{
+        title: fit([" #{state.files.path} ", " files "], list_rect.width - 2),
+        borders: [:all],
+        border_type: :double
+      }
+    }
+
+    detail = %Paragraph{
+      text: files_detail(state, Enum.at(entries, cursor)),
+      wrap: false,
+      block: %Block{title: files_detail_title(state), borders: [:all]}
+    }
+
+    [{list, list_rect}, {detail, detail_rect}]
+  end
+
+  defp file_line(entry, width) do
+    mark = if entry.dir?, do: "/", else: " "
+    size = if entry.dir?, do: "", else: human_size(entry.size)
+    head = clip(entry.name <> mark, max(width - 10, 8))
+    String.trim_trailing(String.pad_trailing(head, max(width - 10, 8)) <> " " <> size)
+  end
+
+  defp files_detail_title(%{files: %{preview: {path, _lines}}}), do: " #{path} — Esc closes "
+  defp files_detail_title(_state), do: " Enter opens · ← up · r reloads · Esc closes "
+
+  defp files_detail(%{files: %{error: error}}, _entry) when is_binary(error), do: error
+
+  defp files_detail(%{files: %{preview: {_path, lines}}}, _entry), do: Enum.join(lines, "
+")
+
+  defp files_detail(_state, nil), do: "This directory is empty."
+
+  defp files_detail(_state, entry) do
+    kind = if entry.dir?, do: "directory", else: "file"
+
+    Enum.join(
+      [
+        field("name", entry.name),
+        field("path", entry.path),
+        field("kind", kind),
+        field("size", if(entry.dir?, do: "—", else: human_size(entry.size)))
+      ],
+      "
+"
+    )
+  end
+
+  defp human_size(size) when is_integer(size) and size >= 1_000_000,
+    do: "#{Float.round(size / 1_000_000, 1)} MB"
+
+  defp human_size(size) when is_integer(size) and size >= 1_000, do: "#{div(size, 1000)} kB"
+  defp human_size(size) when is_integer(size), do: "#{size} B"
+  defp human_size(_size), do: ""
 
   ## Settings page
 
@@ -967,6 +1080,7 @@ defmodule Troupe.UI.TUI.View do
 
     text =
       "#{Model.attention_summary(state.model)}#{hint} · #{watch} · #{state.session_id}" <>
+        remote_note(state) <>
         if(notice, do: " · #{notice}", else: "")
 
     text =
@@ -976,6 +1090,29 @@ defmodule Troupe.UI.TUI.View do
 
     {%Paragraph{text: text, style: %Style{fg: :dark_gray}}, rect}
   end
+
+  # A remote session says what it is and what it will not let you do; a local
+  # one adds nothing to the line at all.
+  defp remote_note(%{model: %{remote: %{} = remote}}) do
+    state = " · remote (#{remote[:state] || "?"})"
+
+    case remote[:reason] do
+      reason when is_binary(reason) -> state <> " · #{reason}"
+      _ -> state
+    end
+  end
+
+  defp remote_note(_state), do: ""
+
+  # The reason input is off, when it is: a read-only session, a viewer token, or
+  # a connection that is coming back.
+  @doc false
+  @spec input_blocked(map()) :: String.t() | nil
+  def input_blocked(%{model: %{remote: %{can_input?: false, reason: reason}}})
+      when is_binary(reason),
+      do: reason
+
+  def input_blocked(_state), do: nil
 
   defp command_line(state, rect) do
     {text, title} =
@@ -989,9 +1126,11 @@ defmodule Troupe.UI.TUI.View do
           target = if state.pane.agent in [nil, path], do: "", else: " to the branch root"
 
           title =
-            if multiline?(state.win_text),
-              do: pasted_title(state.win_text),
-              else: " → #{path} (Enter sends#{target}, Esc back) "
+            cond do
+              blocked = input_blocked(state) -> " → #{path} — input disabled: #{blocked} "
+              multiline?(state.win_text) -> pasted_title(state.win_text)
+              true -> " → #{path} (Enter sends#{target}, Esc back) "
+            end
 
           {state.win_text <> "▏", title}
 
@@ -1003,6 +1142,12 @@ defmodule Troupe.UI.TUI.View do
 
         :sessions ->
           {"", " sessions — ↑↓ move · Enter resumes · r refreshes · Esc back "}
+
+        :files ->
+          {"", " files — ↑↓ move · Enter opens · ← up · r reloads · Esc back "}
+
+        :hq ->
+          {hq_text(state), Troupe.UI.HQ.footer(state.hq)}
       end
 
     focused_cmd? = state.focus == :command
@@ -1016,6 +1161,13 @@ defmodule Troupe.UI.TUI.View do
        }
      }, rect}
   end
+
+  # The wizard's free-text steps type into the command line, so the page itself
+  # stays a list and the box stays where the user is already looking.
+  defp hq_text(%{hq: %{create: %{step: step} = create}}) when step in [:url, :ref, :prompt],
+    do: Map.fetch!(create, step) <> "▏"
+
+  defp hq_text(_state), do: ""
 
   @doc false
   @spec multiline?(String.t()) :: boolean()

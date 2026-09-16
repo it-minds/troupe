@@ -117,7 +117,7 @@ defmodule Troupe.SessionPickerTest do
 
       # newest first, and the cursor starts on the session already on screen
       state = user_state(pid)
-      assert Enum.map(state.sessions.entries, & &1.session_id) == [live, done]
+      assert Enum.map(state.sessions.entries, & &1.id) == [live, done]
       assert state.sessions.cursor == 0
 
       press(pid, "down")
