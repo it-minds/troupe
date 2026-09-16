@@ -6,19 +6,9 @@ defmodule Troupe.ClipboardTest do
 
   alias Troupe.UI.Clipboard
 
-  # Copying goes to a file this test owns rather than the machine's clipboard,
-  # which is also how a user redirects it (tmux buffer, OSC-52 helper over ssh).
-  defp capture_clipboard_to(path) do
-    previous = Application.get_env(:troupe, :clipboard_command)
-    Application.put_env(:troupe, :clipboard_command, "cat > '#{path}'")
-    on_exit(fn -> Application.put_env(:troupe, :clipboard_command, previous) end)
-  end
-
   describe "Clipboard.copy/1" do
     test "hands the text to the configured command, byte for byte" do
-      path = Path.join(System.tmp_dir!(), "clip-#{:erlang.unique_integer([:positive])}")
-      on_exit(fn -> File.rm(path) end)
-      capture_clipboard_to(path)
+      path = clipboard_path()
 
       text = "first\nsecond\twith a tab\nüñïçodé and a 'quote'"
       assert {:ok, _cmd} = Clipboard.copy(text)
@@ -63,9 +53,7 @@ defmodule Troupe.ClipboardTest do
 
   describe "copying a transcript" do
     test "Ctrl-Y copies the activated pane, and /copy <n> copies without activating" do
-      path = Path.join(System.tmp_dir!(), "clip-#{:erlang.unique_integer([:positive])}")
-      on_exit(fn -> File.rm(path) end)
-      capture_clipboard_to(path)
+      path = clipboard_path()
 
       ws = tmp_workspace()
       scripts = %{"code-1" => [{:text, "the reply worth keeping"}]}

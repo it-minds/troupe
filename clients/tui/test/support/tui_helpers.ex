@@ -78,6 +78,41 @@ defmodule Troupe.TUIHelpers do
   def click(pid, x, y),
     do: :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "down", button: "left", x: x, y: y})
 
+  @doc "Releases the left mouse button at a screen position."
+  def mouse_up(pid, x, y),
+    do: :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "up", button: "left", x: x, y: y})
+
+  @doc """
+  Press, drag and release: the event sequence a terminal sends for a
+  click-and-drag selection, with one intermediate drag so the path is not a
+  straight jump from the anchor to the far end.
+  """
+  def drag(pid, {x1, y1}, {x2, y2}) do
+    click(pid, x1, y1)
+    mid = {div(x1 + x2, 2), div(y1 + y2, 2)}
+    drag_to(pid, mid)
+    drag_to(pid, {x2, y2})
+    mouse_up(pid, x2, y2)
+  end
+
+  @doc "One drag event with the left button held."
+  def drag_to(pid, {x, y}),
+    do: :ok = ExRatatui.Runtime.inject_event(pid, %Mouse{kind: "drag", button: "left", x: x, y: y})
+
+  @doc """
+  The screen as a list of `{row, col, symbol, modifiers}` for every cell whose
+  symbol is not a space — `screen_text/2` drops styling, and whether a cell is
+  drawn reversed is exactly what a selection test is about.
+  """
+  def screen_cells(pid, session) do
+    send(pid, :force_render)
+    _ = :sys.get_state(pid)
+
+    CellSession.take_cells(session).cells
+    |> Enum.reject(&(&1.symbol == " "))
+    |> Enum.map(&{&1.row, &1.col, &1.symbol, &1.modifiers})
+  end
+
   def user_state(pid), do: :sys.get_state(pid).user_state
 
   @doc """

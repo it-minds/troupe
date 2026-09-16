@@ -35,6 +35,7 @@ defmodule Troupe.UI.TUI.Server do
           quit_armed: boolean(),
           expanded: boolean(),
           pane: pane(),
+          selection: selection() | nil,
           size: {non_neg_integer(), non_neg_integer()},
           answer: answer() | nil,
           settings: settings() | nil,
@@ -55,6 +56,16 @@ defmodule Troupe.UI.TUI.Server do
           scroll: :follow | non_neg_integer(),
           seen_entries: non_neg_integer()
         }
+
+  @typedoc """
+  A mouse selection in the activated pane. Both ends are *transcript*
+  coordinates — `{visual_row, cell_col}`, the row absolute in the wrapped
+  transcript — so new output and scrolling leave them where the user put them.
+  It is view state like `pane`, never a fold over the log: a TUI restart comes
+  back with nothing selected, and a reflow (resize) drops it.
+  """
+  @type point :: {non_neg_integer(), non_neg_integer()}
+  @type selection :: %{anchor: point(), cursor: point(), dragging?: boolean()}
 
   @typedoc """
   Settings-page state: the config as loaded, the cursor, the value being typed,
@@ -113,6 +124,7 @@ defmodule Troupe.UI.TUI.Server do
       quit_armed: false,
       expanded: false,
       pane: fresh_pane(),
+      selection: nil,
       settings: nil,
       answer: nil,
       observer: nil,
@@ -242,7 +254,10 @@ defmodule Troupe.UI.TUI.Server do
       else: handle_event(key, to_command_line(state))
   end
 
-  def handle_event(%Resize{width: w, height: h}, state), do: {:noreply, %{state | size: {w, h}}}
+  # A reflow moves every wrapped row, so transcript coordinates no longer point at
+  # the text the user selected: drop the selection rather than highlight the wrong cells.
+  def handle_event(%Resize{width: w, height: h}, state),
+    do: {:noreply, %{state | size: {w, h}, selection: nil}}
 
   # Bracketed paste arrives as one %Paste{} event, not a stream of keys. Insert the
   # raw text where the user is focused: the command line, an active window's input box,
@@ -263,13 +278,58 @@ defmodule Troupe.UI.TUI.Server do
       when focus in [:settings, :observer, :sessions],
       do: {:noreply, state, render?: false}
 
-  def handle_event(%Mouse{kind: "down", button: "left", x: x, y: y}, state) do
-    case clicked_window(state, x, y) do
-      nil -> {:noreply, state, render?: false}
-      path when state.focus == {:window, path} -> {:noreply, follow(state)}
-      _ when state.focus in [:settings, :observer, :sessions] -> {:noreply, state, render?: false}
-      path -> {:noreply, activate(%{state | quit_armed: false}, path)}
+  # Click-drag inside the transcript selects text: with mouse reporting on the
+  # terminal's own selection is gone, so Troupe owns one (Decision 69). A press
+  # that lands anywhere but the transcript's interior is a tile click and falls
+  # through to the clause below.
+  def handle_event(
+        %Mouse{kind: "down", button: "left", x: x, y: y},
+        %{focus: {:window, _}} = state
+      ) do
+    case pane_point(state, x, y) do
+      nil ->
+        clicked_tile(state, x, y)
+
+      point ->
+        {:noreply, %{state | selection: %{anchor: point, cursor: point, dragging?: true}},
+         render?: false}
     end
+  end
+
+  def handle_event(%Mouse{kind: "down", button: "left", x: x, y: y}, state),
+    do: clicked_tile(state, x, y)
+
+  # Dragging past the top or bottom row scrolls, so a selection can grow beyond
+  # the viewport; the cursor is clamped into the interior, and because both ends
+  # are absolute transcript rows the scroll leaves the far end where it was.
+  def handle_event(
+        %Mouse{kind: "drag", button: "left", x: x, y: y},
+        %{selection: %{dragging?: true} = sel, focus: {:window, _}} = state
+      ) do
+    case View.pane_geometry(state) do
+      nil ->
+        {:noreply, state, render?: false}
+
+      g ->
+        state =
+          case View.pane_edge(g, y) do
+            :above -> scroll_by(state, -1)
+            :below -> scroll_by(state, 1)
+            nil -> state
+          end
+
+        cursor = clamped_point(View.pane_geometry(state), x, y) || sel.cursor
+        {:noreply, %{state | selection: %{sel | cursor: cursor}}}
+    end
+  end
+
+  # Release ends the drag and copies: click-drag-release putting text on the
+  # clipboard is the muscle memory mouse reporting took away. A press with no
+  # drag selected nothing, so it clears rather than copying one cell.
+  def handle_event(%Mouse{kind: "up", button: "left"}, %{selection: %{} = sel} = state) do
+    if sel.anchor == sel.cursor,
+      do: {:noreply, %{state | selection: nil}, render?: false},
+      else: {:noreply, copy_selection(%{state | selection: %{sel | dragging?: false}})}
   end
 
   # The wheel scrolls whatever is under focus: the pane's transcript, the observer's
@@ -305,6 +365,34 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_event(_event, state), do: {:noreply, state, render?: false}
+
+  # A press outside the transcript: the tiles are the only other thing a click means.
+  defp clicked_tile(state, x, y) do
+    case clicked_window(state, x, y) do
+      nil -> {:noreply, state, render?: false}
+      path when state.focus == {:window, path} -> {:noreply, follow(state)}
+      path -> {:noreply, activate(%{state | quit_armed: false}, path)}
+    end
+  end
+
+  # The transcript coordinate under a screen cell, or nil when there is no pane
+  # or the cell is not inside it.
+  defp pane_point(state, x, y) do
+    case View.pane_geometry(state) do
+      nil -> nil
+      g -> View.pane_point(g, x, y)
+    end
+  end
+
+  # While dragging, a pointer outside the interior still has to move the cursor:
+  # clamp it to the nearest cell inside instead of dropping the event.
+  defp clamped_point(nil, _x, _y), do: nil
+
+  defp clamped_point(g, x, y) do
+    x = x |> max(g.left.x + 1) |> min(g.left.x + g.inner_w)
+    y = y |> max(g.left.y + 1) |> min(g.left.y + g.inner_h)
+    View.pane_point(g, x, y)
+  end
 
   # Hit-test a click against the tiles using the same layout the view draws.
   defp clicked_window(%{size: {w, h}} = state, x, y) do
@@ -473,7 +561,9 @@ defmodule Troupe.UI.TUI.Server do
     path = resolve_window(state, arg)
 
     if Map.has_key?(state.model.windows, path) do
-      {:notice, copy_result(%{state | focus: {:window, path}, pane: fresh_pane()})}
+      # A named window has no selection context: `/copy 2` is the whole transcript.
+      state = %{state | focus: {:window, path}, pane: fresh_pane(), selection: nil}
+      {:notice, copy_result(state)}
     else
       {:error, "no window #{arg}"}
     end
@@ -858,12 +948,17 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Window keys
 
+  # Esc clears a selection before it leaves the window, so a mis-drag can be
+  # cancelled without losing the pane.
+  defp window_key(%Key{code: "esc"}, _path, %{selection: %{}} = state),
+    do: %{state | selection: nil}
+
   defp window_key(%Key{code: "esc"}, _path, state), do: %{state | focus: :command, win_text: ""}
 
-  # Ctrl-Y copies the transcript to the system clipboard (same as `/copy`): with
-  # mouse reporting on, the terminal's own selection is gone, and this copies the
-  # whole transcript rather than the rows that happen to be on screen. It has to
-  # come before the `y`/`n`/`a` approval clause, which matches any modifier.
+  # Ctrl-Y copies: the selection when the mouse made one, and otherwise the whole
+  # transcript (same as `/copy`) — with mouse reporting on the terminal's own
+  # selection is gone, and the interesting rows have usually scrolled off. It has
+  # to come before the `y`/`n`/`a` approval clause, which matches any modifier.
   defp window_key(%Key{code: "y", modifiers: ["ctrl"]}, _path, state), do: copy_pane(state)
 
   # Scrolling: PgUp/PgDn, Home and End always; ↑/↓ while nothing is typed; End (or
@@ -1038,7 +1133,15 @@ defmodule Troupe.UI.TUI.Server do
   defp activate(state, path, agent \\ nil) do
     model = %{state.model | windows: Map.update!(state.model.windows, path, &%{&1 | badge: false})}
     agent = if agent == path, do: nil, else: agent
-    %{state | focus: {:window, path}, win_text: "", model: model, pane: fresh_pane(agent)}
+
+    %{
+      state
+      | focus: {:window, path},
+        win_text: "",
+        model: model,
+        pane: fresh_pane(agent),
+        selection: nil
+    }
   end
 
   defp fresh_pane(agent \\ nil), do: %{agent: agent, scroll: :follow, seen_entries: 0}
@@ -1080,7 +1183,7 @@ defmodule Troupe.UI.TUI.Server do
   defp follow(state), do: %{state | pane: %{state.pane | scroll: :follow}}
 
   defp to_command_line(state),
-    do: %{state | focus: :command, win_text: "", pane: fresh_pane()}
+    do: %{state | focus: :command, win_text: "", pane: fresh_pane(), selection: nil}
 
   # Expanding or collapsing tool output keeps the entry at the top of the view where it is,
   # instead of throwing the reader to the bottom of a transcript that just changed height.
@@ -1114,7 +1217,7 @@ defmodule Troupe.UI.TUI.Server do
       _ ->
         current = Enum.find_index(paths, &(&1 == (state.pane.agent || path))) || 0
         next = Enum.at(paths, rem(current + step + length(paths), length(paths)))
-        %{state | pane: fresh_pane(if(next == path, do: nil, else: next))}
+        %{state | pane: fresh_pane(if(next == path, do: nil, else: next)), selection: nil}
     end
   end
 
@@ -1140,8 +1243,67 @@ defmodule Troupe.UI.TUI.Server do
 
   defp copy_pane(state), do: notice(state, copy_result(state))
 
+  # Releasing a drag copies straight away, so the notice says what landed on the
+  # clipboard without the user reaching for a key.
+  defp copy_selection(state), do: notice(state, copy_result(state))
+
+  # The text a selection covers: the wrapped rows between its two ends, sliced by
+  # column on the first and last, rails dropped. Wrapped rather than logical text
+  # because a selection is by definition what the reader sees — unlike a whole-
+  # transcript copy, which deliberately restores the agent's own line breaks.
+  @spec selection_text(map(), selection()) :: String.t() | nil
+  defp selection_text(state, sel) do
+    case View.pane_geometry(state) do
+      nil ->
+        nil
+
+      g ->
+        {{r1, c1}, {r2, c2}} = ordered(sel)
+        flat = Enum.concat(g.blocks)
+        last = min(r2, max(g.total - 1, 0))
+
+        if r1 > last do
+          ""
+        else
+          r1..last
+          |> Enum.map_join("\n", fn row ->
+            case Model.rows(flat, g.inner_w, row, 1) do
+              [line] -> Model.row_slice(line, from_col(row, r1, c1), to_col(row, last, r2, c2))
+              [] -> ""
+            end
+          end)
+        end
+    end
+  end
+
+  # Anchor and cursor in reading order, so a drag upwards or leftwards selects the
+  # same text as the same drag the other way.
+  defp ordered(%{anchor: a, cursor: c}), do: if(a <= c, do: {a, c}, else: {c, a})
+
+  defp from_col(row, first, col), do: if(row == first, do: col, else: 0)
+
+  # The far end is exclusive of the cell under the pointer's *start* and inclusive
+  # of the one it is on, which is what a drag looks like it selects.
+  defp to_col(row, last, r2, col), do: if(row == last and last == r2, do: col + 1, else: :end)
+
   # The message the notice line shows: what was copied and by which command, or
   # why this machine could not.
+  defp copy_result(%{selection: %{} = sel} = state) do
+    case selection_text(state, sel) do
+      nil ->
+        "no window is activated"
+
+      "" ->
+        "nothing selected"
+
+      text ->
+        report(
+          text,
+          "#{String.length(text)} #{plural(String.length(text), "char")} from the selection"
+        )
+    end
+  end
+
   defp copy_result(state) do
     case pane_text(state) do
       nil ->
@@ -1152,11 +1314,14 @@ defmodule Troupe.UI.TUI.Server do
 
       text ->
         lines = length(String.split(text, "\n"))
+        report(text, "#{lines} #{plural(lines, "line")}")
+    end
+  end
 
-        case Clipboard.copy(text) do
-          {:ok, cmd} -> "copied #{lines} #{plural(lines, "line")} to the clipboard (#{cmd})"
-          {:error, msg} -> msg
-        end
+  defp report(text, what) do
+    case Clipboard.copy(text) do
+      {:ok, cmd} -> "copied #{what} to the clipboard (#{cmd})"
+      {:error, msg} -> msg
     end
   end
 

@@ -1241,6 +1241,58 @@ defmodule Troupe.UI.TUI.Model do
   def segments({kind, text}) when is_binary(text), do: [{kind, text}]
   def segments({_kind, segments}) when is_list(segments), do: segments
 
+  # Segment tags that draw a rail or gutter rather than content: they are dropped
+  # when a slice of a row is copied.
+  @rail_tags [:gutter, :code_rail, :quote_rail, :linenum]
+
+  @doc """
+  Splits one *wrapped* row's segments at two cell columns into
+  `{before, inside, after}`, each a segment list in the original order with the
+  original tags. `:end` means "to the end of the row". A wide glyph is never
+  cut: it belongs to the part that has room for it, so the three pieces always
+  reassemble into the row.
+  """
+  @spec split_row(line(), non_neg_integer(), non_neg_integer() | :end) ::
+          {[segment()], [segment()], [segment()]}
+  def split_row(line, from, to) do
+    from = max(from, 0)
+    to = if to == :end, do: :end, else: max(to, from)
+    {pre, ins, post} = line |> segments() |> split_segments(from, to, 0, {[], [], []})
+    {Enum.reverse(pre), Enum.reverse(ins), Enum.reverse(post)}
+  end
+
+  defp split_segments([], _from, _to, _col, acc), do: acc
+
+  defp split_segments([{tag, text} | rest], from, to, col, {pre, ins, post}) do
+    width = cell_width(text)
+
+    {head, tail} =
+      if from > col, do: take_cells(text, min(from - col, width)), else: {"", text}
+
+    {inside, after_} =
+      case to do
+        :end -> {tail, ""}
+        n -> take_cells(tail, max(n - max(col, from), 0))
+      end
+
+    acc = {keep(pre, tag, head), keep(ins, tag, inside), keep(post, tag, after_)}
+    split_segments(rest, from, to, col + width, acc)
+  end
+
+  defp keep(acc, _tag, ""), do: acc
+  defp keep(acc, tag, text), do: [{tag, text} | acc]
+
+  @doc """
+  The plain text of one *wrapped* row between two cell columns (`:end` for the
+  rest of the row), with rails and gutters dropped: a selection is what the
+  reader sees, and nobody wants `│ ` prefixes on their clipboard.
+  """
+  @spec row_slice(line(), non_neg_integer(), non_neg_integer() | :end) :: String.t()
+  def row_slice(line, from, to) do
+    {_pre, inside, _post} = split_row(line, from, to)
+    inside |> Enum.reject(fn {tag, _text} -> tag in @rail_tags end) |> segment_text()
+  end
+
   @doc """
   The rail drawn down the left of a line kind: `{first row, later rows}`. It is
   emitted as a real segment when a line is wrapped, so the view never has to

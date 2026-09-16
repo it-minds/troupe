@@ -176,6 +176,36 @@ defmodule Troupe.UI.TUI.View do
   defp viewed_agent(w, nil), do: w.path
   defp viewed_agent(w, agent), do: if(Map.has_key?(w.agents, agent), do: agent, else: w.path)
 
+  @doc """
+  Maps a screen cell to a transcript coordinate: `{visual_row, cell_col}` where
+  the row is absolute (`offset` plus the row within the view) so it survives new
+  output and scrolling, and the column is a cell offset into that wrapped row.
+  `nil` when the cell is outside the transcript's interior — the borders, the
+  side panel, and the last inner column, where the scrollbar rides.
+  """
+  @spec pane_point(geometry(), non_neg_integer(), non_neg_integer()) ::
+          {non_neg_integer(), non_neg_integer()} | nil
+  def pane_point(g, x, y) do
+    top = g.left.y + 1
+    left = g.left.x + 1
+
+    if x >= left and x < left + g.inner_w and y >= top and y < top + g.inner_h,
+      do: {g.offset + (y - top), x - left},
+      else: nil
+  end
+
+  @doc "Which way a drag at screen row `y` wants the pane to scroll, or nil while it is inside."
+  @spec pane_edge(geometry(), non_neg_integer()) :: :above | :below | nil
+  def pane_edge(g, y) do
+    top = g.left.y + 1
+
+    cond do
+      y < top -> :above
+      y >= top + g.inner_h -> :below
+      true -> nil
+    end
+  end
+
   @doc "Which block covers visual row `offset`, and the row within it: `{index, row}`."
   @spec block_at([non_neg_integer()], non_neg_integer()) :: {non_neg_integer(), non_neg_integer()}
   def block_at(heights, offset), do: block_at(heights, offset, 0)
@@ -741,7 +771,12 @@ defmodule Troupe.UI.TUI.View do
 
   defp pane(g, state) do
     w = g.window
-    rows = g.blocks |> Enum.concat() |> Model.rows(g.inner_w, g.offset, g.inner_h)
+
+    rows =
+      g.blocks
+      |> Enum.concat()
+      |> Model.rows(g.inner_w, g.offset, g.inner_h)
+      |> highlight(g, Map.get(state, :selection))
 
     transcript = %Paragraph{
       text: styled(rows),
@@ -815,13 +850,15 @@ defmodule Troupe.UI.TUI.View do
     agents = length(Model.agent_paths(w))
     approval? = Enum.any?(w.pending, &(&1.kind in [:approval, :budget]))
     verb = if state.expanded, do: "collapses", else: "expands"
+    selection? = Map.get(state, :selection) != nil
 
     pieces = [
       {true, ["PgUp/PgDn ↑↓ scroll", "PgUp/PgDn scroll", "PgUp/PgDn"]},
       {not g.follow?, ["End follows the tail", "End follows", "End"]},
       {agents > 1, ["←→ other agents", "←→ agents", "←→"]},
       {true, ["e #{verb} output", "e #{verb}", "e"]},
-      {true, ["Ctrl-Y copies", "Ctrl-Y copy", nil]},
+      {selection?, ["Ctrl-Y copies the selection", "Ctrl-Y copies selection", "Ctrl-Y sel"]},
+      {not selection?, ["drag selects · Ctrl-Y copies all", "drag · Ctrl-Y copy", nil]},
       {approval?, ["y/n/a approve", "y/n/a", "y/n/a"]},
       {w.state in [:running, :needs_input], ["x cancel & remove", "x cancel", "x"]},
       {w.state in [:done_unread, :failed_unread], ["d dismiss", "d dismiss", "d"]},
@@ -839,6 +876,42 @@ defmodule Troupe.UI.TUI.View do
     end)
     |> fit(g.left.width - 2)
   end
+
+  ## Selection highlight
+
+  # Paints the selected cell span of each visible row by re-tagging its segments
+  # with their own resolved style plus `:reversed`, so syntax highlighting and
+  # colours survive and no theme decision is needed. Styling stays in this module,
+  # which is why `Model` only slices rows and never re-tags them.
+  defp highlight(rows, _g, nil), do: rows
+
+  defp highlight(rows, g, %{anchor: anchor, cursor: cursor}) do
+    {{r1, c1}, {r2, c2}} = if anchor <= cursor, do: {anchor, cursor}, else: {cursor, anchor}
+
+    rows
+    |> Enum.with_index(g.offset)
+    |> Enum.map(fn {row, abs_row} ->
+      if abs_row >= r1 and abs_row <= r2,
+        do: reverse_span(row, if(abs_row == r1, do: c1, else: 0), span_end(abs_row, r2, c2)),
+        else: row
+    end)
+  end
+
+  defp span_end(row, last, col), do: if(row == last, do: col + 1, else: :end)
+
+  defp reverse_span({kind, _} = row, from, to) do
+    {pre, inside, post} = Model.split_row(row, from, to)
+
+    reversed =
+      Enum.map(inside, fn {tag, text} ->
+        {add_reversed(segment_style(tag, kind, text)), text}
+      end)
+
+    {kind, pre ++ reversed ++ post}
+  end
+
+  defp add_reversed(%Style{modifiers: mods} = style),
+    do: %{style | modifiers: Enum.uniq([:reversed | mods])}
 
   ## Styling
 

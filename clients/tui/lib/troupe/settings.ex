@@ -50,14 +50,16 @@ defmodule Troupe.Settings do
       yaml: ["mouse"],
       effect: :next_run,
       help: """
-      Let Troupe see the mouse: clicking a tile activates that window and the
-      wheel scrolls the pane under the cursor.
+      Let Troupe see the mouse: clicking a tile activates that window, the
+      wheel scrolls the pane under the cursor, and dragging across the pane
+      selects text — releasing copies it, so this is on by default.
 
-      The cost is that the terminal hands every click to Troupe, so your own
-      click-and-drag selection — and with it the terminal's copy — stops
-      working inside the TUI. Turn this off if you select and copy text with
-      the mouse; you keep 1-9 for windows and PgUp/PgDn, ↑↓ and End for
-      scrolling, and Ctrl-Y (or /copy) copies a whole transcript either way.
+      The cost is that the terminal hands every click to Troupe, so the
+      *terminal's* own click-and-drag selection stops working inside the TUI.
+      Troupe's own drag-to-select covers most of it; turn this off if you want
+      the emulator's (rectangular blocks, selecting from the tiles). You keep
+      1-9 for windows and PgUp/PgDn, ↑↓ and End for scrolling, and Ctrl-Y (or
+      /copy) copies a whole transcript either way.
 
       Most terminals also let you hold a modifier to bypass mouse reporting
       for one selection (Option on iTerm2 and Terminal.app, Shift on

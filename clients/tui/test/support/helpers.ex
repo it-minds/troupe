@@ -124,4 +124,23 @@ defmodule Troupe.TestHelpers do
       0 -> :ok
     end
   end
+
+  @doc """
+  Sends every copy to a file this test owns rather than to the machine's
+  clipboard — which is also how a user redirects it (a tmux buffer, an OSC-52
+  helper over ssh). Returns the path, which is created on the first copy.
+  """
+  def capture_clipboard_to(path) do
+    previous = Application.get_env(:troupe, :clipboard_command)
+    Application.put_env(:troupe, :clipboard_command, "cat > '#{path}'")
+    on_exit(fn -> Application.put_env(:troupe, :clipboard_command, previous) end)
+    path
+  end
+
+  @doc "A fresh path in the temp dir for a captured clipboard, removed when the test ends."
+  def clipboard_path do
+    path = Path.join(System.tmp_dir!(), "clip-#{:erlang.unique_integer([:positive])}")
+    on_exit(fn -> File.rm(path) end)
+    capture_clipboard_to(path)
+  end
 end

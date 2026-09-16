@@ -32,6 +32,9 @@ Manual smoke without a model: `TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/
 Real providers come from `~/.config/troupe/config.yaml`, env (`TROUPE_*`), or
 opencode's `~/.config/opencode/opencode.jsonc` as a fallback; `scripts/dev config` shows the resolution.
 
+
+Read skills in the .skills repo
+
 ## Layout
 
 - `lib/troupe.ex` client API · `lib/troupe/session/*` Log (JSONL, single writer), Approvals, Locks, Branches, Dispatcher (window ledger = fold over log), Watcher, Worktree

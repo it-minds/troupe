@@ -164,13 +164,16 @@ transcript you are reading to the clipboard; `@file` completes paths;
 Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <id>` and `/todo add <text>` edit the
 activated branch's task list.
 
-Selecting text with the mouse: Troupe asks the terminal for mouse reporting, which is what makes
-tiles clickable and the wheel scroll — and it takes click-and-drag selection away from the terminal
-while the TUI is up. Most terminals let you hold a modifier to select anyway (Option on iTerm2 and
-Terminal.app, Shift on GNOME Terminal, Konsole and most X11 terminals). To get the terminal's own
-selection back permanently, start with `troupe --no-mouse` or turn the `mouse` setting off in
-`/settings`; windows are still `1`–`9` and the pane still scrolls with PgUp/PgDn, ↑/↓ and End.
-Either way `Ctrl-Y` and `/copy` copy a whole transcript, which no drag across a scrolling pane can.
+Selecting text with the mouse: drag across the pane and Troupe highlights what you cover; releasing
+the button copies it to the clipboard, and `Ctrl-Y` copies the selection while one is up (Esc clears
+it). Troupe owns the selection because mouse reporting — the thing that makes tiles clickable and the
+wheel scroll — takes click-and-drag away from the terminal, and it copies the rows as you see them,
+rails and line numbers stripped. For the terminal's own selection (rectangular blocks, selecting from
+the tiles or the observer), most emulators let you hold a modifier to bypass mouse reporting (Option
+on iTerm2 and Terminal.app, Shift on GNOME Terminal, Konsole and most X11 terminals), or start with
+`troupe --no-mouse` / turn the `mouse` setting off in `/settings` — windows are still `1`–`9` and the
+pane still scrolls with PgUp/PgDn, ↑/↓ and End. With nothing selected, `Ctrl-Y` and `/copy` copy a
+whole transcript, which no drag across a scrolling pane can.
 
 Reading a transcript: replies are rendered rather than printed raw. Headings,
 bullets, quotes and rules read as such, `inline code` and **bold** keep their
