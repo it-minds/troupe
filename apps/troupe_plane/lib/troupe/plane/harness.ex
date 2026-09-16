@@ -133,7 +133,9 @@ defmodule Troupe.Plane.Harness do
     with {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
          team when not is_nil(team) <- team_of(session),
          {:ok, _pushed} <-
-           start_on_pod(worker, session, team, nil, session.pending_prompt) do
+           start_on_pod(worker, session, team, nil, session.pending_prompt,
+             on_failure: :requeue
+           ) do
       {:ok, _session} = Sessions.admitted(session.id)
       Logger.info("troupe plane: #{session.id} waited and is now on #{worker.pod_name}")
       {:ok, %{session_id: session.id, worker: worker.id}}
@@ -142,9 +144,12 @@ defmodule Troupe.Plane.Harness do
         {:error, :no_team}
 
       {:error, reason} ->
-        # Left pending. The next tick tries again, and a session that cannot be placed
-        # because its profile shrank under it is still a session somebody can see and
-        # erase — which is more use to them than a row that vanished.
+        # Left pending by `on_failure: :requeue`, because this session's owner has already
+        # been told it exists. The first version reused the create path's unwind, which
+        # deletes the row — so a pod that was not quite ready when the scaler tried made
+        # the session disappear while its owner was still politely waiting for it. The
+        # cluster suite found that; no unit test could have, because in-process there is
+        # no gap between a pod enrolling and a pod being able to answer.
         {:error, reason}
     end
   end
@@ -905,12 +910,28 @@ defmodule Troupe.Plane.Harness do
   #
   # A refusal survives exactly where a human decided it, and then it quotes them.
   defp place_or_wait(session, prompt) do
+    # A profile the plane has no row for is not an error here. A pod enrols by presenting
+    # a token, not by being written down, so a profile can be serving sessions before any
+    # administrator has told the plane about it — and a create that refused on that would
+    # refuse a session the fleet can perfectly well take. What the row decides is the
+    # ceiling; no row is no ceiling.
+    profile = Fleet.get_profile(session.profile)
+
+    if profile && not Scaler.within_ceiling?(profile) do
+      unwind(session)
+      {:error, at_the_ceiling(profile)}
+    else
+      placed_or_waiting(session, prompt, profile)
+    end
+  end
+
+  defp placed_or_waiting(session, prompt, profile) do
     case Placement.reserve(session.profile, session.id) do
       {:ok, %{worker: worker}} ->
         {:ok, {:placed, worker}}
 
       {:error, reason} when reason in [:at_capacity, :no_healthy_worker] ->
-        wait_or_refuse(session, prompt, reason)
+        wait_for_room(session, prompt, profile, reason)
 
       {:error, reason} ->
         unwind(session)
@@ -918,34 +939,27 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
-  defp wait_or_refuse(session, prompt, reason) do
-    profile = Fleet.get_profile(session.profile)
+  # Under the ceiling and no room right now, so the plane is already asking for another
+  # worker and this session waits for it. Unless there is no row to ask *from*: the plane
+  # cannot scale a profile it does not know about, so telling that caller to wait would be
+  # telling them to wait for something nobody is going to do.
+  defp wait_for_room(session, _prompt, nil, _reason) do
+    unwind(session)
 
-    cond do
-      # Granted, but the plane has no record of it — so it cannot know a ceiling and
-      # cannot ask for a worker. `unavailable` rather than `not_found`: the profile
-      # exists as far as the team's grant is concerned, and what is missing is a
-      # component, which is what that code is for.
-      is_nil(profile) ->
-        unwind(session)
-
-        {:error,
-         Error.new(:unavailable, %{
-           component: "profile",
-           profile: session.profile,
-           reason: "this plane has no record of that profile"
-         })}
-
-      Scaler.room_to_grow?(profile) ->
-        {:ok, _session} = Sessions.wait(session.id, prompt)
-        {:ok, :waiting}
-
-      true ->
-        unwind(session)
-        {:error, at_the_ceiling(profile)}
-    end
-    |> tap(fn _ -> log_wait(session, reason) end)
+    {:error,
+     Error.new(:unavailable, %{
+       component: "profile",
+       profile: session.profile,
+       reason: "this plane has no record of that profile, so it cannot ask for a worker"
+     })}
   end
+
+  defp wait_for_room(session, prompt, profile, reason) do
+    {:ok, _session} = Sessions.wait(session.id, prompt)
+    Logger.info("troupe plane: #{session.id} waits on #{profile.name}: #{reason}")
+    {:ok, :waiting}
+  end
+
 
   # The one refusal that survives, and it names the person who decided it rather than
   # the machine that noticed. `at_capacity, ask your administrator to add replicas` is
@@ -957,12 +971,6 @@ defmodule Troupe.Plane.Harness do
       max_sessions: profile.max_sessions,
       reason: "#{profile.name} allows #{profile.max_sessions} session(s) at once, and they are running"
     })
-  end
-
-  defp log_wait(_session, :at_capacity), do: :ok
-
-  defp log_wait(session, reason) do
-    Logger.info("troupe plane: #{session.id} waits on #{session.profile}: #{reason}")
   end
 
   defp unwind(session) do
@@ -1094,7 +1102,7 @@ defmodule Troupe.Plane.Harness do
   # by hash, or by channel *and* version, and a version with no channel matches nothing.
   # Sending only the version made every create fail the moment a channel had a bundle to
   # pin at all — which is to say, as soon as the feature was used.
-  defp start_on_pod(worker, session, team, agent, prompt) do
+  defp start_on_pod(worker, session, team, agent, prompt, opts \\ []) do
     params =
       %{
         "session_id" => session.id,
@@ -1116,11 +1124,13 @@ defmodule Troupe.Plane.Harness do
         {:ok, result}
 
       {:error, reason} ->
-        # The pod could not take it, so nothing may be left holding a slot for it — and
-        # the row goes too, because a session that never started is not a session.
+        # The pod could not take it, so nothing may be left holding a slot for it. What
+        # happens to the *row* is the caller's to say: a create that never started is not
+        # a session and the row goes, but a session that has been waiting is one its owner
+        # has already been told about, and deleting it out from under them is worse than
+        # leaving them waiting a little longer.
         Placement.release(session.profile, session.id)
-        Budget.release(team, session.id, answerable_for(session))
-        Sessions.delete(session.id)
+        unplaced(session, team, Keyword.get(opts, :on_failure, :delete))
 
         {:error,
          Error.new(:unavailable, %{
@@ -1128,6 +1138,18 @@ defmodule Troupe.Plane.Harness do
            detail: inspect(reason)
          })}
     end
+  end
+
+  defp unplaced(session, team, :delete) do
+    Budget.release(team, session.id, answerable_for(session))
+    Sessions.delete(session.id)
+  end
+
+  # Back in the queue with its prompt, and its budget still held: it is the same session,
+  # it is still going to run, and the next tick of the scaler will try again.
+  defp unplaced(session, _team, :requeue) do
+    {:ok, _session} = Sessions.wait(session.id, session.pending_prompt)
+    :ok
   end
 
   # -- opening a session ------------------------------------------------------

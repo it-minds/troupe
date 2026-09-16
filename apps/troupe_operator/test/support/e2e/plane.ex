@@ -24,6 +24,33 @@ defmodule Troupe.E2E.Plane do
   @client "troupe"
 
   @doc """
+  The subject this suite signs in as, as the plane knows it.
+
+  Asked rather than assumed. `@person` is the username Dex takes at the password grant;
+  the *subject* is the opaque string Dex mints for it — `CgNhZGESBWxvY2Fs` rather than
+  `ada@example.test` — and anything the plane matches a person by matches the subject.
+  Sponsoring a principal with the username named a person the plane has never heard of.
+
+  Cached for the run, like the token, because it cannot change within one.
+  """
+  @spec subject() :: String.t()
+  def subject do
+    case :persistent_term.get({__MODULE__, :subject}, nil) do
+      nil ->
+        subject = call!("me")["subject"]
+        :persistent_term.put({__MODULE__, :subject}, subject)
+        subject
+
+      subject ->
+        subject
+    end
+  end
+
+  @doc "The username this suite signs in with at the identity provider."
+  @spec person() :: String.t()
+  def person, do: @person
+
+  @doc """
   A plane token for the development person, who is a platform admin and in `engineering`.
 
   Cached for the run: every test would otherwise spend two round trips on the same
@@ -146,6 +173,43 @@ defmodule Troupe.E2E.Plane do
     :ok
   end
 
+  @doc """
+  What a profile of this world looks like, as `admin.profile.put` takes it.
+
+  Separate from `profile!/2` because a test that wants a profile of its *own* — one it can
+  scale to zero without the rest of the suite noticing — needs the same image and channel
+  and a different name.
+  """
+  @spec profile_attrs(String.t(), String.t()) :: map()
+  def profile_attrs(name, channel) do
+    %{
+      "name" => name,
+      "image" => image(),
+      "size_class" => "standard",
+      "spec" => %{"configBundleChannel" => channel}
+    }
+  end
+
+  @doc """
+  A name nothing else on this plane has, across runs as well as within one.
+
+  `System.unique_integer/1` counts from zero in each VM, so a second run of the suite
+  invents the same names as the first — which is fine for a profile, whose teardown
+  removes it, and not fine for a service principal, whose teardown *disables* it and
+  leaves the row. The second run then collides on the subject's unique index in a setup
+  block, which reads like a product refusal and is a fixture counting from zero.
+  """
+  @spec unique(String.t()) :: String.t()
+  def unique(prefix) do
+    "#{prefix}-#{System.system_time(:second)}-#{System.unique_integer([:positive])}"
+  end
+
+  @doc "Give a team a profile. Idempotent, like everything else here."
+  @spec grant(String.t(), String.t()) :: {:ok, map()} | {:error, map()}
+  def grant(team, profile) do
+    call("admin.team.grant", %{"name" => team, "profile" => profile})
+  end
+
   @doc "A profile the plane knows about, matching the one the operator is already running."
   @spec profile!(String.t(), String.t()) :: map()
   def profile!(name, channel) do
@@ -153,11 +217,14 @@ defmodule Troupe.E2E.Plane do
       "profile" => %{
         "name" => name,
         "image" => image(),
-        "replicas" => 1,
-        # As many as the cluster policy allows, because a run of this suite makes several
-        # sessions and a pod with two slots turns the third test into a `capacity` failure
-        # that is about the fixture and reads like the product.
-        "sessions_per_pod" => 4,
+        # Standard puts four sessions on a worker, because a run of this suite makes
+        # several and a worker with two slots turns the third test into a `capacity`
+        # failure that is about the fixture and reads like the product.
+        "size_class" => "standard",
+        # And one kept warm, so the shared profile never scales to zero underneath a test
+        # that is about something else. The test that is about scaling to zero sets up its
+        # own profile and says so.
+        "warm_workers" => 1,
         "spec" => %{"configBundleChannel" => channel}
       }
     })

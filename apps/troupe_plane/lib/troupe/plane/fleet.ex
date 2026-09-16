@@ -129,6 +129,33 @@ defmodule Troupe.Plane.Fleet do
     |> Enum.filter(&(Worker.disk_fraction(&1) < high_watermark))
   end
 
+  @doc """
+  A pod's control connection has gone, so stop placing sessions on it.
+
+  The sweeper already does this after the heartbeat lease expires, which was enough when
+  a pod only went away because somebody drained it. It is not enough now that the plane
+  scales profiles itself: a worker removed by a scale-down stops heartbeating and stays
+  *placeable* for the rest of its lease, so the next `session.create` is placed on a pod
+  that is not there and fails with "the pod did not accept the session".
+
+  The plane learns this the instant the socket closes, which is a great deal sooner than
+  a lease. Health only governs placement — the sessions the pod was holding are the
+  sweeper's business and are stranded on its schedule, not this one — so marking it here
+  costs nothing if the connection comes straight back, and re-enrolment sets it healthy
+  again.
+  """
+  @spec disconnected(String.t(), String.t()) :: :ok
+  def disconnected(namespace, pod_name) do
+    Repo.update_all(
+      from(w in Worker,
+        where: w.namespace == ^namespace and w.pod_name == ^pod_name and w.healthy
+      ),
+      set: [healthy: false, updated_at: DateTime.utc_now()]
+    )
+
+    :ok
+  end
+
   @doc "Mark pods that have stopped heartbeating as unhealthy, and say which."
   @spec sweep() :: [Worker.t()]
   def sweep do

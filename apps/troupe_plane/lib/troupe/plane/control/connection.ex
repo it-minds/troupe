@@ -99,14 +99,12 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
-    if state.worker do
-      Logger.info("troupe plane: #{state.worker.namespace}/#{state.worker.pod_name} disconnected")
-    end
-
+    gone(state)
     {:stop, :normal, state}
   end
 
   def handle_info({:tcp_error, socket, _reason}, %{socket: socket} = state) do
+    gone(state)
     {:stop, :normal, state}
   end
 
@@ -138,6 +136,18 @@ defmodule Troupe.Plane.Control.Connection do
   def terminate(_reason, state) do
     :gen_tcp.close(state.socket)
     :ok
+  end
+
+  # The pod is not there any more, so stop placing sessions on it — now, rather than when
+  # its heartbeat lease expires. That was enough when a pod only went away because
+  # somebody drained it; the plane scales profiles itself now, so workers come and go on
+  # their own and a placeable row for one that has gone is a create that fails with "the
+  # pod did not accept the session".
+  defp gone(%{worker: nil}), do: :ok
+
+  defp gone(%{worker: worker}) do
+    Logger.info("troupe plane: #{worker.namespace}/#{worker.pod_name} disconnected")
+    Fleet.disconnected(worker.namespace, worker.pod_name)
   end
 
   # -- framing ----------------------------------------------------------------

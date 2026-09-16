@@ -3328,3 +3328,58 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      far as the team's grant is concerned; what is missing is the plane's record of it,
      which is a component problem. `capacity` would send somebody looking for pods that
      were never there.
+
+503. **A worker whose control connection has gone stops being placeable at once.** The
+     sweeper already did this after the heartbeat lease expired, which was enough when a
+     pod only went away because somebody drained one. It is not enough now that the plane
+     scales profiles itself: a worker removed by a scale-down stayed placeable for the rest
+     of its lease, so the next create was placed on a pod that was not there and failed
+     with "the pod did not accept the session". The plane learns from the socket closing,
+     which is a great deal sooner than a lease.
+
+504. **A push that fails for a session that has been *waiting* requeues it; one that fails
+     for a session being *created* deletes it.** The create path's rule — a session that
+     never started is not a session — is right for a create and wrong for an admit: its
+     owner has already been told the session exists, and deleting it out from under them
+     while they wait is worse than making them wait longer. The cluster suite found this
+     and no unit test could have, because in-process there is no gap between a pod
+     enrolling and a pod being able to answer.
+
+505. **The ceiling is checked before placement, not only when placement fails.** The first
+     version asked only on the refusal path, so a ceiling of one session on a class that
+     fits four never bound until four were running. A ceiling that applies only when the
+     pods are full is not a ceiling; it is a second opinion about what placement already
+     knows. Found on the cluster, where a real worker had four slots — the unit suite had
+     been using pods with a capacity of one, which hid it exactly.
+
+506. **A profile the plane has no row for still creates sessions.** A pod enrols by
+     presenting a token, not by being written down, so a profile can be serving sessions
+     before any administrator has told the plane about it. What the row decides is the
+     ceiling and whether the plane can ask for more workers; no row is no ceiling, and a
+     create that refused on its absence would refuse a session the fleet can take. The
+     refusal moves to the moment it matters: a full profile the plane cannot scale.
+
+507. **Shrinking waits; growing does not.** With no hysteresis the fleet went
+     `1 -> 2 -> 1 -> 2 -> 1` inside a minute as sessions started and went dormant — a pod
+     start and a drain each way, and a pod set that moves under everything reading it.
+     `idle_since` is really *smaller-since*: set the first tick a profile wants fewer
+     workers than it has, cleared the moment it wants as many, and a reduction happens only
+     after the grace period. Going to zero is the same rule with nothing special about it.
+
+508. **The e2e suite's shared profile keeps a worker warm.** A test about something else
+     should never find the fleet gone underneath it. The test that is *about* the fleet
+     going owns a profile nobody else uses and says so — and has to put the secrets in its
+     namespace itself, because Troupe creates no secrets and a profile created through the
+     console arrives with an empty namespace.
+
+509. **`System.unique_integer/1` is not unique across runs.** It counts from zero in each
+     VM, so a second run of the cluster suite invented the same names as the first. Fine
+     for a profile, whose teardown removes it; not fine for a service principal, whose
+     teardown *disables* it and leaves the row — the second run then collided on the
+     subject's unique index inside a setup block, which reads like a product refusal and is
+     a fixture counting from zero.
+
+510. **A sponsor is a subject, not a username.** The suite signs in to Dex as
+     `ada@example.test` and the plane knows that person as `CgNhZGESBWxvY2Fs`. Everything
+     the plane matches a person by matches the subject, so the suite asks `me` rather than
+     assuming the two are the same string.

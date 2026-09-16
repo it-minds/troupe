@@ -28,13 +28,19 @@ defmodule Troupe.E2E.WebhookTest do
   end
 
   setup context do
-    name = "e2e-hook-#{System.unique_integer([:positive])}"
-    principal = "e2e-hooker-#{System.unique_integer([:positive])}"
+    name = Plane.unique("e2e-hook")
+    principal = Plane.unique("e2e-hooker")
 
     created =
       Plane.call!("admin.principal.create", %{
         "team" => context.team,
-        "principal" => %{"name" => principal, "profiles" => [context.profile]}
+        # A principal names a person answerable for what it does, and the sponsor has to
+        # be somebody in the team. This is the person the suite signs in as.
+        "principal" => %{
+          "name" => principal,
+          "profiles" => [context.profile],
+          "sponsor" => Plane.subject()
+        }
       })
 
     Plane.call!("admin.trigger.put", %{

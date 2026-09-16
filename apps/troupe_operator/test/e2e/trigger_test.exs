@@ -30,13 +30,19 @@ defmodule Troupe.E2E.TriggerTest do
   end
 
   setup context do
-    name = "e2e-tick-#{System.unique_integer([:positive])}"
-    principal = "e2e-runner-#{System.unique_integer([:positive])}"
+    name = Plane.unique("e2e-tick")
+    principal = Plane.unique("e2e-runner")
 
     created =
       Plane.call!("admin.principal.create", %{
         "team" => context.team,
-        "principal" => %{"name" => principal, "profiles" => [context.profile]}
+        # A principal names a person answerable for what it does, and the sponsor has to
+        # be somebody in the team. This is the person the suite signs in as.
+        "principal" => %{
+          "name" => principal,
+          "profiles" => [context.profile],
+          "sponsor" => Plane.subject()
+        }
       })
 
     on_exit(fn ->
@@ -68,13 +74,20 @@ defmodule Troupe.E2E.TriggerTest do
 
     # Up to two minutes: one for the next tick, one so a tick that lands the instant the
     # trigger was written is not the only chance.
-    World.eventually(fn -> runs(context) != [] end,
-      timeout: 180_000,
+    #
+    # Waited on the *session*, not on the run. The run row is written before the session
+    # is created — that is what makes two callers racing on one key decide by the unique
+    # index rather than by luck — so a test that waited for the row and then asserted a
+    # session id was asserting against a moment in the middle of the firing. It passed for
+    # as long as creating a session was instant, and stopped when a profile that had
+    # scaled down made the create wait for a worker.
+    World.eventually(fn -> Enum.any?(runs(context), & &1["session_id"]) end,
+      timeout: 300_000,
       every: 5_000,
-      what: "#{context.trigger} to fire"
+      what: "#{context.trigger} to fire and make a session"
     )
 
-    [first | _] = runs(context)
+    [first | _] = Enum.filter(runs(context), & &1["session_id"])
     assert first["session_id"], "the run made no session: #{inspect(first)}"
 
     # The session is the principal's, not the person's who wrote the trigger. That is the

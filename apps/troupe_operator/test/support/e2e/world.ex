@@ -273,6 +273,45 @@ defmodule Troupe.E2E.World do
   defp repository_root, do: Path.expand("../../../../..", __DIR__)
 
   @doc """
+  Put the secrets a worker namespace needs into it, the way `scripts/remote-up` does.
+
+  Troupe creates no secrets, on purpose: the invariant is why compromising the plane gets
+  an attacker requests that still pass policy rather than your Jira token. The consequence
+  is that a *new* profile arrives with a namespace the operator made and nothing in it, and
+  its workers cannot read a session's manifest from object storage — which surfaces as
+  `sign_v4(nil, nil, ...)` several layers down and reads like a bug in the object store.
+
+  In a real cluster this is External Secrets Operator. Here it is this function, and a
+  test that creates a profile of its own has to call it for the same reason `remote-up`
+  does for the shared one.
+  """
+  @spec secrets!(String.t()) :: :ok
+  def secrets!(namespace) do
+    secret!(namespace, "llm-credentials", [{"api-key", System.get_env("ITM_LLM_GW_KEY") || ""}])
+
+    secret!(namespace, "troupe-object-store", [
+      {"access-key-id", "troupe"},
+      {"secret-access-key", "troupe-secret"}
+    ])
+  end
+
+  # Created rather than applied. `remote-up` pipes a dry-run manifest into `apply` because
+  # it is a shell script and a pipe is free there; from here it would need a file on disk
+  # that both a Linux shell and a Windows kubectl agree about, which this repository has
+  # already paid for once. A namespace the operator has just made has no secret in it, and
+  # one that already does is not an error worth stopping for.
+  defp secret!(namespace, name, literals) do
+    args =
+      ["create", "secret", "generic", name, "--namespace", namespace] ++
+        Enum.map(literals, fn {key, value} -> "--from-literal=#{key}=#{value}" end)
+
+    case kubectl(args) do
+      {_output, 0} -> :ok
+      {output, _status} -> if output =~ "AlreadyExists", do: :ok, else: raise(output)
+    end
+  end
+
+  @doc """
   The same URL, reachable from wherever this suite is running.
 
   A worker's endpoint is the one the *outside* uses — `…workers.localtest.me:30080`,

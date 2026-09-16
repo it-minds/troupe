@@ -18,7 +18,7 @@ defmodule Troupe.Plane.ScalingTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakePod, Fleet, Harness, Sessions}
+  alias Troupe.Plane.{FakePod, Fleet, Harness, Placement, Sessions}
   alias Troupe.Plane.Fleet.{Scaler, SizeClass}
 
   @moduletag timeout: 60_000
@@ -209,6 +209,25 @@ defmodule Troupe.Plane.ScalingTest do
                Harness.call("token.mint", %{"session_id" => placed.id}, context.caller)
 
       assert is_binary(endpoint["token"])
+    end
+
+    test "is refused at the ceiling even when the worker has room", context do
+      # A ceiling of one on a class that fits four. The cluster suite found this: the
+      # ceiling was only consulted when *placement* failed, so it did not bind until four
+      # sessions were running and a limit of one meant four.
+      {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard", max_sessions: 1})
+      _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 4)
+
+      assert {:ok, _first} = create(context)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+
+      assert {:error, error} = create(context)
+      assert error.message == "capacity"
+      assert error.data.max_sessions == 1
+
+      # And the worker still has three slots, which is the whole point: this refusal is
+      # about a number somebody chose, not about the pods being full.
+      assert %{used: 1} = Placement.inspect_state("dev")
     end
 
     test "is refused only at a ceiling a person set, and told the number", context do

@@ -191,20 +191,33 @@ defmodule Troupe.E2E.CredentialsTest do
   # A pod picks up a changed Secret or a changed spec when it is replaced and not before:
   # the StatefulSet is `OnDelete`, because a rollout that evicted a pod holding a session
   # would end the session.
+  # By name, not by label. A StatefulSet gives the replacement the same name, and waiting
+  # on the label waits on *every* worker of the profile — including one the plane's scaler
+  # is removing at that moment, which fails the wait with `not found` about a pod this
+  # test never touched. The profile's pod set is not stable any more and a test that
+  # assumed it was is a test that will fail about something else.
   defp restart(namespace) do
     pod = World.pod(namespace, "app.kubernetes.io/name=troupe-worker")
     World.kubectl!(["delete", "pod", "-n", namespace, pod, "--wait=true"])
 
-    World.kubectl!([
-      "wait",
-      "-n",
-      namespace,
-      "--for=condition=ready",
-      "pod",
-      "-l",
-      "app.kubernetes.io/name=troupe-worker",
-      "--timeout=300s"
-    ])
+    World.eventually(
+      fn ->
+        match?(
+          {_output, 0},
+          World.kubectl([
+            "wait",
+            "-n",
+            namespace,
+            "--for=condition=ready",
+            "pod/" <> pod,
+            "--timeout=60s"
+          ])
+        )
+      end,
+      timeout: 300_000,
+      every: 5_000,
+      what: "#{pod} to come back ready"
+    )
   end
 
   defp agent do

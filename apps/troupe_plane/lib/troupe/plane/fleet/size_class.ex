@@ -40,14 +40,16 @@ defmodule Troupe.Plane.Fleet.SizeClass do
   @classes %{
     "standard" => %{
       sessions_per_pod: 4,
-      requests: %{"cpu" => "500m", "memory" => "2Gi"},
+      # Requests are a scheduling floor, not an allowance: a worker that asked for its
+      # limit would be a worker two of which will not fit on a node that could run four.
+      requests: %{"cpu" => "250m", "memory" => "1Gi"},
       limits: %{"cpu" => "2", "memory" => "4Gi"},
       storage_size: "20Gi",
       summary: "Several sessions share a worker. Right for most work."
     },
     "heavy" => %{
       sessions_per_pod: 2,
-      requests: %{"cpu" => "2", "memory" => "6Gi"},
+      requests: %{"cpu" => "1", "memory" => "4Gi"},
       limits: %{"cpu" => "4", "memory" => "8Gi"},
       storage_size: "100Gi",
       summary:

@@ -44,27 +44,36 @@ defmodule Troupe.Plane.Fleet.Scaler do
   to noise, and anything cleverer would be a second opinion about a number the plane
   already knows exactly.
 
-  ## Why it waits before going to zero
+  ## Up at once, down after a wait
 
-  `idle_since` is set the first tick a profile is found empty and cleared the moment
-  anything runs. A profile whose last session went dormant ninety seconds ago is very
-  often a profile somebody is about to wake, and removing the worker to put it back is
-  worse than keeping it for a grace period.
+  Growing is immediate: somebody is waiting. Shrinking is not, and the cluster suite is
+  what made that obvious — with no hysteresis the fleet went `1 -> 2 -> 1 -> 2 -> 1` in
+  under a minute as sessions started and went dormant, which costs a pod start and a
+  drain each way and makes the pod set move under everything that reads it.
+
+  So `idle_since` is really *smaller-since*: set the first tick a profile is found
+  wanting fewer workers than it has, cleared the moment it wants as many or more, and a
+  reduction only happens once it has been that way for the grace period. Going to zero is
+  the same rule with nothing special about it, which is the point — a profile whose last
+  session went dormant ninety seconds ago is very often one somebody is about to wake.
+
+  The clock lives on the row rather than in this process, so a failover does not reset it
+  and leave a worker up for ever.
   """
 
   use GenServer
 
-  alias Troupe.Plane.{Fleet, Harness, Provision, Sessions, Singleton}
+  alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Provision, Sessions, Singleton}
   alias Troupe.Plane.Fleet.{Profile, SizeClass}
 
   require Logger
 
   @tick_ms 15_000
 
-  # How long a profile must have been empty before its last worker goes. Two minutes:
+  # How long a profile must have wanted fewer workers before it gets fewer. Two minutes:
   # long enough that waking a session somebody has just closed does not pay a cold start,
   # short enough that a profile nobody is using is not still costing a pod at lunchtime.
-  @idle_grace_seconds 120
+  @shrink_grace_seconds 120
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -101,6 +110,8 @@ defmodule Troupe.Plane.Fleet.Scaler do
     needed = ceil_div(demand.active + demand.pending, per_worker)
 
     {want, capped_by} = clamp(needed + warm, profile, per_worker)
+    {want, capped_by} = under_policy(want, capped_by)
+    have = profile.replicas || 0
 
     %{
       profile: profile.name,
@@ -108,8 +119,9 @@ defmodule Troupe.Plane.Fleet.Scaler do
       pending: demand.pending,
       sessions_per_worker: per_worker,
       warm: warm,
-      have: profile.replicas || 0,
-      want: to_zero(want, demand, warm, profile, now),
+      have: have,
+      asks_for: want,
+      want: settled(want, have, profile, now),
       capped_by: capped_by,
       max_sessions: profile.max_sessions
     }
@@ -125,17 +137,23 @@ defmodule Troupe.Plane.Fleet.Scaler do
   def ceiling(%Profile{max_sessions: max}), do: max
 
   @doc """
-  Whether this profile could still grow to take another session.
+  Whether this profile is within the ceiling somebody set for it.
 
-  The question `session.create` asks before deciding between making somebody wait and
-  refusing them. A profile under its ceiling will have a worker shortly; one at its
-  ceiling never will, and telling that caller to wait would be a lie.
+  Asked *before* placement, not only when placement fails. The first version asked only
+  on the refusal path — so a ceiling of one session on a class that fits four never bound
+  until four were running, because until then there was always room on the worker and
+  nothing consulted the number. A ceiling that only applies when the pods are full is not
+  a ceiling; it is a second opinion about the same thing placement already knows.
+
+  The session being created is counted: its row exists before this is asked, so `<=` is
+  the comparison and it is the difference between a ceiling of one meaning one and
+  meaning two.
   """
-  @spec room_to_grow?(Profile.t()) :: boolean()
-  def room_to_grow?(%Profile{} = profile) do
+  @spec within_ceiling?(Profile.t()) :: boolean()
+  def within_ceiling?(%Profile{} = profile) do
     case ceiling(profile) do
       nil -> true
-      max -> Sessions.demand_for(profile.name) |> then(&(&1.active + &1.pending)) < max
+      max -> Sessions.demand_for(profile.name) |> then(&(&1.active + &1.pending)) <= max
     end
   end
 
@@ -143,7 +161,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
 
   defp scale(%Profile{} = profile, now) do
     plan = plan(profile, now)
-    mark_idle(profile, plan, now)
+    mark_smaller(profile, plan, now)
     changed = plan.want != plan.have and write(profile, plan)
 
     # Before the scaling and after it: a worker that came up two ticks ago has room now,
@@ -199,17 +217,17 @@ defmodule Troupe.Plane.Fleet.Scaler do
     end
   end
 
-  # Set the first tick a profile is found empty, cleared the moment anything runs. The
-  # clock lives on the row rather than in this process so a failover does not reset the
-  # grace period and keep a worker up for ever.
-  defp mark_idle(profile, plan, now) do
-    empty? = plan.active + plan.pending == 0
+  # Set the first tick a profile wants fewer workers than it has, cleared the moment it
+  # wants as many or more. The clock lives on the row rather than in this process, so a
+  # failover does not reset the grace period and keep a worker up for ever.
+  defp mark_smaller(profile, plan, now) do
+    smaller? = plan.asks_for < plan.have
 
     cond do
-      empty? and is_nil(profile.idle_since) ->
+      smaller? and is_nil(profile.idle_since) ->
         {:ok, _} = Fleet.put_profile(%{name: profile.name, idle_since: now})
 
-      not empty? and not is_nil(profile.idle_since) ->
+      not smaller? and not is_nil(profile.idle_since) ->
         {:ok, _} = Fleet.put_profile(%{name: profile.name, idle_since: nil})
 
       true ->
@@ -217,22 +235,18 @@ defmodule Troupe.Plane.Fleet.Scaler do
     end
   end
 
-  # A profile with nothing running and nobody asking for a warm worker goes to zero, but
-  # not before the grace period: a profile whose last session went dormant a minute ago
-  # is very often one somebody is about to wake.
-  defp to_zero(want, demand, warm, profile, now) do
-    cond do
-      demand.active + demand.pending > 0 -> want
-      warm > 0 -> want
-      idle_long_enough?(profile, now) -> 0
-      true -> max(want, min(profile.replicas || 0, 1))
-    end
+  # Up at once and down after a wait. Somebody is waiting for a worker that is not there;
+  # nobody is waiting for one that is.
+  defp settled(want, have, _profile, _now) when want >= have, do: want
+
+  defp settled(want, have, profile, now) do
+    if smaller_long_enough?(profile, now), do: want, else: have
   end
 
-  defp idle_long_enough?(%Profile{idle_since: nil}, _now), do: false
+  defp smaller_long_enough?(%Profile{idle_since: nil}, _now), do: false
 
-  defp idle_long_enough?(%Profile{idle_since: since}, now) do
-    DateTime.diff(now, since, :second) >= @idle_grace_seconds
+  defp smaller_long_enough?(%Profile{idle_since: since}, now) do
+    DateTime.diff(now, since, :second) >= @shrink_grace_seconds
   end
 
   # In sessions, converted to workers here and nowhere else. An administrator's ceiling
@@ -243,6 +257,18 @@ defmodule Troupe.Plane.Fleet.Scaler do
   defp clamp(want, %Profile{max_sessions: max}, per_worker) do
     allowed = ceil_div(max, per_worker)
     if want > allowed, do: {allowed, :max_sessions}, else: {want, nil}
+  end
+
+  # And under whatever the cluster admin's `TroupePolicy` allows. Not because admission
+  # would let a larger number through — it would refuse it — but because a controller that
+  # asked for something it knew would be refused would fail on every tick for ever, and
+  # the person reading the log would be reading the plane's own mistake rather than a
+  # policy they set on purpose.
+  defp under_policy(want, capped_by) do
+    case ClusterPolicy.current() do
+      %{max_replicas: max} when is_integer(max) and max > 0 and want > max -> {max, :policy}
+      _otherwise -> {want, capped_by}
+    end
   end
 
   defp ceil_div(_numerator, denominator) when denominator <= 0, do: 0
