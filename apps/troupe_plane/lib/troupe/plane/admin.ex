@@ -45,7 +45,7 @@ defmodule Troupe.Plane.Admin do
     Ledger
   }
 
-  alias Troupe.Plane.Fleet.{Bundle, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, SizeClass, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
   alias Troupe.Plane.Settings.Ladder
@@ -201,6 +201,7 @@ defmodule Troupe.Plane.Admin do
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
+         {:ok, attrs} <- without_derived(attrs),
          :ok <- Provision.check(attrs) do
       before = Fleet.get_profile(name)
 
@@ -220,6 +221,53 @@ defmodule Troupe.Plane.Admin do
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
     end
+  end
+
+  # Seven fields left the admin surface and the plane writes them now: `replicas` from
+  # what is running, and the rest from the size class. A caller that sends one is refused
+  # rather than having it dropped — silently ignoring a field somebody typed is how a
+  # person comes to believe a number is in force when it is not, and this is exactly the
+  # category of mistake the seven fields were causing in the first place.
+  @derived ~w(replicas sessionsPerPod sessions_per_pod resources storage)
+
+  defp without_derived(attrs) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    spec = Map.get(attrs, "spec") || %{}
+    sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or Map.has_key?(spec, &1)))
+
+    if sent == [] do
+      {:ok, attrs}
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "the plane writes these; set size_class, max_sessions and warm_workers instead",
+         not_yours: sent
+       })}
+    end
+  end
+
+  @doc """
+  The size classes a profile may be, in the order a console offers them.
+
+  Here rather than read from `Fleet.SizeClass` by whoever is rendering: a LiveView is an
+  admin API client and gets no private access, and a model asking over MCP should be able
+  to find out what the two words mean without being told them out of band.
+  """
+  @spec size_classes() :: [String.t()]
+  def size_classes, do: SizeClass.names()
+
+  @doc "Each size class with what it is for, as the console and a model both read it."
+  @spec size_class_summaries() :: [map()]
+  def size_class_summaries do
+    Enum.map(SizeClass.names(), fn name ->
+      class = SizeClass.get(name)
+
+      %{
+        name: name,
+        sessions_per_worker: class.sessions_per_pod,
+        summary: class.summary
+      }
+    end)
   end
 
   @doc "Remove a profile. Its sessions become read-only rather than being erased."
@@ -1347,8 +1395,17 @@ defmodule Troupe.Plane.Admin do
 
     %{
       name: profile.name,
+      # What an administrator answers, first, because it is what they came for.
+      size_class: profile.size_class,
+      size_class_summary: SizeClass.get(profile.size_class).summary,
+      max_sessions: profile.max_sessions,
+      warm_workers: profile.warm_workers,
+      # What the plane decided from it. Shown, not offered: a console should be able to
+      # say how many workers are up and why, and an administrator who wants to know what
+      # a class costs should not have to read the custom resource to find out.
       replicas: profile.replicas,
       sessions_per_pod: profile.sessions_per_pod,
+      capacity_sessions: profile.replicas * profile.sessions_per_pod,
       channel: profile.config_bundle_channel,
       image: profile.image,
       conditions: Provision.conditions(profile),

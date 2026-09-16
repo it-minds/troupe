@@ -249,7 +249,11 @@ defmodule Troupe.Plane.HarnessTest do
       assert {:error, error} =
                Harness.call("session.create", %{"profile" => "dev"}, context(user))
 
-      assert error.message in ["capacity", "unavailable"]
+      # Not `capacity`: the plane has no record of this profile at all, so it cannot know
+      # a ceiling and cannot ask for a worker. "Every pod is full" would send somebody to
+      # look for pods that were never there.
+      assert error.message == "unavailable"
+      assert error.data.component == "profile"
 
       # The row went with the failure: a session that never started is not a session,
       # and leaving it would put a phantom in everybody's listing.

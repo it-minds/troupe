@@ -36,7 +36,9 @@ defmodule Troupe.Plane.Harness do
     Sessions
   }
   alias Troupe.Plane.Control.Router
+  alias Troupe.Plane.Fleet.Scaler
   alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Provision
   alias Troupe.Plane.Sessions.{ACL, Session}
   alias Troupe.Plane.Settings
   alias Troupe.Plane.Settings.Ladder
@@ -44,6 +46,12 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Canonical, Error, Origin, Principal, Token}
+
+  require Logger
+
+  # How long a client should wait before asking again. The scaler's interval plus the
+  # time a cold worker takes to schedule, bind its volume and fetch its bundle.
+  @wait_hint_ms 5_000
 
   # What a session reserves against its team's budget before it starts. A slice rather
   # than the whole budget, so one session cannot lock a team out; the ledger records
@@ -108,6 +116,38 @@ defmodule Troupe.Plane.Harness do
   @doc "Every method the plane answers, and the scope each needs."
   @spec methods() :: %{String.t() => atom()}
   def methods, do: @methods
+
+  @doc """
+  Place a session that has been waiting, and start it.
+
+  The other half of a wait. `session.create` put the row in `pending` because the profile
+  was full and growing; this is what runs when the room arrives — the same placement, the
+  same push to the pod and the same first prompt, so a session that waited is
+  indistinguishable afterwards from one that did not.
+
+  Called by the scaler rather than by a client. A client that polled for its endpoint
+  would be a client racing the thing that is about to give it one.
+  """
+  @spec admit(Session.t()) :: {:ok, map()} | {:error, term()}
+  def admit(%Session{} = session) do
+    with {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
+         team when not is_nil(team) <- team_of(session),
+         {:ok, _pushed} <-
+           start_on_pod(worker, session, team, nil, session.pending_prompt) do
+      {:ok, _session} = Sessions.admitted(session.id)
+      Logger.info("troupe plane: #{session.id} waited and is now on #{worker.pod_name}")
+      {:ok, %{session_id: session.id, worker: worker.id}}
+    else
+      nil ->
+        {:error, :no_team}
+
+      {:error, reason} ->
+        # Left pending. The next tick tries again, and a session that cannot be placed
+        # because its profile shrank under it is still a session somebody can see and
+        # erase — which is more use to them than a row that vanished.
+        {:error, reason}
+    end
+  end
 
   @doc "Answer one request for one user."
   @spec call(String.t(), map(), context()) :: {:ok, map()} | {:error, Error.t()}
@@ -280,10 +320,9 @@ defmodule Troupe.Plane.Harness do
          {:ok, terms} <- terms_for(params["terms"], team, answerable),
          session_id = params["session_id"] || generate_id(),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
-         {:ok, worker} <- reserve_capacity(session, unwind: true),
          {:ok, _budget} <- reserve_budget(team, session),
-         {:ok, _pushed} <- start_on_pod(worker, session, team, agent, prompt) do
-      {:ok, endpoint_for(Sessions.get(session.id), worker, user, "owner")}
+         {:ok, placement} <- place_or_wait(session, prompt) do
+      started(placement, session, team, user, agent, prompt)
     end
   end
 
@@ -493,9 +532,8 @@ defmodule Troupe.Plane.Harness do
 
   defp handle("token.mint", params, %{user: user}) do
     with {:ok, session} <- visible(params["session_id"], user),
-         {:ok, role} <- role_of(user, session),
-         {:ok, worker} <- worker_of(session) do
-      {:ok, endpoint_for(session, worker, user, role)}
+         {:ok, role} <- role_of(user, session) do
+      minted(session, user, role)
     end
   end
 
@@ -802,7 +840,32 @@ defmodule Troupe.Plane.Harness do
       reason: "another device holds this session"
     })
   end
+
   # -- the create sequence ----------------------------------------------------
+
+  # Room now: the pod has it and the client gets its endpoint, as always.
+  defp started({:placed, worker}, session, team, user, agent, prompt) do
+    with {:ok, _pushed} <- start_on_pod(worker, session, team, agent, prompt) do
+      {:ok, endpoint_for(Sessions.get(session.id), worker, user, "owner")}
+    end
+  end
+
+  # No room yet, and more is coming. The session exists, the row is `pending`, and the
+  # prompt is kept until there is a pod to send it to.
+  defp started(:waiting, session, _team, _user, _agent, _prompt) do
+    {:ok, waiting_for(Sessions.get(session.id))}
+  end
+
+  # Still waiting for a worker. The same answer `session.create` gave, so a client asking
+  # again gets the same shape rather than an error it has to special-case — and gets a
+  # token the moment there is somewhere to use one.
+  defp minted(%Session{state: "pending"} = session, _user, _role), do: {:ok, waiting_for(session)}
+
+  defp minted(%Session{} = session, user, role) do
+    with {:ok, worker} <- worker_of(session) do
+      {:ok, endpoint_for(session, worker, user, role)}
+    end
+  end
 
   defp team_for(user, profile, wanted) do
     teams = Identity.teams_for(user)
@@ -833,6 +896,98 @@ defmodule Troupe.Plane.Harness do
   # `:unwind` says whether a failure should take the session row with it. Creating, yes:
   # a session that never started is not a session. Activating, no: the session exists
   # and its history is in object storage, and it only failed to come back right now.
+  # Capacity, or a wait, or a refusal — in that order, and the middle one is the change.
+  #
+  # A profile that is full but may still grow makes the caller wait rather than refusing
+  # them: the plane can see it needs another worker and is already asking for one, and a
+  # refusal in that moment is the platform telling a person to go and find an
+  # administrator about a number that is about to change by itself.
+  #
+  # A refusal survives exactly where a human decided it, and then it quotes them.
+  defp place_or_wait(session, prompt) do
+    case Placement.reserve(session.profile, session.id) do
+      {:ok, %{worker: worker}} ->
+        {:ok, {:placed, worker}}
+
+      {:error, reason} when reason in [:at_capacity, :no_healthy_worker] ->
+        wait_or_refuse(session, prompt, reason)
+
+      {:error, reason} ->
+        unwind(session)
+        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp wait_or_refuse(session, prompt, reason) do
+    profile = Fleet.get_profile(session.profile)
+
+    cond do
+      # Granted, but the plane has no record of it — so it cannot know a ceiling and
+      # cannot ask for a worker. `unavailable` rather than `not_found`: the profile
+      # exists as far as the team's grant is concerned, and what is missing is a
+      # component, which is what that code is for.
+      is_nil(profile) ->
+        unwind(session)
+
+        {:error,
+         Error.new(:unavailable, %{
+           component: "profile",
+           profile: session.profile,
+           reason: "this plane has no record of that profile"
+         })}
+
+      Scaler.room_to_grow?(profile) ->
+        {:ok, _session} = Sessions.wait(session.id, prompt)
+        {:ok, :waiting}
+
+      true ->
+        unwind(session)
+        {:error, at_the_ceiling(profile)}
+    end
+    |> tap(fn _ -> log_wait(session, reason) end)
+  end
+
+  # The one refusal that survives, and it names the person who decided it rather than
+  # the machine that noticed. `at_capacity, ask your administrator to add replicas` is
+  # not something anybody can act on; "this profile allows ten at once and ten are
+  # running" is.
+  defp at_the_ceiling(profile) do
+    Error.new(:capacity, %{
+      profile: profile.name,
+      max_sessions: profile.max_sessions,
+      reason: "#{profile.name} allows #{profile.max_sessions} session(s) at once, and they are running"
+    })
+  end
+
+  defp log_wait(_session, :at_capacity), do: :ok
+
+  defp log_wait(session, reason) do
+    Logger.info("troupe plane: #{session.id} waits on #{session.profile}: #{reason}")
+  end
+
+  defp unwind(session) do
+    Budget.release(session.team_id, session.id, answerable_for(session))
+    Sessions.delete(session.id)
+  end
+
+  # What a client is handed when its session has no pod yet. No endpoint and no token:
+  # there is nothing to connect to, and inventing one would be worse than saying so.
+  #
+  # The wait is bounded and the client is told by how much. Fifteen seconds is the
+  # scaler's interval and a cold worker is another thirty or so on top — which is the same
+  # wait the client already describes honestly when it wakes a dormant session, with the
+  # same indeterminate bar and no invented percentage.
+  defp waiting_for(%Session{} = session) do
+    %{
+      "session_id" => session.id,
+      "epoch" => session.epoch,
+      "state" => "pending",
+      "mode" => "waiting",
+      "reason" => "the profile is full and another worker is coming up",
+      "retry_after_ms" => @wait_hint_ms
+    }
+  end
+
   defp reserve_capacity(session, opts) do
     case Placement.reserve(session.profile, session.id) do
       {:ok, %{worker: worker}} ->
@@ -994,11 +1149,48 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # Reading a dormant session on a profile that has scaled to zero.
+  #
+  # A reader is not an activation: it is a short-lived process that folds a log and
+  # serves it, with no actor tree and no model call, and it reserves no capacity. But it
+  # does need *a pod*, and on a cold profile there is none — so the plane asks for one
+  # and the caller waits, exactly as it would for a session that is waiting for room.
+  #
+  # The distinction is the one `PROTOCOL.md` now states outright: activation is about the
+  # session, not about the pod. The session is exactly as dormant after this as before.
   defp reader_pod(session) do
     case Placement.reader(session.profile, session.worker_id) do
-      {:ok, worker} -> {:ok, worker}
-      {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
+      {:ok, worker} ->
+        {:ok, worker}
+
+      {:error, :no_healthy_worker} ->
+        warm_up(session.profile)
+
+        {:error,
+         Error.new(:unavailable, %{
+           component: "worker",
+           profile: session.profile,
+           reason: "this profile has no worker up; one is being started",
+           retry_after_ms: @wait_hint_ms
+         })}
+
+      {:error, reason} ->
+        {:error, Error.new(:unavailable, %{reason: inspect(reason)})}
     end
+  end
+
+  # A profile with nothing on it has scaled to zero and will stay there: the scaler's
+  # arithmetic is over sessions, and reading is not a session. So the read says it wants
+  # one, which is the smallest thing that keeps "a dormant session is always readable"
+  # true on a profile that costs nothing while nobody is looking.
+  defp warm_up(profile_name) do
+    with %{warm_workers: warm} = profile when warm == 0 <- Fleet.get_profile(profile_name),
+         0 <- profile.replicas do
+      {:ok, _} = Fleet.put_profile(%{name: profile_name, replicas: 1, idle_since: nil})
+      Provision.sync_teams(profile_name, %{subject: "system:scaler", role: :platform_admin})
+    end
+
+    :ok
   end
 
   defp activate(%{state: "read_only"} = session, _user, _role) do

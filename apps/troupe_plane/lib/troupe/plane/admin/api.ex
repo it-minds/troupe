@@ -58,20 +58,28 @@ defmodule Troupe.Plane.Admin.API do
         "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not."
     },
     %Argument{
-      name: "replicas",
-      type: :integer,
-      description: "How many pods this profile runs."
+      name: "size_class",
+      type: :string,
+      description:
+        "How demanding a session is here: standard (several share a worker) or heavy (fewer, with more CPU, memory and disk each). A resource question, not a safety one — sessions cannot see each other's files whatever the class."
     },
     %Argument{
-      name: "sessions_per_pod",
+      name: "max_sessions",
       type: :integer,
-      description: "How many sessions one pod carries before placement fills the next."
+      description:
+        "How far this may grow, in sessions at once rather than workers. Absent is no ceiling, bounded by the team's budget. A session refused here is told this number."
+    },
+    %Argument{
+      name: "warm_workers",
+      type: :integer,
+      description:
+        "How many workers to keep up when nothing is running. 0 scales to zero, which costs the next session a cold start of roughly half a minute."
     },
     %Argument{
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, storage, resources, mcpServers, configBundleChannel, orgMount. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount. Replicas, sessionsPerPod, resources and storage are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 

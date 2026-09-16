@@ -3248,3 +3248,83 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `vouched_source: "agent"` in the context, which is how an agent's firing is an `agent`
      firing. A caller at `/rpc` claiming `agent` is refused, for the same reason it may not
      claim `schedule`: a discriminator anybody can set discriminates nothing.
+
+489. **Seven capacity fields leave the admin surface and the plane writes them.**
+     `replicas`, `sessionsPerPod`, the four resource numbers and `storage.size` were seven
+     guesses an administrator was asked for before they could reach anything they had come
+     to configure — and the first of them was a capacity question the plane already had the
+     data to answer exactly. They stay in the custom resource, where infrastructure desired
+     state belongs and the operator reads nothing else.
+
+490. **A field the plane owns is refused, not ignored.** `admin.profile.put` answers
+     `invalid_params` naming the fields that are not the caller's. Silently dropping a
+     number somebody typed is how a person comes to believe a limit is in force when it is
+     not, which is the exact category of mistake the seven fields were already causing.
+
+491. **Two size classes, and they are about resources.** Session-to-session file separation
+     is already built and tested — the mount table, bubblewrap, stage 2's done item 15 — so
+     an isolated class would buy kernel separation nobody needs at a cold start per session
+     and a pod count that tracks concurrency. `sessionsPerPod: 1` stays in the custom
+     resource for anyone who ever does need it. The console says what the classes are for
+     in those words, so nobody reaches for Heavy hoping it makes their data safer.
+
+492. **Both classes sit under the policy this release ships.** Sixteen sessions a pod, four
+     CPUs, eight gibibytes. A deployment that has never written a `TroupePolicy` gets both
+     classes; one that has written a tighter policy has its class refused at admission,
+     which is where a maximum belongs since the plane cannot write that document.
+
+493. **The class is backfilled from what each profile was already doing.** A profile packing
+     several sessions onto a worker was standard whatever its resources said; one running
+     them nearly alone was heavy. An administrator who set this up by hand should not find
+     their careful `sessionsPerPod: 1` turned into four by a migration.
+
+494. **The ceiling is in sessions, not workers.** It is the number an administrator can
+     reason about and the number a refusal can quote. Converted to replicas in one place,
+     so the two cannot drift.
+
+495. **A full-but-growing profile makes a caller wait; only a human ceiling refuses.** The
+     plane can see it needs another worker and is already asking for one, so refusing in
+     that moment is the platform sending somebody to find an administrator about a number
+     that is about to change by itself. `at_capacity, ask your administrator to add
+     replicas` is not something anybody can act on; *this profile allows ten at once and
+     ten are running* is.
+
+496. **A waiting session gets no endpoint and no token.** There is nothing to connect to,
+     and inventing an address would be worse than saying so. `token.mint` answers the same
+     shape rather than an error, so a client asking again has nothing to special-case — and
+     gets a token the moment there is somewhere to use one.
+
+497. **The plane holds the prompt while a session waits.** It is the only piece of session
+     content the plane ever holds, it is held for seconds, and it is cleared the moment the
+     session is placed. The alternative is a session that starts and then sits there, which
+     is what dropping it would produce for exactly the unattended runs that cannot ask
+     again.
+
+498. **Budget is reserved before capacity now, not after.** A pending session has to hold
+     its money or it could be admitted later into a team that has none. This changed what
+     some refusals say: a team with a pound creating a five-pound session used to be told
+     `capacity`, because placement ran first and there were no pods — the right refusal for
+     the wrong reason.
+
+499. **Scale-to-zero waits two minutes, and the clock lives on the row.** A profile whose
+     last session went dormant ninety seconds ago is very often one somebody is about to
+     wake. On the row rather than in the process, so a failover does not reset the grace
+     period and keep a worker up for ever.
+
+500. **The size class owns the storage size; the cluster owns the storage class.** The
+     first version replaced the whole `storage` object from the class, which silently
+     dropped `storageClassName` — and on a cluster whose default is block storage that is
+     precisely how granting a team access to a profile takes the profile down. Merged, not
+     replaced, and a test asserts both survive.
+
+501. **Activation is about the session, not about the pod.** Written into `PROTOCOL.md`
+     outright because the looser reading forbids something harmless. "Subscribing to a
+     dormant session never activates it" means no actor tree and no model call. A
+     `Session.Reader` is neither, so reading a dormant session on a profile that has scaled
+     to zero may start a *worker* — and must, or the history would be unreadable — while
+     reserving no capacity and writing no `session_activated`.
+
+502. **A profile with no row on the plane is `unavailable`, not `not_found`.** It exists as
+     far as the team's grant is concerned; what is missing is the plane's record of it,
+     which is a component problem. `capacity` would send somebody looking for pods that
+     were never there.

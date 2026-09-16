@@ -38,6 +38,10 @@ defmodule Troupe.Plane.Application do
       # The in-plane cron is a `:global` singleton like the others, but nothing asks for
       # it the way a create asks for placement; the keeper asks, from every replica.
       Troupe.Plane.Triggers.Scheduler.Keeper,
+      # The other half of `Placement`: the profile's replica count, asked for rather than
+      # typed. Also a `:global` singleton nobody asks for on the happy path, so it gets a
+      # keeper of its own for the same reason the scheduler does.
+      Troupe.Plane.Fleet.Scaler.Keeper,
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
       Troupe.Plane.Control.Listener,

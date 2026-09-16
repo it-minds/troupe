@@ -315,12 +315,23 @@ the profile's defaults should change.
 update TEAM FILE`) or to wait for the period. The session stays dormant and can be
 read meanwhile.
 
-### `capacity` — `every pod is full`
+### `pending` — a session with no endpoint yet
 
-**Cause.** Every healthy pod of the profile has its maximum number of sessions.
+**Not an error.** `session.create` answered with a session id, `"state": "pending"` and no
+endpoint: the profile is full and the plane has already asked for another worker. The
+session exists and is yours.
 
-**Do.** Try later (sessions go dormant after about ten minutes idle and free a slot),
-or ask the admin to add replicas or raise sessions per pod.
+**Do.** Nothing. Ask again after `retry_after_ms`; the same call answers with an endpoint
+once there is somewhere to connect to. A cold worker takes roughly half a minute — the same
+wait as waking a dormant session.
+
+### `capacity` — `<profile> allows N session(s) at once, and they are running`
+
+**Cause.** A ceiling somebody set. This is now the only capacity refusal there is: a
+profile with no ceiling grows instead of refusing.
+
+**Do.** Try later, or ask the administrator to raise `max_sessions` on the profile — the
+refusal quotes the number they set, so it is a specific thing to ask for.
 
 ### `unavailable` — `the pod did not accept the session` / `the pod is gone`
 

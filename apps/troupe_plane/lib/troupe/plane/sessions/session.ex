@@ -19,7 +19,10 @@ defmodule Troupe.Plane.Sessions.Session do
   @primary_key {:id, :string, autogenerate: false}
   @foreign_key_type :binary_id
 
-  @states ~w(active dormant read_only erased)
+  # `pending` is a session that exists and has no worker yet: the profile is full but
+  # growing, and the plane has asked for another. It is not a failure and not a queue
+  # entry — it is the session, waiting for the room somebody is already bringing up.
+  @states ~w(pending active dormant read_only erased)
   # Whose session it is, which decides where it can run. A team session is placed on a
   # pod of a profile; a private one runs on its owner's machine and is never placed at
   # all. Not the same question as `visibility`, which is who else may see it.
@@ -73,6 +76,8 @@ defmodule Troupe.Plane.Sessions.Session do
     # Fixed at creation: what started this session, and what it was allowed.
     field(:origin, :map)
     field(:terms, :map)
+    # Held only while a session waits for a worker, and cleared when it gets one.
+    field(:pending_prompt, :string)
 
     field(:reviewed_by, :string)
     field(:reviewed_at, :utc_datetime_usec)
@@ -128,6 +133,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :cost_micros,
     :usage_seq,
     :origin,
+    :pending_prompt,
     :terms,
     :reviewed_by,
     :reviewed_at

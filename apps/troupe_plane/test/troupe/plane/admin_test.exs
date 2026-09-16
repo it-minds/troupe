@@ -198,7 +198,11 @@ defmodule Troupe.Plane.AdminTest do
         })
 
       assert {:error, error} = Admin.trigger_run(context.lead, "engineering", "nightly-deps")
-      assert error.message in ["capacity", "unavailable"]
+
+      # Whichever refuses first. This team has a pound and a session reserves five, so
+      # the budget is the honest answer — it used to be `capacity`, because placement ran
+      # first and there were no pods, which was the right refusal for the wrong reason.
+      assert error.message in ["capacity", "unavailable", "budget_exhausted"]
 
       assert {:ok, [run]} =
                Admin.runs_list(context.lead, team: "engineering", trigger: "nightly-deps")

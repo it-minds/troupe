@@ -576,10 +576,18 @@ Refuses a dirty tree with `conflict` unless `force` is true.
 
 | `state` | actor tree | what a client can do |
 | --- | --- | --- |
+| `pending` | not started | read it; wait. The session exists and has no worker yet |
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
 | `read_only` | stopped | read it; activating commands return `forbidden` |
 | `erased` | gone | `not_found` |
+
+`pending` is a remote state and a short one. A `session.create` on a profile that is full
+but may still grow answers with a session id, `"state": "pending"` and **no endpoint** —
+there is nothing to connect to yet, and inventing an address would be worse than saying
+so. The plane has already asked for another worker; `retry_after_ms` says when to ask
+again. A refusal happens only where a person set a ceiling, and then it quotes the number
+they set.
 
 A session goes `dormant` on its own idle timeout, or on `session.archive`. Its log
 stays, and so does everything a client can learn from it: `session.list`,
@@ -590,6 +598,22 @@ would never stay dormant.
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
+
+#### Activation is about the session, not about the pod
+
+Worth stating exactly, because the looser reading forbids something harmless.
+"Subscribing to a dormant session never activates it" means **no actor tree and no model
+call** — it does not mean no process anywhere and no worker.
+
+A `Session.Reader` is neither an actor tree nor a model call: it is a short-lived process
+that folds a log and serves it. So reading a dormant session may start a *worker* — on a
+profile that has scaled to zero, it must, or the history would be unreadable — and it
+consumes no capacity, reserves no placement and writes no `session_activated`. The
+session is exactly as dormant afterwards as it was before.
+
+The two questions are separate everywhere it matters: a session is active or dormant
+whatever its profile is running, and a profile has workers or none whatever its sessions
+are doing.
 
 ### After a restart
 

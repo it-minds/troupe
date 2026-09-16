@@ -30,10 +30,10 @@ defmodule Troupe.Plane.ProvisionManifestTest do
         name: "dev",
         image: "ghcr.io/troupe/worker:1",
         replicas: 2,
-        sessions_per_pod: 4,
+        size_class: "standard",
         spec: %{
           "llm" => %{"endpoint" => "https://gateway.example.test", "model" => "code-default"},
-          "storage" => %{"size" => "10Gi"}
+          "storage" => %{"storageClassName" => "fast-local"}
         }
       })
 
@@ -54,9 +54,15 @@ defmodule Troupe.Plane.ProvisionManifestTest do
       assert parsed.name == "dev"
       assert parsed.image == "ghcr.io/troupe/worker:1"
       assert parsed.replicas == 2
-      assert parsed.sessions_per_pod == 4
       assert parsed.llm_model == "code-default"
-      assert parsed.storage_size == "10Gi"
+
+      # The size is the class's and the class of storage is the cluster's. Both survive:
+      # a size class that overwrote the whole storage object would drop the storage class,
+      # and on a cluster whose default is block storage that is how granting a team access
+      # to a profile takes the profile down.
+      assert parsed.sessions_per_pod == 4
+      assert parsed.storage_size == "20Gi"
+      assert parsed.storage_class == "fast-local"
     end
   end
 

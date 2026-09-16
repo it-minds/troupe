@@ -40,16 +40,21 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   @providers ~w(openai anthropic fake)
 
+
   # Every scalar field, in the order it appears. The form's names are paths into the
   # resource, so a field and the thing it writes are spelled the same and there is no
   # translation table to get wrong.
+  # Seven fields used to be here that are not any more: `replicas`, `sessionsPerPod`,
+  # the four resource numbers and `storage.size`. They are all still in the custom
+  # resource, written by the plane from the size class and from what is actually running
+  # — because they were seven guesses an administrator was asked for before they could
+  # reach anything they came here to configure, and the first of them was a capacity
+  # question the plane already had the data to answer.
   @scalars ~w(
-    name image replicas sessionsPerPod
+    name image sizeClass maxSessions warmWorkers
     llm.endpoint llm.provider llm.model llm.smallModel llm.secretRef.name llm.secretRef.key
     egress.fqdns egress.gitHosts
-    storage.size storage.storageClassName
-    resources.requests.cpu resources.requests.memory
-    resources.limits.cpu resources.limits.memory
+    storage.storageClassName
     configBundleChannel
   )
 
@@ -176,24 +181,10 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
             "fqdns" => split(fields["egress.fqdns"]),
             "gitHosts" => split(fields["egress.gitHosts"])
           }),
-        "storage" =>
-          compact(%{
-            "size" => fields["storage.size"],
-            "storageClassName" => fields["storage.storageClassName"]
-          }),
-        "resources" =>
-          compact(%{
-            "requests" =>
-              compact(%{
-                "cpu" => fields["resources.requests.cpu"],
-                "memory" => fields["resources.requests.memory"]
-              }),
-            "limits" =>
-              compact(%{
-                "cpu" => fields["resources.limits.cpu"],
-                "memory" => fields["resources.limits.memory"]
-              })
-          }),
+        # The size and the resources belong to the class; only the storage *class* is
+        # still asked for here, because which storage a cluster has is a fact about the
+        # cluster rather than a question about how demanding a session is.
+        "storage" => compact(%{"storageClassName" => fields["storage.storageClassName"]}),
         "mcpServers" => servers_for(servers),
         "configBundleChannel" => fields["configBundleChannel"],
         # Always present: false is a value here, not an absence, and an absent `orgMount`
@@ -204,8 +195,9 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     compact(%{
       "name" => fields["name"],
       "image" => fields["image"],
-      "replicas" => to_integer(fields["replicas"]),
-      "sessions_per_pod" => to_integer(fields["sessionsPerPod"]),
+      "size_class" => fields["sizeClass"],
+      "max_sessions" => to_integer(fields["maxSessions"]),
+      "warm_workers" => to_integer(fields["warmWorkers"]) || 0,
       "spec" => spec
     })
   end
@@ -278,8 +270,9 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     %{
       "name" => name,
       "image" => detail.profile.image,
-      "replicas" => detail.profile.replicas,
-      "sessionsPerPod" => detail.profile.sessions_per_pod,
+      "sizeClass" => detail.profile.size_class,
+      "maxSessions" => detail.profile.max_sessions,
+      "warmWorkers" => detail.profile.warm_workers,
       "llm.endpoint" => get_in(spec, ["llm", "endpoint"]),
       "llm.provider" => get_in(spec, ["llm", "provider"]),
       "llm.model" => get_in(spec, ["llm", "model"]),
@@ -288,12 +281,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "llm.secretRef.key" => get_in(spec, ["llm", "secretRef", "key"]),
       "egress.fqdns" => joined(get_in(spec, ["egress", "fqdns"])),
       "egress.gitHosts" => joined(get_in(spec, ["egress", "gitHosts"])),
-      "storage.size" => get_in(spec, ["storage", "size"]),
       "storage.storageClassName" => get_in(spec, ["storage", "storageClassName"]),
-      "resources.requests.cpu" => get_in(spec, ["resources", "requests", "cpu"]),
-      "resources.requests.memory" => get_in(spec, ["resources", "requests", "memory"]),
-      "resources.limits.cpu" => get_in(spec, ["resources", "limits", "cpu"]),
-      "resources.limits.memory" => get_in(spec, ["resources", "limits", "memory"]),
       "configBundleChannel" => Map.get(spec, "configBundleChannel"),
       "orgMount" => Map.get(spec, "orgMount") == true
     }
@@ -354,6 +342,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       |> assign(:decision, decision(assigns))
       |> assign(:changes, changes_of(assigns))
       |> assign(:providers, @providers)
+      |> assign(:size_classes, Admin.size_classes())
 
     ~H"""
     <.shell actor={@actor} breakglass={@breakglass} page={:workers}>
@@ -378,11 +367,38 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
             repository:tag, or repository@sha256:… A digest pins the image; a tag does not,
             and a pod that restarts on a moved tag comes back running something else.
           </.field>
-          <.field form={@fields} name="replicas" label="replicas" type="number">
-            How many pods. Scaling down drains the ones that go.
+        </section>
+
+        <section class="panel">
+          <h2>Capacity</h2>
+          <p class="lede">
+            Three questions, and the plane answers the rest. How many workers run, how many
+            sessions each carries, and how much CPU, memory and disk they get all follow
+            from the size class and from what is actually running — written by the plane,
+            the way it already writes which teams may use this.
+          </p>
+          <p class="lede">
+            Every session gets its own workspace. Sessions cannot see each other's files,
+            even on the same worker and even for the same person. Files in the team folder
+            are shared, as a shared folder is.
+          </p>
+
+          <.choice form={@fields} name="sizeClass" label="how demanding" options={@size_classes}>
+            Standard puts several sessions on a worker and is right for most work. Heavy
+            gives each one more CPU, memory and disk, for large repositories, builds and
+            long runs. This is a question about resources, not about safety.
+          </.choice>
+
+          <.field form={@fields} name="maxSessions" label="most sessions at once" type="number">
+            How far this may grow, in sessions rather than workers. Empty is no ceiling,
+            bounded by the team's budget. Somebody refused here is shown this number, so it
+            is worth it being one you would stand behind.
           </.field>
-          <.field form={@fields} name="sessionsPerPod" label="sessions per pod" type="number">
-            How many sessions one pod carries before placement fills the next.
+
+          <.field form={@fields} name="warmWorkers" label="workers kept warm" type="number">
+            How many to keep up when nothing is running. 0 costs the next session a cold
+            start of roughly half a minute — the same wait as waking a dormant session, and
+            described the same way.
           </.field>
         </section>
 
@@ -434,40 +450,15 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
         </section>
 
         <section class="panel">
-          <h2>Each pod's disk</h2>
+          <h2>Where a worker's disk comes from</h2>
           <p class="lede">
-            Where the working copies of live sessions are. Fixed once the pods exist: a
-            StatefulSet's volume claim cannot be resized in place, so changing either of
-            these replaces the pods.
+            How much disk is the size class's answer. Which storage it comes from is a fact
+            about this cluster, so it is still asked here — and it is fixed once the pods
+            exist, because a StatefulSet's volume claim cannot be resized in place.
           </p>
 
-          <.field form={@fields} name="storage.size" label="size">
-            A Kubernetes quantity, such as 20Gi. Empty means 20Gi.
-          </.field>
           <.field form={@fields} name="storage.storageClassName" label="storage class">
             Must be one the cluster policy allows. Empty means the cluster's default.
-          </.field>
-        </section>
-
-        <section class="panel">
-          <h2>What each pod is given</h2>
-          <p class="lede">
-            Requests decide where a pod fits; limits decide when it is throttled or killed.
-            Left empty, the namespace's own defaults apply.
-          </p>
-
-          <.field form={@fields} name="resources.requests.cpu" label="cpu requested">
-            Cores, or millicores as 500m.
-          </.field>
-          <.field form={@fields} name="resources.requests.memory" label="memory requested">
-            A quantity, such as 2Gi.
-          </.field>
-          <.field form={@fields} name="resources.limits.cpu" label="cpu limit">
-            Above this the pod is throttled, not killed.
-          </.field>
-          <.field form={@fields} name="resources.limits.memory" label="memory limit">
-            Above this the pod is killed — which takes its sessions with it, so a limit set
-            too low fails the longest-running work first.
           </.field>
         </section>
 

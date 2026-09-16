@@ -107,6 +107,82 @@ defmodule Troupe.Plane.Sessions do
     |> Map.new()
   end
 
+  @doc """
+  What a profile is being asked to run: sessions active now, and sessions waiting.
+
+  Both, because the scaler has to bring up room for the ones waiting as well as keep it
+  for the ones running — a count of the active alone would settle at exactly the capacity
+  that is already full.
+  """
+  @spec demand_for(String.t()) :: %{active: non_neg_integer(), pending: non_neg_integer()}
+  def demand_for(profile) do
+    counts =
+      Repo.all(
+        from(s in Session,
+          where: s.profile == ^profile and s.state in ["active", "pending"],
+          group_by: s.state,
+          select: {s.state, count(s.id)}
+        )
+      )
+      |> Map.new()
+
+    %{active: Map.get(counts, "active", 0), pending: Map.get(counts, "pending", 0)}
+  end
+
+  @doc """
+  Sessions waiting for a worker on this profile, oldest first.
+
+  Oldest first is the whole of the fairness here: a session that has been waiting two
+  minutes should be placed before one created a moment ago, and a controller that took
+  them in any other order would make the wait unbounded for somebody.
+  """
+  @spec pending_for(String.t(), non_neg_integer()) :: [Session.t()]
+  def pending_for(profile, limit \\ 50) do
+    Repo.all(
+      from(s in Session,
+        where: s.profile == ^profile and s.state == "pending",
+        order_by: [asc: s.inserted_at],
+        limit: ^limit
+      )
+    )
+  end
+
+  @doc """
+  Mark a session as waiting for a worker, keeping the prompt until there is one.
+
+  The prompt is the only piece of session *content* the plane ever holds, and it holds
+  it here for the same reason it carries it in `session.activate`: a session with nobody
+  attached has to do its first turn alone, and a wait that dropped the prompt would
+  produce a session that started and then sat there. It is cleared the moment the
+  session is placed.
+  """
+  @spec wait(String.t(), String.t() | nil) :: {:ok, Session.t()} | {:error, term()}
+  def wait(session_id, prompt) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        session
+        |> Session.changeset(%{state: "pending", pending_prompt: prompt})
+        |> Repo.update()
+    end
+  end
+
+  @doc "The session is placed: it is no longer waiting and its prompt has been sent."
+  @spec admitted(String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def admitted(session_id) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        session
+        |> Session.changeset(%{state: "active", pending_prompt: nil})
+        |> Repo.update()
+    end
+  end
+
   # -- lifecycle --------------------------------------------------------------
 
   @doc """

@@ -477,14 +477,24 @@ defmodule Troupe.Plane.PanelTest do
       # The fields a profile actually has. A page that edits a subset of them is a page
       # that quietly makes the rest unreachable except by hand-written JSON.
       for field <- ~w(
-            image replicas sessionsPerPod
+            image sizeClass maxSessions warmWorkers
             llm.endpoint llm.provider llm.model llm.secretRef.name
             egress.fqdns egress.gitHosts
-            storage.size storage.storageClassName
-            resources.requests.cpu resources.limits.memory
+            storage.storageClassName
             configBundleChannel orgMount
           ) do
         assert html =~ ~s(name="#{field}"), "the editor has no field for #{field}"
+      end
+
+      # And the seven that left. They are still in the custom resource and the plane
+      # writes them; an editor that still asked would be asking for a number it does not
+      # use, which is worse than not asking.
+      for gone <- ~w(
+            replicas sessionsPerPod storage.size
+            resources.requests.cpu resources.requests.memory
+            resources.limits.cpu resources.limits.memory
+          ) do
+        refute html =~ ~s(name="#{gone}"), "the editor still asks for #{gone}"
       end
     end
 
