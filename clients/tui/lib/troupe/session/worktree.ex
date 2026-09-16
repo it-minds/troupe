@@ -50,8 +50,8 @@ defmodule Troupe.Session.Worktree do
   @doc "True when `git worktree list` already knows this directory."
   @spec registered?(String.t(), String.t()) :: boolean()
   def registered?(workspace, wt) do
-    expanded = Path.expand(wt)
-    Enum.any?(all(workspace), &(&1.path == expanded))
+    canonical = canonical(wt)
+    Enum.any?(all(workspace), &(&1.path == canonical))
   end
 
   defp branch_exists?(workspace, branch) do
@@ -124,17 +124,23 @@ defmodule Troupe.Session.Worktree do
   @spec list(String.t()) :: [%{path: String.t(), rel: String.t(), branch: String.t() | nil}]
   def list(workspace) do
     root = Path.expand(workspace)
+    # git reports canonical paths; the workspace root may reach them through a
+    # symlink (macOS /var -> /private/var), so compare canonicalized and report
+    # paths back under the root as the user gave it.
+    real_root = canonical(workspace)
 
     workspace
     |> all()
-    |> Enum.reject(&(&1.path in [nil, root] or String.contains?(&1.path, "/.troupe/worktrees/")))
+    |> Enum.reject(
+      &(&1.path in [nil, real_root] or String.contains?(&1.path, "/.troupe/worktrees/"))
+    )
     |> Enum.map(fn wt ->
-      rel =
-        if String.starts_with?(wt.path, root <> "/"),
-          do: Path.relative_to(wt.path, root),
-          else: wt.path
-
-      %{wt | rel: rel}
+      if String.starts_with?(wt.path, real_root <> "/") do
+        rel = Path.relative_to(wt.path, real_root)
+        %{wt | rel: rel, path: Path.join(root, rel)}
+      else
+        %{wt | rel: wt.path}
+      end
     end)
   end
 
@@ -176,8 +182,16 @@ defmodule Troupe.Session.Worktree do
           %{path: String.t(), rel: String.t(), branch: String.t() | nil} | nil
   def find(workspace, name) do
     name = String.trim_trailing(name, "/")
-    Enum.find(list(workspace), fn wt -> name in [wt.rel, wt.path, wt.branch] end)
+
+    Enum.find(list(workspace), fn wt ->
+      name in [wt.rel, wt.path, wt.branch] or
+        (Path.type(name) == :absolute and canonical(name) == canonical(wt.path))
+    end)
   end
+
+  # git reports worktree paths with symlinks resolved, so any path Troupe
+  # compares against one has to be resolved the same way.
+  defp canonical(path), do: path |> Path.expand() |> Troupe.Workspace.canonicalize()
 
   @doc "Uncommitted change summary of a user-managed worktree (nothing is committed)."
   @spec diff_stat(String.t()) :: String.t()
