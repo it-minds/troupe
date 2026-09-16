@@ -773,10 +773,14 @@ defmodule Troupe.Plane.HarnessTest do
   # anything else on the way is the other direction and none of this function's
   # business. Taking whatever arrived first made this a race, and it lost in
   # `bundle.fetch`, which had nothing to do with it.
+  # An *answer*, which is not the same thing as a frame carrying this id. JSON-RPC ids
+  # are per direction: the plane numbers its own requests from one too, and it pushes
+  # `session.index` at a pod the moment it enrols — so matching on the id alone matched
+  # the plane's question and read it as the reply to ours. A response has no `method`.
   defp await_answer(socket, id, buffer) do
     {frames, rest} = split_frames(buffer)
 
-    case Enum.find(frames, &match?(%{"id" => ^id}, &1)) do
+    case Enum.find(frames, &response?(&1, id)) do
       nil ->
         {:ok, data} = :gen_tcp.recv(socket, 0, 5_000)
         await_answer(socket, id, rest <> data)
@@ -785,6 +789,10 @@ defmodule Troupe.Plane.HarnessTest do
         answer
     end
   end
+
+  defp response?(%{"id" => id, "method" => _asking}, id), do: false
+  defp response?(%{"id" => id}, id), do: true
+  defp response?(_frame, _id), do: false
 
   # Newline-delimited JSON, and a read can end mid-frame; the trailing fragment goes
   # back on the buffer rather than through `Jason.decode!/1`.

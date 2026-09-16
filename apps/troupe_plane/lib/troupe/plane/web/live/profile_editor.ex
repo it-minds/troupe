@@ -40,7 +40,6 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   @providers ~w(openai anthropic fake)
 
-
   # Every scalar field, in the order it appears. The form's names are paths into the
   # resource, so a field and the thing it writes are spelled the same and there is no
   # translation table to get wrong.

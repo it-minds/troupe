@@ -960,7 +960,6 @@ defmodule Troupe.Plane.Harness do
     {:ok, :waiting}
   end
 
-
   # The one refusal that survives, and it names the person who decided it rather than
   # the machine that noticed. `at_capacity, ask your administrator to add replicas` is
   # not something anybody can act on; "this profile allows ten at once and ten are
