@@ -19,6 +19,7 @@ defmodule Troupe.Gateway.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Gateway.{Daemon, Dispatch, Presence, Session, Transport, Writer}
+  alias Troupe.Gateway.Session.Subscription
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
 
@@ -630,15 +631,27 @@ defmodule Troupe.Gateway.Connection do
         state
 
       {subscription, rest} ->
-        Session.unsubscribe(subscription.topic)
-        state = %{state | subscriptions: rest}
-
-        if subscription.session_id && not subscribed_to?(state, subscription.session_id) do
-          Presence.publish(subscription.session_id, state.principal, "left")
-        end
-
-        state
+        stop_following(%{state | subscriptions: rest}, subscription)
     end
+  end
+
+  # Only when nothing else on this connection still wants the session. Following is per
+  # process and per session rather than per subscription, so unregistering while another
+  # subscription is open — the presence topic beside the session's own, or the same session
+  # at two levels — would silence that one too.
+  defp stop_following(state, %Subscription{session_id: id} = subscription) when is_binary(id) do
+    if subscribed_to?(state, id) do
+      state
+    else
+      Session.unsubscribe(subscription.topic)
+      Presence.publish(id, state.principal, "left")
+      state
+    end
+  end
+
+  defp stop_following(state, %Subscription{} = subscription) do
+    Session.unsubscribe(subscription.topic)
+    state
   end
 
   defp subscribed_to?(state, nil), do: map_size(state.subscriptions) > 0

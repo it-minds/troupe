@@ -279,8 +279,15 @@ defmodule Troupe.Gateway.Dispatch do
         replay: replay
       }
 
-      {:ok, %{"subscription_id" => subscription.id, "head_seq" => head_seq},
-       {:subscribed, subscription}}
+      # A presence subscription has no head to be at and nothing to catch up on. Saying
+      # `0` rather than the session's head is the honest answer: a client that treated it
+      # as a cursor would be holding a number that means nothing on this topic.
+      answer =
+        if kind == :presence,
+          do: %{"subscription_id" => subscription.id, "head_seq" => 0, "cursored" => false},
+          else: %{"subscription_id" => subscription.id, "head_seq" => head_seq}
+
+      {:ok, answer, {:subscribed, subscription}}
     end
   end
 
@@ -647,7 +654,9 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp ensure_exists(:fleet, _), do: :ok
 
-  defp ensure_exists(:session, session_id) do
+  # Presence is about a session, so the session has to be one — the same check, because
+  # "who is looking at s-nonexistent" is a question with no answer rather than an empty one.
+  defp ensure_exists(kind, session_id) when kind in [:session, :presence] do
     case lookup(session_id) do
       {:ok, _} -> :ok
       error -> error

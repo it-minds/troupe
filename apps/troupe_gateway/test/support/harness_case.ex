@@ -24,7 +24,7 @@ defmodule Troupe.Gateway.HarnessCase do
     end
   end
 
-  setup do
+  setup context do
     base = Path.join(System.tmp_dir!(), "troupe-harness-#{System.unique_integer([:positive])}")
     workspace = Path.join(base, "workspace")
     state_dir = Path.join(base, "state")
@@ -34,10 +34,17 @@ defmodule Troupe.Gateway.HarnessCase do
     previous = System.get_env("TROUPE_STATE_HOME")
     System.put_env("TROUPE_STATE_HOME", state_dir)
 
+    # `@tag limits: [outbound_bound: ...]` for the tests that are about what happens when a
+    # client stops keeping up. Everything else gets the production bounds, because a
+    # fixture that quietly ran under tiny ones would be proving something else.
+    limits = Map.get(context, :limits, [])
+
     start_supervised!(
       {Daemon,
-       endpoint: Endpoint.remote(0, &__MODULE__.authenticate/1),
-       idle_shutdown_ms: :timer.hours(1)}
+       [
+         endpoint: Endpoint.remote(0, &__MODULE__.authenticate/1),
+         idle_shutdown_ms: :timer.hours(1)
+       ] ++ limits}
     )
 
     on_exit(fn ->

@@ -3561,3 +3561,29 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      at most fifteen minutes and is checked offline by the pod that holds the session,
      which is true of every route in and not something shares change. Somebody who needs a
      connection closed *now* ends the session.
+
+541. **Presence is a topic of its own, not a kind of event on the session's.** It has no
+     `seq`, it is never persisted, and a subscriber who missed some of it has missed
+     nothing — three properties the session's stream has none of. Riding `session:<id>` it
+     is presence a client cannot decline and a server cannot shed without touching the one
+     stream it must not touch. On `presence:<id>`, shedding it is a decision about one
+     subscription, which is the difference between a pressure valve and data loss.
+
+542. **`presence:<id>` answers `head_seq: 0` and says `cursored: false`.** Handing back the
+     session's head would be handing back a number that means nothing on this topic, and a
+     client that treated it as a cursor would be holding a lie.
+
+543. **Following a session is per process and per connection, not per subscription.**
+     Registering the connection on the fan-out once per subscription put it there twice —
+     so every event arrived twice and every subscription wrote it twice — and because
+     `Registry.unregister/2` removes all of a process's entries for a key, dropping one
+     subscription would have taken the other's delivery with it. A latent bug for two
+     subscriptions on one session at different levels; the presence topic made it routine.
+     `Troupe.Events.subscribe/1` is idempotent and the connection unregisters only when
+     nothing else still wants the session.
+
+544. **"Presence stops entirely" is a claim about a wedged socket, not a slow one.** The
+     first version of the test asserted no presence at all and failed: a client that has
+     merely fallen behind recovers between writes, and a flush that frees bytes lets the
+     next frame through — which is the design working. The test now fills the kernel
+     buffers until the connection has dropped hundreds, and asserts from that point on.

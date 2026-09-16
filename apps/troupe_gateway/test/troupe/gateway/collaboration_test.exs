@@ -12,6 +12,11 @@ defmodule Troupe.Gateway.CollaborationTest do
   must reach other clients and must never reach the log. It is on the spec's Forbidden
   list, so it is asserted from both ends — what the other client saw, and what the
   durable log contains afterwards.
+
+  Presence arrives on `presence:<id>` rather than on the session's own topic, which is
+  what makes it something a client can decline and a saturated server can shed without
+  touching the session's stream. What that topic is *for* is `Troupe.Gateway.PresenceTest`;
+  here it is only where the subscription points.
   """
 
   use Troupe.Gateway.HarnessCase, async: false
@@ -157,6 +162,7 @@ defmodule Troupe.Gateway.CollaborationTest do
       ada = attach(context, @ada)
       bob = attach(context, @bob)
       {:ok, _} = Client.subscribe(bob, "session:#{session.id}", from_seq: 0)
+      {:ok, _} = Client.subscribe(bob, "presence:#{session.id}")
 
       assert {:ok, %{"accepted" => true}} =
                Client.call(ada, "presence.set", %{
@@ -178,18 +184,17 @@ defmodule Troupe.Gateway.CollaborationTest do
       assert event.seq == nil
       assert event.ephemeral?
 
-      # ...and it cannot be in a replay, because it has no seq to replay from. Checked
-      # over every presence event a fresh client sees while replaying from the
-      # beginning — the live ones its own arrival produces included.
+      # ...and a fresh client replaying the session from the beginning sees none of it,
+      # which is the same fact from the other side. Its own arrival publishes presence
+      # while it is replaying, so this is an assertion about the topic and not about a
+      # quiet moment.
       seen = replayed(context, session.id)
-      presence = Enum.filter(seen, &(&1.type == "presence"))
 
-      assert presence != [], "no presence events at all; this assertion is proving nothing"
+      assert Enum.filter(seen, &(&1.type == "presence")) == [],
+             "presence reached a session replay, which is what the topic exists to prevent"
 
-      for event <- presence do
-        assert event.seq == nil, "a presence event carried a seq, so a replay would contain it"
-        assert event.ephemeral?
-      end
+      assert Enum.any?(seen, &(&1.type == "session_created")),
+             "the replay was empty, so this assertion is proving nothing"
 
       # And from the server's own store, which is the log a new pod would read.
       types = session.id |> Log.replay() |> Enum.map(& &1.type)
@@ -201,7 +206,7 @@ defmodule Troupe.Gateway.CollaborationTest do
 
       ada = attach(context, @ada)
       bob = attach(context, @bob)
-      {:ok, _} = Client.subscribe(bob, "session:#{session.id}", from_seq: 0)
+      {:ok, _} = Client.subscribe(bob, "presence:#{session.id}")
       {:ok, _} = Client.subscribe(ada, "session:#{session.id}", from_seq: 0)
 
       assert_receive {:troupe_event, _t, _i, %Event{type: "presence", data: %{"state" => "joined"}}},

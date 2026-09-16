@@ -342,7 +342,7 @@ and never shared between sessions.
 
 | param | values |
 | --- | --- |
-| `topic` | `"fleet"` or `"session:<id>"` |
+| `topic` | `"fleet"`, `"session:<id>"` or `"presence:<id>"` |
 | `level` | `"summary"` or `"detail"` |
 | `from_seq` | optional; replay durable events with `seq > from_seq` |
 
@@ -367,6 +367,26 @@ with no replay.
 - **`fleet`** carries only session lifecycle events — created, state changes,
   archived, erased — for every session the principal can see. `fleet` ignores
   `from_seq`.
+- **`presence:<id>`** carries `presence` and nothing else, and is the only topic that
+  does. It ignores `level` and `from_seq`, answers `head_seq: 0` with
+  `"cursored": false`, and is the first thing the server stops sending when a client
+  falls behind. Presence never reaches `session:<id>` or `fleet`.
+
+#### Presence is a topic of its own
+
+Who is looking at a session is true while somebody is there and worthless a minute
+later. It has no `seq`, it is never persisted, and a subscriber who missed some of it
+has missed nothing — three properties the session's own stream has none of.
+
+That is what makes it droppable in a way the session's events are not. **With a
+client's outbound queue saturated, presence stops entirely and the durable order is
+unchanged**: shedding it is a decision about one subscription, so the session's own
+stream arrives whole and in the same order it would have. Presence riding
+`session:<id>` would be presence a client cannot decline and a server cannot shed
+without touching the stream it must not touch.
+
+A client that wants both subscribes twice. It is delivered once, on the presence
+subscription.
 
 ### `unsubscribe`
 
@@ -1049,7 +1069,8 @@ definitions and fails CI on any breaking change.
 ## 13. Writing a client
 
 1. Connect and send `initialize`. Keep the negotiated `scopes`.
-2. `subscribe` to `fleet` for the session list, and to `session:<id>` at `detail`
+2. `subscribe` to `fleet` for the session list, to `session:<id>` at `detail`, and to
+   `presence:<id>` if it shows who else is there
    for one session.
 3. Fold durable events into your view; render ephemerals as they arrive and expect
    to lose some.
