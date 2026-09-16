@@ -71,6 +71,7 @@
     "events/tool_results.json",
     "events/tools_registered.json",
     "events/tools_unregistered.json",
+    "events/trigger_fired.json",
     "events/user_input.json",
     "events/watch_notice.json"
   ],

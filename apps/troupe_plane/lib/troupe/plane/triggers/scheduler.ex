@@ -68,7 +68,7 @@ defmodule Troupe.Plane.Triggers.Scheduler do
       event = %{"kind" => "schedule", "at" => DateTime.to_iso8601(due)}
 
       result =
-        case Triggers.fire(trigger, key, event, "scheduler") do
+        case Triggers.fire(trigger, "schedule", key, event, "scheduler") do
           {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
           {:error, error} -> {:error, error}
         end

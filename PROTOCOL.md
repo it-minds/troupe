@@ -248,7 +248,7 @@ Durable:
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
 | `llm_response` | `message`, `usage`, `stop_reason`, `model`, `gateway` |
 | `llm_error` | `reason` |
-| `tool_call_started` | `call_id`, `name`, `args` |
+| `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
@@ -265,10 +265,30 @@ Durable:
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
+| `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
+
+`trigger_fired` is written once, at creation, for a session started by something other
+than a person at a keyboard, and never again however many times that session is woken.
+`source` is one of `schedule`, `webhook`, `integration`, `ci`, `api`, `manual`, `agent`,
+and everything else about the seven is the same — which is the point of the event. A
+session a person typed into carries none.
+
+`payload_digest` is a hash and never a payload: a webhook body is content, and content
+belongs where the retention policy reaches it rather than in an event that outlives the
+session. It and `revision` are absent where there was nothing to measure — a session
+started through the A2A facade has no trigger document to name — and absent means there
+was none, never that the writer skipped it.
+
+`tool_call_started.identity` says whose credential an MCP call goes out as: `"profile"`
+for a profile-mode server, the subject for a person-mode one, and absent for every other
+tool. `principal` answers the same question with its other half — `{"subject", "actor"}`,
+whose authority and what acted — and both halves are written even where they are equal.
+A reader written against `identity` alone keeps working: the field still holds the string
+it always held.
 
 `llm_response.gateway` is what the gateway in front of the provider said about the call
 it billed: `{"request_id": "…", "cost_micros": 18400}`. Both keys are optional and the

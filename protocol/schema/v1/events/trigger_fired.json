@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/trigger_fired.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "idempotency_key": {
+      "type": "string"
+    },
+    "payload_digest": {
+      "type": "string"
+    },
+    "principal": {
+      "type": "object"
+    },
+    "revision": {
+      "type": "string"
+    },
+    "source": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "idempotency_key",
+    "principal",
+    "source"
+  ],
+  "title": "trigger_fired",
+  "type": "object"
+}

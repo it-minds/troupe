@@ -958,9 +958,12 @@ defmodule Troupe.Plane.Admin do
   @doc """
   Fire a trigger now, by hand.
 
-  The same `fire/4` a schedule or an executor reaches, with an idempotency key that
+  The same `fire/5` a schedule or an executor reaches, with an idempotency key that
   names the person and the moment, so a second click a minute later is a second run and
   a retry of a failed one is not.
+
+  The source is `manual` and the console is the only door that may say so: a person's
+  hand is the one thing about a run that cannot be inferred afterwards.
   """
   @spec trigger_run(actor(), String.t(), String.t()) :: result()
   def trigger_run(actor, team_name, name) do
@@ -973,7 +976,7 @@ defmodule Troupe.Plane.Admin do
       {:ok, _} =
         Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"run" => key})
 
-      case Triggers.fire(trigger, key, event, actor.subject) do
+      case Triggers.fire(trigger, "manual", key, event, actor.subject) do
         {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
         {:error, %Error{} = error} -> {:error, error}
       end

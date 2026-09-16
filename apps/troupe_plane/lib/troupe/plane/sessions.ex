@@ -614,6 +614,16 @@ defmodule Troupe.Plane.Sessions do
       {:trigger, name}, acc ->
         from(s in acc, where: fragment("?->>'trigger'", s.origin) == ^name)
 
+      # One filter for all seven ways a session is started by something other than a
+      # person: `source: "any"` is every one of them, and a named source is one. This is
+      # what makes "show me everything automated" a single question rather than a union
+      # of origin kinds a reader has to know to enumerate.
+      {:source, "any"}, acc ->
+        from(s in acc, where: not is_nil(fragment("?->>'source'", s.origin)))
+
+      {:source, source}, acc when is_binary(source) ->
+        from(s in acc, where: fragment("?->>'source'", s.origin) == ^source)
+
       {:needs_review, true}, acc ->
         needs_review(acc)
 

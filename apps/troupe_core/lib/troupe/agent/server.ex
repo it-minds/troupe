@@ -944,8 +944,17 @@ defmodule Troupe.Agent.Server do
   # Both halves, always. `Principal.to_json/1` writes `subject` and `actor` even where
   # they are equal, which is what lets a reader of an old event tell "the same person"
   # from "nobody wrote the second one".
-  defp put_identity(data, %Principal{} = principal),
-    do: Map.put(data, "identity", Principal.to_json(principal))
+  #
+  # `identity` keeps the string it has always been — whose credential goes out — and the
+  # pair arrives beside it. Within a major version a field may be added and may not be
+  # retyped, and a reader written against `identity` last year is a reader that must
+  # still work: it would have got a map where it expected a string and had no way to say
+  # so beyond crashing.
+  defp put_identity(data, %Principal{} = principal) do
+    data
+    |> Map.put("identity", principal.subject)
+    |> Map.put("principal", Principal.to_json(principal))
+  end
 
   defp dispatch_tool(%ToolUse{} = tool_use, state) do
     call = %Call{id: tool_use.id, name: tool_use.name, args: normalize_args(tool_use.input)}

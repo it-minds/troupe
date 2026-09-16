@@ -139,7 +139,7 @@ defmodule Troupe.Plane.TriggersTest do
         })
 
       event = %{"issue" => %{"key" => "OPS-12", "title" => "Disk is full"}}
-      assert {:ok, fired} = Triggers.fire(trigger, "hook:1", event, "hatchet")
+      assert {:ok, fired} = Triggers.fire(trigger, "webhook", "hook:1", event, "hatchet")
 
       assert_receive {:pushed, "session.activate", pushed}, 5_000
       assert pushed["owner_subject"] == "svc:engineering/nightly"
@@ -147,8 +147,12 @@ defmodule Troupe.Plane.TriggersTest do
       assert pushed["terms"] == %{"max_turns" => 3, "approvals" => "deny"}
       # The origin names the revision as well as the trigger, so a session found six
       # weeks later says which wording made it without a join through the run.
-      assert %{"kind" => "trigger", "trigger" => "triage", "run" => "hook:1"} =
-               pushed["origin"]
+      assert %{
+               "kind" => "trigger",
+               "trigger" => "triage",
+               "source" => "webhook",
+               "idempotency_key" => "hook:1"
+             } = pushed["origin"]
 
       # Who fired it, and on whose authority. The principal is what acted; its sponsor is
       # the person answerable for what it did, and a run six weeks old is exactly when
@@ -172,7 +176,7 @@ defmodule Troupe.Plane.TriggersTest do
       assert Sessions.role_for(lead, session) == :control
 
       # The same key again: the same run, the same session, a token minted now.
-      assert {:ok, again} = Triggers.fire(trigger, "hook:1", event, "hatchet")
+      assert {:ok, again} = Triggers.fire(trigger, "webhook", "hook:1", event, "hatchet")
       assert again.run.id == fired.run.id
       assert again.session.id == session.id
       assert is_binary(again.endpoint["token"])
@@ -193,11 +197,11 @@ defmodule Troupe.Plane.TriggersTest do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
       trigger = trigger!(context, %{"name" => "nightly", "concurrency" => 1})
 
-      assert {:ok, first} = Triggers.fire(trigger, "cron:1", %{}, "scheduler")
+      assert {:ok, first} = Triggers.fire(trigger, "schedule", "cron:1", %{}, "scheduler")
       assert_receive {:pushed, "session.activate", _}, 5_000
       assert first.run.state == "created"
 
-      assert {:ok, second} = Triggers.fire(trigger, "cron:2", %{}, "scheduler")
+      assert {:ok, second} = Triggers.fire(trigger, "schedule", "cron:2", %{}, "scheduler")
       assert second.run.state == "skipped"
       assert is_nil(second.session)
       assert is_nil(second.endpoint)
@@ -207,7 +211,7 @@ defmodule Troupe.Plane.TriggersTest do
       {:ok, _} =
         Sessions.put_status(first.session.id, %{"status" => "done", "done_reason" => "finished"})
 
-      assert {:ok, third} = Triggers.fire(trigger, "cron:3", %{}, "scheduler")
+      assert {:ok, third} = Triggers.fire(trigger, "schedule", "cron:3", %{}, "scheduler")
       assert third.run.state == "created"
       assert_receive {:pushed, "session.activate", _}, 5_000
 
@@ -222,12 +226,12 @@ defmodule Troupe.Plane.TriggersTest do
       a = trigger!(context, %{"name" => "a"})
       b = trigger!(context, %{"name" => "b"})
 
-      assert {:ok, _} = Triggers.fire(a, "shared", %{}, "x")
-      assert {:error, error} = Triggers.fire(b, "shared", %{}, "x")
+      assert {:ok, _} = Triggers.fire(a, "api", "shared", %{}, "x")
+      assert {:error, error} = Triggers.fire(b, "api", "shared", %{}, "x")
       assert error.message == "conflict"
 
       {:ok, off} = Triggers.put(context.team, %{"name" => "b", "enabled" => false}, "root")
-      assert {:error, error} = Triggers.fire(off, "b:1", %{}, "x")
+      assert {:error, error} = Triggers.fire(off, "api", "b:1", %{}, "x")
       assert error.message == "forbidden"
     end
 
@@ -374,7 +378,7 @@ defmodule Troupe.Plane.TriggersTest do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
       trigger = trigger!(context, %{"name" => "nightly", "prompt_template" => "check disks"})
 
-      assert {:ok, first} = Triggers.fire(trigger, "run-1", %{}, "scheduler")
+      assert {:ok, first} = Triggers.fire(trigger, "schedule", "run-1", %{}, "scheduler")
       assert first.revision.revision == 1
       assert first.revision.hash =~ ~r/^sha256:[0-9a-f]{64}$/
 
@@ -390,7 +394,7 @@ defmodule Troupe.Plane.TriggersTest do
       assert reread.revision == 1
       assert reread.prompt_template == "check disks"
 
-      assert {:ok, next} = Triggers.fire(edited, "run-2", %{}, "scheduler")
+      assert {:ok, next} = Triggers.fire(edited, "schedule", "run-2", %{}, "scheduler")
       assert next.revision.revision == 2
     end
 
@@ -453,7 +457,7 @@ defmodule Troupe.Plane.TriggersTest do
           end)
         end)
 
-      assert {:ok, fired} = Triggers.fire(trigger, "race-1", %{}, "scheduler")
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "race-1", %{}, "scheduler")
       {:ok, _} = Task.await(task)
 
       assert fired.run.revision_id == fired.revision.id
@@ -461,7 +465,7 @@ defmodule Troupe.Plane.TriggersTest do
       assert named.prompt_template in ["before", "after"]
 
       # One, and it does not move afterwards.
-      assert {:ok, again} = Triggers.fire(trigger, "race-1", %{}, "scheduler")
+      assert {:ok, again} = Triggers.fire(trigger, "schedule", "race-1", %{}, "scheduler")
       assert again.run.revision_id == fired.run.revision_id
       assert again.revision.hash == named.hash
     end
@@ -475,7 +479,7 @@ defmodule Troupe.Plane.TriggersTest do
           "prompt_template" => "rev {{run.revision}} of {{trigger.name}}"
         })
 
-      assert {:ok, fired} = Triggers.fire(trigger, "render-1", %{}, "scheduler")
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "render-1", %{}, "scheduler")
 
       json = Triggers.fired_json(fired)
       assert json["run"]["revision"] == 1
@@ -502,7 +506,7 @@ defmodule Troupe.Plane.TriggersTest do
       lead = person("lead@example.test", ["engineering"])
       trigger = trigger!(context, %{"name" => "nightly", "notify" => [lead.subject]})
 
-      assert {:ok, fired} = Triggers.fire(trigger, "cron:1", %{}, "scheduler")
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "cron:1", %{}, "scheduler")
       assert_receive {:pushed, "session.activate", _}, 5_000
 
       assert {:ok, %{"sessions" => [_]}} =

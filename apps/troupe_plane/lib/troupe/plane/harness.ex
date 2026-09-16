@@ -29,6 +29,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions.{ACL, Session}
   alias Troupe.Plane.{TeamBudget, Tokens, Triggers}
+  alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.{Error, Token}
 
@@ -220,6 +221,7 @@ defmodule Troupe.Plane.Harness do
       |> put_option(:status, params["status"])
       |> put_option(:origin, params["origin"])
       |> put_option(:trigger, params["trigger"])
+      |> put_option(:source, params["source"])
       |> put_option(:needs_review, params["needs_review"])
       |> put_option(:limit, params["limit"])
 
@@ -385,13 +387,20 @@ defmodule Troupe.Plane.Harness do
   end
 
   # As the trigger's principal, or as an admin of its team. The session is created by
-  # `Triggers.fire/4` calling back into `session.create` *as the principal*, so every
+  # `Triggers.fire/5` calling back into `session.create` *as the principal*, so every
   # check a principal's own create would meet — grant, budget, agent, terms — is met.
+  #
+  # A caller may say it is a CI job or a custom integration rather than a bare API call,
+  # because that is a distinction only the caller knows and the run is worth labelling
+  # with. It may not say it is a schedule, a person's hand or a trigger key: those are
+  # vouched for by which door the firing came through, and a source anybody can claim
+  # tells a reader nothing.
   defp handle("trigger.fire", params, %{user: user}) do
     with {:ok, trigger} <- Triggers.for_caller(params["trigger"], user),
          {:ok, key} <- required_string(params, "idempotency_key"),
+         {:ok, source} <- claimed_source(params["source"]),
          {:ok, event} <- event_param(params["event"]),
-         {:ok, fired} <- Triggers.fire(trigger, key, event, user.subject) do
+         {:ok, fired} <- Triggers.fire(trigger, source, key, event, user.subject) do
       {:ok, Triggers.fired_json(fired)}
     end
   end
@@ -601,6 +610,18 @@ defmodule Troupe.Plane.Harness do
   end
 
   defp event_param(_other), do: invalid("event is an object")
+
+  # What the caller says it is. Absent means `api`, which is what a credential at `/rpc`
+  # is unless it says otherwise.
+  defp claimed_source(nil), do: {:ok, "api"}
+
+  defp claimed_source(source) when is_binary(source) do
+    if source in Run.claimable_sources(),
+      do: {:ok, source},
+      else: invalid("source is one of #{Enum.join(Run.claimable_sources(), ", ")}")
+  end
+
+  defp claimed_source(_other), do: invalid("source is a string")
 
   # An id nobody has used, or one that is already this person's private session. A team
   # session's id is refused here rather than quietly becoming a private row, and so is

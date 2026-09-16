@@ -15,6 +15,7 @@ defmodule Troupe do
 
   alias Troupe.Agent.Server, as: Agent
   alias Troupe.{Events, Mounts, Registry, Session, Sessions}
+  alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Watcher}
   alias Troupe.Sessions.Index
 
@@ -76,6 +77,7 @@ defmodule Troupe do
     case Enum.find(previously, &(&1.type == "session_created")) do
       nil ->
         Log.append(session_id, Session.root_path(), :session_created, created_data(session_opts))
+        fired(session_id, Keyword.get(session_opts, :origin))
 
       created ->
         Log.append(
@@ -84,6 +86,21 @@ defmodule Troupe do
           :session_resumed,
           resumed_data(previously, created, workspace)
         )
+    end
+  end
+
+  # One event for all seven ways a session is started by something other than a person at
+  # a keyboard. `session_created` already carries the origin, but as an opaque object
+  # whose shape is the plane's business; this is the normalised claim a reader can group
+  # by — which source, under which document, on whose authority, against which key.
+  #
+  # Only on creation, and only from the origin the plane sent. A resume appends nothing:
+  # a session is fired once, however many times it is opened, and a second
+  # `trigger_fired` would read as a second run.
+  defp fired(session_id, origin) do
+    case Origin.fired(origin) do
+      nil -> :ok
+      data -> Log.append(session_id, Session.root_path(), :trigger_fired, data)
     end
   end
 

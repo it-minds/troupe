@@ -28,7 +28,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
   alias Troupe.Plane.Triggers.{Revision, Run, Template, Trigger}
-  alias Troupe.Protocol.{Error, Principal}
+  alias Troupe.Protocol.{Canonical, Error, Origin, Principal}
 
   require Logger
 
@@ -308,17 +308,20 @@ defmodule Troupe.Plane.Triggers do
   picking up whatever the row says today, so a run names exactly one revision for as
   long as it exists.
   """
-  @spec fire(Trigger.t(), String.t(), map(), String.t()) :: {:ok, fired()} | {:error, Error.t()}
-  def fire(%Trigger{enabled: false} = trigger, _key, _event, _by) do
+  @spec fire(Trigger.t(), String.t(), String.t(), map(), String.t()) ::
+          {:ok, fired()} | {:error, Error.t()}
+  def fire(%Trigger{enabled: false} = trigger, _source, _key, _event, _by) do
     {:error, Error.new(:forbidden, %{reason: "trigger is disabled", trigger: trigger.name})}
   end
 
-  def fire(%Trigger{} = trigger, key, event, by) when is_binary(key) and is_map(event) do
-    with :ok <- check_event(event) do
+  def fire(%Trigger{} = trigger, source, key, event, by)
+      when is_binary(source) and is_binary(key) and is_map(event) do
+    with :ok <- check_source(source),
+         :ok <- check_event(event) do
       case Repo.get_by(Run, idempotency_key: key) do
         nil ->
           {:ok, revision} = revise(trigger)
-          fire_new(trigger, revision, key, event, by)
+          fire_new(trigger, revision, source, key, event, by)
 
         %Run{trigger_id: id} = run when id == trigger.id ->
           replay(trigger, run)
@@ -329,14 +332,19 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
-  defp fire_new(trigger, revision, key, event, by) do
+  defp fire_new(trigger, revision, source, key, event, by) do
     attrs = %{
       trigger_id: trigger.id,
       revision_id: revision.id,
       idempotency_key: key,
       fired_at: DateTime.utc_now(),
       fired_by: by,
+      source: source,
       event: event,
+      # Over the payload as it arrived, not over what the run kept. `event` is capped at
+      # 16 KiB on purpose; a digest taken after the cap would answer "same" for two
+      # firings that differed only past the cut.
+      payload_digest: Canonical.hash(event),
       state: "created"
     }
 
@@ -465,16 +473,18 @@ defmodule Troupe.Plane.Triggers do
       "prompt" => Template.render(revision.prompt_template, values),
       "visibility" => revision.visibility,
       "terms" => revision.terms,
-      "origin" => %{
-        "kind" => "trigger",
-        "trigger" => trigger.name,
-        "run" => run.idempotency_key,
-        "revision" => revision.hash,
-        # Who fired it, and on whose authority. The principal is the actor; its sponsor
-        # is the person answerable for what it does, and a run with no sponsor is a run
-        # nobody is — which is why a principal cannot exist without one.
-        "principal" => Principal.to_json(principal_pair(principal))
-      }
+      "origin" =>
+        Origin.trigger(
+          trigger.name,
+          source: run.source,
+          idempotency_key: run.idempotency_key,
+          revision: revision.hash,
+          payload_digest: run.payload_digest,
+          # Who fired it, and on whose authority. The principal is the actor; its sponsor
+          # is the person answerable for what it does, and a run with no sponsor is a run
+          # nobody is — which is why a principal cannot exist without one.
+          principal: principal_pair(principal)
+        )
     }
     |> then(fn params ->
       if revision.agent, do: Map.put(params, "agent", revision.agent), else: params
@@ -624,7 +634,9 @@ defmodule Troupe.Plane.Triggers do
       "session_id" => run.session_id,
       "fired_at" => DateTime.to_iso8601(run.fired_at),
       "fired_by" => run.fired_by,
+      "source" => run.source,
       "event" => run.event,
+      "payload_digest" => run.payload_digest,
       "state" => state_of(run, session),
       "status" => session && session.status,
       "done_reason" => session && session.done_reason,
@@ -710,6 +722,14 @@ defmodule Troupe.Plane.Triggers do
 
   defp check_terms(_other) do
     {:error, Error.new(:invalid_params, %{reason: "terms is an object"})}
+  end
+
+  defp check_source(source) do
+    if source in Run.sources(),
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:invalid_params, %{field: "source", source: source, one_of: Run.sources()})}
   end
 
   defp check_event(event) do

@@ -3003,3 +3003,47 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      version added a `create_params_for_test/4` to `Triggers` — a seam with no purpose but
      the test, which is the thing this codebase keeps refusing elsewhere. The existing
      firing test already asserts the origin a pod is pushed; the pair is asserted there.
+
+449. **The firing's source is a property of the run, not of the trigger.** A trigger's
+     `source` document says what is expected to fire it — a cron expression, a provider.
+     How a given firing *arrived* is a different fact: a trigger written for a schedule is
+     still run by a person's hand from the console, and that run is `manual`. The
+     discriminator therefore lives on `trigger_runs`, which is the row that records one
+     firing, and the trigger's document is left alone.
+
+450. **A caller may only name a source its door can vouch for.** `/rpc` accepts `api`,
+     `ci` and `integration`, because whether a call is a CI job or a custom integration is
+     something only the caller knows and is worth labelling. It refuses `schedule`,
+     `manual`, `webhook` and `agent`: those are vouched for by which door the firing came
+     through, and an executor that could label its own runs `schedule` would disappear
+     into the cron rows. A source anybody can claim is a discriminator that discriminates
+     nothing.
+
+451. **`trigger_fired` is written by the pod, from the origin the plane sent.** The plane
+     does not reach into a session's log — it cannot; the log is the pod's, hash-chained
+     and sealed there. So the plane normalises the block once, into `origin`, and
+     `Troupe.Protocol.Origin` holds both halves of that shape so the writer and the reader
+     cannot drift apart. It is appended only on creation: a session is fired once however
+     many times it is woken, and a second `trigger_fired` would read as a second run — the
+     mistake `session_created` made before `session_resumed` existed.
+
+452. **The payload is a digest and never a payload.** A webhook body is content. Content
+     belongs in the session's workspace, where the retention policy reaches it, not in a
+     durable event that outlives the session and not in a row an administrator lists. The
+     digest is taken over the event *as it arrived*, before the 16 KiB cap the run row
+     applies — a digest taken after the cap would answer "same firing" for two payloads
+     that differed only past the cut.
+
+453. **`revision` and `payload_digest` are optional in the event, and absent means
+     absent.** A session started through the A2A facade has no trigger document to name,
+     because the caller is an agent that is not ours with its own card; a session created
+     before either field existed has neither. Writing a placeholder would give a reader a
+     value that looks measured and is not. The facade stays what it is and still produces
+     the same event, which is what makes its runs first-class rather than a seventh shape.
+
+454. **`identity` on `tool_call_started` keeps its type; the pair arrives beside it.** The
+     previous commit on this branch made `identity` a map, which is a retype — the one
+     thing the protocol's compatibility rule forbids within a major version, and worse
+     than a removal because a reader expecting a string gets a map and can only crash.
+     `identity` is the string it always was, whose credential goes out, and `principal`
+     carries both halves. Found by `mix troupe.schema.diff`, which is what it is for.

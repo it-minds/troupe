@@ -58,11 +58,20 @@ defmodule Troupe.A2A.TasksTest do
       assert create["session_id"] == task["id"]
       assert create["title"] == "Review PR 812."
 
-      assert create["origin"] == %{
+      # The same block a trigger's firing writes: `integration` is one of the seven
+      # sources, and a session started from outside is found by the same filter as one
+      # started by a cron minute.
+      assert %{
                "kind" => "a2a",
+               "source" => "integration",
                "caller" => "svc:acme/litellm",
-               "task" => task["id"]
-             }
+               "task" => task_id,
+               "idempotency_key" => task_id,
+               "principal" => %{"subject" => "svc:acme/litellm", "actor" => "svc:acme/litellm"}
+             } = create["origin"]
+
+      assert task_id == task["id"]
+      assert "sha256:" <> _ = create["origin"]["payload_digest"]
 
       # And the plane's row is what a later call finds it by.
       assert %{"origin" => %{"kind" => "a2a"}} = StubPlane.row(context.plane, task["id"])

@@ -94,7 +94,12 @@ defmodule Troupe.Protocol.Schema do
         # Absent for every other tool, because a built-in runs as the pod and a
         # client-hosted tool runs on somebody's laptop, and neither is a choice anybody
         # made.
-        "identity" => optional(:string)
+        "identity" => optional(:string),
+        # The same question with its other half: whose credential *and* whose session.
+        # A field is never retyped within a major version, so the pair arrives beside
+        # `identity` rather than in place of it — and `identity` keeps meaning exactly
+        # what it meant to every reader written before there were two halves.
+        "principal" => optional(:object)
       },
       "tool_call_completed" => %{
         "call_id" => required(:string),
@@ -148,6 +153,21 @@ defmodule Troupe.Protocol.Schema do
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.
       "mounts_resolved" => %{"mounts" => required(:array)},
+      # Something other than a person started this session, and this is the whole of what
+      # that was: which of the seven sources, under which trigger document, on whose
+      # authority, against which idempotency key, carrying what.
+      #
+      # `payload_digest` is a hash and never a payload — a webhook body is content, and
+      # content does not belong in an event that outlives the session that received it.
+      # It and `revision` are optional because a session started before either existed
+      # has neither, and a value invented here would read as one that was measured.
+      "trigger_fired" => %{
+        "source" => required(:string),
+        "idempotency_key" => required(:string),
+        "principal" => required(:object),
+        "revision" => optional(:string),
+        "payload_digest" => optional(:string)
+      },
       "published" => %{
         "source" => required(:string),
         "destination" => required(:string),
