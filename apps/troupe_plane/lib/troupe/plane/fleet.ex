@@ -141,15 +141,24 @@ defmodule Troupe.Plane.Fleet do
 
   The plane learns this the instant the socket closes, which is a great deal sooner than
   a lease. Health only governs placement — the sessions the pod was holding are the
-  sweeper's business and are stranded on its schedule, not this one — so marking it here
-  costs nothing if the connection comes straight back, and re-enrolment sets it healthy
-  again.
+  sweeper's business and are stranded on its schedule, not this one.
+
+  **`enrolled_at` is the fence, and it is load-bearing.** A pod whose plane replica dies
+  reconnects to the survivor, and the two events race: the new connection enrols and marks
+  the row healthy, and then the old connection's teardown arrives and marks it unhealthy
+  again. Nothing recovers from that until the pod's next heartbeat, and in between every
+  create is refused with `no_healthy_worker` — a failover that looks exactly like an
+  outage. So a teardown may only mark the row it is actually about: one that has not been
+  enrolled since. Without the fence, "costs nothing if the connection comes straight back"
+  was false precisely when the connection came straight back.
   """
-  @spec disconnected(String.t(), String.t()) :: :ok
-  def disconnected(namespace, pod_name) do
+  @spec disconnected(String.t(), String.t(), DateTime.t()) :: :ok
+  def disconnected(namespace, pod_name, enrolled_at) do
     Repo.update_all(
       from(w in Worker,
-        where: w.namespace == ^namespace and w.pod_name == ^pod_name and w.healthy
+        where:
+          w.namespace == ^namespace and w.pod_name == ^pod_name and w.healthy and
+            w.enrolled_at <= ^enrolled_at
       ),
       set: [healthy: false, updated_at: DateTime.utc_now()]
     )

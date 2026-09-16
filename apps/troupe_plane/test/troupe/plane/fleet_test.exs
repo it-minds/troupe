@@ -86,6 +86,47 @@ defmodule Troupe.Plane.FleetTest do
     assert again.healthy
   end
 
+  test "a socket closing stops placement" do
+    worker = pod("dev", 0)
+    assert Fleet.placeable("dev") |> Enum.map(& &1.id) == [worker.id]
+
+    :ok = Fleet.disconnected(worker.namespace, worker.pod_name, worker.enrolled_at)
+
+    refute Fleet.get_worker(worker.id).healthy
+    assert Fleet.placeable("dev") == []
+  end
+
+  test "a teardown that arrives after the pod came back leaves it alone" do
+    worker = pod("dev", 0)
+
+    # A plane replica dies. The pod reconnects to the survivor and enrols there — and only
+    # then does the dead replica's teardown reach the database.
+    {:ok, again} =
+      Fleet.enrol(%{
+        profile: "dev",
+        ordinal: 0,
+        pod_name: "dev-0",
+        namespace: "troupe-w-dev",
+        capacity: 4
+      })
+
+    assert again.healthy
+
+    :ok = Fleet.disconnected(worker.namespace, worker.pod_name, worker.enrolled_at)
+
+    # The teardown is about an enrolment this row has moved past, so it is not this row's
+    # news. Without the fence the pod is unhealthy here, nothing recovers it until its next
+    # heartbeat, and in between every create is refused with `no_healthy_worker` — a
+    # failover that looks exactly like an outage.
+    assert Fleet.get_worker(worker.id).healthy
+    assert Fleet.placeable("dev") |> Enum.map(& &1.id) == [worker.id]
+
+    # And a teardown for the enrolment that *is* current still lands.
+    :ok = Fleet.disconnected(again.namespace, again.pod_name, again.enrolled_at)
+    refute Fleet.get_worker(worker.id).healthy
+  end
+
+
   defp eventually(predicate, message, timeout_ms \\ 5_000) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 

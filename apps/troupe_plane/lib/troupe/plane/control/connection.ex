@@ -147,7 +147,7 @@ defmodule Troupe.Plane.Control.Connection do
 
   defp gone(%{worker: worker}) do
     Logger.info("troupe plane: #{worker.namespace}/#{worker.pod_name} disconnected")
-    Fleet.disconnected(worker.namespace, worker.pod_name)
+    Fleet.disconnected(worker.namespace, worker.pod_name, worker.enrolled_at)
   end
 
   # -- framing ----------------------------------------------------------------
