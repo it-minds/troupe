@@ -18,7 +18,7 @@ defmodule Troupe.Plane.Fleet.Profile do
 
   import Ecto.Changeset
 
-  alias Troupe.Plane.Fleet.SizeClass
+  alias Troupe.Plane.Fleet.{Provisioner, SizeClass}
 
   @primary_key {:name, :string, autogenerate: false}
   @derive {Phoenix.Param, key: :name}
@@ -36,6 +36,10 @@ defmodule Troupe.Plane.Fleet.Profile do
     # When the last session here stopped being active, so scale-to-zero waits rather
     # than removing a worker the instant somebody's session goes dormant.
     field :idle_since, :utc_datetime_usec
+    # Which substrate the workers come from. An administrator's answer, and the only field
+    # here that decides what guarantees a session on this profile gets — which is why what
+    # those guarantees *are* is asked of the provisioner rather than stored beside this.
+    field :provisioner, :string, default: "kubernetes"
     field :config_bundle_channel, :string, default: "stable"
     field :image, :string
     field :workers_domain, :string
@@ -57,6 +61,7 @@ defmodule Troupe.Plane.Fleet.Profile do
       :max_sessions,
       :warm_workers,
       :idle_since,
+      :provisioner,
       :config_bundle_channel,
       :image,
       :workers_domain,
@@ -65,9 +70,11 @@ defmodule Troupe.Plane.Fleet.Profile do
     |> validate_required([:name])
     |> validate_number(:sessions_per_pod, greater_than: 0)
     |> validate_inclusion(:size_class, SizeClass.names())
+    |> validate_inclusion(:provisioner, Provisioner.names())
     |> validate_number(:max_sessions, greater_than: 0)
     |> validate_number(:warm_workers, greater_than_or_equal_to: 0, less_than_or_equal_to: 10)
     |> derive_from_class()
+    |> check_constraint(:provisioner, name: :profiles_provisioner)
   end
 
   # The class is the answer, so the fields it decides are written from it rather than

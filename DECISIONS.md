@@ -3657,3 +3657,70 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      on CI. They are reported and do not fail the run, anything else does, and a name that
      starts passing is printed as a line to delete — so the list cannot quietly become a
      place to put inconvenient tests.
+
+550. **What makes a worker exist goes behind an interface; nothing above the seam learns
+     there is more than one.** `ensure`, `drain` and `describe`, with the Kubernetes
+     implementation being the operator exactly as it stands. Doing the extraction first and
+     changing no behaviour is the point: a second substrate is only cheap if the first one
+     *is* the interface rather than a special case beside it. Placement, the control
+     channel, the seal format, the key paths and the session log are untouched.
+
+551. **A profile names its provisioner in a column; what that provisioner guarantees is
+     never in one.** `provisioner` is an administrator's answer and belongs on the row.
+     Enforcement is a property of the substrate, and a row that recorded its own would be a
+     claim nobody checked, in the one place being wrong matters most. `guarantees/1` is
+     asked of the module every time.
+
+552. **The missing guarantees are listed one at a time, not summed into a flag.** Done item
+     3 is that the console says *which* guarantee is missing, and "unenforced" is not a
+     useful thing to tell somebody deciding whether their team's work may run there. Four
+     names: admission policy, NetworkPolicy, FQDN egress, disruption budget.
+
+553. **A host proves itself with a secret, and it is refused exactly as a pod is.** A
+     machine has no namespace, so the equivalent is a secret issued to that host for that
+     profile, kept as a salted digest — the same shape a trigger key and a session share
+     have. The claim is as strong as the pod's and no stronger: possession of a secret
+     proves possession of a secret, and the profile comes from the row it opens rather than
+     from anything the worker says.
+
+     Every way it can fail is `{:error, :unauthenticated}` with nothing saying which check
+     refused: an unknown secret, a disabled host, a host claiming a name that is not its
+     own, and a pod from the wrong namespace are one answer, because the difference between
+     them is what an attacker would like to learn.
+
+554. **A host's workers are recorded under `ssh:<profile>`, not a Kubernetes namespace.**
+     The worker row is keyed by namespace and pod name. A host sharing `troupe-w-<profile>`
+     with a pod of the same profile would be two machines claiming one row.
+
+555. **A host carries its own ordinal, assigned at registration and never reused.** Drain
+     takes the highest first and a machine called `build-box` has no trailing integer to
+     read one out of; taking the order from a listing would make it change under somebody.
+
+556. **`ensure/2` on a substrate that cannot make machines reports the shortfall rather
+     than failing.** A profile wanting four workers where two hosts are registered is not a
+     transient condition the next tick fixes — it is somebody who has to go and install the
+     worker on two more machines. Failing would retry that every fifteen seconds for ever
+     and put the plane's own mistake in the log instead of the operator's task.
+
+557. **Rotating a host's secret keeps the host's id.** The secret carries the id of the row
+     it opens, so minting a fresh pair would hand somebody a secret naming a row that does
+     not exist — refused, and indistinguishable from a rotation that did not take. Found by
+     a test, not by reading.
+
+558. **`set_enabled/2` writes by id rather than through the caller's struct.** A changeset
+     built from a stale struct whose `enabled` already reads the new value is an empty
+     changeset, and `Repo.update/1` obliges: it writes nothing and answers `{:ok, host}`. A
+     call that says it worked and did not. Turning a host back on is exactly when a caller
+     holds a stale copy, which is where that shape bites.
+
+559. **Two test suites against one Postgres produce failures that belong to neither.** A
+     full plane run reported fourteen failures, nine of them one module, none reproducible:
+     the same tree passed at seed 0 and seed 111, and the module passed in isolation and
+     beside its neighbours. The run that failed was the one I started while another suite
+     was still running against `troupe_plane_test` — the sandbox's ownership is per
+     connection, and two runs sharing it is not a thing it defends against.
+
+     Already an operating rule here, and broken anyway because a background job that had
+     timed out of the foreground looked finished. It is worth writing down twice: the
+     evidence for "this failure is mine" has to include *what else was running*, or an hour
+     goes into reading a stack trace that describes nothing.

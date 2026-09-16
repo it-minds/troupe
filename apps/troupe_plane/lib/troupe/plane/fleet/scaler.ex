@@ -63,8 +63,8 @@ defmodule Troupe.Plane.Fleet.Scaler do
 
   use GenServer
 
-  alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Provision, Sessions, Singleton}
-  alias Troupe.Plane.Fleet.{Profile, SizeClass}
+  alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Sessions, Singleton}
+  alias Troupe.Plane.Fleet.{Profile, Provisioner, SizeClass}
 
   require Logger
 
@@ -191,7 +191,10 @@ defmodule Troupe.Plane.Fleet.Scaler do
   defp write(profile, plan) do
     case Fleet.put_profile(%{name: profile.name, replicas: plan.want}) do
       {:ok, updated} ->
-        case Provision.apply(updated, scaler()) do
+        # Through the provisioner rather than straight to Kubernetes. What makes a worker
+        # exist is the substrate's business; how many are wanted is this module's, and the
+        # two were the same function until a profile could be provisioned another way.
+        case Provisioner.for(updated).ensure(updated, actor: scaler()) do
           {:ok, _applied} ->
             Logger.info(
               "troupe plane: #{profile.name} #{plan.have} -> #{plan.want} worker(s) for " <>

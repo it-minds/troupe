@@ -126,7 +126,6 @@ defmodule Troupe.Plane.FleetTest do
     refute Fleet.get_worker(worker.id).healthy
   end
 
-
   defp eventually(predicate, message, timeout_ms \\ 5_000) do
     deadline = System.monotonic_time(:millisecond) + timeout_ms
 

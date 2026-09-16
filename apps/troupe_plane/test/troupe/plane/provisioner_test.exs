@@ -1,0 +1,245 @@
+defmodule Troupe.Plane.ProvisionerTest do
+  @moduledoc """
+  What makes a worker exist, behind an interface.
+
+  The claim is a negative one and it is the whole package: **nothing above the seam learns
+  there is more than one substrate.** Placement, the control channel, the seal format and
+  the session log are the same whichever provisioner made the worker — so what is asserted
+  here is that the differences are confined to three callbacks and one honest list.
+
+  The other half is that the difference which *does* matter is impossible to miss. A host
+  is not in a cluster, so four guarantees are gone, and they are named individually rather
+  than summed into a flag: "unenforced" is not a useful thing to tell somebody deciding
+  whether their team's work may run there.
+  """
+
+  use Troupe.Plane.DataCase, async: false
+
+  alias Troupe.Plane.Enrolment
+  alias Troupe.Plane.Fleet
+  alias Troupe.Plane.Fleet.{Host, Hosts, Provisioner}
+
+  @moduletag timeout: 60_000
+
+  defp profile(name, attrs \\ %{}) do
+    {:ok, profile} = Fleet.put_profile(Map.merge(%{name: name}, attrs))
+    profile
+  end
+
+  describe "which provisioner a profile uses" do
+    test "is kubernetes unless it says otherwise" do
+      # Every profile that existed before this, and the right answer for one created by
+      # something that does not know the question.
+      assert profile("dev").provisioner == "kubernetes"
+      assert Provisioner.for(profile("dev")) == Provisioner.Kubernetes
+      assert Provisioner.for(nil) == Provisioner.Kubernetes
+    end
+
+    test "is chosen by name, and an unknown name is refused" do
+      assert profile("laptops", %{provisioner: "ssh"}).provisioner == "ssh"
+      assert Provisioner.for(profile("laptops", %{provisioner: "ssh"})) == Provisioner.SSH
+
+      assert {:error, changeset} = Fleet.put_profile(%{name: "nope", provisioner: "podman"})
+      assert Keyword.has_key?(changeset.errors, :provisioner)
+
+      # And the database says the same thing, because the row is what a placement reads and
+      # application code is not the only thing that writes it.
+      assert Provisioner.names() == ~w(kubernetes ssh)
+    end
+  end
+
+  describe "what a substrate guarantees" do
+    test "is everything on Kubernetes, because the cluster enforces it either way" do
+      dev = profile("dev")
+
+      assert Provisioner.missing(dev) == []
+      refute Provisioner.unenforced?(dev)
+    end
+
+    test "is nothing on a host, named one at a time" do
+      laptops = profile("laptops", %{provisioner: "ssh"})
+
+      # Four names, not a flag. Done item 3 is that the console says *which* guarantee is
+      # missing, and it can only do that if this list exists.
+      assert Enum.sort(Provisioner.missing(laptops)) ==
+               Enum.sort(~w(admission_policy network_policy fqdn_egress disruption_budget)a)
+
+      assert Provisioner.unenforced?(laptops)
+    end
+
+    test "is asked of the provisioner, so no row can claim a guarantee the cluster never made" do
+      # There is deliberately no column for this. A profile that recorded its own
+      # enforcement would be a claim nobody checked, in the one place it matters most.
+      refute Map.has_key?(profile("laptops", %{provisioner: "ssh"}), :unenforced)
+      refute Map.has_key?(profile("laptops", %{provisioner: "ssh"}), :guarantees)
+    end
+  end
+
+  describe "ensure, on a substrate that cannot make machines" do
+    test "reports the shortfall rather than failing at it" do
+      laptops = profile("laptops", %{provisioner: "ssh", replicas: 3})
+
+      # Nothing the plane does next will conjure two more laptops. A shortfall is a fact to
+      # show somebody, not an error to retry every fifteen seconds for ever.
+      {:ok, _host, _secret} =
+        Hosts.register("laptops", %{name: "ada-laptop", registered_by: "root"})
+
+      assert {:ok, report} = Provisioner.SSH.ensure(laptops, [])
+      assert report.wanted == 3
+      assert report.available == 1
+      assert report.short == 2
+      assert report.state == :applied
+    end
+
+    test "does not count a host somebody took out of service" do
+      laptops = profile("laptops", %{provisioner: "ssh", replicas: 2})
+      {:ok, one, _} = Hosts.register("laptops", %{name: "one", registered_by: "root"})
+      {:ok, _two, _} = Hosts.register("laptops", %{name: "two", registered_by: "root"})
+
+      assert {:ok, %{short: 0}} = Provisioner.SSH.ensure(laptops, [])
+
+      {:ok, _} = Hosts.set_enabled(one, false)
+      assert {:ok, %{available: 1, short: 1}} = Provisioner.SSH.ensure(laptops, [])
+
+      # Disabled is not deleted: the listing keeps it, so the audit trail still points at
+      # something and somebody can put it back.
+      assert laptops.name |> Hosts.for_profile() |> length() == 2
+    end
+  end
+
+  describe "describe" do
+    test "says what the substrate has, which is not the same as what has enrolled" do
+      laptops = profile("laptops", %{provisioner: "ssh"})
+      {:ok, _, _} = Hosts.register("laptops", %{name: "build-box", registered_by: "root"})
+
+      assert {:ok, [listed]} = Provisioner.SSH.describe(laptops)
+      assert listed.name == "build-box"
+      assert listed.profile == "laptops"
+
+      # And the fleet has nothing, because nothing has dialled in. That gap is the useful
+      # part: it is the state somebody debugging an install is in.
+      assert Fleet.list_workers("laptops") == []
+    end
+  end
+
+  describe "a host proves which profile it is" do
+    setup do
+      profile("laptops", %{provisioner: "ssh"})
+      profile("other", %{provisioner: "ssh"})
+
+      {:ok, host, secret} =
+        Hosts.register("laptops", %{name: "ada-laptop", registered_by: "root@example.test"})
+
+      %{host: host, secret: secret}
+    end
+
+    test "with the secret it was issued, and the profile comes from the row", context do
+      assert {:ok, identity} = Enrolment.verify(context.secret)
+
+      # From the row it opened, not from anything the worker said — which is the property
+      # the namespace gives a pod and the thing that has to survive the substrate changing.
+      assert identity.profile == "laptops"
+      assert identity.pod_name == "ada-laptop"
+      assert identity.ordinal == context.host.ordinal
+
+      # And its workers are not recorded as being in a Kubernetes namespace, because they
+      # are not in one: a host sharing a namespace with a pod of the same profile would be
+      # two machines claiming to be one row.
+      assert identity.namespace == "ssh:laptops"
+      refute identity.namespace == "troupe-w-laptops"
+    end
+
+    test "and enrolling records a worker placement can use like any other", context do
+      {:ok, identity} = Enrolment.verify(context.secret)
+
+      assert {:ok, worker} =
+               Enrolment.enrol(identity, %{"capacity" => 4, "disk_total_bytes" => 1_000_000})
+
+      assert worker.profile == "laptops"
+      assert worker.pod_name == "ada-laptop"
+      assert worker.ordinal == context.host.ordinal
+      assert worker.healthy
+
+      # Placement never learns there is more than one substrate.
+      assert Fleet.placeable("laptops") |> Enum.map(& &1.id) == [worker.id]
+
+      # And the listing can now say it has been seen, which it could not before.
+      refute is_nil(Hosts.get(context.host.id).last_enrolled_at)
+    end
+
+    test "and another host's secret is refused with the same answer a wrong namespace gets",
+         context do
+      {:ok, _other, other_secret} =
+        Hosts.register("other", %{name: "someone-else", registered_by: "root@example.test"})
+
+      # Done item 2. Every one of these is `:unauthenticated` and nothing in the answer
+      # says which check refused, because that difference is what an attacker would like.
+      assert {:error, :unauthenticated} =
+               Enrolment.verify(other_secret, name: context.host.name)
+
+      assert {:error, :unauthenticated} = Enrolment.verify("twh_nope.nothing")
+
+      assert {:error, :unauthenticated} =
+               Enrolment.verify(context.secret, name: "a-name-that-is-not-its-own")
+
+      # Including the id on its own, which is public: it is in every listing.
+      forged = "twh_" <> String.replace_prefix(context.host.id, "wh_", "") <> ".guess"
+      assert {:error, :unauthenticated} = Enrolment.verify(forged)
+    end
+
+    test "and a host somebody disabled cannot get back in", context do
+      {:ok, _} = Hosts.set_enabled(context.host, false)
+      assert {:error, :unauthenticated} = Enrolment.verify(context.secret)
+
+      {:ok, _} = Hosts.set_enabled(context.host, true)
+      assert {:ok, _identity} = Enrolment.verify(context.secret)
+    end
+
+    test "and rotating invalidates the old secret at the next attempt", context do
+      {:ok, _host, fresh} = Hosts.rotate(context.host, "root@example.test")
+
+      assert {:error, :unauthenticated} = Enrolment.verify(context.secret)
+      assert {:ok, %{profile: "laptops"}} = Enrolment.verify(fresh)
+
+      assert Hosts.get(context.host.id).secret_rotated_by == "root@example.test"
+    end
+
+    test "and the plane keeps a digest, never the secret", context do
+      row = Hosts.get(context.host.id)
+
+      refute row.secret_hash == context.secret
+      refute inspect(Map.from_struct(row)) =~ context.secret
+
+      # Handed back once. There is no call that reads it again, which is what makes losing
+      # one a rotation rather than a lookup.
+      refute function_exported?(Hosts, :secret_for, 1)
+      refute function_exported?(Hosts, :reveal, 1)
+    end
+  end
+
+  describe "the inventory" do
+    test "gives each host a number of its own, never reused" do
+      profile("laptops", %{provisioner: "ssh"})
+
+      {:ok, one, _} = Hosts.register("laptops", %{name: "one", registered_by: "root"})
+      {:ok, two, _} = Hosts.register("laptops", %{name: "two", registered_by: "root"})
+
+      # Drain takes the highest first, which needs a stable order — and a machine called
+      # `build-box` has no trailing integer to read one out of.
+      assert one.ordinal == 0
+      assert two.ordinal == 1
+      assert Host.enrollable?(one)
+    end
+
+    test "refuses two hosts of one profile sharing a name" do
+      profile("laptops", %{provisioner: "ssh"})
+      {:ok, _, _} = Hosts.register("laptops", %{name: "build-box", registered_by: "root"})
+
+      assert {:error, changeset} =
+               Hosts.register("laptops", %{name: "build-box", registered_by: "root"})
+
+      assert Keyword.has_key?(changeset.errors, :profile) or
+               Keyword.has_key?(changeset.errors, :name)
+    end
+  end
+end

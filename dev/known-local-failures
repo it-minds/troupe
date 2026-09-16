@@ -5,7 +5,9 @@
 # something inconvenient — and a line that stops being true is a line to delete, which
 # `scripts/ci` says out loud when one of these passes.
 #
-# One name per line, exactly as ExUnit prints it after the number.
+# One name per line, exactly as ExUnit prints it after the number and before the module —
+# which includes the `describe` block's name where the test is inside one. Matched exactly,
+# because a prefix match would quietly cover tests nobody meant to list.
 
 # Spawns a real daemon in a real OS process and waits for it to answer on a unix socket.
 # The generated launcher used to be unparseable here because the working tree was CRLF
@@ -20,4 +22,4 @@ an idle session stops its tree, and subscribing serves history without starting 
 # Verifies a cancelled shell command's grandchild is gone by its OS pid. The container's
 # process tree is not the runner's, and this has failed here since long before the
 # packages that touch sessions.
-cancel kills a shell command and its grandchild, verified by OS pid
+cancellation cancel kills a shell command and its grandchild, verified by OS pid

@@ -108,8 +108,8 @@ fixed=$(comm -13 "$seen_failures" "$expected" || true)
 printf '\n'
 
 if [ -n "$fixed" ] && [ "$runs" -gt 0 ]; then
-  printf '\033[33mknown local failures that passed this time \u2014 delete them from %s:\033[0m\n' "$known"
-  printf '  %s\n' $(echo "$fixed")
+  printf '\033[33mknown local failures that passed this time, delete them from %s:\033[0m\n' "$known"
+  echo "$fixed" | sed 's/^/  /'
   printf '\n'
 fi
 
