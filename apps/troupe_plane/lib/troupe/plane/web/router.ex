@@ -10,6 +10,7 @@ defmodule Troupe.Plane.Web.Router do
       GET  /.well-known/oauth-protected-resource
                                        which provider an MCP client should authenticate to
       POST /rpc                        the harness JSON-RPC (§ Plane API)
+      POST /trigger/<id>               fire one trigger, with that trigger's own key
       POST /mcp                        the same admin methods, as MCP tools
       *    /scim/v2/...                users and groups, pushed by the identity provider
 
@@ -24,7 +25,7 @@ defmodule Troupe.Plane.Web.Router do
 
   use Plug.Router
 
-  alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens}
+  alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens, Triggers}
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Plane.Web.{Docs, Index}
   alias Troupe.Protocol.{Error, JSONRPC, Token}
@@ -196,6 +197,21 @@ defmodule Troupe.Plane.Web.Router do
   # and answering them with a 405 is how a client is told so.
   get("/mcp", do: send_json(conn, 405, %{"error" => "this server does not stream"}))
   delete("/mcp", do: send_json(conn, 405, %{"error" => "this server has no sessions to end"}))
+
+  # A trigger's own door. The credential is the trigger's key and nothing else: it fires
+  # this one trigger and can do nothing at all besides, which is what makes it the thing
+  # to put in a CI secret store. Everything a person's token can do stays at `/rpc`.
+  #
+  # Stateless, so any replica answers — the scheduler is the singleton, this is not.
+  #
+  # `202`, not `200`: what this returns is a run, and a run is a session somebody else
+  # will finish. A caller that waited for a result would be waiting for a model.
+  post "/trigger/:id" do
+    case fire_from_webhook(conn, id) do
+      {:ok, fired} -> send_json(conn, 202, fired)
+      {:error, error} -> send_json(conn, webhook_status(error), error_json(error))
+    end
+  end
 
   # SCIM is pushed by the identity provider with its own bearer token, which is a
   # different credential from a person's: this endpoint never sees a user token and a
@@ -504,6 +520,70 @@ defmodule Troupe.Plane.Web.Router do
   defp config(key, default \\ nil) do
     Application.get_env(:troupe_plane, :oidc, [])[key] || default
   end
+
+  # -- the trigger ingress ----------------------------------------------------
+
+  defp fire_from_webhook(conn, id) do
+    with {:ok, key} <- trigger_key(conn),
+         {:ok, trigger} <- trigger_for(id, key),
+         {:ok, event} <- webhook_event(conn.body_params) do
+      idempotency_key = idempotency_key(conn, trigger)
+
+      case Triggers.fire(trigger, "webhook", idempotency_key, event, "trigger-key") do
+        {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
+        {:error, %Error{} = error} -> {:error, error}
+      end
+    end
+  end
+
+  # The same header a person's token arrives in, and never a query parameter: a
+  # credential in a URL is a credential in every access log between here and the caller.
+  defp trigger_key(conn) do
+    case bearer(conn) do
+      {:ok, key} when byte_size(key) > 0 -> {:ok, key}
+      _none -> {:error, Error.new(:unauthenticated, %{reason: "no trigger key"})}
+    end
+  end
+
+  # One answer for "no such trigger" and "wrong key", because two answers are an oracle:
+  # a caller holding nothing could walk the id space and learn which triggers exist.
+  defp trigger_for(id, key) do
+    case Triggers.by_key(id, key) do
+      nil -> {:error, Error.new(:unauthenticated, %{reason: "no trigger answers that key"})}
+      trigger -> {:ok, trigger}
+    end
+  end
+
+  # The caller's own key where it sends one, and the revision-plus-minute where it does
+  # not. An executor that retries a failed POST blindly gets the run it already made.
+  defp idempotency_key(conn, trigger) do
+    case get_req_header(conn, "idempotency-key") do
+      [key | _rest] when byte_size(key) > 0 -> "webhook:#{trigger.id}:#{key}"
+      _none -> Triggers.window_key(trigger)
+    end
+  end
+
+  # A body is an object or it is nothing. A provider that posts an array or a bare string
+  # is refused rather than having its payload wrapped in a shape the template cannot
+  # address — `{{event.issue.key}}` has to mean something.
+  defp webhook_event(%{} = params) when not is_struct(params), do: {:ok, params}
+  defp webhook_event(_other), do: {:error, Error.new(:invalid_params, %{field: "body"})}
+
+  defp webhook_status(%Error{message: "unauthenticated"}), do: 401
+  defp webhook_status(%Error{message: "forbidden"}), do: 403
+  defp webhook_status(%Error{message: "not_found"}), do: 404
+  defp webhook_status(%Error{message: "conflict"}), do: 409
+  defp webhook_status(%Error{message: "payload_too_large"}), do: 413
+  defp webhook_status(%Error{message: "capacity"}), do: 503
+  defp webhook_status(%Error{message: "budget_exhausted"}), do: 402
+  defp webhook_status(%Error{}), do: 400
+
+  defp error_json(%Error{} = error) do
+    %{"error" => error.message} |> put_present("data", error.data)
+  end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
 
   defp send_json(conn, status, body) do
     conn

@@ -919,6 +919,39 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Mint a key for a trigger, replacing whatever it had, and return it once.
+
+  The only time the key is legible. It is not in `admin.triggers.list`, not in the audit
+  row this writes, and not recoverable: an administrator who loses it rotates again,
+  which is the same call and costs them the old one.
+
+  The old key stops working immediately. A rotation is usually somebody reacting to a
+  leak, and an overlap window would mean the leaked key went on firing for as long as
+  the window lasted.
+  """
+  @spec trigger_key_rotate(actor(), String.t(), String.t()) :: result()
+  def trigger_key_rotate(actor, team_name, name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name) do
+      {:ok, rotated, key} = Triggers.rotate_key(trigger, actor.subject)
+
+      {:ok, _} =
+        Audit.record(actor.subject, "trigger.key.rotate", "#{team.name}/#{name}", %{
+          "had_key" => is_binary(trigger.key_hash)
+        })
+
+      {:ok,
+       %{
+         team: team.name,
+         name: name,
+         url: "/trigger/#{trigger.id}",
+         key: key,
+         rotated_at: DateTime.to_iso8601(rotated.key_rotated_at)
+       }}
+    end
+  end
+
   @doc "Remove a trigger. Its runs go with it; the sessions they created do not."
   @spec trigger_delete(actor(), String.t(), String.t()) :: result()
   def trigger_delete(actor, team_name, name) do

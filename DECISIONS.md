@@ -3047,3 +3047,67 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      than a removal because a reader expecting a string gets a map and can only crash.
      `identity` is the string it always was, whose credential goes out, and `principal`
      carries both halves. Found by `mix troupe.schema.diff`, which is what it is for.
+
+455. **A trigger's key is a credential for one trigger and nothing else.** Firing from
+     outside used to mean holding a person's token or a principal's secret, either of
+     which administers the whole team and starts sessions besides; giving that to a CI job
+     to call one webhook is giving it the team. `POST /trigger/<id>` accepts the trigger's
+     own key, and that key is not a credential anywhere else — not at `/rpc`, not at
+     `/mcp`, not for the trigger next to it.
+
+456. **A rotation has no overlap window.** The old key stops working the moment the new
+     one is returned. A rotation is usually somebody reacting to a leak, and a window
+     would mean the leaked key went on firing for as long as the window lasted. The cost
+     is that an administrator must update the caller promptly, which is the right thing to
+     be forced to do.
+
+457. **The key is legible exactly once and never stored in the clear.** Salted and hashed
+     as a principal's secret is. The listing says `has_key`, when it was minted and by
+     whom, and nothing else — a listing that carried the key would put a credential into
+     every console, every logged response and every audit row that quoted one.
+
+458. **One answer to "no such trigger" and "wrong key".** Two answers are an oracle: a
+     caller holding nothing could walk the id space and learn which triggers a plane has,
+     which is a map of what a team automates. There is also no lookup *by* key — the id
+     names the row and the key is checked against that row alone.
+
+459. **A webhook with no idempotency key gets the revision and the minute.** An executor
+     that retries a failed POST cannot know whether the first arrived, so the plane
+     supplies a key that makes the retry safe. The revision is in it so a firing that
+     overlaps an edit is a new run: the second POST is asking for something different from
+     the first, whatever the clock says. A caller that means two firings sends its own key.
+
+460. **An outbound notification target is absolute, off the loopback and on the egress
+     allowlist.** LangGraph shipped a 2026 advisory because a *relative* target was
+     resolved against the server's own base URL and reached an in-process route with no
+     authentication. So a target with no scheme and no host is not a target; `127.0.0.1`
+     and `::1` and `localhost` and `::ffff:127.0.0.1` are the same attack written out; and
+     `169.254.169.254` is where cloud credentials live. Other private ranges are *not*
+     refused — a plane in a cluster has legitimate internal receivers — and what governs
+     those is the egress allowlist, which a platform admin sets and a team admin cannot.
+
+461. **The target is checked at save and again at send, and the second check resolves the
+     name.** A check only at save is a check against the value, not against what the value
+     does: a host that passed on Tuesday and answers `127.0.0.1` today is a DNS rebind, and
+     only a check that asks DNS at send sees it. Redirects are not followed, for the same
+     reason — a target answering `302 http://127.0.0.1/` would carry the request somewhere
+     neither check ever looked at, which would make both of them decoration.
+
+462. **The notification target is read from the trigger now, not from the run's revision.**
+     Every other question about a run is answered by the revision it froze — what it ran,
+     as whom, under which terms — because those are facts about the run. Where somebody
+     wants to be told is not: an administrator who moved their receiver because the old one
+     is gone means the runs in flight too.
+
+463. **The notification is dispatched off the control connection and is not supervised.**
+     A pod reporting that a session finished must not wait on somebody else's HTTP server,
+     and a notification lost because the node went down is a better outcome than a status
+     report that did not land because one was in flight. Every refusal is logged and none
+     raises: a run that failed because its announcement could not be sent would be a worse
+     record than one that merely was not announced.
+
+464. **`manual` joins `schedule` and `webhook` as a trigger document kind.** A trigger that
+     nothing fires automatically — one that exists to be run by a person, by the API or by
+     an agent — had to declare itself a webhook, which was a lie about what was expected to
+     call it. This is the document's kind and is still not the run's source: a `manual`
+     trigger fired by CI is a `ci` run.

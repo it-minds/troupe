@@ -57,6 +57,23 @@ defmodule Troupe.Plane.Web.Live.Triggers do
     end
   end
 
+  # The one time the key is legible, and it is legible here rather than anywhere it could
+  # be read again: a flash the person copies now. It is not in the listing, not in the
+  # audit row, and there is no "show me the key" — losing it costs a rotation.
+  def handle_event("rotate-key", %{"name" => name}, socket) do
+    case Admin.trigger_key_rotate(socket.assigns.actor, socket.assigns.team, name) do
+      {:ok, minted} ->
+        message =
+          "#{name}: POST #{minted.url} with Authorization: Bearer #{minted.key} — " <>
+            "copy it now, it is not shown again"
+
+        {:noreply, socket |> assign(flash_message: message) |> load()}
+
+      {:error, error} ->
+        {:noreply, assign(socket, flash_message: error.message)}
+    end
+  end
+
   # Two steps, because a deleted trigger's runs go with it and a misclick should not.
   def handle_event("confirm-delete", %{"name" => name}, socket) do
     {:noreply, assign(socket, confirming: name)}
@@ -151,6 +168,10 @@ defmodule Troupe.Plane.Web.Live.Triggers do
           <dd>{trigger["review"]}</dd>
           <dt>notify</dt>
           <dd>{if trigger["notify"] == [], do: "nobody", else: Enum.join(trigger["notify"], ", ")}</dd>
+          <dt>notify url</dt>
+          <dd>{trigger["notify_url"] || "nowhere"}</dd>
+          <dt>key</dt>
+          <dd>{key_note(trigger)}</dd>
           <dt>last fired</dt>
           <dd>{trigger["last_fired_at"] || "never"}</dd>
         </dl>
@@ -163,6 +184,9 @@ defmodule Troupe.Plane.Web.Live.Triggers do
             enable
           </button>
           <button phx-click="run" phx-value-name={trigger["name"]}>run now</button>
+          <button phx-click="rotate-key" phx-value-name={trigger["name"]}>
+            {if trigger["has_key"], do: "rotate key", else: "make a key"}
+          </button>
           <button
             :if={@confirming != trigger["name"]}
             phx-click="confirm-delete"
@@ -221,6 +245,14 @@ defmodule Troupe.Plane.Web.Live.Triggers do
     do: "webhook from #{source["provider"] || "anywhere"}"
 
   defp source(_source), do: "—"
+
+  # Whether there is one and when it was last minted. Never the key: this page is read
+  # over somebody's shoulder, screenshotted into a ticket, and left open on a laptop.
+  defp key_note(%{"has_key" => true} = trigger) do
+    "minted #{trigger["key_rotated_at"]} by #{trigger["key_rotated_by"]}"
+  end
+
+  defp key_note(_trigger), do: "none"
 
   defp terms(terms) when terms in [nil, %{}], do: "defaults"
 

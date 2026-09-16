@@ -27,7 +27,7 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
-  alias Troupe.Plane.Triggers.{Revision, Run, Template, Trigger}
+  alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
   alias Troupe.Protocol.{Canonical, Error, Origin, Principal}
 
   require Logger
@@ -82,7 +82,7 @@ defmodule Troupe.Plane.Triggers do
          :ok <- check_terms(attrs["terms"]) do
       fields =
         ~w(name profile agent enabled source prompt_template terms visibility) ++
-          ~w(review notify concurrency)
+          ~w(review notify notify_url concurrency)
 
       (existing || %Trigger{team_id: team.id, created_by: by})
       |> Trigger.changeset(attrs |> Map.take(fields) |> Map.put("principal_id", principal_id))
@@ -221,6 +221,92 @@ defmodule Troupe.Plane.Triggers do
       )
 
     count == 1
+  end
+
+  # -- the trigger's own key --------------------------------------------------
+
+  @doc """
+  Mint a key for a trigger, replacing whatever it had.
+
+  Returned once, in the clear, and never again: the row holds a salted hash and a salt,
+  and neither reconstructs it. Rotation is the same call as creation — there is no
+  "create key" beside a "rotate key", because the two differ only in whether a previous
+  key existed, and a caller should not have to know that to do the right thing.
+
+  The old key stops working the moment this returns. That is deliberate and is the point
+  of a rotation: an overlap window would mean a key somebody rotated *because it leaked*
+  goes on working for as long as the window lasts.
+  """
+  @spec rotate_key(Trigger.t(), String.t()) :: {:ok, Trigger.t(), String.t()}
+  def rotate_key(%Trigger{} = trigger, by) do
+    {key, hash, salt} = mint_key()
+
+    {:ok, trigger} =
+      trigger
+      |> Trigger.key_changeset(%{
+        key_hash: hash,
+        key_salt: salt,
+        key_rotated_at: DateTime.utc_now(),
+        key_rotated_by: by
+      })
+      |> Repo.update()
+
+    {:ok, trigger, key}
+  end
+
+  @doc """
+  The idempotency key for a firing whose caller supplied none.
+
+  The revision and the minute. An executor that retries a failed POST within the minute
+  gets the run it already made rather than a second session, which is the behaviour a
+  blind retry needs; an executor that means two firings sends its own key and gets two.
+  The revision is in it so that a firing which overlaps an edit is a new run: the second
+  POST is asking for something different from the first, whatever the clock says.
+  """
+  @spec window_key(Trigger.t()) :: String.t()
+  def window_key(%Trigger{} = trigger) do
+    {:ok, revision} = revise(trigger)
+    minute = %{DateTime.utc_now() | second: 0, microsecond: {0, 0}}
+    "webhook:#{trigger.id}:#{revision.hash}:#{DateTime.to_iso8601(minute)}"
+  end
+
+  @doc """
+  The trigger this id and key name, or `nil`.
+
+  One trigger, by id, and the key is checked against that row alone — there is no
+  lookup by key, because a key that could find its own trigger would be a key an
+  attacker could enumerate the table with. A trigger with no key is not reachable
+  through this door at all: a `nil` hash matches nothing, rather than matching a caller
+  who presents nothing.
+  """
+  @spec by_key(String.t(), String.t()) :: Trigger.t() | nil
+  def by_key(id, key) when is_binary(id) and is_binary(key) do
+    case fetch(id) do
+      %Trigger{key_hash: hash, key_salt: salt} = trigger when is_binary(hash) and is_binary(salt) ->
+        if key_matches?(trigger, key), do: trigger
+
+      _none ->
+        nil
+    end
+  end
+
+  def by_key(_id, _key), do: nil
+
+  # 256 bits, URL-safe so it survives a shell, a YAML file and a CI secret store. Prefixed
+  # so that a key found in a log or a repository says what it is and what to rotate — the
+  # thing a scanner looks for and a person needs to be told.
+  defp mint_key do
+    key = "twk_" <> (32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+    salt = 16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+    {key, key_hash(salt, key), salt}
+  end
+
+  defp key_hash(salt, key),
+    do: :sha256 |> :crypto.hash(salt <> key) |> Base.encode16(case: :lower)
+
+  defp key_matches?(%Trigger{key_hash: hash, key_salt: salt}, key) do
+    presented = key_hash(salt, key)
+    byte_size(presented) == byte_size(hash) and :crypto.hash_equals(presented, hash)
   end
 
   @doc """
@@ -593,6 +679,29 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
+  @doc """
+  Tell a run's trigger's target that the run ended, if it named one.
+
+  Synchronous, and the caller decides whether to wait: the control connection does not,
+  because a pod reporting that a session finished should not be held up by somebody
+  else's HTTP server.
+
+  The target is read from the trigger **now**, not from the revision the run froze. Every
+  other question about a run is answered by its revision on purpose — what it ran, as
+  whom, under which terms — but a notification target is not a fact about the run. It is
+  where somebody wants to be told today, and an administrator who moved their receiver
+  because the old one is gone means the runs in flight too.
+  """
+  @spec announce(String.t(), map()) :: :ok | {:error, String.t()}
+  def announce(session_id, outcome) when is_binary(session_id) do
+    with %Run{} = run <- Repo.get_by(Run, session_id: session_id),
+         %Trigger{} = trigger <- Repo.get(Trigger, run.trigger_id) do
+      Notify.deliver(trigger, run, outcome)
+    else
+      nil -> :ok
+    end
+  end
+
   @doc "Mark the run behind a session reviewed, if there is one."
   @spec reviewed(String.t(), String.t()) :: :ok
   def reviewed(session_id, by) do
@@ -679,7 +788,14 @@ defmodule Troupe.Plane.Triggers do
       "visibility" => trigger.visibility,
       "review" => trigger.review,
       "notify" => trigger.notify,
+      "notify_url" => trigger.notify_url,
       "concurrency" => trigger.concurrency,
+      # Whether there is a key and when it was last minted, never the key. A listing that
+      # carried it would put a credential in every console, every audit row that quotes a
+      # listing, and every log line that logged a response.
+      "has_key" => is_binary(trigger.key_hash),
+      "key_rotated_at" => trigger.key_rotated_at && DateTime.to_iso8601(trigger.key_rotated_at),
+      "key_rotated_by" => trigger.key_rotated_by,
       "last_fired_at" => trigger.last_fired_at && DateTime.to_iso8601(trigger.last_fired_at),
       "created_by" => trigger.created_by,
       "updated_at" => trigger.updated_at && DateTime.to_iso8601(trigger.updated_at)

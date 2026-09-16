@@ -24,7 +24,8 @@ defmodule Troupe.Plane.Control.Connection do
     Placement,
     Sessions,
     TeamBudget,
-    Tokens
+    Tokens,
+    Triggers
   }
 
   alias Troupe.Plane.Control.{Connections, Router}
@@ -297,8 +298,12 @@ defmodule Troupe.Plane.Control.Connection do
   # a pod still running an older epoch cannot overwrite what the new one reports.
   defp dispatch("session.status", params, state) do
     case Sessions.put_status(params["session_id"], params) do
-      {:ok, _count} -> {:ok, %{"ok" => true}, state}
-      {:error, :stale_epoch} -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+      {:ok, _count} ->
+        announce(params)
+        {:ok, %{"ok" => true}, state}
+
+      {:error, :stale_epoch} ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
     end
   end
 
@@ -429,6 +434,18 @@ defmodule Troupe.Plane.Control.Connection do
   defp dispatch(method, _params, state) do
     {:error, Error.new(:method_not_found, %{method: method}), state}
   end
+
+  # A trigger's run has ended, so whoever asked to be told is told. Off this process and
+  # unsupervised on purpose: a pod reporting that a session finished must not wait on
+  # somebody else's HTTP server, and a notification lost because the node went down is a
+  # better outcome than a status report that did not land because one was in flight.
+  defp announce(%{"session_id" => session_id, "status" => status})
+       when status in ["done", "interrupted"] and is_binary(session_id) do
+    Task.start(fn -> Triggers.announce(session_id, %{"state" => status}) end)
+    :ok
+  end
+
+  defp announce(_params), do: :ok
 
   # A person the identity provider has deactivated stops being able to lend their
   # credentials to a pod, and this is where that takes effect. It matters more here than

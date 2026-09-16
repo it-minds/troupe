@@ -180,7 +180,7 @@ defmodule Troupe.Plane.Admin.API do
       required: true,
       description: "The trigger's name, unique within the team."
     },
-    %Argument{name: "kind", type: :string, description: "schedule, webhook or event."},
+    %Argument{name: "kind", type: :string, description: "schedule, webhook or manual."},
     %Argument{
       name: "schedule",
       type: :string,
@@ -188,7 +188,13 @@ defmodule Troupe.Plane.Admin.API do
     },
     %Argument{name: "profile", type: :string, description: "The profile its sessions start on."},
     %Argument{name: "prompt", type: :string, description: "What the session is asked to do."},
-    %Argument{name: "enabled", type: :boolean, description: "Whether it fires at all."}
+    %Argument{name: "enabled", type: :boolean, description: "Whether it fires at all."},
+    %Argument{
+      name: "notify_url",
+      type: :string,
+      description:
+        "An absolute http or https URL told when a run ends. Loopback and link-local are refused, and the host must be one this deployment's egress policy allows."
+    }
   ]
 
   @methods [
@@ -708,6 +714,22 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.trigger.run",
       function: :trigger_run,
       summary: "Fire a trigger now, by hand. It starts a real session and spends real money.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "team", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The trigger's name."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.trigger.key.rotate",
+      function: :trigger_key_rotate,
+      summary:
+        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},
