@@ -557,6 +557,138 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
+  describe "publishing a bundle" do
+    setup context do
+      {:ok, _} =
+        Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable", replicas: 1})
+
+      {:ok, _} =
+        Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "skills" => [],
+            "mcp_servers" => [],
+            "agents" => [
+              %{"name" => "reviewer", "definition" => "---
+description: Reviews
+mode: primary
+---
+You review."},
+              %{"name" => "builder", "definition" => "---
+description: Builds
+mode: primary
+---
+You build."}
+            ]
+          },
+          announce: false
+        )
+
+      actor = Admin.actor_for_subject(context.root.subject)
+
+      # `engineering` is allowed the agent the next version removes. A deny row on the
+      # other one, so the test also says what a loss is not.
+      {:ok, _} =
+        Admin.team_grant(actor, "engineering", "dev", %{
+          "entitlements" => [
+            %{"kind" => "agent", "name" => "reviewer", "mode" => "allow"},
+            %{"kind" => "agent", "name" => "builder", "mode" => "deny"}
+          ]
+        })
+
+      %{actor: actor}
+    end
+
+    test "shows what changes and names the teams that lose an entitlement", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/bundles")
+
+      without_reviewer =
+        Jason.encode!(%{
+          "schema" => 1,
+          "skills" => [],
+          "mcp_servers" => [],
+          "agents" => [%{"name" => "builder", "definition" => "---
+description: Builds
+mode: primary
+---
+You build."}]
+        })
+
+      html =
+        view
+        |> element("#bundle-draft")
+        |> render_submit(%{"content" => without_reviewer, "action" => "check"})
+
+      assert html =~ "What publishing this would change"
+      assert html =~ "agents"
+
+      # Done item 4's second half, and the question a publish actually raises.
+      assert html =~ "Who loses something"
+      assert html =~ "engineering"
+      assert html =~ "reviewer"
+    end
+
+    test "and a deny row losing its target is not a loss", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/bundles")
+
+      without_builder =
+        Jason.encode!(%{
+          "schema" => 1,
+          "skills" => [],
+          "mcp_servers" => [],
+          "agents" => [%{"name" => "reviewer", "definition" => "---
+description: Reviews
+mode: primary
+---
+You review."}]
+        })
+
+      html =
+        view
+        |> element("#bundle-draft")
+        |> render_submit(%{"content" => without_builder, "action" => "check"})
+
+      # `engineering` denies `builder`, so it was not getting it and has lost nothing.
+      # Reporting it would bury the rows that matter under the rows that do not.
+      assert html =~ "No team holds an entitlement naming an entry this version removes"
+    end
+
+    test "and a draft that changes nothing says so rather than showing an empty diff",
+         context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/bundles")
+
+      same =
+        Jason.encode!(%{
+          "schema" => 1,
+          "skills" => [],
+          "mcp_servers" => [],
+          "agents" => [
+            %{"name" => "reviewer", "definition" => "---
+description: Reviews
+mode: primary
+---
+You review."},
+            %{"name" => "builder", "definition" => "---
+description: Builds
+mode: primary
+---
+You build."}
+          ]
+        })
+
+      html =
+        view
+        |> element("#bundle-draft")
+        |> render_submit(%{"content" => same, "action" => "check"})
+
+      assert html =~ "Nothing changes"
+    end
+  end
+
   describe "the erase dialog" do
     setup context do
       # Erasing releases the session's place, which is a `:global` actor — the rest of this

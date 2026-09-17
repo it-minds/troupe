@@ -588,6 +588,33 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.bundle.preview",
+      function: :bundle_preview,
+      summary:
+        "What publishing this document would change against the channel's current version, and which teams lose an entitlement because an entry they are allowed no longer exists. Read this before publishing: it is the same diff the audit record is written from.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "channel",
+          type: :string,
+          required: true,
+          description: "The channel, such as stable."
+        },
+        %Argument{
+          name: "content",
+          type: :object,
+          required: true,
+          description: "The bundle document, as `admin.bundle.publish` takes it."
+        },
+        %Argument{
+          name: "from",
+          type: :integer,
+          description:
+            "Compare against this published version instead of the channel's current one."
+        }
+      ]
+    },
+    %Method{
       name: "admin.bundle.publish",
       function: :bundle_publish,
       summary:

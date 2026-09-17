@@ -16,6 +16,21 @@ defmodule Troupe.Plane.Web.Live.Bundles do
   the sessions already running on it are untouched. There is no "revert" that rewrites a
   version, because versions are immutable — a session pinned to v2 has to keep meaning
   what v2 meant, or its next activation would silently be a different session.
+
+  ## Checking a draft answers two questions, and the second is the one nobody asks
+
+  Validate says whether the document is publishable. The diff says what publishing it would
+  *do*: three skills added, one server's URL changed, one agent removed — and, beneath
+  that, **which teams lose something**, because they hold an entitlement naming an entry
+  this version takes away.
+
+  That second list is the question a publish actually raises, and until now nothing
+  answered it. A team whose grant allows an agent that no longer exists does not fail
+  loudly; it quietly stops getting it, on a schedule nobody chose, at the next session.
+
+  The diff comes from `Audit.diff/2`, which is the function that writes the audit record —
+  so the thing that was approved and the thing in the trail are the same object rather than
+  two descriptions of one change.
   """
 
   use Phoenix.LiveView, layout: false
@@ -34,7 +49,8 @@ defmodule Troupe.Plane.Web.Live.Bundles do
        channel: params["channel"] || "stable",
        flash_message: nil,
        draft: @blank,
-       errors: []
+       errors: [],
+       preview: nil
      )
      |> load()}
   end
@@ -68,14 +84,27 @@ defmodule Troupe.Plane.Web.Live.Bundles do
     respond(socket, Admin.bundle_retire(actor, channel, String.to_integer(version)))
   end
 
+  # Two answers, because they are two questions. Validate says whether the document is
+  # publishable; the preview says what publishing it would do, and to whom.
   defp check(socket, decoded) do
     case Admin.bundle_validate(socket.assigns.actor, decoded) do
       {:ok, result} ->
         message = "valid — #{describe_summary(result.summary)} — #{result.hash}"
-        {:noreply, assign(socket, errors: [], flash_message: message)}
+
+        {:noreply,
+         socket
+         |> assign(errors: [], flash_message: message)
+         |> preview(decoded)}
 
       {:error, error} ->
-        {:noreply, assign(socket, errors: errors_of(error), flash_message: nil)}
+        {:noreply, assign(socket, errors: errors_of(error), flash_message: nil, preview: nil)}
+    end
+  end
+
+  defp preview(socket, decoded) do
+    case Admin.bundle_preview(socket.assigns.actor, socket.assigns.channel, decoded) do
+      {:ok, preview} -> assign(socket, preview: preview)
+      {:error, _error} -> assign(socket, preview: nil)
     end
   end
 
@@ -86,7 +115,7 @@ defmodule Troupe.Plane.Web.Live.Bundles do
 
         {:noreply,
          socket
-         |> assign(flash_message: message, errors: [], draft: @blank)
+         |> assign(flash_message: message, errors: [], draft: @blank, preview: nil)
          |> load()}
 
       {:error, error} ->
@@ -100,6 +129,17 @@ defmodule Troupe.Plane.Web.Live.Bundles do
 
   defp respond(socket, {:error, error}),
     do: {:noreply, assign(socket, flash_message: error.message)}
+
+  # One side of a diff row. `Audit.diff/2` writes `%{"from" => …, "to" => …}`, and a list
+  # of names reads as a list rather than as `["a", "b"]`.
+  defp render_side(change, side) do
+    case Map.get(change, side) do
+      nil -> "—"
+      [] -> "none"
+      value when is_list(value) -> Enum.join(value, ", ")
+      value -> to_string(value)
+    end
+  end
 
   # The validation errors as a list, or the one-line message for anything else — a
   # refusal is not a validation failure and should not be dressed as one.
@@ -288,6 +328,45 @@ defmodule Troupe.Plane.Web.Live.Bundles do
         <button type="submit" name="action" value="check">check</button>
         <button type="submit" name="action" value="publish">publish to {@channel}</button>
       </form>
+
+      <section :if={@preview} class="panel">
+        <h2>What publishing this would change</h2>
+        <p class="hint">
+          Against
+          {if @preview.from, do: "v#{@preview.from}", else: "nothing — this would be the first version"}.
+          The same diff the audit record is written from, so what you approve and what the
+          trail keeps are one object rather than two descriptions of it.
+        </p>
+
+        <ul :if={@preview.changes != %{}} class="diff">
+          <li :for={{field, change} <- @preview.changes} class="diff__row">
+            <span class="diff__field">{field}</span>
+            <span class="diff__from">{render_side(change, "from")}</span>
+            <span class="diff__to">{render_side(change, "to")}</span>
+          </li>
+        </ul>
+
+        <p :if={@preview.changes == %{}} class="empty">
+          Nothing changes. This document is what {@channel} already carries.
+        </p>
+
+        <h3>Who loses something</h3>
+
+        <p :if={@preview.losers == []} class="empty">
+          Nobody. No team holds an entitlement naming an entry this version removes.
+        </p>
+
+        <ul :if={@preview.losers != []} class="checks">
+          <li :for={loser <- @preview.losers} class="checks__bad">
+            <span class="checks__name">{loser.team}</span>
+            <span class="checks__detail">
+              is allowed {loser.kind} <strong>{loser.name}</strong> on {loser.profile}, and
+              this version does not carry it. The grant stays; what it names stops existing,
+              at each team's next session rather than now.
+            </span>
+          </li>
+        </ul>
+      </section>
 
       <p class="hint">
         Publishing tells every pod on this channel. Running sessions keep the version they

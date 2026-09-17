@@ -4080,3 +4080,25 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 612. **An erased child is not counted as a survivor.** `children_of/1` leaves them out —
      listing one would have the dialog claiming something is still readable when it is not,
      which is the one direction this count must never be wrong in.
+
+613. **The bundle diff is `Audit.diff/2`, which is the function that writes the audit
+     record.** Rule 2's identity, and the reason it is worth stating: the thing you approved
+     and the thing in the trail are the same object. A console computing a preview one way
+     and an audit record another way has two descriptions of one change, and the one you
+     read is not the one that survives.
+
+614. **A deny row losing its target is not a loss.** A team that denies an agent was not
+     getting it, so a version that removes the agent takes nothing away — and listing it
+     would bury the rows that matter under rows that do not. Only *allow* entitlements
+     naming a removed entry make somebody a loser.
+
+615. **`bundle_preview` takes the candidate document, and optionally a version to measure
+     against.** One answer serves both questions the screen asks: what this draft would do,
+     and what one published version did against another. The default baseline is the
+     channel's current version, because that is what a publish is measured against.
+
+616. **A published version that no longer validates is still the baseline, with nothing to
+     compare.** It is what is running. The preview then reads as everything being added,
+     which is the honest answer — the alternative was refusing to preview against a version
+     an older schema wrote, which would make the diff unavailable exactly when a migration
+     makes it most worth reading.

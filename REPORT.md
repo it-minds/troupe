@@ -2405,3 +2405,43 @@ the markup is one a form post walks past.
 Three of those tests are new: the three consequences with the forks named, a wrong
 identifier erasing nothing, and — after a real erase — the fork still not erased, which is
 the dialog's third claim checked rather than taken on trust.
+
+## R8h — the bundle diff, and who loses something
+
+Done item 4: *publishing a bundle version shows the diff against the current one and names
+every team that loses an entitlement, before the publish.*
+
+Checking a draft answered one question — is this publishable — and the screen now answers
+the second: what publishing it would *do*, and to whom. The diff is `Audit.diff/2`, the
+same function that writes the audit record, so what was approved and what the trail keeps
+are one object.
+
+The second list is the one nothing answered. A team whose grant allows an agent that the
+new version does not carry does not fail loudly; it quietly stops getting it, at its next
+session, on a schedule nobody chose.
+
+    What publishing this would change
+    Against v1. The same diff the audit record is written from.
+
+      agents        reviewer, builder → builder
+
+    Who loses something
+      engineering   is allowed agent reviewer on dev, and this version does not carry it.
+                    The grant stays; what it names stops existing, at each team's next
+                    session rather than now.
+
+A *deny* row losing its target is not a loss: the team was not getting it. The test says so
+by denying `builder` on the same grant and then removing `builder` — the answer is "no team
+holds an entitlement naming an entry this version removes".
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs
+    Result: 54 passed
+
+    $ ./scripts/toolbox mix test .../console_coverage_test.exs .../admin_parity_test.exs \
+        .../bundles_test.exs
+    Result: 40 passed
+
+    $ ./scripts/credo
+    6649 mods/funs, found no issues.

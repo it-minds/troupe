@@ -89,6 +89,7 @@ defmodule Troupe.Plane.Admin.Console do
     bundles_list: {:screen, :bundles},
     bundle_get: {:screen, :bundles},
     bundle_validate: {:screen, :bundles},
+    bundle_preview: {:screen, :bundles},
     bundle_publish: {:screen, :bundles},
     bundle_retire: {:screen, :bundles},
     profile_get: {:screen, :profiles},

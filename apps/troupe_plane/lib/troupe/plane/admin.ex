@@ -1170,6 +1170,106 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  What publishing this document would change, and **who loses something**.
+
+  Rule 2 of the console: nothing is applied until its diff has been read. For a bundle
+  that matters more than anywhere else, because a bundle is the one document whose change
+  reaches into other people's grants — three skills added and one agent removed is the easy
+  half, and the half nobody answers is which teams were entitled to the agent that went.
+
+  The diff is `Audit.diff/2` over the summaries, which is the same function that writes the
+  audit record. That identity is the point: **the thing you approved and the thing in the
+  trail are the same object.** A console computing a preview one way and an audit record
+  another way has two descriptions of one change, and the one you read is not the one that
+  survives.
+
+  `from` is the channel's current version unless a version is named, which is how the same
+  answer serves both questions — what this draft would do, and what one published version
+  did against another.
+
+  A team "loses" an entry when it holds an *allow* entitlement naming something this
+  version removes. A deny row whose target is gone is not a loss: the team was not getting
+  it, and reporting it would bury the rows that matter under the rows that do not.
+  """
+  @spec bundle_preview(actor(), String.t(), map(), integer() | nil) :: result()
+  def bundle_preview(actor, channel, content, from \\ nil) do
+    with :ok <- require_admin(actor),
+         {:ok, parsed} <- validate_bundle(content),
+         {:ok, before} <- baseline(channel, from) do
+      after_summary = Document.summary(parsed)
+      before_summary = before && Document.summary(before.parsed)
+
+      {:ok,
+       %{
+         channel: channel,
+         from: before && before.version,
+         hash: Bundle.hash(content),
+         changes: Audit.diff(before_summary || %{}, after_summary),
+         removed: removed_entries(before_summary, after_summary),
+         losers: losers(channel, removed_entries(before_summary, after_summary))
+       }}
+    end
+  end
+
+  # The version this is measured against: one named, or the channel's current. A channel
+  # with nothing published yet has no baseline, and every entry in the document is an
+  # addition rather than a change — which is right, and is not an error.
+  defp baseline(channel, nil) do
+    case Bundles.current(channel) do
+      nil -> {:ok, nil}
+      bundle -> parsed_baseline(bundle)
+    end
+  end
+
+  defp baseline(channel, version) do
+    with {:ok, bundle} <- fetch_bundle(channel, version), do: parsed_baseline(bundle)
+  end
+
+  defp parsed_baseline(bundle) do
+    case Document.validate(bundle.content) do
+      {:ok, parsed} -> {:ok, %{version: bundle.version, parsed: parsed}}
+      # A version that no longer validates is a version this plane published under an
+      # older schema. It is still the thing that is running, so it is still the baseline —
+      # with nothing to compare, which the caller sees as everything being added.
+      {:error, _messages} -> {:ok, nil}
+    end
+  end
+
+  # `{kind, name}` for everything the new document does not carry and the old one did.
+  # Keyed by the entitlement's own kind, because that is what a grant row names.
+  @entry_kinds %{
+    "agents" => "agent",
+    "skills" => "skill",
+    "mcp_servers" => "mcp_server",
+    "acp_agents" => "acp_agent"
+  }
+
+  defp removed_entries(nil, _after_summary), do: []
+
+  defp removed_entries(before_summary, after_summary) do
+    for {section, kind} <- @entry_kinds,
+        name <- Map.get(before_summary, section, []),
+        name not in Map.get(after_summary, section, []),
+        do: %{kind: kind, name: name}
+  end
+
+  # The teams entitled to something this version takes away. Every profile on the channel,
+  # every team granted it, and the allow rows naming a removed entry.
+  defp losers(_channel, []), do: []
+
+  defp losers(channel, removed) do
+    gone = MapSet.new(removed, &{&1.kind, &1.name})
+
+    for profile <- Bundles.profiles_on(channel),
+        grant <- Identity.grants_for_profile(profile),
+        team = grant.team,
+        row <- Identity.entitlements_for(team, profile),
+        row.mode == "allow",
+        MapSet.member?(gone, {row.kind, row.name}),
+        do: %{team: team.name, profile: profile, kind: row.kind, name: row.name}
+  end
+
   @doc "Publish a new version, which pushes `config.updated` to every pod on the channel."
   @spec bundle_publish(actor(), String.t(), map()) :: result()
   def bundle_publish(actor, channel, content) do
