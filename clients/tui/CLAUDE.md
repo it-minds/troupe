@@ -48,7 +48,7 @@ Read skills in the .skills repo
 - `lib/troupe/llm/*` Provider behaviour, Fake (all tests), Anthropic, OpenAI, SSE/HTTP
 - `lib/troupe/client.ex` + `lib/troupe/client/{local,remote}.ex` the **only** thing the UI may call; a session routes to one implementation by id
 - `lib/troupe/remote/*` the remote client: Discovery, Auth (device flow), Credentials, Tokens, Socket (`mint_web_socket`), RPC, Plane (one per plane), Worker (one per attached session), Journal (JSONL + cursor), Translate (remote events → local ones), Capability, TLS, Backoff
-- `lib/troupe/ui/tui/*` Model (fold over events, rebuildable), View (widgets), Server (`ExRatatui.App`); `ui/hq.ex` the remote HQ page; `ui/headless/printer.ex`; `cli.ex`, `cli/runner.ex` (Burrito entry, blocks in the UI supervisor), `cli/remote.ex` (login/logout/whoami)
+- `lib/troupe/ui/tui/*` Model (fold over events, rebuildable), View (widgets), Input (the `{text, cursor}` editor both boxes use), Server (`ExRatatui.App`); `ui/hq.ex` the remote HQ page; `ui/headless/printer.ex`; `cli.ex`, `cli/runner.ex` (Burrito entry, blocks in the UI supervisor), `cli/remote.ex` (login/logout/whoami)
 - `native/reaper/reaper.zig` + `Mix.Tasks.Compile.Reaper` in `mix.exs`: every OS process runs under reaper
 - `test/support/helpers.ex` (`start_session!`, `await_state`, `eventually`), `test/support/tui_helpers.ex` (headless TUI on `CellSession`, `screen_text`, `press`), `test/support/fake_remote.ex` (a plane, workers and an OIDC issuer in this VM, over real HTTP and real WebSocket frames) with `test/support/remote_helpers.ex`
 

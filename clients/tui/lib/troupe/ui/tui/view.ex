@@ -14,16 +14,17 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Widgets.Block.Title
   alias Troupe.Client
   alias Troupe.Settings
-  alias Troupe.UI.TUI.Model
+  alias Troupe.UI.TUI.{Input, Model}
 
-  # Command-box geometry: `@cmd_rows` console rows when the input fits one row,
-  # growing (to a maximum of `@max_content_rows + 2`) as the focused box holds
-  # more: a line that folds past the width, or a pasted / Alt-Enter multiline.
-  # The box always shows the *tail* of the input — the rows the user is
-  # producing right now — never the first rows of a long input, which they
-  # typed rows ago and already saw.
+  # Command-box geometry. The focused box — the command line and an active
+  # window's input — is a fixed `@input_rows` console rows: `@input_content`
+  # rows to write in plus the two borders, so the box never jumps under the
+  # typist and there is room to see what a long input actually says. Past that
+  # it scrolls around the cursor rather than growing (Decision 88). The pages
+  # (settings, sessions, files, HQ) keep the one-row `@cmd_rows` footer.
   @cmd_rows 3
-  @max_content_rows 4
+  @input_content 5
+  @input_rows @input_content + 2
 
   @spec render(map(), ExRatatui.Frame.t()) :: [{term(), Rect.t()}]
   def render(%{focus: :settings} = state, frame) do
@@ -61,7 +62,7 @@ defmodule Troupe.UI.TUI.View do
   def render(state, frame) do
     windows = Model.windows(state.model)
     geometry = pane_geometry(state, {frame.width, frame.height})
-    cmd_rows = box_height(frame.width, frame.height, state)
+    cmd_rows = box_height(frame.height)
 
     {strip_rect, _pane_rect, status_rect, cmd_rect} =
       layout(frame.width, frame.height, geometry != nil, length(windows), cmd_rows)
@@ -75,8 +76,7 @@ defmodule Troupe.UI.TUI.View do
   The vertical layout for a frame: `{strip, pane | nil, status, command}` rects.
   With a pane open the strip becomes a compact tray (at most 8 rows) so the
   transcript gets the screen. `cmd_rows` sets the command box height; callers
-  hand in `box_height/3` so the pane shrinks to leave room for a multiline
-  input's tail.
+  hand in `box_height/1` so the pane leaves room for the input box.
   """
   @spec layout(non_neg_integer(), non_neg_integer(), boolean(), non_neg_integer(), pos_integer()) ::
           {Rect.t(), Rect.t() | nil, Rect.t(), Rect.t()}
@@ -147,13 +147,7 @@ defmodule Troupe.UI.TUI.View do
 
       w ->
         {_strip, pane_rect, _status, _cmd} =
-          layout(
-            width,
-            height,
-            true,
-            map_size(state.model.windows),
-            box_height(width, height, state)
-          )
+          layout(width, height, true, map_size(state.model.windows), box_height(height))
 
         {left, side} = pane_split(pane_rect)
         inner_w = max(left.width - 2, 1)
@@ -1231,7 +1225,7 @@ defmodule Troupe.UI.TUI.View do
     {text, title} =
       case state.focus do
         :command ->
-          {"#{"/" <> state.cmd_text <> "▏"}",
+          {{:edit, {"/" <> state.cmd_text, state.cmd_pos + 1}},
            if(multiline?(state.cmd_text), do: pasted_title(state.cmd_text), else: " command ")}
 
         {:window, path} ->
@@ -1245,7 +1239,7 @@ defmodule Troupe.UI.TUI.View do
               true -> " → #{path} (Enter sends#{target}, Esc back) "
             end
 
-          {state.win_text <> "▏", title}
+          {{:edit, {state.win_text, state.win_pos}}, title}
 
         :settings ->
           settings_command_line(state)
@@ -1276,11 +1270,24 @@ defmodule Troupe.UI.TUI.View do
      }, rect}
   end
 
-  # The box always shows the *tail* of the input — the rows the user is
-  # producing right now — never the first rows of a long input, which they typed
-  # rows ago and already saw. Fold the last lines to the inner width (hard
-  # breaking so a too-long row's continuation stays visible), then show the last
-  # `content_rows` rows, ending with the cursor marker. The box never scrolls.
+  # An editable box scrolls: fold the whole input to the inner width (hard
+  # breaking, so a too-long row's continuation stays visible), then show the
+  # window of rows around the one the cursor is on — centred, so there is
+  # context either side, and pinned to the ends so the first and last rows are
+  # reachable. An input that fits draws whole.
+  defp input_box_text(state, {:edit, input}, box_rows) do
+    content = max(box_rows - 2, 1)
+    {rows, cursor_row} = Input.rows(input, cmd_inner_width(state, box_rows))
+
+    offset =
+      (cursor_row - div(content - 1, 2))
+      |> max(0)
+      |> min(max(length(rows) - content, 0))
+
+    rows |> Enum.slice(offset, content) |> Enum.join("\n")
+  end
+
+  # A box nobody types into (a page's footer, the HQ wizard) just shows its tail.
   defp input_box_text(state, text, box_rows) do
     w = cmd_inner_width(state, box_rows)
     content = max(box_rows - 2, 1)
@@ -1304,33 +1311,11 @@ defmodule Troupe.UI.TUI.View do
 
   defp cmd_inner_width(_state, _box_rows), do: 120
 
-  # How tall the command box should be: one content row per wrapped row of the
-  # active input, plus the two border rows, up to `@max_content_rows` content
-  # rows, never below `@cmd_rows` (so there is always a content row to type
-  # into) and never so tall it would collapse the pane (leave the strip, status
-  # and at least two pane rows). Folding here matches exactly how the box will
-  # draw it, so the pane always leaves the room the box needs. Everything typed
-  # grows the box; nothing scrolls.
-  defp box_height(width, height, state) do
-    text =
-      case state.focus do
-        {:window, _} -> state.win_text
-        :command -> state.cmd_text
-        _ -> ""
-      end
-
-    w = max(width - 2, 1)
-
-    content =
-      text
-      |> String.split("\n")
-      |> Enum.map(&Model.wrap(&1, w, :char))
-      |> List.flatten()
-      |> length()
-      |> min(@max_content_rows)
-
-    max(@cmd_rows, min(content + 2, height - 5))
-  end
+  # How tall the command box is: `@input_rows`, always — a fixed box is one the
+  # typist can aim at, and five rows is enough of a long input to read back. On
+  # a short terminal it gives way so the strip, the status line and two pane
+  # rows still fit.
+  defp box_height(height), do: max(@cmd_rows, min(@input_rows, height - 5))
 
   # The wizard's free-text steps type into the command line, so the page itself
   # stays a list and the box stays where the user is already looking.

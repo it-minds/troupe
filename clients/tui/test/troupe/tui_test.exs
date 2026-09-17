@@ -624,7 +624,7 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     assert answered.data.text == "a multi-\nline answer"
   end
 
-  test "the command box grows and shows the tail of a long single-line input, so the end you type stays visible" do
+  test "the command box shows the tail of a long single-line input, so the end you type stays visible" do
     ws = tmp_workspace()
     scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => "what?"}}, {:finish, "ok"}]}
     {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
@@ -653,14 +653,66 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     await_state("code-1", :needs_input)
     press(pid, "1")
 
-    # A paste with more lines than the box, then more typing: the box shows the
-    # last rows (the newest content), including what follows the paste.
-    paste(pid, "first\nsecond\nthird\nfourth\nfifth")
+    # A paste with more lines than the box holds, then more typing: the box
+    # scrolls to the cursor, so the newest content — what follows the paste — is
+    # what is on screen.
+    paste(pid, "first\nsecond\nthird\nfourth\nfifth\nsixth\nseventh")
     type(pid, "-more")
 
     text = screen_text(pid, session)
-    assert text =~ "fifth-more▏", "the tail after the paste is on the box with its cursor"
+    assert text =~ "seventh-more▏", "the tail after the paste is on the box with its cursor"
     refute text =~ "first", "the first pasted line is not what the box shows"
+  end
+
+  test "the cursor moves and edits inside the line: arrows, Alt-word jumps, Home/End, Delete" do
+    {sid, _, _} = start_session!(workspace: tmp_workspace())
+    {pid, _session} = start_tui(sid, width: 80, height: 24)
+
+    type(pid, "code fix the parser bug")
+
+    # Alt-← jumps a word at a time, ← a character; typing lands at the cursor.
+    press(pid, "left", ["alt"])
+    press(pid, "left", ["alt"])
+    assert user_state(pid).cmd_pos == 13
+    type(pid, "broken ")
+    assert user_state(pid).cmd_text == "code fix the broken parser bug"
+
+    # Alt-Backspace takes the word before the cursor, Delete the character after.
+    press(pid, "backspace", ["alt"])
+    assert user_state(pid).cmd_text == "code fix the parser bug"
+    press(pid, "delete")
+    assert user_state(pid).cmd_text == "code fix the arser bug"
+
+    # Home/End are the ends of the line, and Ctrl-K cuts to the end from there.
+    press(pid, "home")
+    assert user_state(pid).cmd_pos == 0
+    press(pid, "right", ["ctrl"])
+    press(pid, "k", ["ctrl"])
+    assert user_state(pid).cmd_text == "code"
+    press(pid, "end")
+    assert user_state(pid).cmd_pos == 4
+  end
+
+  test "an input taller than the box scrolls to wherever the cursor is" do
+    {sid, _, _} = start_session!(workspace: tmp_workspace())
+    {pid, session} = start_tui(sid, width: 80, height: 24)
+
+    paste(pid, Enum.map_join(1..9, "\n", &"row#{&1}"))
+
+    # The box is five rows: the cursor sits at the end, so the last rows show.
+    text = screen_text(pid, session)
+    assert text =~ "row9▏"
+    refute text =~ "row1\n", "the first rows of a nine-row input are scrolled off"
+
+    # ↑ walks the cursor back up the input, keeping its column, and the box
+    # scrolls with it; on the first row it goes to the start of the line.
+    for _ <- 1..8, do: press(pid, "up")
+    assert user_state(pid).cmd_pos == 4
+    press(pid, "up")
+    assert user_state(pid).cmd_pos == 0
+    text = screen_text(pid, session)
+    assert text =~ "row1"
+    refute text =~ "row9", "the tail is scrolled off once the cursor is at the top"
   end
 
   test "a question with options renders a numbered menu and a digit answers it" do

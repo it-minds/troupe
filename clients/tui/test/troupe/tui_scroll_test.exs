@@ -681,7 +681,7 @@ defmodule Troupe.TUIPaneRegressionTest do
     }
 
     {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
-    {pid, session} = start_tui(sid, width: 80, height: 24)
+    {pid, session} = start_tui(sid, width: 80, height: 28)
     {:ok, "code-1"} = Troupe.dispatch(sid, "code", "edit it")
     await_state("code-1", :needs_input, 15_000)
     eventually(fn -> user_state(pid).model.windows["code-1"].pending != [] end)

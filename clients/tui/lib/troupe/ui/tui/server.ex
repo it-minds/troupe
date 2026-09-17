@@ -14,7 +14,7 @@ defmodule Troupe.UI.TUI.Server do
   alias Troupe.Client
   alias Troupe.Settings
   alias Troupe.UI.HQ
-  alias Troupe.UI.TUI.{Model, View}
+  alias Troupe.UI.TUI.{Input, Model, View}
 
   @tick_ms 33
   @mailbox_threshold 50
@@ -26,7 +26,9 @@ defmodule Troupe.UI.TUI.Server do
           focus:
             :command | {:window, String.t()} | :settings | :observer | :sessions | :files | :hq,
           cmd_text: String.t(),
+          cmd_pos: non_neg_integer(),
           win_text: String.t(),
+          win_pos: non_neg_integer(),
           commands: [String.t()],
           tick: non_neg_integer(),
           now: integer(),
@@ -143,7 +145,9 @@ defmodule Troupe.UI.TUI.Server do
       model: model,
       focus: :command,
       cmd_text: "",
+      cmd_pos: 0,
       win_text: "",
+      win_pos: 0,
       commands: Client.commands(sid),
       tick: 0,
       now: System.system_time(:millisecond),
@@ -316,13 +320,26 @@ defmodule Troupe.UI.TUI.Server do
     state = %{state | quit_armed: false}
 
     case state.focus do
-      :command -> {:noreply, %{state | cmd_text: state.cmd_text <> content}}
-      {:window, _} -> {:noreply, %{state | win_text: state.win_text <> content, win_armed: nil}}
-      :observer -> {:noreply, state, render?: false}
-      :sessions -> {:noreply, state, render?: false}
-      :files -> {:noreply, state, render?: false}
-      :hq -> {:noreply, state, render?: false}
-      :settings -> {:noreply, paste_into_settings(state, content)}
+      :command ->
+        {:noreply, put_cmd(state, Input.insert(cmd_input(state), content))}
+
+      {:window, _} ->
+        {:noreply, %{put_win(state, Input.insert(win_input(state), content)) | win_armed: nil}}
+
+      :observer ->
+        {:noreply, state, render?: false}
+
+      :sessions ->
+        {:noreply, state, render?: false}
+
+      :files ->
+        {:noreply, state, render?: false}
+
+      :hq ->
+        {:noreply, state, render?: false}
+
+      :settings ->
+        {:noreply, paste_into_settings(state, content)}
     end
   end
 
@@ -492,23 +509,20 @@ defmodule Troupe.UI.TUI.Server do
 
   ## Command line keys
 
-  defp command_key(%Key{code: "esc"}, state), do: %{state | cmd_text: ""}
-
-  defp command_key(%Key{code: "backspace"}, state),
-    do: %{state | cmd_text: String.slice(state.cmd_text, 0..-2//1)}
+  defp command_key(%Key{code: "esc"}, state), do: put_cmd(state, "")
 
   defp command_key(%Key{code: "tab"}, state),
-    do: %{state | cmd_text: complete_command(state.cmd_text, state)}
+    do: put_cmd(state, complete_command(state.cmd_text, state))
 
   # A newline in the box rather than running the command: any modifier on Enter,
   # and Ctrl-J. The box holds multiline (typed or pasted) input, folded to a
   # `<pasted N lines>` marker in the title. Shift-Enter alone is not enough:
   # most terminals send a bare `\r` for it, indistinguishable from Enter.
   defp command_key(%Key{code: "enter", modifiers: mods}, state) when mods != [],
-    do: %{state | cmd_text: state.cmd_text <> "\n"}
+    do: put_cmd(state, Input.insert(cmd_input(state), "\n"))
 
   defp command_key(%Key{code: "j", modifiers: ["ctrl"]}, state),
-    do: %{state | cmd_text: state.cmd_text <> "\n"}
+    do: put_cmd(state, Input.insert(cmd_input(state), "\n"))
 
   defp command_key(%Key{code: "enter"}, %{cmd_text: ""} = state) do
     case Model.windows(state.model) do
@@ -526,12 +540,46 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  defp command_key(%Key{code: code, modifiers: mods}, state)
+  defp command_key(%Key{code: code, modifiers: mods} = key, state)
        when byte_size(code) >= 1 and mods in [[], ["shift"]] do
-    if String.length(code) == 1, do: %{state | cmd_text: state.cmd_text <> code}, else: state
+    if String.length(code) == 1,
+      do: put_cmd(state, Input.insert(cmd_input(state), code)),
+      else: editing_key(key, state)
   end
 
-  defp command_key(_key, state), do: state
+  defp command_key(key, state), do: editing_key(key, state)
+
+  # Motions and deletions the editor owns (Decision 88): they come last, so
+  # every binding above — Esc, Tab, Enter, a digit that picks a window — wins.
+  defp editing_key(key, %{focus: :command} = state) do
+    case Input.key(key, cmd_input(state)) do
+      {:ok, input} -> put_cmd(state, input)
+      :pass -> state
+    end
+  end
+
+  defp editing_key(key, state) do
+    case Input.key(key, win_input(state)) do
+      {:ok, input} -> put_win(state, input)
+      :pass -> state
+    end
+  end
+
+  # The command line and a window's input box as `{text, cursor}` pairs, and the
+  # two ways back: a bare string puts the cursor at its end (a completion, a
+  # clear), a pair keeps the cursor the editor chose.
+  defp cmd_input(%{cmd_text: text, cmd_pos: pos}), do: {text, pos}
+  defp win_input(%{win_text: text, win_pos: pos}), do: {text, pos}
+
+  defp put_cmd(state, text) when is_binary(text), do: put_cmd(state, {text, String.length(text)})
+
+  defp put_cmd(state, {text, pos}),
+    do: %{state | cmd_text: text, cmd_pos: Input.clamp(text, pos)}
+
+  defp put_win(state, text) when is_binary(text), do: put_win(state, {text, String.length(text)})
+
+  defp put_win(state, {text, pos}),
+    do: %{state | win_text: text, win_pos: Input.clamp(text, pos)}
 
   defp run_command(state, text) do
     sid = state.session_id
@@ -611,7 +659,7 @@ defmodule Troupe.UI.TUI.Server do
           Client.dispatch(sid, cmd, args)
       end
 
-    state = %{state | cmd_text: ""}
+    state = put_cmd(state, "")
 
     case result do
       :quit -> %{state | quitting: true}
@@ -619,7 +667,7 @@ defmodule Troupe.UI.TUI.Server do
       {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
       :models -> open_models(state)
-      :observer -> %{state | focus: :observer, cmd_text: "", observer: %{cursor: 0}}
+      :observer -> %{put_cmd(state, "") | focus: :observer, observer: %{cursor: 0}}
       {:sessions, ""} -> open_sessions(state)
       {:sessions, arg} -> resume_by_arg(state, arg)
       {:ok, _} -> state
@@ -732,7 +780,7 @@ defmodule Troupe.UI.TUI.Server do
     entries = pickable_sessions(state)
     cursor = Enum.find_index(entries, &(&1.id == state.session_id)) || 0
 
-    %{state | focus: :sessions, cmd_text: "", sessions: %{entries: entries, cursor: cursor}}
+    %{put_cmd(state, "") | focus: :sessions, sessions: %{entries: entries, cursor: cursor}}
   end
 
   defp sessions_key(%Key{code: "esc"}, state), do: %{state | focus: :command, sessions: nil}
@@ -817,7 +865,9 @@ defmodule Troupe.UI.TUI.Server do
         commands: Client.commands(sid),
         focus: :command,
         cmd_text: "",
+        cmd_pos: 0,
         win_text: "",
+        win_pos: 0,
         win_armed: nil,
         expanded: false,
         pane: fresh_pane(),
@@ -867,7 +917,7 @@ defmodule Troupe.UI.TUI.Server do
         url when is_binary(url) -> ensure_plane({:remote, url})
       end
 
-    state = %{state | focus: :hq, cmd_text: "", hq: HQ.open(origin, state.workspace)}
+    state = %{put_cmd(state, "") | focus: :hq, hq: HQ.open(origin, state.workspace)}
     _ = origin && Client.subscribe_fleet(origin)
     state
   end
@@ -903,7 +953,7 @@ defmodule Troupe.UI.TUI.Server do
   # `fs.list`/`fs.read` through the client, so a local session shows its
   # workspace and a remote one its worker's checkout with the same keys.
   defp toggle_files(%{files: nil} = state),
-    do: load_files(%{state | focus: :files, cmd_text: ""}, "session:/")
+    do: load_files(%{put_cmd(state, "") | focus: :files}, "session:/")
 
   defp toggle_files(state), do: %{state | focus: :command, files: nil}
 
@@ -1022,6 +1072,7 @@ defmodule Troupe.UI.TUI.Server do
       state
       | focus: :settings,
         cmd_text: "",
+        cmd_pos: 0,
         settings: %{config: config, cursor: 0, editing: nil, scroll: 0, status: nil, picker: nil}
     }
   end
@@ -1194,7 +1245,7 @@ defmodule Troupe.UI.TUI.Server do
     do: %{state | selection: nil}
 
   defp window_key(%Key{code: "esc"}, _path, state),
-    do: %{state | focus: :command, win_text: "", win_armed: nil}
+    do: %{put_win(state, "") | focus: :command, win_armed: nil}
 
   # Ctrl-Y copies: the selection when the mouse made one, and otherwise the whole
   # transcript (same as `/copy`) — with mouse reporting on the terminal's own
@@ -1206,17 +1257,14 @@ defmodule Troupe.UI.TUI.Server do
   # reaching the bottom) follows the tail again.
   defp window_key(%Key{code: "page_up"}, _path, state), do: page_by(state, -1)
   defp window_key(%Key{code: "page_down"}, _path, state), do: page_by(state, 1)
-  defp window_key(%Key{code: "home"}, _path, state), do: scroll_to(state, 0)
-  defp window_key(%Key{code: "end"}, _path, state), do: follow(state)
+  defp window_key(%Key{code: "home"}, _path, %{win_text: ""} = state), do: scroll_to(state, 0)
+  defp window_key(%Key{code: "end"}, _path, %{win_text: ""} = state), do: follow(state)
   defp window_key(%Key{code: "up"}, _path, %{win_text: ""} = state), do: scroll_by(state, -1)
   defp window_key(%Key{code: "down"}, _path, %{win_text: ""} = state), do: scroll_by(state, 1)
 
   # ←/→ cycle through the branch's agents (root first), so a subagent's transcript can be read.
   defp window_key(%Key{code: code}, path, %{win_text: ""} = state) when code in ["left", "right"],
     do: cycle_agent(state, path, if(code == "right", do: 1, else: -1))
-
-  defp window_key(%Key{code: "backspace"}, _path, state),
-    do: %{state | win_text: String.slice(state.win_text, 0..-2//1)}
 
   defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state) do
     w = Map.fetch!(state.model.windows, path)
@@ -1237,14 +1285,15 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp window_key(%Key{code: "tab"}, _path, state),
-    do: %{state | win_text: complete_file(state.win_text, state.model.workspace)}
+    do: put_win(state, complete_file(state.win_text, state.model.workspace))
 
-  defp window_key(%Key{code: code}, path, %{win_text: ""} = state) when code in ["y", "n", "a"] do
+  defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
+       when code in ["y", "n", "a"] do
     w = Map.fetch!(state.model.windows, path)
 
     case answerable(w, state.pane.agent || path) do
       nil ->
-        %{state | win_text: code}
+        put_win(state, code)
 
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
@@ -1280,7 +1329,7 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(%Key{code: code, modifiers: []}, path, %{win_text: ""} = state)
        when code in ["x", "d"],
-       do: %{state | win_text: code, win_armed: {path, code}}
+       do: %{put_win(state, code) | win_armed: {path, code}}
 
   defp window_key(%Key{code: "e"}, _path, %{win_text: ""} = state), do: toggle_expanded(state)
 
@@ -1298,17 +1347,17 @@ defmodule Troupe.UI.TUI.Server do
         end
 
       _ ->
-        %{state | win_text: <<d>>}
+        put_win(state, <<d>>)
     end
   end
 
   # A newline in the input box: any modifier on Enter, and Ctrl-J. Multiline
   # (typed or pasted) input folds to a `<pasted N lines>` marker in the title.
   defp window_key(%Key{code: "enter", modifiers: mods}, _path, state) when mods != [],
-    do: %{state | win_text: state.win_text <> "\n"}
+    do: put_win(state, Input.insert(win_input(state), "\n"))
 
   defp window_key(%Key{code: "j", modifiers: ["ctrl"]}, _path, state),
-    do: %{state | win_text: state.win_text <> "\n"}
+    do: put_win(state, Input.insert(win_input(state), "\n"))
 
   # Enter with nothing typed sends the ticked options of a multiple-choice
   # question. With none ticked there is nothing to send, so it falls through.
@@ -1347,14 +1396,17 @@ defmodule Troupe.UI.TUI.Server do
 
     # Any Enter that reaches here either answered the question or replaced it
     # with fresh input, so a half-built selection is stale either way.
-    follow(%{state | win_text: "", answer: nil})
+    follow(%{put_win(state, "") | answer: nil})
   end
 
-  defp window_key(%Key{code: code, modifiers: mods}, _path, state) when mods in [[], ["shift"]] do
-    if String.length(code) == 1, do: %{state | win_text: state.win_text <> code}, else: state
+  defp window_key(%Key{code: code, modifiers: mods} = key, _path, state)
+       when mods in [[], ["shift"]] do
+    if String.length(code) == 1,
+      do: put_win(state, Input.insert(win_input(state), code)),
+      else: editing_key(key, state)
   end
 
-  defp window_key(_key, _path, state), do: state
+  defp window_key(key, _path, state), do: editing_key(key, state)
 
   # y/n/a answers approvals and the budget question — a delegated subagent raises
   # both, and its pending item lives in the branch's window like the root's. When
@@ -1404,6 +1456,7 @@ defmodule Troupe.UI.TUI.Server do
       state
       | focus: {:window, path},
         win_text: "",
+        win_pos: 0,
         win_armed: nil,
         model: model,
         pane: fresh_pane(agent),
@@ -1454,13 +1507,14 @@ defmodule Troupe.UI.TUI.Server do
       state
       | focus: :command,
         win_text: "",
+        win_pos: 0,
         win_armed: nil,
         pane: fresh_pane(),
         selection: nil
     }
 
   # Empties the input box without leaving the window, and takes any arming with it.
-  defp clear_input(state), do: %{state | win_text: "", win_armed: nil}
+  defp clear_input(state), do: %{put_win(state, "") | win_armed: nil}
 
   # Expanding or collapsing tool output keeps the entry at the top of the view where it is,
   # instead of throwing the reader to the bottom of a transcript that just changed height.
