@@ -478,10 +478,18 @@ not list goes out as typed with nothing added.
 `Troupe.Tool` behaviour: `name/0`, `description/0`, `schema/0`,
 `default_permission/0`, `run(args, ctx)`. `ctx` is `%Troupe.Tool.Context{}`
 with `workspace`, `isolation`, `session_id`, `agent_path`, `call_id`,
-`definition`, `definitions`, `depth`. Tool tasks run under `Agent.Tasks`; the
+`definition`, `definitions`, `depth`, `config`. Tool tasks run under `Agent.Tasks`; the
 runner (`Troupe.Tool.Runner`) is the one place `rescue`/`catch` is used: a
 raise, exit or timeout becomes `{:error, text}`. Every OS process runs under
 `reaper` through `Troupe.OS.Process`, whose Port is owned by the tool task.
+
+Reads and writes are confined differently (Decision 90). A write resolves
+through `Workspace.resolve/3` and can never leave the workspace root. A read
+(`read_file`, `grep`, `list_files`) resolves through
+`Workspace.resolve_readable/4`, which also admits the directories in
+`config.read_roots` — `deps/`, a vendored checkout, a sibling repo — so
+inspecting a dependency does not mean falling back to `shell`. Both compare the
+*canonicalized* path, so a symlink is judged by where it lands.
 
 `web_fetch` is the only tool that reaches the network: a GET, capped in what it
 reads off the socket and in what it returns, with the response reduced to text

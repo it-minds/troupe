@@ -56,7 +56,16 @@ models:
   cheap: claude-haiku-4-5    # cheap: exploration, synthesis, /ask
 max_branches: 8
 compaction: {fraction: 0.8, keep_last_turns: 4}
+read_roots:                  # extra directories the *read* tools may reach into
+  - ~/src/some-dependency
 ```
+
+`read_roots` widens only reading. `read_file`, `grep`, `list_files` and `glob`
+may look inside these directories as well as the workspace, which is what lets
+the agent read a dependency's source without shelling out; `write_file` and
+`edit_file` are unaffected and can never write outside the workspace root.
+Paths are compared after resolving symlinks, so a link out of the workspace
+counts as wherever it actually points.
 
 A project `.troupe/config.yaml` overrides keys; environment variables
 (`TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`)

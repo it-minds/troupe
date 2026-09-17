@@ -32,30 +32,43 @@ defmodule Troupe.Tools.ReadFile do
 
   @impl true
   def run(%{"path" => path} = args, ctx) do
-    with {:ok, abs} <- Workspace.resolve(ctx.workspace, path),
+    with {:ok, abs} <- Workspace.resolve_readable(ctx.workspace, path, Context.read_roots(ctx)),
          {:ok, content} <- File.read(abs) do
       limits = Context.limits(ctx)
       offset = max(Map.get(args, "offset", 1) || 1, 1)
       limit = max(Map.get(args, "limit") || limits.file_lines, 1)
 
-      numbered =
-        content
-        |> Bound.sanitize()
-        |> String.split("\n")
-        |> Enum.with_index(1)
-        |> Enum.map_join("\n", fn {line, n} ->
-          "#{String.pad_leading(Integer.to_string(n), 5)}\t#{line}"
-        end)
-
-      {:ok, bound(numbered, path, offset, limit, limits, ctx)}
+      {:ok, bound(numbered(content), path, offset, limit, limits, ctx)}
     else
-      {:error, :outside_workspace} -> {:error, "path escapes the workspace: #{path}"}
+      {:error, :outside_workspace} -> {:error, outside(path, ctx)}
       {:error, :invalid_path} -> {:error, "invalid path: #{path}"}
       {:error, reason} -> {:error, "cannot read #{path}: #{:file.format_error(reason)}"}
     end
   end
 
   def run(_, _), do: {:error, "path is required"}
+
+  defp numbered(content) do
+    content
+    |> Bound.sanitize()
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.map_join("\n", fn {line, n} ->
+      "#{String.pad_leading(Integer.to_string(n), 5)}\t#{line}"
+    end)
+  end
+
+  # Naming the readable roots turns a refusal into something the model can act
+  # on: without them it retries the same path, or falls back to `shell`.
+  defp outside(path, ctx) do
+    case Context.read_roots(ctx) do
+      [] ->
+        "path escapes the workspace: #{path}"
+
+      roots ->
+        "path escapes the workspace and the readable roots (#{Enum.join(roots, ", ")}): #{path}"
+    end
+  end
 
   # A file read is idempotent, so a line window needs nothing stored: the next
   # window is one more `read_file` away. The character cap is the backstop for a

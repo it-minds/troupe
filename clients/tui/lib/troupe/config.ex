@@ -41,6 +41,7 @@ defmodule Troupe.Config do
             survey_chars: pos_integer()
           },
           tool_timeout_ms: pos_integer(),
+          read_roots: [String.t()],
           cache: %{ttl: String.t()},
           limits: %{
             file_lines: pos_integer(),
@@ -122,6 +123,7 @@ defmodule Troupe.Config do
               survey_chars: 1_500
             },
             tool_timeout_ms: 120_000,
+            read_roots: [],
             cache: %{ttl: "5m"},
             limits: %{
               file_lines: 250,
@@ -596,6 +598,7 @@ defmodule Troupe.Config do
           survey_chars: Map.get(memory, "survey_chars", cfg.memory.survey_chars)
         },
         tool_timeout_ms: Map.get(yaml, "tool_timeout_ms", cfg.tool_timeout_ms),
+        read_roots: read_roots(Map.get(yaml, "read_roots"), cfg.read_roots),
         cache: %{ttl: ttl(Map.get(cache, "ttl")) || cfg.cache.ttl},
         limits: %{
           file_lines: Map.get(limits, "file_lines", cfg.limits.file_lines),
@@ -611,6 +614,20 @@ defmodule Troupe.Config do
         models_explicit?: Map.has_key?(models, "default")
     }
   end
+
+  # Directories the read-only tools may reach into besides the workspace. Each is
+  # expanded once here (`~` and a relative entry both appear in hand-written
+  # config) so path comparison later is between absolute paths only.
+  defp read_roots(nil, default), do: default
+
+  defp read_roots(list, _default) when is_list(list) do
+    list
+    |> Enum.filter(&is_binary/1)
+    |> Enum.map(&Path.expand/1)
+    |> Enum.uniq()
+  end
+
+  defp read_roots(_other, default), do: default
 
   defp parse_providers(map) when is_map(map) do
     Map.new(map, fn {name, p} ->

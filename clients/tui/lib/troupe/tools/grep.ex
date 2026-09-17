@@ -41,7 +41,7 @@ defmodule Troupe.Tools.Grep do
   def run(%{"pattern" => pattern} = args, ctx) do
     base = Map.get(args, "path") || "."
 
-    case Workspace.resolve(ctx.workspace, base) do
+    case Workspace.resolve_readable(ctx.workspace, base, Context.read_roots(ctx)) do
       {:ok, dir} ->
         if System.find_executable("rg") do
           ripgrep(pattern, dir, args, ctx)
@@ -50,7 +50,7 @@ defmodule Troupe.Tools.Grep do
         end
 
       {:error, _} ->
-        {:error, "path escapes the workspace: #{base}"}
+        {:error, "path escapes the workspace and the readable roots: #{base}"}
     end
   end
 

@@ -36,4 +36,12 @@ defmodule Troupe.Tool.Context do
         }
   def limits(%__MODULE__{config: %Troupe.Config{limits: limits}}), do: limits
   def limits(%__MODULE__{}), do: %Troupe.Config{}.limits
+
+  @doc """
+  Directories a read-only tool may reach into besides the workspace. Writes
+  never consult this — `Workspace.resolve/3` still confines them to the root.
+  """
+  @spec read_roots(t()) :: [String.t()]
+  def read_roots(%__MODULE__{config: %Troupe.Config{read_roots: roots}}), do: roots
+  def read_roots(%__MODULE__{}), do: []
 end

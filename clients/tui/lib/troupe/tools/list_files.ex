@@ -37,13 +37,13 @@ defmodule Troupe.Tools.ListFiles do
     pattern = Map.get(args, "pattern") || "**/*"
     base = Map.get(args, "path") || "."
 
-    case Workspace.resolve(ctx.workspace, base) do
+    case Workspace.resolve_readable(ctx.workspace, base, Context.read_roots(ctx)) do
       {:ok, dir} ->
         files =
           Path.join(dir, pattern)
           |> Path.wildcard(match_dot: true)
           |> Enum.reject(&excluded?(&1, ctx.workspace))
-          |> Enum.map(&Path.relative_to(&1, ctx.workspace))
+          |> Enum.map(&Path.relative_to(&1, relative_root(dir, ctx)))
           |> Enum.sort()
 
         limits = Context.limits(ctx)
@@ -58,8 +58,15 @@ defmodule Troupe.Tools.ListFiles do
          end)}
 
       {:error, _} ->
-        {:error, "path escapes the workspace: #{base}"}
+        {:error, "path escapes the workspace and the readable roots: #{base}"}
     end
+  end
+
+  # Paths print relative to the workspace when they are in it, and relative to
+  # the read root otherwise — `Path.relative_to/2` against the wrong root leaves
+  # an absolute path, which reads as noise and is not a path the model can reuse.
+  defp relative_root(dir, ctx) do
+    if String.starts_with?(dir, ctx.workspace), do: ctx.workspace, else: dir
   end
 
   defp excluded?(path, root) do

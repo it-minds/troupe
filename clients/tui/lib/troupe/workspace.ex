@@ -3,6 +3,11 @@ defmodule Troupe.Workspace do
   Path confinement. Every tool path is resolved against the branch's workspace
   root with symlinks (and junctions on Windows) followed; anything that
   escapes the root is rejected.
+
+  `resolve_readable/4` is the one relaxation, and it is read-only: a read tool
+  may also reach into a configured read root (`deps/`, a vendored checkout, a
+  sibling repo). Writes always go through `resolve/3` and never leave the
+  workspace.
   """
 
   @type os :: :unix | :windows
@@ -28,6 +33,45 @@ defmodule Troupe.Workspace do
       else
         {:error, :outside_workspace}
       end
+    end
+  end
+
+  @doc """
+  Resolves `path` for a **read**: inside the workspace as `resolve/3` does, or
+  else inside one of `read_roots`.
+
+  The audit that motivated this found a quarter of all read-only shell calls
+  were the model routing around a refusal — `cd deps/ex_ratatui && sed -n ...`,
+  `cat /tmp/checkout/lib/x.ex` — because the native read tools could not reach
+  outside the root. Widening only the read path costs nothing in safety: the
+  fallback compares the same canonicalized path against each root, so a symlink
+  out of the workspace is judged by where it actually lands, and a worktree that
+  symlinks `deps` to the main checkout resolves through this rather than being
+  rejected.
+  """
+  @spec resolve_readable(String.t(), String.t(), [String.t()], keyword()) ::
+          {:ok, String.t()} | {:error, :outside_workspace | :invalid_path}
+  def resolve_readable(root, path, read_roots, opts \\ [])
+      when is_binary(root) and is_binary(path) and is_list(read_roots) do
+    case resolve(root, path, opts) do
+      {:ok, abs} ->
+        {:ok, abs}
+
+      {:error, :invalid_path} = invalid ->
+        invalid
+
+      {:error, :outside_workspace} = outside ->
+        os = Keyword.get(opts, :os, host_os())
+        canon = Keyword.get(opts, :canonicalize, &canonicalize/1)
+
+        with :ok <- validate(path),
+             {:ok, abs} <- expand(root, path, os) do
+          real = canon.(abs)
+
+          Enum.find_value(read_roots, outside, fn r ->
+            if inside?(canon.(normalize(r, os)), real, os), do: {:ok, real}
+          end)
+        end
     end
   end
 
