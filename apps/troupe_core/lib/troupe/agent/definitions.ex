@@ -43,9 +43,33 @@ defmodule Troupe.Agent.Definitions do
       |> merge_bundle(Keyword.get(opts, :bundle_dir))
       |> merge_dir(Path.join(Paths.config_dir(), "agents"), :global)
       |> merge_dir(Path.join(Paths.project_dir(workspace_root), "agents"), :project)
+      |> merge_acp(Keyword.get(opts, :acp_agents, []))
       |> entitled(Keyword.get(opts, :entitled))
 
     %__MODULE__{by_name: by_name}
+  end
+
+  # A bundle's ACP agents become ordinary subagent definitions carrying a command instead
+  # of a prompt. Doing it here rather than beside the delegation tool is what keeps the rest
+  # of the system from learning there is a second kind of delegate: `fetch/2` finds it,
+  # `delegate` accepts it, the depth limit applies to it, and it takes a budget slice like
+  # anything else.
+  #
+  # Merged last, after every directory, because a bundle entry is the plane's word and a
+  # file on the pod's disk should not be able to stand in for one.
+  defp merge_acp(by_name, []), do: by_name
+
+  defp merge_acp(by_name, entries) do
+    Enum.reduce(entries, by_name, fn entry, acc ->
+      Map.put(acc, entry.name, %Definition{
+        name: entry.name,
+        mode: :subagent,
+        prompt: "",
+        description: Map.get(entry, :description) || "An ACP agent: #{entry.command}",
+        source: :bundle,
+        acp: entry
+      })
+    end)
   end
 
   # A subagent is not narrowed by the set: the plane's set names primaries, which is

@@ -159,7 +159,8 @@ defmodule Troupe.Session do
         Keyword.get_lazy(opts, :definitions, fn ->
           Definitions.load(workspace.root_real,
             bundle_dir: bundle && bundle[:dir],
-            entitled: entitled_agents(bundle)
+            entitled: entitled_agents(bundle),
+            acp_agents: acp_agents(bundle)
           )
         end)
 
@@ -228,6 +229,18 @@ defmodule Troupe.Session do
 
   defp entitled_agents(%{entitlements: %{"agents" => names}}) when is_list(names), do: names
   defp entitled_agents(_bundle), do: nil
+
+  # Narrowed before they become definitions, by the same set that narrows everything else.
+  # An unnarrowed grant and a local session both record nothing, and nothing means every
+  # one the bundle has — the same rule the other three kinds follow.
+  defp acp_agents(%{acp_agents: entries} = bundle) when is_list(entries) do
+    case get_in(bundle, [:entitlements, "acp_agents"]) do
+      names when is_list(names) -> Enum.filter(entries, &(&1.name in names))
+      _unnarrowed -> entries
+    end
+  end
+
+  defp acp_agents(_bundle), do: []
 
   defp with_skills(%Mounts{} = mounts, bundle) do
     case {Skills.mount(bundle), Mounts.fetch(mounts, "skills")} do

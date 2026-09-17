@@ -3819,3 +3819,25 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      handshake rather than an error at the first call, so an agent that can work either way
      picks the way that works — and the refusal names the reason rather than reporting a
      capability that does not exist.
+
+574. **An ACP agent becomes an ordinary subagent definition carrying a command instead of a
+     prompt.** The alternative was a second kind of delegate, with its own lookup, its own
+     depth check and its own budget rule. Making it a `Definition` with an `acp` field means
+     `fetch/2` finds it, the `delegate` tool accepts it, the depth limit applies to it and it
+     takes a budget slice — and `spawn_child/4` has exactly one branch, on which child spec
+     to start. Everything around that branch is shared, which is the test of whether the
+     abstraction was the right one.
+
+575. **The bundle's ACP agents are merged last, after every directory.** A bundle entry is
+     the plane's word; a file on the pod's disk must not be able to stand in for one.
+
+576. **An ACP agent that exits mid-task reports `:partial`, not an error.** Whatever it said
+     before it died is more use to the parent than an error with nothing in it — the same
+     reason a Troupe subagent's partial work comes back as a successful tool result. The
+     parent is left waiting on a tool call otherwise, which is the failure that matters.
+
+577. **The fake ACP agent in the tests is an Elixir script given explicit code paths.**
+     `elixir` is the one interpreter every machine that runs this suite has; a bare one has
+     no dependencies, so the paths are passed as `-pa` arguments. No shell, which is the same
+     rule the product follows and for the same reason — a glob left for a shell to expand
+     turns the rest of the arguments into something else.

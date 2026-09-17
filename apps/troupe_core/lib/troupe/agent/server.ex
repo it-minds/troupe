@@ -1213,7 +1213,24 @@ defmodule Troupe.Agent.Server do
       fake: state.fake
     ]
 
-    case DynamicSupervisor.start_child(children_sup(state), {Troupe.Agent.Node, opts}) do
+    # The one place the two kinds of delegate differ. Everything around it — the child path,
+    # the sequence, the monitor, `delegation_started`, the budget slice — is the same,
+    # because an ACP agent is a subagent that happens to be a program rather than a prompt.
+    child_spec =
+      if Definition.acp?(definition) do
+        {Troupe.Agent.ACPAgent,
+         session_id: state.session_id,
+         agent_path: child_path,
+         workspace: state.workspace,
+         entry: definition.acp,
+         task: task,
+         parent: self(),
+         parent_ref: child_ref}
+      else
+        {Troupe.Agent.Node, opts}
+      end
+
+    case DynamicSupervisor.start_child(children_sup(state), child_spec) do
       {:ok, node_pid} ->
         monitor = Process.monitor(node_pid)
 

@@ -33,6 +33,7 @@ defmodule Troupe.Agent.ACPAgent do
 
   use GenServer
 
+  alias Troupe.LLM.Usage
   alias Troupe.Workspace
 
   require Logger
@@ -65,7 +66,7 @@ defmodule Troupe.Agent.ACPAgent do
     buffer: "",
     next_id: 1,
     pending: %{},
-    terminals: %{}
+    said: ""
   ]
 
   @spec start_link(options()) :: GenServer.on_start()
@@ -217,12 +218,32 @@ defmodule Troupe.Agent.ACPAgent do
   @impl GenServer
   def handle_continue(:open, %{port: nil} = state) do
     case open_port(state.entry, state.workspace) do
-      {:ok, port} -> {:noreply, %{state | port: port}}
+      {:ok, port} -> {:noreply, handshake(%{state | port: port})}
       {:error, reason} -> {:stop, {:acp_agent_failed, reason}, state}
     end
   end
 
-  def handle_continue(:open, state), do: {:noreply, state}
+  def handle_continue(:open, state), do: {:noreply, handshake(state)}
+
+  # The client half of the handshake the gateway adapter answers. `initialize` first, then
+  # a session, then the task — in that order because ACP says so, and each waits for the
+  # last, which is why the replies drive the sequence rather than a chain of calls here.
+  defp handshake(state) do
+    ask(state, "initialize", %{
+      "protocolVersion" => @protocol_version,
+      "clientInfo" => %{"name" => "troupe", "version" => Troupe.Protocol.version()},
+      "clientCapabilities" => client_capabilities()
+    })
+  end
+
+  defp ask(state, method, params) do
+    id = state.next_id
+
+    state
+    |> write(%{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
+    |> Map.put(:next_id, id + 1)
+    |> Map.update!(:pending, &Map.put(&1, id, method))
+  end
 
   @impl GenServer
   def handle_info({port, {:data, data}}, %{port: port} = state) do
@@ -231,6 +252,14 @@ defmodule Troupe.Agent.ACPAgent do
 
   def handle_info({port, {:exit_status, status}}, %{port: port} = state) do
     Logger.info("troupe: acp agent #{state.entry.name} exited with #{status}")
+
+    # If the turn never answered, the parent is still waiting on a tool call. An agent that
+    # exited mid-task has said whatever it said, and that is more use to the parent than an
+    # error with nothing in it — but it is reported as partial, because it is.
+    if Map.has_key?(state.pending, state.next_id - 1) do
+      report(state, {:partial, state.said, %Usage{}})
+    end
+
     {:stop, :normal, state}
   end
 
@@ -256,14 +285,79 @@ defmodule Troupe.Agent.ACPAgent do
       {:ok, %{"method" => method, "id" => id} = frame} ->
         answer(state, id, serve(method, frame["params"] || %{}, state.workspace))
 
-      # A notification from the agent — `session/update` — is the delegate reporting, and
-      # it becomes log events through the parent rather than being answered.
-      {:ok, %{"method" => _method}} ->
+      # A notification from the agent — `session/update` — is the delegate reporting as it
+      # goes. Collected rather than answered: what the parent needs is the summary at the
+      # end, and that is what a Troupe subagent gives it too.
+      {:ok, %{"method" => _method} = frame} ->
+        collect(state, frame)
+
+      {:ok, %{"id" => id} = frame} ->
+        settle(state, id, frame)
+
+      _other ->
+        state
+    end
+  end
+
+  # Text the agent streamed, kept so the summary is what it actually said rather than a
+  # sentence this module made up about it.
+  defp collect(state, %{"method" => "session/update", "params" => params}) do
+    case get_in(params, ["update", "content", "text"]) do
+      text when is_binary(text) -> %{state | said: state.said <> text}
+      _other -> state
+    end
+  end
+
+  defp collect(state, _frame), do: state
+
+  # Each answer moves the handshake on. A failure at any step ends the delegate, and the
+  # parent hears about it the same way it hears about a Troupe subagent that could not
+  # start — there is no ACP-shaped error for it to learn.
+  defp settle(state, id, frame) do
+    {method, pending} = Map.pop(state.pending, id)
+    state = %{state | pending: pending}
+
+    case {method, frame} do
+      {_method, %{"error" => error}} ->
+        report(state, {:error, {:acp_agent, error}})
+        state
+
+      {"initialize", _ok} ->
+        ask(state, "session/new", %{
+          "cwd" => state.workspace.root_real,
+          "mcpServers" => []
+        })
+
+      {"session/new", %{"result" => %{"sessionId" => acp_session}}} ->
+        %{state | acp_session: acp_session}
+        |> ask("session/prompt", %{
+          "sessionId" => acp_session,
+          "prompt" => [%{"type" => "text", "text" => state.task}]
+        })
+
+      {"session/prompt", %{"result" => result}} ->
+        report(state, {:ok, summary(state, result), %Usage{}})
         state
 
       _other ->
         state
     end
+  end
+
+  # What the delegate says it did. ACP's stop reason is kept beside the text, because
+  # `max_tokens` and `end_turn` are a different thing to hand a parent and the parent is a
+  # model that can act on the difference.
+  defp summary(state, result) do
+    case Map.get(result || %{}, "stopReason") do
+      reason when reason in [nil, "end_turn"] -> state.said
+      reason -> state.said <> "\n\n(the agent stopped: #{reason})"
+    end
+  end
+
+  defp report(%{parent: nil}, _result), do: :ok
+
+  defp report(state, result) do
+    send(state.parent, {:child_result, state.parent_ref, result})
   end
 
   defp answer(state, id, {:ok, result}) do

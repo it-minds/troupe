@@ -30,7 +30,13 @@ defmodule Troupe.Agent.Definition do
     max_turns: nil,
     budget_share: 0.25,
     skills: [],
-    source: :builtin
+    source: :builtin,
+    # Set only for a bundle's `acp_agents` entry: the command, its arguments and the hash
+    # of what it should be. An agent definition carries a prompt for a model to run; this
+    # one carries a program to run instead, and is otherwise an ordinary subagent — which
+    # is the point. Delegation, depth limits, budget slices and the log do not learn there
+    # is a second kind.
+    acp: nil
   ]
 
   @type mode :: :primary | :subagent
@@ -47,8 +53,13 @@ defmodule Troupe.Agent.Definition do
           max_turns: pos_integer() | nil,
           budget_share: float(),
           skills: :all | [String.t()],
-          source: source()
+          source: source(),
+          acp: map() | nil
         }
+
+  @doc "Whether this delegate is a subprocess somebody else wrote rather than a prompt."
+  @spec acp?(t()) :: boolean()
+  def acp?(%__MODULE__{acp: acp}), do: not is_nil(acp)
 
   @doc """
   Whether this profile may call a tool at all.
