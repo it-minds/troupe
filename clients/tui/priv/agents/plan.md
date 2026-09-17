@@ -3,7 +3,7 @@ description: Investigates the codebase and writes a task list. Cannot edit files
 mode: primary
 model: default
 isolation: shared
-tools: [read_file, list_files, grep, web_fetch, todo_write, todo_read, delegate, finish, ask_user, remember]
+tools: [read_file, read_output, list_files, grep, web_fetch, todo_write, todo_read, delegate, finish, ask_user, remember]
 permissions:
   write_file: deny
   edit_file: deny

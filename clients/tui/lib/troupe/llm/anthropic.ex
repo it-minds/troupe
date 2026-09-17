@@ -51,12 +51,14 @@ defmodule Troupe.LLM.Anthropic do
 
   @doc false
   def encode(%Request{} = r, config \\ %{}) do
+    plan = cache_plan(r)
+
     %{
       model: r.model,
       max_tokens: config[:max_output] || r.max_tokens,
       stream: true,
-      system: r.system,
-      messages: Enum.map(r.messages, &encode_message/1),
+      system: encode_system(r.system, plan),
+      messages: r.messages |> Enum.with_index() |> Enum.map(&encode_message(&1, plan)),
       tools:
         Enum.map(
           r.tools,
@@ -65,6 +67,80 @@ defmodule Troupe.LLM.Anthropic do
     }
     |> then(fn m -> if r.tools == [], do: Map.delete(m, :tools), else: m end)
     |> put_thinking(Provider.effort(r, config))
+  end
+
+  ## Prompt cache breakpoints
+  #
+  # The prefix renders tools, then system, then messages, and a cache entry is a
+  # prefix match, so at most three markers are ever needed and they all go on
+  # here rather than in anything that is stored:
+  #
+  #   1. the system block, which caches the tools and the system prompt together;
+  #   2. the last stable block of the final message, which caches the whole
+  #      conversation for the next call;
+  #   3. the block that carried (2) last time, because a lookup only scans about
+  #      twenty positions back from a breakpoint and a turn that appended a lot
+  #      could otherwise miss the entry the previous request just wrote.
+  #
+  # Three is under the limit of four. A compaction request is a one-shot with a
+  # different system prompt and model, so it gets none: a write nothing ever
+  # reads back is a pure surcharge.
+
+  defp cache_plan(%Request{cache: nil}), do: nil
+  defp cache_plan(%Request{purpose: :compaction}), do: nil
+
+  defp cache_plan(%Request{cache: %{ttl: ttl} = cache, messages: messages}) do
+    last = length(messages) - 1
+
+    indexes =
+      [last, Map.get(cache, :previous)]
+      |> Enum.filter(&(is_integer(&1) and &1 >= 0 and &1 <= last))
+      |> Enum.uniq()
+
+    %{ttl: ttl, messages: indexes}
+  end
+
+  defp cache_control(%{ttl: "1h"}), do: %{type: "ephemeral", ttl: "1h"}
+  defp cache_control(%{ttl: _}), do: %{type: "ephemeral"}
+
+  defp encode_system("", _plan), do: ""
+  defp encode_system(system, nil), do: system
+
+  defp encode_system(system, plan),
+    do: [%{type: "text", text: system, cache_control: cache_control(plan)}]
+
+  defp encode_message({%{role: role, content: blocks}, index}, plan) do
+    mark = breakpoint_block(blocks, index, plan)
+
+    content =
+      blocks
+      |> Enum.with_index()
+      |> Enum.map(fn
+        {block, ^mark} -> Map.put(encode_block(block), :cache_control, cache_control(plan))
+        {block, _i} -> encode_block(block)
+      end)
+
+    %{role: role, content: content}
+  end
+
+  # The last block that will still be there next turn. A volatile block is
+  # rebuilt every request, so a marker on it would write an entry nothing can
+  # ever read; putting the marker before it leaves it as the uncached tail.
+  defp breakpoint_block(_blocks, _index, nil), do: nil
+
+  defp breakpoint_block(blocks, index, %{messages: indexes}) do
+    if index in indexes do
+      blocks
+      |> Enum.with_index()
+      |> Enum.reject(fn {block, _i} -> Message.volatile?(block) end)
+      |> List.last()
+      |> case do
+        {_block, i} -> i
+        nil -> nil
+      end
+    else
+      nil
+    end
   end
 
   # Anthropic takes a thinking budget in tokens where an OpenAI-compatible
@@ -95,10 +171,6 @@ defmodule Troupe.LLM.Anthropic do
       {n, ""} when n >= 1_024 -> n
       _ -> nil
     end
-  end
-
-  defp encode_message(%{role: role, content: blocks}) do
-    %{role: role, content: Enum.map(blocks, &encode_block/1)}
   end
 
   defp encode_block(%{type: :text, text: t}), do: %{type: "text", text: t}

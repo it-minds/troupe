@@ -9,7 +9,7 @@ defmodule Troupe.LLM.Message do
   """
 
   @type block ::
-          %{type: :text, text: String.t()}
+          %{:type => :text, :text => String.t(), optional(:volatile) => true}
           | %{type: :tool_use, id: String.t(), name: String.t(), input: map()}
           | %{type: :tool_result, tool_use_id: String.t(), content: String.t(), is_error: boolean()}
 
@@ -24,6 +24,19 @@ defmodule Troupe.LLM.Message do
 
   @spec text_block(String.t()) :: block()
   def text_block(text), do: %{type: :text, text: text}
+
+  @doc """
+  A text block that is rebuilt every turn and never stored: the task list, watch
+  context — state the model needs now and that would be stale if replayed. The
+  request builder puts it after the last cache breakpoint, where a block that
+  differs from turn to turn costs its own tokens and invalidates nothing.
+  """
+  @spec volatile_block(String.t()) :: block()
+  def volatile_block(text), do: %{type: :text, text: text, volatile: true}
+
+  @spec volatile?(block()) :: boolean()
+  def volatile?(%{volatile: true}), do: true
+  def volatile?(_block), do: false
 
   @spec tool_use(String.t(), String.t(), map()) :: block()
   def tool_use(id, name, input) when is_map(input),

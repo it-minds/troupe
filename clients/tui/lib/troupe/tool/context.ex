@@ -22,4 +22,18 @@ defmodule Troupe.Tool.Context do
             definitions: %{},
             depth: 0,
             config: nil
+
+  @doc """
+  The per-tool output limits in force. A context built without a config (tests,
+  a tool called directly) gets the defaults rather than no bound at all.
+  """
+  @spec limits(t()) :: %{
+          file_lines: pos_integer(),
+          command_head: pos_integer(),
+          command_tail: pos_integer(),
+          list_items: pos_integer(),
+          max_chars: pos_integer()
+        }
+  def limits(%__MODULE__{config: %Troupe.Config{limits: limits}}), do: limits
+  def limits(%__MODULE__{}), do: %Troupe.Config{}.limits
 end

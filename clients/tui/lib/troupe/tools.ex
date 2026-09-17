@@ -18,14 +18,23 @@ defmodule Troupe.Tools do
     Troupe.Tools.Finish,
     Troupe.Tools.AskUser,
     Troupe.Tools.ReadBranch,
+    Troupe.Tools.ReadOutput,
     Troupe.Tools.Remember
   ]
 
   @inline ~w(todo_write todo_read finish ask_user delegate)
-  @read_only ~w(read_file list_files grep web_fetch todo_write todo_read finish ask_user delegate remember)
+  @read_only ~w(read_file read_output list_files grep web_fetch todo_write todo_read finish ask_user delegate remember)
 
   @spec all() :: %{String.t() => module()}
   def all, do: Map.new(@modules, &{&1.name(), &1})
+
+  @doc """
+  Every tool name in a fixed order. Tool definitions render at position 0 of the
+  prompt, so a set that reordered between turns would invalidate the whole
+  prompt cache; `Map.keys/1` gives no ordering contract, the module list does.
+  """
+  @spec names() :: [String.t()]
+  def names, do: Enum.map(@modules, & &1.name())
 
   @spec fetch(String.t()) :: {:ok, module()} | :error
   def fetch(name), do: Map.fetch(all(), name)
@@ -38,7 +47,7 @@ defmodule Troupe.Tools do
 
   @doc "Tool names a definition may use."
   @spec allowed(Definition.t()) :: [String.t()]
-  def allowed(%Definition{tools: :all}), do: Map.keys(all()) -- ["read_branch"]
+  def allowed(%Definition{tools: :all}), do: names() -- ["read_branch"]
 
   def allowed(%Definition{tools: list}) when is_list(list),
     do: Enum.filter(list, &Map.has_key?(all(), &1))

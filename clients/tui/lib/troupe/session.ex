@@ -6,7 +6,7 @@ defmodule Troupe.Session do
 
   use Supervisor
 
-  alias Troupe.Session.{Approvals, Branches, Dispatcher, Locks, Log, Memory, Watcher}
+  alias Troupe.Session.{Approvals, Branches, Dispatcher, Locks, Log, Memory, Outputs, Watcher}
 
   @type opts :: %{
           session_id: String.t(),
@@ -34,6 +34,7 @@ defmodule Troupe.Session do
   def init(opts) do
     children = [
       {Log, opts},
+      {Outputs, opts},
       {Memory, opts},
       {Approvals, opts},
       {Locks, opts},

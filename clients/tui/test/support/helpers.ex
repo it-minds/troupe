@@ -68,6 +68,18 @@ defmodule Troupe.TestHelpers do
     |> Map.update(:memory, %{auto_refresh: false}, &Map.put_new(&1, :auto_refresh, false))
   end
 
+  @doc """
+  The per-turn context a request carries: the task list and workspace context,
+  which live in a volatile block after the last cache breakpoint rather than in
+  the system prompt, so the cached prefix stays byte-identical between turns.
+  """
+  def volatile_text(request) do
+    request.messages
+    |> Enum.flat_map(& &1.content)
+    |> Enum.filter(&Troupe.LLM.Message.volatile?/1)
+    |> Enum.map_join("\n", & &1.text)
+  end
+
   @doc "Waits for the window `path` to publish `branch_state` = `state`."
   def await_state(path, state, timeout \\ 5_000)
 

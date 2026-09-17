@@ -32,9 +32,9 @@ defmodule Troupe.TUIScrollTest do
 
     scripts = %{
       "code-1" => [
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:tool, "ask_user", %{"question" => "more?"}},
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:finish, "done"}
       ]
     }
@@ -159,7 +159,7 @@ defmodule Troupe.TUIScrollTest do
 
     scripts = %{
       "code-1" => [
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:tool, "shell", %{"command" => "printf '\\033[32mgreen\\033[0m\\tok\\n'; exit 3"}},
         {:finish, "ok"}
       ]
@@ -315,7 +315,7 @@ defmodule Troupe.TUIScrollTest do
 
     scripts = %{
       "code-1" => [
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:delay, 60_000, {:finish, "never"}}
       ]
     }
@@ -365,7 +365,7 @@ defmodule Troupe.TUIScrollTest do
     scripts = %{
       "code-1" => [
         {:tool, "read_file", %{"path" => "small.txt"}},
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:text, Enum.map_join(1..30, "\n", &"paragraph #{&1}")}
       ]
     }
@@ -398,7 +398,7 @@ defmodule Troupe.TUIScrollTest do
 
     scripts = %{
       "code-1" => [
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:tool, "ask_user", %{"question" => "go on?"}},
         {:finish, "done"}
       ]
@@ -703,7 +703,11 @@ defmodule Troupe.TUIPaneRegressionTest do
 
   test "at 80 columns the pane still says how to get back to the tail" do
     ws = tmp_workspace(%{"big.txt" => Enum.map_join(1..300, "\n", &"L#{&1}")})
-    scripts = %{"code-1" => [{:tool, "read_file", %{"path" => "big.txt"}}, {:finish, "ok"}]}
+
+    scripts = %{
+      "code-1" => [{:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}}, {:finish, "ok"}]
+    }
+
     {sid, _, _} = start_session!(workspace: ws, scripts: scripts, auto_approve: true)
     {pid, session} = start_tui(sid, width: 80, height: 24)
     {:ok, "code-1"} = Troupe.dispatch(sid, "code", "read it")
@@ -857,7 +861,7 @@ defmodule Troupe.TUIRichTextTest do
     scripts = %{
       "code-1" => [
         {:tool, "shell", %{"command" => "echo plain"}},
-        {:tool, "read_file", %{"path" => "big.txt"}},
+        {:tool, "read_file", %{"path" => "big.txt", "limit" => 1000}},
         {:finish, "done"}
       ]
     }

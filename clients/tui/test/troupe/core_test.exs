@@ -95,7 +95,7 @@ defmodule Troupe.CoreTest do
     [_, second | _] = Fake.requests(fake)
     results = second.messages |> List.last() |> Map.get(:content)
     assert Enum.map(results, & &1.tool_use_id) == ["call_1", "call_2", "call_3"]
-    assert Enum.map(results, &String.trim(&1.content)) == ["a", "b", "c"]
+    assert Enum.map(results, &String.trim(&1.content)) == ["exit 0\na", "exit 0\nb", "exit 0\nc"]
   end
 
   # Done item 5

@@ -53,7 +53,7 @@ defmodule Troupe.RecoveryTest do
 
     # state rebuilt: the request after recovery has the whole conversation, the todo list and the switched profile
     last = fake |> Fake.requests() |> List.last()
-    assert last.system =~ "step one"
+    assert volatile_text(last) =~ "step one"
     assert last.system =~ "profile worktree"
     assert length(last.messages) == 5
     assert Enum.count(events_of(sid, path, :assistant_message)) == 3

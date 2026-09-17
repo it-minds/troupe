@@ -88,7 +88,7 @@ defmodule Troupe.CLITest do
     assert out =~ "#{path}> spawned /code (shared)"
     assert out =~ "#{path}> < write then read"
     assert out =~ "#{path}> → write_file"
-    assert out =~ "#{path}> ✓ call_2: hi"
+    assert out =~ "#{path}> ✓ call_2: exit 0\n#{path}> hi"
     assert out =~ "#{path}> [done_unread] wrote and read"
     assert Enum.all?(String.split(String.trim(out), "\n"), &String.starts_with?(&1, "code-1> "))
   end

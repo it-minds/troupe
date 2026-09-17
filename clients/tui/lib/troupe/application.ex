@@ -4,6 +4,8 @@ defmodule Troupe.Application do
 
   @impl true
   def start(_type, _args) do
+    :ok = Troupe.LLM.UsageLog.attach()
+
     children = [
       {Registry, keys: :unique, name: Troupe.Registry},
       {Registry, keys: :duplicate, name: Troupe.Events},

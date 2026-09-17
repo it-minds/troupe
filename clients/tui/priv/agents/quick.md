@@ -4,7 +4,7 @@ mode: primary
 model: cheap
 reasoning_effort: low
 isolation: shared
-tools: [read_file, write_file, edit_file, list_files, grep, shell, finish]
+tools: [read_file, read_output, write_file, edit_file, list_files, grep, shell, finish]
 max_turns: 25
 max_input_tokens: 1500000
 max_output_tokens: 200000

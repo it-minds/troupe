@@ -126,7 +126,7 @@ defmodule Troupe.DefinitionsTest do
 
     req = fake |> Fake.requests() |> List.last()
     assert req.system =~ "profile code"
-    assert req.system =~ "split billing"
+    assert volatile_text(req) =~ "split billing"
     assert Enum.any?(req.tools, &(&1.name == "write_file"))
     assert Enum.any?(req.tools, &(&1.name == "shell"))
 
@@ -180,8 +180,8 @@ defmodule Troupe.DefinitionsTest do
     :ok = Troupe.edit_todo(sid, path, {:cancel, "2"})
     await_state(path, :done_unread)
     last = fake |> Fake.requests() |> List.last()
-    assert last.system =~ "[cancelled] 2: b"
-    assert last.system =~ "[in_progress] 1: a"
+    assert volatile_text(last) =~ "[cancelled] 2: b"
+    assert volatile_text(last) =~ "[in_progress] 1: a"
   end
 
   # Done item 23

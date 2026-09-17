@@ -122,7 +122,15 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp print(_event, state), do: state
 
-  defp line(state, path, text), do: IO.puts(state.io, "#{path}> #{text}")
+  # Every line carries the prefix, not just the first: a tool result is routinely
+  # several lines long (a command's output leads with its exit code), and a bare
+  # continuation line is unattributable when several branches print at once.
+  defp line(state, path, text) do
+    text
+    |> to_string()
+    |> String.split("\n")
+    |> Enum.each(&IO.puts(state.io, "#{path}> #{&1}"))
+  end
 
   defp say(state, path, text) do
     line(state, path, text)

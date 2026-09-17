@@ -2,7 +2,7 @@
 description: Read-only exploration and search. Cheap model; use it for reading and finding things.
 mode: subagent
 model: cheap
-tools: [read_file, list_files, grep, web_fetch, finish, remember]
+tools: [read_file, read_output, list_files, grep, web_fetch, finish, remember]
 max_turns: 25
 budget_share: 0.3
 ---

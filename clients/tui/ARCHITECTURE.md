@@ -15,6 +15,7 @@ Troupe.Application (one_for_one)
 ├── Troupe.Sessions            DynamicSupervisor
 │   └── Troupe.Session         Supervisor, rest_for_one, one per session
 │       ├── Session.Log        GenServer, single-writer append-only JSONL event store + publisher
+│       ├── Session.Outputs    GenServer, full text of truncated tool results, paged back by `read_output`
 │       ├── Session.Memory     GenServer, owns .troupe/memory.md (the project brief)
 │       ├── Session.Approvals  GenServer, permission gate and user-question broker
 │       ├── Session.Locks      GenServer, advisory per-path write locks
@@ -39,6 +40,7 @@ Registry keys (all under `{session_id, key}`):
 |---------------------------|--------------------|
 | `:session`                | Troupe.Session     |
 | `:log`                    | Session.Log        |
+| `:outputs`                | Session.Outputs    |
 | `:memory`                 | Session.Memory     |
 | `:approvals`              | Session.Approvals  |
 | `:locks`                  | Session.Locks      |
@@ -423,6 +425,50 @@ raise, exit or timeout becomes `{:error, text}`. Every OS process runs under
 reads off the socket and in what it returns, with the response reduced to text
 before the model sees it. It defaults to permission `ask`, so the URL is shown
 to the user before the request is made (Decision 58).
+
+### 5.1 Bounded results
+
+Every result is bounded **where it is created**, before it becomes a message,
+and nothing already in the conversation is ever shrunk — rewriting a message
+invalidates the prompt cache from that point on (§5.2, Decision 85).
+`Troupe.Tool.Bound` is the pure half: `sanitize/1` (ANSI out, invalid UTF-8
+replaced — `Jason.encode!/1` raises on the latter), then `head_tail/3` for
+command output, `window/3` for a file, `items/3` for a listing or a search,
+`json/3` for a document, and `chars/2` as the backstop, each cutting only on a
+line or grapheme boundary and each reporting what it left out. The caller turns
+that into a marker naming the exact call that returns the rest.
+
+Limits come from `config.limits` (`file_lines` 250, `command_head` 60,
+`command_tail` 140, `list_items` 50, `max_chars` 30 000). `Tool.Runner` applies
+`sanitize` and the character cap to every tool result, and `Agent.Server`
+does the same for the rest — inline tools, a subagent's summary, a crash report.
+
+A file read, a listing and a search are idempotent, so their markers name the
+same tool with the next `offset`. A command and a fetch are not, so their full
+text goes to `Session.Outputs` and the marker names a `read_output` call: the
+agent never re-runs a slow or non-idempotent command to see what was cut.
+
+### 5.2 Prompt cache
+
+The prefix renders tools, then system, then messages, and a cache entry is a
+prefix match, so everything that can be stable is:
+
+* `Tools.names/0` fixes the tool order (a map's key order is not a contract).
+* `Agent.Prompt.system/3` holds only what is fixed for the agent's life — its
+  definition, the project brief, the workspace survey, the harness facts. Per-turn
+  state (the task list, watch context) goes in `Agent.Prompt.volatile/1`, a block
+  appended to the last user message *after* the final breakpoint, where it costs
+  its own tokens and invalidates nothing.
+* History is append-only. Assistant content goes back exactly as it arrived.
+* Markers are never stored: `LLM.Anthropic.encode/2` places at most three
+  (system; the last stable block of the final message; the block that carried the
+  second one last request, which `Agent.Server` tracks in its `Data` and resets on
+  compaction), against a limit of four. A compaction request gets none.
+
+`config.cache.ttl` is `"5m"` or `"1h"` (`TROUPE_CACHE_TTL`); every breakpoint in
+one request asks for the same one. `Troupe.LLM.UsageLog` logs the four token
+classes, the hit ratio and the cost-weighted input per call and per session, and
+`mix troupe.usage` prints the same from a finished session's log.
 
 ## 6. Failure matrix
 

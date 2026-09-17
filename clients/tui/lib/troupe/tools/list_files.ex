@@ -2,9 +2,8 @@ defmodule Troupe.Tools.ListFiles do
   @moduledoc false
   @behaviour Troupe.Tool
 
+  alias Troupe.Tool.{Bound, Context}
   alias Troupe.Workspace
-
-  @max 2000
 
   @impl true
   def name, do: "list_files"
@@ -12,7 +11,7 @@ defmodule Troupe.Tools.ListFiles do
   @impl true
   def description,
     do:
-      "List files matching a glob pattern (default `**/*`) relative to the workspace root. `.git` and `.troupe/worktrees` are excluded. Returns at most #{@max} paths."
+      "List files matching a glob pattern (default `**/*`) relative to the workspace root. `.git` and `.troupe/worktrees` are excluded. The number of paths returned is capped; use `offset` (1-based) and `limit` to page through the rest."
 
   @impl true
   def schema do
@@ -23,7 +22,9 @@ defmodule Troupe.Tools.ListFiles do
         "path" => %{
           "type" => "string",
           "description" => "Directory to list from, relative to the workspace"
-        }
+        },
+        "offset" => %{"type" => "integer", "description" => "First path to return (1-based)"},
+        "limit" => %{"type" => "integer", "description" => "Maximum number of paths"}
       }
     }
   end
@@ -45,9 +46,16 @@ defmodule Troupe.Tools.ListFiles do
           |> Enum.map(&Path.relative_to(&1, ctx.workspace))
           |> Enum.sort()
 
-        shown = Enum.take(files, @max)
-        suffix = if length(files) > @max, do: "\n[#{length(files) - @max} more not shown]", else: ""
-        {:ok, Enum.join(shown, "\n") <> suffix}
+        limits = Context.limits(ctx)
+        offset = max(Map.get(args, "offset") || 1, 1)
+        limit = max(Map.get(args, "limit") || limits.list_items, 1)
+
+        {:ok,
+         files
+         |> Bound.items(offset, limit)
+         |> Bound.render(fn o ->
+           ~s|Call list_files(pattern: #{inspect(pattern)}, offset: #{o.first}, limit: #{limit}) for more, or narrow the pattern.|
+         end)}
 
       {:error, _} ->
         {:error, "path escapes the workspace: #{base}"}

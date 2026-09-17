@@ -12,9 +12,9 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Events
   alias Troupe.LLM.Message
   alias Troupe.Session
-  alias Troupe.Session.{Approvals, Log, Worktree}
+  alias Troupe.Session.{Approvals, Log, Outputs, Worktree}
   alias Troupe.Telemetry
-  alias Troupe.Tool.{Context, Runner}
+  alias Troupe.Tool.{Bound, Context, Runner}
   alias Troupe.Tools
   alias Troupe.Workspace.Survey
 
@@ -27,7 +27,8 @@ defmodule Troupe.Agent.Server do
               children: %{},
               compaction: nil,
               survey: nil,
-              brief: ""
+              brief: "",
+              cache_bp: nil
   end
 
   ## API
@@ -205,7 +206,7 @@ defmodule Troupe.Agent.Server do
     data = stream_finished(data, response)
     summary = Message.text(response.content)
     data = log(data, :compaction, %{summary: summary, dropped_messages: data.compaction.dropped})
-    continue_turn(%{data | compaction: nil})
+    continue_turn(%{data | compaction: nil, cache_bp: nil})
   end
 
   def handle_event(:info, {:llm_error, ref, reason}, :thinking, %Data{stream: %{ref: ref}} = data) do
@@ -414,10 +415,20 @@ defmodule Troupe.Agent.Server do
   end
 
   defp launch_turn(%Data{} = data) do
-    request = Prompt.request(data.state, data.survey, data.brief)
+    cache = %{ttl: data.spec.config.cache.ttl, previous: data.cache_bp}
+    request = Prompt.request(data.state, data.survey, data.brief, cache)
+    data = %{data | cache_bp: breakpoint(request.messages)}
     data = spawn_stream(data, request, :turn)
     {:next_state, :thinking, data}
   end
+
+  # Where this request asked for a breakpoint, so the next one can ask for a
+  # second at the same place: a cache lookup only scans a limited number of
+  # blocks back, and a turn that appended a lot would otherwise leave the entry
+  # this request just wrote outside the window. It is a property of the last
+  # request, not of the conversation, so it lives here and never in the log.
+  defp breakpoint([]), do: nil
+  defp breakpoint(messages), do: length(messages) - 1
 
   defp ask_budget(%Data{} = data) do
     call_id = "budget-#{System.unique_integer([:positive])}"
@@ -724,8 +735,19 @@ defmodule Troupe.Agent.Server do
       call_id: call.call_id
     }
 
+  # The last gate before a result becomes a message. `Tool.Runner` has already
+  # bounded anything that ran as a tool; this catches the rest — an inline tool,
+  # a subagent's summary, a crash report — so nothing unbounded or unencodable
+  # ever enters the conversation. A result already under the cap is unchanged,
+  # which is what keeps the prompt cache valid: history is never rewritten.
   defp complete(%Data{} = data, call_id, ok, content) when is_boolean(ok) do
-    log(data, :tool_call_completed, %{call_id: call_id, ok: ok, content: to_string(content)})
+    text = content |> to_string() |> Bound.sanitize()
+    max_chars = data.spec.config.limits.max_chars
+
+    bounded =
+      Outputs.store_and_mark(data.spec.session_id, text, Bound.chars(text, max_chars), 200)
+
+    log(data, :tool_call_completed, %{call_id: call_id, ok: ok, content: bounded})
   end
 
   defp normalize_result({:ok, content}) when is_binary(content), do: {true, content}

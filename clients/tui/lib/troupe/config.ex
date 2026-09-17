@@ -38,6 +38,14 @@ defmodule Troupe.Config do
             survey_chars: pos_integer()
           },
           tool_timeout_ms: pos_integer(),
+          cache: %{ttl: String.t()},
+          limits: %{
+            file_lines: pos_integer(),
+            command_head: pos_integer(),
+            command_tail: pos_integer(),
+            list_items: pos_integer(),
+            max_chars: pos_integer()
+          },
           auto_approve: boolean(),
           mouse: boolean(),
           max_delegation_depth: pos_integer(),
@@ -105,6 +113,14 @@ defmodule Troupe.Config do
               survey_chars: 1_500
             },
             tool_timeout_ms: 120_000,
+            cache: %{ttl: "5m"},
+            limits: %{
+              file_lines: 250,
+              command_head: 60,
+              command_tail: 140,
+              list_items: 50,
+              max_chars: 30_000
+            },
             auto_approve: false,
             mouse: true,
             max_delegation_depth: 3,
@@ -522,6 +538,8 @@ defmodule Troupe.Config do
     compaction = Map.get(yaml, "compaction", %{})
     watch = Map.get(yaml, "watch", %{})
     memory = Map.get(yaml, "memory", %{})
+    cache = Map.get(yaml, "cache", %{})
+    limits = Map.get(yaml, "limits", %{})
 
     %__MODULE__{
       cfg
@@ -556,6 +574,14 @@ defmodule Troupe.Config do
           survey_chars: Map.get(memory, "survey_chars", cfg.memory.survey_chars)
         },
         tool_timeout_ms: Map.get(yaml, "tool_timeout_ms", cfg.tool_timeout_ms),
+        cache: %{ttl: ttl(Map.get(cache, "ttl")) || cfg.cache.ttl},
+        limits: %{
+          file_lines: Map.get(limits, "file_lines", cfg.limits.file_lines),
+          command_head: Map.get(limits, "command_head", cfg.limits.command_head),
+          command_tail: Map.get(limits, "command_tail", cfg.limits.command_tail),
+          list_items: Map.get(limits, "list_items", cfg.limits.list_items),
+          max_chars: Map.get(limits, "max_chars", cfg.limits.max_chars)
+        },
         mouse: Map.get(yaml, "mouse", cfg.mouse),
         max_delegation_depth: Map.get(yaml, "max_delegation_depth", cfg.max_delegation_depth),
         default_window: Map.get(yaml, "default_window", cfg.default_window),
@@ -623,6 +649,11 @@ defmodule Troupe.Config do
   defp parse_auth(_token, "api_key", _default), do: :api_key
   defp parse_auth(_token, _auth, default), do: default
 
+  # Anthropic takes exactly two cache lifetimes. Anything else is ignored rather
+  # than sent, because a rejected `cache_control` fails the whole request.
+  defp ttl(t) when t in ["5m", "1h"], do: t
+  defp ttl(_), do: nil
+
   defp apply_env(cfg) do
     cfg
     |> maybe_put(:provider, System.get_env("TROUPE_PROVIDER"), &parse_provider(&1, cfg.provider))
@@ -637,6 +668,12 @@ defmodule Troupe.Config do
     end)
     |> maybe_put(:fake_script, System.get_env("TROUPE_FAKE_SCRIPT"))
     |> maybe_put(:reasoning_effort, System.get_env("TROUPE_REASONING_EFFORT"))
+    |> then(fn c ->
+      case ttl(System.get_env("TROUPE_CACHE_TTL")) do
+        nil -> c
+        t -> %{c | cache: %{c.cache | ttl: t}}
+      end
+    end)
     |> then(fn c ->
       case System.get_env("TROUPE_MODEL") do
         nil -> c
@@ -662,6 +699,12 @@ defmodule Troupe.Config do
 
       {:memory, m}, acc when is_map(m) ->
         %{acc | memory: Map.merge(acc.memory, m)}
+
+      {:cache, c}, acc when is_map(c) ->
+        %{acc | cache: Map.merge(acc.cache, c)}
+
+      {:limits, l}, acc when is_map(l) ->
+        %{acc | limits: Map.merge(acc.limits, l)}
 
       {k, v}, acc when is_map_key(acc, k) ->
         Map.put(acc, k, v)
