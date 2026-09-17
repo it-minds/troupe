@@ -522,7 +522,10 @@ defmodule Troupe.Agent.Server do
   # A warning is a notice, not a stop: it is logged beside the exhaustion check
   # and the turn goes ahead. Once per dimension per slice — the fold keeps the set
   # of dimensions already warned about and clears it when a grant buys another
-  # slice — so it can never become a per-turn nag.
+  # slice — so it can never become a per-turn nag. A full-send session opted out
+  # of the budget entirely, so there is nothing left to warn about.
+  defp warn_headroom(%Data{spec: %Spec{config: %{full_send: true}}} = data), do: data
+
   defp warn_headroom(%Data{spec: spec, state: st} = data) do
     threshold = spec.config.budget.warn_at
 

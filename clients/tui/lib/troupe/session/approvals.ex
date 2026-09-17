@@ -64,7 +64,16 @@ defmodule Troupe.Session.Approvals do
 
   @impl true
   def init(%{session_id: sid, config: config}) do
-    {:ok, %__MODULE__{session_id: sid, auto_approve: config.auto_approve}}
+    # `--full-send` opts out of the budget entirely, which is what answering a
+    # budget question with `a` (allow_session) does mid-run: it sets this same
+    # flag. Seeding it here means a full-send session never asks, and never
+    # warns — every branch, root or delegated, checks the one flag.
+    {:ok,
+     %__MODULE__{
+       session_id: sid,
+       auto_approve: config.auto_approve,
+       budget_overridden: config.full_send
+     }}
   end
 
   @impl true

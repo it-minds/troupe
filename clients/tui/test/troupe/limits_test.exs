@@ -394,4 +394,43 @@ defmodule Troupe.LimitsTest do
       assert Troupe.Agent.State.elapsed_ms(state) < 60_000
     end
   end
+
+  describe "full send" do
+    # `--full-send` lifts every budget for the whole session: the budget question
+    # that an exhausted branch would otherwise ask never appears, and neither do
+    # the warnings leading up to it. This is the same override `a` (allow_session)
+    # sets mid-run, seeded at session start so a full-send run never asks.
+    test "an exhausted budget is not asked about and no warnings are logged" do
+      ws = tmp_workspace(%{"f.txt" => "x"})
+      script = List.duplicate({:tool, "read_file", %{"path" => "f.txt"}}, 5) ++ [{:finish, "done"}]
+
+      {sid, _fake, _} = start_session!(workspace: ws, script: script, full_send: true)
+
+      {:ok, path} =
+        Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
+
+      await_state(path, :done_unread, 15_000)
+
+      assert window(sid, path).reason == :finished
+      assert events_of(sid, path, :budget_ask_started) == []
+      assert events_of(sid, path, :budget_warning) == []
+    end
+
+    test "without full send an exhausted budget asks, as it does without the flag" do
+      ws = tmp_workspace(%{"f.txt" => "x"})
+      script = List.duplicate({:tool, "read_file", %{"path" => "f.txt"}}, 5)
+
+      {sid, _fake, _} = start_session!(workspace: ws, script: script, full_send: false)
+
+      {:ok, path} =
+        Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
+
+      ask = await_event(path, :budget_ask_started, 15_000)
+      assert ask.data.dimension == :turns
+
+      :ok = Troupe.approve(sid, ask.data.call_id, :deny)
+      await_state(path, :done_unread, 15_000)
+      assert window(sid, path).reason == :budget_exhausted
+    end
+  end
 end

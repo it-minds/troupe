@@ -91,7 +91,8 @@ defmodule Troupe.CLI.Runner do
         case Troupe.start_session(
                workspace: args.workspace,
                watch: args.watch,
-               auto_approve: args.auto_approve
+               auto_approve: args.auto_approve,
+               full_send: args.full_send
              ) do
           {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
           {:error, reason} -> fail("could not start session: #{inspect(reason)}")
@@ -118,6 +119,7 @@ defmodule Troupe.CLI.Runner do
     case Troupe.start_session(
            workspace: args.workspace,
            auto_approve: args.auto_approve,
+           full_send: args.full_send,
            watch: args.watch
          ) do
       {:ok, sid} when args.headless ->
@@ -154,7 +156,12 @@ defmodule Troupe.CLI.Runner do
     sid = args.session_id || newest(args.workspace)
     page = if args.session_id, do: [], else: [page: :sessions]
 
-    case sid && Troupe.resume(sid, auto_approve: args.auto_approve, watch: args.watch) do
+    case sid &&
+           Troupe.resume(sid,
+             auto_approve: args.auto_approve,
+             full_send: args.full_send,
+             watch: args.watch
+           ) do
       {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
       nil -> fail("no session to resume in #{args.workspace}")
       {:error, reason} -> fail("could not resume: #{inspect(reason)}")
