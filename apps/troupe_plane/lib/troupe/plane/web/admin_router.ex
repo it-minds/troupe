@@ -45,6 +45,7 @@ defmodule Troupe.Plane.Web.AdminRouter do
       live("/workers/:profile", Live.Workers)
       live("/provisioners", Live.Provisioners)
       live("/teams", Live.Teams)
+      live("/identity", Live.Identity)
       live("/sessions", Live.Sessions)
       live("/budgets", Live.Budgets)
       live("/connections", Live.Connections)

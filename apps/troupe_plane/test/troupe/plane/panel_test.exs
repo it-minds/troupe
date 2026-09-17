@@ -280,67 +280,6 @@ defmodule Troupe.Plane.PanelTest do
   end
 
   describe "the teams page" do
-    test "shows a team's principals, and makes one with the secret shown once", context do
-      {:ok, view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
-      assert html =~ "Service principals"
-
-      html =
-        view
-        |> form("form[phx-submit='create-principal']", %{
-          "team" => "engineering",
-          "name" => "nightly-deps",
-          "profiles" => "dev",
-          "sponsor" => context.lead.subject,
-          "description" => "the nightly dependency update"
-        })
-        |> render_submit()
-
-      assert html =~ "svc:engineering/nightly-deps"
-      assert html =~ "shown once"
-
-      principal = Principals.get("svc:engineering/nightly-deps")
-      assert principal.profiles == ["dev"]
-      assert principal.sponsor_subject == context.lead.subject
-
-      # The hash is not on the page, and neither is the salt.
-      refute html =~ principal.secret_hash
-      refute html =~ principal.secret_salt
-    end
-
-    test "refuses one with no sponsor, and says so in words", context do
-      {:ok, view, _html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
-
-      html =
-        view
-        |> form("form[phx-submit='create-principal']", %{
-          "team" => "engineering",
-          "name" => "unsponsored",
-          "profiles" => "dev"
-        })
-        |> render_submit()
-
-      # Not "invalid_params". Four things can be wrong with a sponsor and the person at
-      # the form has to be told which.
-      assert html =~ "answerable"
-      refute Principals.get("svc:engineering/unsponsored")
-    end
-
-    test "says a principal needs a sponsor rather than that it is disabled", context do
-      {:ok, principal, _secret} =
-        principal!(context.engineering, %{
-          name: "orphan",
-          profiles: ["dev"],
-          sponsor: context.lead.subject
-        })
-
-      {:ok, _} = SCIM.deactivate_user(Identity.get_user(context.lead.subject).id)
-
-      {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/teams")
-
-      assert html =~ "needs a sponsor"
-      refute Principals.get(principal.subject) |> ServicePrincipal.enabled?()
-    end
-
     test "shows members and offers no way to change them", context do
       {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
 
@@ -554,6 +493,140 @@ defmodule Troupe.Plane.PanelTest do
       assert [server] = draft["spec"]["mcpServers"]
       assert server["name"] == "jira"
       assert server["timeoutMs"] == 5000
+    end
+  end
+
+  describe "the identity page" do
+    test "shows a team's principals, and makes one with the secret shown once", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/identity")
+
+      assert html =~ "Service principals"
+
+      html =
+        view
+        |> form("form[phx-submit='create-principal']", %{
+          "team" => "engineering",
+          "name" => "nightly-deps",
+          "profiles" => "dev",
+          "sponsor" => context.lead.subject,
+          "description" => "the nightly dependency update"
+        })
+        |> render_submit()
+
+      assert html =~ "svc:engineering/nightly-deps"
+      assert html =~ "shown once"
+
+      principal = Principals.get("svc:engineering/nightly-deps")
+      assert principal.profiles == ["dev"]
+      assert principal.sponsor_subject == context.lead.subject
+
+      # The hash is not on the page, and neither is the salt.
+      refute html =~ principal.secret_hash
+      refute html =~ principal.secret_salt
+    end
+
+    test "refuses one with no sponsor, and says so in words", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/identity")
+
+      html =
+        view
+        |> form("form[phx-submit='create-principal']", %{
+          "team" => "engineering",
+          "name" => "unsponsored",
+          "profiles" => "dev"
+        })
+        |> render_submit()
+
+      # Not "invalid_params". Four things can be wrong with a sponsor and the person at
+      # the form has to be told which.
+      assert html =~ "answerable"
+      refute Principals.get("svc:engineering/unsponsored")
+    end
+
+    test "says a principal needs a sponsor rather than that it is disabled", context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{
+          name: "orphan",
+          profiles: ["dev"],
+          sponsor: context.lead.subject
+        })
+
+      {:ok, _} = SCIM.deactivate_user(Identity.get_user(context.lead.subject).id)
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/identity")
+
+      assert html =~ "needs a sponsor"
+      refute Principals.get(principal.subject) |> ServicePrincipal.enabled?()
+    end
+
+    test "runs the check against the group in the field, not the one that is stored",
+         context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/identity")
+
+      html =
+        view
+        |> form("#identity-check", %{"group" => "nobody-carries-this"})
+        |> render_submit()
+
+      # The useful question is not whether that is a valid group but how many people would
+      # administer this platform afterwards.
+      assert html =~ "never arrived in the"
+
+      html =
+        view
+        |> form("#identity-check", %{"group" => "platform"})
+        |> render_submit()
+
+      assert html =~ "including you."
+    end
+
+    test "lists the groups this plane has actually seen", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/identity")
+
+      assert html =~ "Groups this plane has seen"
+      assert html =~ "engineering"
+
+      # Mirrored, never authored — and the page says so where somebody would look for the
+      # button that is not there.
+      assert html =~ "Mirrored, never authored"
+      refute html =~ "add member"
+    end
+  end
+
+  describe "deleting a profile" do
+    test "names the teams that lose the grant, and what happens to the sessions", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      # `admin.profile.delete` was in the API, in the CLI and in the MCP tool list, and on
+      # no screen at all. This is the screen the coverage test said it was owed.
+      assert html =~ "Delete dev"
+
+      html = view |> element(~s(button[phx-click="confirm-delete"])) |> render_click()
+
+      assert html =~ "every grant goes"
+      assert html =~ "engineering"
+      assert html =~ "its sessions become read-only"
+    end
+
+    test "and refuses until the profile's own name is typed", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      view |> element(~s(button[phx-click="confirm-delete"])) |> render_click()
+
+      html =
+        view
+        |> element("#delete-profile")
+        |> render_submit(%{"confirm" => "devv"})
+
+      assert html =~ "nothing was deleted"
+      refute is_nil(Fleet.get_profile("dev"))
     end
   end
 

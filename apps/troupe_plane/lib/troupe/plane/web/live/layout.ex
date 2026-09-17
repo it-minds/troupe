@@ -31,6 +31,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
     {:workers, "Workers", "/admin/workers"},
     {:provisioners, "Provisioners", "/admin/provisioners"},
     {:teams, "Teams", "/admin/teams"},
+    {:identity, "Identity", "/admin/identity"},
     {:bundles, "Configuration bundles", "/admin/bundles"},
     {:triggers, "Triggers", "/admin/triggers"},
     {:sessions, "Sessions and spend", "/admin/sessions"},

@@ -113,14 +113,15 @@ defmodule Troupe.Plane.Admin.Console do
     team_admin_add: {:screen, :teams},
     team_admin_remove: {:screen, :teams},
 
-    # Identity is its own screen in the design and lives inside two existing ones today.
-    # Placed where it is; `owed/0` carries the move.
-    groups_list: {:screen, :teams},
+    # `identity_check` is placed on Policy because that is where the value it gates is
+    # saved, and a save gated on a check somewhere else is a gate somebody walks around.
+    # Identity runs the same check; a function is placed once and neither caller is a lie.
     identity_check: {:screen, :policy},
-    principals_list: {:screen, :teams},
-    principal_create: {:screen, :teams},
-    principal_rotate: {:screen, :teams},
-    principal_disable: {:screen, :teams},
+    groups_list: {:screen, :identity},
+    principals_list: {:screen, :identity},
+    principal_create: {:screen, :identity},
+    principal_rotate: {:screen, :identity},
+    principal_disable: {:screen, :identity},
 
     # Integrations likewise: checking whether a pod may reach an MCP host is a question the
     # profile editor asks while somebody is editing a profile.
@@ -147,11 +148,7 @@ defmodule Troupe.Plane.Admin.Console do
   """
   @spec owed() :: %{atom() => atom()}
   def owed do
-    %{
-      # No way to delete a profile from the console. The editor edits one, reached by name
-      # from the fleet screen, and creating is a route of its own.
-      profile_delete: :profiles
-    }
+    %{}
   end
 
   @doc """
@@ -166,8 +163,6 @@ defmodule Troupe.Plane.Admin.Console do
   def unbuilt do
     %{
       review: "what ran unattended and needs a person; exists in the GUI, not here",
-      identity:
-        "the provider, claims, SCIM state and principals, which sit inside Policy and Teams",
       integrations: "org-level MCP servers and the egress allowlist as an object"
     }
   end

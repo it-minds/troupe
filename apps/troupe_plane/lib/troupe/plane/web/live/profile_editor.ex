@@ -30,6 +30,18 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   happens is not the operator's choice, it is `provisioning_mode`. The button is named for
   what will actually happen and the consequence is written above it. Two buttons where one
   of them is a lie would be worse than one.
+
+  ## Deleting one
+
+  `admin.profile.delete` was in the API, in the CLI and in the MCP tool list, and on no
+  screen — which is the failure the coverage test was written for, found by it, and this is
+  the screen it was owed on.
+
+  It asks for the profile's own name typed out, like every other irreversible thing here,
+  and it says the two consequences before it asks: every team granted this profile loses
+  the grant, and the sessions that were running on it become read-only rather than being
+  erased. History is history, and a profile going away is not a reason to hide what was
+  done on it.
   """
 
   use Phoenix.LiveView, layout: false
@@ -63,7 +75,16 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
   def mount(params, _session, socket) do
     {:ok,
      socket
-     |> assign(name: params["profile"], notice: nil, error: nil, applied: nil, checked: %{})
+     |> assign(
+       name: params["profile"],
+       notice: nil,
+       error: nil,
+       applied: nil,
+       checked: %{},
+       deleting: false,
+       typed: "",
+       granted_to: []
+     )
      |> load(params["profile"])}
   end
 
@@ -98,6 +119,49 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
     end
   end
 
+  # Which teams hold this profile, asked when somebody opens the dialog rather than on
+  # every load: it is the answer to "what breaks", and nothing else on this page needs it.
+  def handle_event("confirm-delete", _params, socket) do
+    granted =
+      case Admin.teams_list(socket.assigns.actor) do
+        {:ok, teams} ->
+          for team <- teams,
+              grant <- team.grants,
+              grant.profile == socket.assigns.fields["name"],
+              do: team.name
+
+        {:error, _error} ->
+          []
+      end
+
+    {:noreply, assign(socket, deleting: true, typed: "", granted_to: granted)}
+  end
+
+  def handle_event("cancel-delete", _params, socket) do
+    {:noreply, assign(socket, deleting: false, typed: "")}
+  end
+
+  def handle_event("typing-delete", %{"confirm" => typed}, socket) do
+    {:noreply, assign(socket, typed: typed)}
+  end
+
+  def handle_event("delete", %{"confirm" => typed}, socket) do
+    name = socket.assigns.fields["name"]
+
+    if typed == name do
+      delete(socket, name)
+    else
+      # Refused on the server as well as disabled in the page, for the reason the erase
+      # dialog gives: a check that lives only in the markup is one a form post walks past.
+      {:noreply,
+       assign(socket,
+         error: "that is not #{name}; nothing was deleted",
+         deleting: false,
+         typed: ""
+       )}
+    end
+  end
+
   def handle_event("apply", _params, socket) do
     case Admin.profile_put(socket.assigns.actor, draft(socket.assigns)) do
       {:ok, result} ->
@@ -108,6 +172,24 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
       {:error, error} ->
         {:noreply, assign(socket, error: describe(error), notice: nil)}
+    end
+  end
+
+  defp delete(socket, name) do
+    case Admin.profile_delete(socket.assigns.actor, name) do
+      {:ok, result} ->
+        {:noreply,
+         socket
+         |> assign(
+           notice: "#{name} is gone — #{state_of(result.provisioning)}",
+           error: nil,
+           deleting: false,
+           typed: ""
+         )
+         |> load(nil)}
+
+      {:error, error} ->
+        {:noreply, assign(socket, error: describe(error), deleting: false, typed: "")}
     end
   end
 
@@ -511,6 +593,62 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
           <p :if={@applied} class="micro">{state_of(@applied)}</p>
         </section>
       </form>
+
+      <section :if={@current} class="panel">
+        <h2>Delete {@fields["name"]}</h2>
+
+        <p class="hint">
+          <strong>Irreversible.</strong>
+          Two things happen, and neither of them erases anything a session said.
+        </p>
+
+        <ul class="checks">
+          <li class="checks__bad">
+            <span class="checks__name">every grant goes</span>
+            <span class="checks__detail">
+              {if @granted_to == [],
+                do: "No team is granted this profile.",
+                else: "#{Enum.join(@granted_to, ", ")} — each loses it."}
+              A team cannot be granted a profile that does not exist, so the grants go with
+              it.
+            </span>
+          </li>
+
+          <li class="checks__bad">
+            <span class="checks__name">its sessions become read-only</span>
+            <span class="checks__detail">
+              Not erased. History is history, and a profile going away is not a reason to
+              hide what was done on it. The pods go the way {consequence(@mode)}
+            </span>
+          </li>
+        </ul>
+
+        <button :if={not @deleting} type="button" phx-click="confirm-delete">
+          delete this profile
+        </button>
+
+        <form :if={@deleting} id="delete-profile" phx-submit="delete" phx-change="typing-delete">
+          <label for="delete-profile-confirm">Type the profile's own name</label>
+
+          <p class="field-help">
+            <code>{@fields["name"]}</code>. The same rule the MCP tool applies to a model: a
+            confirmation that has to match exactly.
+          </p>
+
+          <input
+            id="delete-profile-confirm"
+            name="confirm"
+            value={@typed}
+            autocomplete="off"
+            spellcheck="false"
+          />
+
+          <div class="setting__actions">
+            <button type="submit" disabled={@typed != @fields["name"]}>delete it</button>
+            <button type="button" phx-click="cancel-delete">no</button>
+          </div>
+        </form>
+      </section>
     </.shell>
     """
   end
