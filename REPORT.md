@@ -2060,3 +2060,84 @@ built, committed and covered by their own tests, and none of them is written up 
 decisions are recorded in `DECISIONS.md`, through to 519; what is missing is this
 document's half — the
 command output beside each done item.
+
+---
+
+# R8 — the console
+
+## R8a — coverage is asserted, and it produced the backlog
+
+Rule 4 first, because it is the one that stops the console drifting behind the API again
+and because it derives the rest of R8 from the code rather than from the document.
+
+`Troupe.Plane.Admin.Console` records, per context function, the screen somebody reaches it
+from — **where it is reached today, not where the design says it belongs.** A map of the
+plan would pass a coverage test while the button did not exist, which is the exact failure
+the test exists to catch. `Troupe.Plane.ConsoleCoverageTest` reads each screen's own source
+and fails on a placement the screen does not keep.
+
+Debt is named in two lists that may only shrink: `owed/0` for a method with nowhere to be,
+`unbuilt/0` for a screen with nothing of its own yet. The test fails when an entry becomes
+satisfied, so closing a gap forces the entry to be deleted.
+
+Its first run named five methods and six screens. Two were closed in the same commit:
+`team_enable` on Teams, and `trigger_revisions` on Triggers (done item 5).
+
+## R8b — Policy, and the ladder made visible
+
+Rule 1 and done item 3.
+
+`Live.Settings` becomes `Live.Policy` at `/admin/policy`, keeping `/admin/settings` as the
+address it had. The coverage map loses its `policy: Live.Settings` exception rather than
+gaining a second one, and the rung chip is a layout component — the ladder is a property of
+the value, not of one page.
+
+The effective-configuration view is a table of every rung: the value in force, the rung that
+decided it, the ceiling a team may not pass, and one column per rung holding what that rung
+said. The winning cell is marked and **says "in force" in words**. A team picker adds the
+third rung.
+
+### The three rungs, in a browser
+
+Seeded so the three disagree in the order they disagree in life — the team asks for ninety
+days while the platform has no opinion, and the platform then narrows to thirty:
+
+    setting                      in force  decided by  ceiling  deployment  platform       team
+    default_erase_after_days     30        platform    30       365         30 · in force  90
+
+Read from the rendered page at `http://localhost:4001/admin/policy` with the team picker on
+`delivery`, against a plane serving out of `scripts/dev-up`'s Postgres.
+
+### The refusal quotes the floor
+
+`refusal/1` on the Teams screen already matched the ladder's error — it carries
+`reason: "a lower rung may only narrow"` — so the flash said the rule and not the number.
+The rule is the half an administrator has worked out from being refused. The clause that
+quotes the ceiling now goes first:
+
+    erase_after_days: 200 is wider than 30, which the platform decided. A lower rung may
+    only narrow, so ask for less here or change it there.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs \
+        apps/troupe_plane/test/troupe/plane/console_coverage_test.exs
+    Finished in 42.5 seconds (0.3s async, 42.2s sync)
+    Result: 46 passed
+
+    $ ./scripts/credo
+    Checking 444 source files (this might take a while) ...
+    6547 mods/funs, found no issues.
+
+    $ ./scripts/toolbox mix troupe.boundaries
+    boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+Three of those tests are new and are done item 3: the winner and both losers with their
+values, the refusal with the floor quoted, and the deployment rung listed as read-only
+rather than omitted.
+
+## What R8 still owes
+
+`owed/0` holds `profile_delete` and `budget_explain`. `unbuilt/0` holds review, identity,
+integrations, provisioners, budgets and connections. Done items 2, 4, 6, 7, 8, 9 and 10 are
+open.

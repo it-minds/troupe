@@ -52,7 +52,12 @@ defmodule Troupe.Plane.Web.AdminRouter do
       # Readable by a team admin and writable only by a platform admin, which the page
       # enforces per field rather than by not being routed: a team admin who cannot see
       # what the platform is configured with cannot tell whether their problem is theirs.
-      live("/settings", Live.Settings)
+      live("/policy", Live.Policy)
+
+      # The address it had when it was only one rung of the ladder. Kept because it is in
+      # the deployment notes, in the runbook and in at least one bookmark, and a 404 on
+      # the page somebody was told to open is a worse answer than the page.
+      live("/settings", Live.Policy)
     end
 
     live_session :platform, on_mount: {Live.Auth, :platform_admin} do

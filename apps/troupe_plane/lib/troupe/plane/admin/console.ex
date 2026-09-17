@@ -65,8 +65,6 @@ defmodule Troupe.Plane.Admin.Console do
   # A screen here is a claim that somebody can do this thing there, and the test checks the
   # claim against what that screen's module actually calls. A map that said `:teams` for
   # something Teams does not call would be a worse lie than no map at all.
-  # Keyed by the context function rather than the method name, because the context is the
-  # thing every surface renders and the method name is one surface's spelling of it.
   #
   # **This records where somebody does each thing today, not where the design says it
   # belongs.** A map of the plan would pass a coverage test while the button did not exist,
@@ -145,11 +143,6 @@ defmodule Troupe.Plane.Admin.Console do
   @spec owed() :: %{atom() => atom()}
   def owed do
     %{
-      # The Policy screen is the ladder made visible: every setting at every rung, the
-      # effective value, and who decided it. Settings shows values; it does not yet say
-      # which rung won, which is the whole of rule 1 and of done item 3.
-      setting_effective: :policy,
-
       # No way to delete a profile from the console. The editor edits one, reached by name
       # from the fleet screen, and creating is a route of its own.
       profile_delete: :profiles,

@@ -629,7 +629,16 @@ defmodule Troupe.Plane.Admin do
           %{key: key, title: title, blurb: blurb}
         end)
 
-      {:ok, %{groups: groups, settings: Settings.all(), ladder: Ladder.rungs()}}
+      {:ok,
+       %{
+         groups: groups,
+         settings: Settings.all(),
+         ladder: Ladder.rungs(),
+         # Which of them more than one rung decides, so a surface can put the chip on the
+         # right fields without asking about every setting it has. A console is an API
+         # client here like any other and cannot read the resolver to find out.
+         laddered: Ladder.laddered() |> Map.keys() |> Enum.sort()
+       }}
     end
   end
 
@@ -1011,8 +1020,7 @@ defmodule Troupe.Plane.Admin do
            })}
 
         {:error, {:no_such_sponsor, subject}} ->
-          {:error,
-           Error.new(:invalid_params, %{sponsor: subject, reason: "no such person"})}
+          {:error, Error.new(:invalid_params, %{sponsor: subject, reason: "no such person"})}
 
         {:error, {:sponsor_inactive, subject}} ->
           {:error,

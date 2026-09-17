@@ -570,3 +570,90 @@ pre {
 @media (max-width: 900px) {
   .diff__row { grid-template-columns: 1fr; }
 }
+
+/* ---------- the ladder ----------
+
+   Rule 1 of the console: every effective value names the rung that decided it. The chip
+   is text — the rung's name is inside the element — and everything here is set apart by
+   weight, a hairline and a background, never by hue alone. A reader who cannot see the
+   colour reads the same page. */
+
+.rung {
+  display: inline-block;
+  font: var(--typography-role-micro);
+  letter-spacing: 0.03em;
+  padding: 0 var(--space-2);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-radius: var(--radius-pill);
+  background: var(--color-bg-sunken);
+  color: var(--color-text-secondary);
+  white-space: nowrap;
+}
+
+/* The floor and the rungs nobody edits from here read quieter than the two that are
+   somebody's to change. Still only a reinforcement of what the word already says. */
+.rung--deployment { color: var(--color-text-muted); }
+.rung--platform { color: var(--color-text-primary); border-color: var(--color-border-strong); }
+.rung--team { color: var(--color-text-primary); }
+
+.rungs { margin: 0 0 var(--space-6); display: grid; gap: var(--space-3); }
+
+.rungs__rung {
+  display: grid;
+  grid-template-columns: 9rem 1fr;
+  gap: var(--space-4);
+  align-items: baseline;
+}
+
+.rungs__rung dt { margin: 0; }
+.rungs__rung dd { margin: 0; color: var(--color-text-secondary); font: var(--typography-role-body); }
+
+@media (max-width: 40rem) {
+  .rungs__rung { grid-template-columns: 1fr; gap: var(--space-1); }
+}
+
+/* The cell that won. Marked, and also *said* — the template writes "in force" into the
+   cell, because the most consequential assertion on the page cannot be a shade. */
+.ladder__won {
+  background: var(--color-bg-selected);
+  color: var(--color-text-primary);
+  font: var(--typography-role-data-strong);
+}
+
+/* The chip beside a field, where what is in force is not what this rung holds. */
+.setting__rung {
+  display: inline-flex;
+  align-items: baseline;
+  gap: var(--space-2);
+  margin-left: var(--space-3);
+  font: var(--typography-role-micro);
+  color: var(--color-text-muted);
+}
+
+/* A sentence under a heading that qualifies what follows. Between `.lede`, which
+   introduces a page, and `.field-help`, which belongs to one control. */
+.hint {
+  font: var(--typography-role-body);
+  color: var(--color-text-secondary);
+  margin: 0 0 var(--space-4);
+}
+
+/* "Nothing here", inside a table rather than instead of one. `.empty` is the panel-level
+   version; this is a cell. */
+.none { color: var(--color-text-muted); font: var(--typography-role-body); }
+
+/* A trigger's revisions, fetched when somebody asks. Each carries its whole document, so
+   the document is set in a sunken block rather than run together with the heading. */
+.revisions { display: grid; gap: var(--space-5); margin: var(--space-4) 0 var(--space-6); }
+.revision h4 { margin: 0 0 var(--space-2); font: var(--typography-role-section-title); }
+
+.revision pre {
+  margin: 0;
+  padding: var(--space-4);
+  overflow-x: auto;
+  font: var(--typography-role-data);
+  background: var(--color-bg-sunken);
+  border: var(--border-hairline) solid var(--color-border-hairline);
+  border-radius: var(--radius-md);
+  color: var(--color-text-secondary);
+}

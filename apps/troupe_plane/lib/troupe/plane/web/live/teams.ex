@@ -186,6 +186,15 @@ defmodule Troupe.Plane.Web.Live.Teams do
   # What the plane refused, in the words it used. `Admin.principal_create/3` distinguishes
   # a missing sponsor from a misspelt one from one who has left from one on another team,
   # and every one of those is a different thing to do next.
+  # A widening refused by the ladder, which is the one refusal whose useful content is a
+  # number the reader does not have. The generic clause below matches this error too —
+  # it carries `reason: "a lower rung may only narrow"` — and quoting the rule without
+  # the ceiling tells an administrator the half they already worked out from the refusal.
+  defp refusal(%{data: %{field: field, asked: asked, ceiling: ceiling, decided_by: rung}}) do
+    "#{field}: #{asked} is wider than #{ceiling}, which the #{rung} decided. " <>
+      "A lower rung may only narrow, so ask for less here or change it there."
+  end
+
   defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
   defp refusal(%{data: %{missing: field}}) when is_binary(field), do: "#{field} is required"
   defp refusal(error), do: error.message
@@ -200,7 +209,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
   end
 
   defp respond(socket, {:error, error}, _message) do
-    {:noreply, assign(socket, flash_message: error.message)}
+    {:noreply, assign(socket, flash_message: refusal(error))}
   end
 
   # A blank field clears the cap rather than leaving it alone, which is the opposite of

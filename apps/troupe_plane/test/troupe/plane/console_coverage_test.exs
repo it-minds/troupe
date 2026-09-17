@@ -27,7 +27,6 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
   # module's are allowed to differ where the module predates the grouping.
   @modules %{
     fleet: Troupe.Plane.Web.Live.Workers,
-    policy: Troupe.Plane.Web.Live.Settings,
     profiles: Troupe.Plane.Web.Live.ProfileEditor
   }
 

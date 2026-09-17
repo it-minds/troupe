@@ -3904,3 +3904,46 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      them; `trigger_revisions` carries each revision's whole document, so loading every
      revision of every trigger to render a panel nobody has opened would be the page paying
      for a question it was not asked.
+
+586. **Settings becomes Policy rather than being joined by it.** The document names Policy
+     a new screen and describes it as Settings plus the ladder, and building both would
+     have put two screens in the console that edit the same platform values — which is the
+     drift the coverage test exists to catch, arriving by the front door. So the module is
+     `Live.Policy`, the route is `/admin/policy`, and the coverage map loses its
+     `policy: Live.Settings` exception rather than gaining a second one.
+
+     `/admin/settings` still routes to it. The address is in the deployment notes and in at
+     least one bookmark, and a 404 on the page somebody was told to open is a worse answer
+     than the page.
+
+587. **The rung chip lives in the layout, not on Policy.** Rule 1 says every effective value
+     names the rung that decided it, on every screen — so the chip is a component beside
+     `budget/1` and `metric/1` rather than a private function of one page. Two spellings of
+     "who decided this" would eventually disagree, and the one that disagreed would be the
+     one somebody read.
+
+     Text, not colour, for the reason the status vocabulary is: provenance is an assertion,
+     and the design's rule about assertions readable without colour is not about health.
+
+588. **The effective view is a table of every rung, not an expander.** Five settings are
+     laddered, so the whole answer fits: for each, the value in force, the rung that decided
+     it, the ceiling a team may not pass, and one column per rung holding what that rung
+     said. The winning cell is marked *and* says "in force" in words — a cell that was only
+     styled as the winner would put the most consequential thing on the page in a shade.
+
+     The team picker is what makes the three-rung case readable. Two rungs are always
+     present; the third is a team, and a team is where a value usually stops being the one
+     somebody expected.
+
+589. **`settings_list` answers which settings are laddered.** The console is an admin API
+     client and gets no private access to the resolver, so a surface that wanted to put the
+     chip on the right fields had no way to find out which those are. One sorted list of
+     keys in the answer, rather than a screen that hard-codes five names that live in
+     another module.
+
+590. **A widening refusal quotes the ceiling, and the clause goes first.** `refusal/1` on the
+     Teams screen already matched the ladder's error — it carries
+     `reason: "a lower rung may only narrow"` — so the flash said the rule and nothing else.
+     The rule is the half an administrator has already worked out from being refused; the
+     number is the half they do not have. Done item 3's second sentence is the flash naming
+     the field, what was asked for, the ceiling, and the rung that set it.

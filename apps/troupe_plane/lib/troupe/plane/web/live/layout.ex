@@ -34,7 +34,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
     {:triggers, "Triggers", "/admin/triggers"},
     {:sessions, "Sessions and spend", "/admin/sessions"},
     {:audit, "Audit", "/admin/audit"},
-    {:settings, "Settings", "/admin/settings"}
+    {:policy, "Policy", "/admin/policy"}
   ]
 
   @doc "Every page in the rail, in the order it appears."
@@ -101,6 +101,27 @@ defmodule Troupe.Plane.Web.Live.Layout do
     >
       {render_slot(@inner_block)}
     </.link>
+    """
+  end
+
+  @doc """
+  Which rung decided a value.
+
+  Rule 1 of the console: every effective value names the rung that decided it. The chip
+  lives here rather than on the Policy screen because the ladder is a property of the
+  value and not of one page — a team's idle timeout carries the same claim on the Teams
+  screen as it does on Policy, and two spellings of it would eventually disagree.
+
+  **Text, not colour.** "Who decided this" is an assertion, and the design's rule that
+  the console's assertions must be readable without colour applies to assertions about
+  provenance exactly as it does to a health status. The class exists so a chip can be set
+  apart from the number beside it, and the rung's name is in the element either way.
+  """
+  attr(:rung, :atom, required: true)
+
+  def rung(assigns) do
+    ~H"""
+    <span class={"rung rung--#{@rung}"}>{@rung}</span>
     """
   end
 

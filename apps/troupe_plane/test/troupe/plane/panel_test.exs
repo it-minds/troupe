@@ -11,7 +11,18 @@ defmodule Troupe.Plane.PanelTest do
 
   use Troupe.Plane.PanelCase, async: false
 
-  alias Troupe.Plane.{Admin, Bundles, Fleet, Identity, Principals, SCIM, Sessions, Triggers}
+  alias Troupe.Plane.{
+    Admin,
+    Bundles,
+    Fleet,
+    Identity,
+    Principals,
+    SCIM,
+    Sessions,
+    Settings,
+    Triggers
+  }
+
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.Web.Live.ProfileEditor
 
@@ -315,7 +326,11 @@ defmodule Troupe.Plane.PanelTest do
 
     test "says a principal needs a sponsor rather than that it is disabled", context do
       {:ok, principal, _secret} =
-        principal!(context.engineering, %{name: "orphan", profiles: ["dev"], sponsor: context.lead.subject})
+        principal!(context.engineering, %{
+          name: "orphan",
+          profiles: ["dev"],
+          sponsor: context.lead.subject
+        })
 
       {:ok, _} = SCIM.deactivate_user(Identity.get_user(context.lead.subject).id)
 
@@ -541,10 +556,88 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
-  describe "the settings page" do
+  describe "the policy page" do
+    # Done item 3 of the console document, which is also rule 1: for a setting decided at
+    # three rungs, the view names the winner and *both losers with their values*, and a
+    # team's attempt to widen it is refused with the floor quoted.
+    #
+    # Three rungs are arranged in the order they happen in life rather than the order they
+    # are read in: the team asks for ninety days while the platform has no opinion, and the
+    # platform then narrows to thirty. That is the case the ladder exists for — the team's
+    # row is left alone and stops being what runs — and it is the case a page showing one
+    # rung's value cannot explain.
+    setup context do
+      actor = Admin.actor_for_subject(context.root.subject)
+
+      {:ok, _team} = Admin.team_update(actor, "engineering", %{erase_after_days: 90})
+      {:ok, _applied} = Admin.setting_put(actor, "default_erase_after_days", "30")
+
+      on_exit(fn -> Settings.reset("default_erase_after_days", "test") end)
+
+      %{actor: actor, deployed: 365}
+    end
+
+    test "names the winner and both losers, with their values", context do
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
+
+      # Two rungs without a team: what no team may exceed.
+      assert html =~ "default_erase_after_days"
+      assert html =~ "the platform — what no team may exceed"
+
+      # The team's opinion joins the two above it.
+      html =
+        view
+        |> element("#policy-as-team")
+        |> render_change(%{"team" => "engineering"})
+
+      row = ladder_row(html, "default_erase_after_days")
+
+      # The winner, named as a rung rather than implied by being first.
+      assert row =~ "30"
+      assert row =~ ~s(class="rung rung--platform")
+      assert row =~ "in force"
+
+      # And both losers, with the values they hold. This is the half a settings page
+      # leaves out: 30 says nothing about why somebody's 365 is not in force.
+      assert row =~ "365", "the deployment's opinion is missing, so a loser is unnamed"
+      assert row =~ "90", "the team's own opinion is missing, so a loser is unnamed"
+    end
+
+    test "and a team's attempt to widen it is refused with the floor quoted", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/teams")
+
+      # The edit form only exists once somebody opens it, which is also how a reader gets
+      # to it: the page is a list of teams and not a page of open forms.
+      view
+      |> element(~s(button[phx-click="edit"][phx-value-team="engineering"]))
+      |> render_click()
+
+      html =
+        view
+        |> element("#edit-engineering")
+        |> render_submit(%{"team" => "engineering", "erase_after_days" => "200"})
+
+      # Not "forbidden", and not the rule alone: the number they do not have.
+      assert html =~ "erase_after_days"
+      assert html =~ "200"
+      assert html =~ "30"
+      assert html =~ "wider than"
+      assert html =~ "platform"
+    end
+
+    test "says what the deployment is and that this console does not edit it", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
+
+      assert html =~ "The floor, and read-only from this console."
+      assert html =~ "may narrow the deployment and never widen it"
+    end
+
     test "says what every setting does and where its value came from", context do
       {:ok, _view, html} =
-        context.conn |> sign_in(context.root.subject) |> live("/admin/settings")
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
 
       assert html =~ "platform_admin_group"
       assert html =~ "provisioning_mode"
@@ -563,7 +656,7 @@ defmodule Troupe.Plane.PanelTest do
       on_exit(fn -> Application.delete_env(:troupe_plane, :scim_token) end)
 
       {:ok, _view, html} =
-        context.conn |> sign_in(context.root.subject) |> live("/admin/settings")
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
 
       assert html =~ "scim_token"
       assert html =~ "reference only, never shown"
@@ -572,7 +665,7 @@ defmodule Troupe.Plane.PanelTest do
 
     test "a team admin reads it and cannot save any of it", context do
       {:ok, _view, html} =
-        context.conn |> sign_in(context.lead.subject) |> live("/admin/settings")
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/policy")
 
       assert html =~ "read-only for you"
       assert html =~ "platform_admin_group"
@@ -583,7 +676,7 @@ defmodule Troupe.Plane.PanelTest do
 
     test "the group that decides who administers cannot be saved unchecked", context do
       {:ok, view, html} =
-        context.conn |> sign_in(context.root.subject) |> live("/admin/settings")
+        context.conn |> sign_in(context.root.subject) |> live("/admin/policy")
 
       assert html =~ "Run the check below before saving this one"
 
@@ -615,6 +708,17 @@ defmodule Troupe.Plane.PanelTest do
   end
 
   # -- helpers ----------------------------------------------------------------
+
+  # One row of the ladder table. Asserting against the whole page would let a claim about
+  # `default_erase_after_days` pass on another setting's numbers, and three of the five
+  # laddered settings are counts of days.
+  defp ladder_row(html, key) do
+    [row] =
+      Regex.scan(~r{<tr>(?:(?!</tr>).)*?<code>#{Regex.escape(key)}</code>.*?</tr>}s, html)
+      |> Enum.map(&List.first/1)
+
+    row
+  end
 
   defp session!(team, profile) do
     {:ok, session} =
