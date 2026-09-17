@@ -52,13 +52,19 @@ defmodule Troupe.LLM.Anthropic do
   @doc false
   def encode(%Request{} = r, config \\ %{}) do
     plan = cache_plan(r)
+    effort = Provider.effort(r, config)
+    keep_thinking? = budget(effort) != nil
 
     %{
       model: r.model,
       max_tokens: config[:max_output] || r.max_tokens,
       stream: true,
       system: encode_system(r.system, plan),
-      messages: r.messages |> Enum.with_index() |> Enum.map(&encode_message(&1, plan)),
+      messages:
+        r.messages
+        |> Enum.map(&replayable(&1, keep_thinking?))
+        |> Enum.with_index()
+        |> Enum.map(&encode_message(&1, plan)),
       tools:
         Enum.map(
           r.tools,
@@ -66,7 +72,23 @@ defmodule Troupe.LLM.Anthropic do
         )
     }
     |> then(fn m -> if r.tools == [], do: Map.delete(m, :tools), else: m end)
-    |> put_thinking(Provider.effort(r, config))
+    |> put_thinking(effort)
+  end
+
+  # Which reasoning blocks may go back out. Another provider's thinking carries
+  # no signature Anthropic can verify, and a thinking block is only legal on a
+  # request that has thinking enabled — so with thinking off, or for anything
+  # that came from an OpenAI-compatible provider, the blocks are dropped and the
+  # rest of the turn is sent unchanged.
+  defp replayable(%{content: blocks} = msg, keep_thinking?) do
+    kept =
+      Enum.reject(blocks, fn
+        %{type: :reasoning, provider: :anthropic} -> not keep_thinking?
+        %{type: :reasoning} -> true
+        _ -> false
+      end)
+
+    %{msg | content: kept}
   end
 
   ## Prompt cache breakpoints
@@ -173,6 +195,12 @@ defmodule Troupe.LLM.Anthropic do
     end
   end
 
+  defp encode_block(%{type: :reasoning, redacted: true, text: d}),
+    do: %{type: "redacted_thinking", data: d}
+
+  defp encode_block(%{type: :reasoning, text: t, signature: sig}),
+    do: %{type: "thinking", thinking: t, signature: sig}
+
   defp encode_block(%{type: :text, text: t}), do: %{type: "text", text: t}
 
   defp encode_block(%{type: :tool_use, id: id, name: n, input: i}),
@@ -206,6 +234,14 @@ defmodule Troupe.LLM.Anthropic do
         %{"type" => "tool_use", "id" => id, "name" => name} ->
           %{type: :tool_use, id: id, name: name, json: ""}
 
+        %{"type" => "thinking"} ->
+          %{type: :reasoning, text: Map.get(block, "thinking", ""), signature: nil}
+
+        # Thinking the provider encrypted: the payload is opaque and there is
+        # nothing to stream, but it still has to go back verbatim next turn.
+        %{"type" => "redacted_thinking"} = b ->
+          %{type: :redacted, data: Map.get(b, "data", "")}
+
         %{"type" => other} ->
           %{type: :other, kind: other}
       end
@@ -222,11 +258,16 @@ defmodule Troupe.LLM.Anthropic do
       {%{type: :tool_use} = b, %{"type" => "input_json_delta", "partial_json" => j}} ->
         %{acc | blocks: Map.put(acc.blocks, i, %{b | json: b.json <> j})}
 
-      # summarized thinking is shown live (tagged, so the UI can fold it into
-      # its own collapsible block) and never persisted
-      {_, %{"type" => "thinking_delta", "thinking" => t}} ->
+      # Thinking is shown live (tagged, so the UI can fold it into its own
+      # collapsible block) *and* kept: with thinking enabled, Anthropic rejects a
+      # tool-use turn whose thinking blocks are not handed back with the
+      # signature it issued for them.
+      {%{type: :reasoning} = b, %{"type" => "thinking_delta", "thinking" => t}} ->
         send(acc.reply_to, {:llm_delta, acc.ref, t, :reasoning})
-        acc
+        %{acc | blocks: Map.put(acc.blocks, i, %{b | text: b.text <> t})}
+
+      {%{type: :reasoning} = b, %{"type" => "signature_delta", "signature" => sig}} ->
+        %{acc | blocks: Map.put(acc.blocks, i, %{b | signature: (b.signature || "") <> sig})}
 
       _ ->
         acc
@@ -287,6 +328,12 @@ defmodule Troupe.LLM.Anthropic do
 
         {_, %{type: :tool_use, id: id, name: n, json: j}} ->
           [Message.tool_use(id, n, decode_input(j))]
+
+        {_, %{type: :reasoning, text: t, signature: sig}} ->
+          [Message.reasoning(:anthropic, t, signature: sig)]
+
+        {_, %{type: :redacted, data: d}} ->
+          [Message.reasoning(:anthropic, d, redacted: true)]
 
         _ ->
           []

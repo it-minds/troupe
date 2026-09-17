@@ -10,7 +10,7 @@ defmodule Troupe.Codec do
   alias Troupe.Event
 
   @opaque_keys ~w(input markers)
-  @enum_keys ~w(state source reason decision stop_reason role type status isolation kind)
+  @enum_keys ~w(state source reason decision stop_reason role type status isolation kind provider)
 
   @spec encode_event(Event.t()) :: iodata()
   def encode_event(%Event{} = e) do

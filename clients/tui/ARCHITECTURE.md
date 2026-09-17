@@ -303,7 +303,7 @@ Persisted event types and data:
 | `worktree_merged`      | branch          | `%{output, conflicts}`                                               |
 | `worktree_discarded`   | branch          | `%{}`                                                                |
 | `input`                | agent           | `%{source, content}`                                                 |
-| `assistant_message`    | agent           | `%{content, usage, model, stop_reason}` (usage as above; an event written before Decision 59 has no cache keys and folds as zero) |
+| `assistant_message`    | agent           | `%{content, usage, model, stop_reason}` (usage as above; an event written before Decision 59 has no cache keys and folds as zero). `content` blocks are `text`, `tool_use`, `tool_result` and `reasoning` (`%{provider, text, signature, redacted}`, Decision 89) |
 | `tool_call_started`    | agent           | `%{call_id, name, input}`                                            |
 | `tool_call_completed`  | agent           | `%{call_id, ok, content}`                                            |
 | `approval_requested`   | agent           | `%{call_id, name, input, preview}`                                   |

@@ -20,6 +20,7 @@ defmodule Troupe.LLM.OpenAI do
 
     acc0 = %{
       text: "",
+      reasoning: "",
       calls: %{},
       usage: Provider.empty_usage(),
       finish: nil,
@@ -138,8 +139,24 @@ defmodule Troupe.LLM.OpenAI do
         }
       )
 
-    msg = %{role: "assistant", content: Message.text(blocks)}
+    msg =
+      %{role: "assistant", content: Message.text(blocks)}
+      |> put_reasoning(blocks)
+
     [if(calls == [], do: msg, else: Map.put(msg, :tool_calls, calls))]
+  end
+
+  # Unlike Anthropic's thinking, reasoning here is not a content block but a
+  # sibling of `content` on the assistant message. DeepSeek's thinking mode is
+  # all-or-nothing: once any assistant message in the history carried
+  # `reasoning_content`, one that omits it fails the whole request with a 400, so
+  # what the model produced goes back exactly where it came from. Another
+  # provider's reasoning is not ours to replay and is dropped.
+  defp put_reasoning(msg, blocks) do
+    case Message.reasoning_of(blocks, :openai) do
+      [] -> msg
+      reasoning -> Map.put(msg, :reasoning_content, Enum.map_join(reasoning, & &1.text))
+    end
   end
 
   @doc false
@@ -192,15 +209,19 @@ defmodule Troupe.LLM.OpenAI do
             a
         end
 
-      # reasoning / thinking tokens (vLLM, LiteLLM, Mistral, GLM...): shown
-      # live and tagged so the UI can fold them into their own collapsible block
-      case Map.get(delta, "reasoning_content") || Map.get(delta, "reasoning") do
-        r when is_binary(r) and r != "" ->
-          send(a.reply_to, {:llm_delta, a.ref, r, :reasoning})
+      # reasoning / thinking tokens (DeepSeek, vLLM, LiteLLM, Mistral, GLM...):
+      # shown live and tagged so the UI can fold them into their own collapsible
+      # block, and kept, because a thinking model that has made one tool call
+      # rejects every later turn that does not hand its reasoning back.
+      a =
+        case Map.get(delta, "reasoning_content") || Map.get(delta, "reasoning") do
+          r when is_binary(r) and r != "" ->
+            send(a.reply_to, {:llm_delta, a.ref, r, :reasoning})
+            %{a | reasoning: a.reasoning <> r}
 
-        _ ->
-          :ok
-      end
+          _ ->
+            a
+        end
 
       Enum.reduce(Map.get(delta, "tool_calls") || [], a, fn tc, a2 ->
         idx = Map.get(tc, "index", 0)
@@ -228,8 +249,12 @@ defmodule Troupe.LLM.OpenAI do
       end)
 
     text = if acc.text == "", do: [], else: [Message.text_block(acc.text)]
+
+    reasoning =
+      if acc.reasoning == "", do: [], else: [Message.reasoning(:openai, acc.reasoning)]
+
     stop = if calls == [], do: :end_turn, else: :tool_use
-    %{content: text ++ calls, usage: acc.usage, stop_reason: stop, model: acc.model}
+    %{content: reasoning ++ text ++ calls, usage: acc.usage, stop_reason: stop, model: acc.model}
   end
 
   defp decode_args(""), do: %{}
