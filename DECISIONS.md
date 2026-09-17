@@ -3841,3 +3841,29 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      no dependencies, so the paths are passed as `-pa` arguments. No shell, which is the same
      rule the product follows and for the same reason — a glob left for a shell to expand
      turns the rest of the arguments into something else.
+
+578. **A version is not a build, and the footer needed the second one.** The page carried
+     `plane 0.2.0`, which is the number in `mix.exs`: it changes when somebody edits a file,
+     not when an image is built, so two deploys a week apart report the same string. The
+     question people actually ask is *is the thing I just deployed the thing that is
+     running*, and nothing on the page could answer it.
+
+     `Troupe.Plane.Build` reads a commit and a build time from the environment, stamped into
+     the image by `scripts/build-images` and declared as build args in the Dockerfile.
+     Read at runtime rather than compiled in, because a release is built once and run in
+     several places — a value baked at compile time is a value the image cannot be asked
+     about afterwards.
+
+579. **It says the version, the short commit and the day, and nothing else.** No branch, no
+     dirty marker, no builder's hostname: this renders on a page anybody who can reach the
+     plane can read, and the useful half is the half that identifies the artifact. The day
+     rather than the clock, because a footer that changed every time somebody looked is a
+     footer people stop reading — and *which day* is what answers the question.
+
+     An unstamped build reports `dev` and says it does not know, which is honest: a tree
+     somebody is editing has no build identity. An empty environment variable counts as
+     unset, because a build arg nobody passed arrives as `""` and an empty commit shown as a
+     commit would read as an identity where there is none.
+
+580. **`/.well-known/troupe` and the footer read one function.** A deploy check that
+     disagreed with the page would be worse than either on its own.

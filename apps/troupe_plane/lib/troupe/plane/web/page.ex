@@ -30,6 +30,7 @@ defmodule Troupe.Plane.Web.Page do
   sentence. Nothing else on either page may have it, and the test pins both.
   """
 
+  alias Troupe.Plane.Build
   alias Troupe.Protocol
 
   # Where the endpoint mounts the generated stylesheet and the brand's own files. Both
@@ -138,13 +139,11 @@ defmodule Troupe.Plane.Web.Page do
     """
     <footer>
       <span>protocol #{e(Protocol.version())}</span>
-      <span>plane #{e(version())}</span>
+      <span>plane #{e(Build.label())}</span>
       <span class="footer-theme">theme · signal</span>
     </footer>
     """
   end
-
-  defp version, do: to_string(Application.spec(:troupe_plane, :vsn) || "dev")
 
   # -- helpers shared by both pages -------------------------------------------
 

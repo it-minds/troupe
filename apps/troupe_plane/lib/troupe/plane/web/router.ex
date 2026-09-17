@@ -26,7 +26,7 @@ defmodule Troupe.Plane.Web.Router do
 
   use Plug.Router
 
-  alias Troupe.Plane.{Admin, Harness, Identity, OIDC, Principals, SCIM, Tokens, Triggers}
+  alias Troupe.Plane.{Admin, Build, Harness, Identity, OIDC, Principals, SCIM, Tokens, Triggers}
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Plane.Web.{Docs, Index}
   alias Troupe.Protocol.{Error, JSONRPC, Token}
@@ -108,7 +108,9 @@ defmodule Troupe.Plane.Web.Router do
         "name" => config(:plane_name, "troupe"),
         "rpc" => "/rpc",
         "jwks" => "/.well-known/jwks.json",
-        "protocol_version" => Troupe.Protocol.version()
+        "protocol_version" => Troupe.Protocol.version(),
+      # The same facts the footer shows, so a deploy check and a browser cannot disagree.
+      "build" => Build.to_json()
       }
     })
   end

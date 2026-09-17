@@ -20,6 +20,12 @@ registry="${TROUPE_REGISTRY:-ghcr.io/objective-mj}"
 tag="${TROUPE_IMAGE_TAG:-dev}"
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
 push="${TROUPE_PUSH:-false}"
+
+# Which commit and which moment, stamped into every image so the plane's own page can say
+# whether what is running is what was deployed. `git` may not be there — a tarball build,
+# a CI checkout without history — and an image with no stamp reports `dev`, which is true.
+commit="${TROUPE_BUILD_COMMIT:-$(git rev-parse HEAD 2>/dev/null || true)}"
+built_at="${TROUPE_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
 releases=("${@:-troupe_operator troupe_plane troupe_worker troupe_a2a}")
 
 for release in ${releases[@]}; do
@@ -29,7 +35,11 @@ for release in ${releases[@]}; do
   # the node pool cannot run, and the failure arrives as `exec format error` in a
   # CrashLoopBackOff rather than as anything about architecture.
   docker build --platform linux/amd64 \
-    --file docker/Dockerfile --build-arg "RELEASE=${release}" --tag "$image" .
+    --file docker/Dockerfile \
+    --build-arg "RELEASE=${release}" \
+    --build-arg "BUILD_COMMIT=${commit}" \
+    --build-arg "BUILD_TIME=${built_at}" \
+    --tag "$image" .
 
   if [ "$push" = "true" ]; then
     echo "build-images: pushing $image"

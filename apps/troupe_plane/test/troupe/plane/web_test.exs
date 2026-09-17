@@ -12,6 +12,7 @@ defmodule Troupe.Plane.WebTest do
 
   use Troupe.Plane.DataCase, async: false
 
+  alias Troupe.Plane.Build
   alias Troupe.Plane.{Bundles, Fleet, Identity, OIDC, Principals, Sessions, Tokens}
   alias Troupe.Plane.Web.Router
   alias Troupe.Protocol.Token
@@ -217,6 +218,17 @@ defmodule Troupe.Plane.WebTest do
       assert body["device_authorization_endpoint"] =~ "/device"
       assert body["plane"]["rpc"] == "/rpc"
       assert body["plane"]["protocol_version"] == Troupe.Protocol.version()
+    end
+
+    test "says which build is answering, so a deploy can be checked without a browser",
+         context do
+      assert {:ok, %{status: 200, body: body}} = get(context, "/.well-known/troupe")
+
+      # The same three facts the footer shows. One source, because a deploy check that
+      # disagreed with the page would be worse than either on its own.
+      assert body["plane"]["build"]["version"] == Build.version()
+      assert body["plane"]["build"]["commit"] == Build.commit()
+      assert Map.has_key?(body["plane"]["build"], "built_at")
     end
 
     # `groups` is not a scope anywhere. Group membership is a claim the provider is

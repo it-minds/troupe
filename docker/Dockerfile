@@ -98,6 +98,15 @@ COPY --from=build --chown=troupe:troupe /app/release ./
 
 ENV RELEASE_NAME=${RELEASE}
 
+# Which build this is, for the footer of the plane's own pages and for
+# `/.well-known/troupe`. Passed in rather than discovered: this stage has no git and no
+# clock worth trusting, and a value the build system supplies is a value the deploy can be
+# asked to prove. Unset on a hand-built image, which then honestly reports `dev`.
+ARG BUILD_COMMIT=""
+ARG BUILD_TIME=""
+ENV TROUPE_BUILD_COMMIT=${BUILD_COMMIT}
+ENV TROUPE_BUILD_TIME=${BUILD_TIME}
+
 # `exec` so signals reach the VM: Kubernetes' SIGTERM has to become a graceful stop,
 # not a killed shell.
 ENTRYPOINT ["/bin/sh", "-c", "exec /app/bin/${RELEASE_NAME} start"]
