@@ -4060,3 +4060,23 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      the whole trail, so a page that ran it on every keystroke in the filter is a page
      nobody opens. And the trail is the whole plane's — a check that answered "somewhere in
      the part you cannot see" would be worse than no check.
+
+609. **The erase dialog asks for a preview before it asks for a decision.** The same shape
+     as `team_unlink_preview/3`, for the same reason: the count before the deed. Somebody
+     erasing a session is usually right about which session and often wrong about what goes
+     with it — and `session_erase_preview` is where the third consequence comes from, which
+     no surface could work out for itself.
+
+610. **Forks are named, not counted.** A number would be asking somebody to trust a claim
+     about sessions they cannot see from the row they are looking at. The dialog lists the
+     ids and says to erase each separately if that is what was meant.
+
+611. **The typed identifier is checked on the server as well as disabled in the page.** The
+     dialog's rule and the MCP tool's `confirm` are one rule in two renderings, and a check
+     that lived only in the markup is a check a form post walks past. Disabled *and*
+     refused: a button that looks pressable and then refuses has already wasted the
+     reader's attention.
+
+612. **An erased child is not counted as a survivor.** `children_of/1` leaves them out —
+     listing one would have the dialog claiming something is still readable when it is not,
+     which is the one direction this count must never be wrong in.

@@ -513,6 +513,21 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.session.erase.preview",
+      function: :session_erase_preview,
+      summary:
+        "What erasing a session will do, before doing it: how much it holds, that its key is destroyed in every version so no backup recovers the content, and how many forks survive it. A fork is a separate session with its own key and is not erased with its parent.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "session_id",
+          type: :string,
+          required: true,
+          description: "The session's id."
+        }
+      ]
+    },
+    %Method{
       name: "admin.session.erase",
       function: :session_erase,
       summary:

@@ -75,6 +75,7 @@ defmodule Troupe.Plane.Admin.Console do
     overview: {:screen, :overview},
     sessions_list: {:screen, :sessions},
     session_erase: {:screen, :sessions},
+    session_erase_preview: {:screen, :sessions},
     runs_list: {:screen, :triggers},
     audit_list: {:screen, :audit},
     audit_verify: {:screen, :audit},

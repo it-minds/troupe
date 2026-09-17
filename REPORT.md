@@ -2351,3 +2351,57 @@ nothing is chained yet, and that the chain starts at the next change somebody ma
 
     $ ./scripts/credo
     6635 mods/funs, found no issues.
+
+## R8g — the erase dialog, in full
+
+Done item 6: *the erase dialog requires the session's own identifier and names the three
+consequences, including how many forks survive.*
+
+It was a two-step confirm: click, then "irreversible — erase it". Both halves of the done
+item were missing, and the third consequence is the one people get backwards.
+
+### What the dialog says now
+
+Read off `http://localhost:4001/admin/sessions` for a session with two forks:
+
+    Erase s-demo-2?
+    Irreversible. Not a delete a restore undoes. Three things happen, and the third is the
+    one people expect to go the other way.
+
+    the key is destroyed
+      every version of it, in the key manager. After this, no backup of object storage, of
+      PostgreSQL or of any volume can recover what this session said — the ciphertext may
+      survive a restore and nothing can read it.
+
+    every object version goes
+      the whole prefix, including prior versions in the versioned bucket, which is where a
+      restore would otherwise find them. 0 B of objects and 0 B of workspace.
+
+    2 forks survive
+      A fork is a separate session with its own key, sealed under it from the moment it was
+      opened. Erasing this one leaves them readable. They are s-demo-2-fork-a,
+      s-demo-2-fork-b — erase each one separately if that is what you meant.
+
+    Type the session's own identifier
+    s-demo-2
+
+With `s-demo-` typed, the button is disabled. Typing something else and posting anyway is
+refused by the server with "that is not s-demo-2; nothing was erased" — the dialog's rule
+and the MCP tool's `confirm` are one rule in two renderings, and a check that lived only in
+the markup is one a form post walks past.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs
+    Result: 51 passed
+
+    $ ./scripts/toolbox mix test .../console_coverage_test.exs .../admin_parity_test.exs \
+        .../admin_api_test.exs .../admin_mcp_test.exs
+    Result: 49 passed
+
+    $ ./scripts/credo
+    6639 mods/funs, found no issues.
+
+Three of those tests are new: the three consequences with the forks named, a wrong
+identifier erasing nothing, and — after a real erase — the fork still not erased, which is
+the dialog's third claim checked rather than taken on trust.

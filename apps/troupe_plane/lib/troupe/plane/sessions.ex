@@ -749,6 +749,24 @@ defmodule Troupe.Plane.Sessions do
     |> Repo.all()
   end
 
+  @doc """
+  The sessions forked from this one, which an erasure does *not* take with it.
+
+  A fork is a separate session with its own key, sealed under it from the moment it was
+  opened — so erasing a parent destroys the parent's key and leaves every child readable.
+  That is the consequence people get wrong, and the count is what the dialog quotes.
+
+  An erased child is left out: it is already gone, and listing it as a survivor would be
+  the count saying something is still readable when it is not.
+  """
+  @spec children_of(String.t()) :: [Session.t()]
+  def children_of(session_id) do
+    Session
+    |> where([s], s.parent_session_id == ^session_id and s.state != "erased")
+    |> order_by([s], asc: s.inserted_at)
+    |> Repo.all()
+  end
+
   @doc "How many sessions in a state an administrator can see."
   @spec count_for_admin([Ecto.UUID.t()], boolean(), String.t()) :: non_neg_integer()
   def count_for_admin(team_ids, platform_admin?, state) do
@@ -1016,7 +1034,10 @@ defmodule Troupe.Plane.Sessions do
     id = 12 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
     # A dot between the two halves, because base64url uses `-` and `_` and a separator that
     # can appear inside an id is a separator that splits the wrong id in half.
-    secret = "tsh_" <> id <> "." <> (32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+    secret =
+      "tsh_" <>
+        id <> "." <> (32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+
     salt = 16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
     {"shr_" <> id, secret, secret_hash(salt, secret), salt}
   end

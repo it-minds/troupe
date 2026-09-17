@@ -233,7 +233,7 @@ defmodule Troupe.Plane.PanelTest do
       # The first click asks rather than does: erasure is irreversible and a misclick
       # should not be enough.
       html = view |> element("button[phx-value-session='#{session.id}']") |> render_click()
-      assert html =~ "irreversible"
+      assert html =~ "Irreversible"
       assert Sessions.get(session.id).state != "erased"
     end
   end
@@ -554,6 +554,92 @@ defmodule Troupe.Plane.PanelTest do
       assert [server] = draft["spec"]["mcpServers"]
       assert server["name"] == "jira"
       assert server["timeoutMs"] == 5000
+    end
+  end
+
+  describe "the erase dialog" do
+    setup context do
+      # Erasing releases the session's place, which is a `:global` actor — the rest of this
+      # page reads tables and does not need one.
+      start_supervised!(Troupe.Plane.Singleton)
+
+      parent = session!(context.engineering, "dev")
+
+      {:ok, child} =
+        Sessions.create(%{
+          id: "s-fork-#{System.unique_integer([:positive])}",
+          owner_subject: "someone@example.test",
+          team_id: context.engineering.id,
+          profile: "dev",
+          state: "active",
+          epoch: 1,
+          parent_session_id: parent.id,
+          parent_seq: 4,
+          fork_reason: "attempt"
+        })
+
+      %{parent: parent, child: child}
+    end
+
+    test "names the three consequences, and counts the forks that survive", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+
+      html =
+        view
+        |> element(
+          ~s(button[phx-click="confirm-erase"][phx-value-session="#{context.parent.id}"])
+        )
+        |> render_click()
+
+      # One: the key, in every version, so a restore recovers ciphertext and nothing else.
+      assert html =~ "the key is destroyed"
+      assert html =~ "every version of it, in the key manager"
+
+      # Two: the whole prefix, prior versions included.
+      assert html =~ "every object version goes"
+      assert html =~ "versioned bucket"
+
+      # Three, and the one people expect to go the other way.
+      assert html =~ "1 fork survives"
+      assert html =~ context.child.id
+    end
+
+    test "refuses until the session's own identifier is typed", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+
+      view
+      |> element(~s(button[phx-click="confirm-erase"][phx-value-session="#{context.parent.id}"]))
+      |> render_click()
+
+      # Typing something else erases nothing, and says so. Checked on the server as well as
+      # disabled in the page: a check that lived only in the markup is one a form post
+      # walks past.
+      html =
+        view
+        |> element("#erase-session")
+        |> render_submit(%{"session" => context.parent.id, "confirm" => "s-not-that-one"})
+
+      assert html =~ "nothing was erased"
+      assert Sessions.get(context.parent.id).state != "erased"
+    end
+
+    test "and the fork is still there afterwards", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/sessions")
+
+      view
+      |> element(~s(button[phx-click="confirm-erase"][phx-value-session="#{context.parent.id}"]))
+      |> render_click()
+
+      view
+      |> element("#erase-session")
+      |> render_submit(%{"session" => context.parent.id, "confirm" => context.parent.id})
+
+      # The dialog's third claim, checked rather than taken on trust: the child has its own
+      # key and is not erased with its parent.
+      assert Sessions.get(context.child.id).state != "erased"
     end
   end
 

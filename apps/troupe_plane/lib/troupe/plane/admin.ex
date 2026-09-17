@@ -826,6 +826,49 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  What erasing this session will do, before anybody does it.
+
+  The same shape as `team_unlink_preview/3` and for the same reason: the count before the
+  deed. Somebody erasing a session is usually right about which session and often wrong
+  about what goes with it.
+
+  Three consequences, and the third is the one people get wrong:
+
+  * **the key is destroyed**, every version of it, so no backup of object storage, of
+    PostgreSQL or of any volume can recover the content. Erasure here is not a delete of
+    rows that a restore would undo.
+  * **every object version under the prefix goes**, including prior versions in the
+    versioned bucket, which is the place a restore would otherwise find them.
+  * **children survive.** A fork is a separate session with its own key, sealed under it
+    from the moment it was opened. Erasing a parent leaves every child readable, and the
+    number is here because "does this take the forks with it" is the question somebody is
+    actually asking and the answer is no.
+  """
+  @spec session_erase_preview(actor(), String.t()) :: result()
+  def session_erase_preview(actor, session_id) do
+    with :ok <- require_admin(actor),
+         {:ok, session} <- fetch_session(actor, session_id) do
+      forks = Sessions.children_of(session.id)
+
+      {:ok,
+       %{
+         session_id: session.id,
+         owner: session.owner_subject,
+         profile: session.profile,
+         object_bytes: session.object_bytes,
+         workspace_bytes: session.workspace_bytes,
+         # Named rather than implied, because a console that showed only a count would be
+         # asking somebody to trust a number about sessions they cannot see from here.
+         survivors: Enum.map(forks, & &1.id),
+         survivor_count: length(forks),
+         # What the typed confirmation has to match, in the answer rather than assumed by
+         # the surface: the MCP tool and the dialog are one rule in two renderings.
+         confirm: session.id
+       }}
+    end
+  end
+
   @doc "Erase a session, for an administrator entitled to."
   @spec session_erase(actor(), String.t()) :: result()
   def session_erase(actor, session_id) do
