@@ -192,10 +192,14 @@ defmodule Troupe.LLM.OpenAI do
             a
         end
 
-      # reasoning / thinking tokens (vLLM, LiteLLM, Mistral, GLM...): shown live, not kept
+      # reasoning / thinking tokens (vLLM, LiteLLM, Mistral, GLM...): shown
+      # live and tagged so the UI can fold them into their own collapsible block
       case Map.get(delta, "reasoning_content") || Map.get(delta, "reasoning") do
-        r when is_binary(r) and r != "" -> send(a.reply_to, {:llm_delta, a.ref, r})
-        _ -> :ok
+        r when is_binary(r) and r != "" ->
+          send(a.reply_to, {:llm_delta, a.ref, r, :reasoning})
+
+        _ ->
+          :ok
       end
 
       Enum.reduce(Map.get(delta, "tool_calls") || [], a, fn tc, a2 ->

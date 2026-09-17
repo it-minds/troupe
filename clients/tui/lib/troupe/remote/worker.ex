@@ -573,7 +573,8 @@ defmodule Troupe.Remote.Worker do
   defp ephemeral(state, %{"type" => "llm.delta"} = params) do
     agent = params["agent"] || state.agent || "session"
     text = get_in(params, ["data", "text"]) || ""
-    buffer_delta(state, agent, text)
+    reasoning? = get_in(params, ["data", "reasoning"]) == true
+    buffer_delta(state, agent, text, reasoning?)
   end
 
   defp ephemeral(state, %{} = params) do
@@ -586,13 +587,14 @@ defmodule Troupe.Remote.Worker do
 
   # Deltas are coalesced into one event per frame interval and capped: they are
   # allowed to be dropped, and the completed message always arrives durably.
-  defp buffer_delta(state, _agent, ""), do: state
+  defp buffer_delta(state, _agent, "", _reasoning?), do: state
 
-  defp buffer_delta(%{delta_bytes: bytes} = state, _agent, _text) when bytes >= @delta_cap,
-    do: state
+  defp buffer_delta(%{delta_bytes: bytes} = state, _agent, _text, _reasoning?)
+       when bytes >= @delta_cap,
+       do: state
 
-  defp buffer_delta(state, agent, text) do
-    deltas = Map.update(state.deltas, agent, [text], &[text | &1])
+  defp buffer_delta(state, agent, text, reasoning?) do
+    deltas = Map.update(state.deltas, agent, [{text, reasoning?}], &[{text, reasoning?} | &1])
 
     %{state | deltas: deltas, delta_bytes: state.delta_bytes + byte_size(text)}
     |> schedule_flush()
@@ -605,10 +607,15 @@ defmodule Troupe.Remote.Worker do
 
   defp flush_deltas(%{deltas: deltas} = state) when map_size(deltas) == 0, do: state
 
+  # Coalescing keeps the reasoning flag bound to the text that earned it: a
+  # flushed event is reasoning iff *every* buffered chunk was reasoning. Mixing
+  # the two into one text would blur the boundary the UI collapses on.
   defp flush_deltas(state) do
     for {agent, chunks} <- state.deltas do
-      text = chunks |> Enum.reverse() |> IO.iodata_to_binary()
-      Events.notify(state.session_id, agent, :llm_delta, %{text: text})
+      text = chunks |> Enum.reverse() |> Enum.map_join(&elem(&1, 0))
+      reasoning? = Enum.all?(chunks, &elem(&1, 1))
+      data = if reasoning?, do: %{text: text, reasoning: true}, else: %{text: text}
+      Events.notify(state.session_id, agent, :llm_delta, data)
     end
 
     %{state | deltas: %{}, delta_bytes: 0}

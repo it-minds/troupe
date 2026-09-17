@@ -54,8 +54,13 @@ defmodule Troupe.LLM.Fake do
 
   defp decode_turn(%{"text" => t}), do: {:text, t}
   defp decode_turn(%{"finish" => s}), do: {:finish, s}
+  defp decode_turn(%{"reasoning" => r}), do: {:reasoning, r}
+  defp decode_turn(%{"answer" => %{"reasoning" => r, "text" => t}}), do: {:answer, r, t}
   defp decode_turn(%{"tool" => n, "input" => i}), do: {:tool, n, i}
-  defp decode_turn(%{"tools" => list}), do: {:tools, Enum.map(list, &{&1["tool"], &1["input"]})}
+
+  defp decode_turn(%{"tools" => list}),
+    do: {:tools, Enum.map(list, &{&1["tool"], &1["input"]})}
+
   defp decode_turn(%{"error" => r}), do: {:error, r}
 
   ## Provider
@@ -98,6 +103,51 @@ defmodule Troupe.LLM.Fake do
       |> Map.put_new(:model, request.model)
 
     send(reply_to, {:llm_done, ref, response})
+  end
+
+  # A reasoning model's single turn: tagged reasoning deltas, then the answering
+  # text, then a done carrying the text (mimics OpenAI's reasoning_content +
+  # content deltas in one stream).
+  defp deliver({:answer, reasoning, text}, request, reply_to, ref) do
+    for chunk <- chunks(reasoning) do
+      send(reply_to, {:llm_delta, ref, chunk, :reasoning})
+    end
+
+    content = [Message.text_block(text)]
+
+    for chunk <- chunks(text) do
+      send(reply_to, {:llm_delta, ref, chunk})
+    end
+
+    send(
+      reply_to,
+      {:llm_done, ref,
+       %{
+         content: content,
+         usage: %{input_tokens: estimate(request), output_tokens: 20, cache_read: 0, cache_write: 0},
+         stop_reason: :end_turn,
+         model: request.model
+       }}
+    )
+  end
+
+  # A reasoning turn streams tagged deltas and then a `:llm_done` with no text,
+  # mimicking a provider that thought before answering empty-handed.
+  defp deliver({:reasoning, text}, _request, reply_to, ref) do
+    for chunk <- chunks(text) do
+      send(reply_to, {:llm_delta, ref, chunk, :reasoning})
+    end
+
+    send(
+      reply_to,
+      {:llm_done, ref,
+       %{
+         content: [],
+         usage: %{input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0},
+         stop_reason: :end_turn,
+         model: nil
+       }}
+    )
   end
 
   defp chunks(""), do: []
@@ -198,6 +248,12 @@ defmodule Troupe.LLM.Fake do
 
   defp materialize({:text, text}, _request, state),
     do: {%{content: [Message.text_block(text)]}, state}
+
+  defp materialize({:reasoning, text}, _request, state),
+    do: {{:reasoning, text}, state}
+
+  defp materialize({:answer, reasoning, text}, _request, state),
+    do: {{:answer, reasoning, text}, state}
 
   defp materialize({:finish, summary}, request, state),
     do: materialize({:tool, "finish", %{"summary" => summary}}, request, state)

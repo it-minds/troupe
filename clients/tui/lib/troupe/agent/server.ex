@@ -158,13 +158,23 @@ defmodule Troupe.Agent.Server do
 
   # -- thinking / compacting --------------------------------------------------
 
+  # A delta is content or, when the adapter tagged it, reasoning the model thought
+  # through before answering. Both are live-only; the flag lets the UI fold the
+  # reasoning into its own collapsible block instead of blending it into the text.
   def handle_event(:info, {:llm_delta, ref, text}, state, %Data{stream: %{ref: ref}} = data)
       when state in [:thinking, :compacting] do
-    Events.notify(data.spec.session_id, data.spec.agent_path, :llm_delta, %{
-      text: text,
-      purpose: state
-    })
+    notify_delta(data, state, text, false)
+    :keep_state_and_data
+  end
 
+  def handle_event(
+        :info,
+        {:llm_delta, ref, text, :reasoning},
+        state,
+        %Data{stream: %{ref: ref}} = data
+      )
+      when state in [:thinking, :compacting] do
+    notify_delta(data, state, text, true)
     :keep_state_and_data
   end
 
@@ -348,6 +358,7 @@ defmodule Troupe.Agent.Server do
 
   def handle_event(:info, {:DOWN, _, :process, _, _}, _state, _data), do: :keep_state_and_data
   def handle_event(:info, {:llm_delta, _, _}, _state, _data), do: :keep_state_and_data
+  def handle_event(:info, {:llm_delta, _, _, _}, _state, _data), do: :keep_state_and_data
   def handle_event(:info, {:llm_done, _, _}, _state, _data), do: :keep_state_and_data
   def handle_event(:info, {:llm_error, _, _}, _state, _data), do: :keep_state_and_data
   def handle_event(:info, {:tool_result, _, _}, _state, _data), do: :keep_state_and_data
@@ -863,6 +874,14 @@ defmodule Troupe.Agent.Server do
           meta: meta
         }
     }
+  end
+
+  defp notify_delta(%Data{} = data, state, text, reasoning?) do
+    Events.notify(data.spec.session_id, data.spec.agent_path, :llm_delta, %{
+      text: text,
+      purpose: state,
+      reasoning: reasoning?
+    })
   end
 
   defp stream_finished(%Data{stream: stream} = data, response) do

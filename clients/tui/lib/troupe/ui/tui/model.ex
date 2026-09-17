@@ -31,6 +31,7 @@ defmodule Troupe.UI.TUI.Model do
   @type entry ::
           {:user, String.t()}
           | {:assistant, [line()]}
+          | {:reasoning, [line()]}
           | {:tool, tool_entry()}
           | {:system, String.t()}
 
@@ -63,6 +64,7 @@ defmodule Troupe.UI.TUI.Model do
   @type agent :: %{
           transcript: [entry()],
           streaming: String.t(),
+          streaming_reasoning: String.t(),
           todos: [map()],
           name: String.t() | nil,
           model: String.t() | nil,
@@ -225,7 +227,13 @@ defmodule Troupe.UI.TUI.Model do
       :llm_delta ->
         w
         |> ensure_agent(path)
-        |> update_agent(path, fn a -> %{a | streaming: a.streaming <> d.text} end)
+        |> update_agent(path, fn a ->
+          if d[:reasoning] do
+            %{a | streaming_reasoning: (a.streaming_reasoning || "") <> d.text}
+          else
+            %{a | streaming: a.streaming <> d.text}
+          end
+        end)
 
       :agent_state ->
         %{w | activity: Map.put(w.activity, path, d.to), activity_since: ts}
@@ -233,15 +241,36 @@ defmodule Troupe.UI.TUI.Model do
       :assistant_message ->
         text = Message.text(d.content)
         used = used(Map.get(d, :usage) || %{})
+        reasoning = reasoning_so_far(w, path)
 
         w =
           w
           |> ensure_agent(path)
           |> update_agent(path, fn a ->
-            %{a | streaming: "", usage: add(a.usage, used), model: Map.get(d, :model) || a.model}
+            %{
+              a
+              | streaming: "",
+                streaming_reasoning: "",
+                usage: add(a.usage, used),
+                model: Map.get(d, :model) || a.model
+            }
           end)
           |> then(fn w ->
-            if text == "", do: w, else: push(w, path, {:assistant, markdown(sanitize(text))})
+            cond do
+              text == "" and reasoning == "" ->
+                w
+
+              text == "" ->
+                push(w, path, {:reasoning, markdown(reasoning)})
+
+              reasoning == "" ->
+                push(w, path, {:assistant, markdown(sanitize(text))})
+
+              true ->
+                w
+                |> push(path, {:reasoning, markdown(reasoning)})
+                |> push(path, {:assistant, markdown(sanitize(text))})
+            end
           end)
 
         Enum.reduce(Message.tool_uses(d.content), %{w | usage: add(w.usage, used)}, fn tu, acc ->
@@ -535,6 +564,7 @@ defmodule Troupe.UI.TUI.Model do
       %{
         transcript: [],
         streaming: "",
+        streaming_reasoning: "",
         todos: [],
         name: nil,
         model: nil,
@@ -544,6 +574,14 @@ defmodule Troupe.UI.TUI.Model do
       },
       attrs
     )
+  end
+
+  # The reasoning accumulated while the turn streamed, before the message's
+  # `assistant_message` folds it into a transcript entry.
+  defp reasoning_so_far(%{agents: agents}, path) do
+    agents
+    |> Map.get(path, new_agent())
+    |> Map.get(:streaming_reasoning, "")
   end
 
   defp ensure_agent(w, path, attrs \\ %{}),
@@ -837,6 +875,11 @@ defmodule Troupe.UI.TUI.Model do
     agent = Map.get(w.agents, agent_path, new_agent())
     entries = Enum.map(agent.transcript, &entry_lines(&1, expanded?))
 
+    reasoning =
+      if agent.streaming_reasoning in ["", nil],
+        do: [],
+        else: [reasoning_lines(agent.streaming_reasoning, expanded?)]
+
     streaming =
       if agent.streaming == "",
         do: [],
@@ -850,7 +893,7 @@ defmodule Troupe.UI.TUI.Model do
         _ -> []
       end
 
-    entries ++ streaming ++ activity ++ pending
+    entries ++ reasoning ++ streaming ++ activity ++ pending
   end
 
   @doc "A window tile's body: the root transcript with tool calls collapsed, then the activity line."
@@ -858,6 +901,11 @@ defmodule Troupe.UI.TUI.Model do
   def tile_lines(w, tick, now, spacer?) do
     agent = Map.get(w.agents, w.path, new_agent())
     lines = Enum.flat_map(agent.transcript, &entry_lines(&1, false))
+
+    reasoning =
+      if agent.streaming_reasoning in ["", nil],
+        do: [],
+        else: reasoning_lines(agent.streaming_reasoning, false)
 
     streaming =
       if agent.streaming == "", do: [], else: streaming_lines(agent.streaming)
@@ -871,13 +919,24 @@ defmodule Troupe.UI.TUI.Model do
           if(spacer?, do: [{:blank, ""}], else: []) ++ [{:activity, activity_segments(line)}]
       end
 
-    lines ++ streaming ++ activity
+    lines ++ reasoning ++ streaming ++ activity
   end
 
   # Text still arriving is shown plain: it changes on every frame, and it becomes
   # markdown the moment the message lands.
   defp streaming_lines(text),
     do: text |> sanitize() |> String.split("\n") |> Enum.map(&{:text, &1})
+
+  # Reasoning is collapsible: the header line always shows (that the model is
+  # thinking is itself worth seeing), and the body only when `e` has expanded
+  # output. The same shape renders a folded-in `{:reasoning, lines}` entry.
+  defp reasoning_lines(text, expanded?) do
+    head = {:reasoning_head, [{:reasoning_marker, "💭 "}, {:reasoning_title, "reasoning"}]}
+    if expanded?, do: [head | reasoning_body(text)], else: [head]
+  end
+
+  defp reasoning_body(text),
+    do: text |> sanitize() |> String.split("\n") |> Enum.map(&{:reasoning_body, &1})
 
   defp entry_lines({:user, text}, _expanded?) do
     text
@@ -890,6 +949,13 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   defp entry_lines({:assistant, lines}, _expanded?), do: lines
+
+  # A folded-in reasoning block collapses exactly like streaming reasoning, with
+  # the header plus the body when output is expanded.
+  defp entry_lines({:reasoning, lines}, expanded?) do
+    head = {:reasoning_head, [{:reasoning_marker, "💭 "}, {:reasoning_title, "reasoning"}]}
+    if expanded?, do: [head | lines], else: [head]
+  end
 
   defp entry_lines({:system, text}, _expanded?),
     do: Enum.map(String.split(text, "\n"), &{:system, "· " <> &1})
@@ -1347,6 +1413,7 @@ defmodule Troupe.UI.TUI.Model do
   def rail(kind) when kind in [:code_head, :code_tail], do: {nil, nil}
   def rail(:bullet), do: {nil, gutter()}
   def rail(:quote), do: {{:quote_rail, "▏"}, {:quote_rail, "▏"}}
+  def rail(kind) when kind in [:reasoning_head, :reasoning_body], do: {gutter(), gutter()}
   def rail(_kind), do: {nil, nil}
 
   defp gutter, do: {:gutter, "  "}

@@ -150,9 +150,10 @@ defmodule Troupe.LLM.Anthropic do
       {%{type: :tool_use} = b, %{"type" => "input_json_delta", "partial_json" => j}} ->
         %{acc | blocks: Map.put(acc.blocks, i, %{b | json: b.json <> j})}
 
-      # summarized thinking is shown live and never persisted
+      # summarized thinking is shown live (tagged, so the UI can fold it into
+      # its own collapsible block) and never persisted
       {_, %{"type" => "thinking_delta", "thinking" => t}} ->
-        send(acc.reply_to, {:llm_delta, acc.ref, t})
+        send(acc.reply_to, {:llm_delta, acc.ref, t, :reasoning})
         acc
 
       _ ->

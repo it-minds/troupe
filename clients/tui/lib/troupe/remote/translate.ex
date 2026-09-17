@@ -45,7 +45,10 @@ defmodule Troupe.Remote.Translate do
 
     case event["type"] do
       "llm.delta" ->
-        {[transient(session_id, agent, :llm_delta, %{text: text_of(data)})], memory}
+        reasoning? = Map.get(data, "reasoning") == true
+        text = %{text: text_of(data)}
+        text = if reasoning?, do: Map.put(text, :reasoning, true), else: text
+        {[transient(session_id, agent, :llm_delta, text)], memory}
 
       "progress" ->
         {[

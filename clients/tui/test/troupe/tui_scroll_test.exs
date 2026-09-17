@@ -543,6 +543,50 @@ defmodule Troupe.TUIModelTextTest do
     assert length(rows) == 3
     assert us < 50_000, "tail_rows walked the whole transcript (#{us}us)"
   end
+
+  defp model_event(path, seq, type, data),
+    do: %Troupe.Event{session_id: "S", seq: seq, ts: seq, agent_path: path, type: type, data: data}
+
+  test "reasoning deltas stream into their own block and fold to a collapsible entry" do
+    model =
+      Model.apply(
+        Model.rebuild("S", "/ws", []),
+        model_event("code-1", 1, :branch_spawned, %{
+          name: "code",
+          isolation: :shared
+        })
+      )
+
+    model =
+      Model.apply(model, model_event("code-1", 2, :llm_delta, %{text: "let me ", reasoning: true}))
+
+    a = model.windows["code-1"].agents["code-1"]
+    assert a.streaming_reasoning == "let me "
+
+    model =
+      Model.apply(model, model_event("code-1", 3, :llm_delta, %{text: " think", reasoning: true}))
+
+    a = model.windows["code-1"].agents["code-1"]
+    assert a.streaming == "", "plain deltas stream separately"
+    assert a.streaming_reasoning == "let me  think"
+
+    model =
+      Model.apply(model, model_event("code-1", 4, :assistant_message, %{content: [], usage: %{}}))
+
+    a = model.windows["code-1"].agents["code-1"]
+    assert a.streaming_reasoning == ""
+    assert [{:reasoning, lines}] = a.transcript
+    assert Model.line_text(hd(lines)) =~ "let me  think"
+
+    # collapsed: the header says what it is; expanded: the reasoning shows
+    [collapsed | _] = Model.pane_blocks(model.windows["code-1"], "code-1", false, 0, 0)
+    assert Enum.any?(collapsed, &(Model.line_text(&1) =~ "reasoning"))
+    refute Enum.any?(collapsed, &(Model.line_text(&1) =~ "let me  think"))
+
+    [expanded | _] = Model.pane_blocks(model.windows["code-1"], "code-1", true, 0, 0)
+    assert Enum.any?(expanded, &(Model.line_text(&1) =~ "reasoning"))
+    assert Enum.any?(expanded, &(Model.line_text(&1) =~ "let me  think"))
+  end
 end
 
 defmodule Troupe.TUIPaneRegressionTest do
@@ -848,5 +892,23 @@ defmodule Troupe.TUIRichTextTest do
     press(pid, "1")
     eventually(fn -> screen_text(pid, session) =~ "## Heading" end)
     assert screen_text(pid, session) =~ "- one", "a delta is not reflowed mid-flight"
+  end
+
+  # A reasoning model's single turn: the thinking streams in its own collapsible
+  # block behind a header, so it does not mix into the answer, and only `e`
+  # (expanded output) reveals the body.
+  test "reasoning streams collapsibly and folds to a block when the message lands" do
+    {sid, _, _} = start_session!(scripts: %{"code-1" => [{:answer, "hmm", "the answer"}]})
+    {pid, session} = start_tui(sid)
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "think about it")
+    eventually(fn -> user_state(pid).model.windows["code-1"] end)
+
+    press(pid, "1")
+    eventually(fn -> screen_text(pid, session) =~ "the answer" end)
+    assert screen_text(pid, session) =~ "reasoning", "a header marks the reasoning block"
+    refute screen_text(pid, session) =~ "hmm", "collapsed reasoning hides its body"
+
+    press(pid, "e")
+    assert screen_text(pid, session) =~ "hmm", "expanded output shows the reasoning body"
   end
 end

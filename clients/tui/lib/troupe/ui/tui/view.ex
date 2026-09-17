@@ -1065,6 +1065,9 @@ defmodule Troupe.UI.TUI.View do
   defp segment_style(:bullet_marker, _kind, _text), do: %Style{fg: :cyan}
   defp segment_style(:quote, _kind, _text), do: %Style{modifiers: [:dim]}
   defp segment_style(:system, _kind, _text), do: %Style{modifiers: [:dim]}
+  defp segment_style(:reasoning_marker, _kind, _text), do: %Style{fg: :magenta}
+  defp segment_style(:reasoning_title, _kind, _text), do: %Style{fg: :magenta, modifiers: [:dim]}
+  defp segment_style(:reasoning_body, _kind, _text), do: %Style{fg: :magenta, modifiers: [:dim]}
   defp segment_style(:pending, _kind, _text), do: %Style{fg: :yellow, modifiers: [:bold]}
   defp segment_style(:diff_add, _kind, _text), do: %Style{fg: :green}
   defp segment_style(:diff_del, _kind, _text), do: %Style{fg: :red}
