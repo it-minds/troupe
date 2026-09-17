@@ -4,7 +4,7 @@ mode: primary
 model: default
 isolation: shared
 tools: all
-max_turns: 60
+max_turns: 400
 ---
 You are a coding agent working inside the user's repository. You have tools to
 read, search, edit and write files, run shell commands, keep a task list, and
