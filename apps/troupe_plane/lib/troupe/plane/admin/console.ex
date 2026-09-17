@@ -77,6 +77,7 @@ defmodule Troupe.Plane.Admin.Console do
     session_erase: {:screen, :sessions},
     runs_list: {:screen, :triggers},
     audit_list: {:screen, :audit},
+    connections: {:screen, :connections},
 
     # -- Configure -----------------------------------------------------------
     settings_list: {:screen, :policy},
@@ -164,8 +165,7 @@ defmodule Troupe.Plane.Admin.Console do
       review: "what ran unattended and needs a person; exists in the GUI, not here",
       identity:
         "the provider, claims, SCIM state and principals, which sit inside Policy and Teams",
-      integrations: "org-level MCP servers and the egress allowlist as an object",
-      connections: "who connected a personal credential to which server, and revocation"
+      integrations: "org-level MCP servers and the egress allowlist as an object"
     }
   end
 

@@ -556,6 +556,67 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
+  describe "the connections page" do
+    setup context do
+      {:ok, _} =
+        Fleet.put_profile(%{name: "dev", config_bundle_channel: "stable", replicas: 1})
+
+      {:ok, _} =
+        Bundles.publish(
+          "stable",
+          %{
+            "schema" => 1,
+            "agents" => [],
+            "skills" => [],
+            "mcp_servers" => [
+              %{
+                "name" => "jira",
+                "url" => "https://mcp.jira.example/mcp",
+                "credential_mode" => "person"
+              }
+            ]
+          },
+          announce: false
+        )
+
+      session = session!(context.engineering, "dev")
+      %{session: session}
+    end
+
+    test "lists the server, its slot, and who has connected", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/connections")
+
+      assert html =~ "jira"
+      assert html =~ "Slot"
+
+      # Nobody has filled it — and "not connected" has to be said rather than left as an
+      # empty list a reader would take for "everybody has".
+      assert html =~ "Not connected" or html =~ "Nobody has connected this one yet"
+    end
+
+    test "names the credential's owner and says a session has one identity", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/connections")
+
+      # Done item 9's two names: whose credential the calls go out with, against the
+      # session that makes them.
+      assert html =~ "A session has one identity"
+      assert html =~ "calls go out as"
+      assert html =~ context.session.id
+      assert html =~ "someone@example.test"
+    end
+
+    test "and says where somebody would look for it that there is nothing to read",
+         context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/connections")
+
+      assert html =~ "cannot read or remove"
+      assert html =~ "There is no method for either"
+    end
+  end
+
   describe "the provisioners page" do
     setup do
       {:ok, _} = Fleet.put_profile(%{name: "laptops", provisioner: "ssh"})

@@ -2248,3 +2248,51 @@ silently unarmed against the one case they exist for.
 
     $ ./scripts/credo
     6602 mods/funs, found no issues.
+
+## R8e — Connections, and the one identity a session has
+
+Done item 9: *Connections lists a personal credential's owner and the session's owner as
+two names, and an administrator's attempt to read the credential is refused.*
+
+The screen exists for one sentence people otherwise discover the hard way: a person-mode
+server reaches out as the session's **owner**, fixed at activation. Two people attached are
+two actors behind one subject. So the session table's column is headed `calls go out as`
+rather than `owner` — the consequence, not the field.
+
+### What it shows, against a running plane
+
+    jira
+    Slot jira, on dev. The value lives in the key manager under each person, at a path the
+    plane's own policy cannot read.
+
+    Not connected
+      ada@example.test    nothing in this slot, or the key manager could not be asked.
+      grace@example.test  nothing in this slot, or the key manager could not be asked.
+
+    You cannot read or remove any of these. There is no method for either — not a
+    permission this screen declines to use.
+
+    Whose identity each session carries
+    session    team      profile  calls go out as    state
+    s-demo-1   delivery  dev      ada@example.test   active
+
+### The refusal is that there is no method
+
+The mechanism half is already proven against a real OpenBao by
+`Troupe.Plane.PersonCredentialsTest`: the plane's own credential cannot read a slot even
+knowing exactly where it is. The console half is asserted structurally —
+`Troupe.Plane.Connections` exports exactly `assertion`, `connected?`, `grant` and
+`known_slot`, and the coverage test fails on a fifth. A method that could fetch a value
+fails the build rather than needing a refusal somebody remembered to write.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/console_coverage_test.exs \
+        apps/troupe_plane/test/troupe/plane/panel_test.exs
+    Result: 58 passed
+
+    $ ./scripts/credo
+    6615 mods/funs, found no issues.
+
+    $ ./scripts/toolbox mix troupe.boundaries
+    boundaries ok: 3 app rule(s), 1 module rule(s), no violations

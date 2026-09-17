@@ -18,6 +18,7 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
 
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.{API, Console}
+  alias Troupe.Plane.Connections
 
   # The same exemption `AdminParityTest` makes, for the same reason: these work out *who is
   # asking* rather than doing anything on their behalf.
@@ -219,6 +220,52 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
             do: "#{screen} (#{inspect(module)})"
 
       assert unreadable == [], "could not read the source of: #{Enum.join(unreadable, ", ")}"
+    end
+  end
+
+  describe "what no surface offers" do
+    # Done item 9's second half. The mechanism is already proven against a real OpenBao in
+    # `Troupe.Plane.PersonCredentialsTest` — the plane's own credential cannot read a slot
+    # even knowing exactly where it is. This is the other end of the same claim: there is
+    # no *method* to attempt it with, so the refusal cannot be lost by somebody adding one.
+    test "a method that reads or removes somebody's credential" do
+      offered =
+        for method <- API.list(),
+            name = to_string(method.name),
+            String.contains?(name, "connection") or String.contains?(name, "credential"),
+            method.risk != :read or
+              Regex.match?(~r/\b(value|secret|reveal|read the credential)\b/i, method.summary),
+            do: name
+
+      assert offered == [],
+             """
+             These methods offer something on a personal credential beyond whether a slot
+             is filled:
+
+                 #{Enum.join(offered, "\n    ")}
+
+             The plane holds no credential and no token that could read one. A method here
+             would be a claim it does.
+             """
+    end
+
+    test "and `Troupe.Plane.Connections` exports nothing that returns a value" do
+      # Named exactly rather than checked by shape: the module's whole surface is four
+      # functions, and this fails when a fifth appears rather than when one misbehaves.
+      exported =
+        Connections.__info__(:functions)
+        |> Enum.map(&elem(&1, 0))
+        |> Enum.uniq()
+        |> Enum.sort()
+
+      assert exported == [:assertion, :connected?, :grant, :known_slot],
+             """
+             `Troupe.Plane.Connections` exports #{inspect(exported)}.
+
+             It is allowed to answer whether a slot is filled and to mint an assertion the
+             caller spends itself. Anything else is the plane holding, or being able to
+             fetch, somebody's credential.
+             """
     end
   end
 

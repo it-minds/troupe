@@ -4002,3 +4002,28 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      is the reason not to want it: a console with a private path into the plane is a path no
      other client has. So `admin.provisioners.list` exists, and the model reading it over
      MCP gets the same four names the screen shows.
+
+599. **Connections answers whether a slot is filled, and the answer says so.**
+     `credentials_readable: false` is in the payload rather than only on the page, because
+     a model reading `admin.connections.list` over MCP has to be told the same thing a
+     person is: there is nothing here to read. The plane's key manager policy has metadata
+     and nothing on the data path, which is the same absence that stops it reading a
+     session key.
+
+600. **The session table's column is headed "calls go out as".** Not "owner", which is a
+     field, but what the field *means*: a person-mode server reaches out as the session's
+     owner, fixed at activation, so two people attached are two actors behind one subject.
+     Naming the column after the consequence is the whole reason the panel exists — the
+     comfortable design is one name, and one name is what somebody is surprised by later.
+
+601. **Done item 9's refusal is proven by there being no method.** The mechanism is already
+     proven against a real OpenBao in `PersonCredentialsTest`: the plane's own credential
+     cannot read a slot knowing exactly where it is. The console half is the other end of
+     the same claim — the coverage test asserts `Troupe.Plane.Connections` exports exactly
+     four functions, so a fifth that could fetch a value fails the build rather than being
+     caught by a refusal somebody has to remember to write.
+
+602. **The session list is scoped by team id even for a platform admin.** `for_admin/3`
+     ignores the id list when the role is `:platform_admin`, and the teams passed here are
+     already the ones this actor may see — so passing the real role would have made a team
+     admin's Connections page list every session on the plane.

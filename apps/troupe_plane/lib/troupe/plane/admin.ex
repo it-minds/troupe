@@ -38,6 +38,7 @@ defmodule Troupe.Plane.Admin do
     Budget,
     Bundles,
     ClusterPolicy,
+    Connections,
     Drain,
     Erasure,
     Fleet,
@@ -701,6 +702,127 @@ defmodule Troupe.Plane.Admin do
   def sessions_list(actor, opts \\ []) do
     with :ok <- require_admin(actor) do
       {:ok, actor |> Sessions.for_admin(team_ids(actor), opts) |> Enum.map(&session_summary/1)}
+    end
+  end
+
+  @doc """
+  Who has connected a personal credential to which server, and whose identity a session
+  carries.
+
+  The console half of person-mode servers, and it exists to make one thing visible that
+  people otherwise discover: **a session has one identity.** A person-mode server reaches
+  out as the session's *owner*, fixed when the session was activated — so two people
+  attached to one session are two actors behind one subject, and the answer to "whose
+  credential was that" is the owner's rather than whoever typed.
+
+  What is answered here is deliberately thin, and each absence is the same absence:
+
+  * **whether** somebody has filled a slot, never what is in it. The plane's key manager
+    policy has metadata and nothing on the data path, which is the same absence that stops
+    it reading a session key.
+  * no method removes a slot, because there is no credential here that could be removed.
+    An administrator retires the server from the bundle; the credential stays the
+    person's.
+
+  `connected` is `false` where the key manager could not be reached, because "we could not
+  ask" and "there is nothing there" lead a person to the same next step.
+  """
+  @spec connections(actor(), String.t() | nil) :: result()
+  def connections(actor, team_name \\ nil) do
+    with :ok <- require_admin(actor),
+         {:ok, team} <- optional_team(actor, team_name) do
+      teams = if team, do: [team], else: visible_teams(actor)
+      servers = person_servers_by_profile(teams)
+
+      {:ok,
+       %{
+         servers: Enum.map(servers, &server_connections(&1, teams)),
+         sessions: sessions_carrying(servers, teams),
+         # Said in the answer rather than only on the screen, because a model reading this
+         # over MCP has to be told the same thing a person is: there is nothing to read.
+         credentials_readable: false
+       }}
+    end
+  end
+
+  # Every person-mode server on the profiles these teams are granted, with the profiles it
+  # came from. Keyed by name and slot: two profiles carrying the same server is one server
+  # somebody connects once.
+  defp person_servers_by_profile(teams) do
+    for team <- teams,
+        grant <- Identity.grants_for_team(team),
+        server <- person_servers(grant.profile),
+        reduce: %{} do
+      acc ->
+        key = {server.name, server.credential_ref}
+
+        existing =
+          Map.get(acc, key, %{name: server.name, slot: server.credential_ref, profiles: []})
+
+        Map.put(acc, key, %{existing | profiles: Enum.uniq([grant.profile | existing.profiles])})
+    end
+    |> Map.values()
+    |> Enum.sort_by(& &1.name)
+  end
+
+  defp person_servers(profile_name) do
+    with %{config_bundle_channel: channel} <- Fleet.get_profile(profile_name),
+         %{} = bundle <- Bundles.current(channel),
+         {:ok, %{mcp_servers: servers}} <- Document.validate(bundle.content) do
+      Enum.filter(servers, &(&1.credential_mode == :person))
+    else
+      _absent -> []
+    end
+  end
+
+  defp server_connections(server, teams) do
+    people =
+      for team <- teams,
+          Enum.any?(
+            server.profiles,
+            &(&1 in Enum.map(Identity.grants_for_team(team), fn g -> g.profile end))
+          ),
+          user <- Identity.members_of_team(team),
+          uniq: true,
+          do: user
+
+    Map.put(
+      server,
+      :people,
+      people
+      |> Enum.uniq_by(& &1.subject)
+      |> Enum.sort_by(& &1.subject)
+      |> Enum.map(fn user ->
+        %{
+          subject: user.subject,
+          display_name: user.display_name,
+          connected: Connections.connected?(user.subject, server.slot)
+        }
+      end)
+    )
+  end
+
+  # The sessions whose profile carries one of these servers, each with the one identity its
+  # calls go out as. Metadata only, like every other session-shaped answer here.
+  defp sessions_carrying(servers, teams) do
+    profiles = servers |> Enum.flat_map(& &1.profiles) |> MapSet.new()
+
+    by_id = Map.new(teams, &{&1.id, &1.name})
+
+    # Scoped by the team ids even for a platform admin, because the teams here are already
+    # the ones this actor may see — and `:platform_admin` would make `for_admin/3` ignore
+    # the list, which for a team admin would be every session on the plane.
+    for session <- Sessions.for_admin(%{role: :team_admin}, Map.keys(by_id)),
+        session.profile in profiles,
+        Map.has_key?(by_id, session.team_id) do
+      %{
+        id: session.id,
+        profile: session.profile,
+        team: Map.fetch!(by_id, session.team_id),
+        # The name every person-mode call goes out as, whoever is driving.
+        owner: session.owner_subject,
+        state: session.state
+      }
     end
   end
 

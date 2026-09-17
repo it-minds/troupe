@@ -477,6 +477,20 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.connections.list",
+      function: :connections,
+      summary:
+        "Who has connected a personal credential to which person-mode server, and whose identity each session carries. Whether a slot is filled, never what is in it: there is no method that reads or removes somebody's credential.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "team",
+          type: :string,
+          description: "One team's, or every team you administer if left out."
+        }
+      ]
+    },
+    %Method{
       name: "admin.sessions.list",
       function: :sessions_list,
       summary:

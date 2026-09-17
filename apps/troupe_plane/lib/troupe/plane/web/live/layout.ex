@@ -35,6 +35,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
     {:triggers, "Triggers", "/admin/triggers"},
     {:sessions, "Sessions and spend", "/admin/sessions"},
     {:budgets, "Budgets", "/admin/budgets"},
+    {:connections, "Connections", "/admin/connections"},
     {:audit, "Audit", "/admin/audit"},
     {:policy, "Policy", "/admin/policy"}
   ]
