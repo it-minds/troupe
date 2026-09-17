@@ -1079,3 +1079,58 @@ definitions and fails CI on any breaking change.
 5. Give every command a fresh `command_id`, and retry with the *same* one after a
    disconnect — it is a no-op if the server already saw it.
 6. Ignore event types and fields you do not recognise.
+
+---
+
+## 14. Which protocol carries which boundary
+
+Four protocols appear in Troupe and it is not obvious from any one of them why the other
+three exist. This table is the answer, written once so that nobody has to infer it — and so
+that the next integration is recognised as one of these four rather than invented as a
+fifth.
+
+Read the direction column first. Most of the confusion about MCP, ACP and A2A is that each
+of them can run in either direction, and which direction it is running in decides everything
+about what it may touch.
+
+| protocol | direction | boundary it crosses | what it carries | where it is enforced |
+| --- | --- | --- | --- | --- |
+| **Troupe's own** | client → daemon or plane | a person and their session | everything in this document: subscribe, steer, approve, administer | scopes, §7 |
+| **ACP** | editor → daemon | a person's editor and their session | the same session, reached the way an ACP client already knows how to reach one | the same scopes, on the same socket |
+| **ACP** | session → a subprocess agent | the session and an agent somebody else wrote | a bundle entry naming an ACP agent, served through the mount table | entitlements, and the mount table |
+| **MCP** | session → a server | the session and a tool somebody else runs | tools the model may call, as the profile or as the person | entitlements, egress policy, credential slots |
+| **MCP** | admin client → plane | an administrator and the admin surface | the methods of §9, as tools | the same admin scopes, §9 |
+| **A2A** | another agent → a profile | an agent framework and a whole profile | a task in, an answer out; no sessions, pods or events | the facade exchanges the caller's credential and calls `/rpc` as that principal |
+
+### The rules that fall out of it
+
+**A protocol is a way in, never a second set of permissions.** Every row is enforced by the
+mechanism that was already there: ACP on the daemon socket gets the scopes that socket gives,
+admin MCP gets the admin scopes, the A2A facade holds no credential of its own and acts as
+whoever called it. There is no row where speaking a different protocol grants anything, and a
+proposed integration that would need one is the signal to stop.
+
+**Inbound protocols reach a session; they do not become one.** An ACP client's session *is* a
+Troupe session — created by `session.create`, subscribed at `detail`, ended when the session
+ends. It is not a parallel object with its own lifetime, which is what makes a transcript the
+same whoever was watching.
+
+**Outbound protocols are entitlements.** An MCP server and an ACP agent are both *things the
+bundle names and the grant narrows*. Neither is configuration a session can acquire at
+runtime, and both go through the mount table, which is what makes a subprocess agent no more
+dangerous than a tool call.
+
+**The mount table is the only filesystem.** ACP defines filesystem and terminal operations,
+and they map onto the mounts a session already has rather than onto the disk. An ACP agent
+that asked for a path outside them is refused exactly as a tool would be — the refusal is not
+special-cased for ACP, because the check is not in the ACP layer.
+
+### Where each one is not used
+
+* **ACP does not administer.** There is no ACP route to §9; an editor that wants to publish a
+  bundle uses the admin surface like anything else.
+* **MCP does not steer a session.** Tools are called *by* a model inside a session. A person
+  driving a session uses this protocol, and the admin MCP server exposes administration
+  rather than conversation.
+* **A2A does not attach.** It has no events, no subscriptions and no approvals — a task goes
+  in and an answer comes out. Somebody who wants to watch it happening wants this protocol.

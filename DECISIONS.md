@@ -3730,3 +3730,54 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `TriggersTest`, and not one of the module that failed before. Contention fails
      whatever it lands on; a defect fails the same thing twice. Which set of tests failed
      was the witness, not how many.
+
+560. **ACP is selected by the shape of the client's own `initialize`, not by a port or a
+     flag.** ACP sends `protocolVersion` and `clientCapabilities`; Troupe sends
+     `protocol_version` and `client_info`. The casing is the discriminator, and it is a
+     good one because an editor that already speaks ACP announces itself without being
+     told anything about Troupe — which is the whole point of adopting somebody else's
+     protocol. A client that sends neither is answered as Troupe's own, which is what every
+     client was before ACP existed.
+
+561. **There is no ACP authentication, and `authMethods` is empty to say so.** The socket
+     authenticated this connection before ACP was mentioned: permissions on Unix, a token
+     from the discovery file on TCP and WebSocket. So an ACP client gets exactly the scopes
+     that connection was going to get, and an ACP request goes through the same guard and
+     the same dispatcher as any other — which is what makes "a protocol is a way in, never
+     a second set of permissions" a property rather than an intention. It is asserted: an
+     observer over ACP is refused for want of a scope exactly as an observer over Troupe's
+     protocol is.
+
+562. **`loadSession` is advertised false rather than implemented.** Replaying a whole
+     conversation as notifications is what `subscribe` with `from_seq` already does, with a
+     cursor and no loss. Claiming the ACP capability would promise an editor something
+     weaker than the thing it is sitting on.
+
+563. **An event ACP has no rendering for is sent nothing, and the cursor still advances.**
+     Troupe's event set is what a session *is* and includes seal reports, epoch changes and
+     budget refusals; ACP's update set is what an editor draws. Inventing an update type
+     for the rest would be worse than silence, because the durable log is still the record
+     and is still where they are.
+
+564. **ACP's `allow_always` maps to `:allow_session`, which already existed.** Not an allow
+     followed by a switch set beside it: the approval flow has that decision, so ACP is
+     naming something rather than asking for something. `reject_always` is *not* offered,
+     because a standing refusal is not something Troupe can honour — every later call would
+     have to be denied without asking and nothing records that, and offering an option then
+     not keeping it is worse than not offering it.
+
+565. **An ACP client's prompt contributes its text and not its resource links.** ACP lets a
+     client attach paths to a message. A path an editor nominates is not a mount, and the
+     mount table is what decides where a session can read — quietly widening it because a
+     content block arrived would be the one shortcut that matters.
+
+566. **`session/close` detaches; it does not end the session.** ACP was designed for an
+     agent subprocess that dies with the editor. Here the session is on the other side of a
+     socket and outlives every client attached to it, which is the property ACP's own
+     design does not have and the reason this is worth doing. Proven by killing the client
+     mid-turn: `llm_request` and `llm_response` both land afterwards.
+
+567. **A session created over the protocol is nobody's to clean up, and a test that makes
+     one must say so.** `Troupe.stop_session/1` on exit. Without it the session stays in
+     the VM and the next file's "nothing is running yet" fails about something that
+     happened in another file — which it did.

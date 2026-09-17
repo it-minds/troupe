@@ -18,7 +18,7 @@ defmodule Troupe.Gateway.Connection do
   # process would sit holding a closed port waiting for a client that has gone.
   use GenServer, restart: :temporary
 
-  alias Troupe.Gateway.{Daemon, Dispatch, Presence, Session, Transport, Writer}
+  alias Troupe.Gateway.{ACP, Daemon, Dispatch, Presence, Session, Transport, Writer}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
@@ -48,6 +48,10 @@ defmodule Troupe.Gateway.Connection do
     :bearer,
     buffer: "",
     initialized?: false,
+    # Which protocol this connection speaks, decided once at `initialize` by what the
+    # client sent and never revisited. `:troupe` is what every connection was before ACP.
+    protocol: :troupe,
+    acp: nil,
     scopes: [],
     capabilities: %{},
     client_info: %{},
@@ -301,17 +305,25 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp handle_message({:request, id, method, params}, state) do
-    # Nothing is accepted past `exp`. The client was warned; this is the refusal, and
-    # the connection goes with it.
-    if expired?(state) do
-      {:stop, send_control(state, {:error, id, Error.new(:unauthenticated, %{reason: "expired"})})}
-    else
-      case guard(state, method, params) do
-        :ok -> dispatch_request(id, method, params, state)
-        {:error, reason} -> {:ok, send_control(state, {:error, id, as_error(reason)})}
-      end
+  defp handle_message({:request, id, method, params}, %{protocol: :acp} = state) do
+    case ACP.translate(method, params, state.acp) do
+      # Something the connection can answer by itself: the handshake, and detaching.
+      {:reply, result} ->
+        {:ok, send_control(state, {:result, id, result})}
+
+      # Everything else is a Troupe command wearing a different name, and goes through the
+      # same guard and the same dispatcher. An ACP client is refused for want of a scope
+      # exactly as any other client is.
+      {:dispatch, troupe_method, troupe_params} ->
+        troupe_request(id, troupe_method, troupe_params, state, acp: method)
+
+      {:error, %Error{} = error} ->
+        {:ok, send_control(state, {:error, id, error})}
     end
+  end
+
+  defp handle_message({:request, id, method, params}, state) do
+    troupe_request(id, method, params, state)
   end
 
   defp handle_message({:notification, _method, _params}, state), do: {:ok, state}
@@ -326,10 +338,32 @@ defmodule Troupe.Gateway.Connection do
     {:ok, settle(state, id, {:error, error})}
   end
 
+  defp troupe_request(id, method, params, state, opts \\ []) do
+    # Nothing is accepted past `exp`. The client was warned; this is the refusal, and
+    # the connection goes with it.
+    if expired?(state) do
+      {:stop,
+       send_control(state, {:error, id, Error.new(:unauthenticated, %{reason: "expired"})})}
+    else
+      case guard(state, method, params) do
+        :ok -> dispatch_request(id, method, params, state, opts)
+        {:error, reason} -> {:ok, send_control(state, {:error, id, as_error(reason)})}
+      end
+    end
+  end
+
   defp settle(state, id, answer) do
     case Map.pop(state.outbound_requests, id) do
       {nil, _rest} ->
         state
+
+      # An editor answering a permission request. Nothing is blocked on it \u2014 the approval
+      # flow is waiting on a decision rather than on this connection \u2014 so the answer is
+      # applied where every other client's answer is applied, and first-wins settles two
+      # clients answering at once exactly as it always did.
+      {{:acp_permission, session_id, call_id}, rest} ->
+        apply_permission(session_id, call_id, answer)
+        %{state | outbound_requests: rest}
 
       {from, rest} ->
         GenServer.reply(from, answer)
@@ -337,10 +371,30 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
-  defp dispatch_request(id, method, params, state) do
+  defp apply_permission(session_id, call_id, {:ok, response}) do
+    case ACP.decision(response) do
+      {:ok, decision} ->
+        Troupe.approve(session_id, call_id, decision)
+
+      # The turn was cancelled before anybody answered. ACP requires the client to say so
+      # on every pending request, so this arrives whenever somebody presses stop; there is
+      # no decision to record and the cancellation is already its own event.
+      :cancelled ->
+        :ok
+
+      {:error, _error} ->
+        :ok
+    end
+  end
+
+  # A client that errored rather than answering has decided nothing, and the request stays
+  # pending for whoever else is attached.
+  defp apply_permission(_session_id, _call_id, {:error, _error}), do: :ok
+
+  defp dispatch_request(id, method, params, state, opts) do
     case Dispatch.call(method, params, context(state)) do
       {:ok, result} ->
-        {:ok, send_control(state, {:result, id, result})}
+        answer(id, result, state, opts)
 
       {:ok, result, {:subscribed, subscription}} ->
         state = send_control(state, {:result, id, result})
@@ -355,15 +409,88 @@ defmodule Troupe.Gateway.Connection do
     end
   end
 
+  # A Troupe client gets the result as it is. An ACP client gets it in ACP's shape, and
+  # whatever ACP expects to have happened by then — a new session is subscribed, because
+  # ACP has no `subscribe` and expects the stream to start on its own.
+  defp answer(id, result, state, opts) do
+    case Keyword.get(opts, :acp) do
+      nil ->
+        {:ok, send_control(state, {:result, id, result})}
+
+      acp_method ->
+        state = send_control(state, {:result, id, ACP.result_for(acp_method, result)})
+        {:ok, acp_follow_up(state, ACP.follow_up(acp_method, result))}
+    end
+  end
+
+  defp acp_follow_up(state, nil), do: state
+
+  defp acp_follow_up(state, {:subscribe, session_id}) do
+    topic = "session:" <> session_id
+    :ok = Session.subscribe(topic)
+
+    subscription = %Subscription{
+      id: "sub-#{state.next_subscription}",
+      topic: topic,
+      level: :detail,
+      session_id: session_id,
+      cursor: 0
+    }
+
+    replay_and_follow(state, subscription)
+  end
+
   # -- initialize -------------------------------------------------------------
 
+  # An ACP client announces itself by the shape of its own `initialize` — `protocolVersion`
+  # and `clientCapabilities`, where Troupe's has `protocol_version` and `client_info`. It is
+  # decided here, once, and a connection speaks one protocol for its whole life.
+  #
+  # Authentication is not part of the choice and happens either way: the socket said who
+  # this is before ACP was mentioned, which is why an ACP client gets exactly the scopes
+  # this connection was going to get, and why there is no second auth path to review.
   defp initialize(params, state) do
+    if ACP.announced?(params) do
+      acp_initialize(params, state)
+    else
+      troupe_initialize(params, state)
+    end
+  end
+
+  defp troupe_initialize(params, state) do
     version = Map.get(params, "protocol_version", Protocol.version())
 
     if Protocol.supports?(version) do
       authorise(params, state, version)
     else
       {:error, Error.new(:unsupported_version, %{supported: Protocol.supported_versions()})}
+    end
+  end
+
+  defp acp_initialize(params, state) do
+    case authenticate(params, state) do
+      {:ok, principal, scopes, auth} ->
+        state =
+          %{
+            state
+            | initialized?: true,
+              principal: principal,
+              scopes: scopes,
+              auth: auth,
+              protocol: :acp,
+              acp: ACP.new(params),
+              capabilities: Map.get(params, "clientCapabilities", %{}),
+              client_info: Map.get(params, "clientInfo", %{})
+          }
+          |> schedule_expiry()
+
+        {:ok, ACP.initialize(params), state}
+
+      {:error, %Error{} = error} ->
+        {:error, error}
+
+      {:error, reason} ->
+        {:error, Error.new(:unauthenticated, %{reason: to_string(reason)})}
     end
   end
 
@@ -693,6 +820,42 @@ defmodule Troupe.Gateway.Connection do
   # The envelope names the session as well as the topic: a `fleet` subscriber sees
   # events from every session on one subscription, and an event does not carry its own
   # session id — in the log, the file it is in says which session it belongs to.
+  # An ACP client is sent `session/update`, and an event ACP has no rendering for is sent
+  # nothing at all. The cursor still advances: the durable log is the record and this
+  # connection has seen the event, so a client that later asks for the Troupe stream from
+  # its cursor is not handed it twice.
+  defp write_event(%{protocol: :acp} = state, subscription, session_id, %Event{
+         type: "approval_requested",
+         data: data
+       }) do
+    id = "srv-#{state.next_request}"
+    params = ACP.permission_request(session_id, data)
+
+    state =
+      state
+      |> send_control({:request, id, "session/request_permission", params})
+      |> Map.update!(:next_request, &(&1 + 1))
+      |> Map.update!(
+        :outbound_requests,
+        &Map.put(&1, id, {:acp_permission, session_id, data["call_id"]})
+      )
+
+    advance(state, subscription, %Event{type: "approval_requested", data: data})
+  end
+
+  defp write_event(%{protocol: :acp} = state, subscription, session_id, event) do
+    case ACP.update_for(session_id, event) do
+      nil ->
+        advance(state, subscription, event)
+
+      update ->
+        case send_event(state, event, {:notification, "session/update", update}) do
+          {:ok, state} -> advance(state, subscription, event)
+          {:error, state} -> backpressure(state, subscription, event)
+        end
+    end
+  end
+
   defp write_event(state, subscription, session_id, event) do
     payload = %{
       "topic" => subscription.topic,
