@@ -485,11 +485,16 @@ raise, exit or timeout becomes `{:error, text}`. Every OS process runs under
 
 Reads and writes are confined differently (Decision 90). A write resolves
 through `Workspace.resolve/3` and can never leave the workspace root. A read
-(`read_file`, `grep`, `list_files`) resolves through
+(`read_file`, `grep`, `list_files`, `glob`) resolves through
 `Workspace.resolve_readable/4`, which also admits the directories in
 `config.read_roots` — `deps/`, a vendored checkout, a sibling repo — so
 inspecting a dependency does not mean falling back to `shell`. Both compare the
 *canonicalized* path, so a symlink is judged by where it lands.
+
+`git_read` is the read-only half of git (`status`, `diff`, `log`, `show`,
+`branch`). Its `op` is an enum and its `ref` and `path` may not begin with `-`,
+so no argument can turn into a flag; everything that writes to the index or the
+worktree stays in `shell`, behind its approval.
 
 `web_fetch` is the only tool that reaches the network: a GET, capped in what it
 reads off the socket and in what it returns, with the response reduced to text

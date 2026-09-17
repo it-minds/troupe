@@ -12,7 +12,7 @@ defmodule Troupe.Tools.ReadFile do
   @impl true
   def description,
     do:
-      "Read a file from the workspace. Returns numbered lines. Use `offset` (1-based line) and `limit` to page: a read that does not reach the end of the file says so and names the next offset."
+      "Read one file (`path`) or several at once (`paths`). Returns numbered lines, each file under a `===== path =====` header. Prefer one call with `paths` over several calls when you already know which files you want. Use `offset` (1-based line) and `limit` to page a single file: a read that does not reach the end says so and names the next offset."
 
   @impl true
   def schema do
@@ -20,10 +20,14 @@ defmodule Troupe.Tools.ReadFile do
       "type" => "object",
       "properties" => %{
         "path" => %{"type" => "string", "description" => "Path relative to the workspace root"},
+        "paths" => %{
+          "type" => "array",
+          "items" => %{"type" => "string"},
+          "description" => "Several paths to read in one call, instead of `path`"
+        },
         "offset" => %{"type" => "integer", "description" => "First line to return (1-based)"},
-        "limit" => %{"type" => "integer", "description" => "Maximum number of lines"}
-      },
-      "required" => ["path"]
+        "limit" => %{"type" => "integer", "description" => "Maximum number of lines per file"}
+      }
     }
   end
 
@@ -31,6 +35,33 @@ defmodule Troupe.Tools.ReadFile do
   def default_permission, do: :auto
 
   @impl true
+  # Reading several files was the commonest thing the shell tool was used for
+  # that a native tool already did: 43% of read-only shell calls chained
+  # commands, most of them `cat a b c` with `echo ===` between. One call that
+  # takes a list is that, without the shell.
+  def run(%{"paths" => paths}, ctx) when is_list(paths) and paths != [] do
+    limits = Context.limits(ctx)
+
+    body =
+      paths
+      |> Enum.filter(&is_binary/1)
+      |> Enum.map_join("\n\n", fn path ->
+        "===== #{path} =====\n" <> one(path, 1, limits.file_lines, ctx)
+      end)
+
+    text = Bound.sanitize(body)
+
+    {:ok,
+     Outputs.store_and_mark(
+       ctx.session_id,
+       text,
+       Bound.chars(text, limits.max_chars),
+       limits.file_lines
+     )}
+  end
+
+  def run(%{"paths" => _}, _ctx), do: {:error, "paths must be a non-empty list of strings"}
+
   def run(%{"path" => path} = args, ctx) do
     with {:ok, abs} <- Workspace.resolve_readable(ctx.workspace, path, Context.read_roots(ctx)),
          {:ok, content} <- File.read(abs) do
@@ -46,7 +77,26 @@ defmodule Troupe.Tools.ReadFile do
     end
   end
 
-  def run(_, _), do: {:error, "path is required"}
+  def run(_, _), do: {:error, "path or paths is required"}
+
+  # One file inside a multi-file read. A failure here is reported in place rather
+  # than failing the call: a list of five files where one has been deleted should
+  # still return the other four.
+  defp one(path, offset, limit, ctx) do
+    with {:ok, abs} <- Workspace.resolve_readable(ctx.workspace, path, Context.read_roots(ctx)),
+         {:ok, content} <- File.read(abs) do
+      content
+      |> numbered()
+      |> Bound.window(offset, limit)
+      |> Bound.render(fn o ->
+        ~s|Call read_file(path: "#{path}", offset: #{o.first}, limit: #{limit}) for more.|
+      end)
+    else
+      {:error, :outside_workspace} -> outside(path, ctx)
+      {:error, :invalid_path} -> "invalid path: #{path}"
+      {:error, reason} -> "cannot read #{path}: #{:file.format_error(reason)}"
+    end
+  end
 
   defp numbered(content) do
     content

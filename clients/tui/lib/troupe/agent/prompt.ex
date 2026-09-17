@@ -80,6 +80,16 @@ defmodule Troupe.Agent.Prompt do
     Platform: #{os_info}
     All paths are relative to the workspace root and confined to it.
 
+    # Tools
+    Use a native tool wherever one fits; reach for `shell` only when none does.
+    `read_file` (several paths in one call), `glob` to find files by name, `grep`
+    to search contents, `git_read` for status, diffs, log and show. `shell` is
+    for building, testing, running things and anything that changes the
+    repository — not for `cat`, `ls`, `find`, `grep` or `git diff`.
+    Read a file before editing it, and prefer `edit_file` over rewriting a whole
+    file with `write_file`. Delegate a self-contained piece of work whose
+    intermediate output you do not need to see; do it yourself when you do.
+
     # Large tool output
     Tool results are bounded. A command keeps its first and last lines, a file
     read a line window, a listing or search the first matches; whatever was cut

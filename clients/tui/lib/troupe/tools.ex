@@ -9,7 +9,9 @@ defmodule Troupe.Tools do
     Troupe.Tools.WriteFile,
     Troupe.Tools.EditFile,
     Troupe.Tools.ListFiles,
+    Troupe.Tools.Glob,
     Troupe.Tools.Grep,
+    Troupe.Tools.GitRead,
     Troupe.Tools.Shell,
     Troupe.Tools.WebFetch,
     Troupe.Tools.TodoWrite,
@@ -23,7 +25,7 @@ defmodule Troupe.Tools do
   ]
 
   @inline ~w(todo_write todo_read finish ask_user delegate)
-  @read_only ~w(read_file read_output list_files grep web_fetch todo_write todo_read finish ask_user delegate remember)
+  @read_only ~w(read_file read_output list_files glob grep git_read web_fetch todo_write todo_read finish ask_user delegate remember)
 
   @spec all() :: %{String.t() => module()}
   def all, do: Map.new(@modules, &{&1.name(), &1})
