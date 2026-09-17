@@ -22,11 +22,36 @@ defmodule Troupe.Events do
     Registry.child_spec(keys: :duplicate, name: @registry, partitions: System.schedulers_online())
   end
 
-  @doc "Subscribe the calling process to one session's events."
+  @doc """
+  Subscribe the calling process to one session's events.
+
+  Idempotent, and it has to be. A connection takes out more than one subscription on the
+  same session — `session:<id>` and `presence:<id>`, or the same session at two levels —
+  and each of them asks to follow it. Registering twice puts the process in the fan-out
+  twice, so every event arrives twice and every subscription writes it twice; and because
+  `Registry.unregister/2` removes *all* of a process's entries for a key, dropping one
+  subscription would then take the other's delivery with it.
+
+  So the registration is per process and per session rather than per subscription. Which
+  subscriptions want an event is `Troupe.Gateway.Session.interested?/3`'s question, and it
+  is the only place that should be asking it.
+  """
   @spec subscribe(String.t()) :: :ok
   def subscribe(session_id) do
-    {:ok, _} = Registry.register(@registry, session_id, nil)
-    :ok
+    if following?(session_id) do
+      :ok
+    else
+      {:ok, _registered} = Registry.register(@registry, session_id, nil)
+      :ok
+    end
+  end
+
+  @doc "Whether the calling process already follows this session."
+  @spec following?(String.t()) :: boolean()
+  def following?(session_id) do
+    @registry
+    |> Registry.keys(self())
+    |> Enum.member?(session_id)
   end
 
   @doc "Stop receiving one session's events."

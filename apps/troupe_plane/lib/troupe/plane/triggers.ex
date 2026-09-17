@@ -13,6 +13,13 @@ defmodule Troupe.Plane.Triggers do
   The plane stores the definition and the record. What decides *when* to fire is
   outside — Hatchet where it is deployed, `Triggers.Scheduler` for cron where it is
   not — and both reach the same `fire/4`.
+
+  Every firing names a `Revision`: the trigger's document, frozen and content-addressed
+  at the moment it fired. The row an admin edits is what the *next* firing will resolve;
+  what a run says it ran is immutable. Resolution happens once, at the top of `fire/4`,
+  which is what makes a firing that overlaps an edit use one document or the other and
+  never a mixture — and is why it is not the scheduler's business: a webhook, an API
+  call and a person's hand reach the same line.
   """
 
   import Ecto.Query
@@ -20,8 +27,8 @@ defmodule Troupe.Plane.Triggers do
   alias Troupe.Plane.{Harness, Identity, Principals, Repo, Sessions}
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Sessions.Session
-  alias Troupe.Plane.Triggers.{Run, Template, Trigger}
-  alias Troupe.Protocol.Error
+  alias Troupe.Plane.Triggers.{Notify, Revision, Run, Template, Trigger}
+  alias Troupe.Protocol.{Canonical, Error, Origin, Principal}
 
   require Logger
 
@@ -75,18 +82,106 @@ defmodule Troupe.Plane.Triggers do
          :ok <- check_terms(attrs["terms"]) do
       fields =
         ~w(name profile agent enabled source prompt_template terms visibility) ++
-          ~w(review notify concurrency)
+          ~w(review notify notify_url concurrency)
 
       (existing || %Trigger{team_id: team.id, created_by: by})
       |> Trigger.changeset(attrs |> Map.take(fields) |> Map.put("principal_id", principal_id))
       |> Repo.insert_or_update()
       |> case do
         {:ok, trigger} ->
+          # A revision is made here rather than at the next firing, so that the diff an
+          # admin is shown and the audit row that records it can both name the hash
+          # somebody will later see on a run. `revise/2` makes nothing when the document
+          # did not move, which is what makes a partial put of `enabled` free.
+          {:ok, _revision} = revise(trigger, by)
           {:ok, trigger}
 
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
+    end
+  end
+
+  # -- revisions --------------------------------------------------------------
+
+  @doc """
+  The revision of a trigger's document as it stands, made if it does not exist yet.
+
+  Idempotent by content: a document that hashes to a revision this trigger already has
+  returns that revision, so editing a template and editing it back lands on revision 1
+  rather than making a third. Two callers racing produce one row, because the
+  `(trigger_id, hash)` index decides it and the loser reads the winner's.
+  """
+  @spec revise(Trigger.t(), String.t() | nil) :: {:ok, Revision.t()}
+  def revise(%Trigger{} = trigger, by \\ nil) do
+    hash = Revision.hash(trigger)
+
+    case Repo.get_by(Revision, trigger_id: trigger.id, hash: hash) do
+      %Revision{} = revision ->
+        {:ok, revision}
+
+      nil ->
+        insert_revision(trigger, hash, by)
+    end
+  end
+
+  # Retried rather than locked: the two ways this collides are two callers with the same
+  # document (the hash index, and the winner's row is the answer) and two callers with
+  # different documents landing on the same number (the revision index, and the next
+  # number is the answer). Both are settled by reading what is there, and neither is
+  # worth an advisory lock on a table an admin writes to by hand a few times a week.
+  defp insert_revision(trigger, hash, by, attempts \\ 5) do
+    attrs =
+      trigger
+      |> Revision.document()
+      |> Map.merge(%{
+        "trigger_id" => trigger.id,
+        "revision" => next_revision(trigger),
+        "hash" => hash,
+        "created_by" => by
+      })
+
+    case %Revision{} |> Revision.changeset(attrs) |> Repo.insert() do
+      {:ok, revision} ->
+        {:ok, revision}
+
+      {:error, _changeset} when attempts > 1 ->
+        case Repo.get_by(Revision, trigger_id: trigger.id, hash: hash) do
+          %Revision{} = revision -> {:ok, revision}
+          nil -> insert_revision(trigger, hash, by, attempts - 1)
+        end
+
+      {:error, changeset} ->
+        raise "troupe plane: could not revise trigger #{trigger.name}: " <>
+                inspect(changeset.errors)
+    end
+  end
+
+  defp next_revision(trigger) do
+    highest =
+      Repo.one(
+        from(r in Revision, where: r.trigger_id == ^trigger.id, select: max(r.revision))
+      )
+
+    (highest || 0) + 1
+  end
+
+  @doc "A trigger's revisions, newest first."
+  @spec revisions(Trigger.t()) :: [Revision.t()]
+  def revisions(%Trigger{} = trigger) do
+    Repo.all(
+      from(r in Revision, where: r.trigger_id == ^trigger.id, order_by: [desc: r.revision])
+    )
+  end
+
+  @doc "One revision by id, or `nil`."
+  @spec revision(String.t() | nil) :: Revision.t() | nil
+  def revision(nil), do: nil
+
+  def revision(id) do
+    case Ecto.UUID.cast(id) do
+      {:ok, uuid} -> Repo.get(Revision, uuid)
+      :error -> nil
     end
   end
 
@@ -126,6 +221,92 @@ defmodule Troupe.Plane.Triggers do
       )
 
     count == 1
+  end
+
+  # -- the trigger's own key --------------------------------------------------
+
+  @doc """
+  Mint a key for a trigger, replacing whatever it had.
+
+  Returned once, in the clear, and never again: the row holds a salted hash and a salt,
+  and neither reconstructs it. Rotation is the same call as creation — there is no
+  "create key" beside a "rotate key", because the two differ only in whether a previous
+  key existed, and a caller should not have to know that to do the right thing.
+
+  The old key stops working the moment this returns. That is deliberate and is the point
+  of a rotation: an overlap window would mean a key somebody rotated *because it leaked*
+  goes on working for as long as the window lasts.
+  """
+  @spec rotate_key(Trigger.t(), String.t()) :: {:ok, Trigger.t(), String.t()}
+  def rotate_key(%Trigger{} = trigger, by) do
+    {key, hash, salt} = mint_key()
+
+    {:ok, trigger} =
+      trigger
+      |> Trigger.key_changeset(%{
+        key_hash: hash,
+        key_salt: salt,
+        key_rotated_at: DateTime.utc_now(),
+        key_rotated_by: by
+      })
+      |> Repo.update()
+
+    {:ok, trigger, key}
+  end
+
+  @doc """
+  The idempotency key for a firing whose caller supplied none.
+
+  The revision and the minute. An executor that retries a failed POST within the minute
+  gets the run it already made rather than a second session, which is the behaviour a
+  blind retry needs; an executor that means two firings sends its own key and gets two.
+  The revision is in it so that a firing which overlaps an edit is a new run: the second
+  POST is asking for something different from the first, whatever the clock says.
+  """
+  @spec window_key(Trigger.t()) :: String.t()
+  def window_key(%Trigger{} = trigger) do
+    {:ok, revision} = revise(trigger)
+    minute = %{DateTime.utc_now() | second: 0, microsecond: {0, 0}}
+    "webhook:#{trigger.id}:#{revision.hash}:#{DateTime.to_iso8601(minute)}"
+  end
+
+  @doc """
+  The trigger this id and key name, or `nil`.
+
+  One trigger, by id, and the key is checked against that row alone — there is no
+  lookup by key, because a key that could find its own trigger would be a key an
+  attacker could enumerate the table with. A trigger with no key is not reachable
+  through this door at all: a `nil` hash matches nothing, rather than matching a caller
+  who presents nothing.
+  """
+  @spec by_key(String.t(), String.t()) :: Trigger.t() | nil
+  def by_key(id, key) when is_binary(id) and is_binary(key) do
+    case fetch(id) do
+      %Trigger{key_hash: hash, key_salt: salt} = trigger when is_binary(hash) and is_binary(salt) ->
+        if key_matches?(trigger, key), do: trigger
+
+      _none ->
+        nil
+    end
+  end
+
+  def by_key(_id, _key), do: nil
+
+  # 256 bits, URL-safe so it survives a shell, a YAML file and a CI secret store. Prefixed
+  # so that a key found in a log or a repository says what it is and what to rotate — the
+  # thing a scanner looks for and a person needs to be told.
+  defp mint_key do
+    key = "twk_" <> (32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+    salt = 16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+    {key, key_hash(salt, key), salt}
+  end
+
+  defp key_hash(salt, key),
+    do: :sha256 |> :crypto.hash(salt <> key) |> Base.encode16(case: :lower)
+
+  defp key_matches?(%Trigger{key_hash: hash, key_salt: salt}, key) do
+    presented = key_hash(salt, key)
+    byte_size(presented) == byte_size(hash) and :crypto.hash_equals(presented, hash)
   end
 
   @doc """
@@ -190,6 +371,7 @@ defmodule Troupe.Plane.Triggers do
 
   @type fired :: %{
           trigger: Trigger.t(),
+          revision: Revision.t(),
           run: Run.t(),
           session: Session.t() | nil,
           endpoint: map() | nil
@@ -205,37 +387,58 @@ defmodule Troupe.Plane.Triggers do
   no session, so the record shows the cron fired and says why nothing happened. A run
   whose create failed is retried by the next call with the same key, which is what lets
   an executor retry blindly.
+
+  The revision is resolved **once**, here, before anything is written. A firing that
+  overlaps an edit therefore uses the document as it was or as it became, and never a
+  mixture — and a run that is retried re-reads the revision it recorded rather than
+  picking up whatever the row says today, so a run names exactly one revision for as
+  long as it exists.
   """
-  @spec fire(Trigger.t(), String.t(), map(), String.t()) :: {:ok, fired()} | {:error, Error.t()}
-  def fire(%Trigger{enabled: false} = trigger, _key, _event, _by) do
+  @spec fire(Trigger.t(), String.t(), String.t(), map(), String.t()) ::
+          {:ok, fired()} | {:error, Error.t()}
+  def fire(%Trigger{enabled: false} = trigger, _source, _key, _event, _by) do
     {:error, Error.new(:forbidden, %{reason: "trigger is disabled", trigger: trigger.name})}
   end
 
-  def fire(%Trigger{} = trigger, key, event, by) when is_binary(key) and is_map(event) do
-    with :ok <- check_event(event) do
+  def fire(%Trigger{} = trigger, source, key, event, by)
+      when is_binary(source) and is_binary(key) and is_map(event) do
+    with :ok <- check_source(source),
+         :ok <- check_event(event) do
       case Repo.get_by(Run, idempotency_key: key) do
-        nil -> fire_new(trigger, key, event, by)
-        %Run{trigger_id: id} = run when id == trigger.id -> replay(trigger, run)
-        %Run{} -> {:error, Error.new(:conflict, %{reason: "that key belongs to another trigger"})}
+        nil ->
+          {:ok, revision} = revise(trigger)
+          fire_new(trigger, revision, source, key, event, by)
+
+        %Run{trigger_id: id} = run when id == trigger.id ->
+          replay(trigger, run)
+
+        %Run{} ->
+          {:error, Error.new(:conflict, %{reason: "that key belongs to another trigger"})}
       end
     end
   end
 
-  defp fire_new(trigger, key, event, by) do
+  defp fire_new(trigger, revision, source, key, event, by) do
     attrs = %{
       trigger_id: trigger.id,
+      revision_id: revision.id,
       idempotency_key: key,
       fired_at: DateTime.utc_now(),
       fired_by: by,
+      source: source,
       event: event,
+      # Over the payload as it arrived, not over what the run kept. `event` is capped at
+      # 16 KiB on purpose; a digest taken after the cap would answer "same" for two
+      # firings that differed only past the cut.
+      payload_digest: Canonical.hash(event),
       state: "created"
     }
 
     case %Run{} |> Run.changeset(attrs) |> Repo.insert() do
       {:ok, run} ->
-        if live_runs(trigger, run) >= trigger.concurrency,
-          do: skip(trigger, run),
-          else: create(trigger, run)
+        if live_runs(trigger, run) >= revision.concurrency,
+          do: skip(trigger, revision, run),
+          else: create(trigger, revision, run)
 
       {:error, changeset} ->
         # The unique key said somebody else fired first, between our lookup and our
@@ -263,23 +466,27 @@ defmodule Troupe.Plane.Triggers do
     ) || 0
   end
 
-  defp skip(trigger, run) do
+  defp skip(trigger, revision, run) do
     {:ok, run} = run |> Run.changeset(%{state: "skipped"}) |> Repo.update()
     Logger.info("troupe plane: trigger #{trigger.name} fired over its concurrency cap; skipped")
-    {:ok, %{trigger: trigger, run: run, session: nil, endpoint: nil}}
+    {:ok, fired(trigger, revision, run, nil, nil)}
   end
 
-  defp create(trigger, run) do
-    with {:ok, user} <- principal_user(trigger),
+  defp create(trigger, revision, run) do
+    with {:ok, user, principal} <- principal_user(revision),
          {:ok, endpoint} <-
-           Harness.call("session.create", create_params(trigger, run), context(user)) do
+           Harness.call(
+             "session.create",
+             create_params(trigger, revision, run, principal),
+             context(user)
+           ) do
       session_id = endpoint["session_id"]
-      Enum.each(trigger.notify, &let_in(user, session_id, &1))
+      Enum.each(revision.notify, &let_in(user, session_id, &1))
 
       {:ok, run} =
         run |> Run.changeset(%{session_id: session_id, state: "created"}) |> Repo.update()
 
-      {:ok, %{trigger: trigger, run: run, session: Sessions.get(session_id), endpoint: endpoint}}
+      {:ok, fired(trigger, revision, run, Sessions.get(session_id), endpoint)}
     else
       {:error, %Error{} = error} ->
         # Recorded, so the run shows what happened and the next call with the same key
@@ -293,45 +500,80 @@ defmodule Troupe.Plane.Triggers do
   # The same key again. A skipped run stays skipped; a failed one is retried; a run with
   # a session is handed that session and a token minted now, because the one minted the
   # first time has almost certainly expired.
-  defp replay(trigger, %Run{state: "skipped"} = run) do
-    {:ok, %{trigger: trigger, run: run, session: nil, endpoint: nil}}
+  #
+  # Every branch reads the run's own revision rather than resolving the trigger's
+  # current one: a retry of a failed create is the same run, and a run that named two
+  # documents would be exactly the provenance this table exists to prevent.
+  defp replay(trigger, %Run{} = run), do: replay(trigger, revision_of(run), run)
+
+  defp replay(trigger, revision, %Run{state: "skipped"} = run) do
+    {:ok, fired(trigger, revision, run, nil, nil)}
   end
 
-  defp replay(trigger, %Run{state: "failed", session_id: nil} = run), do: create(trigger, run)
-
-  defp replay(trigger, %Run{session_id: nil} = run) do
-    {:ok, %{trigger: trigger, run: run, session: nil, endpoint: nil}}
+  defp replay(trigger, revision, %Run{state: "failed", session_id: nil} = run) do
+    create(trigger, revision, run)
   end
 
-  defp replay(trigger, %Run{session_id: session_id} = run) do
-    with {:ok, user} <- principal_user(trigger),
+  defp replay(trigger, revision, %Run{session_id: nil} = run) do
+    {:ok, fired(trigger, revision, run, nil, nil)}
+  end
+
+  defp replay(trigger, revision, %Run{session_id: session_id} = run) do
+    with {:ok, user, _principal} <- principal_user(revision),
          {:ok, endpoint} <-
            Harness.call("token.mint", %{"session_id" => session_id}, context(user)) do
-      {:ok, %{trigger: trigger, run: run, session: Sessions.get(session_id), endpoint: endpoint}}
+      {:ok, fired(trigger, revision, run, Sessions.get(session_id), endpoint)}
     end
   end
 
-  defp create_params(trigger, run) do
+  defp fired(trigger, revision, run, session, endpoint) do
+    %{trigger: trigger, revision: revision, run: run, session: session, endpoint: endpoint}
+  end
+
+  # A run always has one — the column is not null and the migration backfilled every row
+  # that predates it — but a `Repo.get` that answered `nil` here would be a silent fall
+  # back to the mutable row, so it raises instead.
+  defp revision_of(%Run{revision_id: id, id: run_id}) do
+    case Repo.get(Revision, id) do
+      %Revision{} = revision -> revision
+      nil -> raise "troupe plane: run #{run_id} names revision #{id}, which is gone"
+    end
+  end
+
+  defp create_params(trigger, revision, run, principal) do
     values = %{
       "event" => run.event,
-      "trigger" => %{"name" => trigger.name, "profile" => trigger.profile},
+      "trigger" => %{"name" => trigger.name, "profile" => revision.profile},
       "run" => %{
         "idempotency_key" => run.idempotency_key,
-        "fired_at" => DateTime.to_iso8601(run.fired_at)
+        "fired_at" => DateTime.to_iso8601(run.fired_at),
+        "revision" => revision.revision,
+        "revision_hash" => revision.hash
       }
     }
 
     %{
-      "profile" => trigger.profile,
+      "profile" => revision.profile,
       "team" => team_name(trigger),
       "title" => "#{trigger.name} #{Calendar.strftime(run.fired_at, "%Y-%m-%d %H:%M")}",
-      "prompt" => Template.render(trigger.prompt_template, values),
-      "visibility" => trigger.visibility,
-      "terms" => trigger.terms,
-      "origin" => %{"kind" => "trigger", "trigger" => trigger.name, "run" => run.idempotency_key}
+      "prompt" => Template.render(revision.prompt_template, values),
+      "visibility" => revision.visibility,
+      "terms" => revision.terms,
+      "origin" =>
+        Origin.trigger(
+          trigger.name,
+          source: run.source,
+          idempotency_key: run.idempotency_key,
+          revision: revision.hash,
+          payload_digest: run.payload_digest,
+          # Who fired it, and on whose authority. The principal is the actor; its sponsor
+          # is the person answerable for what it does, and a run with no sponsor is a run
+          # nobody is — which is why a principal cannot exist without one.
+          principal: principal_pair(principal)
+        )
     }
     |> then(fn params ->
-      if trigger.agent, do: Map.put(params, "agent", trigger.agent), else: params
+      if revision.agent, do: Map.put(params, "agent", revision.agent), else: params
     end)
   end
 
@@ -351,18 +593,27 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
-  defp principal_user(trigger) do
-    case Principals.fetch(trigger.principal_id) do
+  defp principal_user(%{principal_id: principal_id}) do
+    case Principals.fetch(principal_id) do
       nil ->
         {:error, Error.new(:forbidden, %{reason: "the trigger's principal is gone"})}
 
       principal ->
         case Principals.user_for(principal) do
           nil -> {:error, Error.new(:forbidden, %{reason: "the trigger's principal is disabled"})}
-          user -> {:ok, user}
+          user -> {:ok, user, principal}
         end
     end
   end
+
+  # A principal acts on its sponsor's authority. Where the sponsor is gone the principal
+  # is already disabled and never reaches here; where a row predates sponsors the
+  # principal stands for itself, which is what it did before there was anybody else to
+  # name.
+  defp principal_pair(%{subject: subject, sponsor_subject: sponsor}) when is_binary(sponsor),
+    do: Principal.of(sponsor, subject)
+
+  defp principal_pair(%{subject: subject}), do: Principal.of(subject)
 
   defp context(user), do: %{user: user, platform_admin?: false}
 
@@ -380,6 +631,7 @@ defmodule Troupe.Plane.Triggers do
         where: t.team_id == ^team.id,
         order_by: [desc: r.fired_at],
         limit: ^Keyword.get(opts, :limit, 50),
+        preload: [:revision],
         select: {r, t, s}
       )
 
@@ -427,6 +679,29 @@ defmodule Troupe.Plane.Triggers do
     end
   end
 
+  @doc """
+  Tell a run's trigger's target that the run ended, if it named one.
+
+  Synchronous, and the caller decides whether to wait: the control connection does not,
+  because a pod reporting that a session finished should not be held up by somebody
+  else's HTTP server.
+
+  The target is read from the trigger **now**, not from the revision the run froze. Every
+  other question about a run is answered by its revision on purpose — what it ran, as
+  whom, under which terms — but a notification target is not a fact about the run. It is
+  where somebody wants to be told today, and an administrator who moved their receiver
+  because the old one is gone means the runs in flight too.
+  """
+  @spec announce(String.t(), map()) :: :ok | {:error, String.t()}
+  def announce(session_id, outcome) when is_binary(session_id) do
+    with %Run{} = run <- Repo.get_by(Run, session_id: session_id),
+         %Trigger{} = trigger <- Repo.get(Trigger, run.trigger_id) do
+      Notify.deliver(trigger, run, outcome)
+    else
+      nil -> :ok
+    end
+  end
+
   @doc "Mark the run behind a session reviewed, if there is one."
   @spec reviewed(String.t(), String.t()) :: :ok
   def reviewed(session_id, by) do
@@ -442,24 +717,35 @@ defmodule Troupe.Plane.Triggers do
 
   @doc "What `trigger.fire` answers: the run, and where the session is."
   @spec fired_json(fired()) :: map()
-  def fired_json(%{run: run, session: session, endpoint: endpoint}) do
-    %{"run" => run_json(run, session)}
+  def fired_json(%{run: run, revision: revision, session: session, endpoint: endpoint}) do
+    %{"run" => run_json(%{run | revision: revision}, session)}
     |> Map.merge(endpoint || %{})
     |> Map.put("session_id", session && session.id)
     |> Map.put("state", state_of(run, session))
   end
 
-  @doc "A run as a listing shows it."
+  @doc """
+  A run as a listing shows it.
+
+  `revision` and `revision_hash` are the question a person reviewing a bad run actually
+  has — *which wording produced this* — and they answer it without a join the caller has
+  to remember, which is why `runs/2` preloads rather than leaving it to each caller.
+  """
   @spec run_json(Run.t(), Session.t() | nil) :: map()
   def run_json(%Run{} = run, session) do
     %{
       "id" => run.id,
       "trigger_id" => run.trigger_id,
+      "revision_id" => run.revision_id,
+      "revision" => revision_number(run),
+      "revision_hash" => revision_hash(run),
       "idempotency_key" => run.idempotency_key,
       "session_id" => run.session_id,
       "fired_at" => DateTime.to_iso8601(run.fired_at),
       "fired_by" => run.fired_by,
+      "source" => run.source,
       "event" => run.event,
+      "payload_digest" => run.payload_digest,
       "state" => state_of(run, session),
       "status" => session && session.status,
       "done_reason" => session && session.done_reason,
@@ -470,12 +756,25 @@ defmodule Troupe.Plane.Triggers do
     }
   end
 
-  @doc "A trigger as a listing shows it."
+  defp revision_number(%Run{revision: %Revision{revision: number}}), do: number
+  defp revision_number(%Run{}), do: nil
+
+  defp revision_hash(%Run{revision: %Revision{hash: hash}}), do: hash
+  defp revision_hash(%Run{}), do: nil
+
+  @doc """
+  A trigger as a listing shows it, with the revision its next firing would use.
+
+  `revision` is resolved rather than stored on the row: it is a function of the document
+  and making it a column would be a second copy of a fact the hash already decides.
+  """
   @spec trigger_json(Trigger.t()) :: map()
   def trigger_json(%Trigger{} = trigger) do
     principal = Principals.fetch(trigger.principal_id)
+    {:ok, revision} = revise(trigger)
 
     %{
+      "revision" => Revision.json(revision),
       "id" => trigger.id,
       "team" => team_name(trigger),
       "name" => trigger.name,
@@ -489,7 +788,14 @@ defmodule Troupe.Plane.Triggers do
       "visibility" => trigger.visibility,
       "review" => trigger.review,
       "notify" => trigger.notify,
+      "notify_url" => trigger.notify_url,
       "concurrency" => trigger.concurrency,
+      # Whether there is a key and when it was last minted, never the key. A listing that
+      # carried it would put a credential in every console, every audit row that quotes a
+      # listing, and every log line that logged a response.
+      "has_key" => is_binary(trigger.key_hash),
+      "key_rotated_at" => trigger.key_rotated_at && DateTime.to_iso8601(trigger.key_rotated_at),
+      "key_rotated_by" => trigger.key_rotated_by,
       "last_fired_at" => trigger.last_fired_at && DateTime.to_iso8601(trigger.last_fired_at),
       "created_by" => trigger.created_by,
       "updated_at" => trigger.updated_at && DateTime.to_iso8601(trigger.updated_at)
@@ -532,6 +838,14 @@ defmodule Troupe.Plane.Triggers do
 
   defp check_terms(_other) do
     {:error, Error.new(:invalid_params, %{reason: "terms is an object"})}
+  end
+
+  defp check_source(source) do
+    if source in Run.sources(),
+      do: :ok,
+      else:
+        {:error,
+         Error.new(:invalid_params, %{field: "source", source: source, one_of: Run.sources()})}
   end
 
   defp check_event(event) do

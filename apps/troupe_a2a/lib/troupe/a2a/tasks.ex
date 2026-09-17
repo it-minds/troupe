@@ -14,7 +14,7 @@ defmodule Troupe.A2A.Tasks do
   """
 
   alias Troupe.A2A.{Error, Events, Plane, Stream, Worker}
-  alias Troupe.Protocol.Client
+  alias Troupe.Protocol.{Canonical, Client, Origin, Principal}
   alias Troupe.Protocol.Error, as: PlaneError
 
   @type action :: {:input, String.t()} | {:decision, String.t(), String.t()}
@@ -79,7 +79,17 @@ defmodule Troupe.A2A.Tasks do
             "prompt" => prompt,
             "visibility" => Troupe.A2A.visibility(),
             "session_id" => id,
-            "origin" => %{"kind" => "a2a", "caller" => caller.subject, "task" => id},
+            # The same block a trigger's firing writes, so that a session started from
+            # outside and one started by a schedule are one shape in the log and one row
+            # in a listing. The facade stays what it is — an agent that is not ours, with
+            # its own card — and what it produces is not a second-class run.
+            "origin" =>
+              Origin.integration(
+                caller: caller.subject,
+                task: id,
+                payload_digest: Canonical.hash(message),
+                principal: Principal.of(caller.subject)
+              ),
             "title" => metadata["title"] || title_of(prompt)
           }
           |> maybe_put("agent", metadata["agent"])

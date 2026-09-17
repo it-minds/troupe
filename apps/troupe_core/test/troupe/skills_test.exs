@@ -131,6 +131,93 @@ defmodule Troupe.SkillsTest do
     end
   end
 
+  describe "the team's entitlement set" do
+    test "narrows the skills a profile may consult, and the prompt says so", context do
+      definition = %Definition{
+        name: "reviewer",
+        mode: :primary,
+        prompt: "",
+        skills: :all
+      }
+
+      # No set is no restriction, which is a laptop, a local session, and every grant
+      # nobody has narrowed.
+      both = Skills.available(context.bundle, definition)
+      assert Enum.map(both, & &1.name) == ["deploy", "review-checklist"]
+
+      narrowed = entitled(context.bundle, %{"skills" => ["review-checklist"]})
+      assert [%{name: "review-checklist"}] = Skills.available(narrowed, definition)
+
+      section = Skills.prompt_section(narrowed, definition)
+      assert section =~ "review-checklist"
+      refute section =~ "deploy"
+    end
+
+    test "a skill outside the set is not found, exactly as one the profile omits",
+         context do
+      definition = %Definition{name: "reviewer", mode: :primary, prompt: "", skills: :all}
+      narrowed = entitled(context.bundle, %{"skills" => ["review-checklist"]})
+
+      assert [tool] = Skills.tools(narrowed, definition)
+
+      assert {:ok, content} = Tool.invoke(tool, %{"name" => "review-checklist"}, ctx(context))
+      assert content =~ @checklist
+
+      # Absent rather than denied: the model is told there is no such skill, which is
+      # what it is told about a skill the profile did not list, and the two cases should
+      # not be distinguishable from outside.
+      assert {:error, {:unknown_skill, "deploy"}} =
+               Tool.invoke(tool, %{"name" => "deploy"}, ctx(context, narrowed))
+    end
+
+    test "narrows the primaries in the definition map, leaving subagents alone",
+         context do
+      File.write!(
+        Path.join(context.dir, "agents/helper.md"),
+        "---\nmode: subagent\n---\nYou help."
+      )
+
+      all = Definitions.load(context.workspace, bundle_dir: context.dir)
+      assert Enum.map(Definitions.primaries(all), & &1.name) == ["build", "plan", "reviewer"]
+
+      narrowed =
+        Definitions.load(context.workspace, bundle_dir: context.dir, entitled: ["build"])
+
+      assert Enum.map(Definitions.primaries(narrowed), & &1.name) == ["build"]
+      assert {:error, {:unknown_agent, "reviewer"}} = Definitions.fetch(narrowed, "reviewer")
+
+      # A subagent is reached only by an agent the team *is* entitled to, and narrowing
+      # it here would break a bundle's own delegation for a team that had simply not
+      # listed a name it never names.
+      assert Definitions.fetch!(narrowed, "helper").mode == :subagent
+    end
+
+    test "takes an MCP server's tools out of a session's list, without undiscovering them",
+         context do
+      jira = fake_mcp_tool("jira", "create_issue")
+      pager = fake_mcp_tool("pager", "page")
+
+      Application.put_env(:troupe_core, :remote_tools, [jira, pager])
+      on_exit(fn -> Application.delete_env(:troupe_core, :remote_tools) end)
+
+      definition = %Definition{name: "plain", mode: :primary, prompt: ""}
+
+      offered = definition |> Tools.available(ctx(context, context.bundle)) |> names()
+      assert "mcp.jira.create_issue" in offered
+      assert "mcp.pager.page" in offered
+
+      narrowed = entitled(context.bundle, %{"mcp_servers" => ["jira"]})
+      offered = definition |> Tools.available(ctx(context, narrowed)) |> names()
+      assert "mcp.jira.create_issue" in offered
+      refute "mcp.pager.page" in offered
+
+      # The pod still knows the tool exists — discovery is pod-wide and stays that way,
+      # because asking four servers for their tool list at every create would put
+      # somebody else's latency on the create path.
+      assert Enum.any?(Tools.all(), &(Tool.name(&1) == "mcp.pager.page"))
+    end
+  end
+
   describe "the skills mount" do
     test "reads under skills:/ and refuses every write", context do
       session = %{name: "session", kind: :session, root: context.workspace, mode: :rw}
@@ -243,6 +330,23 @@ defmodule Troupe.SkillsTest do
       agent_pid: self(),
       bundle: if(bundle == :pinned, do: context.bundle, else: bundle),
       config: %Troupe.Config{}
+    }
+  end
+  defp entitled(bundle, set), do: Map.put(bundle, :entitlements, set)
+
+  defp names(tools), do: Enum.map(tools, &Tool.name/1)
+
+  # A tool value under an MCP name, which is all the entitlement filter looks at: it
+  # works on names, so that a client-hosted tool and a built-in — neither of which any
+  # set names — are never narrowed by one.
+  defp fake_mcp_tool(server, tool) do
+    %Troupe.MCP.Tool{
+      name: Troupe.MCP.tool_name(server, tool),
+      remote_name: tool,
+      server: server,
+      description: "a tool",
+      schema: %{"type" => "object"},
+      run: fn _arguments, _ctx -> {:ok, "done"} end
     }
   end
 end

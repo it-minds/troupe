@@ -16,8 +16,8 @@ defmodule Troupe.Plane.Drain do
   to remove a StatefulSet pod that stays removed.
   """
 
+  alias Troupe.Plane.{Budget, Fleet, Placement, Sessions}
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Fleet, Placement, Sessions}
   alias Troupe.Plane.Fleet.Worker
 
   require Logger
@@ -95,14 +95,7 @@ defmodule Troupe.Plane.Drain do
   defp unreachable(worker, before, reason) do
     Logger.warning("troupe plane: #{worker.pod_name} is unreachable (#{inspect(reason)}); marking its sessions dormant")
 
-    stranded =
-      worker.id
-      |> Sessions.on_worker()
-      |> Enum.map(fn session_id ->
-        Sessions.dormant(session_id)
-        Placement.release(worker.profile, session_id)
-        session_id
-      end)
+    stranded = strand(worker)
 
     {:ok,
      %{
@@ -114,6 +107,49 @@ defmodule Troupe.Plane.Drain do
        unreachable: true
      }}
   end
+
+  @doc """
+  Mark everything a lost pod was holding dormant, and give back what it was holding.
+
+  What a session on a pod that is not there needs: its log is sealed in object storage
+  and the next open replays it somewhere else. What is lost is the process, which was
+  already lost when the pod went.
+
+  **The order is load-bearing.** `Placement.release/2` gives a slot back only when it
+  finds a `worker_id` to clear, and `Sessions.dormant/1` clears it — so doing these the
+  other way round marks the session dormant, finds nothing to unplace, and leaves the pod
+  charged for a session that is no longer on it. A profile whose count only ever goes up
+  is a profile that is eventually full for ever. That was fixed once in the control
+  connection and was still the wrong way round here, which is the argument for this
+  living in one place.
+  """
+  @spec strand(Worker.t()) :: [String.t()]
+  def strand(%Worker{} = worker) do
+    worker.id
+    |> Sessions.on_worker()
+    |> Enum.map(fn session_id ->
+      Placement.release(worker.profile, session_id)
+      Sessions.dormant(session_id)
+      release_budget(session_id)
+      session_id
+    end)
+  end
+
+  defp release_budget(session_id) do
+    case Sessions.get(session_id) do
+      %{} = session -> Budget.release(session.team_id, session_id, answerable_for(session))
+      _none -> :ok
+    end
+  end
+
+  # Whose cap this session's spend counts against: the sponsor behind a trigger's run, and
+  # otherwise the owner. The same answer the plane gave when it reserved, because a release
+  # that named a different person would give back somebody else's slice.
+  defp answerable_for(%{origin: %{"principal" => %{"subject" => subject}}})
+       when is_binary(subject),
+       do: subject
+
+  defp answerable_for(%{owner_subject: subject}), do: subject
 
   @doc """
   Drain a profile down to `replicas` pods, highest ordinals first.

@@ -69,6 +69,44 @@ defmodule Troupe.Plane.Tokens do
   end
 
   @doc """
+  Mint an assertion a pod exchanges for a key-manager token of the session's *owner*.
+
+  The same signer that mints session tokens, a different audience, and one claim that
+  matters: `sub` is the person the session belongs to, fixed at activation and recorded
+  in `session_created`. OpenBao's JWT auth method verifies it against the transit key's
+  public half and issues a token whose policy is templated on that subject — so a pod
+  running Ada's session can read Ada's slots and nothing else, and a stolen plane mints
+  assertions and reads nothing.
+
+  Short-lived on purpose. The pod exchanges it once at activation and holds the *Bao*
+  token for the life of the session, as it already does for the data key; the assertion
+  itself is worth nothing a minute later.
+
+  Deliberately not a session token. A session token's audience is a pod and its claims
+  are about a session; this one's audience is the key manager and its claim is about a
+  person, and a single token doing both would be a token that works in two places when
+  one of them is compromised.
+  """
+  @kms_audience "troupe-kms"
+  @assertion_lifetime 60
+
+  @spec mint_kms_assertion(String.t(), keyword()) ::
+          {:ok, String.t(), map()} | {:error, term()}
+  def mint_kms_assertion(subject, opts \\ []) when is_binary(subject) do
+    mint(
+      %{"sub" => subject},
+      Keyword.merge(
+        [audience: @kms_audience, lifetime: @assertion_lifetime],
+        opts
+      )
+    )
+  end
+
+  @doc "The audience a key-manager assertion carries, which its JWT role binds."
+  @spec kms_audience() :: String.t()
+  def kms_audience, do: @kms_audience
+
+  @doc """
   The JWKS a worker caches.
 
   Every version of the transit key, not only the current one: a token minted moments

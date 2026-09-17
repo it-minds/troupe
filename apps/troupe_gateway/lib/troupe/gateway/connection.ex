@@ -19,6 +19,7 @@ defmodule Troupe.Gateway.Connection do
   use GenServer, restart: :temporary
 
   alias Troupe.Gateway.{Daemon, Dispatch, Presence, Session, Transport, Writer}
+  alias Troupe.Gateway.Session.Subscription
   alias Troupe.Protocol
   alias Troupe.Protocol.{Error, Event, JSONRPC}
 
@@ -416,11 +417,37 @@ defmodule Troupe.Gateway.Connection do
   defp server_name(%{endpoint: %{kind: :remote}}), do: "troupe-worker"
   defp server_name(_state), do: "troupe-daemon"
 
+  # A worker never offers private sessions. A private session is sealed under its
+  # person's own key, in a subtree no pod credential can reach, and no worker profile is
+  # involved in one — so this is `false` as a fact about the design rather than as a
+  # setting somebody could turn on.
   defp capabilities(%{endpoint: %{kind: :remote}}) do
-    %{"worktrees" => false, "watch" => true, "remote" => true}
+    %{"worktrees" => false, "watch" => true, "remote" => true, "private_sessions" => false}
   end
 
-  defp capabilities(_state), do: %{"worktrees" => true, "watch" => true, "remote" => false}
+  defp capabilities(state) do
+    %{
+      "worktrees" => true,
+      "watch" => true,
+      "remote" => false,
+      "private_sessions" => private_sessions?(state)
+    }
+  end
+
+  # Computed, never compiled in. This is the capability that un-gates the client's
+  # control, and the two things it needs are things that can be missing at run time: a
+  # person the daemon can name — `local:<username>` means nothing to a plane or to
+  # another device — and somewhere to seal to. A client that offered the checkbox on a
+  # daemon with neither would be offering a session that silently stayed local.
+  defp private_sessions?(state) do
+    linked?(state) and Application.get_env(:troupe_protocol, :object_store) != nil
+  end
+
+  # `Troupe.Identity.principal/2` puts `linked` on the map when a subject has been
+  # recorded, so the answer is already in hand for a connection that has initialised;
+  # the disk read is for the one that has not.
+  defp linked?(%{principal: %{"linked" => true}}), do: true
+  defp linked?(_state), do: Troupe.Identity.get() != nil
 
   defp maybe_put_expiry(result, %{auth: %{expires_at: expires_at}}) when is_integer(expires_at) do
     Map.put(result, "auth", %{"expires_at" => expires_at})
@@ -604,15 +631,27 @@ defmodule Troupe.Gateway.Connection do
         state
 
       {subscription, rest} ->
-        Session.unsubscribe(subscription.topic)
-        state = %{state | subscriptions: rest}
-
-        if subscription.session_id && not subscribed_to?(state, subscription.session_id) do
-          Presence.publish(subscription.session_id, state.principal, "left")
-        end
-
-        state
+        stop_following(%{state | subscriptions: rest}, subscription)
     end
+  end
+
+  # Only when nothing else on this connection still wants the session. Following is per
+  # process and per session rather than per subscription, so unregistering while another
+  # subscription is open — the presence topic beside the session's own, or the same session
+  # at two levels — would silence that one too.
+  defp stop_following(state, %Subscription{session_id: id} = subscription) when is_binary(id) do
+    if subscribed_to?(state, id) do
+      state
+    else
+      Session.unsubscribe(subscription.topic)
+      Presence.publish(id, state.principal, "left")
+      state
+    end
+  end
+
+  defp stop_following(state, %Subscription{} = subscription) do
+    Session.unsubscribe(subscription.topic)
+    state
   end
 
   defp subscribed_to?(state, nil), do: map_size(state.subscriptions) > 0

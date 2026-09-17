@@ -259,6 +259,49 @@ defmodule Troupe.Sessions.Storage do
     end
   end
 
+  @doc """
+  Every workspace archive a session has, oldest first, as `{seq, extension}`.
+
+  Archives are written at intervals rather than at every event, so "the workspace at
+  `seq`" is never a thing that exists — the nearest one at or before it is, and a fork
+  replays the events after it over the top. Listing rather than guessing, because the
+  interval is a policy and reconstructing it from one is how a restore ends up reaching
+  for a key that was never written.
+  """
+  @spec workspace_archives(ObjectStore.t(), String.t()) :: [{non_neg_integer(), String.t()}]
+  def workspace_archives(store, session_id) do
+    case ObjectStore.list(store, prefix(session_id) <> "workspace/") do
+      {:ok, keys} -> keys |> Enum.flat_map(&parse_workspace_key/1) |> Enum.sort()
+      _unreadable -> []
+    end
+  end
+
+  defp parse_workspace_key(key) do
+    name = Path.basename(key)
+
+    with [seq, extension] <- String.split(name, ".", parts: 2),
+         {seq, ""} <- Integer.parse(seq) do
+      [{seq, extension}]
+    else
+      _ -> []
+    end
+  end
+
+  @doc """
+  The newest workspace archive at or before `seq`, or `nil`.
+
+  `nil` for `seq` means the newest there is, which is what forking at a session's head
+  asks for.
+  """
+  @spec workspace_at(ObjectStore.t(), String.t(), non_neg_integer() | nil) ::
+          {non_neg_integer(), String.t()} | nil
+  def workspace_at(store, session_id, seq) do
+    store
+    |> workspace_archives(session_id)
+    |> Enum.filter(fn {at, _extension} -> is_nil(seq) or at <= seq end)
+    |> List.last()
+  end
+
   @doc "Upload a workspace archive."
   @spec put_workspace(ObjectStore.t(), String.t(), key(), non_neg_integer(), binary(), String.t()) ::
           {:ok, map()} | {:error, term()}
@@ -307,7 +350,7 @@ defmodule Troupe.Sessions.Storage do
   def put_manifest(store, session_id, manifest) do
     body =
       manifest
-      |> Map.take(~w(session_id team owner_subject profile epoch latest_segment key_path last_seq head_hash object_bytes)a)
+      |> Map.take(~w(session_id kind team owner_subject profile epoch latest_segment key_path last_seq head_hash object_bytes)a)
       |> Map.put(:session_id, session_id)
       |> Map.put(:written_at, DateTime.utc_now() |> DateTime.to_iso8601())
       |> Jason.encode!(pretty: true)

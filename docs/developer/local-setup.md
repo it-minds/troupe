@@ -35,6 +35,44 @@ Optional, each unlocking a part of the suite that otherwise skips (details in
 | `inotify-tools` (Linux) | the native watch backend; CI installs it (`.github/workflows/ci.yml:56-59`) |
 | `kind`, `kubectl`, `helm` | `scripts/kind-up`, `scripts/remote-up`, and the operator's and plane's cluster suites |
 
+### 1.1 None of it, with Docker
+
+`scripts/toolbox` runs a command against this repository with the toolchain
+`.tool-versions` names, in a container built from `dev/toolbox/`, without installing any
+of it — Erlang, Elixir and Zig, plus `inotify-tools` and `bubblewrap`, which are the
+difference between the watch and sandbox done items being proven and being skipped.
+
+```bash
+scripts/dev-up          # Postgres, MinIO, OpenBao — the container joins their network
+scripts/toolbox mix check
+scripts/toolbox         # an interactive shell
+```
+
+The container joins the network `scripts/dev-up` created and carries `localhost:55432`,
+`localhost:59000` and `localhost:58200` to it, so `config/config.exs` is not forked for
+one way of running the suite. `_build` and `deps` live in named volumes: a Linux build and
+a host build cannot share either, and a bind-mounted `_build` on a non-Linux host is the
+slowest part of a compile by an order of magnitude.
+
+Five tests do not pass in a container and are not made to — `Troupe.Agent.ResilienceTest`'s
+OS-pid cancellation test, and the four gateway tests that spawn or `kill -9` a daemon. They
+pass on a Linux runner, which is where that claim is settled (`DECISIONS.md` 328).
+
+It is not a deployment artifact; `docker/Dockerfile` builds those, and CI installs the
+toolchain directly.
+
+**One trap, on a Windows checkout.** This repository's blobs are CRLF, and `mix format`
+run inside the container writes LF — so after a format, `mix credo --strict` reports a
+hundred-odd `Consistency.LineEndings` issues about a working tree that has become mixed.
+Nothing is actually wrong: `core.autocrlf` converts the files back on `git add`, `git
+diff` shows no content change, and credo run against the tree as it would be committed
+finds none of them. To check the gate rather than the checkout:
+
+```bash
+git add -A && TREE=$(git write-tree) && git reset
+scripts/toolbox bash -c "mkdir -p /tmp/w && git archive --format=tar $TREE | tar -x -C /tmp/w   && cd /tmp/w && ln -s /workspace/deps deps && ln -s /workspace/_build _build   && MIX_ENV=test mix credo --strict"
+```
+
 ## 2. Dependencies and the gate
 
 ```bash

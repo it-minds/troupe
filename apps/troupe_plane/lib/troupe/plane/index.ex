@@ -135,14 +135,14 @@ defmodule Troupe.Plane.Index do
     # about where a session *got to*, not about whose it is.
     existing = session_id |> Sessions.get() |> existing_fields()
     {epoch, last_seq, head_hash} = position(manifest, List.last(chain))
+    kind = manifest["kind"] || existing[:kind] || "team"
 
     {:ok,
      %{
        id: session_id,
+       kind: kind,
        owner_subject: manifest["owner_subject"] || existing[:owner_subject],
        owner_id: owner_id(manifest["owner_subject"]) || existing[:owner_id],
-       team_id: team_id(manifest["team"]) || existing[:team_id],
-       profile: manifest["profile"] || existing[:profile] || Keyword.get(opts, :default_profile, "unknown"),
        # Nothing is running after a rebuild, by definition: this index was just
        # reconstructed from storage and no pod has been told about any of it.
        state: "dormant",
@@ -152,7 +152,23 @@ defmodule Troupe.Plane.Index do
        head_hash: head_hash,
        object_bytes: manifest["object_bytes"] || Enum.sum(Enum.map(chain, &(&1[:bytes] || 0))),
        last_active_at: written_at(manifest)
-     }}
+     }
+     |> Map.merge(placement(kind, manifest, existing, opts))}
+  end
+
+  # A team session gets a profile — a real one, or the fallback, because a row with none
+  # is a row no listing can place. A private session gets neither profile nor team, and
+  # the fallback would be a lie the check constraint catches: storage says where a session
+  # got to and has no opinion about where it runs.
+  defp placement("private", _manifest, _existing, _opts), do: %{profile: nil, team_id: nil}
+
+  defp placement(_team, manifest, existing, opts) do
+    %{
+      team_id: team_id(manifest["team"]) || existing[:team_id],
+      profile:
+        manifest["profile"] || existing[:profile] ||
+          Keyword.get(opts, :default_profile, "unknown")
+    }
   end
 
   # Segments win over the manifest: they are what a worker would replay, and the manifest

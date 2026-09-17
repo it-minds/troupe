@@ -16,7 +16,7 @@ defmodule Troupe.Sessions.StorageTest do
 
   setup context do
     if store = context[:store] do
-      session_id = "s-#{System.unique_integer([:positive])}"
+      session_id = unique("s")
       on_exit(fn -> Storage.erase(store, session_id) end)
 
       %{store: store, session_id: session_id, key: :crypto.strong_rand_bytes(32)}

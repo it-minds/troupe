@@ -11,6 +11,8 @@ defmodule Troupe.Gateway.Daemon do
 
       Daemon (one_for_one)
       ├── Commands      idempotency ledger: command_id -> acknowledgement
+      ├── Plane         where the plane is and how to speak to it, if anybody has said
+      ├── Private       a sealer per private session, and the registry that names them
       ├── Connections   DynamicSupervisor, one process per attached client
       ├── Listener      accepts on the transport and hands sockets to Connections
       ├── Loopback      a WebSocket on 127.0.0.1, which is the only door a browser has
@@ -23,7 +25,8 @@ defmodule Troupe.Gateway.Daemon do
 
   use Supervisor
 
-  alias Troupe.Gateway.{Commands, Connections, Idle, Listener, Loopback}
+  alias Troupe.Gateway.{Commands, Connections, Idle, Listener, Loopback, Plane}
+  alias Troupe.Gateway.Private
 
   @spec start_link(keyword()) :: Supervisor.on_start()
   def start_link(opts \\ []) do
@@ -61,6 +64,13 @@ defmodule Troupe.Gateway.Daemon do
 
     children = [
       {Commands, opts},
+      # Before the Listener, because the first thing a client may do is link — and
+      # a restart here must not take the sessions with it, which is why it holds a
+      # token and nothing else.
+      {Plane, Keyword.get(opts, :plane, [])},
+      # After Plane, because a sealer with nowhere to report is a sealer that does not
+      # start. Shutting this down is what seals every private session one last time.
+      {Private.Sealers, opts},
       {Connections, opts},
       {Listener, opts},
       # After the Listener, so that `rest_for_one` republishes the WebSocket entry if

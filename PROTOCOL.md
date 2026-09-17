@@ -135,12 +135,29 @@ The response:
 {"jsonrpc": "2.0", "id": 1, "result": {
   "protocol_version": "1",
   "server_info": {"name": "troupe-daemon", "version": "0.2.0", "instance_id": "kP3u_2fQ8xA"},
-  "capabilities": {"worktrees": true, "watch": true, "remote": false},
+  "capabilities": {"worktrees": true, "watch": true, "remote": false,
+                   "private_sessions": true},
   "principal": {"subject": "local:martin", "display_name": "martin", "kind": "user"},
   "scopes": ["observe", "control", "admin"],
   "limits": {"max_message_bytes": 67108864, "outbound_queue": 10000}
 }}
 ```
+
+The server's `capabilities`:
+
+| key | meaning |
+| --- | --- |
+| `worktrees` | this server can make a git worktree for a session |
+| `watch` | `watch.set` is served, and `fs_changed` events arrive |
+| `remote` | this is a worker pod rather than a local daemon |
+| `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
+
+`private_sessions` is computed at every `initialize`, never compiled in, and it is what
+un-gates the client's control. It is true only where both things it needs are true: a
+person the server can name — `local:<username>` means nothing to a plane or to another
+device, so an unlinked daemon says false — and somewhere to seal to. A worker always
+says false: a private session is sealed under its person's own key, in a subtree no pod
+credential can reach, and no worker profile is involved in one.
 
 `server_info.instance_id` identifies the running daemon and changes when it restarts.
 A client that reconnects and finds a different one is talking to a daemon that has been
@@ -231,7 +248,7 @@ Durable:
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
 | `llm_response` | `message`, `usage`, `stop_reason`, `model`, `gateway` |
 | `llm_error` | `reason` |
-| `tool_call_started` | `call_id`, `name`, `args` |
+| `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
@@ -248,10 +265,30 @@ Durable:
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
+| `trigger_fired` | `source`, `idempotency_key`, `principal`, `revision`, `payload_digest` |
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
+
+`trigger_fired` is written once, at creation, for a session started by something other
+than a person at a keyboard, and never again however many times that session is woken.
+`source` is one of `schedule`, `webhook`, `integration`, `ci`, `api`, `manual`, `agent`,
+and everything else about the seven is the same — which is the point of the event. A
+session a person typed into carries none.
+
+`payload_digest` is a hash and never a payload: a webhook body is content, and content
+belongs where the retention policy reaches it rather than in an event that outlives the
+session. It and `revision` are absent where there was nothing to measure — a session
+started through the A2A facade has no trigger document to name — and absent means there
+was none, never that the writer skipped it.
+
+`tool_call_started.identity` says whose credential an MCP call goes out as: `"profile"`
+for a profile-mode server, the subject for a person-mode one, and absent for every other
+tool. `principal` answers the same question with its other half — `{"subject", "actor"}`,
+whose authority and what acted — and both halves are written even where they are equal.
+A reader written against `identity` alone keeps working: the field still holds the string
+it always held.
 
 `llm_response.gateway` is what the gateway in front of the provider said about the call
 it billed: `{"request_id": "…", "cost_micros": 18400}`. Both keys are optional and the
@@ -305,7 +342,7 @@ and never shared between sessions.
 
 | param | values |
 | --- | --- |
-| `topic` | `"fleet"` or `"session:<id>"` |
+| `topic` | `"fleet"`, `"session:<id>"` or `"presence:<id>"` |
 | `level` | `"summary"` or `"detail"` |
 | `from_seq` | optional; replay durable events with `seq > from_seq` |
 
@@ -330,6 +367,26 @@ with no replay.
 - **`fleet`** carries only session lifecycle events — created, state changes,
   archived, erased — for every session the principal can see. `fleet` ignores
   `from_seq`.
+- **`presence:<id>`** carries `presence` and nothing else, and is the only topic that
+  does. It ignores `level` and `from_seq`, answers `head_seq: 0` with
+  `"cursored": false`, and is the first thing the server stops sending when a client
+  falls behind. Presence never reaches `session:<id>` or `fleet`.
+
+#### Presence is a topic of its own
+
+Who is looking at a session is true while somebody is there and worthless a minute
+later. It has no `seq`, it is never persisted, and a subscriber who missed some of it
+has missed nothing — three properties the session's own stream has none of.
+
+That is what makes it droppable in a way the session's events are not. **With a
+client's outbound queue saturated, presence stops entirely and the durable order is
+unchanged**: shedding it is a decision about one subscription, so the session's own
+stream arrives whole and in the same order it would have. Presence riding
+`session:<id>` would be presence a client cannot decline and a server cannot shed
+without touching the stream it must not touch.
+
+A client that wants both subscribes twice. It is delivered once, on the presence
+subscription.
 
 ### `unsubscribe`
 
@@ -448,11 +505,20 @@ A client that is signed in tells it who that is, once.
 #### `identity.link`
 ```json
 {"command_id": "c-2", "subject": "ada@example.test", "display_name": "Ada",
- "plane_url": "https://troupe.example"}
+ "plane_url": "https://troupe.example", "plane_token": "..."}
 ```
 Every connection made after this carries that subject as its principal, and the one that
 made the call is relabelled where it stands. `session_created` gains an `owner` field
 naming it. A blank subject is `invalid_params`.
+
+`plane_token` is optional and is the one part of this that is not a label. The daemon
+authenticates nobody, so it cannot obtain a plane token and has to be handed one by the
+client that signed in — it needs one to register and seal a private session. It is held
+in memory only: `identity.json` records the name, never the token, because a token on
+disk is a token a backup copies. A restarted daemon therefore has no token until a client
+links again, which costs nothing: the local log is already durable, so a daemon with no
+token seals later rather than losing anything. A client that refreshes its token links
+again.
 
 #### `identity.unlink` → `{"linked": false}`. The events already written keep the actor
 they were written with.
@@ -530,10 +596,18 @@ Refuses a dirty tree with `conflict` unless `force` is true.
 
 | `state` | actor tree | what a client can do |
 | --- | --- | --- |
+| `pending` | not started | read it; wait. The session exists and has no worker yet |
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
 | `read_only` | stopped | read it; activating commands return `forbidden` |
 | `erased` | gone | `not_found` |
+
+`pending` is a remote state and a short one. A `session.create` on a profile that is full
+but may still grow answers with a session id, `"state": "pending"` and **no endpoint** —
+there is nothing to connect to yet, and inventing an address would be worse than saying
+so. The plane has already asked for another worker; `retry_after_ms` says when to ask
+again. A refusal happens only where a person set a ceiling, and then it quotes the number
+they set.
 
 A session goes `dormant` on its own idle timeout, or on `session.archive`. Its log
 stays, and so does everything a client can learn from it: `session.list`,
@@ -544,6 +618,22 @@ would never stay dormant.
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
+
+#### Activation is about the session, not about the pod
+
+Worth stating exactly, because the looser reading forbids something harmless.
+"Subscribing to a dormant session never activates it" means **no actor tree and no model
+call** — it does not mean no process anywhere and no worker.
+
+A `Session.Reader` is neither an actor tree nor a model call: it is a short-lived process
+that folds a log and serves it. So reading a dormant session may start a *worker* — on a
+profile that has scaled to zero, it must, or the history would be unreadable — and it
+consumes no capacity, reserves no placement and writes no `session_activated`. The
+session is exactly as dormant afterwards as it was before.
+
+The two questions are separate everywhere it matters: a session is active or dormant
+whatever its profile is running, and a profile has workers or none whatever its sessions
+are doing.
 
 ### After a restart
 
@@ -756,11 +846,12 @@ that team.
 | `admin.principals.list` | either | a team's service principals: subject, profiles, last use, whether enabled — never a secret or its hash |
 | `admin.principal.create` | either | `{team, name, description, profiles}` → the principal, with `secret` exactly once; `profiles` must be within the team's grants |
 | `admin.principal.rotate` / `admin.principal.disable` | either | `{subject}`: a new secret shown once, or the end of the credential; a disabled principal is `unauthenticated` at its next call |
-| `admin.triggers.list` | either | `{team}` → a team's trigger definitions |
-| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger and the diff |
+| `admin.triggers.list` | either | `{team}` → a team's trigger definitions, each with the `revision` its next firing would use |
+| `admin.trigger.put` | either | upsert by `team` and `name`; partial on update, so `{team, name, enabled: false}` is a switch-off; returns the trigger, the diff and the `revision` the document now hashes to |
 | `admin.trigger.delete` | either | `{team, name}`; the runs go with it, the sessions they made do not |
 | `admin.trigger.run` | either | `{team, name}`: fire it now, with a manual idempotency key naming the caller and the minute |
-| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status |
+| `admin.runs.list` | either | `{team, trigger?, limit?}` → runs newest first, each with its `state` (`created`, `running`, `waiting`, `done`, `failed`, `skipped`) read from the session's status, and the `revision` and `revision_hash` it actually ran |
+| `admin.trigger.revisions` | either | `{team, name}` → every revision of a trigger, newest first: the number, the hash, who made it and when, and whether it was reconstructed by the migration that introduced them |
 
 Membership is never editable: it comes from the identity provider, and a method to change
 it would be a second source of truth for who is in a team.
@@ -815,6 +906,29 @@ header, minting and renewing the plane token from the credentials `troupe login`
 
     claude mcp add troupe -- troupe mcp
 
+### Trigger revisions
+
+A trigger's row is mutable and a run's provenance is not. Every firing names a
+**revision**: the trigger document as it stood, frozen, and addressed by the `sha256:`
+hash of its canonical form — the same convention a bundle uses, for the same reason.
+
+The document is `profile`, `agent`, `principal_id`, `prompt_template`, `terms`,
+`visibility`, `review`, `notify`, `concurrency` and `source`. It is **a property of the
+document, not of the source**: nothing in the hash says how a firing arrived, so a
+schedule, a webhook, an API call and a person's hand name the same revision when the
+document has not moved. `enabled` is not in it — switching a trigger off does not change
+what a run would be.
+
+Three consequences a client may rely on:
+
+* A `trigger.put` that changes nothing creates no revision, and an edit back to a
+  previous wording lands on that revision rather than making a third.
+* A run names exactly one revision, for as long as the run exists. A firing that
+  overlaps an edit resolves once, before it writes anything; a retry of a failed run
+  re-reads the revision the run recorded.
+* A session made by a trigger carries `origin.revision` — the hash — so the session
+  itself says which wording made it, without a join through the run.
+
 ### Triggers and principals on the harness side
 
 Three methods on the plane's `/rpc` that are not administrative, because a caller other
@@ -822,9 +936,39 @@ than an admin uses them:
 
 | method | scope | who | answers |
 | --- | --- | --- | --- |
-| `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The same key returns the same run and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
+| `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
+| `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
+| `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own subject, which the client exchanges with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
+| `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told |
+| `session.presign` | control | anybody, for their own private sessions | `{session_id, method (`get`/`put`), keys}` → `{expires_in, urls}`, one signed URL per key, good for five minutes. Every key must be under `sessions/<session_id>/` and at most 64 per call. **The bytes never cross the plane**: it holds an object-storage credential scoped to signing and no key for what it signs for, which is the narrowest revision of `DECISIONS.md` 90 that lets a laptop seal at all |
+| `session.objects` | observe | anybody, for their own private sessions | `{session_id, prefix}` → `{keys}` under `sessions/<session_id>/`. A caller with no object-storage credential cannot list — a listing is signed against the bucket, not against a key it does not yet know — so the plane lists for it. A `prefix` may narrow the listing and may not widen it; one that is not under the session's own is ignored |
+| `session.assertion` | control | anybody, for their own private sessions | `{session_id}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`, the same shape `me.connections.grant` answers and for the same reason. The path is `troupe/people/<subject>/sessions/<session_id>`; the person policy covers their own subtree and no pod role covers any of it. The session must already be registered, which is what makes this a statement about a session the plane agrees is theirs |
+
+### Private sessions
+
+A private session belongs to a person, not a team. It runs on their own machine, is
+sealed under `troupe/people/<subject>/sessions/<id>`, and is never placed on a pod. The
+plane's row carries `kind: "private"`, no `team`, no `profile` and no worker — sizes,
+sequence numbers, hashes and a `device` name, and nothing else. A team admin does not see
+it; a platform admin sees a count and a size.
+
+A session's JSON carries `kind` and, for a private one, the `device` that last sealed
+it, and `bundle_version` — the configuration it was pinned to when it was created,
+which does not move when a newer version is published. A session whose agent
+definitions changed underneath it would be a different session halfway through.
+ `sessions.list` takes `kind` (`team` or `private`) alongside its other filters, so one
+list can show both and either can be asked for on its own. `kind` is not `visibility`:
+`visibility` is who else on the team may see a session and defaults to `private`, so an
+unshared team session has always been visibility-private and is not a private session.
+
+A person-mode MCP server reaches its far side as the session's **owner**, fixed at
+activation and recorded in `session_created`. The credential is in the key manager under
+`troupe/people/<subject>/mcp/<slot>`; the plane never holds it and cannot read it, and a
+pod reads it with a token it exchanged for an assertion naming that person. Where nobody
+has connected, the tool answers a result the model can read —
+`{"error": "not_connected", "server": …, "hint": …}` — and the session carries on.
 
 `POST /auth/exchange` takes `{"client_id": "svc:<team>/<name>", "client_secret": …}` as
 well as `{"id_token"}`, and answers the same plane token with `kind: "service"`, `team`
@@ -925,7 +1069,8 @@ definitions and fails CI on any breaking change.
 ## 13. Writing a client
 
 1. Connect and send `initialize`. Keep the negotiated `scopes`.
-2. `subscribe` to `fleet` for the session list, and to `session:<id>` at `detail`
+2. `subscribe` to `fleet` for the session list, to `session:<id>` at `detail`, and to
+   `presence:<id>` if it shows who else is there
    for one session.
 3. Fold durable events into your view; render ephemerals as they arrive and expect
    to lose some.

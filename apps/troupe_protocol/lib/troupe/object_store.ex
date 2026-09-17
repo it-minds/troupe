@@ -13,10 +13,20 @@ defmodule Troupe.ObjectStore do
   afterwards, including prior versions.
   """
 
+  alias Troupe.ObjectStore.Signed
+
   @enforce_keys [:endpoint, :bucket, :access_key_id, :secret_access_key]
   defstruct [:endpoint, :bucket, :access_key_id, :secret_access_key, region: "us-east-1"]
 
   @type t :: %__MODULE__{}
+
+  @typedoc """
+  Either store: one with a credential, or one that borrows signatures.
+
+  `Troupe.Sessions.Storage` takes whichever it was handed and does not ask which, so a
+  pod with a service account and a laptop with neither seal through the same code.
+  """
+  @type store :: t() | Signed.t()
 
   @doc "The store this worker was configured with."
   @spec from_env() :: t()
@@ -33,8 +43,12 @@ defmodule Troupe.ObjectStore do
   end
 
   @doc "Write an object. The body is already encrypted by the time it gets here."
-  @spec put(t(), String.t(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
-  def put(%__MODULE__{} = store, key, body, opts \\ []) do
+  @spec put(store(), String.t(), binary(), keyword()) :: {:ok, map()} | {:error, term()}
+  def put(store, key, body, opts \\ [])
+
+  def put(%Signed{} = signed, key, body, opts), do: Signed.put(signed, key, body, opts)
+
+  def put(%__MODULE__{} = store, key, body, opts) do
     headers =
       [{"content-type", Keyword.get(opts, :content_type, "application/octet-stream")}] ++
         metadata_headers(Keyword.get(opts, :metadata, %{}))
@@ -52,8 +66,12 @@ defmodule Troupe.ObjectStore do
   end
 
   @doc "Read an object, or say it is not there."
-  @spec get(t(), String.t(), keyword()) :: {:ok, binary()} | {:error, :not_found | term()}
-  def get(%__MODULE__{} = store, key, opts \\ []) do
+  @spec get(store(), String.t(), keyword()) :: {:ok, binary()} | {:error, :not_found | term()}
+  def get(store, key, opts \\ [])
+
+  def get(%Signed{} = signed, key, opts), do: Signed.get(signed, key, opts)
+
+  def get(%__MODULE__{} = store, key, opts) do
     case request(store, :get, key, version_query(opts), "", []) do
       {:ok, %{status: status, body: body}} when status in 200..299 -> {:ok, body}
       {:ok, %{status: 404}} -> {:error, :not_found}
@@ -63,7 +81,9 @@ defmodule Troupe.ObjectStore do
   end
 
   @doc "Whether an object exists, without fetching it."
-  @spec exists?(t(), String.t()) :: boolean()
+  @spec exists?(store(), String.t()) :: boolean()
+  def exists?(%Signed{} = signed, key), do: Signed.exists?(signed, key)
+
   def exists?(%__MODULE__{} = store, key) do
     match?({:ok, %{status: status}} when status in 200..299, request(store, :head, key, [], "", []))
   end
@@ -76,7 +96,9 @@ defmodule Troupe.ObjectStore do
   hash, none of which is content. That is what lets the plane reconstruct its index
   from storage it is not allowed to decrypt.
   """
-  @spec head(t(), String.t()) :: {:ok, map()} | {:error, :not_found | term()}
+  @spec head(store(), String.t()) :: {:ok, map()} | {:error, :not_found | term()}
+  def head(%Signed{} = signed, key), do: Signed.head(signed, key)
+
   def head(%__MODULE__{} = store, key) do
     case request(store, :head, key, [], "", []) do
       {:ok, %{status: status} = response} when status in 200..299 ->
@@ -111,13 +133,47 @@ defmodule Troupe.ObjectStore do
   end
 
   @doc """
+  A URL that carries its own authorisation, for a caller who has no credential.
+
+  A laptop sealing a private session cannot hold an object-storage key, and the plane
+  cannot be on the path of the bytes — it has no key for them and must keep it that way.
+  A presigned URL is the shape that satisfies both: the signature authorises one method
+  on one key until it expires, and it is made from a credential that never leaves the
+  plane.
+
+  `UNSIGNED-PAYLOAD` rather than a body digest, because the signer does not have the
+  body — the point of the exercise is that it never will. That is what S3 and MinIO
+  both expect for query-parameter authorisation, and it is why the lifetime has to be
+  short: within it, the URL *is* the authorisation, for whoever holds it.
+  """
+  @spec presign(t(), :get | :put, String.t(), keyword()) :: String.t()
+  def presign(%__MODULE__{} = store, method, key, opts \\ []) when method in [:get, :put] do
+    url = store.endpoint <> build_path(store, key)
+
+    :aws_signature.sign_v4_query_params(
+      store.access_key_id,
+      store.secret_access_key,
+      store.region,
+      "s3",
+      Keyword.get(opts, :now, :calendar.universal_time()),
+      method_string(method),
+      url,
+      ttl: Keyword.get(opts, :ttl, 300),
+      body_digest: "UNSIGNED-PAYLOAD",
+      uri_encode_path: false
+    )
+  end
+
+  @doc """
   Every key under a prefix, following continuation tokens.
 
   Listing is how a rebuild finds what exists, so it has to be complete rather than a
   first page: a session whose manifest is on page two of a thousand is a session the
   rebuilt index would not have.
   """
-  @spec list(t(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  @spec list(store(), String.t()) :: {:ok, [String.t()]} | {:error, term()}
+  def list(%Signed{} = signed, prefix), do: Signed.list(signed, prefix)
+
   def list(%__MODULE__{} = store, prefix) do
     collect_keys(store, prefix, nil, [])
   end

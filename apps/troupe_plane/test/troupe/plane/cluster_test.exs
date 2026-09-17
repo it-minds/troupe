@@ -15,7 +15,18 @@ defmodule Troupe.Plane.ClusterTest do
   use ExUnit.Case, async: false
 
   alias Ecto.Adapters.SQL.Sandbox
-  alias Troupe.Plane.{Fleet, Identity, Ledger, Placement, Replica, Repo, Sessions, Singleton, TeamBudget}
+  alias Troupe.Plane.{
+    Budget,
+    Fleet,
+    Identity,
+    Ledger,
+    Placement,
+    Replica,
+    Repo,
+    Sessions,
+    Singleton,
+    TeamBudget
+  }
 
   @moduletag timeout: 180_000
 
@@ -119,10 +130,18 @@ defmodule Troupe.Plane.ClusterTest do
         fn n ->
           id = "s-#{suffix}-#{n}"
 
+          # Through the ladder on both replicas, because that is the whole path a
+          # `session.create` takes and it is the one that writes the row.
           if rem(n, 2) == 0 do
-            TeamBudget.reserve(team.id, id, 100)
+            Budget.reserve(team.id, id, "ada@example.test", 100)
           else
-            :erpc.call(peer_node, TeamBudget, :reserve, [team.id, id, 100], 30_000)
+            :erpc.call(
+              peer_node,
+              Budget,
+              :reserve,
+              [team.id, id, "ada@example.test", 100],
+              30_000
+            )
           end
         end,
         max_concurrency: 50,
@@ -133,7 +152,7 @@ defmodule Troupe.Plane.ClusterTest do
     granted = Enum.count(results, &match?({:ok, _}, &1))
 
     assert granted == 10
-    assert Enum.count(results, &match?({:error, {:over_budget, _}}, &1)) == 40
+    assert Enum.count(results, &match?({:error, {:over_budget, :team, _}}, &1)) == 40
 
     promised = Ledger.open_reservations(team.id) |> Map.values() |> Enum.sum()
     assert promised == 1_000, "the team promised #{promised} against a budget of 1000"

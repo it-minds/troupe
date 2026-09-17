@@ -1,11 +1,17 @@
 defmodule Troupe.Plane.Web.Live.Teams do
   @moduledoc """
-  Teams, their grants, budgets and retention — and their members, read-only.
+  Teams, the groups they draw their members from, their grants, budgets and retention —
+  and their members, read-only.
 
   Members are shown and cannot be edited. Showing them matters: an administrator setting
   a team's budget wants to know how many people it is for. Editing them is not on offer
   because membership comes from the identity provider, and a panel that let somebody add
   a member would be a second source of truth for who is in a team.
+
+  What *is* editable is which groups count. A team draws its members from any number of
+  them and its membership is the union, so linking a group is how a team gets people —
+  and unlinking one is destructive enough to want the count first, which is the whole of
+  the confirmation here.
   """
 
   use Phoenix.LiveView, layout: false
@@ -16,14 +22,19 @@ defmodule Troupe.Plane.Web.Live.Teams do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(flash_message: nil, editing: nil) |> load()}
+    {:ok,
+     socket
+     |> assign(flash_message: nil, editing: nil, unlinking: nil, unlink_effect: nil)
+     |> load()}
   end
 
   @impl Phoenix.LiveView
   def handle_event("edit", %{"team" => name}, socket),
     do: {:noreply, assign(socket, editing: name)}
 
-  def handle_event("cancel", _params, socket), do: {:noreply, assign(socket, editing: nil)}
+  def handle_event("cancel", _params, socket) do
+    {:noreply, assign(socket, editing: nil, unlinking: nil, unlink_effect: nil, confirming: nil)}
+  end
 
   def handle_event("save", %{"team" => name} = params, socket) do
     attrs =
@@ -39,6 +50,47 @@ defmodule Troupe.Plane.Web.Live.Teams do
       |> Map.put(:pins_allowed, params["pins_allowed"] == "on")
 
     respond(socket, Admin.team_update(socket.assigns.actor, name, attrs), "#{name} updated")
+  end
+
+  # A person's own ceiling, set from the team page because that is where somebody is
+  # looking when they wonder who is near theirs. The cap itself is not the team's: it
+  # follows them into every team they are in, which is what the flash says.
+  def handle_event("person-cap", %{"subject" => subject} = params, socket) do
+    micros = params["budget_micros"]
+
+    respond(
+      socket,
+      Admin.person_budget(socket.assigns.actor, subject, cap_of(micros)),
+      "#{subject}: #{cap_note(cap_of(micros))} in every team"
+    )
+  end
+
+  def handle_event("link", %{"team" => name, "group" => group}, socket) do
+    respond(
+      socket,
+      Admin.team_link(socket.assigns.actor, name, group),
+      "#{name} now draws its members from #{group} as well"
+    )
+  end
+
+  # The count before the deed, like every other irreversible action. Somebody unlinking a
+  # group is usually right about which group and often wrong about how many people are in
+  # the team *only* through it.
+  def handle_event("confirm-unlink", %{"team" => name, "group" => group}, socket) do
+    case Admin.team_unlink_preview(socket.assigns.actor, name, group) do
+      {:ok, effect} -> {:noreply, assign(socket, unlinking: {name, group}, unlink_effect: effect)}
+      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+    end
+  end
+
+  def handle_event("unlink", %{"team" => name, "group" => group}, socket) do
+    socket = assign(socket, unlinking: nil, unlink_effect: nil)
+
+    respond(
+      socket,
+      Admin.team_unlink(socket.assigns.actor, name, group),
+      "#{name} no longer draws its members from #{group}"
+    )
   end
 
   def handle_event("grant", %{"team" => name, "profile" => profile}, socket) do
@@ -79,12 +131,16 @@ defmodule Troupe.Plane.Web.Live.Teams do
     attrs = %{
       "name" => params["name"],
       "description" => params["description"],
+      "sponsor" => params["sponsor"],
       "profiles" => params |> Map.get("profiles", "") |> String.split(~r/[,\s]+/, trim: true)
     }
 
     case Admin.principal_create(socket.assigns.actor, name, attrs) do
       {:ok, principal} -> shown_once(socket, principal)
-      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+      # The reason, not only the word. Four things can be wrong with a sponsor and a
+      # form that said "invalid_params" to all of them would leave the person guessing
+      # which.
+      {:error, error} -> {:noreply, assign(socket, flash_message: refusal(error))}
     end
   end
 
@@ -99,6 +155,20 @@ defmodule Troupe.Plane.Web.Live.Teams do
     respond(socket, Admin.principal_disable(socket.assigns.actor, subject), "#{subject} disabled")
   end
 
+  # Three states rather than two, because a principal whose sponsor left is a field to
+  # fill in and a principal somebody disabled is a decision, and a list that said
+  # "disabled" to both would send people looking for a fault that is not there.
+  defp state_note(%{state: :needs_sponsor}), do: "· needs a sponsor"
+  defp state_note(%{state: :disabled}), do: "· disabled"
+  defp state_note(_principal), do: ""
+
+  # What the plane refused, in the words it used. `Admin.principal_create/3` distinguishes
+  # a missing sponsor from a misspelt one from one who has left from one on another team,
+  # and every one of those is a different thing to do next.
+  defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
+  defp refusal(%{data: %{missing: field}}) when is_binary(field), do: "#{field} is required"
+  defp refusal(error), do: error.message
+
   defp shown_once(socket, principal) do
     message = "#{principal.subject} — secret, shown once: #{principal.secret}"
     {:noreply, socket |> assign(flash_message: message, editing: nil) |> load()}
@@ -111,6 +181,72 @@ defmodule Troupe.Plane.Web.Live.Teams do
   defp respond(socket, {:error, error}, _message) do
     {:noreply, assign(socket, flash_message: error.message)}
   end
+
+  # A blank field clears the cap rather than leaving it alone, which is the opposite of
+  # every other field on this page — and is right here, because "no ceiling" is a value
+  # somebody means and there is no other way to say it.
+  defp cap_of(nil), do: nil
+  defp cap_of(""), do: nil
+
+  defp cap_of(value) when is_binary(value) do
+    case Integer.parse(value) do
+      {number, _rest} when number > 0 -> number
+      _otherwise -> nil
+    end
+  end
+
+  # What the ladder makes of a field, and a parenthetical where that is not what this
+  # team asked for. The team's own number stays in the edit form: this is the answer to
+  # "why is it not what I set", which is a different question from "what did I set".
+  defp in_force(team, field) do
+    case Enum.find(team.effective, &(&1.field == field)) do
+      nil -> Map.get(team, field)
+      setting -> setting.value
+    end
+  end
+
+  defp note(team, field) do
+    case Enum.find(team.effective, &(&1.field == field)) do
+      %{decided_by: rung, value: value} when rung != :team ->
+        if value == Map.get(team, field),
+          do: "",
+          else: " (#{rung}; this team asked for #{Map.get(team, field)})"
+
+      _otherwise ->
+        ""
+    end
+  end
+
+  # The sentence a dialog puts in front of somebody. Sessions do not move — a session's
+  # team is recorded at create and stays — and people assume the opposite, so it says so.
+  defp unlink_warning(nil), do: ""
+
+  defp unlink_warning(effect) do
+    "removes #{effect.lose_access} of #{effect.in_group} people; " <>
+      "#{effect.keep_access} keep access through another group. " <>
+      "They lose #{effect.sessions_they_can_open} session(s) they can open now. " <>
+      "The sessions stay with the team — only who may open them changes."
+  end
+
+  defp cap_note(nil), do: "no spend ceiling"
+  defp cap_note(micros), do: "a ceiling of #{money(micros)}"
+
+  # Never `money/1` for what has been spent: that answers "unlimited" for zero, which is
+  # right for a ceiling and nonsense for a total.
+  defp member_note(member) do
+    spent = :erlang.float_to_binary(member.spent_micros / 1_000_000, decimals: 2)
+
+    promised =
+      if member.reserved_micros > 0,
+        do:
+          ", #{:erlang.float_to_binary(member.reserved_micros / 1_000_000, decimals: 2)} promised",
+        else: ""
+
+    "#{spent} spent#{promised} · #{cap_note(member.budget_micros && positive(member.budget_micros))}"
+  end
+
+  defp positive(micros) when micros > 0, do: micros
+  defp positive(_micros), do: nil
 
   # A field left blank is a field nobody changed, not a field set to nothing. Every one of
   # these has a meaning at its current value and none of them has a meaning as `""`.
@@ -130,12 +266,14 @@ defmodule Troupe.Plane.Web.Live.Teams do
 
   defp load(socket) do
     with {:ok, teams} <- Admin.teams_list(socket.assigns.actor),
-         {:ok, profiles} <- Admin.profiles_list(socket.assigns.actor) do
+         {:ok, profiles} <- Admin.profiles_list(socket.assigns.actor),
+         {:ok, groups} <- Admin.groups_list(socket.assigns.actor) do
       principals = Map.new(teams, &{&1.name, principals_of(socket.assigns.actor, &1.name)})
 
       assign(socket,
         teams: teams,
         profiles: Enum.map(profiles, & &1.name),
+        groups: groups,
         principals: principals,
         error: nil
       )
@@ -172,14 +310,26 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <:field label="against budget">
             <.budget team={team} />
           </:field>
-          <:field label="goes dormant after">{team.idle_timeout_seconds}s idle</:field>
-          <:field label="cache kept">{team.cache_eviction_days} days</:field>
-          <:field label="erased after">{team.erase_after_days} days</:field>
+          <:field label="goes dormant after">
+            {in_force(team, :idle_timeout_seconds)}s idle{note(team, :idle_timeout_seconds)}
+          </:field>
+          <:field label="cache kept">
+            {in_force(team, :cache_eviction_days)} days{note(team, :cache_eviction_days)}
+          </:field>
+          <:field label="erased after">
+            {in_force(team, :erase_after_days)} days{note(team, :erase_after_days)}
+          </:field>
           <:field label="members may">
-            {if team.members_may_control, do: "steer sessions", else: "watch only"}
+            {if in_force(team, :members_may_control), do: "steer sessions", else: "watch only"}{note(
+              team,
+              :members_may_control
+            )}
           </:field>
           <:field label="pinning">
-            {if team.pins_allowed, do: "allowed", else: "not allowed"}
+            {if in_force(team, :pins_allowed), do: "allowed", else: "not allowed"}{note(
+              team,
+              :pins_allowed
+            )}
           </:field>
           <:field label="team volume">
             {team.volume_size} on {team.volume_storage_class || "the default class"}
@@ -300,6 +450,35 @@ defmodule Troupe.Plane.Web.Live.Teams do
 
         <button :if={@editing != team.name} phx-click="edit" phx-value-team={team.name}>edit</button>
 
+        <h3>Where each value comes from</h3>
+        <p class="hint">
+          A lower rung may only narrow. Where a team's own value is wider than the rung
+          above it, the tighter one is in force and the team's is left where it was — so
+          widening the platform again gives it back.
+        </p>
+        <table class="ladder">
+          <thead>
+            <tr>
+              <th>setting</th>
+              <th>in force</th>
+              <th>decided by</th>
+              <th>every opinion</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr :for={setting <- team.effective}>
+              <td><code>{setting.key}</code></td>
+              <td>{to_string(setting.value)}</td>
+              <td>{setting.decided_by}</td>
+              <td>
+                {setting.opinions
+                |> Enum.map(fn opinion -> "#{opinion.rung} #{opinion.value}" end)
+                |> Enum.join(", ")}
+              </td>
+            </tr>
+          </tbody>
+        </table>
+
         <h3>Spend</h3>
         <p :if={team.spend_by_model == []} class="empty">
           Nothing charged yet. A model call is recorded when the pod running it reports
@@ -371,7 +550,8 @@ defmodule Troupe.Plane.Web.Live.Teams do
               {Enum.join(p.profiles, ", ")}
               {if p.description, do: "— #{p.description}"}
               {if p.last_used_at, do: "· last used #{p.last_used_at}", else: "· never used"}
-              {if !p.enabled, do: "· disabled"}
+              {if p.sponsor, do: "· sponsored by #{p.sponsor}"}
+              {state_note(p)}
             </span>
             <button :if={p.enabled} phx-click="rotate-principal" phx-value-subject={p.subject}>
               rotate secret
@@ -387,14 +567,88 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <input type="hidden" name="team" value={team.name} />
           <label>name <input name="name" placeholder="nightly-deps" /></label>
           <label>profiles <input name="profiles" placeholder="dev, review" /></label>
+          <label>
+            sponsor
+            <input name="sponsor" list={"members-#{team.name}"} placeholder="somebody in this team" />
+          </label>
+          <datalist id={"members-#{team.name}"}>
+            <option :for={member <- team.members} value={member.subject} />
+          </datalist>
+          <p class="hint">
+            A person in this team, answerable for what it does. If they leave, it stops
+            firing and appears here as needing a sponsor.
+          </p>
           <label>description <input name="description" /></label>
           <button type="submit">create a principal</button>
         </form>
 
+        <h3>Groups</h3>
+        <p class="hint">
+          A team draws its members from any number of the identity provider's groups, and
+          its membership is the union — somebody in two of them is in the team once. This
+          list is what an administrator edits. Who is in the groups is still the provider's
+          answer and is not editable here.
+        </p>
+        <ul class="groups">
+          <li :for={group <- team.groups}>
+            <code>{group.external_id}</code> — {group.display_name}
+            <button
+              :if={@actor.role == :platform_admin and @unlinking != {team.name, group.external_id}}
+              phx-click="confirm-unlink"
+              phx-value-team={team.name}
+              phx-value-group={group.external_id}
+            >
+              unlink
+            </button>
+            <span :if={@unlinking == {team.name, group.external_id}} class="confirm">
+              {unlink_warning(@unlink_effect)}
+              <button phx-click="unlink" phx-value-team={team.name} phx-value-group={group.external_id}>
+                unlink it
+              </button>
+              <button phx-click="cancel">no</button>
+            </span>
+          </li>
+          <li :if={team.groups == []} class="none">
+            no groups yet, so no members — which is what a team looks like while you are
+            still deciding which groups belong in it
+          </li>
+        </ul>
+
+        <form id={"link-#{team.name}"} :if={@actor.role == :platform_admin} phx-submit="link">
+          <input type="hidden" name="team" value={team.name} />
+          <select name="group">
+            <option :for={group <- @groups} value={group.external_id}>
+              {group.external_id} — {group.display_name}
+            </option>
+          </select>
+          <button type="submit">link a group</button>
+        </form>
+
         <h3>Members</h3>
-        <p class="hint">From the identity provider, and read-only here.</p>
+        <p class="hint">
+          From the identity provider, and read-only here — except a person's own spend
+          ceiling, which is Troupe's and follows them into every team they are in.
+          Blank is no ceiling.
+        </p>
         <ul class="members">
-          <li :for={member <- team.members}>{member}</li>
+          <li :for={member <- team.members}>
+            {member.subject}
+            <span class="none">{member_note(member)}</span>
+            <form
+              :if={@actor.role == :platform_admin}
+              id={"cap-#{team.name}-#{member.subject}"}
+              phx-submit="person-cap"
+            >
+              <input type="hidden" name="subject" value={member.subject} />
+              <input
+                type="number"
+                name="budget_micros"
+                value={member.budget_micros}
+                placeholder="no cap"
+              />
+              <button type="submit">set cap</button>
+            </form>
+          </li>
           <li :if={team.members == []} class="none">nobody</li>
         </ul>
       </div>

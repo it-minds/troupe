@@ -113,7 +113,10 @@ defmodule Troupe.Plane.ProvisionTest do
       Application.put_env(:troupe_plane, :policy, policy())
 
       assert {:error, error} =
-               Admin.profile_put(context.actor, %{name: "bad", image: "docker.io/someone/whatever:1", replicas: 1})
+               Admin.profile_put(context.actor, %{
+                 name: "bad",
+                 image: "docker.io/someone/whatever:1"
+               })
 
       assert error.message == "invalid_params"
       assert error.data.policy_violations != []
@@ -121,17 +124,35 @@ defmodule Troupe.Plane.ProvisionTest do
     end
 
     test "every violation is reported, not the first", context do
-      Application.put_env(:troupe_plane, :policy, policy())
+      Application.put_env(:troupe_plane, :policy, policy(max_sessions_per_pod: 1))
 
       assert {:error, error} =
                Admin.profile_put(context.actor, %{
                  name: "bad",
                  image: "docker.io/someone/whatever:1",
-                 replicas: 99
+                 size_class: "heavy"
                })
 
       # A form that fixed one problem at a time would take four round trips to get right.
       assert length(error.data.policy_violations) >= 2
+    end
+
+    test "a violation is a sentence, and survives being sent", context do
+      Application.put_env(:troupe_plane, :policy, policy(max_sessions_per_pod: 1))
+
+      assert {:error, error} =
+               Admin.profile_put(context.actor, %{
+                 name: "bad",
+                 image: "ghcr.io/objective-mj/troupe-worker:dev",
+                 size_class: "heavy"
+               })
+
+      # A violation is a tuple, and `Jason` refuses tuples: putting them in an error's
+      # data turned a legitimate refusal into a 500 with an HTML body, so a caller who
+      # asked for one thing too many was told nothing whatever about which.
+      assert Enum.all?(error.data.policy_violations, &is_binary/1), inspect(error.data)
+      assert Enum.any?(error.data.policy_violations, &(&1 =~ "sessionsPerPod 2"))
+      assert {:ok, _json} = Jason.encode(error.data)
     end
 
     test "a profile inside policy is saved", context do
@@ -141,8 +162,7 @@ defmodule Troupe.Plane.ProvisionTest do
                Admin.profile_put(context.actor, %{
                  name: "good",
                  image: "ghcr.io/troupe/worker:2",
-                 replicas: 2,
-                 sessions_per_pod: 2
+                 size_class: "heavy"
                })
 
       assert result.profile.name == "good"
@@ -155,11 +175,11 @@ defmodule Troupe.Plane.ProvisionTest do
       # Same document, same parser, same function. An approximation that disagreed would
       # be worse than no check, because a person would trust it.
       assert {:ok, preview} =
-               Admin.preview(context.actor, %{name: "dev", image: "docker.io/someone/whatever:1", replicas: 1})
+               Admin.preview(context.actor, %{name: "dev", image: "docker.io/someone/whatever:1"})
 
       refute preview.policy.allowed?
 
-      verdict = Provision.verdict(%{name: "dev", image: "docker.io/someone/whatever:1", replicas: 1})
+      verdict = Provision.verdict(%{name: "dev", image: "docker.io/someone/whatever:1"})
       assert verdict.violations == preview.policy.violations
     end
 
@@ -184,8 +204,12 @@ defmodule Troupe.Plane.ProvisionTest do
     end
 
     test "a profile becomes a commit in the repository", context do
+      # Written the way the scaler writes it: `replicas` left the admin surface, so a
+      # test that set it through `profile_put` would be testing a door that is shut.
+      {:ok, _} = Fleet.put_profile(%{name: "dev", replicas: 3})
+
       assert {:ok, result} =
-               Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2", replicas: 3})
+               Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2"})
 
       assert result.provisioning.mode == :gitops
       assert result.provisioning.state == :pending
@@ -215,7 +239,10 @@ defmodule Troupe.Plane.ProvisionTest do
     end
 
     test "the manifest committed is the manifest direct mode would apply", context do
-      {:ok, _} = Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2", replicas: 3})
+      {:ok, _} = Fleet.put_profile(%{name: "dev", replicas: 3})
+
+      {:ok, _} =
+        Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2"})
 
       committed = Path.join([context.repo, "profiles", "dev.yaml"]) |> File.read!()
       direct = Provision.manifest(Fleet.get_profile("dev"))
@@ -250,14 +277,18 @@ defmodule Troupe.Plane.ProvisionTest do
     end
   end
 
-  defp policy do
+  # `max_sessions_per_pod` is an option because a size class is now what decides that
+  # number, and the interesting case is a cluster admin whose policy is tighter than the
+  # class — which is the whole of "a TroupePolicy maximum still refuses a size class that
+  # exceeds it".
+  defp policy(opts \\ []) do
     %{
       "spec" => %{
         # A prefix, not a glob: the checker matches the repository itself or anything
         # under it, which is what the chart's default values also express.
         "allowedImageRepositories" => ["ghcr.io/troupe"],
         "maxReplicas" => 4,
-        "maxSessionsPerPod" => 8,
+        "maxSessionsPerPod" => Keyword.get(opts, :max_sessions_per_pod, 8),
         "namespacePrefix" => "troupe-w-"
       }
     }

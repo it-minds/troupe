@@ -5,6 +5,10 @@
 # usually has other things in Docker, and none of them should notice this.
 set -euo pipefail
 
+# The cluster definition is a file in this repository, shared with CI, so `--config`
+# below is relative to the root and not to wherever this was run from.
+cd "$(dirname "$0")/.."
+
 cluster="${TROUPE_KIND_CLUSTER:-troupe-dev}"
 
 command -v kind >/dev/null || { echo "kind-up: kind is required" >&2; exit 1; }
@@ -13,27 +17,40 @@ command -v kubectl >/dev/null || { echo "kind-up: kubectl is required" >&2; exit
 if kind get clusters 2>/dev/null | grep -qx "$cluster"; then
   echo "kind-up: $cluster already exists"
 else
-  # 30080/30443 rather than 80/443: binding the privileged ports would fight with
-  # whatever else the machine is already serving, and nothing here needs them.
-  kind create cluster --name "$cluster" --wait 120s --config=- <<'YAML'
-kind: Cluster
-apiVersion: kind.x-k8s.io/v1alpha4
-nodes:
-  - role: control-plane
-    kubeadmConfigPatches:
-      - |
-        kind: InitConfiguration
-        nodeRegistration:
-          kubeletExtraArgs:
-            node-labels: "ingress-ready=true"
-    extraPortMappings:
-      - containerPort: 80
-        hostPort: 30080
-        protocol: TCP
-      - containerPort: 443
-        hostPort: 30443
-        protocol: TCP
-YAML
+  # Which CNI, and it is a choice with a consequence.
+  #
+  # `cilium` is the default and is what the product is written for: kind's own CNI
+  # implements pod networking and ignores every NetworkPolicy, so an egress rule on such
+  # a cluster is enforced by nothing at all. `mix troupe.e2e` fails its egress claim on a
+  # cluster that does not enforce — deliberately, and whichever CNI is at fault — so a
+  # fallback can never be mistaken for a passing one.
+  #
+  # `default` exists because some kernels cannot carry Cilium's datapath. Under Docker
+  # Desktop it starts, reports policy enforcement it is not performing, does not implement
+  # `hostPort` without kube-proxy replacement, and disrupts long-lived pod-to-pod TCP. A
+  # developer there is better served by a cluster that is honest about enforcing nothing
+  # than by one that says it does.
+  case "${TROUPE_KIND_CNI:-cilium}" in
+    cilium)
+      # No `--wait`: with no CNI the node stays NotReady until `scripts/remote-up`
+      # installs one, so waiting for readiness here waits for something this script
+      # does not do.
+      {
+        cat dev/kind/cluster.yaml
+        printf '%s
+' 'networking:' '  disableDefaultCNI: true'
+      } | kind create cluster --name "$cluster" --config -
+      echo "kind-up: no CNI yet; the node is NotReady until scripts/remote-up installs Cilium"
+      ;;
+    default)
+      kind create cluster --name "$cluster" --wait 120s --config dev/kind/cluster.yaml
+      echo "kind-up: using kind's own CNI, which enforces no NetworkPolicy at all" >&2
+      ;;
+    *)
+      echo "kind-up: TROUPE_KIND_CNI is 'cilium' or 'default'" >&2
+      exit 1
+      ;;
+  esac
 fi
 
 kubectl --context "kind-${cluster}" version --output=yaml | head -20

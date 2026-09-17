@@ -26,4 +26,8 @@ exclude =
       [:cluster]
   end
 
-ExUnit.start(capture_log: true, exclude: exclude)
+# `:e2e` is excluded always, not conditionally. Those run against a whole Troupe on a
+# real cluster, they delete pods and inject faults, and `mix test` must never be the way
+# somebody discovers that. `mix troupe.e2e` is the only way in, and it checks which
+# cluster it is pointed at before it starts.
+ExUnit.start(capture_log: true, exclude: [:e2e | exclude])

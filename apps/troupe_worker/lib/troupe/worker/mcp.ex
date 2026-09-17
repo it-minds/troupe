@@ -75,6 +75,11 @@ defmodule Troupe.Worker.MCP do
     # queue behind a discovery.
     Application.put_env(:troupe_core, :remote_tools, tools)
 
+    # The servers themselves, for the one question a tool's name cannot answer: which
+    # credential a call to it goes out as. Published the same way and for the same
+    # reason.
+    Application.put_env(:troupe_core, :mcp_servers, state.servers)
+
     if tools != [] do
       Logger.info(
         "troupe worker: #{length(tools)} MCP tool(s) from #{length(state.servers)} server(s)"

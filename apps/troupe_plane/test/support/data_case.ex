@@ -58,6 +58,29 @@ defmodule Troupe.Plane.DataCase do
     user
   end
 
+  @doc """
+  A service principal, with a sponsor invented for it.
+
+  Most tests that need a principal do not care who sponsors it — they care that it exists
+  and can act. But a principal without a sponsor cannot exist, on purpose, so this makes
+  one: a person in the team's own group, which is what `Principals.create/3` requires.
+  A test that cares about the sponsor passes `:sponsor` and this leaves it alone.
+  """
+  @spec principal!(Troupe.Plane.Identity.Team.t(), map() | keyword(), String.t()) ::
+          {:ok, Troupe.Plane.Identity.ServicePrincipal.t(), String.t()} | {:error, term()}
+  def principal!(team, attrs, by \\ "root") do
+    alias Troupe.Plane.{Identity, Principals, Repo}
+
+    attrs = Map.new(attrs)
+    group = Repo.get(Identity.Group, team.group_id)
+
+    sponsor =
+      Map.get(attrs, :sponsor) ||
+        person("sponsor-#{team.name}@example.test", [group.external_id]).subject
+
+    Principals.create(team, Map.put(attrs, :sponsor, sponsor), by)
+  end
+
   @doc "An enabled team over a group, with a grant on a profile."
   @spec team_with_grant(String.t(), String.t(), keyword()) :: Troupe.Plane.Identity.Team.t()
   def team_with_grant(group_id, profile, opts \\ []) do

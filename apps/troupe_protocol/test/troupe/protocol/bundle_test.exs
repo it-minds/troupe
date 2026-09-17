@@ -190,4 +190,95 @@ defmodule Troupe.Protocol.BundleTest do
     assert [%{name: "review-checklist", description: "How we review a pull request"}] =
              Bundle.list_skills(dir)
   end
+  describe "whose credential an MCP server uses" do
+    test "profile is the default, and is what every bundle meant before there was a mode" do
+      content = %{
+        "schema" => 1,
+        "mcp_servers" => [
+          %{
+            "name" => "jira",
+            "url" => "https://mcp.jira.example/mcp",
+            "credential_ref" => "JIRA_MCP_TOKEN"
+          }
+        ]
+      }
+
+      assert {:ok, %{mcp_servers: [server]}} = Bundle.validate(content)
+      assert server.credential_mode == :profile
+      assert server.credential_ref == "JIRA_MCP_TOKEN"
+    end
+
+    test "person mode reads credential_ref as a slot, defaulting to the server's name" do
+      assert {:ok, %{mcp_servers: [jira, pager]}} =
+               Bundle.validate(%{
+                 "schema" => 1,
+                 "mcp_servers" => [
+                   %{
+                     "name" => "jira",
+                     "url" => "https://mcp.jira.example/mcp",
+                     "credential_mode" => "person"
+                   },
+                   %{
+                     "name" => "pager",
+                     "url" => "https://mcp.pager.example/mcp",
+                     "credential_mode" => "person",
+                     "credential_ref" => "on-call"
+                   }
+                 ]
+               })
+
+      assert jira.credential_mode == :person
+      assert jira.credential_ref == "jira"
+      assert pager.credential_ref == "on-call"
+    end
+
+    test "a slot is a name under a person, not an environment variable" do
+      assert {:error, [reason]} =
+               Bundle.validate(%{
+                 "schema" => 1,
+                 "mcp_servers" => [
+                   %{
+                     "name" => "jira",
+                     "url" => "https://mcp.jira.example/mcp",
+                     "credential_mode" => "person",
+                     "credential_ref" => "JIRA_MCP_TOKEN"
+                   }
+                 ]
+               })
+
+      assert reason =~ "is not a slot name"
+
+      # And nothing that could be a path segment separator, because the slot becomes one.
+      assert {:error, [escaped]} =
+               Bundle.validate(%{
+                 "schema" => 1,
+                 "mcp_servers" => [
+                   %{
+                     "name" => "jira",
+                     "url" => "https://mcp.jira.example/mcp",
+                     "credential_mode" => "person",
+                     "credential_ref" => "../other"
+                   }
+                 ]
+               })
+
+      assert escaped =~ "is not a slot name"
+    end
+
+    test "a mode that is neither is refused with both names" do
+      assert {:error, [reason]} =
+               Bundle.validate(%{
+                 "schema" => 1,
+                 "mcp_servers" => [
+                   %{
+                     "name" => "jira",
+                     "url" => "https://mcp.jira.example/mcp",
+                     "credential_mode" => "whoever"
+                   }
+                 ]
+               })
+
+      assert reason =~ "is not profile or person"
+    end
+  end
 end

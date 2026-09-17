@@ -6,11 +6,17 @@
     "bundle_version": {
       "type": "string"
     },
+    "entitlements": {
+      "type": "object"
+    },
     "kind": {
       "type": "string"
     },
     "origin": {
       "type": "object"
+    },
+    "owner": {
+      "type": "string"
     },
     "profile": {
       "type": "string"

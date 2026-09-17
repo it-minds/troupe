@@ -31,6 +31,10 @@ defmodule Troupe.Session.Approvals do
     :session_id,
     mode: :wait,
     auto_approve: false,
+    # A platform switch: with it on, a session may not grant itself a standing
+    # permission. Every call goes back to the rule the definition carries, which is the
+    # platform's, which is the point.
+    managed_rules_only: false,
     pending: %{},
     resolved: %{},
     # Decisions read back from the log at start-up. A session that went dormant with an
@@ -93,7 +97,8 @@ defmodule Troupe.Session.Approvals do
     state = %__MODULE__{
       session_id: session_id,
       mode: Keyword.get(opts, :mode, :wait),
-      auto_approve: Keyword.get(opts, :auto_approve, false)
+      auto_approve: Keyword.get(opts, :auto_approve, false),
+      managed_rules_only: Keyword.get(opts, :managed_rules_only, false)
     }
 
     # Approvals are durable events precisely so they survive dormancy, and a gate that
@@ -136,6 +141,9 @@ defmodule Troupe.Session.Approvals do
 
   defp answer_for("deny"), do: :deny
   defp answer_for(_decision), do: :allow
+
+  defp managed(:allow_session), do: :allow
+  defp managed(decision), do: decision
 
   @impl GenServer
   def handle_call({:request, req}, from, state) do
@@ -205,6 +213,13 @@ defmodule Troupe.Session.Approvals do
         Process.demonitor(entry.monitor, [:flush])
         answer = if decision == :deny, do: :deny, else: :allow
         GenServer.reply(entry.from, answer)
+
+        # `allow_session` becomes a plain `allow` where the platform holds the rules: the
+        # call in front of the person is answered, and nothing standing is created. The
+        # *decision that was made* still goes in the log as `allow`, because an event
+        # saying `allow_session` beside a session that allows nothing would be a log that
+        # disagreed with itself.
+        decision = if state.managed_rules_only, do: managed(decision), else: decision
 
         allows =
           if decision == :allow_session,

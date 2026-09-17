@@ -12,8 +12,8 @@ defmodule Troupe.Plane.TriggersTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakePod, Harness, Identity, Principals, Sessions, Triggers}
-  alias Troupe.Plane.Triggers.{Cron, Scheduler, Template}
+  alias Troupe.Plane.{FakePod, Harness, Identity, Principals, Repo, Sessions, Triggers}
+  alias Troupe.Plane.Triggers.{Cron, Revision, Scheduler, Template}
 
   @moduletag timeout: 60_000
 
@@ -26,7 +26,7 @@ defmodule Troupe.Plane.TriggersTest do
     team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
 
     {:ok, principal, _secret} =
-      Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+      principal!(team, %{name: "nightly", profiles: ["dev"]})
 
     %{port: Listener.port(), team: team, principal: principal}
   end
@@ -139,13 +139,31 @@ defmodule Troupe.Plane.TriggersTest do
         })
 
       event = %{"issue" => %{"key" => "OPS-12", "title" => "Disk is full"}}
-      assert {:ok, fired} = Triggers.fire(trigger, "hook:1", event, "hatchet")
+      assert {:ok, fired} = Triggers.fire(trigger, "webhook", "hook:1", event, "hatchet")
 
       assert_receive {:pushed, "session.activate", pushed}, 5_000
       assert pushed["owner_subject"] == "svc:engineering/nightly"
       assert pushed["prompt"] == "Triage OPS-12: Disk is full"
       assert pushed["terms"] == %{"max_turns" => 3, "approvals" => "deny"}
-      assert pushed["origin"] == %{"kind" => "trigger", "trigger" => "triage", "run" => "hook:1"}
+      # The origin names the revision as well as the trigger, so a session found six
+      # weeks later says which wording made it without a join through the run.
+      assert %{
+               "kind" => "trigger",
+               "trigger" => "triage",
+               "source" => "webhook",
+               "idempotency_key" => "hook:1"
+             } = pushed["origin"]
+
+      # Who fired it, and on whose authority. The principal is what acted; its sponsor is
+      # the person answerable for what it did, and a run six weeks old is exactly when
+      # somebody wants to know which human stands behind it.
+      assert %{"actor" => "svc:engineering/nightly", "subject" => sponsor} =
+               pushed["origin"]["principal"]
+
+      assert sponsor == context.principal.sponsor_subject
+      refute sponsor == "svc:engineering/nightly"
+
+      assert pushed["origin"]["revision"] == fired.revision.hash
 
       session = fired.session
       assert session.owner_subject == "svc:engineering/nightly"
@@ -158,7 +176,7 @@ defmodule Troupe.Plane.TriggersTest do
       assert Sessions.role_for(lead, session) == :control
 
       # The same key again: the same run, the same session, a token minted now.
-      assert {:ok, again} = Triggers.fire(trigger, "hook:1", event, "hatchet")
+      assert {:ok, again} = Triggers.fire(trigger, "webhook", "hook:1", event, "hatchet")
       assert again.run.id == fired.run.id
       assert again.session.id == session.id
       assert is_binary(again.endpoint["token"])
@@ -179,11 +197,11 @@ defmodule Troupe.Plane.TriggersTest do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
       trigger = trigger!(context, %{"name" => "nightly", "concurrency" => 1})
 
-      assert {:ok, first} = Triggers.fire(trigger, "cron:1", %{}, "scheduler")
+      assert {:ok, first} = Triggers.fire(trigger, "schedule", "cron:1", %{}, "scheduler")
       assert_receive {:pushed, "session.activate", _}, 5_000
       assert first.run.state == "created"
 
-      assert {:ok, second} = Triggers.fire(trigger, "cron:2", %{}, "scheduler")
+      assert {:ok, second} = Triggers.fire(trigger, "schedule", "cron:2", %{}, "scheduler")
       assert second.run.state == "skipped"
       assert is_nil(second.session)
       assert is_nil(second.endpoint)
@@ -193,7 +211,7 @@ defmodule Troupe.Plane.TriggersTest do
       {:ok, _} =
         Sessions.put_status(first.session.id, %{"status" => "done", "done_reason" => "finished"})
 
-      assert {:ok, third} = Triggers.fire(trigger, "cron:3", %{}, "scheduler")
+      assert {:ok, third} = Triggers.fire(trigger, "schedule", "cron:3", %{}, "scheduler")
       assert third.run.state == "created"
       assert_receive {:pushed, "session.activate", _}, 5_000
 
@@ -208,12 +226,12 @@ defmodule Troupe.Plane.TriggersTest do
       a = trigger!(context, %{"name" => "a"})
       b = trigger!(context, %{"name" => "b"})
 
-      assert {:ok, _} = Triggers.fire(a, "shared", %{}, "x")
-      assert {:error, error} = Triggers.fire(b, "shared", %{}, "x")
+      assert {:ok, _} = Triggers.fire(a, "api", "shared", %{}, "x")
+      assert {:error, error} = Triggers.fire(b, "api", "shared", %{}, "x")
       assert error.message == "conflict"
 
       {:ok, off} = Triggers.put(context.team, %{"name" => "b", "enabled" => false}, "root")
-      assert {:error, error} = Triggers.fire(off, "b:1", %{}, "x")
+      assert {:error, error} = Triggers.fire(off, "api", "b:1", %{}, "x")
       assert error.message == "forbidden"
     end
 
@@ -329,7 +347,7 @@ defmodule Troupe.Plane.TriggersTest do
 
     test "a schedule is checked when it is written" do
       team = team_with_grant("design", "ux", name: "design")
-      {:ok, _principal, _} = Principals.create(team, %{name: "bot", profiles: ["ux"]}, "root")
+      {:ok, _principal, _} = principal!(team, %{name: "bot", profiles: ["ux"]})
 
       base = %{"name" => "bad", "principal" => "svc:design/bot", "profile" => "ux"}
       put = fn extra -> Triggers.put(team, Map.merge(base, extra), "root") end
@@ -354,13 +372,141 @@ defmodule Troupe.Plane.TriggersTest do
     end
   end
 
+  describe "revisions" do
+    test "an edit makes a revision; the previous run still reports the one it ran",
+         context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      trigger = trigger!(context, %{"name" => "nightly", "prompt_template" => "check disks"})
+
+      assert {:ok, first} = Triggers.fire(trigger, "schedule", "run-1", %{}, "scheduler")
+      assert first.revision.revision == 1
+      assert first.revision.hash =~ ~r/^sha256:[0-9a-f]{64}$/
+
+      {:ok, edited} =
+        Triggers.put(context.team, %{"name" => "nightly", "prompt_template" => "check disks twice"}, "root")
+
+      assert [second, _first] = Triggers.revisions(edited)
+      assert second.revision == 2
+      assert second.prompt_template == "check disks twice"
+
+      # The run made before the edit still names revision 1, with its text.
+      reread = Triggers.revision(first.run.revision_id)
+      assert reread.revision == 1
+      assert reread.prompt_template == "check disks"
+
+      assert {:ok, next} = Triggers.fire(edited, "schedule", "run-2", %{}, "scheduler")
+      assert next.revision.revision == 2
+    end
+
+    test "editing back to the original text makes no third revision", context do
+      trigger = trigger!(context, %{"name" => "backandforth", "prompt_template" => "one"})
+      assert [%Revision{revision: 1}] = Triggers.revisions(trigger)
+
+      {:ok, trigger} =
+        Triggers.put(context.team, %{"name" => "backandforth", "prompt_template" => "two"}, "root")
+
+      assert [%Revision{revision: 2}, %Revision{revision: 1}] = Triggers.revisions(trigger)
+
+      {:ok, trigger} =
+        Triggers.put(context.team, %{"name" => "backandforth", "prompt_template" => "one"}, "root")
+
+      assert [%Revision{revision: 2}, %Revision{revision: 1}] = Triggers.revisions(trigger)
+      assert {:ok, %Revision{revision: 1}} = Triggers.revise(trigger)
+    end
+
+    test "switching a trigger off is not a change to what a run would be", context do
+      trigger = trigger!(context, %{"name" => "toggled"})
+      assert [%Revision{revision: 1, hash: hash}] = Triggers.revisions(trigger)
+
+      {:ok, off} = Triggers.put(context.team, %{"name" => "toggled", "enabled" => false}, "root")
+      assert [%Revision{revision: 1, hash: ^hash}] = Triggers.revisions(off)
+
+      {:ok, on} = Triggers.put(context.team, %{"name" => "toggled", "enabled" => true}, "root")
+      assert [%Revision{revision: 1, hash: ^hash}] = Triggers.revisions(on)
+    end
+
+    test "the hash is over the document, not over the row", context do
+      trigger = trigger!(context, %{"name" => "hashed"})
+
+      # Two rows of two different triggers with the same document hash to the same
+      # thing: nothing identifying the trigger is in it.
+      other = trigger!(context, %{"name" => "hashed-too"})
+      assert Revision.hash(trigger) == Revision.hash(%{other | name: trigger.name})
+
+      # And the source is in it, so a webhook and a schedule are different documents
+      # even where everything else matches — which is what makes one revision serve
+      # every way a trigger is fired.
+      schedule = %{"kind" => "schedule", "cron" => "0 3 * * *"}
+      refute Revision.hash(trigger) == Revision.hash(%{trigger | source: schedule})
+    end
+
+    test "a firing that overlaps an edit names exactly one revision", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+      trigger = trigger!(context, %{"name" => "racing", "prompt_template" => "before"})
+
+      # The edit commits while the firing is in flight: `fire/4` resolved the revision
+      # before it wrote the run, so the run has the document it read and not a mixture.
+      task =
+        Task.async(fn ->
+          Repo.checkout(fn ->
+            Triggers.put(
+              context.team,
+              %{"name" => "racing", "prompt_template" => "after"},
+              "root"
+            )
+          end)
+        end)
+
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "race-1", %{}, "scheduler")
+      {:ok, _} = Task.await(task)
+
+      assert fired.run.revision_id == fired.revision.id
+      named = Triggers.revision(fired.run.revision_id)
+      assert named.prompt_template in ["before", "after"]
+
+      # One, and it does not move afterwards.
+      assert {:ok, again} = Triggers.fire(trigger, "schedule", "race-1", %{}, "scheduler")
+      assert again.run.revision_id == fired.run.revision_id
+      assert again.revision.hash == named.hash
+    end
+
+    test "a run renders from its revision, and says which in the listing", context do
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
+
+      trigger =
+        trigger!(context, %{
+          "name" => "rendered",
+          "prompt_template" => "rev {{run.revision}} of {{trigger.name}}"
+        })
+
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "render-1", %{}, "scheduler")
+
+      json = Triggers.fired_json(fired)
+      assert json["run"]["revision"] == 1
+      assert json["run"]["revision_hash"] == fired.revision.hash
+
+      assert [{run, _trigger, _session}] = Triggers.runs(context.team, trigger: "rendered")
+      assert %Revision{revision: 1} = run.revision
+      assert Triggers.run_json(run, nil)["revision"] == 1
+    end
+
+    test "a trigger listing carries the revision its next firing would use", context do
+      trigger = trigger!(context, %{"name" => "listed"})
+      json = Triggers.trigger_json(trigger)
+
+      assert json["revision"]["revision"] == 1
+      assert json["revision"]["hash"] =~ ~r/^sha256:/
+      refute json["revision"]["reconstructed"]
+    end
+  end
+
   describe "reviewing" do
     test "marks the session and its run, for anybody who can see it", context do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
       lead = person("lead@example.test", ["engineering"])
       trigger = trigger!(context, %{"name" => "nightly", "notify" => [lead.subject]})
 
-      assert {:ok, fired} = Triggers.fire(trigger, "cron:1", %{}, "scheduler")
+      assert {:ok, fired} = Triggers.fire(trigger, "schedule", "cron:1", %{}, "scheduler")
       assert_receive {:pushed, "session.activate", _}, 5_000
 
       assert {:ok, %{"sessions" => [_]}} =

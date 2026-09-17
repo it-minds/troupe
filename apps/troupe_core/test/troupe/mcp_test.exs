@@ -13,6 +13,7 @@ defmodule Troupe.MCPTest do
 
   alias Troupe.MCP
   alias Troupe.MCP.{Client, Server}
+  alias Troupe.Protocol.Principal
   alias Troupe.{Tool, Tools, Workspace}
   alias Troupe.Tool.Ctx
 
@@ -169,6 +170,109 @@ defmodule Troupe.MCPTest do
     }
   end
 
+  describe "a server that acts as the session's owner" do
+    setup context do
+      person =
+        Server.from_config(%{
+          name: "notes",
+          url: "http://127.0.0.1:#{context.port}/mcp",
+          credential_mode: "person"
+        })
+
+      # Nothing resolved: there is no environment variable for a person-mode server and
+      # the value is not the pod's to hold.
+      assert person.credential == nil
+      assert person.credential_mode == :person
+      assert Server.slot(person) == "notes"
+
+      on_exit(fn -> Application.delete_env(:troupe_core, :person_credentials) end)
+      %{person: person}
+    end
+
+    test "answers not_connected, readably, when nobody has connected it", context do
+      assert [tool] = MCP.tools(context.person)
+      # Discovery is the profile's and happens without anybody's credential.
+      _listing = assert_request()
+
+      # No lookup installed at all, which is what a laptop and a local session both mean.
+      assert {:ok, output} = Tool.invoke(tool, %{"topic" => "a thing"}, owned_ctx("idp|ada"))
+
+      assert %{"error" => "not_connected", "server" => "notes", "hint" => hint} =
+               Jason.decode!(output)
+
+      assert hint =~ "Connections"
+
+      # And the session carries on: nothing was sent, and this is a result the model can
+      # read rather than a transport error it would retry four times.
+      refute_received {:mcp_request, _}
+    end
+
+    test "sends the owner's credential, and only for the call", context do
+      Application.put_env(:troupe_core, :person_credentials, fn _server, ctx ->
+        case MCP.owner_of(ctx) do
+          "idp|ada" -> {:ok, "ada-personal-4417"}
+          _other -> {:error, :not_connected}
+        end
+      end)
+
+      assert [tool] = MCP.tools(context.person)
+      _listing = assert_request()
+
+      assert {:ok, _output} = Tool.invoke(tool, %{"topic" => "a thing"}, owned_ctx("idp|ada"))
+      call = assert_request()
+
+      assert call.headers["authorization"] == "Bearer ada-personal-4417"
+
+      # A session whose owner has not connected gets the refusal, on the same server, at
+      # the same moment — the credential is the session's, not the pod's.
+      assert {:ok, output} = Tool.invoke(tool, %{"topic" => "a thing"}, owned_ctx("idp|bo"))
+      assert %{"error" => "not_connected"} = Jason.decode!(output)
+    end
+
+    test "says which identity a call would go out as", context do
+      Application.put_env(:troupe_core, :mcp_servers, [context.person])
+      on_exit(fn -> Application.delete_env(:troupe_core, :mcp_servers) end)
+
+      tools = MCP.tools(context.person)
+      _listing = assert_request()
+      Application.put_env(:troupe_core, :remote_tools, tools)
+      on_exit(fn -> Application.delete_env(:troupe_core, :remote_tools) end)
+
+      assert [%{name: name}] = tools
+
+      # Both halves. Ada is running her own session, so they are equal — and are written
+      # anyway, because a field omitted when it matches cannot be read afterwards: absent
+      # because they were the same, or absent because nothing wrote it, look identical.
+      assert %Principal{subject: "idp|ada", actor: "idp|ada"} =
+               Tools.identity_of(name, owned_ctx("idp|ada"))
+
+      refute Principal.delegated?(Tools.identity_of(name, owned_ctx("idp|ada")))
+
+      # A built-in is not a credential anybody chose, so there is no question to answer.
+      assert Tools.identity_of("write_file", owned_ctx("idp|ada")) == nil
+    end
+
+    test "names the credential's owner and the session's owner separately", context do
+      Application.put_env(:troupe_core, :mcp_servers, [context.person])
+      on_exit(fn -> Application.delete_env(:troupe_core, :mcp_servers) end)
+
+      tools = MCP.tools(context.person)
+      _listing = assert_request()
+      Application.put_env(:troupe_core, :remote_tools, tools)
+      on_exit(fn -> Application.delete_env(:troupe_core, :remote_tools) end)
+
+      [%{name: name}] = tools
+
+      # A profile-mode server's credential belongs to nobody in particular: it is the
+      # service account the operator injected, the same for every session. Naming a person
+      # there would be a lie about whose credential went out.
+      Application.put_env(:troupe_core, :mcp_servers, [%{context.person | credential_mode: :profile}])
+
+      assert %Principal{subject: "profile", actor: "idp|ada"} =
+               Tools.identity_of(name, owned_ctx("idp|ada"))
+    end
+  end
+
   defp ctx do
     %Ctx{
       session_id: "s-1",
@@ -290,5 +394,11 @@ defmodule Troupe.MCPTest do
         _ -> nil
       end
     end)
+  end
+  # A session has one identity: the owner, fixed at activation, which is what a pod is
+  # told in its attribution and what a person-mode call goes out as however many people
+  # are attached.
+  defp owned_ctx(owner) do
+    %{ctx() | config: %Troupe.Config{attribution: %{owner: owner, team: "engineering"}}}
   end
 end

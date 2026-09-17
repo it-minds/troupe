@@ -6,6 +6,9 @@
     "channel": {
       "type": "string"
     },
+    "entitlements": {
+      "type": "object"
+    },
     "from": {
       "type": "integer"
     },

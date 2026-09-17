@@ -82,6 +82,29 @@ defmodule Troupe.Gateway.DaemonTest do
       assert Enum.sort(info.scopes) == [:admin, :control, :observe]
     end
 
+    test "private_sessions is false until the daemon can name a person", context do
+      # Unlinked. The daemon knows an operating-system user and calls them
+      # `local:<username>`, which means nothing to a plane or to another device — so a
+      # client that offered the checkbox here would be offering a session that silently
+      # stayed local.
+      client = connect(context)
+      assert Client.info(client).capabilities["private_sessions"] == false
+      Client.close(client)
+
+      {:ok, _identity} =
+        Troupe.Identity.link(
+          %{subject: "idp|ada", display_name: "Ada", plane_url: "https://plane.example"},
+          context.state_dir
+        )
+
+      linked = connect(context)
+      info = Client.info(linked)
+
+      assert info.principal["subject"] == "idp|ada"
+      assert info.capabilities["private_sessions"] == true
+      Client.close(linked)
+    end
+
     test "a version the server cannot speak is refused, with what it can", context do
       {address, port} = Endpoint.connect_args(context.endpoint)
 

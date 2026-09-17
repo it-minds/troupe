@@ -15,8 +15,18 @@ defmodule Troupe.Plane.Identity do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias Troupe.Plane.Identity.{Grant, Group, Membership, Team, TeamAdmin, User}
-  alias Troupe.Plane.{Principals, Repo, Sessions}
+  alias Troupe.Plane.{Principals, Repo, Sessions, Settings}
+
+  alias Troupe.Plane.Identity.{
+    Entitlement,
+    Grant,
+    Group,
+    Membership,
+    Team,
+    TeamAdmin,
+    TeamGroupLink,
+    User
+  }
 
   require Logger
 
@@ -101,6 +111,19 @@ defmodule Troupe.Plane.Identity do
   def get_user("svc:" <> _ = subject), do: Principals.user_for(subject)
   def get_user(subject), do: Repo.get_by(User, subject: subject)
 
+  @doc """
+  Set or clear a person's own spend ceiling.
+
+  Through `User.budget_changeset/2` rather than the changeset SCIM and a login write, so
+  a provider push cannot reset it. `nil` and `0` both clear it.
+  """
+  @spec set_budget(User.t(), integer() | nil) :: {:ok, User.t()} | {:error, Ecto.Changeset.t()}
+  def set_budget(%User{} = user, budget_micros) do
+    user
+    |> User.budget_changeset(%{budget_micros: budget_micros})
+    |> Repo.update()
+  end
+
   @doc "A user by the id this plane gave them, or `nil`. SCIM addresses people this way."
   @spec get_user_by_id(Ecto.UUID.t()) :: User.t() | nil
   def get_user_by_id(id) do
@@ -166,22 +189,37 @@ defmodule Troupe.Plane.Identity do
   """
   @spec enable_team(Group.t(), map()) :: {:ok, Team.t()} | {:error, Ecto.Changeset.t()}
   def enable_team(%Group{} = group, attrs \\ %{}) do
-    existing = Repo.get_by(Team, group_id: group.id)
-
     # String keys throughout, whoever called. `Map.put_new(:group_id, ...)` on a map that
     # arrived from JSON produced a map with mixed keys, which Ecto refuses to cast — so
     # enabling a team with any attributes at all worked from the panel and raised from the
     # CLI and the API.
+    wanted = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    name = wanted["name"] || default_team_name(group)
+
+    # By name, not by group. Keying on the group meant enabling one under a second name
+    # silently *renamed* the first team instead of making another — one group, one team,
+    # for ever, which is the assumption this package exists to remove.
+    existing = Repo.get_by(Team, name: name)
+
     attrs =
-      attrs
-      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      wanted
       |> Map.put_new("group_id", group.id)
-      |> Map.put_new("name", default_team_name(group))
+      |> Map.put("name", name)
       |> Map.put_new("enabled_at", DateTime.utc_now())
 
     (existing || %Team{})
     |> Team.changeset(attrs)
     |> Repo.insert_or_update()
+    |> case do
+      {:ok, team} ->
+        # A team enabled from a group starts linked to it, which is what enabling one has
+        # always meant. Everything after that is `link_group/3`.
+        {:ok, _link} = link_group(team, group, "enable_team")
+        {:ok, team}
+
+      error ->
+        error
+    end
   end
 
   # A name a person will type: the display name, lowercased, with anything that is not
@@ -227,11 +265,17 @@ defmodule Troupe.Plane.Identity do
   end
 
   def teams_for(%User{} = user) do
+    # Through the links, and `distinct` because a person in two of a team's groups is in
+    # the team *once*. Without it they get every team twice and a listing shows their
+    # budget as two budgets.
     Repo.all(
       from(t in Team,
+        join: l in TeamGroupLink,
+        on: l.team_id == t.id,
         join: m in Membership,
-        on: m.group_id == t.group_id,
+        on: m.group_id == l.group_id,
         where: m.user_id == ^user.id,
+        distinct: t.id,
         order_by: t.name
       )
     )
@@ -261,16 +305,145 @@ defmodule Troupe.Plane.Identity do
 
   # -- grants -----------------------------------------------------------------
 
-  @doc "Let a team use a profile."
+  @doc """
+  Let a team use a profile.
+
+  `attrs` may carry `entitlements`: a list of `%{kind, name, mode}` that *replaces* the
+  grant's rows. Replacement rather than merge, because the editor that writes them shows
+  three checklists and a partial write of a checklist is a list somebody did not mean.
+  Leaving the key out changes nothing, which is what keeps every existing caller — and
+  every existing grant — exactly as it was.
+  """
   @spec grant(Team.t(), String.t(), map()) :: {:ok, Grant.t()} | {:error, Ecto.Changeset.t()}
   def grant(%Team{} = team, profile, attrs \\ %{}) do
     existing = Repo.get_by(Grant, team_id: team.id, profile: profile)
 
-    attrs = attrs |> Map.put_new(:team_id, team.id) |> Map.put_new(:profile, profile)
+    # String keys throughout, because callers reach here with both — a form's map, a
+    # keyword-ish map from a test, and `Admin.team_grant/4`, which stringifies before it
+    # can look for `entitlements`. Ecto refuses a map with mixed keys, and the mixture
+    # only appears when one caller has already normalised and this function has not.
+    {entitlements, attrs} = attrs |> stringify() |> pop_entitlements()
 
-    (existing || %Grant{})
-    |> Grant.changeset(attrs)
-    |> Repo.insert_or_update()
+    attrs =
+      attrs
+      |> Map.put_new("team_id", team.id)
+      |> Map.put_new("profile", profile)
+
+    with {:ok, grant} <-
+           (existing || %Grant{}) |> Grant.changeset(attrs) |> Repo.insert_or_update() do
+      case entitlements do
+        nil -> {:ok, grant}
+        rows -> put_entitlements(grant, rows)
+      end
+    end
+  end
+
+  defp pop_entitlements(attrs), do: Map.pop(attrs, "entitlements")
+
+  # -- entitlements -----------------------------------------------------------
+
+  @doc """
+  The rows narrowing a grant. None means no restriction.
+  """
+  @spec entitlements(Grant.t()) :: [Entitlement.t()]
+  def entitlements(%Grant{} = grant) do
+    Repo.all(
+      from(e in Entitlement,
+        where: e.grant_id == ^grant.id,
+        order_by: [e.kind, e.name]
+      )
+    )
+  end
+
+  @doc """
+  The rows narrowing what a team may use on a profile, or `[]` where there is no grant.
+
+  `[]` from a team with no grant is not a widening: nothing reaches this without having
+  already been told the team may use the profile at all, and a profile a team has no
+  grant on offers it nothing to narrow.
+  """
+  @spec entitlements_for(Team.t() | nil, String.t()) :: [Entitlement.t()]
+  def entitlements_for(nil, _profile), do: []
+
+  def entitlements_for(%Team{} = team, profile) do
+    Repo.all(
+      from(e in Entitlement,
+        join: g in Grant,
+        on: g.id == e.grant_id,
+        where: g.team_id == ^team.id and g.profile == ^profile,
+        order_by: [e.kind, e.name]
+      )
+    )
+  end
+
+  @doc """
+  Replace a grant's entitlement rows, in one transaction.
+
+  Replacement is the operation the editor has: three checklists, written whole. A row
+  naming something the current bundle does not have is kept rather than refused — a
+  bundle can be rolled back, and an entitlement that vanished with a publish and did not
+  come back with the revert would be a silent widening.
+  """
+  @spec put_entitlements(Grant.t(), [map()]) :: {:ok, Grant.t()} | {:error, Ecto.Changeset.t()}
+  def put_entitlements(%Grant{} = grant, rows) when is_list(rows) do
+    now = DateTime.utc_now()
+
+    prepared =
+      rows
+      |> Enum.map(&stringify/1)
+      |> collapse()
+      |> Enum.map(fn row ->
+        %Entitlement{}
+        |> Entitlement.changeset(%{
+          "grant_id" => grant.id,
+          "kind" => row["kind"],
+          "name" => row["name"],
+          "mode" => row["mode"] || "allow"
+        })
+      end)
+
+    case Enum.find(prepared, &(not &1.valid?)) do
+      %Ecto.Changeset{} = bad ->
+        {:error, bad}
+
+      nil ->
+        rows = Enum.map(prepared, &entitlement_row(&1, now))
+
+        Repo.transaction(fn ->
+          Repo.delete_all(from(e in Entitlement, where: e.grant_id == ^grant.id))
+          Repo.insert_all(Entitlement, rows)
+          grant
+        end)
+    end
+  end
+
+  # `insert_all` takes plain maps rather than changesets, so the defaults a changeset
+  # would have applied have to be applied here — the changeset above is what validated
+  # the row, and this is what writes it.
+  defp entitlement_row(changeset, now) do
+    changeset.changes
+    |> Map.put(:id, Ecto.UUID.generate())
+    |> Map.put_new(:mode, "allow")
+    |> Map.put(:inserted_at, now)
+    |> Map.put(:updated_at, now)
+  end
+
+  defp stringify(row) when is_map(row) do
+    Map.new(row, fn {key, value} -> {to_string(key), value} end)
+  end
+
+  # One row per name, because that is what the unique index holds and what an editor of
+  # three checklists can express. A list that names the same thing twice is a caller
+  # saying two things at once, and the safe reading is the one that grants less — the
+  # same rule `Entitlement.resolve/2` applies when rows arrive together from several
+  # grants, reached here before anything is written rather than after.
+  defp collapse(rows) do
+    rows
+    |> Enum.group_by(&{&1["kind"], &1["name"]})
+    |> Enum.map(fn {_key, group} ->
+      Enum.find(group, List.first(group), &(&1["mode"] == "deny"))
+    end)
+    |> Enum.sort_by(&{&1["kind"], &1["name"]})
   end
 
   @doc "Take a profile away from a team. Its live sessions become read-only."
@@ -320,11 +493,127 @@ defmodule Troupe.Plane.Identity do
       from(u in User,
         join: m in Membership,
         on: m.user_id == u.id,
-        where: m.group_id == type(^team.group_id, :binary_id),
+        join: l in TeamGroupLink,
+        on: l.group_id == m.group_id and l.team_id == type(^team.id, :binary_id),
+        distinct: u.id,
         order_by: u.subject
       )
     )
   end
+
+  @doc """
+  The groups a team draws its members from, newest link last.
+
+  What the console lists and what an administrator adds to. A team with none has no
+  members, which is valid: it is what a team looks like while somebody is still deciding
+  which groups belong in it.
+  """
+  @spec links_of(Team.t()) :: [TeamGroupLink.t()]
+  def links_of(%Team{} = team) do
+    Repo.all(
+      from(l in TeamGroupLink,
+        where: l.team_id == type(^team.id, :binary_id),
+        order_by: l.inserted_at,
+        preload: [:group]
+      )
+    )
+  end
+
+  @doc """
+  Draw a team's members from one more group.
+
+  Idempotent on the pair: linking a group twice is the same link, not a person counted
+  twice — which matters because membership is a union and a union over duplicates is a
+  listing with everybody in it twice.
+  """
+  @spec link_group(Team.t(), Group.t(), String.t()) ::
+          {:ok, TeamGroupLink.t()} | {:error, Ecto.Changeset.t()}
+  def link_group(%Team{} = team, %Group{} = group, by) do
+    attrs = %{team_id: team.id, group_id: group.id, issuer: issuer(), linked_by: by}
+
+    (Repo.get_by(TeamGroupLink, team_id: team.id, group_id: group.id) || %TeamGroupLink{})
+    |> TeamGroupLink.changeset(attrs)
+    |> Repo.insert_or_update()
+  end
+
+  @doc """
+  Stop drawing a team's members from a group.
+
+  Removes access for everybody who was in the team *only* through it. `unlink_effect/2`
+  is what says how many that is, and is meant to be shown before this is called.
+  """
+  @spec unlink_group(Team.t(), Group.t()) :: :ok
+  def unlink_group(%Team{} = team, %Group{} = group) do
+    Repo.delete_all(
+      from(l in TeamGroupLink,
+        where: l.team_id == type(^team.id, :binary_id) and l.group_id == type(^group.id, :binary_id)
+      )
+    )
+
+    :ok
+  end
+
+  @doc """
+  Who loses access if this link goes, and who does not.
+
+  The count comes first and the identifier is typed, like every other irreversible
+  action. Somebody unlinking a group is usually right about which group and often wrong
+  about how many people are only in the team through it — that is exactly the number this
+  answers, and it is the one worth putting in front of them.
+  """
+  @spec unlink_effect(Team.t(), Group.t()) :: map()
+  def unlink_effect(%Team{} = team, %Group{} = group) do
+    in_group = MapSet.new(members_of_group(group), & &1.subject)
+    remaining = team |> members_without(group) |> MapSet.new(& &1.subject)
+
+    losing = MapSet.difference(in_group, remaining)
+
+    %{
+      team: team.name,
+      group: group.external_id,
+      in_group: MapSet.size(in_group),
+      keep_access: MapSet.size(MapSet.intersection(in_group, remaining)),
+      lose_access: MapSet.size(losing),
+      losing: losing |> MapSet.to_list() |> Enum.sort(),
+      # Sessions do not move. A session's team is recorded at create and stays; unlinking
+      # changes who may open it, not what it belongs to — which is the thing people assume
+      # the other way round, so the dialog says it.
+      sessions_they_can_open: sessions_open_to(team, losing)
+    }
+  end
+
+  defp members_without(%Team{} = team, %Group{} = group) do
+    Repo.all(
+      from(u in User,
+        join: m in Membership,
+        on: m.user_id == u.id,
+        join: l in TeamGroupLink,
+        on: l.group_id == m.group_id and l.team_id == type(^team.id, :binary_id),
+        where: l.group_id != type(^group.id, :binary_id),
+        distinct: u.id
+      )
+    )
+  end
+
+  defp members_of_group(%Group{} = group) do
+    Repo.all(
+      from(u in User,
+        join: m in Membership,
+        on: m.user_id == u.id,
+        where: m.group_id == type(^group.id, :binary_id),
+        order_by: u.subject
+      )
+    )
+  end
+
+  # What those people could open today. Team-visible sessions of this team, plus the ones
+  # they own or are on the ACL of — counted rather than listed, because a dialog wants a
+  # number and a list of twenty-three session ids is not one.
+  defp sessions_open_to(_team, losing) do
+    if MapSet.size(losing) == 0, do: 0, else: Sessions.count_visible_to(MapSet.to_list(losing))
+  end
+
+  defp issuer, do: Settings.get("issuer")
 
   # -- team administrators ----------------------------------------------------
 
@@ -399,8 +688,10 @@ defmodule Troupe.Plane.Identity do
       from(g in Grant,
         join: t in Team,
         on: t.id == g.team_id,
+        join: l in TeamGroupLink,
+        on: l.team_id == t.id,
         join: m in Membership,
-        on: m.group_id == t.group_id,
+        on: m.group_id == l.group_id,
         where: m.user_id == ^user.id,
         order_by: [g.profile, t.name],
         preload: [team: t]

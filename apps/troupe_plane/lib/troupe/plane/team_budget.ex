@@ -2,6 +2,10 @@ defmodule Troupe.Plane.TeamBudget do
   @moduledoc """
   One actor per team, deciding whether there is money left.
 
+  One rung of the ladder `Troupe.Plane.Budget` walks: the platform's ceiling above it,
+  a person's below. This one answers only for the team, and writes nothing — the
+  reservation row is `Budget`'s to write once every rung has said yes.
+
   The same shape as `Troupe.Plane.Placement` and for the same reason: deciding whether
   a reservation fits is a read-decide-write over the ledger, and two replicas doing it
   at once is how a team spends more than it has.
@@ -92,6 +96,12 @@ defmodule Troupe.Plane.TeamBudget do
 
   @impl GenServer
   def handle_call({:reserve, session_id, amount}, _from, state) do
+    # Reloaded rather than trusted. The count this actor last had is one a pod restart, a
+    # replica handover or another rung's release can have moved under it, and a ceiling
+    # decided from a stale count is a ceiling that is wrong for as long as the process
+    # lives — which is the fault the placement actor already taught us once.
+    state = load(state)
+
     cond do
       Map.has_key?(state.reservations, session_id) ->
         # Reserving twice for one session is a retry, not a second slice.
@@ -99,9 +109,9 @@ defmodule Troupe.Plane.TeamBudget do
 
       unlimited?(state) or
           state.spent_micros + state.reserved_micros + amount <= state.budget_micros ->
-        # Written before it is granted, so a replica dying does not release it silently.
-        {:ok, _} = Ledger.reserve(state.team_id, session_id, amount)
-
+        # Held, not written. One promise is one row, and `Troupe.Plane.Budget` writes it
+        # once every rung of the ladder has agreed — a row written here would be counted
+        # by the rungs after this one as though somebody else had made it.
         state = %{
           state
           | reserved_micros: state.reserved_micros + amount,
@@ -117,7 +127,6 @@ defmodule Troupe.Plane.TeamBudget do
 
   def handle_call({:release, session_id}, _from, state) do
     {amount, reservations} = Map.pop(state.reservations, session_id, 0)
-    Ledger.release(state.team_id, session_id)
 
     state = %{
       state
@@ -186,8 +195,10 @@ defmodule Troupe.Plane.TeamBudget do
   # -- state ------------------------------------------------------------------
 
   # Reloaded from the ledger, which is what makes respawning on another replica safe.
+  # What this actor is already holding is merged over what the ledger knows, so a session
+  # granted a moment ago and not yet written is counted once rather than twice.
   defp load(state) do
-    reservations = Ledger.open_reservations(state.team_id)
+    reservations = Map.merge(Ledger.open_reservations(state.team_id), state.reservations)
 
     %{
       state

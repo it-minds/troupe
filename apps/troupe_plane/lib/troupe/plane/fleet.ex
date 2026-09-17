@@ -12,6 +12,7 @@ defmodule Troupe.Plane.Fleet do
 
   alias Troupe.Plane.Fleet.{Profile, Worker}
   alias Troupe.Plane.Repo
+  alias Troupe.Plane.Sessions.Session
 
   # Past this with no heartbeat a pod is presumed lost. Fifteen seconds is the done
   # item's number, and heartbeats are every five.
@@ -129,7 +130,50 @@ defmodule Troupe.Plane.Fleet do
     |> Enum.filter(&(Worker.disk_fraction(&1) < high_watermark))
   end
 
-  @doc "Mark pods that have stopped heartbeating as unhealthy, and say which."
+  @doc """
+  A pod's control connection has gone, so stop placing sessions on it.
+
+  The sweeper already does this after the heartbeat lease expires, which was enough when
+  a pod only went away because somebody drained it. It is not enough now that the plane
+  scales profiles itself: a worker removed by a scale-down stops heartbeating and stays
+  *placeable* for the rest of its lease, so the next `session.create` is placed on a pod
+  that is not there and fails with "the pod did not accept the session".
+
+  The plane learns this the instant the socket closes, which is a great deal sooner than
+  a lease. Health only governs placement — the sessions the pod was holding are the
+  sweeper's business and are stranded on its schedule, not this one.
+
+  **`enrolled_at` is the fence, and it is load-bearing.** A pod whose plane replica dies
+  reconnects to the survivor, and the two events race: the new connection enrols and marks
+  the row healthy, and then the old connection's teardown arrives and marks it unhealthy
+  again. Nothing recovers from that until the pod's next heartbeat, and in between every
+  create is refused with `no_healthy_worker` — a failover that looks exactly like an
+  outage. So a teardown may only mark the row it is actually about: one that has not been
+  enrolled since. Without the fence, "costs nothing if the connection comes straight back"
+  was false precisely when the connection came straight back.
+  """
+  @spec disconnected(String.t(), String.t(), DateTime.t()) :: :ok
+  def disconnected(namespace, pod_name, enrolled_at) do
+    Repo.update_all(
+      from(w in Worker,
+        where:
+          w.namespace == ^namespace and w.pod_name == ^pod_name and w.healthy and
+            w.enrolled_at <= ^enrolled_at
+      ),
+      set: [healthy: false, updated_at: DateTime.utc_now()]
+    )
+
+    :ok
+  end
+
+  @doc """
+  Mark pods that have stopped heartbeating as unhealthy, and say which.
+
+  Stopping placement, which is the easy half. The other half — what becomes of the
+  sessions such a pod was believed to be holding — is `lost/0`, because they are two
+  questions: a pod with nothing on it needs nothing done about it, and a pod that was
+  marked unhealthy an hour ago still holds whatever it held.
+  """
   @spec sweep() :: [Worker.t()]
   def sweep do
     cutoff = DateTime.add(DateTime.utc_now(), -lease_timeout_ms(), :millisecond)
@@ -141,6 +185,38 @@ defmodule Troupe.Plane.Fleet do
       )
 
     workers || []
+  end
+
+  @doc """
+  Pods past their lease that are still believed to be holding sessions.
+
+  Nothing ever did anything about these. They stayed `active`, pointing at a worker that
+  was gone, and opening one took the already-running branch — it hands the client an
+  endpoint and never tells the pod to restore — so `subscribe` answered `not_found` for as
+  long as anybody cared to retry. No timeout expired and no retry helped.
+
+  It only ever looked handled because a pod that comes *back* reconciles what it holds on
+  re-enrolment, and until the plane scaled profiles itself a pod nearly always came back.
+  A pod removed by a scale-down does not.
+
+  Health is not in the question. A worker marked unhealthy the moment its socket closed
+  is exactly the one whose sessions need rescuing, and asking only about healthy ones
+  would skip it. Idempotent because a session that has been marked dormant is not on a
+  worker: once rescued, there is nothing here to find.
+  """
+  @spec lost() :: [Worker.t()]
+  def lost do
+    cutoff = DateTime.add(DateTime.utc_now(), -lease_timeout_ms(), :millisecond)
+
+    Repo.all(
+      from(w in Worker,
+        join: s in Session,
+        on: s.worker_id == w.id and s.state == "active",
+        where: w.last_heartbeat_at < ^cutoff,
+        distinct: w.id,
+        select: w
+      )
+    )
   end
 
   @doc "Stop placing on a pod. Running turns finish; the sessions then go dormant."

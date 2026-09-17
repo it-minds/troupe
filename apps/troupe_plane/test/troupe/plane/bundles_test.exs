@@ -220,6 +220,57 @@ defmodule Troupe.Plane.BundlesTest do
       {:ok, _} = Bundles.retire("stable", bundle.version)
       assert Fleet.get_profile("dev").spec["mcpServers"] == []
     end
+
+    test "a person-mode server carries a slot and no Secret at all" do
+      {:ok, _} = Fleet.put_profile(%{name: "dev", spec: %{}})
+
+      content =
+        schema_1(
+          mcp_servers: [
+            %{
+              "name" => "jira",
+              "url" => "https://mcp.jira.example/mcp",
+              "credential_mode" => "person"
+            }
+          ]
+        )
+
+      assert {:ok, _} = Bundles.publish("stable", content, announce: false)
+      assert [entry] = Fleet.get_profile("dev").spec["mcpServers"]
+
+      # The slot defaults to the server's own name: "connect Jira as yourself" should
+      # not need a second name invented for it.
+      assert entry["credentialMode"] == "person"
+      assert entry["credentialSlot"] == "jira"
+
+      # Nothing for the operator to mount, and no environment variable. A `secretRef`
+      # here would be a pod failing to start over a credential nobody configured.
+      refute Map.has_key?(entry, "secretRef")
+      refute Map.has_key?(entry, "credentialRef")
+
+      # And it is still listed, because egress has to see the host either way.
+      assert entry["url"] == "https://mcp.jira.example/mcp"
+    end
+
+    test "a server with a Secret and a person's credential is refused at publish" do
+      content =
+        schema_1(
+          mcp_servers: [
+            %{
+              "name" => "jira",
+              "url" => "https://mcp.jira.example/mcp",
+              "credential_mode" => "person",
+              "secret_ref" => "JIRA_MCP_TOKEN"
+            }
+          ]
+        )
+
+      assert {:error, {:invalid_bundle, [reason]}} =
+               Bundles.publish("stable", content, announce: false)
+
+      assert reason =~ "two credentials"
+      assert reason =~ "which code path ran"
+    end
   end
 
   describe "what a session runs on" do
@@ -240,6 +291,20 @@ defmodule Troupe.Plane.BundlesTest do
       # A new session gets v2.
       assert {:ok, later} = Harness.call("session.create", %{"profile" => "dev"}, context(user))
       assert Sessions.get(later["session_id"]).bundle_version == v2.version
+
+      # And a client can see all of that. Until this was on `session.get`, the pin was a
+      # promise nothing outside the plane's own database could check — which is the same
+      # as no promise, for anybody trying to explain why a session is behaving like a
+      # bundle that was replaced an hour ago.
+      assert {:ok, pinned} =
+               Harness.call("session.get", %{"session_id" => session.id}, context(user))
+
+      assert pinned["bundle_version"] == v1.version
+
+      assert {:ok, moved} =
+               Harness.call("session.get", %{"session_id" => later["session_id"]}, context(user))
+
+      assert moved["bundle_version"] == v2.version
     end
 
     test "activating on a retired version upgrades, and says so", context do

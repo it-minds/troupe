@@ -1,0 +1,56 @@
+#!/usr/bin/env bash
+# Run a command against this repository with the toolchain `.tool-versions` names,
+# without installing it.
+#
+#   scripts/toolbox mix test
+#   scripts/toolbox mix check
+#   scripts/toolbox                 # an interactive shell
+#
+# The container joins the network `scripts/dev-up` created, so Postgres, MinIO and
+# OpenBao are where `config/config.exs` says they are. `_build` and `deps` live in named
+# volumes rather than in the working tree: a Linux build and a host build cannot share
+# either, and a bind-mounted `_build` on a non-Linux host is also the slowest part of a
+# compile by an order of magnitude.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+image=troupe-toolbox
+network=troupe-dev_default
+
+# Git Bash on Windows hands Docker a path like `/c/Users/...`, which the daemon reads as
+# a Linux path and creates as an empty directory — the failure being a mount that is
+# there and has no `mix.exs` in it. `pwd -W` is the same directory spelled the way the
+# daemon understands.
+host_pwd="$(pwd -W 2>/dev/null || pwd)"
+export MSYS_NO_PATHCONV=1
+
+docker image inspect "$image" >/dev/null 2>&1 || {
+  echo "building $image (once)" >&2
+  docker build --tag "$image" dev/toolbox >&2
+}
+
+docker network inspect "$network" >/dev/null 2>&1 || {
+  echo "no network $network — run scripts/dev-up first" >&2
+  exit 1
+}
+
+# `Troupe.SandboxTest` is the only proof one session cannot see another's workspace,
+# and bubblewrap builds that sandbox out of an unprivileged user namespace. Docker's
+# default seccomp profile blocks `clone` with `CLONE_NEWUSER`, so without these the
+# sandbox tests fail with "Creating new namespace failed: Operation not permitted" —
+# which reads like a sandbox that refused and is a container that refused. The same
+# relaxation CI reaches by turning AppArmor's `restrict_unprivileged_userns` off on
+# the runner.
+exec docker run --rm --interactive $([ -t 0 ] && echo --tty) \
+  --security-opt seccomp=unconfined \
+  --security-opt apparmor=unconfined \
+  --cap-add=SYS_ADMIN \
+  --network "$network" \
+  --volume "$host_pwd:/workspace" \
+  --volume troupe-toolbox-build:/workspace/_build \
+  --volume troupe-toolbox-deps:/workspace/deps \
+  --volume troupe-toolbox-hex:/root/.hex \
+  --volume troupe-toolbox-mix:/root/.mix \
+  --env MIX_ENV="${MIX_ENV:-test}" \
+  "$image" "${@:-bash}"

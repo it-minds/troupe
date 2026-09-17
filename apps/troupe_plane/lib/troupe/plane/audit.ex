@@ -20,6 +20,7 @@ defmodule Troupe.Plane.Audit do
 
   alias Troupe.Plane.Audit.Event
   alias Troupe.Plane.Repo
+  alias Troupe.Protocol.Principal
 
   require Logger
 
@@ -39,7 +40,11 @@ defmodule Troupe.Plane.Audit do
   def record(actor, action, subject_id, detail \\ %{}, opts \\ []) do
     %Event{}
     |> Event.changeset(%{
-      actor: actor,
+      actor: actor(actor),
+      # Whose authority, which for everything a person does by hand is themselves. Passed
+      # as `on_behalf_of:` by the callers where it is not — a trigger firing as a
+      # principal, a delegated call going out with somebody else's credential.
+      on_behalf_of: Keyword.get(opts, :on_behalf_of, on_behalf_of(actor)),
       action: action,
       subject_kind: Keyword.get(opts, :kind, kind_of(action)),
       subject_id: subject_id,
@@ -48,6 +53,15 @@ defmodule Troupe.Plane.Audit do
     })
     |> Repo.insert()
   end
+
+  # A caller may hand in either half, or the pair. Taking a `Principal` here means a
+  # caller that already has one does not have to take it apart and risk putting the
+  # halves back the wrong way round.
+  defp actor(%Principal{actor: actor}), do: actor
+  defp actor(subject) when is_binary(subject), do: subject
+
+  defp on_behalf_of(%Principal{subject: subject}), do: subject
+  defp on_behalf_of(subject) when is_binary(subject), do: subject
 
   # `profile.put` is about a profile. Derived rather than passed, so an action and its
   # subject kind cannot drift apart.

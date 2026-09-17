@@ -148,6 +148,57 @@ jobs:
                   -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
           done
 
+  cluster:
+    name: the suite that needs a cluster
+    needs: [check, chart]
+    # On `main` and on tags only. It takes twenty minutes and the gate on every push is
+    # what keeps the loop tight; a branch that wants it can be pushed to a tag.
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: troupe-dev
+          config: dev/kind/cluster.yaml
+
+      - uses: azure/setup-helm@v4
+
+      # The same script a developer runs, so that a cluster failure here is reproducible
+      # by one command on a laptop. It builds the four images and `kind load`s them,
+      # which is why nothing is pushed for this job.
+      - name: Bring up a Troupe
+        run: scripts/remote-up
+
+      - run: mix deps.get
+
+      - name: The cluster suite
+        run: mix troupe.e2e
+
+      # A cluster failure that produces only an exit code is a failure nobody will
+      # diagnose. These are the two logs that say what happened.
+      - name: Logs, on failure
+        if: failure()
+        run: |
+          mkdir -p cluster-logs
+          kubectl logs -n troupe-system deployment/troupe-plane --tail=2000 > cluster-logs/plane.log 2>&1 || true
+          kubectl logs -n troupe-system deployment/troupe-operator --tail=2000 > cluster-logs/operator.log 2>&1 || true
+          kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
+          kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cluster-logs
+          path: cluster-logs/
+
   images:
     name: image ${{ matrix.release }}
     needs: [check, protocol]

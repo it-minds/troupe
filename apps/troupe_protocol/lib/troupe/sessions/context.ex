@@ -1,4 +1,4 @@
-defmodule Troupe.Worker.Session.Context do
+defmodule Troupe.Sessions.Context do
   @moduledoc """
   What a worker needs to know to make one session durable.
 
@@ -9,6 +9,11 @@ defmodule Troupe.Worker.Session.Context do
 
   The epoch comes from the plane and is carried unchanged. A worker never mints one —
   that is the whole of fencing.
+
+  `team` is whoever the key belongs to, and that is not always a team: a private session's
+  key belongs to a person, `{:person, subject}`, under a path no pod role covers. The name
+  stays because it is the *owner of the key* in both cases and a second field would be two
+  things to keep in step; `KMS.path/2` takes either.
   """
 
   alias Troupe.KMS
@@ -29,10 +34,10 @@ defmodule Troupe.Worker.Session.Context do
 
   @type t :: %__MODULE__{
           session_id: String.t(),
-          team: String.t(),
+          team: KMS.owner(),
           epoch: pos_integer(),
           data_key: binary(),
-          store: Troupe.ObjectStore.t(),
+          store: ObjectStore.store(),
           owner_subject: String.t() | nil,
           profile: String.t() | nil,
           state_dir: Path.t() | nil,
@@ -71,4 +76,21 @@ defmodule Troupe.Worker.Session.Context do
   @doc "Where this session's key lives, for the manifest."
   @spec key_path(t()) :: String.t()
   def key_path(%__MODULE__{} = context), do: KMS.path(context.team, context.session_id)
+
+  @doc """
+  Whose session this is, for the manifest and for a rebuild reading it.
+
+  A manifest is plaintext JSON, and `{:person, subject}` is neither a team name nor
+  something `Jason` will encode — so the owner is written as a kind and a team, with the
+  subject already carried separately. A rebuild needs the kind anyway: a private session
+  has no profile, and inventing one for it is a row the database refuses.
+  """
+  @spec kind(t()) :: String.t()
+  def kind(%__MODULE__{team: {:person, _subject}}), do: "private"
+  def kind(%__MODULE__{}), do: "team"
+
+  @doc "The team a session belongs to, or `nil` where it belongs to a person."
+  @spec team_name(t()) :: String.t() | nil
+  def team_name(%__MODULE__{team: {:person, _subject}}), do: nil
+  def team_name(%__MODULE__{team: team}) when is_binary(team), do: team
 end

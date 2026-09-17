@@ -1,0 +1,147 @@
+#!/usr/bin/env bash
+# The CI job, on this machine, in the order CI runs it.
+#
+#   scripts/ci              # every gate, then 3 consecutive test runs
+#   scripts/ci --runs 10    # what CI actually does
+#   scripts/ci --runs 0     # the gates only
+#   scripts/ci --gates       # same thing, spelled out
+#
+# This exists because "it passes locally" has been wrong four times in a row, each for a
+# different reason, and each cost a push and ten minutes of CI:
+#
+#   * `mix credo --strict` here reads a working copy CI never sees, so credo goes through
+#     `scripts/credo`, which checks the bytes CI clones. (`.gitattributes` now keeps the
+#     working tree LF as well, which is the fix rather than the workaround — this stays
+#     because a checkout made before that still exists on somebody's machine.)
+#   * The generated protocol schema and the console's assets are committed, and a change
+#     that does not regenerate them fails a step nobody runs by hand.
+#   * The test database needs whatever migrations came with the branch.
+#   * **The suite is run repeatedly.** One run proves almost nothing about anything that
+#     touches object storage: MinIO is not sandboxed and does not roll back, so a name a
+#     test reuses collides with what the *previous* run left behind. Two of those four
+#     failures were exactly that, and neither was reproducible in a single local run.
+#
+# What it does not do is the cluster suite (`scripts/e2e`) or the image builds: those need
+# kind and a registry, and CI gates them behind this job anyway.
+#
+# `dev/known-local-failures` lists tests that fail here and pass on CI. They are reported
+# and do not fail the run; anything else does. A test that is in the list and passed is
+# reported too, because that is a line to delete.
+set -euo pipefail
+
+cd "$(dirname "$0")/.."
+
+runs=3
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --runs) runs="$2"; shift 2 ;;
+    --runs=*) runs="${1#*=}"; shift ;;
+    --gates) runs=0; shift ;;
+    -h|--help) sed -n '2,28p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+    *) echo "ci: unknown argument $1" >&2; exit 2 ;;
+  esac
+done
+
+known="dev/known-local-failures"
+out=$(mktemp -d)
+trap 'rm -rf "$out"' EXIT
+
+bold() { printf '\n\033[1m── %s\033[0m\n' "$1"; }
+ok()   { printf '\033[32mok\033[0m      %s\n' "$1"; }
+bad()  { printf '\033[31mFAILED\033[0m  %s\n' "$1"; }
+
+failed=()
+step() {
+  local name="$1"; shift
+  bold "$name"
+  if "$@"; then ok "$name"; else bad "$name"; failed+=("$name"); fi
+}
+
+box() { ./scripts/toolbox "$@"; }
+
+step "compile --warnings-as-errors" box bash -c 'MIX_ENV=test mix compile --force --warnings-as-errors'
+step "format --check-formatted"     box mix format --check-formatted
+step "credo --strict"               ./scripts/credo
+step "generated assets are current" box bash -c 'MIX_ENV=test mix troupe.admin.assets --check && MIX_ENV=test mix troupe.admin.tokens --check && MIX_ENV=test mix troupe.theme --check'
+step "boundaries"                   box bash -c 'MIX_ENV=test mix troupe.boundaries'
+step "protocol schema is current"   box bash -c 'mix troupe.schema.diff | grep -q "schema unchanged"'
+step "migrate the test database"    box bash -c 'MIX_ENV=test mix ecto.create --quiet && MIX_ENV=test mix ecto.migrate --quiet'
+
+# The repeated part. Each run is a fresh VM, which is the point: anything that survives
+# between them — an object key, a bucket listing, a file on disk — is precisely what one
+# run cannot see.
+seen_failures="$out/failures"
+: > "$seen_failures"
+
+for ((n = 1; n <= runs; n++)); do
+  bold "test (run $n of $runs)"
+  log="$out/run-$n.log"
+
+  if box mix test > "$log" 2>&1; then
+    ok "test (run $n of $runs)"
+  else
+    # `  1) test <name> (<Module>)` is ExUnit's shape for a failure.
+    grep -E '^  [0-9]+\) (test|property|doctest) ' "$log" \
+      | sed -E 's/^  [0-9]+\) (test|property|doctest) //' \
+      | sed -E 's/ \([A-Za-z0-9_.]+\)$//' \
+      | sort -u >> "$seen_failures"
+
+    grep -E '^  [0-9]+\) |^Result:' "$log" || true
+    bad "test (run $n of $runs)"
+    failed+=("test (run $n of $runs)")
+  fi
+done
+
+sort -u "$seen_failures" -o "$seen_failures"
+
+# What is known, minus comments and blanks.
+expected="$out/expected"
+if [ -f "$known" ]; then
+  sed -E 's/#.*//' "$known" | sed -E 's/[[:space:]]+$//' | grep -v '^$' | sort -u > "$expected"
+else
+  : > "$expected"
+fi
+
+new=$(comm -23 "$seen_failures" "$expected" || true)
+fixed=$(comm -13 "$seen_failures" "$expected" || true)
+
+printf '\n'
+
+if [ -n "$fixed" ] && [ "$runs" -gt 0 ]; then
+  printf '\033[33mknown local failures that passed this time, delete them from %s:\033[0m\n' "$known"
+  echo "$fixed" | sed 's/^/  /'
+  printf '\n'
+fi
+
+if [ -n "$new" ]; then
+  printf '\033[31mci: %d test(s) failed that CI does not expect to fail:\033[0m\n' "$(echo "$new" | wc -l)"
+  echo "$new" | sed 's/^/  /'
+  printf '\nthe full output is in %s (kept until this shell exits)\n' "$out"
+  trap - EXIT
+  exit 1
+fi
+
+# A test step can still have failed on nothing but known-local tests, and that is not a
+# failure of this script.
+real=()
+for name in "${failed[@]-}"; do
+  [ -z "$name" ] && continue
+  case "$name" in
+    "test (run "*) ;;
+    *) real+=("$name") ;;
+  esac
+done
+
+if [ ${#real[@]} -eq 0 ]; then
+  if [ -s "$seen_failures" ]; then
+    printf '\033[32mci: everything CI checks passes here\033[0m (%s known local failure(s), listed in %s)\n' \
+      "$(wc -l < "$seen_failures" | tr -d ' ')" "$known"
+  else
+    printf '\033[32mci: everything CI checks passes here\033[0m\n'
+  fi
+  exit 0
+fi
+
+printf '\033[31mci: %d step(s) failed\033[0m\n' "${#real[@]}"
+printf '  %s\n' "${real[@]}"
+exit 1

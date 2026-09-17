@@ -249,7 +249,11 @@ defmodule Troupe.Plane.HarnessTest do
       assert {:error, error} =
                Harness.call("session.create", %{"profile" => "dev"}, context(user))
 
-      assert error.message in ["capacity", "unavailable"]
+      # Not `capacity`: the plane has no record of this profile at all, so it cannot know
+      # a ceiling and cannot ask for a worker. "Every pod is full" would send somebody to
+      # look for pods that were never there.
+      assert error.message == "unavailable"
+      assert error.data.component == "profile"
 
       # The row went with the failure: a session that never started is not a session,
       # and leaving it would put a phantom in everybody's listing.
@@ -506,6 +510,292 @@ defmodule Troupe.Plane.HarnessTest do
     end
   end
 
+  describe "session.fork" do
+    test "is a create with a lineage: its own row, its own budget, the parent's team", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(user, team, 40)
+
+      assert {:ok, result} =
+               Harness.call(
+                 "session.fork",
+                 %{"session_id" => parent.id, "seq" => 12, "reason" => "branch"},
+                 context(user)
+               )
+
+      child = Sessions.get(result["session_id"])
+      refute child.id == parent.id
+
+      # The three columns that make it a fork, and nothing else about it is special: its
+      # own id, its own epoch, its own key path, placed like anything else.
+      assert child.parent_session_id == parent.id
+      assert child.parent_seq == 12
+      assert child.fork_reason == "branch"
+      assert child.team_id == team.id
+      assert child.profile == parent.profile
+      assert child.epoch == 1
+      assert child.last_seq == 0
+    end
+
+    test "tells the pod what to copy, and the pod is the only thing that reads a log",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(user, team, 40)
+
+      assert {:ok, _} =
+               Harness.call(
+                 "session.fork",
+                 %{"session_id" => parent.id, "seq" => 12},
+                 context(user)
+               )
+
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+
+      assert pushed["fork"] == %{
+               "parent" => parent.id,
+               "parent_team" => team.name,
+               "seq" => 12,
+               "reason" => "attempt"
+             }
+
+      # The instruction names a session and a number. There is no event in it, and there
+      # could not be: the plane has never held a key.
+      refute pushed |> inspect() =~ "user_input"
+    end
+
+    test "at no seq is the parent's last seal, written down rather than left to drift",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(user, team, 40)
+
+      assert {:ok, result} =
+               Harness.call("session.fork", %{"session_id" => parent.id}, context(user))
+
+      assert Sessions.get(result["session_id"]).parent_seq == 40
+
+      # And the parent going on talking does not move it. "Forked at the head" would have.
+      {:ok, _} = Sessions.seal(parent.id, %{last_seq: 55})
+      assert Sessions.get(result["session_id"]).parent_seq == 40
+    end
+
+    test "refuses a point the parent has not sealed", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(user, team, 40)
+
+      assert {:error, error} =
+               Harness.call(
+                 "session.fork",
+                 %{"session_id" => parent.id, "seq" => 41},
+                 context(user)
+               )
+
+      assert error.data.sealed_through == 40
+    end
+
+    test "needs control of the parent, not a view of it", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      ada = person("ada@example.test", ["engineering"])
+      bea = person("bea@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(ada, team, 40, visibility: "team")
+
+      # bea can read every word of it through the team, and that is not enough. A fork is
+      # a copy she would own, under her own key, outliving the original's erasure.
+      assert {:ok, _} = Harness.call("session.get", %{"session_id" => parent.id}, context(bea))
+
+      assert {:error, error} =
+               Harness.call("session.fork", %{"session_id" => parent.id}, context(bea))
+
+      assert error.message == "forbidden"
+      assert error.data.reason =~ "control"
+
+      # Let her in properly and it goes through.
+      {:ok, _} =
+        Harness.call(
+          "session.grant",
+          %{"session_id" => parent.id, "subject" => bea.subject, "role" => "collaborator"},
+          context(ada)
+        )
+
+      assert {:ok, _} = Harness.call("session.fork", %{"session_id" => parent.id}, context(bea))
+    end
+
+    test "refuses a reason nobody defined, and a session nobody may see", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      ada = person("ada@example.test", ["engineering"])
+      stranger = person("nobody@example.test", [])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(ada, team, 40)
+
+      assert {:error, bad} =
+               Harness.call(
+                 "session.fork",
+                 %{"session_id" => parent.id, "reason" => "vibes"},
+                 context(ada)
+               )
+
+      assert bad.message == "invalid_params"
+
+      # Not-found rather than forbidden: whether a session exists is itself something
+      # somebody who cannot see it should not learn.
+      assert {:error, hidden} =
+               Harness.call("session.fork", %{"session_id" => parent.id}, context(stranger))
+
+      assert hidden.message == "not_found"
+    end
+
+    test "a lineage is not a client's to claim", context do
+      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      ada = person("ada@example.test", ["engineering"])
+      mallory = person("mal@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      parent = sealed_parent(ada, Identity.get_team("engineering"), 40)
+
+      # A create carrying a `fork` block of its own would be a create that walked off with
+      # somebody else's history. The block is stripped at the door, so this is a plain
+      # create and the row says so.
+      assert {:ok, result} =
+               Harness.call(
+                 "session.create",
+                 %{
+                   "profile" => "dev",
+                   "fork" => %{"parent" => parent.id, "seq" => 40, "reason" => "attempt"}
+                 },
+                 context(mallory)
+               )
+
+      child = Sessions.get(result["session_id"])
+      assert is_nil(child.parent_session_id)
+      assert is_nil(child.parent_seq)
+      assert is_nil(child.fork_reason)
+
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      refute Map.has_key?(pushed, "fork")
+    end
+
+    test "a private session forks as an import, from the device that holds its key",
+         context do
+      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, private} =
+        Sessions.create(%{
+          id: "private-" <> to_string(System.unique_integer([:positive])),
+          owner_id: user.id,
+          owner_subject: user.subject,
+          kind: "private",
+          visibility: "private",
+          state: "active",
+          epoch: 1,
+          last_seq: 9
+        })
+
+      assert {:error, error} =
+               Harness.call(
+                 "session.fork",
+                 %{"session_id" => private.id, "reason" => "branch"},
+                 context(user)
+               )
+
+      assert error.data.reason =~ "import"
+
+      # And an import with no profile is refused rather than guessed at: a private session
+      # has none to inherit, because it was never placed anywhere.
+      assert {:error, no_profile} =
+               Harness.call(
+                 "session.fork",
+                 %{"session_id" => private.id, "reason" => "import", "team" => "engineering"},
+                 context(user)
+               )
+
+      assert no_profile.data.reason =~ "profile"
+
+      # As an import it is a real create, and the pod is told nothing: a private session's
+      # key is under a path no pod role covers, so no pod could read the parent. The row
+      # carries the lineage and the copy belongs to the machine that holds the key.
+      assert {:ok, result} =
+               Harness.call(
+                 "session.fork",
+                 %{
+                   "session_id" => private.id,
+                   "reason" => "import",
+                   "team" => "engineering",
+                   "profile" => "dev"
+                 },
+                 context(user)
+               )
+
+      child = Sessions.get(result["session_id"])
+      assert child.parent_session_id == private.id
+      assert child.fork_reason == "import"
+      assert child.kind == "team"
+      assert child.visibility == "team"
+
+      assert_receive {:pushed, "session.activate", pushed}, 5_000
+      refute Map.has_key?(pushed, "fork")
+    end
+  end
+
+  describe "a share and the pod holding the session" do
+    test "the pod is told, by id, with no secret in what crosses the wire", context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      user = person("ada@example.test", ["engineering"])
+      pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      {:ok, created} =
+        Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
+      session_id = created["session_id"]
+      assert_receive {:pushed, "session.activate", _activated}, 5_000
+
+      assert {:ok, share} =
+               Harness.call(
+                 "session.share",
+                 %{"session_id" => session_id, "role" => "observe"},
+                 context(user)
+               )
+
+      # The pod appends the durable event; this is the instruction that asks it to. It
+      # names the share and never the secret — a log outlives the session, and a working
+      # credential in one is a credential nobody can revoke by revoking the share.
+      assert_receive {:pushed, "share.changed", minted}, 5_000
+      assert minted["type"] == "share_created"
+      assert minted["session_id"] == session_id
+      assert minted["share"]["id"] == share["id"]
+      assert minted["share"]["role"] == "observe"
+      refute minted |> inspect() =~ share["secret"]
+
+      assert {:ok, _revoked} =
+               Harness.call(
+                 "session.share.revoke",
+                 %{"session_id" => session_id, "share" => share["id"]},
+                 context(user)
+               )
+
+      assert_receive {:pushed, "share.changed", ended}, 5_000
+      assert ended["type"] == "share_revoked"
+      assert ended["share"]["id"] == share["id"]
+
+      assert pod.worker_id
+      assert team.name == "engineering"
+    end
+  end
+
   describe "sessions.list filters" do
     test "by status, origin, trigger and what still needs a review" do
       team = team_with_grant("engineering", "dev", name: "engineering")
@@ -626,7 +916,7 @@ defmodule Troupe.Plane.HarnessTest do
       {:ok, _} = Identity.grant(team, "ux")
 
       {:ok, principal, _secret} =
-        Principals.create(team, %{name: "nightly", profiles: ["dev"]}, "root")
+        principal!(team, %{name: "nightly", profiles: ["dev"]})
 
       robot = Identity.get_user(principal.subject)
       assert robot.kind == "service"
@@ -682,6 +972,15 @@ defmodule Troupe.Plane.HarnessTest do
       )
 
     session
+  end
+
+  # A parent with a history the plane can see: a row that has sealed through `seq`. The
+  # events themselves are in object storage under a key the plane does not have, which is
+  # exactly the situation `session.fork` has to work in.
+  defp sealed_parent(user, team, seq, opts \\ []) do
+    session = session!("parent", user, team, Keyword.put_new(opts, :visibility, "private"))
+    {:ok, sealed} = Sessions.seal(session.id, %{last_seq: seq, head_hash: "sha256:whatever"})
+    sealed
   end
 
   defp enrol_worker(profile, pod_name, opts) do
@@ -769,10 +1068,14 @@ defmodule Troupe.Plane.HarnessTest do
   # anything else on the way is the other direction and none of this function's
   # business. Taking whatever arrived first made this a race, and it lost in
   # `bundle.fetch`, which had nothing to do with it.
+  # An *answer*, which is not the same thing as a frame carrying this id. JSON-RPC ids
+  # are per direction: the plane numbers its own requests from one too, and it pushes
+  # `session.index` at a pod the moment it enrols — so matching on the id alone matched
+  # the plane's question and read it as the reply to ours. A response has no `method`.
   defp await_answer(socket, id, buffer) do
     {frames, rest} = split_frames(buffer)
 
-    case Enum.find(frames, &match?(%{"id" => ^id}, &1)) do
+    case Enum.find(frames, &response?(&1, id)) do
       nil ->
         {:ok, data} = :gen_tcp.recv(socket, 0, 5_000)
         await_answer(socket, id, rest <> data)
@@ -781,6 +1084,10 @@ defmodule Troupe.Plane.HarnessTest do
         answer
     end
   end
+
+  defp response?(%{"id" => id, "method" => _asking}, id), do: false
+  defp response?(%{"id" => id}, id), do: true
+  defp response?(_frame, _id), do: false
 
   # Newline-delimited JSON, and a read can end mid-frame; the trailing fragment goes
   # back on the buffer rather than through `Jason.decode!/1`.

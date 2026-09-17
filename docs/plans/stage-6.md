@@ -12,17 +12,18 @@ throws most of them away at the plane boundary. The interesting work is deciding
 of their tables we already have as a log, and which of their loops we already have as a
 process.
 
-Part 1 is **built** — `ARCHITECTURE.md` §15 describes what landed and `REPORT.md`'s
-stage 6 section proves it. It stays here as the record of what was intended, including
-the four places where the build deviated (all named in `DECISIONS.md` 287–303). The
-other four are not built.
+Parts 1, 2 and 4 are **built** — `ARCHITECTURE.md` §15 and §16 describe what landed and
+`REPORT.md`'s stage 6 and R1 sections prove them. They stay here as the record of what was
+intended, including the places where the build deviated (`DECISIONS.md` 287–303 for part
+1, 330–343 for parts 2 and 4 — including the generalisation of a revision beyond cron that
+`docs/brief-remote.md` R1 asks for). Parts 3 and 5 are not built.
 
 | Part | One line | Size |
 | --- | --- | --- |
 | [1. Token accounting](#1-token-accounting) — **built** | Cost becomes a fold over the log, batched through a pod-local cache into a ledger that is already built. | large |
-| [2. Entitlements below the profile](#2-entitlements-below-the-profile) | A grant may name which of a bundle's agents, skills and servers a team gets. | medium |
+| [2. Entitlements below the profile](#2-entitlements-below-the-profile) — **built** | A grant may name which of a bundle's agents, skills and servers a team gets. | medium |
 | [3. Credentials that belong to a person](#3-credentials-that-belong-to-a-person) | An MCP server may authenticate as the session's owner, with the value in OpenBao and the plane never holding it. | medium |
-| [4. Trigger revisions](#4-trigger-revisions) | A run names an immutable, content-addressed revision instead of a row somebody has since edited. | small |
+| [4. Trigger revisions](#4-trigger-revisions) — **built** | A run names an immutable, content-addressed revision instead of a row somebody has since edited. | small |
 | [5. Proving it on a cluster](#5-proving-it-on-a-cluster) | The end-to-end suite that `scripts/remote-up` has been waiting for, and CI that runs it. | medium |
 
 ---
@@ -414,8 +415,10 @@ hit, which is the right place for it in a system where the tool list is already 
   person-mode, calls go out as the session's **owner**, fixed at activation and recorded
   in `session_created`. A collaborator acting through somebody else's credential is a
   thing people should be told once, in the panel and in the log, rather than discover.
-* **This is not taint.** `session_tainted` is for a server a *client* registered
-  (`tui/connectors.ex:5-8`); this one an admin published. What the log does gain is
+* **This is not taint.** `session_tainted` is for a server a *client* registered — the
+  app that carried that registration is gone (`DECISIONS.md` 320), and the event now
+  lives in `Troupe.Session.ClientTools`, `Troupe.Log.Fold` and `Troupe.Session.Summary`;
+  this one an admin published. What the log does gain is
   `identity` on the MCP call event — `"profile"` or `"person:<subject>"` — so a reader
   can tell which credential a call used without knowing what the bundle said that day.
 

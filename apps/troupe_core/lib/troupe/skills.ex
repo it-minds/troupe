@@ -36,11 +36,18 @@ defmodule Troupe.Skills do
           }
   end
 
-  @typedoc "What a session knows about its bundle: `%{version, hash, channel, dir}`."
+  @typedoc """
+  What a session knows about its bundle: `%{version, hash, channel, dir, entitlements}`.
+
+  `entitlements` is the set the plane resolved for this session's team, by name, or
+  `nil` for no restriction — which is what a local session, a laptop and every grant
+  nobody has narrowed all send.
+  """
   @type bundle :: %{
           optional(:version) => term(),
           optional(:hash) => String.t() | nil,
           optional(:channel) => String.t() | nil,
+          optional(:entitlements) => map() | nil,
           required(:dir) => Path.t() | nil
         }
 
@@ -77,15 +84,34 @@ defmodule Troupe.Skills do
   @spec available(bundle() | nil, Definition.t()) :: [listed()]
   def available(bundle, %Definition{} = definition) do
     case {definition.skills, bundle} do
-      {[], _} -> []
-      {_, %{dir: dir}} when is_binary(dir) -> dir |> Bundle.list_skills() |> allowed(definition)
-      _ -> []
+      {[], _} ->
+        []
+
+      {_, %{dir: dir}} when is_binary(dir) ->
+        dir
+        |> Bundle.list_skills()
+        |> allowed(definition)
+        |> entitled(bundle)
+
+      _ ->
+        []
     end
   end
 
   defp allowed(skills, definition) do
     Enum.filter(skills, &Definition.allows_skill?(definition, &1.name))
   end
+
+  # The team's set, applied after the definition's own list. Two narrowings that compose
+  # in the only order that is safe: a skill has to be both something this agent consults
+  # and something this team was granted. A session with no set is unrestricted, which is
+  # a laptop, a local session, and every team nobody has narrowed.
+  defp entitled(skills, %{entitlements: %{"skills" => names}}) when is_list(names) do
+    entitled = MapSet.new(names)
+    Enum.filter(skills, &MapSet.member?(entitled, &1.name))
+  end
+
+  defp entitled(skills, _bundle), do: skills
 
   @doc """
   The `skill` tool for a session, or none.

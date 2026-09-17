@@ -409,6 +409,17 @@ newest version the pod holds, which is what `bundles.adoption` compares against 
 channel's current version — a pod holding a newer, since-retired version is ahead, not
 behind.
 
+Key-manager assertions are fetched the same way, and for a sharper reason.
+`kms.assertion {session_id}` answers a short-lived JWT the pod exchanges for a token that
+can read *that session owner's* slots — and the subject is read off the session row, so
+the only thing a pod can influence is which of its own sessions it asks about. A pod
+naming a session another pod holds is told `not_found`, which is the difference between
+one pod reading another person's credentials and not.
+
+It is asked for rather than handed over at activation because the token it buys lives
+twenty minutes and a session can live all day: a pod given one at activation would lose
+its person's credentials mid-afternoon with no way to ask for another.
+
 A pod is attached to exactly one replica, and rarely the one a harness reached, so
 pushes are *routed*: try locally, otherwise ask the other replicas, each of which
 answers with a single registry lookup.
@@ -986,3 +997,254 @@ progress. What the next stage owes is the retention decision, not the pipeline.
 And `session.status`'s `cost_micros` now moves, because the summary projection folds the
 same field — so a review queue shows a cost without anyone reading a log, which is what
 §14.2 always claimed and could not yet do.
+---
+
+## 16. A run's provenance, and what a team may see
+
+Two things that were decided somewhere mutable and are now decided somewhere that cannot
+change: which document a trigger run actually ran, and which of a bundle's entries a team
+was allowed to use.
+
+### 16.1 A trigger revision
+
+`trigger_runs` pointed at the `triggers` row. Editing a prompt template therefore
+rewrote the provenance of every run that had used the old one — the rendered prompt
+survived in the session's own log, so the content was never lost, but which document
+produced it, under which terms and as which principal, was.
+
+A run now names a **revision**: the trigger document, frozen, addressed by the `sha256:`
+hash of its canonical form. Same convention as a bundle, same reason — two systems that
+must agree join on something neither of them invented.
+
+```
+trigger_revisions   trigger_id, revision, hash
+                    profile, agent, principal_id, prompt_template, terms,
+                    visibility, review, notify, concurrency, source
+                    reconstructed, created_by, inserted_at    (no updated_at)
+trigger_runs        … revision_id, not null
+```
+
+**The revision is a property of the document, not of the source.** `stage-6.md` §4
+designed this for the scheduler; nothing in the hash says how a firing arrived. The
+`source` document is *inside* the hash rather than beside it, so a schedule and a webhook
+of otherwise identical wording are two revisions — and the seven sources `RELEASE.md` W2
+adds need no second shape. `Triggers.fire/4` resolves once, at the top, before anything is
+written, which every path reaches: the scheduler, `trigger.fire` on `/rpc`,
+`admin.trigger.run`, and whatever comes next. The scheduler learned nothing new.
+
+Three consequences a reader can rely on:
+
+* a `trigger.put` that changes nothing creates no revision, and an edit back to a previous
+  wording lands on that revision rather than making a third — the `(trigger_id, hash)`
+  index decides it;
+* a firing that overlaps an edit uses one document or the other and never a mixture, and
+  a retry re-reads the revision the run recorded rather than the row as it stands;
+* the session a trigger made carries `origin.revision` — the hash — so a session found six
+  weeks later says which wording made it without a join through the run.
+
+`enabled` is deliberately outside the hash. Switching a trigger off changes *whether* a
+run happens, not what it would be, and the panel's switch is a `trigger.put`: a revision
+per toggle would be a history made of noise. `visibility` is inside it, because it decides
+who may open the session a run made.
+
+The migration creates revision 1 for every existing trigger from its current row, marks it
+`reconstructed`, and points every existing run at it. That is honest rather than complete:
+revision 1 is what can be proven, and the column says so.
+
+### 16.2 Entitlements below the profile
+
+A grant said only *this team may use this profile*. It may now say which of the bundle's
+agents, skills and MCP servers come with it.
+
+```
+grant_entitlements   grant_id, kind ("agent" | "skill" | "mcp_server"), name,
+                     mode ("allow" | "deny")        unique on (grant_id, kind, name)
+```
+
+**No rows is no restriction** — exactly what every grant meant before the table existed,
+so the migration is a no-op and the old behaviour is the default. Within a kind, `allow`
+rows are an allowlist and `deny` rows subtract; deny wins, and because one row per name is
+what the index holds, a submitted list saying both collapses to the deny before it is
+written. A name the current bundle does not have is kept rather than pruned: a bundle can
+be rolled back, and an entitlement that vanished with a publish and did not come back with
+the revert would be a silent widening.
+
+**The bundle is untouched.** One content-addressed document, one hash, no derived bundles
+and no per-team hashes. What narrows is the *session*.
+
+Resolution happens on the plane, at create, and lands in three places:
+
+* `profiles.list` shows a person what they may use — the **union** over the teams of
+  theirs that may use the profile, because an intersection there would hide something they
+  can have;
+* `session.create` refuses an agent the team may not run, with the names it could have
+  had, before a pod or a budget is touched — and the session gets **one team's** set,
+  because a session belongs to one team, which is the rule that already decides whose
+  budget and whose volume it gets;
+* `session.activate` carries the set to the pod, and `session_created` records it, so the
+  log answers *what was this session allowed to see* without the reader knowing what the
+  bundle said that day. A publish can add an entry a team is not entitled to, so the set
+  is re-resolved at every activation and `config_upgraded` carries the new one.
+
+On the pod the set rides on the bundle pin, because every place that has to apply it
+already reads the bundle:
+
+* **agents** are filtered after the whole definition search order is merged, so an agent
+  outside the set is not in the map at all — filtering where the bundle is merged would
+  leave a built-in of the same name standing in for it, which is a different agent
+  answering to a name somebody was refused. Primaries only: a subagent is reached through
+  an agent the team *is* entitled to;
+* **skills** are filtered after the definition's own `skills:` list, and a skill outside
+  the set answers `not_found` — the same answer a skill the profile did not list gets,
+  because what a model can tell apart it can probe;
+* **MCP discovery stays pod-wide** and the filter is where a session's tool list is
+  composed. Asking four servers for their tool list at every create would put somebody
+  else's latency on the create path, so the pod discovers once and each session composes
+  its own list. A session that may not use `jira` does not see `mcp.jira.*`; the pod still
+  knows the tools exist.
+
+### 16.3 One sealer, two hosts, two key subtrees
+
+`Sealer` and the `Context` it needs moved from `troupe_worker` into `troupe_protocol`,
+beside `Storage`, `Cipher` and `Snapshot`. A worker pod is not the only thing that seals:
+a daemon sealing a person's private session writes the same segments, in the same layout,
+under the same cipher, to the same bucket, and a session sealed by one host has to restore
+on the other. Two implementations of that are two chances to disagree about a byte.
+
+Which means the sealer cannot know how events reach it — the protocol is what core is
+built on and cannot call back into it. `:subscribe` is a function of a session id the host
+passes in. That is what the process is for: getting events into object storage. Where they
+come from is the host's business.
+
+`Troupe.KMS.path/2` takes an **owner**, which is a team or `{:person, subject}`:
+
+```
+troupe/teams/<team>/sessions/<id>       a pod reads this, scoped to its granted teams
+troupe/people/<subject>/sessions/<id>   a person's daemon reads this, and nothing else
+```
+
+Neither credential reaches the other's subtree. No pod rule mentions `people/` at all —
+an absence rather than a deny, because OpenBao denies by default and a deny rule invites
+somebody to narrow it later. The person policy is templated on the subject OpenBao itself
+put on the entity when it verified the identity provider's token, so there is one policy
+for everybody and a daemon cannot name somebody else's subtree by asking. The plane's
+policy covers both subtrees and is still metadata-delete only: erasure is erasure, and a
+plane that could erase one and not the other would have two answers to one promise.
+
+A subject is opaque and may be `idp|ada`. That is a fine path segment and an invalid URL,
+so the adapter percent-encodes segment by segment; a subject containing a `/` is refused
+at the one place the path is built, because sanitising it would silently make it a
+different person.
+### 16.4 A credential that belongs to a person
+
+A bundle's MCP server entry says whose credential goes out with a call.
+`credential_mode: profile` is what every bundle meant before there was a mode: one
+service account, the same for every session, injected by the operator from a Secret.
+`credential_mode: person` is the session's **owner** — fixed at activation, recorded in
+`session_created`, and the same for everybody attached, because a session has one
+identity and a collaborator acting through somebody else's credential is a thing people
+should be told once rather than discover.
+
+The two are exclusive per server and the contradiction is refused at publish. A server
+with a `secretRef` *and* a person's credential is a server whose identity depends on which
+code path ran.
+
+```
+troupe/people/<subject>/mcp/<slot>        the value, which only that person may read
+troupe/people/<subject>/sessions/<id>     a private session's data key, same subtree
+```
+
+Nobody in the middle can read either. The pod asks the plane for an **assertion** —
+`kms.assertion {session_id}`, a short-lived JWT signed through the same transit key that
+mints session tokens, whose subject the plane reads off the session row — and exchanges
+it at OpenBao's JWT auth method for a token whose policy is templated on that subject. A
+pod naming a session it does not hold is told `not_found`, which is the half a key manager
+cannot decide because it does not know which pod holds what.
+
+A person connects a server through `me.connections.grant`, which takes no value and
+returns none: it answers the same kind of assertion, for the caller's own subject, and the
+client exchanges it and writes the value itself. The plane is never in possession of a
+credential that could read the slot — stronger than handing back a token it minted, which
+would be a token it held. Removal uses the same grant; the plane's policy has no `delete`
+there at all.
+
+What the plane may see is that a slot has a version: `list` and `read` on KV v2 metadata,
+which is timestamps and never a value. That is what lets a panel say *Ada has connected
+Jira* and the most it should ever be able to say.
+
+Where nobody has connected, the tool answers a result the model can read —
+`{"error": "not_connected", "server": …, "hint": …}` — rather than a 401 it would retry
+four times, and the session carries on. `tool_call_started` records `identity`, `profile`
+or `person:<subject>`, so a reader can tell which credential a call used without knowing
+what the bundle said that day.
+
+### 16.5 A session that belongs to a person
+
+A private session runs on somebody's own machine and never touches a pod. It is sealed
+with the same `Troupe.Sessions.Sealer` a worker uses, under a key at
+`troupe/people/<subject>/sessions/<id>` that no pod role and no operator role covers, and
+its objects live under the same `sessions/<id>/` prefix as everything else — so
+`mix troupe.index.rebuild` sees one more session rather than a special case.
+
+The plane holds a row and nothing else. `kind: "private"` with no team, no profile and no
+worker, which is a check constraint rather than a convention: the row is what a placement
+reads, and a rebuild, a migration or a console bypasses every changeset. `kind` is not
+`visibility` — `visibility` is who else on the team may see a session and has defaulted to
+`private` since the first migration, so an unshared *team* session is visibility-private
+and is not one of these.
+
+Two things have to cross the gap between a laptop and the cluster, and neither may carry a
+credential the laptop keeps.
+
+**The bytes** go through presigned URLs. `session.presign` signs one method on one key
+under `sessions/<id>/` of a session the caller owns, for five minutes, up to sixty-four
+keys a call. The plane thereby holds an object-storage credential, which `DECISIONS.md` 90
+said it would not; the reason 90 gave was that the plane must never read content, and a
+signer for ciphertext it has no key for cannot. The prefix is checked rather than trusted,
+because a signer that signs whatever it is handed is that credential with extra steps.
+
+Listing is the one verb a signature cannot cover, because the caller does not yet know
+the keys and signing the bucket would be handing over the bucket. `session.objects` lists
+under the session's own prefix, narrowable and not widenable. Deleting is not on that road
+at all: erasure removes every *version* of every object, which is a bucket operation and a
+decision with an owner, so it stays on `session.erase`. And a presigned PUT cannot set
+object metadata, since S3 refuses an `x-amz-*` header the signature does not cover — the
+epoch, sequence and head hash it would have carried reach the plane through the plaintext
+manifest and through every `session.register` instead.
+
+**The fence** is the epoch, the same field that stops a resurrected pod appending to a
+session that moved on. `session.register` with `claim: true` bumps it conditionally on the
+epoch the device last saw, so two devices waking on the same session both send `epoch: 3`
+and exactly one moves it. The loser is not told at the moment it loses — that would mean
+reaching a laptop that may be asleep — but on its next seal, which is the moment it was
+going to write. Its local log stays on its own disk, read-only, until the person archives
+it: nothing is merged and nothing is lost.
+
+Registration is idempotent on the id, because a daemon that seals, loses its connection
+and retries must end up with one session rather than two; and `last_seq` never goes
+backwards, because a queue replayed after a restart arrives in the order it was kept.
+
+### 16.6 The daemon's end of it
+
+A private session is sealed by the machine it runs on, which holds neither of the two
+credentials a pod holds. It gets by without them the same way twice.
+
+**The key.** `session.assertion` answers a short-lived statement, signed by the plane,
+that the caller is who they are; the daemon exchanges it at the key manager's JWT auth
+mount for a token whose policy is templated on that subject, and uses it to create the
+session key at `troupe/people/<subject>/sessions/<id>`. The plane signs and never holds:
+a token it minted would be a token it had.
+
+**The bytes.** `Troupe.ObjectStore.Signed`, above.
+
+Everything after that is `Troupe.Sessions.Sealer`, unchanged and unaware of which host it
+is running on. That is what moving it into `troupe_protocol` was for — a session sealed by
+a laptop and one sealed by a pod are the same bytes in the same layout, so either can
+restore the other.
+
+The plane token the daemon needs for all of this comes from the client that signed in, on
+`identity.link`, and is held in memory only. `identity.json` records the person's name,
+which is a label the daemon goes on applying whether or not it can reach anything; a token
+is not a label, and one on disk is one a backup copies. A restarted daemon has no token
+until somebody links again, and loses nothing by it: the durable log is already local, so
+a daemon that cannot reach the plane seals later rather than losing anything.

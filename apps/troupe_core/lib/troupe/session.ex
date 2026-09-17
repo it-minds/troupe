@@ -56,11 +56,15 @@ defmodule Troupe.Session do
         {Troupe.Session.Log,
          session_id: session_id, workspace_root: workspace.root_real, state_dir: config.state_dir},
         {Troupe.Session.Approvals,
-         session_id: session_id, auto_approve: config.auto_approve, mode: config.approvals},
+         session_id: session_id,
+         auto_approve: config.auto_approve,
+         mode: config.approvals,
+         managed_rules_only: config.managed_permission_rules_only},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
-        {Troupe.Session.ClientTools, session_id: session_id}
+        {Troupe.Session.ClientTools,
+         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only}
       ] ++
         fake_child(session_id, config, opts) ++
         [
@@ -139,7 +143,7 @@ defmodule Troupe.Session do
     workspace_path = Keyword.get(opts, :workspace, File.cwd!())
     bundle = Keyword.get(opts, :bundle)
 
-    with {:ok, workspace} <- Workspace.new(workspace_path) do
+    with {:ok, workspace} <- open_workspace(workspace_path, opts) do
       config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, []))
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
@@ -153,7 +157,10 @@ defmodule Troupe.Session do
 
       definitions =
         Keyword.get_lazy(opts, :definitions, fn ->
-          Definitions.load(workspace.root_real, bundle_dir: bundle && bundle[:dir])
+          Definitions.load(workspace.root_real,
+            bundle_dir: bundle && bundle[:dir],
+            entitled: entitled_agents(bundle)
+          )
         end)
 
       {:ok,
@@ -178,6 +185,50 @@ defmodule Troupe.Session do
   # Appended rather than merged: the plane's table never names the bundle, because the
   # plane does not know where a pod materialised it. A table that already has a
   # `skills` entry — a session restored with one — keeps it.
+
+  # The agent names this session's team was granted, or `nil` for no restriction. A
+  # local session and a laptop have no bundle and therefore no set, which is the same
+  # answer by a shorter route.
+  # `Workspace.new/1` refusing a directory that is not there is right, and it is the
+  # wrong answer for one case: a session being resumed whose recorded directory has been
+  # moved or deleted. Its history is intact and its tree is under the state directory
+  # where a restore put it, and answering `not_a_directory` there loses a session over a
+  # checkout somebody tidied up.
+  #
+  # Only a session that names itself, and only to a directory that already exists.
+  # Nothing is created here: a session with neither its recorded workspace nor a restored
+  # tree still fails, because putting an agent in a directory nobody asked for is the
+  # thing `Workspace.new/1` is refusing to do.
+  defp open_workspace(workspace_path, opts) do
+    case Workspace.new(workspace_path) do
+      {:ok, workspace} ->
+        {:ok, workspace}
+
+      {:error, {:not_a_directory, _path}} = error ->
+        case restored_tree(opts) do
+          nil -> error
+          path -> Workspace.new(path)
+        end
+
+      error ->
+        error
+    end
+  end
+
+  defp restored_tree(opts) do
+    with session_id when is_binary(session_id) <- Keyword.get(opts, :session_id),
+         state_dir <- Keyword.get(opts, :config_overrides, [])[:state_dir],
+         path <- Path.join([Troupe.Paths.state_dir(state_dir), "workspaces", session_id]),
+         true <- File.dir?(path) do
+      path
+    else
+      _ -> nil
+    end
+  end
+
+  defp entitled_agents(%{entitlements: %{"agents" => names}}) when is_list(names), do: names
+  defp entitled_agents(_bundle), do: nil
+
   defp with_skills(%Mounts{} = mounts, bundle) do
     case {Skills.mount(bundle), Mounts.fetch(mounts, "skills")} do
       {nil, _} -> mounts

@@ -11,7 +11,8 @@ defmodule Troupe.Plane.PanelTest do
 
   use Troupe.Plane.PanelCase, async: false
 
-  alias Troupe.Plane.{Admin, Bundles, Fleet, Identity, Principals, Sessions, Triggers}
+  alias Troupe.Plane.{Admin, Bundles, Fleet, Identity, Principals, SCIM, Sessions, Triggers}
+  alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.Web.Live.ProfileEditor
 
   @moduletag timeout: 60_000
@@ -228,7 +229,7 @@ defmodule Troupe.Plane.PanelTest do
   describe "the triggers page" do
     test "lists a team's triggers with their runs, and switches one off", context do
       {:ok, principal, _secret} =
-        Principals.create(context.engineering, %{name: "bot", profiles: ["dev"]}, "root")
+        principal!(context.engineering, %{name: "bot", profiles: ["dev"]})
 
       {:ok, _} =
         Triggers.put(
@@ -277,6 +278,7 @@ defmodule Troupe.Plane.PanelTest do
           "team" => "engineering",
           "name" => "nightly-deps",
           "profiles" => "dev",
+          "sponsor" => context.lead.subject,
           "description" => "the nightly dependency update"
         })
         |> render_submit()
@@ -286,17 +288,48 @@ defmodule Troupe.Plane.PanelTest do
 
       principal = Principals.get("svc:engineering/nightly-deps")
       assert principal.profiles == ["dev"]
+      assert principal.sponsor_subject == context.lead.subject
 
       # The hash is not on the page, and neither is the salt.
       refute html =~ principal.secret_hash
       refute html =~ principal.secret_salt
     end
 
+    test "refuses one with no sponsor, and says so in words", context do
+      {:ok, view, _html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
+
+      html =
+        view
+        |> form("form[phx-submit='create-principal']", %{
+          "team" => "engineering",
+          "name" => "unsponsored",
+          "profiles" => "dev"
+        })
+        |> render_submit()
+
+      # Not "invalid_params". Four things can be wrong with a sponsor and the person at
+      # the form has to be told which.
+      assert html =~ "answerable"
+      refute Principals.get("svc:engineering/unsponsored")
+    end
+
+    test "says a principal needs a sponsor rather than that it is disabled", context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "orphan", profiles: ["dev"], sponsor: context.lead.subject})
+
+      {:ok, _} = SCIM.deactivate_user(Identity.get_user(context.lead.subject).id)
+
+      {:ok, _view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/teams")
+
+      assert html =~ "needs a sponsor"
+      refute Principals.get(principal.subject) |> ServicePrincipal.enabled?()
+    end
+
     test "shows members and offers no way to change them", context do
       {:ok, _view, html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
 
       assert html =~ "member" or html =~ "Members"
-      assert html =~ "From the identity provider, and read-only here."
+      assert html =~ "From the identity provider, and read-only here"
       refute html =~ "add member"
       refute html =~ "remove member"
     end
@@ -444,14 +477,24 @@ defmodule Troupe.Plane.PanelTest do
       # The fields a profile actually has. A page that edits a subset of them is a page
       # that quietly makes the rest unreachable except by hand-written JSON.
       for field <- ~w(
-            image replicas sessionsPerPod
+            image sizeClass maxSessions warmWorkers
             llm.endpoint llm.provider llm.model llm.secretRef.name
             egress.fqdns egress.gitHosts
-            storage.size storage.storageClassName
-            resources.requests.cpu resources.limits.memory
+            storage.storageClassName
             configBundleChannel orgMount
           ) do
         assert html =~ ~s(name="#{field}"), "the editor has no field for #{field}"
+      end
+
+      # And the seven that left. They are still in the custom resource and the plane
+      # writes them; an editor that still asked would be asking for a number it does not
+      # use, which is worse than not asking.
+      for gone <- ~w(
+            replicas sessionsPerPod storage.size
+            resources.requests.cpu resources.requests.memory
+            resources.limits.cpu resources.limits.memory
+          ) do
+        refute html =~ ~s(name="#{gone}"), "the editor still asks for #{gone}"
       end
     end
 

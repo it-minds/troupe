@@ -91,6 +91,26 @@ defmodule Troupe.Plane.Settings do
       effect: :next_team
     },
     %Setting{
+      key: "platform_budget_micros",
+      group: :administration,
+      type: :integer,
+      fallback: 0,
+      summary: "A ceiling on everything this plane spends, in millionths. 0 is no ceiling.",
+      consequence:
+        "Above every team's. It only ever narrows: where the deployment was given a tighter ceiling, that one binds and this is ignored. A reservation refused here names which of the two it was.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "default_person_budget_micros",
+      group: :team_defaults,
+      type: :integer,
+      fallback: 0,
+      summary: "The spend ceiling a person gets, in millionths, across every team.",
+      consequence:
+        "Applied to people who have not been given one of their own. 0 is unlimited, which is what everybody gets today unless you set this.",
+      effect: :immediate
+    },
+    %Setting{
       key: "default_budget_period",
       group: :team_defaults,
       type: :enum,
@@ -106,20 +126,78 @@ defmodule Troupe.Plane.Settings do
       key: "default_idle_timeout_seconds",
       group: :team_defaults,
       type: :integer,
+      app_key: :default_idle_timeout_seconds,
       fallback: 1800,
-      summary: "How long a new team's sessions sit idle before going dormant.",
+      summary: "The longest a team may let its sessions sit idle before going dormant.",
       consequence:
-        "A dormant session costs nothing and wakes with its history. Shorter saves memory on the pods; longer means fewer wakes.",
-      effect: :next_team
+        "A ceiling as well as a default: a team may set a shorter timeout and not a longer one, and the Teams page quotes this when it refuses. A dormant session costs nothing and wakes with its history.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "default_cache_eviction_days",
+      group: :team_defaults,
+      type: :integer,
+      app_key: :default_cache_eviction_days,
+      fallback: 7,
+      summary: "The longest a team may keep a dormant session's cache.",
+      consequence:
+        "A ceiling as well as a default. A team may keep a cache for fewer days and not more.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "pins_allowed",
+      group: :team_defaults,
+      type: :boolean,
+      app_key: :pins_allowed,
+      fallback: true,
+      summary: "Whether teams may let their members pin a session against eviction.",
+      consequence:
+        "Off here and no team may turn it on, whatever their own setting says. A lower rung may only narrow.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "members_may_control",
+      group: :team_defaults,
+      type: :boolean,
+      app_key: :members_may_control,
+      fallback: true,
+      summary: "Whether teams may let members steer a shared session rather than watch it.",
+      consequence:
+        "Off here and no team may turn it on. A team that has it on already stops being able to steer at the next request.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "managed_permission_rules_only",
+      group: :sessions,
+      type: :boolean,
+      app_key: :managed_permission_rules_only,
+      fallback: false,
+      summary: "Ignore a session's own permission rules; only the platform's apply.",
+      consequence:
+        "A client may still send rules and they change nothing. Turn this on where what a session may do has to be decided by somebody other than the session.",
+      effect: :next_session
+    },
+    %Setting{
+      key: "managed_mcp_servers_only",
+      group: :sessions,
+      type: :boolean,
+      app_key: :managed_mcp_servers_only,
+      fallback: false,
+      summary: "Refuse client-hosted tools: only the profile's MCP servers may be used.",
+      consequence:
+        "`tools.register` is refused with a reason the model can relay, and nothing is registered. A personal connector on somebody's laptop is exactly what this turns off.",
+      effect: :next_session
     },
     %Setting{
       key: "default_erase_after_days",
       group: :team_defaults,
       type: :integer,
+      app_key: :default_erase_after_days,
       fallback: 365,
-      summary: "How long a new team's sessions are kept before they are erased.",
-      consequence: "Only for teams enabled after the change. Erasure is irreversible.",
-      effect: :next_team
+      summary: "The longest a team may keep its sessions before they are erased.",
+      consequence:
+        "A ceiling as well as a default: a team may shorten its retention and not lengthen it, which is the direction a retention policy has to be enforceable in. Erasure is irreversible.",
+      effect: :immediate
     },
     %Setting{
       key: "default_bundle_channel",
@@ -348,6 +426,37 @@ defmodule Troupe.Plane.Settings do
 
       {:ok,
        %{key: key, value: value_of(setting, %{}), effect: effect_description(setting.effect)}}
+    end
+  end
+
+  @doc """
+  What the *deployment* said, ignoring any stored override.
+
+  The ladder's bottom rung, and the one nothing inside the console can move: a plane's
+  deployed value is its floor whatever an operator does afterwards.
+  """
+  @spec deployed_value(String.t()) :: term()
+  def deployed_value(key) do
+    case Map.fetch(@by_key, key) do
+      :error -> nil
+      {:ok, setting} -> deployed(setting)
+    end
+  end
+
+  @doc """
+  What a platform admin stored for a key, or `nil` where they stored nothing.
+
+  Distinct from `get/1`, which answers what the plane *runs on*: this says whether
+  anybody has had an opinion, which is what an effective-value view has to show.
+  """
+  @spec stored_value(String.t()) :: term()
+  def stored_value(key) do
+    with {:ok, setting} <- Map.fetch(@by_key, key),
+         raw when is_binary(raw) <- Map.get(stored(), key),
+         {:ok, parsed} <- parse(setting, raw) do
+      parsed
+    else
+      _none -> nil
     end
   end
 

@@ -24,8 +24,8 @@ defmodule Troupe.Worker.SessionCase do
 
       alias Troupe.ObjectStore
       alias Troupe.Protocol.Event
-      alias Troupe.Sessions.Storage
-      alias Troupe.Worker.Session.{Context, Manager, Sealer}
+      alias Troupe.Sessions.{Context, Sealer, Storage}
+      alias Troupe.Worker.Session.Manager
       alias Troupe.Worker.Sessions
     end
   end

@@ -13,7 +13,8 @@ defmodule Troupe.Plane.Sessions do
   alias Troupe.Plane.Fleet.Worker
   alias Troupe.Plane.Identity.{Team, User}
   alias Troupe.Plane.Repo
-  alias Troupe.Plane.Sessions.{ACL, Anchor, Session}
+  alias Troupe.Plane.Sessions.{ACL, Anchor, Session, Share}
+  alias Troupe.Plane.Settings.Ladder
 
   # -- creating and placing ---------------------------------------------------
 
@@ -106,6 +107,82 @@ defmodule Troupe.Plane.Sessions do
     |> Map.new()
   end
 
+  @doc """
+  What a profile is being asked to run: sessions active now, and sessions waiting.
+
+  Both, because the scaler has to bring up room for the ones waiting as well as keep it
+  for the ones running — a count of the active alone would settle at exactly the capacity
+  that is already full.
+  """
+  @spec demand_for(String.t()) :: %{active: non_neg_integer(), pending: non_neg_integer()}
+  def demand_for(profile) do
+    counts =
+      Repo.all(
+        from(s in Session,
+          where: s.profile == ^profile and s.state in ["active", "pending"],
+          group_by: s.state,
+          select: {s.state, count(s.id)}
+        )
+      )
+      |> Map.new()
+
+    %{active: Map.get(counts, "active", 0), pending: Map.get(counts, "pending", 0)}
+  end
+
+  @doc """
+  Sessions waiting for a worker on this profile, oldest first.
+
+  Oldest first is the whole of the fairness here: a session that has been waiting two
+  minutes should be placed before one created a moment ago, and a controller that took
+  them in any other order would make the wait unbounded for somebody.
+  """
+  @spec pending_for(String.t(), non_neg_integer()) :: [Session.t()]
+  def pending_for(profile, limit \\ 50) do
+    Repo.all(
+      from(s in Session,
+        where: s.profile == ^profile and s.state == "pending",
+        order_by: [asc: s.inserted_at],
+        limit: ^limit
+      )
+    )
+  end
+
+  @doc """
+  Mark a session as waiting for a worker, keeping the prompt until there is one.
+
+  The prompt is the only piece of session *content* the plane ever holds, and it holds
+  it here for the same reason it carries it in `session.activate`: a session with nobody
+  attached has to do its first turn alone, and a wait that dropped the prompt would
+  produce a session that started and then sat there. It is cleared the moment the
+  session is placed.
+  """
+  @spec wait(String.t(), String.t() | nil) :: {:ok, Session.t()} | {:error, term()}
+  def wait(session_id, prompt) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        session
+        |> Session.changeset(%{state: "pending", pending_prompt: prompt})
+        |> Repo.update()
+    end
+  end
+
+  @doc "The session is placed: it is no longer waiting and its prompt has been sent."
+  @spec admitted(String.t()) :: {:ok, Session.t()} | {:error, term()}
+  def admitted(session_id) do
+    case Repo.get(Session, session_id) do
+      nil ->
+        {:error, :not_found}
+
+      session ->
+        session
+        |> Session.changeset(%{state: "active", pending_prompt: nil})
+        |> Repo.update()
+    end
+  end
+
   # -- lifecycle --------------------------------------------------------------
 
   @doc """
@@ -136,15 +213,26 @@ defmodule Troupe.Plane.Sessions do
     end
   end
 
-  @doc "Record that a session has gone dormant, with the sequence it sealed at."
+  @doc """
+  Record that a session has gone dormant, with the sequence it sealed at.
+
+  The worker is cleared here rather than being left to whoever calls `Placement.release`
+  next. `put_fields/2` drops nils on purpose — a pod reporting three of four lifecycle
+  fields must not blank the fourth — so `worker_id: nil` through that path was silently
+  discarded, and a dormant session went on naming the pod it was no longer on until a
+  release happened to land. Every reader of `worker_id` filters on `state == "active"`,
+  which is why it took a test asserting the row directly to see it.
+  """
   @spec dormant(String.t(), map()) :: {:ok, Session.t()} | {:error, term()}
   def dormant(session_id, attrs \\ %{}) do
-    put_fields(session_id, Map.merge(attrs, %{state: "dormant", worker_id: nil}))
+    put_fields(session_id, Map.merge(attrs, %{state: "dormant"}), clear: [:worker_id])
   end
 
   @doc "Make a session read-only, because its profile is gone or its team lost the grant."
   @spec read_only(String.t()) :: {:ok, Session.t()} | {:error, term()}
-  def read_only(session_id), do: put_fields(session_id, %{state: "read_only", worker_id: nil})
+  def read_only(session_id) do
+    put_fields(session_id, %{state: "read_only"}, clear: [:worker_id])
+  end
 
   @doc """
   Overwrite a row from a rebuild.
@@ -237,6 +325,128 @@ defmodule Troupe.Plane.Sessions do
     )
   end
 
+  # -- private sessions -------------------------------------------------------
+
+  @doc """
+  Register a session that runs on somebody's own machine.
+
+  The plane learns that it exists and how far it has got. It learns nothing else: the
+  bytes are sealed with a key under `troupe/people/<subject>/sessions/<id>` that no pod
+  and no operator role can read, and the row carries sizes, sequence numbers and hashes.
+
+  Idempotent on the id, because a daemon that seals, loses its connection and retries
+  must not end up with two sessions or a rejected one. A first registration mints epoch
+  1; a later one is a progress report, fenced.
+  """
+  @spec register(String.t(), map()) ::
+          {:ok, Session.t()} | {:error, :stale_epoch | :not_yours | Ecto.Changeset.t()}
+  def register(subject, %{"session_id" => session_id} = params) when is_binary(subject) do
+    case Repo.get(Session, session_id) do
+      nil -> insert_private(subject, session_id, params)
+      %Session{} = session -> reseal_private(subject, session, params)
+    end
+  end
+
+  defp insert_private(subject, session_id, params) do
+    create(%{
+      id: session_id,
+      owner_subject: subject,
+      kind: "private",
+      visibility: "private",
+      state: "active",
+      device: params["device"],
+      title: params["title"],
+      origin: %{"kind" => "user", "device" => params["device"]},
+      last_seq: params["last_seq"] || 0,
+      head_hash: params["head_hash"],
+      object_bytes: params["object_bytes"] || 0,
+      workspace_bytes: params["workspace_bytes"] || 0
+    })
+  end
+
+  # A seal carries the epoch the device believes it holds. The device that lost a claim
+  # still has a log and still wants to write it; this is where it is told not to, and it
+  # is told on the *next seal* rather than at the moment it lost, because nothing reaches
+  # a laptop that is not asking.
+  defp reseal_private(subject, %Session{kind: "private", owner_subject: subject} = session, p) do
+    {count, rows} =
+      Repo.update_all(
+        from(s in Session,
+          where: s.id == ^session.id and s.epoch == ^(p["epoch"] || session.epoch),
+          select: s
+        ),
+        set: seal_fields(session, p)
+      )
+
+    case {count, rows} do
+      {1, [updated]} -> {:ok, updated}
+      {0, _none} -> {:error, :stale_epoch}
+    end
+  end
+
+  defp reseal_private(_subject, %Session{}, _params), do: {:error, :not_yours}
+
+  # `last_seq` never goes backwards. A retry of an older seal is not a rewind, and a
+  # daemon replaying its queue after a restart sends them in whatever order it kept them.
+  defp seal_fields(session, params) do
+    [
+      last_seq: max(params["last_seq"] || 0, session.last_seq),
+      last_active_at: DateTime.utc_now(),
+      updated_at: DateTime.utc_now()
+    ]
+    |> put_present(:head_hash, params["head_hash"])
+    |> put_present(:device, params["device"])
+    |> put_present(:title, params["title"])
+    |> put_present(:object_bytes, params["object_bytes"])
+    |> put_present(:workspace_bytes, params["workspace_bytes"])
+  end
+
+  defp put_present(fields, _key, nil), do: fields
+  defp put_present(fields, key, value), do: Keyword.put(fields, key, value)
+
+  @doc """
+  Take a private session over on this device.
+
+  The fence between two machines. Both read epoch 3 and both try to move past it; the
+  conditional update decides, and the loser learns it lost on its next seal rather than
+  by being told — a laptop that is asleep is not listening, and one that is awake is
+  about to ask anyway.
+
+  Unlike `activate/1` there is no dormancy condition: a private session has no pod whose
+  absence would make it dormant, so "still on the other device" is exactly the case this
+  has to resolve rather than refuse.
+  """
+  @spec claim(String.t(), String.t(), integer(), String.t() | nil) ::
+          {:ok, Session.t()} | {:error, :stale_epoch | :not_found | :not_yours}
+  def claim(session_id, subject, from_epoch, device \\ nil) do
+    {count, rows} =
+      Repo.update_all(
+        from(s in Session,
+          where:
+            s.id == ^session_id and s.epoch == ^from_epoch and s.kind == "private" and
+              s.owner_subject == ^subject and s.state != "erased",
+          select: s
+        ),
+        inc: [epoch: 1],
+        set:
+          [state: "active", last_active_at: DateTime.utc_now(), updated_at: DateTime.utc_now()]
+          |> put_present(:device, device)
+      )
+
+    case {count, rows} do
+      {1, [session]} -> {:ok, session}
+      {0, _none} -> claim_refusal(session_id, subject)
+    end
+  end
+
+  defp claim_refusal(session_id, subject) do
+    case Repo.get(Session, session_id) do
+      nil -> {:error, :not_found}
+      %Session{kind: "private", owner_subject: ^subject} -> {:error, :stale_epoch}
+      %Session{} -> {:error, :not_yours}
+    end
+  end
+
   @doc """
   Record what the worker says a session is doing.
 
@@ -327,8 +537,17 @@ defmodule Troupe.Plane.Sessions do
   # A field the worker did not report is a field that has not changed. Casting a nil
   # would set the column to NULL instead, which for the counters means a constraint
   # violation and for the rest means losing what was there.
-  defp put_fields(session_id, attrs) do
-    attrs = Map.reject(attrs, fn {_key, value} -> is_nil(value) end)
+  # Nils are dropped because a pod reporting three of four lifecycle fields must not
+  # blank the fourth. `clear:` is how a caller says it means the nil: the fields named
+  # there are set to nil after the rejection, which is the difference between "I have
+  # nothing to say about the worker" and "there is no worker".
+  defp put_fields(session_id, attrs, opts \\ []) do
+    cleared = Map.new(Keyword.get(opts, :clear, []), &{&1, nil})
+
+    attrs =
+      attrs
+      |> Map.reject(fn {_key, value} -> is_nil(value) end)
+      |> Map.merge(cleared)
 
     case Repo.get(Session, session_id) do
       nil -> {:error, :not_found}
@@ -438,12 +657,20 @@ defmodule Troupe.Plane.Sessions do
   # `users` row to join through.
   defp member_team_ids(%User{kind: "service", principal: %{team_id: team_id}}), do: [team_id]
 
+  # Through the team's links, because a team is a union of groups rather than one. The
+  # raw table names are deliberate — `Sessions` may not reach into `Identity`'s schemas
+  # any more than a LiveView may reach into `Admin`'s — and `distinct` is load-bearing: a
+  # person in two of a team's groups would otherwise put the team in this list twice, and
+  # every listing would show their sessions twice.
   defp member_team_ids(%User{id: id}) when is_binary(id) do
     Repo.all(
       from(t in Team,
+        join: l in "team_group_links",
+        on: l.team_id == type(t.id, :binary_id),
         join: m in "memberships",
-        on: m.group_id == type(t.group_id, :binary_id),
+        on: m.group_id == type(l.group_id, :binary_id),
         where: m.user_id == type(^id, :binary_id),
+        distinct: t.id,
         select: t.id
       )
     )
@@ -455,6 +682,9 @@ defmodule Troupe.Plane.Sessions do
     Enum.reduce(opts, query, fn
       {:profile, profile}, acc ->
         from(s in acc, where: s.profile == ^profile)
+
+      {:kind, kind}, acc ->
+        from(s in acc, where: s.kind == ^kind)
 
       {:state, states}, acc ->
         from(s in acc, where: s.state in ^List.wrap(states))
@@ -468,6 +698,16 @@ defmodule Troupe.Plane.Sessions do
 
       {:trigger, name}, acc ->
         from(s in acc, where: fragment("?->>'trigger'", s.origin) == ^name)
+
+      # One filter for all seven ways a session is started by something other than a
+      # person: `source: "any"` is every one of them, and a named source is one. This is
+      # what makes "show me everything automated" a single question rather than a union
+      # of origin kinds a reader has to know to enumerate.
+      {:source, "any"}, acc ->
+        from(s in acc, where: not is_nil(fragment("?->>'source'", s.origin)))
+
+      {:source, source}, acc when is_binary(source) ->
+        from(s in acc, where: fragment("?->>'source'", s.origin) == ^source)
 
       {:needs_review, true}, acc ->
         needs_review(acc)
@@ -528,6 +768,43 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  How many sessions these people can currently open.
+
+  What an unlink dialog quotes. Counted rather than listed, because the question is *how
+  much am I about to take away* and a list of twenty-three session ids is not an answer to
+  it. Sessions they own, sessions they are on the ACL of, and their teams' shared ones —
+  the same three roads `visible_to/2` takes, because a number that did not match what they
+  can actually open would be worse than no number.
+  """
+  @spec count_visible_to([String.t()]) :: non_neg_integer()
+  def count_visible_to([]), do: 0
+
+  def count_visible_to(subjects) do
+    Repo.one(
+      from(s in Session,
+        left_join: a in ACL,
+        on: a.session_id == s.id and a.subject in ^subjects,
+        left_join: t in Team,
+        on: t.id == s.team_id,
+        left_join: l in "team_group_links",
+        on: l.team_id == type(t.id, :binary_id),
+        left_join: m in "memberships",
+        on: m.group_id == type(l.group_id, :binary_id),
+        left_join: u in User,
+        on: u.id == type(m.user_id, :binary_id) and u.subject in ^subjects,
+        where:
+          s.state != "erased" and
+            (s.owner_subject in ^subjects or not is_nil(a.id) or
+               (s.visibility == "team" and not is_nil(u.id))),
+        distinct: s.id,
+        select: s.id
+      )
+      |> subquery()
+      |> select([s], count(s.id))
+    )
+  end
+
+  @doc """
   What a user may do with one session, or `nil` when they may not see it.
 
   Owner administers, collaborator steers, viewer watches. Team visibility gives observe,
@@ -548,7 +825,10 @@ defmodule Troupe.Plane.Sessions do
     with team_id when not is_nil(team_id) <- session.team_id,
          %Team{} = team <- Repo.get(Team, team_id),
          true <- member?(user, team) do
-      if team.members_may_control, do: :control, else: :observe
+      # Through the ladder, not off the column: a platform that has turned this off
+      # turns it off for every team, and a team that has it on in its own row stops
+      # being able to steer at the next request rather than at the next edit.
+      if Ladder.resolve(team).members_may_control, do: :control, else: :observe
     else
       _ -> nil
     end
@@ -562,8 +842,9 @@ defmodule Troupe.Plane.Sessions do
   defp member?(%User{id: id}, team) when is_binary(id) do
     Repo.exists?(
       from(m in "memberships",
-        where:
-          m.user_id == type(^id, :binary_id) and m.group_id == type(^team.group_id, :binary_id)
+        join: l in "team_group_links",
+        on: l.group_id == m.group_id,
+        where: m.user_id == type(^id, :binary_id) and l.team_id == type(^team.id, :binary_id)
       )
     )
   end
@@ -594,6 +875,158 @@ defmodule Troupe.Plane.Sessions do
   def revoke_access(session_id, subject) do
     Repo.delete_all(from(a in ACL, where: a.session_id == ^session_id and a.subject == ^subject))
     :ok
+  end
+
+  # -- shares -----------------------------------------------------------------
+
+  @doc """
+  Mint a capability over a session, and hand back the secret once.
+
+  Once, because the plane keeps a salted digest and not the secret — the same shape a
+  trigger key has, and for the same reason: a dump of this table is not a set of working
+  links. Somebody who loses a share mints another and revokes the first, which is the
+  behaviour to want anyway.
+
+  The caller has already decided this is allowed. Everything here is the record of that
+  decision and none of it is the decision itself.
+  """
+  @spec mint_share(String.t(), map()) :: {:ok, Share.t(), String.t()} | {:error, term()}
+  def mint_share(session_id, attrs) do
+    {id, secret, hash, salt} = mint_secret()
+
+    %Share{}
+    |> Share.changeset(
+      Map.merge(attrs, %{
+        id: id,
+        session_id: session_id,
+        secret_hash: hash,
+        secret_salt: salt
+      })
+    )
+    |> Repo.insert()
+    |> case do
+      {:ok, share} -> {:ok, share, secret}
+      error -> error
+    end
+  end
+
+  @doc """
+  End one capability, leaving every other route to the session alone.
+
+  The difference from `revoke_access/2` is the point of having both. Removing somebody
+  from the ACL ends every way they had in; revoking a share ends this link and not their
+  membership, not their team's visibility, and not another link they were sent.
+
+  Idempotent: revoking a revoked share keeps the first revocation, because *when* it
+  stopped working is a fact and the second attempt is somebody making sure.
+  """
+  @spec revoke_share(Share.t(), String.t(), String.t() | nil) :: {:ok, Share.t()}
+  def revoke_share(%Share{revoked_at: at} = share, _by, _reason) when not is_nil(at),
+    do: {:ok, share}
+
+  def revoke_share(%Share{} = share, by, reason) do
+    share
+    |> Share.revoke_changeset(%{
+      revoked_at: DateTime.utc_now(),
+      revoked_by: by,
+      revoked_reason: reason
+    })
+    |> Repo.update()
+  end
+
+  @doc "One share, by its public id."
+  @spec get_share(String.t()) :: Share.t() | nil
+  def get_share(id) when is_binary(id), do: Repo.get(Share, id)
+  def get_share(_other), do: nil
+
+  @doc "Every capability over a session, newest first, revoked and expired ones included."
+  @spec shares_of(String.t()) :: [Share.t()]
+  def shares_of(session_id) do
+    Repo.all(
+      from(s in Share, where: s.session_id == ^session_id, order_by: [desc: s.inserted_at])
+    )
+  end
+
+  @doc """
+  The share a secret opens, if it still opens one.
+
+  What is asked of the share is only what is true of the share: unexpired, unrevoked, and
+  — where it named somebody — presented by them. Nothing here re-derives the sharer's
+  authority. That was settled at mint, and a link that quietly stopped working because
+  somebody changed teams is not what anybody means by sending somebody a link.
+  """
+  @spec redeem_share(String.t(), String.t() | nil) ::
+          {:ok, Share.t()} | {:error, :no_such_share | :expired | :revoked | :not_for_you}
+  def redeem_share(secret, subject \\ nil)
+
+  def redeem_share(secret, subject) when is_binary(secret) do
+    now = DateTime.utc_now()
+
+    with {:ok, share} <- share_for_secret(secret),
+         :ok <- share_usable(share, now),
+         :ok <- share_audience(share, subject) do
+      {:ok, mark_redeemed(share, now)}
+    end
+  end
+
+  def redeem_share(_secret, _subject), do: {:error, :no_such_share}
+
+  # The secret names its own share, so this is one indexed lookup rather than a scan of
+  # every share in the deployment. The id is public — it is in `share_created` — and the
+  # half after the dot is the part that has to be right; it is compared against a salted
+  # digest, in constant time, and the id on its own opens nothing.
+  defp share_for_secret(secret) do
+    with ["tsh_" <> id, _presented] <- String.split(secret, ".", parts: 2),
+         %Share{} = share <- Repo.get(Share, "shr_" <> id),
+         true <- secret_matches?(share, secret) do
+      {:ok, share}
+    else
+      _no -> {:error, :no_such_share}
+    end
+  end
+
+  defp share_usable(%Share{revoked_at: at}, _now) when not is_nil(at), do: {:error, :revoked}
+
+  defp share_usable(%Share{} = share, now) do
+    if Share.live?(share, now), do: :ok, else: {:error, :expired}
+  end
+
+  # A share made out to somebody is theirs. One with no audience is a link, and was minted
+  # by somebody who chose that.
+  defp share_audience(%Share{audience: nil}, _subject), do: :ok
+  defp share_audience(%Share{audience: subject}, subject), do: :ok
+  defp share_audience(%Share{}, _other), do: {:error, :not_for_you}
+
+  # What it has actually been used for, which is the question somebody asks before revoking
+  # one: has anybody opened this, and when did they last.
+  defp mark_redeemed(%Share{} = share, now) do
+    {1, _updated} =
+      Repo.update_all(
+        from(s in Share, where: s.id == ^share.id),
+        inc: [redeemed_count: 1],
+        set: [last_redeemed_at: now, updated_at: now]
+      )
+
+    %{share | redeemed_count: share.redeemed_count + 1, last_redeemed_at: now}
+  end
+
+  # 256 bits after the id, URL-safe so it survives a chat window, a mail client and a
+  # shell. Prefixed so a secret found in a log says what it is and what to revoke.
+  defp mint_secret do
+    id = 12 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
+    # A dot between the two halves, because base64url uses `-` and `_` and a separator that
+    # can appear inside an id is a separator that splits the wrong id in half.
+    secret = "tsh_" <> id <> "." <> (32 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
+    salt = 16 |> :crypto.strong_rand_bytes() |> Base.encode16(case: :lower)
+    {"shr_" <> id, secret, secret_hash(salt, secret), salt}
+  end
+
+  defp secret_hash(salt, secret),
+    do: :sha256 |> :crypto.hash(salt <> secret) |> Base.encode16(case: :lower)
+
+  defp secret_matches?(%Share{secret_hash: hash, secret_salt: salt}, secret) do
+    presented = secret_hash(salt, secret)
+    byte_size(presented) == byte_size(hash) and :crypto.hash_equals(presented, hash)
   end
 
   @doc "Everyone explicitly on a session."

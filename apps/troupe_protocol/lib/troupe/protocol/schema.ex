@@ -41,7 +41,24 @@ defmodule Troupe.Protocol.Schema do
         "visibility" => required(:string),
         "bundle_version" => optional(:string),
         "kind" => optional(:string),
+        # Who it belongs to, where anybody was told; and what it was allowed to see —
+        # the agent, skill and MCP server names the grant resolved to, or absent for no
+        # restriction, which is what a local session and an unnarrowed grant both mean.
+        "owner" => optional(:string),
+        "entitlements" => optional(:object),
         "origin" => optional(:object)
+      },
+      # The child's first event, and the only place the lineage is written down in the log.
+      # `parent` carries the id, the seq forked at and the parent's head hash there, so a
+      # reader holding only the child can say what it came from and a verifier can say the
+      # claim is about a real point in a real chain.
+      #
+      # The parent gets nothing. It is not amended, not notified, and a fork of a dormant
+      # session does not wake it — which is what makes forking cost the person who forks
+      # and nobody else.
+      "session_forked" => %{
+        "parent" => required(:object),
+        "reason" => required(:string)
       },
       "agent_started" => %{
         "profile" => required(:string),
@@ -84,7 +101,17 @@ defmodule Troupe.Protocol.Schema do
       "tool_call_started" => %{
         "call_id" => required(:string),
         "name" => required(:string),
-        "args" => required(:object)
+        "args" => required(:object),
+        # Which credential an MCP call goes out as: `"profile"` or `"person:<subject>"`.
+        # Absent for every other tool, because a built-in runs as the pod and a
+        # client-hosted tool runs on somebody's laptop, and neither is a choice anybody
+        # made.
+        "identity" => optional(:string),
+        # The same question with its other half: whose credential *and* whose session.
+        # A field is never retyped within a major version, so the pair arrives beside
+        # `identity` rather than in place of it — and `identity` keeps meaning exactly
+        # what it meant to every reader written before there were two halves.
+        "principal" => optional(:object)
       },
       "tool_call_completed" => %{
         "call_id" => required(:string),
@@ -138,6 +165,21 @@ defmodule Troupe.Protocol.Schema do
       # What the session may touch: `[{name, kind, root, mode}]`. Resolved once, at
       # creation, and recorded so that a replay can tell what was allowed at the time.
       "mounts_resolved" => %{"mounts" => required(:array)},
+      # Something other than a person started this session, and this is the whole of what
+      # that was: which of the seven sources, under which trigger document, on whose
+      # authority, against which idempotency key, carrying what.
+      #
+      # `payload_digest` is a hash and never a payload — a webhook body is content, and
+      # content does not belong in an event that outlives the session that received it.
+      # It and `revision` are optional because a session started before either existed
+      # has neither, and a value invented here would read as one that was measured.
+      "trigger_fired" => %{
+        "source" => required(:string),
+        "idempotency_key" => required(:string),
+        "principal" => required(:object),
+        "revision" => optional(:string),
+        "payload_digest" => optional(:string)
+      },
       "published" => %{
         "source" => required(:string),
         "destination" => required(:string),
@@ -158,7 +200,11 @@ defmodule Troupe.Protocol.Schema do
         "channel" => required(:string),
         "from" => optional(:integer),
         "to" => required(:integer),
-        "hash" => required(:string)
+        "hash" => required(:string),
+        # Re-resolved at this activation: a publish can add an entry the team is not
+        # entitled to, so the event that says the configuration moved says what the
+        # session may now see.
+        "entitlements" => optional(:object)
       },
       "session_read_only" => %{"reason" => required(:string)},
       "session_archived" => %{},
@@ -168,6 +214,25 @@ defmodule Troupe.Protocol.Schema do
         "hash" => required(:string),
         "size" => required(:integer)
       },
+      # A capability somebody minted over this session: a link that carries a role rather
+      # than a name. Durable, because a share is a decision about who may read what was
+      # said, and a decision of that kind that left no trace would be one nobody could
+      # audit after the fact.
+      #
+      # `id` is the share's public identifier and never the secret — the secret is shown to
+      # whoever minted it, once, and the plane keeps a salted digest. An event carrying it
+      # would put a working credential in a log that outlives the session.
+      #
+      # `role` is `observe` or `control`. Never `admin`: a capability that could administer
+      # a session could grant further capabilities, and a link that can mint links is a link
+      # nobody can reason about.
+      "share_created" => %{
+        "id" => required(:string),
+        "role" => required(:string),
+        "expires_at" => required(:string),
+        "audience" => optional(:string)
+      },
+      "share_revoked" => %{"id" => required(:string), "reason" => optional(:string)},
       "acl_granted" => %{"subject" => required(:string), "role" => required(:string)},
       "acl_revoked" => %{"subject" => required(:string), "role" => required(:string)},
       # Client-hosted tools. Durable, all three, because a tool that ran on somebody's

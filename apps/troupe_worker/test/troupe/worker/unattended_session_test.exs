@@ -57,6 +57,71 @@ defmodule Troupe.Worker.UnattendedSessionTest do
     end
   end
 
+  describe "the firing" do
+    test "is one event, from the origin, and is not repeated when the session wakes",
+         context do
+      context = requires_tier(context)
+      fake = scripted([{:text, "triaged"}])
+
+      # Written as a literal rather than through `Origin.trigger/2`: what is under test
+      # is that the pod reads what the plane put on the wire, and a test that built the
+      # block with the same constructor the plane uses would pass on two halves that had
+      # drifted together.
+      origin = %{
+        "kind" => "trigger",
+        "trigger" => "nightly-deps",
+        "source" => "schedule",
+        "idempotency_key" => "cron:2026-09-16T03:00:00Z",
+        "revision" => "sha256:" <> String.duplicate("a", 64),
+        "payload_digest" => "sha256:" <> String.duplicate("b", 64),
+        "principal" => %{"subject" => "ada@example.test", "actor" => "svc:engineering/nightly"}
+      }
+
+      assert {:ok, _} = activate(context, fake: fake, prompt: @prompt, origin: origin)
+      await_responses(context.session_id, 1)
+
+      assert [fired] =
+               context.session_id
+               |> Troupe.replay_from(0)
+               |> Enum.filter(&(&1.type == "trigger_fired"))
+
+      assert fired.data == %{
+               "source" => "schedule",
+               "idempotency_key" => "cron:2026-09-16T03:00:00Z",
+               "revision" => origin["revision"],
+               "payload_digest" => origin["payload_digest"],
+               "principal" => origin["principal"]
+             }
+
+      # Asleep and awake again. A session is fired once however many times it is opened,
+      # and a second `trigger_fired` would read as a second run — which is exactly the
+      # mistake `session_created` made before `session_resumed` existed.
+      assert {:ok, _} = Sessions.dormant(context.session_id)
+      assert {:ok, _} = activate(context, fake: fake, epoch: 2, prompt: @prompt, origin: origin)
+
+      Process.sleep(300)
+
+      assert context.session_id
+             |> Troupe.replay_from(0)
+             |> Enum.count(&(&1.type == "trigger_fired")) == 1
+    end
+
+    test "is absent where a person started the session", context do
+      context = requires_tier(context)
+      fake = scripted([{:text, "hello"}])
+
+      assert {:ok, _} = activate(context, fake: fake, prompt: "by hand")
+      await_responses(context.session_id, 1)
+
+      # The negative half, and the reason it is worth a test: an event emitted for every
+      # session would make "this ran unattended" true of everything, and the filter that
+      # depends on it would answer the same list as no filter at all.
+      refute context.session_id
+             |> Troupe.replay_from(0)
+             |> Enum.any?(&(&1.type == "trigger_fired"))
+    end
+  end
+
   describe "terms" do
     test "max_turns ends the session with the limit named", context do
       context = requires_tier(context)

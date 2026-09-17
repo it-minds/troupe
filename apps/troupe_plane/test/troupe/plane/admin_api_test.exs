@@ -15,6 +15,7 @@ defmodule Troupe.Plane.AdminAPITest do
 
   alias Troupe.Plane.{Admin, Fleet, Identity, OIDC, Sessions, Tokens}
   alias Troupe.Plane.Admin.API
+  alias Troupe.Plane.Admin.API.Method
   alias Troupe.Protocol.Token
 
   @endpoint Troupe.Plane.Web.Endpoint
@@ -107,6 +108,39 @@ defmodule Troupe.Plane.AdminAPITest do
 
       assert {:ok, [only]} = API.call("admin.sessions.list", %{"filter" => %{"state" => "dormant"}}, actor)
       assert only.state == "dormant"
+    end
+
+    test "a required argument that was not sent is named, not crashed on", context do
+      actor = Admin.actor_for(context.root)
+
+      # `admin.bundles.list` is the one that found this: its `channel` reached
+      # `Bundles.list/1` as nil and Ecto refuses to compare a column with nil, which is an
+      # ArgumentError, which is a 500 on a public endpoint.
+      assert {:error, error} = API.call("admin.bundles.list", %{}, actor)
+      assert error.message == "invalid_params"
+      assert error.data.missing == ["channel"]
+    end
+
+    test "every method with a required argument says so rather than raising", context do
+      actor = Admin.actor_for(context.root)
+
+      # The whole surface, because the defect was never about bundles: forty arguments
+      # were declared `required: true` and not one of them was enforced, so *any* client
+      # omitting *any* of them got whatever that context function did with a nil. A test
+      # naming one method would have left thirty-nine.
+      for method <- API.list(), Method.required_names(method) != [] do
+        answer =
+          try do
+            API.call(method.name, %{}, actor)
+          rescue
+            error -> {:raised, error}
+          end
+
+        assert {:error, %{message: "invalid_params"} = error} = answer,
+               "#{method.name} answered #{inspect(answer)}"
+
+        assert error.data.missing != [], method.name
+      end
     end
 
     test "an unknown filter key is ignored rather than crashing", context do

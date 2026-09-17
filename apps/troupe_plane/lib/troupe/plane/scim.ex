@@ -16,6 +16,7 @@ defmodule Troupe.Plane.SCIM do
 
   alias Troupe.Plane.Identity
   alias Troupe.Plane.Identity.{Group, User}
+  alias Troupe.Plane.Principals
 
   @user_schema "urn:ietf:params:scim:schemas:core:2.0:User"
   @group_schema "urn:ietf:params:scim:schemas:core:2.0:Group"
@@ -67,8 +68,16 @@ defmodule Troupe.Plane.SCIM do
   @spec deactivate_user(String.t()) :: {:ok, User.t()} | {:error, term()}
   def deactivate_user(id) do
     case Identity.get_user_by_id(id) do
-      nil -> {:error, :not_found}
-      user -> Identity.upsert_user(%{subject: user.subject, active: false})
+      nil ->
+        {:error, :not_found}
+
+      user ->
+        # And everything that person was answerable for. A service principal is a
+        # credential that starts sessions and spends a budget; one whose sponsor has left
+        # the provider has nobody to ask about it, so it stops firing within this push
+        # rather than at whatever point somebody notices.
+        {:ok, _stopped} = Principals.sponsor_left(user.subject)
+        Identity.upsert_user(%{subject: user.subject, active: false})
     end
   end
 

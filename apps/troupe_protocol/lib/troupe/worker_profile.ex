@@ -31,19 +31,40 @@ defmodule Troupe.WorkerProfile do
     @moduledoc """
     One MCP server a profile's sessions may use.
 
-    `credential_ref` is the name of the environment variable the pod finds the server's
-    token in. The bundle names it; the plane copies it into the spec; the operator writes
-    a `secretKeyRef` under that name and tells the worker the same name in
-    `TROUPE_MCP_SERVERS`, so the three agree without any of them holding the value.
+    `credential_mode` says whose credential goes out with a call, and the two modes use
+    different fields.
+
+    In `"profile"` mode — the default, and what every profile did before there was a
+    mode — `credential_ref` is the name of the environment variable the pod finds the
+    server's token in. The bundle names it; the plane copies it into the spec; the
+    operator writes a `secretKeyRef` under that name and tells the worker the same name
+    in `TROUPE_MCP_SERVERS`, so the three agree without any of them holding the value.
+
+    In `"person"` mode there is no Secret and no environment variable. `credential_slot`
+    names a slot under the session's owner in the key manager, which the pod reads with a
+    credential scoped to that person and neither the plane nor the operator can reach.
+    There is nothing here for the operator to mount.
     """
 
     @enforce_keys [:name, :url]
-    defstruct [:name, :url, :secret_name, :secret_key, :credential_ref, :header, :timeout_ms]
+    defstruct [
+      :name,
+      :url,
+      :secret_name,
+      :secret_key,
+      :credential_ref,
+      :credential_slot,
+      :header,
+      :timeout_ms,
+      credential_mode: "profile"
+    ]
 
     @type t :: %__MODULE__{
             name: String.t(),
             url: String.t(),
             secret_name: String.t() | nil,
+            credential_mode: String.t(),
+            credential_slot: String.t() | nil,
             secret_key: String.t() | nil,
             credential_ref: String.t() | nil,
             header: String.t() | nil,
@@ -156,6 +177,8 @@ defmodule Troupe.WorkerProfile do
       secret_name: get_in(entry, ["secretRef", "name"]),
       secret_key: get_in(entry, ["secretRef", "key"]) || "token",
       credential_ref: Map.get(entry, "credentialRef"),
+      credential_mode: Map.get(entry, "credentialMode") || "profile",
+      credential_slot: Map.get(entry, "credentialSlot"),
       header: Map.get(entry, "header"),
       timeout_ms: Map.get(entry, "timeoutMs")
     }

@@ -17,9 +17,9 @@ defmodule Troupe.Worker.Session.Restore do
   alias Troupe.Paths
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Log, Summary}
-  alias Troupe.Sessions.{Cipher, Snapshot, Storage}
+  alias Troupe.Sessions.{Cipher, Context, Snapshot, Storage}
   alias Troupe.Worker.Cache
-  alias Troupe.Worker.Session.{Context, Workspace}
+  alias Troupe.Worker.Session.Workspace
 
   @doc """
   Write a session's durable log to disk, ready for `Troupe.resume/2` to replay.

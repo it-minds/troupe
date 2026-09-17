@@ -46,13 +46,35 @@ defmodule Troupe.Protocol.Bundle do
   @default_header "authorization"
   @default_timeout_ms 30_000
   @permissions ~w(ask auto)
+  @credential_modes ~w(profile person)
+  # A slot is a name a person's key manager path is built from, so it is deliberately
+  # narrower than a secret name: lowercase, and nothing that could be a path segment
+  # separator or a wildcard.
+  @slot_name ~r/\A[a-z][a-z0-9-]{0,63}\z/
 
   @type agent :: %{name: String.t(), definition: String.t(), parsed: AgentDefinition.t()}
   @type skill :: %{name: String.t(), description: String.t(), files: %{String.t() => String.t()}}
+  @typedoc """
+  One MCP server a profile's sessions may use.
+
+  `credential_mode` says whose credential goes out with a call.
+
+  * `:profile` — today's behaviour and the default. `credential_ref` names an
+    environment variable, the operator writes a `secretKeyRef`, and every session on the
+    profile reaches the server as the same service account.
+  * `:person` — `credential_ref` is not a variable name but a **slot**. The value lives
+    in the key manager at `troupe/people/<subject>/mcp/<slot>`, and neither the plane nor
+    the operator ever reads it. The slot defaults to the server's own name.
+
+  The two are exclusive per server, and `secret_ref` — the spelling that becomes a
+  `secretRef` on the `WorkerProfile` — is refused alongside `:person` at publish. A
+  server with two credentials is a server whose identity depends on which code path ran.
+  """
   @type mcp_server :: %{
           name: String.t(),
           url: String.t(),
           credential_ref: String.t() | nil,
+          credential_mode: :profile | :person,
           header: String.t(),
           timeout_ms: pos_integer(),
           permission: :ask | :auto,
@@ -132,6 +154,7 @@ defmodule Troupe.Protocol.Bundle do
         "name" => server.name,
         "url" => server.url,
         "credential_ref" => server.credential_ref,
+        "credential_mode" => Atom.to_string(server.credential_mode),
         "header" => server.header,
         "timeout_ms" => server.timeout_ms,
         "permission" => Atom.to_string(server.permission),
@@ -254,6 +277,8 @@ defmodule Troupe.Protocol.Bundle do
        name: name,
        url: url,
        credential_ref: raw["credential_ref"] || raw["secret_ref"],
+       # A schema-0 bundle predates the mode and can only mean the one that existed.
+       credential_mode: :profile,
        header: raw["header"] || @default_header,
        timeout_ms: raw["timeout_ms"] || @default_timeout_ms,
        permission: :ask,
@@ -433,7 +458,9 @@ defmodule Troupe.Protocol.Bundle do
              {:error, "mcp server #{inspect(name)}: not a valid name"},
          {:ok, host} <- url_ok(name, url),
          :ok <- egress_ok(name, host, egress_allowed?),
-         {:ok, ref} <- credential_ref(name, raw["credential_ref"] || raw["secret_ref"]),
+         {:ok, mode} <- credential_mode(name, raw["credential_mode"]),
+         :ok <- one_credential(name, mode, raw),
+         {:ok, ref} <- credential(name, mode, raw),
          {:ok, permission} <- permission(name, raw["permission"]),
          {:ok, tools} <- tools(name, raw["tools"]) do
       {:ok,
@@ -441,6 +468,7 @@ defmodule Troupe.Protocol.Bundle do
          name: name,
          url: url,
          credential_ref: ref,
+         credential_mode: mode,
          header: raw["header"] || @default_header,
          timeout_ms: positive(raw["timeout_ms"]) || @default_timeout_ms,
          permission: permission,
@@ -471,6 +499,59 @@ defmodule Troupe.Protocol.Bundle do
       do: :ok,
       else:
         {:error, "mcp server #{name}: #{host} is not a host the cluster policy lets a pod reach"}
+  end
+
+  defp credential_mode(_name, nil), do: {:ok, :profile}
+
+  defp credential_mode(_name, mode) when mode in @credential_modes,
+    do: {:ok, String.to_existing_atom(mode)}
+
+  defp credential_mode(name, mode) do
+    {:error,
+     "mcp server #{name}: credential_mode #{inspect(mode)} is not " <>
+       Enum.join(@credential_modes, " or ")}
+  end
+
+  # Refused at publish rather than resolved at run time. `secret_ref` is the spelling
+  # that becomes a `secretRef` on the `WorkerProfile`, and a server that has one *and*
+  # answers as the session's owner is a server whose identity depends on which code path
+  # ran — which is not a thing to find out from a log six weeks later.
+  defp one_credential(_name, :profile, _raw), do: :ok
+
+  defp one_credential(name, :person, raw) do
+    if is_nil(raw["secret_ref"]) do
+      :ok
+    else
+      {:error,
+       "mcp server #{name}: credential_mode person and secret_ref together — a server " <>
+         "with two credentials is a server whose identity depends on which code path ran"}
+    end
+  end
+
+  # In profile mode the reference is an environment variable the operator injects. In
+  # person mode it is a slot in the key manager, and it defaults to the server's own
+  # name, because "connect Jira as yourself" should not need a second name invented for
+  # it.
+  defp credential(name, :profile, raw) do
+    credential_ref(name, raw["credential_ref"] || raw["secret_ref"])
+  end
+
+  defp credential(name, :person, raw) do
+    case raw["credential_ref"] do
+      nil ->
+        {:ok, name}
+
+      slot when is_binary(slot) ->
+        if Regex.match?(@slot_name, slot),
+          do: {:ok, slot},
+          else:
+            {:error,
+             "mcp server #{name}: credential_ref #{inspect(slot)} is not a slot name; in " <>
+               "person mode it names a slot under the person, not an environment variable"}
+
+      other ->
+        {:error, "mcp server #{name}: credential_ref #{inspect(other)} must be a string"}
+    end
   end
 
   defp credential_ref(_name, nil), do: {:ok, nil}

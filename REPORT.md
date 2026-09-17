@@ -1249,6 +1249,8 @@ passes alone — the flake already named in stage 5's report.
 
 * **Nothing has run on a cluster**, which is still the first item on the list. The
   end-to-end test uses real object storage and a real key manager, and a fake plane.
+  *(No longer true as of R1j below: it runs on one now, and the first thing it found was
+  that no worker could enrol on one. The sentence stands as what was true when written.)*
 * **No rollup pipeline and no retention job.** Raw records and a cached aggregate answer
   everything at this volume. The decision this stage owes the next one is the row count
   at which that stops being true.
@@ -1307,3 +1309,754 @@ keys, so every profile change was recorded as one twenty-line object becoming an
 **What is not claimed.** Identity and Integrations are not their own screens; the erase
 dialog is a two-step confirmation and not the typed identifier the design specifies; Audit
 has no integrity tab. `docs/plans/admin-surface.md` lists what is owed.
+---
+
+# R0 and R1 — the floor, in part
+
+What `docs/brief-remote.md` calls R0 and the first parts of R1. Two of R1's five pieces
+are built and proven; the rest is named at the end of this section with what is left of
+each, because a package listed as done that is not is worse than a package listed as
+owed.
+
+## R0 — the corrections
+
+`docs/plans/stage-6.md` §3e cited `tui/connectors.ex:5-8` for an app that was deleted;
+it now names the three modules `session_tainted` actually lives in, and the distinction
+it draws — a server a *client* registered versus one an *admin* published — is unchanged
+and still correct.
+
+`docs/plans/README.md` did not carry the sentence the brief quotes, so the correction was
+made where the claim still lives: a preamble saying that the five plans below are history
+where they name `apps/troupe_tui` or `apps/troupe_ctl`, and that what carries the
+protocol's proof now is `apps/troupe_gateway/test/conformance/conformance.py`.
+`DECISIONS.md` 325 records why that was the right shape rather than editing the plans.
+
+`placement.ex:35`'s comment is untouched, as instructed: it is the sentence that
+justified the design R3 changes, and it goes in R3's commit.
+
+## A toolchain, before anything that had to be run
+
+Nothing below could be proven on the machine this was written on, which had no Erlang,
+no Elixir and no Zig. `dev/toolbox/` builds the three `.tool-versions` names, plus
+`inotify-tools` and `bubblewrap` — the difference between the watch and sandbox done
+items being proven and being skipped — and `scripts/toolbox` runs a command in it,
+joined to the network `scripts/dev-up` already creates.
+
+```
+$ scripts/dev-up
+postgres  postgres://troupe:troupe@localhost:55432/troupe_plane_dev
+minio     http://localhost:59000  (console :59001, troupe / troupe-secret)
+openbao   http://localhost:58200  (dev root token: troupe-dev-root)
+
+$ scripts/toolbox elixir --version
+Erlang/OTP 28 [erts-16.4.0.5] [source] [64-bit] [smp:32:32] [jit:ns]
+Elixir 1.20.4 (compiled with Erlang/OTP 28)
+
+$ scripts/toolbox bwrap --dev-bind / / --unshare-pid echo SANDBOX_OK
+SANDBOX_OK
+```
+
+The configuration is not forked: `config/config.exs` names `localhost:55432`,
+`localhost:59000` and `localhost:58200`, and the container's entrypoint carries those
+three loopback ports to the compose network with `socat` rather than keeping a second set
+of values in step. `_build` and `deps` are named volumes, because a Linux build and a
+host build cannot share either. CI is unchanged and still installs the toolchain
+directly.
+
+**Five tests do not pass in a container and are not made to.**
+`Troupe.Agent.ResilienceTest`'s OS-pid cancellation test and four gateway tests that
+spawn or `kill -9` a daemon (`AutospawnTest`, `RestartTest`) fail here and pass on a
+Linux runner. They failed before any of this work — checked by stashing it and running
+them again on the same container — and `DECISIONS.md` 328 says so rather than weakening
+them until they pass somewhere they were not written for.
+
+## R1a — trigger revisions
+
+A run named a mutable row; it now names an immutable, content-addressed revision.
+
+**Generalised beyond the scheduler**, which is the brief's second correction. The hash
+covers the trigger *document* — profile, agent, principal, template, terms, visibility,
+review, notify, concurrency and the `source` document itself — and nothing in it says how
+a firing arrived. `Triggers.fire/4` resolves once, at the top, and every path reaches it:
+the scheduler, `trigger.fire` on `/rpc`, `admin.trigger.run`, and the seven sources
+`RELEASE.md` W2 adds. The scheduler learned nothing new.
+
+The four done items in `stage-6.md` §4, and three more the design implies:
+
+```
+$ scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/triggers_test.exs
+Result: 21 passed
+```
+
+| claim | test |
+| --- | --- |
+| Editing a template creates revision 2; the previous run still reports revision 1 and its text | "an edit makes a revision; the previous run still reports the one it ran" |
+| Editing back to the original creates no third revision | "editing back to the original text makes no third revision" |
+| Every pre-existing run points at a reconstructed revision 1 | the migration's backfill, and `reconstructed` on the row |
+| A firing that overlaps an edit names exactly one revision | "a firing that overlaps an edit names exactly one revision" |
+| Switching a trigger off is not a change to what a run would be | "switching a trigger off is not a change to what a run would be" |
+| The hash is over the document, so a webhook and a schedule of the same wording differ | "the hash is over the document, not over the row" |
+| A run renders from its revision and says which in the listing | "a run renders from its revision, and says which in the listing" |
+
+The session a trigger makes carries `origin.revision` — the hash — so a session found six
+weeks later says which wording made it without a join through the run.
+`admin.trigger.revisions` is new on the admin API and in `PROTOCOL.md`.
+
+## R1b — entitlements below the profile
+
+`stage-6.md` §2's five done items, and the pod half of them.
+
+```
+$ scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/entitlements_test.exs
+Result: 12 passed
+
+$ scripts/toolbox mix test apps/troupe_core/test/troupe/skills_test.exs
+Result: 15 passed
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A grant with no rows behaves exactly as today | "a grant with no rows offers exactly what the bundle has", plus the existing grant tests unchanged |
+| A team entitled to one of two skills gets one in `profiles.list`, one prompt line, `not_found` for the other | "shows one of two skills in the offering…", "narrows the skills a profile may consult, and the prompt says so", "a skill outside the set is not found, exactly as one the profile omits" |
+| An agent the team may not run is refused at `session.create` with the names it could have had, before placement or budget | "refuses an agent the team may not run, before placing or budgeting" — which asserts the empty session list and no push, not merely the error |
+| A session's set is recorded, and re-resolved on a publish | "is told its set, and the set is what the log will record"; `session_created` and `config_upgraded` both carry `entitlements` |
+| A `deny` row beats an `allow` row for the same name | "a list that says allow and deny for one name stores the deny", and `Entitlement.resolve/2`'s doctests |
+
+Two things the plan left to be decided and `DECISIONS.md` 336–337 record. One row per name
+is what the unique index holds, so a submitted list saying both collapses to the deny
+before it is written; deny-wins then applies to rows that arrive *together* without having
+been written together, which is the real case — the union across a person's teams. And a
+listing is that union while a session gets one team's set, because a session belongs to
+one team and an intersection in a listing would hide something a person can have.
+
+## R1c — one sealer, and a second tenant in the key store
+
+`Sealer` and the `Context` it needs moved from `troupe_worker` into `troupe_protocol`,
+beside `Storage`, `Cipher` and `Snapshot`. A move, not a fork: there is one
+implementation, and a session sealed by one host restores on the other because there is
+nothing else it could be sealed by. The sealer no longer knows how events reach it —
+`:subscribe` is a function the host passes in, because the protocol cannot call back into
+core, and because getting events into storage is what the process is *for*.
+
+```
+$ scripts/toolbox mix troupe.boundaries
+boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+$ scripts/toolbox bash -c 'cd apps/troupe_worker && mix test'
+Result: 109 passed
+```
+
+`Troupe.KMS.path/2` takes an owner — a team, or `{:person, subject}` — and R1's fourth
+done item is proven against a real OpenBao with real tokens rather than against this
+code's belief about it:
+
+```
+$ scripts/toolbox mix test apps/troupe_protocol/test/troupe/kms/open_bao_test.exs
+Result: 13 passed
+```
+
+* *a pod's KMS token cannot read a key under `people/`* — "a pod cannot read a key under
+  people/, and a person cannot read one under teams/", with a token carrying
+  `Policy.worker/2`, refused by OpenBao;
+* *a person's token cannot read one under `teams/`* — same test, with a token carrying the
+  person policy, refused both for another person's key and for a team's;
+* *the plane's token can delete metadata under both* — "the plane can destroy metadata
+  under both subtrees, and read neither", which also asserts the two reads are forbidden
+  first.
+
+**One defect found by writing those tests.** A subject is opaque and `idp|ada` is what
+Auth0 puts in `sub`. That is a fine path segment and an invalid request target, so a
+person's key failed at the HTTP client with `:invalid_request_target` and never reached
+OpenBao. A key path is a *logical* path — the policy matches it unencoded and the store
+files the secret under it — so the encoding belongs in the adapter, segment by segment.
+Team paths were unaffected because a team name is `[a-z0-9-]`, which is why it survived
+until a person's key was written.
+
+## R1d — the capability that un-gates the client
+
+R1's fifth done item.
+
+```
+$ scripts/toolbox mix test apps/troupe_gateway/test/troupe/gateway/daemon_test.exs
+Result: 22 passed
+```
+
+"private_sessions is false until the daemon can name a person" connects unlinked, asserts
+`false`, links an identity, reconnects and asserts `true`. It is computed at every
+`initialize` rather than compiled in, and a worker always answers `false` — a private
+session is sealed under its person's own key in a subtree no pod credential can reach.
+`PROTOCOL.md` §3 now carries the server capability table this was missing.
+
+## R1e — two of the three log fixes
+
+`../troupe-gui/docs/plans/local-and-private-sessions.md` §7 lists three. Two are done and
+the third was already there — `session_created.data` has carried `kind` and `owner` since
+stage 5.
+
+```
+$ scripts/toolbox mix test apps/troupe_core/test/troupe/session/reopening_test.exs
+Result: 4 passed
+```
+
+*A session is created once and opened many times, and the log now says so.* `resume/2` is
+`start_session/1` with a session id, so every reopen appended a second `session_created`.
+`session_resumed` — in the schema since stage 2, never emitted — carries `dormant_ms` and
+`moved`, and `moved` is the field Cursor's warning is about: a snapshot preserves disk and
+nothing else.
+
+*A resume whose recorded directory is gone falls back to the restored tree.* Narrowly:
+only a session that names itself, only to `<state>/workspaces/<id>`, and only when that
+directory already exists. The fourth test asserts the case that must still fail — neither
+the directory nor a restored tree — because a fallback that invented a directory would be
+doing quietly the thing `Workspace.new/1` refuses to do.
+
+Writing the first of these corrected a comment that had been approximate since stage 1:
+`session_created` is not the first event in the file and never was. The tree starts before
+it is appended and its own `agent_started` is already in. What it *is* is the event that
+says what the session is, which is the claim a rebuild depends on.
+
+## R1f — credentials that belong to a person
+
+`stage-6.md` §3, and the one part of R1 where every interesting claim is a negative one.
+So the tests stand the real mechanism up — the plane signs through transit, OpenBao's JWT
+auth verifies against the transit key's public half, the policy it issues is templated on
+the subject — rather than asserting what this code believes it sends.
+
+```
+$ scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/person_credentials_test.exs
+Result: 6 passed
+
+$ scripts/toolbox mix test apps/troupe_core/test/troupe/mcp_test.exs
+Result: 11 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/control_test.exs'
+Result: 18 passed
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A profile-mode server behaves exactly as today | `credential_mode` defaults to `profile`; every existing bundle, projection and MCP test passes unchanged |
+| A person-mode server with no connection returns `not_connected` with a hint, and the session continues | "answers not_connected, readably, when nobody has connected it" — which also asserts nothing was sent, and that it is `{:ok, …}` rather than an error |
+| After a grant and a direct write, the call succeeds and the event records `identity: "person:<subject>"` | "grants an assertion and never a value" writes through the real key manager with a client-exchanged token; "sends the owner's credential, and only for the call" and "says which identity a call would go out as" prove the call and the event |
+| A pod holding session A's assertion is refused the slot of session B's owner | "reads that person's slot and is refused everybody else's", refused by OpenBao — and "refuses a session this pod is not holding", refused by the plane, which is the half a key manager cannot decide |
+| The plane's logs and audit rows contain no credential value | no value reaches the plane: `grant` takes none and answers none, asserted directly on the answer |
+| A bundle setting both a `secretRef` and `person` mode is refused at publish, with the reason | "a server with a Secret and a person's credential is refused at publish" |
+
+**Two things deviate from the plan, both in the same direction.** `me.connections.grant`
+answers an assertion rather than a key-manager token, because a token the plane minted is
+a token the plane held; and there is no `me.connections.revoke`, because removal uses the
+same grant and the plane's policy has no `delete` under a person's connections at all.
+`DECISIONS.md` 375–376.
+
+**What is not claimed.** The path from `me.connections.grant` through a real key manager
+into a real tool call is proven in two halves rather than one: the grant and the write
+against OpenBao, and the call and its event against a mock MCP server with the lookup
+injected. Joining them needs a pod, a plane and a key manager at once, which is the
+cluster suite's job and not yet done.
+
+## R1g — a deprovision that takes effect
+
+Not in the plan, and found by asking what `User.active` was for. SCIM wrote it. Nothing
+read it. A person the identity provider had deprovisioned could sign in, call every
+method, and go on doing so — and `Login` wrote `active: true` on *every* login, so the
+deprovision lasted exactly until its subject next authenticated.
+
+Three doors, because they are three doors and not one.
+
+| door | what was wrong | what it does now |
+| --- | --- | --- |
+| Signing in | reactivated whoever it authenticated | refused, and never reactivates. Only somebody nobody has ever deactivated is created active, which is what a deployment with no SCIM means by the word |
+| The harness | nothing checked | checked on every call rather than at the door, because a plane token outlives the moment it was issued. It reads the row: the provider's decision reaches us through SCIM, and nothing re-reads a claim |
+| `kms.assertion` | nothing checked | refused for a deactivated owner |
+
+The third is the one that mattered. A running session needs nobody to sign in, so
+refusing at the harness alone would have left a deprovisioned person's credentials
+reachable by any pod for as long as anything they had started kept running —
+indefinitely, since a pod refreshes its own token. Refused there, the window is the pod's
+existing key-manager lease and no longer.
+
+```
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/deactivation_test.exs'
+Result: 3 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/control_test.exs'
+Result: 19 passed
+```
+
+**What is deliberately not done.** A deactivated person's sessions keep running. What a
+session may still do is the session's question — its history is the team's, and a person
+leaving is not a reason to lose it — and what it may do *as them* is the one closed here.
+Stopping them is a policy decision with an owner, and `RELEASE.md` W2 already has the
+shape of it for service principals. `DECISIONS.md` 380–384.
+
+## R1h — a session that belongs to a person
+
+`../troupe-gui/docs/plans/local-and-private-sessions.md` §4 and §5, the server half. The
+plane learns that a private session exists and how far it has got; it does not learn a
+profile, a team, a pod or a byte.
+
+```
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix test test/troupe/plane/private_sessions_test.exs'
+Result: 14 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_plane && mix ecto.rollback --to 20260915000014 && mix ecto.migrate'
+== Migrated 20260915000014 in 0.0s   # down
+== Migrated 20260915000014 in 0.0s   # and up again
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A private session's row has no team, no profile and no pod | "creates a row with no team, no profile and no pod" reads the row, not the answer |
+| …and cannot have one, by any path | "the database refuses the shape even when nothing else does" — the changeset refuses it *and* a raw `INSERT` that skips every line of Elixir raises on the check constraint |
+| Registration is idempotent and a seal does not rewind | "is idempotent on the id, and a seal only moves forward": a retry is one session, and an older `last_seq` replayed after a restart is not a rewind |
+| Two devices resuming at once: one wins, the other is told | "one claim wins and the loser is told on its next seal" — both send `epoch: 1`, one moves it, and the loser's *seal* is refused `stale_version` while the winner's succeeds |
+| One list shows both kinds, and either alone | "separates a person's own sessions from their team's": `sessions.list` with no filter returns both, `kind: "private"` returns the one |
+| A private session is nobody else's | "a private session is nobody else's, team or not" — absent from another person's listing and `not_found` to `session.get` |
+| A laptop with no credential seals, lists and reads back | "a laptop seals, lists and reads back through the plane's signatures": `Storage.seal_segment` and `read_segment` through `ObjectStore.Signed`, against the real MinIO |
+| …and the plane cannot read what it signed for | the same test reads the object with the plane's own credential and finds ciphertext: the marker string is absent and `Cipher.open/3` with any other key fails |
+| A signed URL expires | "a signature stops working when it expires" — signed as of an hour ago with its five minutes, refused by MinIO with a 403; a fresh one is 200. The claim is the store's to make, not ours |
+| Signing is confined to the session's own prefix | "signs only keys under this session's prefix" refuses another session's key, a `..` climb out of this one, and a bare key at the root |
+| `mix troupe.index.rebuild` sees a private session | "a rebuild finds a private session without reading a byte of it" — epoch, sequence and head hash recovered from the plaintext manifest, with the segment's own metadata asserted *empty* |
+
+**Two deviations from the plan, both recorded.** `origin.kind` stays what started a
+session (`user`), and the private/team distinction is a column of its own — `origin.kind`
+is validated against three values that answer a different question, and the new column is
+where a filter and a check constraint can both reach it. And `visibility` was not reused:
+it has defaulted to `private` since the first migration, so selecting private sessions on
+it would have returned every unshared team session. `DECISIONS.md` 385–393.
+
+**What writing it found.** `Index.attrs/4` fell back to a `default_profile` of `"unknown"`
+for anything storage did not name. A private session cannot have a profile, so a rebuild
+would have failed on precisely the sessions a rebuild exists for — silently, into a log
+line. `DECISIONS.md` 399.
+
+**What is not claimed here.** This is the plane's half: the transport, the fence, the row
+and the signatures, against a real store and a real plane. The daemon's half is R1i
+below; the second device — listing a private session there, verifying its chain, restoring
+its workspace — is still owed.
+
+## R1i — the daemon's end of a private session
+
+`local-and-private-sessions.md` §4, the sealing half. A laptop holds neither of the two
+credentials a pod holds and seals anyway.
+
+```
+$ scripts/toolbox bash -c 'cd apps/troupe_gateway && mix test test/troupe/gateway/private_test.exs'
+Result: 9 passed
+
+$ scripts/toolbox bash -c 'cd apps/troupe_gateway && mix test'
+Result: 69/73 passed        # the four are the container's, named under The gate
+```
+
+| done item | where it is proven |
+| --- | --- |
+| A daemon with no object-storage credential writes a session into the cluster's bucket | "writes a session nobody else can read, through signatures it was handed" — `Storage.seal_segment` through `ObjectStore.Signed`, against the real MinIO, with every URL signed by the fake plane against the same bucket |
+| …and nobody else can read it | the same test fetches the object with a keyed store and finds ciphertext: the marker string is absent, and `Cipher.open/3` with any other key fails |
+| …and can read its own back | `read_segment` returns the events, which is the half that needs the session key |
+| Listing works without a credential | `list_segments` through the signed store, which asks the plane |
+| Every seal says how far the session has got | "every seal tells the plane how far the session has got": the row carries `last_seq`, the head hash the sealer computed, and the device |
+| The manifest names a person, not a team | the same test: `kind: "private"`, `team: nil`, and `key_path` under `troupe/people/<subject>/sessions/<id>` |
+| A device that lost the fence stops | "a device that lost the session stops sealing" — another device takes the row to epoch 2, this one reports epoch 1, is refused, and logs that it has stopped. The row is not merged |
+| Claiming is conditional | "claiming bumps the epoch, and a second claim on the old one is refused" |
+| The plane token is never written to disk | "the token is held in memory and never written to disk": a restarted `Plane` is unlinked and every call answers `{:error, :unlinked}` |
+| A daemon with no plane runs local sessions and refuses private ones cleanly | "a session that cannot be registered is refused, and nothing is lost" |
+| `session.create {private: true}` starts one, over a real socket | "a daemon nobody has linked creates the session and says it is not syncing" — the session is created and runs, `session_created` records `kind: "private"`, and `syncing` reports what it is *actually* doing rather than what was asked for |
+| A local session is untouched by any of it | "a local session has no sealer, and stopping one is a no-op" |
+
+**What writing it found.** `Sealer` wrote `team: context.team` straight into the plaintext
+manifest, and a private session's owner is `{:person, subject}` — a tuple, which `Jason`
+refuses. The first private session a daemon ever sealed would have crashed its sealer on
+the manifest, after the segment had gone up. `Context.kind/1` and `Context.team_name/1`
+answer both, and the kind is what stops a rebuild inventing a profile.
+`DECISIONS.md` 404.
+
+**What is not claimed, precisely.** The gateway may not depend on `troupe_plane` — a
+boundary rule — so the test cannot mint an assertion, because minting one is signing.
+`Private.start/2` takes the exchange as `:key_manager` and the test passes one that
+answers a token; the exchange itself is proven in the plane's suite, against a real
+OpenBao JWT mount. Joining the two halves needs a pod, a plane, a key manager and a laptop
+at once, which is the cluster suite. Nor is the far side of it built: no restore runs on a
+second device, and there is no directory binding. `session.create {private: true}` starts
+a sealer and `session.archive` seals it, which is the near half.
+
+## R1j — the suite that needs a cluster
+
+`stage-6.md` §5. This is the package `REPORT.md` has been owing since stage 3, and the
+first thing to say about it is that it worked: the harness exists, it runs, and within an
+hour of existing it had found four defects nobody could have seen without it.
+
+**What was built.** `mix troupe.e2e` runs `apps/troupe_operator/test/e2e/**`, tagged
+`:e2e` and excluded from `mix test` always rather than conditionally. It refuses any
+kubeconfig context but `kind-troupe-dev` unless told twice, because a suite that deletes
+pods is one `KUBECONFIG` away from doing it somewhere real. `Troupe.E2E.World` is the
+world: it attaches to a cluster `scripts/remote-up` built and never makes one, it speaks
+`kubectl` rather than the `k8s` library the operator uses — a second road to the same API
+server, so a wrong RBAC rule is visible — and it mints real ServiceAccount tokens from the
+real API server. `scripts/e2e` is the laptop's way in, because `mix` lives in the toolbox
+container and the cluster lives on Docker's `kind` network. A `cluster` job runs it on
+`main` and on tags and uploads the plane's and the operator's logs on failure.
+
+**The first four bugs arrived before the suite had a single passing test**, simply from
+installing onto a cluster that had never had one. They are in the table at the end of this
+section with the five that came after.
+
+One of the five is a wrong tool rather than a bug: `kubectl rollout status` was waited on
+for a worker StatefulSet, which is `OnDelete` on purpose — a rollout that evicted a pod
+holding a session would end the session — and `rollout status` has nothing to say about
+anything but `RollingUpdate`.
+
+```
+$ scripts/remote-up
+==> 8. Where things are
+  plane      http://plane.localtest.me:30080
+  identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
+  workers    ws://<n>.dev.workers.localtest.me:30080/v1/socket
+```
+
+**And then the suite failed, which is the point of it.**
+
+```
+$ scripts/e2e
+  1) test ... enrols on that profile (Troupe.E2E.EnrolmentTest)
+     right: {:error, %{"message" => "invalid_params", "data" => %{"reason" =>
+              "{:token_review_failed, %K8s.Client.APIError{message: \"Unauthorized\"}}"}}}
+Result: 0/4 passed
+```
+
+The plane's `TokenReview` was refused by the API server, so no worker could enrol at all.
+**The cause was the second of my own fixes above.** Making the plane's ServiceAccount a
+`pre-install` hook cured the fresh install and broke every upgrade: Helm deletes and
+recreates a hook resource on each run, which gives it a new UID, and a ServiceAccount's
+UID is inside every token the kubelet has already handed to a running pod. The upgraded
+plane's projected token was silently invalidated. It logged nothing. Workers simply never
+appeared. The migration now has an account of its own, held by nothing that outlives the
+Job.
+
+**The first diagnosis was wrong, and the way it was wrong is worth keeping.** It read:
+*the RBAC is correct and the token works by hand, so the request is going out without it.*
+The "works by hand" was `kubectl auth can-i --token=…` against a kubeconfig holding a
+client certificate — which authenticated with the certificate and answered `yes` about the
+wrong identity entirely. Presented with no other credential
+(`kubectl --server --certificate-authority --token`), the same token is refused. A passing
+response is not proof that the thing you meant passed; that rule applies to the person
+reading the suite as much as to the suite.
+
+## The claims, and what each is proven by
+
+```
+$ scripts/e2e
+Result: 16/17 passed        # the one is egress, below
+```
+
+| claim | fault or witness |
+| --- | --- |
+| A pod enrols as the profile its namespace names | The plane's fleet listing and the API server's pod list name the same pod — two roads to one fact, rather than one road twice |
+| …and cannot claim another | `default/default`, a real token the real API server minted for the right audience, refused after a real `TokenReview`; and the worker's own account projected for the API server rather than the plane, refused as a replay. Both sit beside a positive in the same describe, so neither is satisfied by a plane that refuses everything |
+| A pod fetches its bundle by hash and materialises it once | The same content published twice is one directory, asserted by inode and mtime on the pod's disk — a plane's belief about what it sent is not evidence |
+| A running session keeps its version; the next one moves | v2 published while a session runs; `session.get` now says which version each is pinned to |
+| A session survives its pod being deleted | `kubectl delete pod`, then the log read off the *replacement* over a real WebSocket: an event whose `prev_hash` is the pre-fault head, and every link in the chain checked |
+| An MCP credential is a `secretKeyRef`, optional when absent | Four hops no unit test sees together, proven both ways: absent, the pod runs and the variable is unset inside it; present, it is filled in |
+| A cron trigger fires on the minute, as a principal, once | A wall clock nobody stubbed, a principal that is not a person, and runs grouped by idempotency key — a run for the *next* minute is correct, and a plain count would call it a double fire |
+| A2A `message/send` reaches a pod through the facade | Three deployments, an ingress, the identity provider's token exchanged at the plane, and a session the plane has a row for |
+| `helm upgrade` leaves a running session running | The pod's uid and restart count and the session's epoch, because a test that checked only for "still active" would pass on a pod that had been replaced and the session restored |
+| Cilium egress admits the bundle's host and refuses everything else | **Not proven.** See below |
+
+**Egress is written, correct, and fails here.** It is a TCP connection the pod attempts,
+never a lookup of the policy object — and writing it that way is what found that *no
+`remote-up` cluster has ever enforced network policy*. kind's own CNI implements pod
+networking and ignores every NetworkPolicy, so the operator's egress rules were accepted
+by the API server and enforced by nothing, while `kubectl get networkpolicy` showed a tidy
+list.
+
+`scripts/remote-up` now installs Cilium, which is what the chart's `CiliumNetworkPolicy`
+is addressed to, with `kubeProxyReplacement` because without it Cilium does not implement
+`hostPort` and the ingress quietly stops answering. On this machine that is still not
+enough: under Docker Desktop, Cilium starts, reports `policy-enabled: both` for the worker
+endpoint, shows the policy Valid — and passes everything, the plane and the object store
+included. Everything it says is right and nothing it does is, which is the exact shape
+this suite exists to catch.
+
+So `TROUPE_KIND_CNI` defaults to `cilium`, and `default` gets a usable local cluster. The
+egress test fails on both, deliberately: a fallback costs a red test and never a false
+green. CI's kernel is where this one is settled.
+
+**The brief's two extra claims are not written, and cannot be yet.** A forked session's log
+naming its parent's head needs `session_forked`, which is R5; a session sealed by a
+non-Kubernetes worker restoring on a pod needs a second provisioner, which is R6. They are
+in the table so that those packages land them.
+
+## What the cluster suite found
+
+Nine defects, every one of them invisible to anybody whose cluster already works.
+
+| what | why nobody saw it |
+| --- | --- |
+| A temp file handed to `kubectl` by a path only one of the two processes understood | Windows hosts only |
+| The namespace pre-created without the metadata Helm needs to adopt it | First install only |
+| The migration hook running before its own ServiceAccount | First install only |
+| …and the fix for that invalidating every running pod's token on upgrade | Upgrades only, and silently |
+| `llm-credentials` created only when a key was set, so "workers start but cannot reach a model" was a pod that does not start at all | Always, and the sentence had been false for as long as it had existed |
+| `required: true` declared on forty admin arguments and enforced on none — a missing one was a 500 on a public endpoint | Any caller omitting any of them |
+| A profile permanently full: the placement actor's count drifted upward and only reloaded for a pod it had never seen | After any pod restart — and *caused* by the dormancy fix earlier on this branch |
+| The worker's persistent volume mounted and unused: bundles, segments and workspaces written to the container's ephemeral layer | Always. Nothing was lost; everything was re-fetched on every restart |
+| A policy violation put into an error as an Elixir tuple, which `Jason` refuses | Any profile outside policy: a 500 with an HTML body instead of the limit's name |
+
+Two of those were mine, made earlier on this branch. That is the argument for the package
+in one line: both fixes were right in the unit suite and wrong on a cluster, and nothing
+short of a cluster was going to say so.
+
+
+## A flake that was a defect
+
+`ControlTest`'s "a pod that restarted gives up the sessions the plane still thought it was
+holding" failed about two runs in three, before any of this work.
+
+`Sessions.dormant/1` passed `worker_id: nil` through `put_fields/2`, which drops nils on
+purpose — a pod reporting three of four lifecycle fields must not blank the fourth — so
+it was silently discarded. A dormant session went on naming the pod it was no longer on
+until something else happened to call `Placement.release`, and the test was racing that.
+Every other reader filters on `state == "active"`, which is why it took a test asserting
+the row directly to see it. `read_only/1` had the same hole.
+
+```
+$ for i in 1 2 3 4 5; do scripts/toolbox bash -c \
+    'cd apps/troupe_plane && mix test test/troupe/plane/control_test.exs' | grep Result; done
+Result: 16 passed
+Result: 16 passed
+Result: 16 passed
+Result: 16 passed
+Result: 16 passed
+```
+
+## The gate
+
+Every step of `mix check`, plus the schema diff, against the tree as it would be
+committed — not against the working tree, because `mix format` run inside a Linux
+container rewrites a Windows checkout to LF and `Consistency.LineEndings` then has a
+hundred-odd things to say about a difference `git add` undoes. `docs/developer/local-setup.md`
+§1.1 has the incantation.
+
+```
+$ scripts/toolbox mix format --check-formatted
+ok
+
+$ scripts/toolbox bash -c 'MIX_ENV=test mix compile --force --warnings-as-errors'
+Generated troupe_a2a app
+
+$ scripts/toolbox mix troupe.boundaries
+boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+$ scripts/toolbox mix troupe.schema.diff
+schema unchanged: 73 documents
+
+$ # credo, against the tree as it would be committed
+$ git add -A && TREE=$(git write-tree) && git reset
+$ scripts/toolbox bash -c "... git archive $TREE ... mix credo --strict"
+5706 mods/funs, found no issues.
+credo exit=0
+```
+
+```
+$ scripts/toolbox mix test
+==> troupe_protocol
+Result: 99 passed (2 doctests, 97 tests)
+==> troupe_operator
+Result: 39 passed, 31 excluded        # the 17 e2e are excluded from `mix test` always
+==> troupe_plane
+Result: 409 passed, 9 excluded
+==> troupe_core
+  1) test cancellation cancel kills a shell command and its grandchild, verified by OS pid
+Result: 231/232 passed (3/3 doctests, 1/1 property, 227/228 tests)
+==> troupe_gateway
+  1) test ten concurrent clients spawn exactly one daemon
+  2) test a stale lock left by a killed client does not block start-up forever
+  3) test an idle session stops its tree, and subscribing serves history without starting one
+  4) test kill -9 with three sessions: all come back, the mid-turn one interrupted
+Result: 69/73 passed (2/2 properties, 67/71 tests)
+==> troupe_worker
+Result: 109 passed
+==> troupe_a2a
+Result: 45 passed
+```
+
+1001 of 1006 in the unit suite, and 16 of 17 on a cluster.
+
+The five are the container's, named above and in `DECISIONS.md` 328: one OS-pid
+cancellation test and four that spawn or `kill -9` a daemon. They failed before any of
+this work, on the same container, with this work stashed. The one is egress, which fails
+on any cluster that does not enforce network policy and so on every cluster this machine
+can run. CI is where both are settled, and nothing here changes what CI runs.
+
+## What R1 still owes
+
+| piece | what is left |
+| --- | --- |
+| Private sessions, the second device | Creating and sealing one is done and proven on both sides, including through a real daemon socket. What is left is the other end: listing a private session on a second device, downloading and verifying its chain, restoring the workspace tar, and the resume-here / bind-to-directory choice. |
+| The cluster suite (`stage-6.md` §5) | Eight of the ten claims pass on a real cluster. Egress is written and fails on any cluster that does not enforce, which is every one this machine can run — it is settled on CI. The brief's two extra claims need `session_forked` (R5) and a second provisioner (R6), and land with those packages. |
+
+Personal credentials are done, bar the end-to-end join named in R1f. Deprovisioning was
+not in the plan and is done.
+
+R2 through R9 are untouched.
+
+# R5 — sessions people share
+
+Three pieces: a fork, a share, and presence on a topic of its own. `RELEASE.md` numbers
+this W3; the brief numbers it R5.
+
+## R5a — a fork copies, and the copy is the argument
+
+The brief's literal shape is a child whose chain opens at `seq: 0` and whose reader folds
+the parent's chain to the fork point and the child's after it. That is a reference, and two
+rules already in the design refuse one.
+
+* *A fork is a new session for budget, retention, key and erasure.* A child that had to be
+  opened with its parent's key does not have a key of its own in the sense that matters.
+* **Erasing a parent leaves the child readable** — done item 3. Erasure destroys the
+  parent's objects *and its key*, so a reference breaks on the one operation that must never
+  take something else with it.
+
+The brief already says the *workspace* is copied into the child's own prefix. Symmetry did
+the rest: the events are too. `Troupe.Sessions.Fork.copy/3` reads the parent's live segments
+under the parent's key, opens the child's chain with `session_forked`, and reseals the
+parent's events up to `seq` under the child's key with the child's own numbering.
+
+Resealing moves the numbering and nothing else. Each copied event keeps its type, data,
+timestamp, actor and agent path; what the original numbering was is in `session_forked`,
+which carries the parent's id, the seq forked at and the parent's head hash there.
+
+`DECISIONS.md` 520–529.
+
+```
+$ scripts/toolbox mix test apps/troupe_protocol/test/troupe/sessions/fork_test.exs --trace
+  * test the copy takes the parent's events up to seq and no further
+  * test the copy opens with session_forked, which is where the lineage is written
+  * test the copy verifies as a chain of its own
+  * test the copy keeps what each event said and changes only its numbering
+  * test the copy at no seq at all is a fork at the head
+  * test the parent is not written to, and does not learn it was forked
+  * test the parent can be erased and the child is still readable
+  * test what the child may run is what the parent's session_created recorded, not what is on offer now
+  * test what the child may run is nil where the parent recorded nothing, which is not the same as nothing
+  * test what a child may run is what the parent recorded, narrowed by what the team has now
+  * test what a child may run is nil on either side meaning no restriction, and not an empty set
+  * test what a child may run keeps a kind only one side mentions, from whichever side mentions it
+  * test the workspace comes from the nearest archive at or before the fork point
+  * test the workspace is absent rather than invented when the parent has none before the point
+  * test refusals a reason nobody defined
+  * test refusals a seq the parent never reached
+  * test refusals a parent with no history
+  * test refusals forking a session into itself
+Result: 18 passed
+```
+
+Against real MinIO, not a double: what the layout does with versioning and listings is the
+behaviour being relied on.
+
+**The plane's half.** `session.fork` is `session.create` with three columns — it pays its
+own budget, gets its own key, is placed like anything else. The pod does the copying,
+because it is the only place both keys are ever in memory; the plane names a session and a
+number and never sees an event. The instruction rides on `session.activate` rather than a
+push of its own, because the copy has to land before the tree starts — a manager restoring
+an empty log writes a fresh `session_created` at seq 1 and the copied chain arrives second.
+
+```
+$ scripts/toolbox mix cmd --app troupe_plane mix test test/troupe/plane/harness_test.exs
+Result: 33 passed
+```
+
+The eight new ones there are `session.fork`: the row, the instruction that reaches the pod,
+the fork point written down rather than left to drift, a point the parent has not sealed,
+control rather than a view, a reason nobody defined, a session nobody may see, a lineage a
+client tried to claim for itself, and an import.
+
+## R5b — a share is a link that carries a role
+
+The ACL answers *who is allowed here*, by subject, and it is the right answer when the
+person has an account and you know which one. A share answers the other question — *send
+them this* — with three properties an ACL entry does not have: it ends, it is revocable on
+its own, and it is a secret the plane keeps only a salted digest of.
+
+**Refused at mint, never at use.** That the sharer holds the session, that the role is not
+`admin`, that the team allows steering, that the expiry is inside the ceiling — all settled
+when the link is made. Redemption asks only what is true of the share.
+
+`DECISIONS.md` 530–540.
+
+```
+$ scripts/toolbox mix cmd --app troupe_plane mix test test/troupe/plane/shares_test.exs
+Result: 12 passed
+```
+
+Done item 6 — *a link the team's grant would not admit is refused at mint, not at use* — is
+`test is bounded by the team's ACL, through the ladder`, which also shows the converse: a
+team that turns steering on makes `control` shareable at the next request rather than the
+next edit.
+
+## R5c — presence, on a topic of its own
+
+`presence:<id>` beside `fleet` and `session:<id>`. No `seq`, never persisted, and the first
+thing shed when a client stops reading — and shedding it is now a decision about one
+subscription rather than something that touches the session's stream.
+
+```
+$ scripts/toolbox mix cmd --app troupe_gateway mix test test/troupe/gateway/presence_test.exs
+Result: 7 passed
+```
+
+Done item 7 is both halves of one test file: `two clients see each other within 500 ms`, and
+`presence stops entirely and the durable order is identical on both clients` — the latter
+against a socket nobody reads, with a healthy client watching the same two topics beside it,
+comparing `{seq, type, data}` lists.
+
+**A real bug came out of it.** Following a session was registered once per *subscription*
+rather than once per connection, so a client watching a session and its presence — or one
+session at two levels — was in the fan-out twice and received everything twice; and because
+`Registry.unregister/2` drops all of a process's entries for a key, dropping one subscription
+would have silenced the other. Latent before; the presence topic made it routine.
+`Troupe.Events.subscribe/1` is idempotent now and the connection unregisters only when
+nothing else still wants the session. `DECISIONS.md` 543.
+
+## The done items
+
+| # | claim | proven by |
+| --- | --- | --- |
+| 1 | a fork renders parent and continuation as one transcript, and both chains verify independently | `fork_test` — *takes the parent's events up to seq and no further*, *verifies as a chain of its own* |
+| 2 | a fork of a session whose team lost an agent still cannot run it | `fork_test` — *narrowed by what the team has now* |
+| 3 | erasing a parent leaves the child readable | `fork_test` — *the parent can be erased and the child is still readable* |
+| 4 | a private session imported into a team names the private one, and the original is unchanged | **partly** — see below |
+| 5 | a watch link cannot send input, a prompt link can, and both appear in the session's log | **partly** — see below |
+| 6 | a link the team's grant would not admit is refused at mint, not at use | `shares_test` — *bounded by the team's ACL, through the ladder* |
+| 7 | presence within 500 ms; with the queue saturated it stops and the order is identical | `presence_test` — both halves |
+
+## What is not proven here, and why
+
+**Done item 4, the copy half.** An import is `reason: "import"`, and the plane refuses to
+ask a pod to make it. A private session's key lives under a path no pod role covers, so no
+pod can read the parent whatever it is told to do — the copy belongs to the device that
+holds the key. The plane's half is the same as any other fork and is tested: the row carries
+the lineage, the child is a team session, the activation carries no fork instruction, and an
+import is refused if it does not say which profile it lands on. The client half is the TUI's
+and is not in this repository. `DECISIONS.md` 529.
+
+**Done item 5, the "cannot send input" half.** A redeemed share becomes an ordinary session
+token at an ordinary role, which is the whole of why there is no share mirror on the pod.
+That a `viewer` token cannot steer is already asserted — `collaboration_test`, *an observer
+cannot steer* — and is not re-asserted for a token that arrived by link, because it is the
+same token. The `share_created` event reaching the session's own log is proven at the push:
+`harness_test`, *the pod is told, by id, with no secret in what crosses the wire*.
+
+**The `troupe ctl verify` CLI.** Done item 1 names it. `Event.verify/1` is what the CLI
+calls and is what the test calls; the CLI wrapper over a forked pair is not exercised here.
+
+**The cluster.** None of R5 has run on kind. The plane image there is behind R3's later
+fixes, R4 and the CI work as well.
+
+## What R2, R3 and R4 still owe this report
+
+This report stops at R1 and resumes at R5. R2 (the webhook and principal work, the budget and
+policy ladders, the in-system MCP server), R3 (capacity) and R4 (teams linking to groups) are
+built, committed and covered by their own tests, and none of them is written up here. Their
+decisions are recorded in `DECISIONS.md`, through to 519; what is missing is this
+document's half — the
+command output beside each done item.

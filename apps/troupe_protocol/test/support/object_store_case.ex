@@ -42,12 +42,29 @@ defmodule Troupe.ObjectStoreCase do
 
   setup context do
     if store = context[:store] do
-      prefix = "test/#{System.unique_integer([:positive])}/"
+      prefix = "test/" <> unique("run") <> "/"
       on_exit(fn -> ObjectStore.delete_prefix(store, prefix) end)
       %{store: store, prefix: prefix}
     else
       :ok
     end
+  end
+
+  @doc """
+  A name no other run will pick, for anything that becomes an object key.
+
+  `System.unique_integer/1` is unique within one VM and starts again in the next, so two
+  runs of the same file choose the same names \u2014 and an object store is not a database.
+  Nothing rolls back at the end of a test, so the second run lists what the first one wrote
+  and fails about it, usually somewhere that looks nothing like the cause. CI's *ten
+  consecutive runs* is exactly the shape that finds this.
+
+  The wall clock is what makes it unique *between* runs and the counter is what makes it
+  unique *within* one, so both are here.
+  """
+  @spec unique(String.t()) :: String.t()
+  def unique(prefix) do
+    "#{prefix}-#{System.os_time(:millisecond)}-#{System.unique_integer([:positive])}"
   end
 
   @doc "Fail with the reason the suite was skipped, rather than a confusing match error."

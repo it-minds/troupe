@@ -23,8 +23,72 @@ defmodule Troupe.MCP do
   """
 
   alias Troupe.MCP.{Client, Server, Tool}
+  alias Troupe.Protocol.Principal
 
   require Logger
+
+  @doc """
+  The session owner's credential for a person-mode server, or why there is not one.
+
+  A function the host installs, the way `:remote_tools` is installed, because reading it
+  needs a key-manager token scoped to that person and `troupe_core` is not where that
+  lives. A host that installs nothing answers `not_connected`, which is what a laptop
+  and a local session both mean.
+
+  Never cached here. The value belongs to whoever owns the session and the pod holds it
+  for exactly as long as a call takes.
+  """
+  @spec person_credential(Server.t(), Troupe.Tool.Ctx.t()) ::
+          {:ok, String.t()} | {:error, :not_connected | term()}
+  def person_credential(%Server{} = server, ctx) do
+    case Application.get_env(:troupe_core, :person_credentials) do
+      fun when is_function(fun, 2) -> fun.(server, ctx)
+      _none -> {:error, :not_connected}
+    end
+  end
+
+  @doc """
+  Which identity a call to this server goes out as, for the log — both halves of it.
+
+  `subject` is whose credential went out: the profile's service account, or a person's.
+  `actor` is who was running the session when it did: a person, or the principal a
+  trigger fires as. They are usually the same person and are written anyway, because a
+  field omitted when it matches is a field nobody can read afterwards — absent because
+  they were equal, or absent because that day's code did not write it, are not
+  distinguishable after the fact.
+
+  The case worth the trouble is a person-mode server in a session a trigger started: the
+  credential is a person's and the session is a principal's, and a single value had to
+  pick one and hide the other.
+  """
+  @spec identity(Server.t(), Troupe.Tool.Ctx.t()) :: Principal.t()
+  def identity(%Server{credential_mode: :person}, ctx) do
+    case owner_of(ctx) do
+      nil -> Principal.of("person:unknown", actor_of(ctx))
+      subject -> Principal.of(subject, actor_of(ctx))
+    end
+  end
+
+  # A profile-mode server's credential belongs to nobody: it is the service account the
+  # operator injected, the same for every session. `"profile"` is the whole answer and
+  # naming a person there would be a lie about whose it is.
+  def identity(%Server{}, ctx), do: Principal.of("profile", actor_of(ctx))
+
+  # Who the session runs as. The same value `session_created` recorded as its owner, so a
+  # reader joining the two does not have to know which spelling each used.
+  defp actor_of(ctx), do: owner_of(ctx) || "unknown"
+
+  @doc """
+  The subject a session belongs to, from the attribution a pod was told at activation.
+
+  A session has **one** identity. If two people are attached and the server is
+  person-mode, calls go out as the session's *owner*, fixed at activation and recorded in
+  `session_created` — a collaborator acting through somebody else's credential is a thing
+  people should be told once rather than discover.
+  """
+  @spec owner_of(Troupe.Tool.Ctx.t()) :: String.t() | nil
+  def owner_of(%{config: %{attribution: %{owner: owner}}}) when is_binary(owner), do: owner
+  def owner_of(_ctx), do: nil
 
   @doc """
   Discover a server's tools and present them as Troupe tools.
@@ -58,4 +122,26 @@ defmodule Troupe.MCP do
   @doc "The name a server's tool is called by."
   @spec tool_name(String.t(), String.t()) :: String.t()
   def tool_name(server, tool), do: "mcp.#{server}.#{tool}"
+
+  @doc """
+  Which server a tool name belongs to, or `nil` when it belongs to none.
+
+      iex> Troupe.MCP.server_of("mcp.jira.create_issue")
+      "jira"
+      iex> Troupe.MCP.server_of("write_file")
+      nil
+
+  The inverse of `tool_name/2`, and the reason a session's entitlement filter can work
+  on names rather than on the tool values: a client-hosted tool and a built-in are not
+  an MCP server's and must not be narrowed by a set that never names them.
+  """
+  @spec server_of(String.t()) :: String.t() | nil
+  def server_of("mcp." <> rest) do
+    case String.split(rest, ".", parts: 2) do
+      [server, _tool] -> server
+      _ -> nil
+    end
+  end
+
+  def server_of(_name), do: nil
 end

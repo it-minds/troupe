@@ -15,9 +15,24 @@ defmodule Troupe.Plane.Control.Connection do
 
   use GenServer, restart: :temporary
 
-  alias Troupe.Plane.{Bundles, Enrolment, Erasure, Fleet, Placement, Sessions, TeamBudget, Tokens}
+  alias Troupe.Plane.{
+    Budget,
+    Bundles,
+    Enrolment,
+    Erasure,
+    Fleet,
+    Identity,
+    Placement,
+    Sessions,
+    TeamBudget,
+    Tokens,
+    Triggers
+  }
+
   alias Troupe.Plane.Control.{Connections, Router}
   alias Troupe.Plane.Fleet.Bundle
+  alias Troupe.Plane.Identity.User
+  alias Troupe.Plane.Sessions.Session
   alias Troupe.Protocol.{Error, JSONRPC}
 
   require Logger
@@ -84,14 +99,12 @@ defmodule Troupe.Plane.Control.Connection do
   end
 
   def handle_info({:tcp_closed, socket}, %{socket: socket} = state) do
-    if state.worker do
-      Logger.info("troupe plane: #{state.worker.namespace}/#{state.worker.pod_name} disconnected")
-    end
-
+    gone(state)
     {:stop, :normal, state}
   end
 
   def handle_info({:tcp_error, socket, _reason}, %{socket: socket} = state) do
+    gone(state)
     {:stop, :normal, state}
   end
 
@@ -123,6 +136,18 @@ defmodule Troupe.Plane.Control.Connection do
   def terminate(_reason, state) do
     :gen_tcp.close(state.socket)
     :ok
+  end
+
+  # The pod is not there any more, so stop placing sessions on it — now, rather than when
+  # its heartbeat lease expires. That was enough when a pod only went away because
+  # somebody drained it; the plane scales profiles itself now, so workers come and go on
+  # their own and a placeable row for one that has gone is a create that fails with "the
+  # pod did not accept the session".
+  defp gone(%{worker: nil}), do: :ok
+
+  defp gone(%{worker: worker}) do
+    Logger.info("troupe plane: #{worker.namespace}/#{worker.pod_name} disconnected")
+    Fleet.disconnected(worker.namespace, worker.pod_name, worker.enrolled_at)
   end
 
   # -- framing ----------------------------------------------------------------
@@ -284,8 +309,12 @@ defmodule Troupe.Plane.Control.Connection do
   # a pod still running an older epoch cannot overwrite what the new one reports.
   defp dispatch("session.status", params, state) do
     case Sessions.put_status(params["session_id"], params) do
-      {:ok, _count} -> {:ok, %{"ok" => true}, state}
-      {:error, :stale_epoch} -> {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+      {:ok, _count} ->
+        announce(params)
+        {:ok, %{"ok" => true}, state}
+
+      {:error, :stale_epoch} ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
     end
   end
 
@@ -376,6 +405,26 @@ defmodule Troupe.Plane.Control.Connection do
   # the pod verifies the document against before materialising it, or by channel and
   # version for a session pinned to one the pod has never been told about. The document
   # is configuration an admin published, not session content, so it may cross here.
+  # An assertion a pod exchanges for the key-manager token of a session's *owner*.
+  #
+  # Asked for rather than pushed, because the token it buys is short-lived and a session
+  # can outlive it: a pod that had been handed one at activation would lose its person's
+  # credentials twenty minutes in and have no way to ask for another. The plane is the
+  # only thing that can sign one, so this is the only way to ask.
+  #
+  # The subject is **not** the pod's to choose. It is read from the session row, so a pod
+  # asking for a session it is not holding — or naming somebody else — gets the owner of
+  # the session it actually has, or nothing.
+  defp dispatch("kms.assertion", params, state) do
+    case session_of(params["session_id"], state.worker) do
+      %Session{owner_subject: owner} when is_binary(owner) ->
+        mint_for(owner, state)
+
+      nil ->
+        {:error, Error.new(:not_found, %{session_id: params["session_id"]}), state}
+    end
+  end
+
   defp dispatch("bundle.fetch", params, state) do
     case fetch_bundle(params, state.worker) do
       %Bundle{} = bundle ->
@@ -397,6 +446,55 @@ defmodule Troupe.Plane.Control.Connection do
     {:error, Error.new(:method_not_found, %{method: method}), state}
   end
 
+  # A trigger's run has ended, so whoever asked to be told is told. Off this process and
+  # unsupervised on purpose: a pod reporting that a session finished must not wait on
+  # somebody else's HTTP server, and a notification lost because the node went down is a
+  # better outcome than a status report that did not land because one was in flight.
+  defp announce(%{"session_id" => session_id, "status" => status})
+       when status in ["done", "interrupted"] and is_binary(session_id) do
+    Task.start(fn -> Triggers.announce(session_id, %{"state" => status}) end)
+    :ok
+  end
+
+  defp announce(_params), do: :ok
+
+  # A person the identity provider has deactivated stops being able to lend their
+  # credentials to a pod, and this is where that takes effect. It matters more here than
+  # at the harness: a running session needs nobody to sign in, so refusing a deprovisioned
+  # person at the front door would leave their credentials reachable for as long as
+  # anything they started kept running. The pod's existing key-manager token outlives this
+  # by its own lease and no longer.
+  #
+  # The session is not stopped. What it may still do is the session's question — its
+  # history is the team's, and a person leaving is not a reason to lose it — and what it
+  # may do *as them* is this one.
+  defp mint_for(owner, state) do
+    case Identity.get_user(owner) do
+      %User{active: false} ->
+        {:error, Error.new(:forbidden, %{reason: "the session's owner is deactivated"}), state}
+
+      _active ->
+        case Tokens.mint_kms_assertion(owner) do
+          {:ok, assertion, claims} ->
+            {:ok, %{"assertion" => assertion, "expires_at" => claims["exp"]}, state}
+
+          {:error, reason} ->
+            {:error, Error.new(:unavailable, %{reason: inspect(reason)}), state}
+        end
+    end
+  end
+
+  # A pod may ask about the sessions it is holding and no others. Enrolment decided which
+  # pod this is; the index decides which sessions are its.
+  defp session_of(session_id, worker) when is_binary(session_id) do
+    case Sessions.get(session_id) do
+      %Session{worker_id: held} = session when held == worker.id -> session
+      _other -> nil
+    end
+  end
+
+  defp session_of(_session_id, _worker), do: nil
+
   defp fetch_bundle(%{"hash" => hash}, worker) when is_binary(hash) do
     Bundles.by_hash(hash, channel: channel_of(worker))
   end
@@ -415,12 +513,24 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # Every rung, not only the team's. A release that gave back the team's slice and left
+  # the person's held would make somebody's own cap drift upward with every session they
+  # ever put to sleep, and nothing would say so until they could not start one.
   defp release_budget(session_id) do
     case Sessions.get(session_id) do
-      %{team_id: team_id} when is_binary(team_id) -> TeamBudget.release(team_id, session_id)
-      _ -> :ok
+      %{} = session -> Budget.release(session.team_id, session_id, answerable_for(session))
+      _none -> :ok
     end
   end
+
+  # Whose cap this session's spend counts against: the sponsor behind a trigger's run,
+  # and otherwise the owner. The same answer the plane gave when it reserved, because a
+  # release that named a different person would give back somebody else's slice.
+  defp answerable_for(%{origin: %{"principal" => %{"subject" => subject}}})
+       when is_binary(subject),
+       do: subject
+
+  defp answerable_for(%{owner_subject: subject}), do: subject
 
   # Turned into the ledger's shape here rather than trusted as sent: a worker names the
   # call and its cost, and the plane names whose session it was. Nothing a pod says about
@@ -538,8 +648,10 @@ defmodule Troupe.Plane.Control.Connection do
       "troupe plane: #{session_id} is not on #{worker.pod_name} any more, marking it dormant"
     )
 
-    Sessions.dormant(session_id)
+    # The order is load-bearing and lives in one place now — `Drain.strand/1` — because it
+    # was fixed here once and was still the wrong way round in the other two callers.
     Placement.release(worker.profile, session_id)
+    Sessions.dormant(session_id)
     release_budget(session_id)
   end
 

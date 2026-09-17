@@ -39,8 +39,10 @@ defmodule Troupe.Worker.Session.Manager do
   alias Troupe.Session.Log
   alias Troupe.Session.Summary
   alias Troupe.Sessions.{Cipher, Storage}
+  alias Troupe.Sessions.{Context, Sealer}
   alias Troupe.Worker.Cache
-  alias Troupe.Worker.Session.{Context, Restore, Sealer, Workspace}
+  alias Troupe.Worker.Connections
+  alias Troupe.Worker.Session.{Restore, Workspace}
   alias Troupe.Worker.Sessions
   alias Troupe.Worker.Usage
 
@@ -238,6 +240,10 @@ defmodule Troupe.Worker.Session.Manager do
       GenServer.stop(state.sealer, :normal, 60_000)
     end
 
+    # The key-manager token this session's person-mode servers were reaching through.
+    # Held for the life of the session and no longer, exactly as the data key is.
+    Connections.forget(state.session_id)
+
     :ok
   end
 
@@ -279,17 +285,29 @@ defmodule Troupe.Worker.Session.Manager do
   # Only when the version it was pinned to has been retired. A session whose bundle did
   # not move says nothing, because a `config_upgraded` on every activation would be noise
   # that hid the one that mattered.
+  #
+  # The entitlement set rides along, re-resolved by the plane at this activation: a
+  # publish can add an entry the team is not entitled to, and the event that says the
+  # configuration moved is the right place to say what the session may now see.
   defp record_upgrade(_session_id, nil), do: :ok
 
   defp record_upgrade(_session_id, %{upgraded_from: nil}), do: :ok
 
   defp record_upgrade(session_id, bundle) do
-    Log.append(session_id, ["root"], :config_upgraded, %{
+    data = %{
       "channel" => bundle.channel,
       "from" => bundle.upgraded_from,
       "to" => bundle.version,
       "hash" => bundle.hash
-    })
+    }
+
+    data =
+      case Map.get(bundle, :entitlements) do
+        nil -> data
+        set -> Map.put(data, "entitlements", set)
+      end
+
+    Log.append(session_id, ["root"], :config_upgraded, data)
   end
 
   # Started before the tree, so that everything the tree appends on the way up is sealed
@@ -297,6 +315,9 @@ defmodule Troupe.Worker.Session.Manager do
   defp start_sealer(state, context, log) do
     Sealer.start_link(
       context: context,
+      # How the sealer hears about events. It lives in `troupe_protocol` now, which
+      # cannot reach into core, so the host says where events come from.
+      subscribe: &Troupe.subscribe/1,
       report: state.report,
       sealed_through: log.last_seq,
       seal_interval_ms: Keyword.get(state.opts, :seal_interval_ms, 60_000),

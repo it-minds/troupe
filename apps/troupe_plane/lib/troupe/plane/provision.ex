@@ -25,7 +25,7 @@ defmodule Troupe.Plane.Provision do
   """
 
   alias Troupe.Plane.{ClusterPolicy, Fleet, Identity, Settings}
-  alias Troupe.Plane.Fleet.Profile
+  alias Troupe.Plane.Fleet.{Profile, SizeClass}
   alias Troupe.Policy
   alias Troupe.Protocol.Error
   alias Troupe.WorkerProfile
@@ -47,7 +47,12 @@ defmodule Troupe.Plane.Provision do
         :ok
 
       found ->
-        {:error, Error.new(:invalid_params, %{policy_violations: found})}
+        # Described, not passed through. A violation is a tuple — `{:sessions_per_pod_above_maximum, 8, 4}`
+        # — and `Jason` refuses tuples, so putting them in an error's data turned a
+        # legitimate refusal into a 500 with an HTML body: the caller was told nothing at
+        # all about the one thing they got wrong. `Policy.describe/1` exists for this and
+        # says it in a sentence.
+        {:error, Error.new(:invalid_params, %{policy_violations: Enum.map(found, &Policy.describe/1)})}
     end
   end
 
@@ -87,14 +92,29 @@ defmodule Troupe.Plane.Provision do
   defp spec_of(%{} = attrs),
     do: attrs |> Map.get(:spec, Map.get(attrs, "spec", %{})) |> Map.merge(base_spec(attrs))
 
+  # The seven fields that left the admin surface, written here from the one word that
+  # replaced them. Merged *over* the profile's own `spec` map on purpose: a class is the
+  # answer, and a hand-written `sessionsPerPod` kept beside it would be a profile with two
+  # opinions about the same number.
   defp base_spec(source) do
-    %{
-      "image" => image_spec(get(source, :image)),
-      "replicas" => get(source, :replicas),
-      "sessionsPerPod" => get(source, :sessions_per_pod)
-    }
+    %{"image" => image_spec(get(source, :image)), "replicas" => get(source, :replicas)}
+    |> Map.merge(SizeClass.spec(get(source, :size_class)))
+    |> Map.put("storage", storage_spec(source))
     |> Map.reject(fn {_key, value} -> is_nil(value) end)
   end
+
+  # The size is the class's and the *class of storage* is the cluster's. Merged rather
+  # than replaced, because these are two answers to two questions that happen to live in
+  # one object — and a class that overwrote the whole map would silently drop the storage
+  # class, which on a cluster whose default is block storage is how granting a team access
+  # to a profile takes that profile down.
+  defp storage_spec(source) do
+    existing = spec_map(source)["storage"] || %{}
+    Map.merge(existing, SizeClass.spec(get(source, :size_class))["storage"])
+  end
+
+  defp spec_map(%Profile{} = profile), do: profile.spec || %{}
+  defp spec_map(attrs), do: Map.get(attrs, :spec) || Map.get(attrs, "spec") || %{}
 
   # The plane records an image as the string a person types; the custom resource splits
   # it into a repository and a tag or digest, because that is what a policy matches

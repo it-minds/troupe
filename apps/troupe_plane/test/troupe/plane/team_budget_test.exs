@@ -10,7 +10,7 @@ defmodule Troupe.Plane.TeamBudgetTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Ledger, Singleton, TeamBudget}
+  alias Troupe.Plane.{Budget, Ledger, Singleton, TeamBudget}
 
   setup do
     start_supervised!(Singleton)
@@ -107,15 +107,16 @@ defmodule Troupe.Plane.TeamBudgetTest do
   test "the actor reloads what it promised, so a replica losing it changes nothing" do
     team = team(1_000)
 
-    {:ok, _} = TeamBudget.reserve(team, "s-1", 800)
+    # Through the ladder, because that is what writes the row. This actor holds and does
+    # not write — the reload is from the ledger, and a test that reserved here alone
+    # would be a test of an in-process map.
+    {:ok, _} = Budget.reserve(team, "s-1", "ada@example.test", 800)
 
     pid = :global.whereis_name({TeamBudget, team.id})
     ref = Process.monitor(pid)
     Process.exit(pid, :kill)
     assert_receive {:DOWN, ^ref, :process, ^pid, :killed}, 2_000
 
-    # The reservation was written before it was granted, so the actor that comes back
-    # knows about it.
     assert TeamBudget.inspect_state(team).reserved_micros == 800
     assert {:error, {:over_budget, _}} = TeamBudget.reserve(team, "s-2", 800)
   end
@@ -125,7 +126,7 @@ defmodule Troupe.Plane.TeamBudgetTest do
 
     results =
       1..50
-      |> Task.async_stream(fn n -> TeamBudget.reserve(team, "s-#{n}", 100) end,
+      |> Task.async_stream(fn n -> Budget.reserve(team, "s-#{n}", "ada@example.test", 100) end,
         max_concurrency: 50,
         timeout: 30_000
       )
@@ -135,7 +136,7 @@ defmodule Troupe.Plane.TeamBudgetTest do
 
     # Ten fit, forty do not, and the total promised is exactly the budget.
     assert granted == 10
-    assert Enum.count(results, &match?({:error, {:over_budget, _}}, &1)) == 40
+    assert Enum.count(results, &match?({:error, {:over_budget, :team, _}}, &1)) == 40
 
     assert TeamBudget.inspect_state(team).reserved_micros == 1_000
     assert Ledger.open_reservations(team.id) |> Map.values() |> Enum.sum() == 1_000

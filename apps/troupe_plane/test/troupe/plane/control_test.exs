@@ -10,7 +10,7 @@ defmodule Troupe.Plane.ControlTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, Sessions, TeamBudget}
+  alias Troupe.Plane.{Bundles, Fleet, SCIM, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -161,6 +161,77 @@ defmodule Troupe.Plane.ControlTest do
 
       assert %{"params" => %{"version" => 2}} = push(worker, "config.updated")
     end
+  end
+
+  describe "an assertion for a session's owner" do
+    test "names the owner off the row, whatever the pod asks for", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-ada", owner_subject: "idp|ada", profile: "dev"})
+      {:ok, _} = Sessions.place("s-ada", pod)
+
+      assert {:ok, %{"assertion" => assertion, "expires_at" => expires_at}} =
+               call(worker, "kms.assertion", %{"session_id" => "s-ada"})
+
+      # The subject is not the pod's to choose: it is read off the session row, so the
+      # only thing a pod can influence is *which of its own sessions* it asks about.
+      assert %{"sub" => "idp|ada", "aud" => "troupe-kms"} = payload_of(assertion)
+      assert is_integer(expires_at)
+    end
+
+    test "is refused once the session's owner is deactivated", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(worker, [])
+
+      [pod] = Fleet.list_workers("dev")
+      ada = person("ada@example.test", ["engineering"])
+      {:ok, _} = Sessions.create(%{id: "s-ada2", owner_subject: ada.subject, profile: "dev"})
+      {:ok, _} = Sessions.place("s-ada2", pod)
+
+      assert {:ok, %{"assertion" => _}} = call(worker, "kms.assertion", %{"session_id" => "s-ada2"})
+
+      {:ok, _} = SCIM.deactivate_user(ada.id)
+
+      # The door that needs nobody to sign in. A running session would otherwise keep
+      # lending a deprovisioned person's credentials for as long as it kept running; now
+      # the pod's existing key-manager token outlives this by its own lease and no longer.
+      assert {:error, error} = call(worker, "kms.assertion", %{"session_id" => "s-ada2"})
+      assert error["message"] == "forbidden"
+      assert error["data"]["reason"] =~ "deactivated"
+
+      # The session is not stopped. Its history is the team's, and what it may still do is
+      # a different question from what it may do *as them*.
+      assert Sessions.get("s-ada2").state == "active"
+    end
+
+    test "refuses a session this pod is not holding", %{port: port} do
+      mine = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(mine, [])
+
+      theirs = enrolled(port, "dev-token", "troupe-w-dev-1")
+      answer_index(theirs, [])
+
+      [_, other] = Enum.sort_by(Fleet.list_workers("dev"), & &1.pod_name)
+      {:ok, _} = Sessions.create(%{id: "s-theirs", owner_subject: "idp|bo", profile: "dev"})
+      {:ok, _} = Sessions.place("s-theirs", other)
+
+      # A pod holds what the index says it holds. Asking for somebody else's session is
+      # how one pod would read another's person's credentials, and the plane is the only
+      # thing in a position to refuse it.
+      assert {:error, error} = call(mine, "kms.assertion", %{"session_id" => "s-theirs"})
+      assert error["message"] == "not_found"
+
+      assert {:error, missing} = call(mine, "kms.assertion", %{"session_id" => "s-nowhere"})
+      assert missing["message"] == "not_found"
+
+      # A session with no owner is not a case that has to be handled here: the index
+      # requires one, so there is no row this could be asked about.
+      assert {:error, changeset} = Sessions.create(%{id: "s-nobody", profile: "dev"})
+      assert changeset.errors[:owner_subject]
+    end
+
   end
 
   describe "a pod that restarted" do
@@ -521,5 +592,12 @@ defmodule Troupe.Plane.ControlTest do
       %{rows: rows} = Repo.query!("select * from #{table}")
       inspect(rows)
     end)
+  end
+  # The claims, without verifying the signature: what is being checked here is which
+  # subject the plane put in, and OpenBao is what checks the rest.
+  defp payload_of(jwt) do
+    [_header, payload, _signature] = String.split(jwt, ".")
+    padded = payload <> String.duplicate("=", rem(4 - rem(byte_size(payload), 4), 4))
+    padded |> Base.url_decode64!() |> Jason.decode!()
   end
 end

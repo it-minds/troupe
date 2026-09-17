@@ -1,16 +1,44 @@
+# LF in the working tree, everywhere, whatever `core.autocrlf` says.
+#
+# Every tool that reads this repository runs on Linux: the CI runners, the toolbox
+# container, the images. A Windows checkout with CRLF is therefore not a local variant of
+# the same tree — it is a different input, and it has been wrong twice in ways that only a
+# CI round trip could see.
+#
+#   * `mix credo --strict` reports a line-ending consistency finding for every file, which
+#     is true of nobody else's copy — and a check looking for two consecutive newlines
+#     matches nothing in a file whose blank lines carry a carriage return, so the real
+#     finding is not buried by the noise, it is absent. Two of those failed CI while the
+#     local run called the tree clean.
+#   * A test that writes a shell script from a string literal writes the source file's line
+#     endings into it. `dash` answers a redirection with a carriage return on the end with
+#     "Bad fd number" and refuses to parse the file at all, so the script never runs and
+#     the failure surfaces as whatever did not happen next.
+#
+# `text=auto` still lets git detect binary files and leave them alone. The index has always
+# been LF, so this changes what lands in a working tree and nothing that is committed.
+* text=auto eol=lf
+
 # Shell scripts are run by bash on every platform this project builds on — the Linux
 # and macOS runners, the Windows runner's Git Bash, and a Linux container with the
 # repository mounted from a Windows checkout. A `set -euo pipefail` with a carriage
 # return on the end of it is not something bash accepts, and the error it gives
-# ("invalid option name") says nothing about line endings. So these files are LF in
-# the working tree as well as in the index, whatever `core.autocrlf` is set to.
+# ("invalid option name") says nothing about line endings.
+#
+# Redundant under the rule above and kept anyway: these are the files where getting it
+# wrong is loudest, and a line naming them is a line somebody can grep for.
 *.sh text eol=lf
 install.sh text eol=lf
 scripts/build-images text eol=lf
 scripts/build-local text eol=lf
+scripts/ci text eol=lf
+scripts/credo text eol=lf
 scripts/dev-down text eol=lf
 scripts/dev-up text eol=lf
+scripts/e2e text eol=lf
 scripts/kind-down text eol=lf
 scripts/kind-up text eol=lf
 scripts/pitr-drill text eol=lf
 scripts/remote-up text eol=lf
+scripts/toolbox text eol=lf
+dev/toolbox/entrypoint text eol=lf

@@ -13,13 +13,18 @@ defmodule Troupe.Worker.Plane.Commands do
 
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
+  alias Troupe.Protocol.Event
+  alias Troupe.Session.Log
+  alias Troupe.Sessions.Context
+  alias Troupe.Sessions.Fork
+  alias Troupe.Sessions.Sealer
   alias Troupe.Sessions.Storage
   alias Troupe.Worker.Auth
   alias Troupe.Worker.Bundles
   alias Troupe.Worker.Drain
   alias Troupe.Worker.MCP
   alias Troupe.Worker.Plane.Link
-  alias Troupe.Worker.Session.{Manager, Reader, Sealer, Workspace}
+  alias Troupe.Worker.Session.{Manager, Reader, Workspace}
   alias Troupe.Worker.Sessions
 
   require Logger
@@ -44,7 +49,8 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("session.activate", params) do
     session_id = params["session_id"]
 
-    with {:ok, bundle} <- bundle_of(params) do
+    with {:ok, inherited} <- forked(params),
+         {:ok, bundle} <- bundle_of(narrow(params, inherited)) do
       from_plane =
         Enum.reject(
           [
@@ -55,7 +61,7 @@ defmodule Troupe.Worker.Plane.Commands do
             bundle: bundle,
             agent: params["agent"],
             prompt: params["prompt"],
-            terms: terms_of(params["terms"]),
+            terms: terms_of(params["terms"]) |> with_managed(params["managed"]),
             origin: params["origin"],
             usage_seq: params["usage_seq"]
           ],
@@ -163,6 +169,33 @@ defmodule Troupe.Worker.Plane.Commands do
   # prefix decrypts — not the current objects, not the prior versions a versioned bucket
   # keeps, not a copy in a backup — so the deletion that follows is tidiness rather than
   # the security property.
+  # A capability over this session was minted or ended. The pod's part is the durable
+  # event: the plane holds the row, checks it at redemption and mints the token, and none
+  # of that is in a log anybody replays — so a session whose transcript did not say it had
+  # been shared would be a transcript with the interesting part missing.
+  #
+  # Nothing here is a permission check. A redeemed share arrives at this pod as an ordinary
+  # session token at an ordinary role, the same as every other way in, which is why there
+  # is no share mirror beside the ACL one.
+  #
+  # Best effort, and deliberately: a dormant session has no tree to append to, and the
+  # plane's row is the record until it wakes. Refusing the push would make revoking a link
+  # depend on the session being awake, which is the opposite of what somebody revoking one
+  # wants.
+  defp dispatch("share.changed", params) do
+    session_id = params["session_id"]
+    share = params["share"] || %{}
+
+    case Sessions.whereis(session_id) do
+      nil ->
+        {:ok, %{"session_id" => session_id, "recorded" => false, "reason" => "dormant"}}
+
+      _tree ->
+        {:ok, seq} = Log.append(session_id, [], params["type"], share_data(params["type"], share))
+        {:ok, %{"session_id" => session_id, "recorded" => true, "seq" => seq}}
+    end
+  end
+
   defp dispatch("session.erase", params) do
     session_id = params["session_id"]
     team = params["team"]
@@ -222,6 +255,131 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
+
+  # -- shares ------------------------------------------------------------------
+
+  # The share's id and never its secret. The id is what a revocation names and what an
+  # audit reads; the secret is a working credential, and a log outlives the session.
+  defp share_data("share_revoked", share) do
+    %{"id" => share["id"]}
+    |> put_present("reason", share["reason"])
+  end
+
+  defp share_data(_created, share) do
+    %{
+      "id" => share["id"],
+      "role" => share["role"],
+      "expires_at" => share["expires_at"]
+    }
+    |> put_present("audience", share["audience"])
+  end
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  # -- forking -----------------------------------------------------------------
+
+  # A child being activated for the first time, whose log is its parent's up to a point.
+  #
+  # Here rather than in a push of its own, because the copy has to happen before the tree
+  # starts: a manager that restored an empty log would write a fresh `session_created` at
+  # seq 1, and the copied chain would then be a second history arriving after the first.
+  # One push also gives the whole thing one idempotency story — the plane retries
+  # activation without knowing whether the first attempt landed, and a child that already
+  # has segments is one that has already been forked.
+  #
+  # Returns the entitlement set the parent recorded, or `nil` where there is nothing to
+  # inherit — which is also what a re-activation returns, because by then the narrowing
+  # is in the child's own `session_created` and re-deriving it would mean opening the
+  # parent again, possibly after it has been erased.
+  defp forked(%{"fork" => %{"parent" => parent_id} = fork} = params) when is_binary(parent_id) do
+    child_id = params["session_id"]
+
+    with {:ok, child} <- Context.open(child_id, Keyword.merge(defaults(), child_opts(params))),
+         {:ok, existing} <- Storage.list_segments(child.store, child_id) do
+      if existing == [] do
+        copy_from_parent(child, fork, params)
+      else
+        Logger.debug("troupe worker: #{child_id} is already forked; activating")
+        {:ok, nil}
+      end
+    else
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  defp forked(_params), do: {:ok, nil}
+
+  defp copy_from_parent(child, fork, params) do
+    parent_id = fork["parent"]
+
+    parent_opts =
+      Keyword.merge(defaults(), team: fork["parent_team"] || params["team"], session_id: parent_id)
+
+    with {:ok, parent} <- Context.open(parent_id, parent_opts),
+         {:ok, result} <-
+           Fork.copy(parent, child,
+             seq: fork["seq"],
+             reason: fork["reason"] || "attempt",
+             actor: actor_of(fork["actor"])
+           ) do
+      Logger.info(
+        "troupe worker: forked #{parent_id}@#{result.parent_seq} into #{child.session_id}"
+      )
+
+      report_fork(child.session_id, result)
+      {:ok, result.entitlements}
+    else
+      {:error, reason} ->
+        {:error, Error.new(:internal_error, %{reason: "fork failed: #{inspect(reason)}"})}
+    end
+  end
+
+  # The rule itself is `Troupe.Sessions.Fork.narrow/2`, beside the fork it is about. This is
+  # only where it is applied: on the way in, once, before anything reads the set.
+  defp narrow(params, nil), do: params
+
+  defp narrow(params, inherited) when is_map(inherited) do
+    Map.put(params, "entitlements", Fork.narrow(params["entitlements"], inherited))
+  end
+
+  defp child_opts(params) do
+    Enum.reject(
+      [
+        session_id: params["session_id"],
+        team: params["team"],
+        epoch: params["epoch"],
+        owner_subject: params["owner_subject"],
+        profile: params["profile"]
+      ],
+      &match?({_key, nil}, &1)
+    )
+  end
+
+  defp actor_of(nil), do: nil
+  defp actor_of(%{} = json), do: Event.Actor.from_json(json)
+  defp actor_of(_other), do: nil
+
+  # The plane learns the child's head the same way it learns any other: a seal report. A
+  # fork that reported through a channel of its own would be a second way for the row's
+  # `last_seq` to move, and one of the two would eventually be wrong.
+  defp report_fork(session_id, result) do
+    case Process.whereis(Link) do
+      nil ->
+        :ok
+
+      _link ->
+        Link.report(%{
+          "type" => "session.sealed",
+          "session_id" => session_id,
+          "epoch" => result.segment.epoch,
+          "last_seq" => result.last_seq,
+          "head_hash" => result.head_hash,
+          "object_bytes" => result.segment.bytes || 0,
+          "segment" => result.segment.key
+        })
+    end
+  end
 
   @doc """
   What this pod is holding, as metadata.
@@ -319,6 +477,12 @@ defmodule Troupe.Worker.Plane.Commands do
   # skills the session runs under come from that directory. A pod with no bundle
   # registry runs the session on built-ins alone, which is what it did before bundles
   # had content.
+  # The entitlement set rides on the bundle pin rather than beside it, because every
+  # place on the pod that reads the bundle — the definition search order, the skill
+  # tool, the session's MCP tools — is a place that has to apply it, and a set carried
+  # separately is a set one of them would forget. `nil` is no restriction, which is what
+  # a plane that has not been told about entitlements sends and what every grant means
+  # until somebody opens the editor.
   defp bundle_of(params) do
     case params["bundle_version"] do
       nil ->
@@ -328,7 +492,12 @@ defmodule Troupe.Worker.Plane.Commands do
         pin = %{version: version, hash: params["bundle_hash"], channel: params["channel"]}
 
         with {:ok, dir} <- bundle_dir(pin) do
-          {:ok, Map.merge(pin, %{dir: dir, upgraded_from: params["bundle_upgraded_from"]})}
+          {:ok,
+           Map.merge(pin, %{
+             dir: dir,
+             upgraded_from: params["bundle_upgraded_from"],
+             entitlements: params["entitlements"]
+           })}
         end
     end
   end
@@ -372,6 +541,21 @@ defmodule Troupe.Worker.Plane.Commands do
   end
 
   defp terms_of(_terms), do: nil
+
+  # The platform's switches ride in with the terms, because the terms are already the
+  # channel for "configuration this session did not choose" and a second one would be a
+  # second thing to keep in step. Unlike the terms, these are *always* sent: absent has
+  # to mean off rather than unspecified, or a plane that stopped sending them would leave
+  # every session running on whatever it last had.
+  defp with_managed(overrides, %{} = managed) do
+    (overrides || []) ++
+      [
+        managed_permission_rules_only: managed["permission_rules_only"] == true,
+        managed_mcp_servers_only: managed["mcp_servers_only"] == true
+      ]
+  end
+
+  defp with_managed(overrides, _none), do: overrides
 
   defp positive(n) when is_integer(n) and n > 0, do: n
   defp positive(_), do: nil

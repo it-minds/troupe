@@ -9,8 +9,14 @@
     "call_id": {
       "type": "string"
     },
+    "identity": {
+      "type": "string"
+    },
     "name": {
       "type": "string"
+    },
+    "principal": {
+      "type": "object"
     }
   },
   "required": [

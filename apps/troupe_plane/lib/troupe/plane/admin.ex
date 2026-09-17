@@ -35,6 +35,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.{
     Audit,
     Breakglass,
+    Budget,
     Bundles,
     ClusterPolicy,
     Drain,
@@ -44,9 +45,11 @@ defmodule Troupe.Plane.Admin do
     Ledger
   }
 
-  alias Troupe.Plane.Fleet.{Bundle, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, SizeClass, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.Settings.Ladder
+  alias Troupe.Plane.Triggers.Revision
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
 
@@ -198,6 +201,7 @@ defmodule Troupe.Plane.Admin do
   def profile_put(actor, attrs) do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
+         {:ok, attrs} <- without_derived(attrs),
          :ok <- Provision.check(attrs) do
       before = Fleet.get_profile(name)
 
@@ -217,6 +221,53 @@ defmodule Troupe.Plane.Admin do
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
       end
     end
+  end
+
+  # Seven fields left the admin surface and the plane writes them now: `replicas` from
+  # what is running, and the rest from the size class. A caller that sends one is refused
+  # rather than having it dropped — silently ignoring a field somebody typed is how a
+  # person comes to believe a number is in force when it is not, and this is exactly the
+  # category of mistake the seven fields were causing in the first place.
+  @derived ~w(replicas sessionsPerPod sessions_per_pod resources storage)
+
+  defp without_derived(attrs) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+    spec = Map.get(attrs, "spec") || %{}
+    sent = Enum.filter(@derived, &(Map.has_key?(attrs, &1) or Map.has_key?(spec, &1)))
+
+    if sent == [] do
+      {:ok, attrs}
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         reason: "the plane writes these; set size_class, max_sessions and warm_workers instead",
+         not_yours: sent
+       })}
+    end
+  end
+
+  @doc """
+  The size classes a profile may be, in the order a console offers them.
+
+  Here rather than read from `Fleet.SizeClass` by whoever is rendering: a LiveView is an
+  admin API client and gets no private access, and a model asking over MCP should be able
+  to find out what the two words mean without being told them out of band.
+  """
+  @spec size_classes() :: [String.t()]
+  def size_classes, do: SizeClass.names()
+
+  @doc "Each size class with what it is for, as the console and a model both read it."
+  @spec size_class_summaries() :: [map()]
+  def size_class_summaries do
+    Enum.map(SizeClass.names(), fn name ->
+      class = SizeClass.get(name)
+
+      %{
+        name: name,
+        sessions_per_worker: class.sessions_per_pod,
+        summary: class.summary
+      }
+    end)
   end
 
   @doc "Remove a profile. Its sessions become read-only rather than being erased."
@@ -306,7 +357,11 @@ defmodule Troupe.Plane.Admin do
   @doc "Change a team's budget, retention or default visibility."
   @spec team_update(actor(), String.t(), map()) :: result()
   def team_update(actor, name, attrs) do
-    with {:ok, team} <- fetch_team(actor, name) do
+    with {:ok, team} <- fetch_team(actor, name),
+         # Before the changeset, so a widening attempt is refused with the ceiling
+         # quoted rather than clamped. An administrator whose form accepted a number the
+         # plane is not using has been told a lie by something that knew better.
+         :ok <- within_the_ladder(team, attrs) do
       before = comparable(team)
 
       case Identity.update_team(team, attrs) do
@@ -322,17 +377,155 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  defp within_the_ladder(team, attrs) do
+    case Ladder.check(team, Map.new(attrs)) do
+      :ok ->
+        :ok
+
+      {:error, refusal} ->
+        {:error,
+         Error.new(:forbidden, %{
+           field: to_string(refusal.field),
+           asked: refusal.asked,
+           ceiling: refusal.ceiling,
+           decided_by: refusal.rung,
+           reason: "a lower rung may only narrow"
+         })}
+    end
+  end
+
+  @doc """
+  Every group the identity provider has told this plane about.
+
+  What an administrator links a team to. Mirrored, never authored: this list is what SCIM
+  pushed or what somebody's `groups` claim created at login, and a group absent from it is
+  a group nobody from has signed in yet.
+  """
+  @spec groups_list(actor()) :: result()
+  def groups_list(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok,
+       Enum.map(Identity.list_groups(), fn group ->
+         %{external_id: group.external_id, display_name: group.display_name}
+       end)}
+    end
+  end
+
+  @doc """
+  Draw a team's members from one more identity-provider group.
+
+  Membership is still never typed here. What this adds is *which groups count*; who is in
+  them stays the provider's answer, arriving by SCIM or in a `groups` claim at login. A
+  person in two of a team's groups is in the team once.
+  """
+  @spec team_link(actor(), String.t(), String.t()) :: result()
+  def team_link(actor, name, group_id) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name),
+         %Identity.Group{} = group <- Identity.get_group(group_id) do
+      {:ok, _link} = Identity.link_group(team, group, actor.subject)
+      {:ok, _} = Audit.record(actor.subject, "team.link", name, %{"group" => group_id})
+
+      {:ok, %{team: name, group: group_id, members: length(Identity.members_of_team(team))}}
+    else
+      nil -> {:error, Error.new(:not_found, %{group: group_id})}
+      other -> other
+    end
+  end
+
+  @doc """
+  What unlinking a group would do, before anybody does it.
+
+  The count comes first, like every other irreversible action. Somebody unlinking a group
+  is usually right about which group and often wrong about how many people are in the
+  team *only* through it — which is the number this answers and the one worth putting in
+  front of them.
+
+  Sessions do not move. A session's team is recorded at create and stays; unlinking
+  changes who may open it, not what it belongs to. People assume that the other way round,
+  so the answer says how many sessions those people can currently open.
+  """
+  @spec team_unlink_preview(actor(), String.t(), String.t()) :: result()
+  def team_unlink_preview(actor, name, group_id) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name),
+         %Identity.Group{} = group <- Identity.get_group(group_id) do
+      {:ok, Identity.unlink_effect(team, group)}
+    else
+      nil -> {:error, Error.new(:not_found, %{group: group_id})}
+      other -> other
+    end
+  end
+
+  @doc """
+  Stop drawing a team's members from a group.
+
+  Destructive, and confirmed by typing the group's identifier. What it removes is access
+  for everybody who was in the team only through this group; `team_unlink_preview/3` says
+  how many that is and is meant to be shown first.
+  """
+  @spec team_unlink(actor(), String.t(), String.t()) :: result()
+  def team_unlink(actor, name, group_id) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name),
+         %Identity.Group{} = group <- Identity.get_group(group_id) do
+      effect = Identity.unlink_effect(team, group)
+      :ok = Identity.unlink_group(team, group)
+      {:ok, _} = Audit.record(actor.subject, "team.unlink", name, effect)
+
+      {:ok, effect}
+    else
+      nil -> {:error, Error.new(:not_found, %{group: group_id})}
+      other -> other
+    end
+  end
+
   @doc "Give a team access to a profile."
   @spec team_grant(actor(), String.t(), String.t(), map()) :: result()
   def team_grant(actor, name, profile, attrs \\ %{}) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+
     with :ok <- require_platform_admin(actor),
-         {:ok, team} <- fetch_team(actor, name) do
-      {:ok, _} = Identity.grant(team, profile, attrs)
-      {:ok, _} = Audit.record(actor.subject, "team.grant", name, %{"profile" => profile})
+         {:ok, team} <- fetch_team(actor, name),
+         before <- entitlement_names(team, profile),
+         {:ok, _grant} <- granted(team, profile, attrs) do
+      detail = grant_detail(profile, Audit.diff(before, entitlement_names(team, profile)))
+
+      {:ok, _} = Audit.record(actor.subject, "team.grant", name, detail)
       project(profile, actor)
 
       {:ok, team_detail(team)}
     end
+  end
+
+  # An unchanged entitlement list is not a change, and an audit row that recorded one
+  # every time somebody adjusted a volume mode would bury the times it did move.
+  defp grant_detail(profile, changes) when changes == %{}, do: %{"profile" => profile}
+
+  defp grant_detail(profile, changes) do
+    %{"profile" => profile, "entitlements" => changes}
+  end
+
+  defp granted(team, profile, attrs) do
+    case Identity.grant(team, profile, attrs) do
+      {:ok, grant} -> {:ok, grant}
+      {:error, %Ecto.Changeset{} = changeset} -> {:error, invalid(changeset)}
+      {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+    end
+  end
+
+  # A diff of entitlement names is a diff of names, so nothing about redaction changes.
+  # Grouped by kind, because that is how the editor shows them and how an admin reading
+  # the audit row six weeks later will be thinking about them.
+  defp entitlement_names(team, profile) do
+    team
+    |> Identity.entitlements_for(profile)
+    |> Enum.group_by(& &1.kind, &"#{&1.mode}:#{&1.name}")
+    |> Map.new(fn {kind, names} -> {kind, Enum.sort(names)} end)
+  end
+
+  defp invalid(%Ecto.Changeset{} = changeset) do
+    Error.new(:invalid_params, %{reason: inspect(changeset.errors)})
   end
 
   @doc "Take it away. The team's sessions on that profile become read-only."
@@ -431,9 +624,43 @@ defmodule Troupe.Plane.Admin do
   @spec settings_list(actor()) :: result()
   def settings_list(actor) do
     with :ok <- require_admin(actor) do
-      groups = Enum.map(Settings.groups(), fn {key, title, blurb} -> %{key: key, title: title, blurb: blurb} end)
+      groups =
+        Enum.map(Settings.groups(), fn {key, title, blurb} ->
+          %{key: key, title: title, blurb: blurb}
+        end)
 
-      {:ok, %{groups: groups, settings: Settings.all()}}
+      {:ok, %{groups: groups, settings: Settings.all(), ladder: Ladder.rungs()}}
+    end
+  end
+
+  @doc """
+  For one setting, the value in force, the rung that decided it, and every rung that had
+  an opinion.
+
+  The thing that makes a ladder usable rather than merely correct. An administrator
+  looking at a retention of thirty days where they set three hundred and sixty-five needs
+  to know *who* said thirty — and a view that answered only the winner would leave them
+  to guess between the deployment, the platform and their own team.
+
+  `team` is optional: without it the answer is the two rungs above every team, which is
+  what a platform admin asks when they want to know what a team may not exceed.
+  """
+  @spec setting_effective(actor(), String.t(), String.t() | nil) :: result()
+  def setting_effective(actor, key, team_name) do
+    with :ok <- require_admin(actor),
+         {:ok, team} <- optional_team(actor, team_name) do
+      case Ladder.effective(key, team) do
+        nil ->
+          {:error,
+           Error.new(:not_found, %{
+             setting: key,
+             reason: "not a setting more than one rung decides",
+             laddered: Ladder.laddered() |> Map.keys() |> Enum.sort()
+           })}
+
+        resolved ->
+          {:ok, Map.put(resolved, :team, team && team.name)}
+      end
     end
   end
 
@@ -760,7 +987,8 @@ defmodule Troupe.Plane.Admin do
           {:ok, _} =
             Audit.record(actor.subject, "principal.create", principal.subject, %{
               "team" => team.name,
-              "profiles" => principal.profiles
+              "profiles" => principal.profiles,
+              "sponsor" => principal.sponsor_subject
             })
 
           {:ok, principal |> principal_summary() |> Map.put(:secret, secret)}
@@ -771,6 +999,34 @@ defmodule Troupe.Plane.Admin do
         {:error, {:not_granted, outside}} ->
           reason = "#{team.name} is not granted #{Enum.join(outside, ", ")}"
           {:error, Error.new(:invalid_params, %{reason: reason, profiles: outside})}
+
+        # Named separately from any other refusal, because each one is a different thing
+        # for the person filling the form in: a field left empty, a name spelt wrong, a
+        # person who has left, a person who is not on this team.
+        {:error, :no_sponsor} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             missing: "sponsor",
+             reason: "a principal names a person answerable for what it does"
+           })}
+
+        {:error, {:no_such_sponsor, subject}} ->
+          {:error,
+           Error.new(:invalid_params, %{sponsor: subject, reason: "no such person"})}
+
+        {:error, {:sponsor_inactive, subject}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             sponsor: subject,
+             reason: "that person has been deactivated"
+           })}
+
+        {:error, {:sponsor_not_in_team, subject, team_name}} ->
+          {:error,
+           Error.new(:invalid_params, %{
+             sponsor: subject,
+             reason: "#{subject} is not a member of #{team_name}"
+           })}
 
         {:error, changeset} ->
           {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
@@ -814,6 +1070,11 @@ defmodule Troupe.Plane.Admin do
   Partial on update, so enabling and disabling from the panel is the same call as
   putting a whole file from the CLI. A team admin's action, like a principal's creation
   and for the same reason.
+
+  The audit row names the revision the document now hashes to, so the audit trail and
+  the revision point at each other: a run says which revision it ran, and this says who
+  made that revision and what moved. A put that changes nothing names the revision that
+  was already there, which is the honest answer and not a new one.
   """
   @spec trigger_put(actor(), map()) :: result()
   def trigger_put(actor, attrs) do
@@ -826,13 +1087,127 @@ defmodule Troupe.Plane.Admin do
       case Triggers.put(team, attrs, actor.subject) do
         {:ok, trigger} ->
           changes = Audit.diff(comparable(before), comparable(trigger))
-          {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", changes)
-          {:ok, %{trigger: Triggers.trigger_json(trigger), changes: changes}}
+          {:ok, revision} = Triggers.revise(trigger)
+
+          detail =
+            Map.merge(changes, %{
+              "__revision__" => revision.revision,
+              "__revision_hash__" => revision.hash
+            })
+
+          {:ok, _} = Audit.record(actor.subject, "trigger.put", "#{team.name}/#{name}", detail)
+
+          {:ok,
+           %{
+             trigger: Triggers.trigger_json(trigger),
+             changes: changes,
+             revision: Revision.json(revision)
+           }}
 
         {:error, %Error{} = error} ->
           {:error, error}
       end
     end
+  end
+
+  @doc """
+  Mint a key for a trigger, replacing whatever it had, and return it once.
+
+  The only time the key is legible. It is not in `admin.triggers.list`, not in the audit
+  row this writes, and not recoverable: an administrator who loses it rotates again,
+  which is the same call and costs them the old one.
+
+  The old key stops working immediately. A rotation is usually somebody reacting to a
+  leak, and an overlap window would mean the leaked key went on firing for as long as
+  the window lasted.
+  """
+  @spec trigger_key_rotate(actor(), String.t(), String.t()) :: result()
+  def trigger_key_rotate(actor, team_name, name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name) do
+      {:ok, rotated, key} = Triggers.rotate_key(trigger, actor.subject)
+
+      {:ok, _} =
+        Audit.record(actor.subject, "trigger.key.rotate", "#{team.name}/#{name}", %{
+          "had_key" => is_binary(trigger.key_hash)
+        })
+
+      {:ok,
+       %{
+         team: team.name,
+         name: name,
+         url: "/trigger/#{trigger.id}",
+         key: key,
+         rotated_at: DateTime.to_iso8601(rotated.key_rotated_at)
+       }}
+    end
+  end
+
+  @doc """
+  Set or clear a person's own spend ceiling, across every team they are in.
+
+  A platform admin's, not a team admin's. A cap that follows somebody between teams is a
+  statement about the person rather than about any one team, and a team admin who could
+  set it could cap somebody in a team they do not administer.
+
+  `nil` or `0` clears it: absence means everything, exactly as it does at every other
+  rung.
+  """
+  @spec person_budget(actor(), String.t(), integer() | nil) :: result()
+  def person_budget(actor, subject, budget_micros) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, user} <- fetch_user(subject) do
+      before = user.budget_micros
+
+      case Identity.set_budget(user, budget_micros) do
+        {:ok, updated} ->
+          changes = Audit.diff(%{budget_micros: before}, %{budget_micros: updated.budget_micros})
+          {:ok, _} = Audit.record(actor.subject, "person.budget", subject, changes)
+
+          {:ok, %{subject: subject, budget_micros: updated.budget_micros, changes: changes}}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  @doc """
+  Every ceiling that applies to a person here, narrowest first.
+
+  The answer to "why was that refused": four numbers, in the order they are checked,
+  with the one that would bind first at the top. A person told they are over budget
+  should be able to see which of the four without asking anybody.
+  """
+  @spec budget_explain(actor(), String.t(), String.t() | nil) :: result()
+  def budget_explain(actor, subject, team_name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- optional_team(actor, team_name) do
+      {:ok, Budget.ceilings(team, subject)}
+    end
+  end
+
+  defp optional_team(_actor, nil), do: {:ok, nil}
+  defp optional_team(actor, name), do: fetch_team(actor, name)
+
+  defp fetch_user(subject) when is_binary(subject) do
+    case Identity.get_user(subject) do
+      nil -> {:error, Error.new(:not_found, %{subject: subject})}
+      user -> {:ok, user}
+    end
+  end
+
+  defp fetch_user(_other), do: {:error, Error.new(:invalid_params, %{missing: "subject"})}
+
+  defp member_summary(user) do
+    %{
+      subject: user.subject,
+      display_name: user.display_name,
+      budget_micros: user.budget_micros,
+      spent_micros: Ledger.spent_micros_for(user.subject),
+      reserved_micros:
+        user.subject |> Ledger.open_reservations_for() |> Map.values() |> Enum.sum()
+    }
   end
 
   @doc "Remove a trigger. Its runs go with it; the sessions they created do not."
@@ -848,11 +1223,38 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
+  Every revision of a trigger, newest first.
+
+  The document each one froze is included, because the question this answers is "what
+  did the run I am looking at actually say" and an answer that was only a hash would
+  send the reader back to the database.
+  """
+  @spec trigger_revisions(actor(), String.t(), String.t()) :: result()
+  def trigger_revisions(actor, team_name, name) do
+    with {:ok, team} <- fetch_team(actor, team_name),
+         {:ok, trigger} <- fetch_trigger(team, name) do
+      revisions =
+        trigger
+        |> Triggers.revisions()
+        |> Enum.map(fn revision ->
+          revision
+          |> Revision.json()
+          |> Map.put("document", Revision.document(revision))
+        end)
+
+      {:ok, revisions}
+    end
+  end
+
+  @doc """
   Fire a trigger now, by hand.
 
-  The same `fire/4` a schedule or an executor reaches, with an idempotency key that
+  The same `fire/5` a schedule or an executor reaches, with an idempotency key that
   names the person and the moment, so a second click a minute later is a second run and
   a retry of a failed one is not.
+
+  The source is `manual` and the console is the only door that may say so: a person's
+  hand is the one thing about a run that cannot be inferred afterwards.
   """
   @spec trigger_run(actor(), String.t(), String.t()) :: result()
   def trigger_run(actor, team_name, name) do
@@ -865,7 +1267,7 @@ defmodule Troupe.Plane.Admin do
       {:ok, _} =
         Audit.record(actor.subject, "trigger.run", "#{team.name}/#{name}", %{"run" => key})
 
-      case Triggers.fire(trigger, key, event, actor.subject) do
+      case Triggers.fire(trigger, "manual", key, event, actor.subject) do
         {:ok, fired} -> {:ok, Triggers.fired_json(fired)}
         {:error, %Error{} = error} -> {:error, error}
       end
@@ -1079,8 +1481,17 @@ defmodule Troupe.Plane.Admin do
 
     %{
       name: profile.name,
+      # What an administrator answers, first, because it is what they came for.
+      size_class: profile.size_class,
+      size_class_summary: SizeClass.get(profile.size_class).summary,
+      max_sessions: profile.max_sessions,
+      warm_workers: profile.warm_workers,
+      # What the plane decided from it. Shown, not offered: a console should be able to
+      # say how many workers are up and why, and an administrator who wants to know what
+      # a class costs should not have to read the custom resource to find out.
       replicas: profile.replicas,
       sessions_per_pod: profile.sessions_per_pod,
+      capacity_sessions: profile.replicas * profile.sessions_per_pod,
       channel: profile.config_bundle_channel,
       image: profile.image,
       conditions: Provision.conditions(profile),
@@ -1126,6 +1537,11 @@ defmodule Troupe.Plane.Admin do
   defp team_detail(team) do
     %{
       name: team.name,
+      # What the ladder makes of this team's laddered settings: the value in force, the
+      # rung that decided it, and every rung that had an opinion. Beside the team's own
+      # columns rather than instead of them — an administrator looking at a value that is
+      # not the one they set has to be able to see both.
+      effective: Ladder.all(team),
       budget_micros: team.budget_micros,
       budget_period: team.budget_period,
       members_may_control: team.members_may_control,
@@ -1141,9 +1557,26 @@ defmodule Troupe.Plane.Admin do
           Identity.grants_for_team(team),
           &%{profile: &1.profile, volume_mode: &1.volume_mode}
         ),
+      # The groups this team draws its members from. A team links to any number of them
+      # and its membership is the union, so this is the list an administrator edits —
+      # rather than the members, which are still nobody's here to edit.
+      groups:
+        Enum.map(Identity.links_of(team), fn link ->
+          %{
+            external_id: link.group.external_id,
+            display_name: link.group.display_name,
+            issuer: link.issuer,
+            linked_by: link.linked_by
+          }
+        end),
       # Read-only, always: membership comes from the identity provider and a method to
       # change it would be a second source of truth for who is in a team.
-      members: Enum.map(Identity.members_of_team(team), & &1.subject),
+      #
+      # Their own ceilings come with them, because the question a team admin looking at a
+      # budget asks next is which of their people is near theirs — and a cap that follows
+      # somebody between teams is invisible on a page organised by team unless it is put
+      # here.
+      members: Enum.map(Identity.members_of_team(team), &member_summary/1),
       # What the team has actually spent, against what it promised. Both are aggregates
       # over an append-only table and both go through `Ledger.Cache`, so a page that is
       # reloaded costs a lookup rather than a scan.
@@ -1198,9 +1631,15 @@ defmodule Troupe.Plane.Admin do
       profiles: principal.profiles,
       created_by: principal.created_by,
       created_at: principal.inserted_at,
+      sponsor: principal.sponsor_subject,
       disabled_at: principal.disabled_at,
+      disabled_reason: principal.disabled_reason,
       last_used_at: principal.last_used_at,
-      enabled: ServicePrincipal.enabled?(principal)
+      enabled: ServicePrincipal.enabled?(principal),
+      # Three states, not two. A console that shows `enabled: false` for both a principal
+      # somebody disabled and one whose sponsor left sends people looking for a fault
+      # where there is a field to fill in.
+      state: ServicePrincipal.state(principal)
     }
   end
 

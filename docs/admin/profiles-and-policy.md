@@ -17,9 +17,9 @@ A **profile** is one pool of worker pods: image, size, model endpoint, egress, b
 | `image.repository` | string, required | — | image repository; must match a `TroupePolicy.allowedImageRepositories` entry exactly or as a prefix `<repo>/` | 32-36 |
 | `image.tag` | string | — | tag | 37 |
 | `image.digest` | string | — | wins over `tag` when both are given | 38-40 |
-| `replicas` | integer ≥ 0 | 1 | pods; one Service + Ingress each | 41 |
-| `sessionsPerPod` | integer ≥ 1 | 4 | capacity a pod claims; placement fills the next pod past it | 42 |
-| `resources` | free-form object | — | container requests/limits; `limits.cpu` drives `+S`, and limits are what policy checks | 43-45 |
+| `replicas` | integer ≥ 0 | 1 | pods; one Service + Ingress each. **Written by the plane**, not by an administrator — see §1.1 | 41 |
+| `sessionsPerPod` | integer ≥ 1 | 4 | capacity a pod claims; placement fills the next pod past it. **Written by the plane** from the size class | 42 |
+| `resources` | free-form object | — | container requests/limits; `limits.cpu` drives `+S`, and limits are what policy checks. **Written by the plane** from the size class | 43-45 |
 | `llm.endpoint` | string | — | becomes `TROUPE_BASE_URL` on the pod; its host is an egress destination | 49 |
 | `llm.provider` | enum `anthropic`, `openai`, `fake` | `openai` | adapter; `openai` is plain Chat Completions, which a gateway serves | 50-54 |
 | `llm.model` | string | — | `TROUPE_MODEL` | 55 |
@@ -38,6 +38,34 @@ Status: `observedGeneration`, `readyReplicas` (declared but never written by the
 The parser the plane and operator share is `Troupe.WorkerProfile.from_resource/1` (`apps/troupe_protocol/lib/troupe/worker_profile.ex:100-128`); `egress_destinations/1` (`:171-179`) is the list policy checks: LLM host, every MCP host, `fqdns`, `gitHosts`.
 
 ---
+
+
+### 1.1 Seven fields the plane writes
+
+`replicas`, `sessionsPerPod`, the four numbers under `resources`, and `storage.size` are
+in the custom resource and are not on the admin surface. `admin.profile.put` refuses them
+rather than ignoring them, because a number somebody typed and the platform dropped is a
+number they will believe is in force.
+
+What an administrator answers instead is three questions:
+
+| field | meaning |
+|---|---|
+| `size_class` | `standard` (four sessions a worker) or `heavy` (two, with more CPU, memory and disk each). A question about resources, not about safety: sessions cannot see each other's files whatever the class |
+| `max_sessions` | how far the profile may grow, **in sessions at once rather than workers**. Absent is no ceiling, bounded by the team's budget |
+| `warm_workers` | how many workers to keep up when nothing is running. `0` scales to zero |
+
+`replicas` is then the plane's, computed every fifteen seconds as
+`ceil((active + pending) / sessionsPerPod) + warm`, clamped to `max_sessions`, and written
+through the same path and the same RBAC that already writes `spec.teams`. A profile with
+nothing running goes to zero after two minutes idle; the next session brings a worker back
+and waits for it.
+
+The storage **class** is still an administrator's field: how much disk is a size question
+and which storage it comes from is a fact about the cluster.
+
+A `TroupePolicy` still refuses a size class that exceeds it, at admission — which is where
+a maximum belongs, since the plane cannot write that document.
 
 ## 2. What the operator creates for one profile
 
@@ -139,7 +167,7 @@ What the operator does with one: writes `status.claimName = team-<team>` and `Re
 
 ## 7. Provisioning: how the plane's row becomes a CR
 
-The plane keeps a `profiles` row (name, image, replicas, sessions_per_pod, `spec`) and renders the CR from it (`provision.ex:166-200`): `metadata.name` = the profile name in namespace `troupe-system` with label `troupe.dev/managed-by: plane`, `spec` = the stored spec merged with `image` (split into repository and tag or digest, `:99-123`), `replicas`, `sessionsPerPod` and the `teams` projection from grants. Every `admin.profile.put`, `admin.team.grant`/`revoke` (`sync_teams`, `:158-164`) and every bundle publish/retire (`bundles.ex:418-449`) re-renders and re-applies.
+The plane keeps a `profiles` row (name, image, size_class, max_sessions, warm_workers, replicas, sessions_per_pod, `spec`) and renders the CR from it (`provision.ex:166-200`): `metadata.name` = the profile name in namespace `troupe-system` with label `troupe.dev/managed-by: plane`, `spec` = the stored spec merged with `image` (split into repository and tag or digest, `:99-123`), `replicas`, `sessionsPerPod` and the `teams` projection from grants. Every `admin.profile.put`, `admin.team.grant`/`revoke` (`sync_teams`, `:158-164`) and every bundle publish/retire (`bundles.ex:418-449`) re-renders and re-applies.
 
 Two modes, the `provisioning_mode` setting (`provision.ex:33-35`):
 

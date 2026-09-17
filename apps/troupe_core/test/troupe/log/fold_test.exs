@@ -173,7 +173,14 @@ defmodule Troupe.Log.FoldTest do
   # The event types `Agent.Server.fold_event/2` has a clause for, read out of the source
   # so the two cannot drift apart quietly.
   defp agent_replay_types do
-    source = File.read!(Path.join([File.cwd!(), "lib", "troupe", "agent", "server.ex"]))
+    # Line endings normalised because this reads source rather than data, and a
+    # checkout that stores CRLF would otherwise make every anchor below miss — which
+    # reads like `fold_event/2` having no clauses at all.
+    source =
+      [File.cwd!(), "lib", "troupe", "agent", "server.ex"]
+      |> Path.join()
+      |> File.read!()
+      |> String.replace("\r\n", "\n")
 
     [_before, body] =
       String.split(source, "defp fold_event(%Event{type: type, data: data}, state) do", parts: 2)

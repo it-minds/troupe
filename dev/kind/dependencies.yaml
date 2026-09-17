@@ -292,6 +292,11 @@ data:
       # The device flow needs no client secret and no browser redirect back to a
       # terminal, which is the whole reason `troupe login` uses it.
       skipApprovalScreen: true
+      # And the resource-owner password grant, which is how `mix troupe.e2e` signs in:
+      # there is no browser on a CI runner and no person to type into one. It is enabled
+      # here and nowhere else — this file is the development cluster, whose passwords are
+      # in this repository in plain sight. A real deployment's Dex has neither.
+      passwordConnector: local
     staticClients:
       - id: troupe
         name: Troupe

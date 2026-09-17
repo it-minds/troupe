@@ -53,7 +53,26 @@ defmodule Troupe.MCP.Tool do
   # The session's identity goes as metadata, for the server's logs. Never as a token: a
   # server that received one could act as that user against anything else trusting the
   # same issuer, and it has no need to act as anyone.
-  defp call(server, remote_name, args, ctx) do
+  defp call(%Server{credential_mode: :person} = server, remote_name, args, ctx) do
+    case MCP.person_credential(server, ctx) do
+      {:ok, credential} ->
+        dispatch(%{server | credential: credential}, remote_name, args, ctx)
+
+      {:error, :not_connected} ->
+        # A structured refusal the model can read and relay, not a 401 it will retry four
+        # times. `{:ok, …}` on purpose: nobody has connected this server, which is a fact
+        # about the session's owner rather than a failure of the call, and the session
+        # carries on.
+        {:ok, not_connected(server)}
+
+      {:error, reason} ->
+        {:error, describe(reason)}
+    end
+  end
+
+  defp call(server, remote_name, args, ctx), do: dispatch(server, remote_name, args, ctx)
+
+  defp dispatch(server, remote_name, args, ctx) do
     meta = %{
       "troupe/session" => ctx.session_id,
       "troupe/agent" => Enum.join(ctx.agent_path, "/")
@@ -63,6 +82,16 @@ defmodule Troupe.MCP.Tool do
       {:ok, result} -> {:ok, render(result)}
       {:error, reason} -> {:error, describe(reason)}
     end
+  end
+
+  defp not_connected(server) do
+    Jason.encode!(%{
+      "error" => "not_connected",
+      "server" => server.name,
+      "hint" =>
+        "connect #{server.name} in Troupe under Connections, then ask again — " <>
+          "this server acts as you, and nobody has given it a credential of yours"
+    })
   end
 
   # MCP returns content blocks. Text is what a model can read; anything else is named

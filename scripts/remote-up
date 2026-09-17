@@ -43,13 +43,52 @@ else
   step "1. Cluster $cluster is already up"
 fi
 
+# -- the network ---------------------------------------------------------------
+#
+# A CNI that enforces policy, because the default one does not. kind's own implements
+# pod networking and ignores every NetworkPolicy, which means an egress rule the operator
+# writes is accepted by the API server and enforced by nothing — and a pod on such a
+# cluster can reach anything on the internet while `kubectl get networkpolicy` shows a
+# tidy list. Cilium is also what the chart's `CiliumNetworkPolicy` is addressed to, so
+# this is the cluster the product is written for rather than a near relative of it.
+#
+# `kubeProxyReplacement` is not a preference. Without it Cilium does not implement
+# `hostPort`, and the ingress controller kind installs binds the node's 80 and 443 that
+# way — so the whole cluster becomes unreachable from outside with no error anywhere
+# except a connection that is refused.
+
+step "2. A CNI that enforces policy"
+if [ "${TROUPE_KIND_CNI:-cilium}" != "cilium" ]; then
+  echo "TROUPE_KIND_CNI=${TROUPE_KIND_CNI}: leaving the cluster's own CNI in place." >&2
+  echo "It enforces no NetworkPolicy, so mix troupe.e2e will fail its egress claim." >&2
+elif kc get daemonset -n kube-system cilium >/dev/null 2>&1; then
+  echo "cilium is already installed"
+else
+  helm --kube-context "$context" repo add cilium https://helm.cilium.io >/dev/null 2>&1 || true
+  helm --kube-context "$context" repo update >/dev/null
+  helm --kube-context "$context" upgrade --install cilium cilium/cilium \
+    --namespace kube-system \
+    --version "${TROUPE_CILIUM_VERSION:-1.18.2}" \
+    --set image.pullPolicy=IfNotPresent \
+    --set ipam.mode=kubernetes \
+    --set operator.replicas=1 \
+    --set kubeProxyReplacement=true \
+    --set k8sServiceHost="${cluster}-control-plane" \
+    --set k8sServicePort=6443 \
+    --wait --timeout 10m
+fi
+
+if [ "${TROUPE_KIND_CNI:-cilium}" = "cilium" ]; then
+  kc rollout status -n kube-system daemonset/cilium --timeout=300s
+fi
+
 # -- ingress ------------------------------------------------------------------
 #
 # `kind-up` labels its node `ingress-ready` and maps the host's 30080 onto port 80,
 # which is exactly what ingress-nginx's kind manifest expects. Workers are reached
 # through an Ingress per pod, so this is not optional.
 
-step "2. An ingress controller"
+step "3. An ingress controller"
 if kc get deployment -n ingress-nginx ingress-nginx-controller >/dev/null 2>&1; then
   echo "ingress-nginx is already installed"
 else
@@ -80,17 +119,40 @@ done
 
 # -- images -------------------------------------------------------------------
 
-step "3. Images"
+step "4. Images"
 if [ "${TROUPE_SKIP_BUILD:-}" = "1" ]; then
-  echo "skipping the build (TROUPE_SKIP_BUILD=1)"
+  # Skipping the *build*, not the load. A fresh cluster has none of these images however
+  # recently they were built, and the failure arrives as a pre-install hook that never
+  # starts — "trying and failing to pull image" — several steps from anything that
+  # mentions building. Whatever is on this machine is loaded; what is not, is not.
+  echo "skipping the build (TROUPE_SKIP_BUILD=1); loading what is already built"
+  for release in troupe-operator troupe-plane troupe-worker troupe-a2a; do
+    image="ghcr.io/objective-mj/${release}:${TROUPE_IMAGE_TAG:-dev}"
+    if docker image inspect "$image" >/dev/null 2>&1; then
+      kind load docker-image "$image" --name "$cluster"
+    else
+      echo "remote-up: $image is not on this machine; run without TROUPE_SKIP_BUILD" >&2
+    fi
+  done
 else
   scripts/build-images
 fi
 
 # -- dependencies -------------------------------------------------------------
 
-step "4. A database, an object store, a key manager and an identity provider"
+step "5. A database, an object store, a key manager and an identity provider"
 kc create namespace "$namespace" --dry-run=client -o yaml | kc apply -f -
+
+# The dependencies need the namespace before the chart runs, and the chart owns it —
+# `templates/namespace.yaml`. Helm refuses to adopt a resource it did not create unless
+# the resource says it is the release's, so it is told, here, where the namespace is
+# made. Without this a *fresh* cluster fails at step 6 with "cannot be imported into the
+# current release" and an upgraded one never notices, which is the worst shape a bug can
+# have: invisible to everybody who already has it working.
+kc label namespace "$namespace" app.kubernetes.io/managed-by=Helm --overwrite >/dev/null
+kc annotate namespace "$namespace" \
+  meta.helm.sh/release-name=troupe \
+  meta.helm.sh/release-namespace="$namespace" --overwrite >/dev/null
 retry_apply() {
   for attempt in 1 2 3 4 5; do
     if kc apply -f "$1"; then return 0; fi
@@ -103,27 +165,39 @@ retry_apply() {
 retry_apply dev/kind/dependencies.yaml
 
 # The gateway key is the one secret that is never written to a file in this repository.
-if [ -n "${ITM_LLM_GW_KEY:-}" ]; then
+#
+# The secret itself is created either way. A worker mounts it as an environment variable,
+# and a pod whose secret is absent does not start at all — `CreateContainerConfigError`,
+# which is not "cannot reach a model", it is "cannot run". The line below has claimed for
+# some time that a worker starts without a key; now it does.
+llm_secret() {
   kc create secret generic llm-credentials \
-    --namespace "$namespace" \
-    --from-literal=api-key="$ITM_LLM_GW_KEY" \
+    --namespace "$1" \
+    --from-literal=api-key="${ITM_LLM_GW_KEY:-}" \
     --dry-run=client -o yaml | kc apply -f -
-  echo "llm-credentials carries ITM_LLM_GW_KEY from this shell"
-else
-  echo "ITM_LLM_GW_KEY is not set; workers will start but cannot reach a model" >&2
-fi
+}
+
+llm_secret "$namespace"
 
 # The issuer URL must resolve inside the cluster to the same Dex it resolves to outside.
 # `localtest.me` is 127.0.0.1 everywhere, which inside a pod is the pod — so CoreDNS is
 # told otherwise. Only for this one name.
-step "4b. Teaching the cluster where dex.localtest.me is"
+step "5b. Teaching the cluster where dex.localtest.me is"
 if kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' | grep -q "dex.localtest.me"; then
   echo "the rewrite is already there"
 else
-  kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' > /tmp/troupe-corefile
+  # In the working tree rather than /tmp, and by a relative path. `--from-file` is read
+  # by kubectl, and on a Windows host kubectl is a Windows binary that reads `/tmp/x` as
+  # a path off the system drive while the shell that wrote it meant somewhere else — a
+  # failure that arrives as "no objects passed to apply" three lines later. A
+  # relative path is the one spelling both agree on.
+  work="$(mktemp -d ./.remote-up-XXXXXX)"
+  trap 'rm -rf "$work"' EXIT
+  kc get configmap -n kube-system coredns -o jsonpath='{.data.Corefile}' > "$work/Corefile"
   awk '/^\s*kubernetes cluster\.local/ && !done {print "    rewrite name dex.localtest.me dex-public.troupe-system.svc.cluster.local"; done=1} {print}' \
-    /tmp/troupe-corefile > /tmp/troupe-corefile.new
-  kc create configmap coredns -n kube-system --from-file=Corefile=/tmp/troupe-corefile.new \
+    "$work/Corefile" > "$work/Corefile.new"
+  mv "$work/Corefile.new" "$work/Corefile"
+  kc create configmap coredns -n kube-system --from-file=Corefile="$work/Corefile" \
     --dry-run=client -o yaml | kc apply -f -
   kc rollout restart -n kube-system deployment/coredns
   kc rollout status -n kube-system deployment/coredns --timeout=120s
@@ -139,10 +213,10 @@ done
 # a CRD removes every object of that kind, and for WorkerProfile that means the workers.
 # Changing one is therefore deliberate, and on a development cluster this is the deliberate
 # part.
-step "5. Custom resource definitions"
+step "6. Custom resource definitions"
 kc apply -f charts/troupe/crds/
 
-step "6. The chart"
+step "7. The chart"
 helm --kube-context "$context" upgrade --install troupe charts/troupe \
   --namespace "$namespace" \
   --values dev/kind/values.yaml \
@@ -164,7 +238,7 @@ kc rollout status -n "$namespace" deployment/troupe-operator --timeout=180s
 # platform admin and a platform admin needs somebody to have logged in. The plane learns
 # about it when a pod of it enrols.
 
-step "7. A worker profile"
+step "8. A worker profile"
 kc apply -f - <<YAML
 apiVersion: troupe.dev/v1alpha1
 kind: WorkerProfile
@@ -190,22 +264,31 @@ spec:
       key: api-key
 YAML
 
+# Waited for, and given up on out loud. This used to fall through silently when the
+# operator was slow — a freshly deployed one takes a moment to see its first profile —
+# and the next line then wrote a Secret into a namespace that did not exist yet, which
+# arrives as `namespaces "troupe-w-dev" not found` several steps from its cause.
 echo "waiting for the operator to reconcile ${profile}"
-for _ in $(seq 1 60); do
-  if kc get statefulset -n "troupe-w-${profile}" "troupe-w-${profile}" >/dev/null 2>&1; then break; fi
+reconciled=false
+for _ in $(seq 1 90); do
+  if kc get statefulset -n "troupe-w-${profile}" "troupe-w-${profile}" >/dev/null 2>&1; then
+    reconciled=true
+    break
+  fi
   sleep 2
 done
+
+if [ "$reconciled" != true ]; then
+  echo "remote-up: the operator did not reconcile ${profile}. Its logs:" >&2
+  kc logs -n "$namespace" deployment/troupe-operator --tail=60 >&2 || true
+  exit 1
+fi
 
 # A profile's pods run in their own namespace and Troupe creates no secrets, so the
 # gateway credential has to be put there by whoever owns it — External Secrets Operator
 # in a real cluster, and this line here. The operator makes the namespace; the secret in
 # it is somebody else's job on purpose.
-if [ -n "${ITM_LLM_GW_KEY:-}" ]; then
-  kc create secret generic llm-credentials \
-    --namespace "troupe-w-${profile}" \
-    --from-literal=api-key="$ITM_LLM_GW_KEY" \
-    --dry-run=client -o yaml | kc apply -f -
-fi
+llm_secret "troupe-w-${profile}"
 
 # The object store is the same story: a pod reads sealed segments and writes them back,
 # and the credentials for that live in its own namespace.
@@ -215,9 +298,13 @@ kc create secret generic troupe-object-store \
   --from-literal=secret-access-key=troupe-secret \
   --dry-run=client -o yaml | kc apply -f -
 
-kc rollout status -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --timeout=300s || {
+# Not `kubectl rollout status`: a worker's StatefulSet is `OnDelete`, because a rollout
+# that evicted a pod holding a session would end the session, and `rollout status` has
+# nothing to say about anything but `RollingUpdate`. What is waited for is a ready pod.
+kc wait --namespace "troupe-w-${profile}"   --for=condition=ready pod   --selector="app.kubernetes.io/name=troupe-worker"   --timeout=300s || {
   echo "remote-up: the worker did not become ready. Its logs:" >&2
   kc logs -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --tail=60 >&2 || true
+  kc describe pods -n "troupe-w-${profile}" >&2 || true
   exit 1
 }
 
@@ -228,7 +315,7 @@ kc rollout status -n "troupe-w-${profile}" "statefulset/troupe-w-${profile}" --t
 # and reaches the ingress controller through kind's port mapping, and inside the cluster
 # the same Ingress serves it.
 
-step "8. Where things are"
+step "9. Where things are"
 cat <<EOF
 
   plane      http://plane.localtest.me:30080

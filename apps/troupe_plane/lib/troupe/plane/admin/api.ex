@@ -58,20 +58,28 @@ defmodule Troupe.Plane.Admin.API do
         "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not."
     },
     %Argument{
-      name: "replicas",
-      type: :integer,
-      description: "How many pods this profile runs."
+      name: "size_class",
+      type: :string,
+      description:
+        "How demanding a session is here: standard (several share a worker) or heavy (fewer, with more CPU, memory and disk each). A resource question, not a safety one — sessions cannot see each other's files whatever the class."
     },
     %Argument{
-      name: "sessions_per_pod",
+      name: "max_sessions",
       type: :integer,
-      description: "How many sessions one pod carries before placement fills the next."
+      description:
+        "How far this may grow, in sessions at once rather than workers. Absent is no ceiling, bounded by the team's budget. A session refused here is told this number."
+    },
+    %Argument{
+      name: "warm_workers",
+      type: :integer,
+      description:
+        "How many workers to keep up when nothing is running. 0 scales to zero, which costs the next session a cold start of roughly half a minute."
     },
     %Argument{
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, storage, resources, mcpServers, configBundleChannel, orgMount. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount. Replicas, sessionsPerPod, resources and storage are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -152,6 +160,14 @@ defmodule Troupe.Plane.Admin.API do
       description: "What this principal is for."
     },
     %Argument{
+      name: "sponsor",
+      type: :string,
+      required: true,
+      description:
+        "The subject of a person in this team who is answerable for what it does. " <>
+          "A principal whose sponsor leaves stops firing at the next SCIM push."
+    },
+    %Argument{
       name: "profiles",
       type: :array,
       description:
@@ -172,7 +188,7 @@ defmodule Troupe.Plane.Admin.API do
       required: true,
       description: "The trigger's name, unique within the team."
     },
-    %Argument{name: "kind", type: :string, description: "schedule, webhook or event."},
+    %Argument{name: "kind", type: :string, description: "schedule, webhook or manual."},
     %Argument{
       name: "schedule",
       type: :string,
@@ -180,7 +196,13 @@ defmodule Troupe.Plane.Admin.API do
     },
     %Argument{name: "profile", type: :string, description: "The profile its sessions start on."},
     %Argument{name: "prompt", type: :string, description: "What the session is asked to do."},
-    %Argument{name: "enabled", type: :boolean, description: "Whether it fires at all."}
+    %Argument{name: "enabled", type: :boolean, description: "Whether it fires at all."},
+    %Argument{
+      name: "notify_url",
+      type: :string,
+      description:
+        "An absolute http or https URL told when a run ends. Loopback and link-local are refused, and the host must be one this deployment's egress policy allows."
+    }
   ]
 
   @methods [
@@ -321,6 +343,62 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.groups.list",
+      function: :groups_list,
+      summary:
+        "Every identity-provider group this plane knows about, which is what a team links to.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.team.link",
+      function: :team_link,
+      summary:
+        "Draw a team's members from one more identity-provider group. Membership stays the provider's; this says which groups count.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "group",
+          type: :string,
+          required: true,
+          description: "The group's identifier, as the provider spells it."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.team.unlink.preview",
+      function: :team_unlink_preview,
+      summary:
+        "What unlinking a group would do: how many people are in the team only through it, how many keep access another way, and how many sessions they can currently open. Read this first.",
+      risk: :read,
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "group",
+          type: :string,
+          required: true,
+          description: "The group's identifier."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.team.unlink",
+      function: :team_unlink,
+      summary:
+        "Stop drawing a team's members from a group. Removes access for everybody who was in the team only through it. Sessions do not move: their team is fixed at create.",
+      risk: :destructive,
+      confirm: "group",
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "group",
+          type: :string,
+          required: true,
+          description: "The group's identifier."
+        }
+      ]
+    },
+    %Method{
       name: "admin.team.grant",
       function: :team_grant,
       summary: "Give a team access to a profile. Effective for sessions started after it.",
@@ -336,7 +414,11 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "attrs",
           type: :object,
-          description: "Grant options, such as the volume mode the team gets on this profile."
+          description:
+            "Grant options: the volume mode the team gets on this profile, and " <>
+              "`entitlements`, a list of `{kind, name, mode}` narrowing which of the " <>
+              "bundle's agents, skills and MCP servers this team gets. No entitlements " <>
+              "means no restriction; sending the key replaces the whole list."
         }
       ]
     },
@@ -553,6 +635,26 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.setting.effective",
+      function: :setting_effective,
+      summary:
+        "For one setting decided at more than one rung: the value in force, which rung decided it, and every rung that had an opinion.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "key",
+          type: :string,
+          required: true,
+          description: "The setting's key."
+        },
+        %Argument{
+          name: "team",
+          type: :string,
+          description: "Include this team's own rung. Absent answers for the rungs above every team."
+        }
+      ]
+    },
+    %Method{
       name: "admin.setting.reset",
       function: :setting_reset,
       summary:
@@ -637,6 +739,46 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.person.budget",
+      function: :person_budget,
+      summary:
+        "Set or clear a person's own spend ceiling, in millionths, across every team they are in. 0 or absent is no ceiling.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "subject",
+          type: :string,
+          required: true,
+          description: "The person's subject, as the identity provider spells it."
+        },
+        %Argument{
+          name: "budget_micros",
+          type: :integer,
+          description: "The ceiling. Absent or 0 clears it."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.budget.explain",
+      function: :budget_explain,
+      summary:
+        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, and which rung set it.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "subject",
+          type: :string,
+          required: true,
+          description: "The person's subject."
+        },
+        %Argument{
+          name: "team",
+          type: :string,
+          description: "The team whose ceiling to include. Absent leaves that rung out."
+        }
+      ]
+    },
+    %Method{
       name: "admin.triggers.list",
       function: :triggers_list,
       summary: "A team's triggers: what fires them, what they run, and whether they are enabled.",
@@ -677,9 +819,41 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.trigger.revisions",
+      function: :trigger_revisions,
+      summary:
+        "Every revision of a trigger, newest first: what each one said and when it was made.",
+      risk: :read,
+      arguments: [
+        %Argument{name: "team", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The trigger's name."
+        }
+      ]
+    },
+    %Method{
       name: "admin.trigger.run",
       function: :trigger_run,
       summary: "Fire a trigger now, by hand. It starts a real session and spends real money.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "team", type: :string, required: true, description: "The team's name."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The trigger's name."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.trigger.key.rotate",
+      function: :trigger_key_rotate,
+      summary:
+        "Mint the trigger's own webhook key, replacing whatever it had. Returned once and never readable again; the old key stops working immediately.",
       risk: :write,
       arguments: [
         %Argument{name: "team", type: :string, required: true, description: "The team's name."},
@@ -735,9 +909,39 @@ defmodule Troupe.Plane.Admin.API do
   end
 
   defp invoke(%Method{} = method, params, actor) do
-    arguments = Enum.map(Method.argument_names(method), &argument(&1, params))
-    Kernel.apply(Admin, method.function, [actor | arguments])
+    case missing(method, params) do
+      [] ->
+        arguments = Enum.map(Method.argument_names(method), &argument(&1, params))
+        Kernel.apply(Admin, method.function, [actor | arguments])
+
+      missing ->
+        {:error, Error.new(:invalid_params, %{method: method.name, missing: missing})}
+    end
   end
+
+  # `required: true` was declared on forty arguments and enforced on none of them: a
+  # missing one arrived at the context as `nil` and became whatever that function did
+  # with a nil — for `admin.bundles.list`, an Ecto comparison against nil, which is an
+  # ArgumentError, which is a 500 on a public endpoint. A declaration nothing reads is a
+  # comment.
+  #
+  # The flat forms are honoured here too, because `argument/2` honours them: a client may
+  # send a profile as `{"profile": {...}}` or as the params map itself, and a method whose
+  # required argument is satisfied that way is not missing it.
+  defp missing(%Method{} = method, params) do
+    method
+    |> Method.required_names()
+    |> Enum.reject(&present?(&1, params))
+  end
+
+  defp present?(name, params) when name in ~w(profile principal trigger) do
+    is_map(params[name]) or map_size(Map.drop(params, ["confirm"])) > 0
+  end
+
+  defp present?("content", params), do: is_map(params["content"])
+  defp present?("attrs", params), do: is_map(params["attrs"])
+  defp present?("filter", params), do: is_map(params)
+  defp present?(name, params), do: not is_nil(params[name])
 
   # `filter` and `attrs` are the two shapes a method takes a bag of options in; the rest
   # are plain values. A keyword list for the former because that is what the context
