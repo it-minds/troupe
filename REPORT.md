@@ -2185,3 +2185,66 @@ And the explanation, for `grace@example.test` in `delivery`:
 Five of those are new: every team's ceiling with its figures, which rung binds and the two
 that do not, a rung with no ceiling reported as nothing refusing, and — walking Overview,
 Teams and Budgets — no amount anywhere rendering as the word `unlimited`.
+
+## R8d — Provisioners, and the grant that is refused
+
+Done item 8, and the last of R6's own done items: *a profile on an SSH provisioner is
+marked unenforced, and granting it to a team without `allow_unenforced_workers` is refused
+with the missing guarantee named.*
+
+Four names rather than one word, everywhere. "Unenforced" is not a useful thing to tell
+somebody deciding whether their team's work may run on somebody's build box.
+
+### The refusal, against a running plane
+
+`design` has no permission; `laptops` is on the SSH provisioner:
+
+    grant without permission: {:error,
+     %Troupe.Protocol.Error{
+       code: -32004,
+       message: "forbidden",
+       data: %{
+         profile: "laptops",
+         provisioner: "ssh",
+         missing: ["admission_policy", "network_policy", "fqdn_egress",
+          "disruption_budget"],
+         team: "design",
+         reason: "this substrate does not provide admission_policy, network_policy,
+           fqdn_egress, disruption_budget; a platform admin must allow unenforced workers
+           for this team first"
+       }
+     }}
+
+And nothing was granted, which a refusal that only logged would have missed.
+
+### Both directions of the flag
+
+A team admin setting it for themselves is refused rather than having the value dropped.
+Clearing it while the grant it allowed still stands is refused with the profiles named,
+because the check at grant time exists to make "granted, and not allowed" impossible and
+clearing the flag afterwards would have produced that state by the back door.
+
+That second test found a defect in the check itself: `Enum.find_value/2` reads a `false`
+result as *not found*, and `false` is exactly the value being looked for, so clearing the
+flag was indistinguishable from an update that never mentioned it. Both checks were
+silently unarmed against the one case they exist for.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/provisioner_test.exs \
+        apps/troupe_plane/test/troupe/plane/console_coverage_test.exs \
+        apps/troupe_plane/test/troupe/plane/admin_parity_test.exs
+    Finished in 8.3 seconds (0.2s async, 8.0s sync)
+    Result: 42 passed
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs
+    Result: 41 passed
+
+    $ ./scripts/toolbox mix troupe.schema.diff
+    schema unchanged: 77 documents
+
+    $ ./scripts/toolbox mix troupe.boundaries
+    boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+    $ ./scripts/credo
+    6602 mods/funs, found no issues.

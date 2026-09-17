@@ -29,6 +29,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
   @pages [
     {:overview, "Overview", "/admin"},
     {:workers, "Workers", "/admin/workers"},
+    {:provisioners, "Provisioners", "/admin/provisioners"},
     {:teams, "Teams", "/admin/teams"},
     {:bundles, "Configuration bundles", "/admin/bundles"},
     {:triggers, "Triggers", "/admin/triggers"},

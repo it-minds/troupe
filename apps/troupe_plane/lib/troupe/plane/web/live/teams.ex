@@ -48,6 +48,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
       |> put_string(:volume_storage_class, params["volume_storage_class"])
       |> Map.put(:members_may_control, params["members_may_control"] == "on")
       |> Map.put(:pins_allowed, params["pins_allowed"] == "on")
+      |> allow_unenforced(socket.assigns.actor, params)
 
     respond(socket, Admin.team_update(socket.assigns.actor, name, attrs), "#{name} updated")
   end
@@ -313,6 +314,16 @@ defmodule Troupe.Plane.Web.Live.Teams do
     end
   end
 
+  # Only sent by a platform admin's form, and only mentioned when it was on the page: a
+  # team admin's save must not carry the key at all, because `Admin.team_update` refuses an
+  # update that mentions it rather than dropping the value — and a form that quietly sent
+  # `false` would turn every team admin's save into a refusal.
+  defp allow_unenforced(attrs, %{role: :platform_admin}, params) do
+    Map.put(attrs, :allow_unenforced_workers, params["allow_unenforced_workers"] == "on")
+  end
+
+  defp allow_unenforced(attrs, _actor, _params), do: attrs
+
   defp name_for(%{"name" => name}, _group) when is_binary(name) and name != "", do: name
   defp name_for(_params, group), do: group
 
@@ -405,6 +416,9 @@ defmodule Troupe.Plane.Web.Live.Teams do
           <:field label="team volume">
             {team.volume_size} on {team.volume_storage_class || "the default class"}
           </:field>
+          <:field label="unenforced workers">
+            {if team.allow_unenforced_workers, do: "allowed", else: "not allowed"}
+          </:field>
         </.title_block>
 
         <form :if={@editing == team.name} id={"edit-#{team.name}"} phx-submit="save">
@@ -456,6 +470,25 @@ defmodule Troupe.Plane.Web.Live.Teams do
             <p class="field-help">
               How long a dormant session keeps the working copy it can wake straight back
               into. After this it still wakes, from the log, more slowly.
+            </p>
+          </div>
+
+          <div :if={@actor.role == :platform_admin} class="setting">
+            <label class="toggle">
+              <input
+                type="checkbox"
+                name="allow_unenforced_workers"
+                checked={team.allow_unenforced_workers}
+              />
+              may run where nothing is enforced
+            </label>
+            <p class="field-help">
+              A worker outside Kubernetes has no admission policy, no network policy, no
+              egress by hostname and no disruption budget. Off, a grant to such a profile is
+              refused with the missing guarantees named. This is deliberate friction and not
+              a way around the policy — it exists so a developer with one laptop and a team
+              with one build box can use the product. The Provisioners screen says which
+              profiles this is about.
             </p>
           </div>
 

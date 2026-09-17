@@ -45,7 +45,7 @@ defmodule Troupe.Plane.Admin do
     Ledger
   }
 
-  alias Troupe.Plane.Fleet.{Bundle, SizeClass, Worker}
+  alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
   alias Troupe.Plane.Settings.Ladder
@@ -166,6 +166,36 @@ defmodule Troupe.Plane.Admin do
   end
 
   # -- profiles ---------------------------------------------------------------
+
+  @doc """
+  What can make a worker, and which guarantee each one does not give.
+
+  Asked of the provisioners rather than of any profile: what a substrate guarantees is a
+  property of the substrate, and a row that claimed to be enforced would be a claim the
+  cluster never made. A *profile's* own answer is in `profiles_list/1`, because a
+  provisioner may give less for one profile than for another.
+
+  Here rather than read out of `Fleet` by a screen, for the reason every other answer is
+  here: the console is an admin API client and gets no private path into the plane.
+  """
+  @spec provisioners(actor()) :: result()
+  def provisioners(actor) do
+    with :ok <- require_admin(actor) do
+      {:ok,
+       Enum.map(Provisioner.implementations(), fn module ->
+         # A bare profile of this provisioner, which is what "in general" can mean: the
+         # question is what the substrate offers before anybody configures anything.
+         profile = %Fleet.Profile{name: module.name(), provisioner: module.name()}
+         given = module.guarantees(profile)
+
+         %{
+           name: module.name(),
+           guarantees: Enum.map(given, &to_string/1),
+           missing: Provisioner.guarantees() |> Kernel.--(given) |> Enum.map(&to_string/1)
+         }
+       end)}
+    end
+  end
 
   @doc "Every profile, with its pods, conditions and load."
   @spec profiles_list(actor()) :: result()
@@ -358,6 +388,8 @@ defmodule Troupe.Plane.Admin do
   @spec team_update(actor(), String.t(), map()) :: result()
   def team_update(actor, name, attrs) do
     with {:ok, team} <- fetch_team(actor, name),
+         :ok <- may_set_unenforced(actor, attrs),
+         :ok <- still_allowed(team, attrs),
          # Before the changeset, so a widening attempt is refused with the ceiling
          # quoted rather than clamped. An administrator whose form accepted a number the
          # plane is not using has been told a lie by something that knew better.
@@ -393,6 +425,84 @@ defmodule Troupe.Plane.Admin do
          })}
     end
   end
+
+  # A team admin may set everything else about their team and not this one: a flag a team
+  # could give itself is not a decision anybody made about that team. Refused rather than
+  # dropped, because a form that accepted the value and ignored it would be the lie this
+  # module keeps refusing to tell.
+  defp may_set_unenforced(%{role: :platform_admin}, _attrs), do: :ok
+
+  defp may_set_unenforced(_actor, attrs) do
+    if is_nil(unenforced_attr(attrs)) do
+      :ok
+    else
+      {:error,
+       Error.new(:forbidden, %{
+         field: "allow_unenforced_workers",
+         reason: "only a platform admin decides whether a team may run where nothing is enforced"
+       })}
+    end
+  end
+
+  # Taking the permission back while the team still holds a grant that needed it would
+  # leave the grant standing and the permission gone, which is the state the check at grant
+  # time exists to make impossible. The profiles are named, because the repair is to revoke
+  # them and the person doing it has to know which.
+  defp still_allowed(team, attrs) do
+    case unenforced_attr(attrs) do
+      false ->
+        case unenforced_grants(team) do
+          [] ->
+            :ok
+
+          profiles ->
+            {:error,
+             Error.new(:forbidden, %{
+               team: team.name,
+               profiles: profiles,
+               reason:
+                 "this team is granted " <>
+                   Enum.join(profiles, ", ") <>
+                   ", which no substrate enforces; revoke them first"
+             })}
+        end
+
+      _unchanged_or_true ->
+        :ok
+    end
+  end
+
+  defp unenforced_grants(team) do
+    for grant <- Identity.grants_for_team(team),
+        profile = Fleet.get_profile(grant.profile),
+        not is_nil(profile),
+        Provisioner.unenforced?(profile),
+        do: grant.profile
+  end
+
+  # A form sends `"on"` and nothing at all; a JSON-RPC caller sends a boolean. `nil` means
+  # this update does not mention the flag, which is not the same as setting it to false.
+  #
+  # Wrapped in a tuple on the way out, because the value this looks for is very often
+  # `false` and `Enum.find_value/2` reads a `false` result as *not found* — which made
+  # clearing the flag indistinguishable from an update that never mentioned it, and left
+  # the one case both checks here exist for silently unchecked.
+  defp unenforced_attr(attrs) do
+    attrs
+    |> Enum.find_value(fn {key, value} ->
+      if to_string(key) == "allow_unenforced_workers", do: {:set, coerce_flag(value)}
+    end)
+    |> case do
+      {:set, flag} -> flag
+      nil -> nil
+    end
+  end
+
+  defp coerce_flag(value) when is_boolean(value), do: value
+  defp coerce_flag("on"), do: true
+  defp coerce_flag("true"), do: true
+  defp coerce_flag("false"), do: false
+  defp coerce_flag(_other), do: nil
 
   @doc """
   Every group the identity provider has told this plane about.
@@ -487,6 +597,7 @@ defmodule Troupe.Plane.Admin do
 
     with :ok <- require_platform_admin(actor),
          {:ok, team} <- fetch_team(actor, name),
+         :ok <- enforced_enough(team, profile),
          before <- entitlement_names(team, profile),
          {:ok, _grant} <- granted(team, profile, attrs) do
       detail = grant_detail(profile, Audit.diff(before, entitlement_names(team, profile)))
@@ -496,6 +607,43 @@ defmodule Troupe.Plane.Admin do
 
       {:ok, team_detail(team)}
     end
+  end
+
+  # A profile whose substrate does not enforce, granted to a team nobody has said may
+  # run there. Refused rather than warned about, and the refusal lists *which* guarantees
+  # are missing: "unenforced" is not a useful thing to tell somebody deciding whether
+  # their team's work may run on somebody's build box.
+  #
+  # This is deliberate friction. The feature exists so a developer with one laptop can use
+  # the product, and it is not a way around the policy — a console that softened this
+  # would be the most dangerous thing in the console.
+  defp enforced_enough(team, profile_name) do
+    profile = Fleet.get_profile(profile_name)
+
+    cond do
+      # A grant to a profile that does not exist is the grant path's business, not this
+      # check's, and answering `:ok` here leaves that refusal where it already is.
+      is_nil(profile) -> :ok
+      Provisioner.missing(profile) == [] -> :ok
+      team.allow_unenforced_workers -> :ok
+      true -> unenforced_refusal(team, profile)
+    end
+  end
+
+  defp unenforced_refusal(team, profile) do
+    missing = profile |> Provisioner.missing() |> Enum.map(&to_string/1)
+
+    {:error,
+     Error.new(:forbidden, %{
+       profile: profile.name,
+       provisioner: profile.provisioner,
+       missing: missing,
+       team: team.name,
+       reason:
+         "this substrate does not provide " <>
+           Enum.join(missing, ", ") <>
+           "; a platform admin must allow unenforced workers for this team first"
+     })}
   end
 
   # An unchanged entitlement list is not a change, and an audit row that recorded one
@@ -1502,6 +1650,11 @@ defmodule Troupe.Plane.Admin do
       capacity_sessions: profile.replicas * profile.sessions_per_pod,
       channel: profile.config_bundle_channel,
       image: profile.image,
+      # What makes these workers exist, and what that substrate does *not* guarantee.
+      # Named individually rather than summed into a flag: "unenforced" is not a useful
+      # thing to tell somebody deciding whether their team's work may run there.
+      provisioner: profile.provisioner,
+      missing_guarantees: profile |> Provisioner.missing() |> Enum.map(&to_string/1),
       conditions: Provision.conditions(profile),
       pods:
         Enum.map(workers, fn worker ->
@@ -1559,6 +1712,7 @@ defmodule Troupe.Plane.Admin do
       pins_allowed: team.pins_allowed,
       volume_storage_class: team.volume_storage_class,
       volume_size: team.volume_size,
+      allow_unenforced_workers: team.allow_unenforced_workers,
       admins: Identity.admins_of(team),
       grants:
         Enum.map(

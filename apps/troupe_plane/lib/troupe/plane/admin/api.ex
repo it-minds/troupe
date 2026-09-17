@@ -220,6 +220,13 @@ defmodule Troupe.Plane.Admin.API do
       risk: :read
     },
     %Method{
+      name: "admin.provisioners.list",
+      function: :provisioners,
+      summary:
+        "What can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget. A profile on a substrate that gives none of them may only be granted to a team a platform admin has allowed.",
+      risk: :read
+    },
+    %Method{
       name: "admin.profile.get",
       function: :profile_get,
       summary:
@@ -650,7 +657,8 @@ defmodule Troupe.Plane.Admin.API do
         %Argument{
           name: "team",
           type: :string,
-          description: "Include this team's own rung. Absent answers for the rungs above every team."
+          description:
+            "Include this team's own rung. Absent answers for the rungs above every team."
         }
       ]
     },

@@ -45,6 +45,11 @@ defmodule Troupe.Plane.Identity.Team do
     field :volume_storage_class, :string
     field :volume_size, :string, default: "10Gi"
 
+    # Whether this team may be granted a profile whose substrate does not enforce. A
+    # platform admin's, per team, and `false` until one says otherwise — see the migration
+    # for why it is not a platform-wide switch.
+    field :allow_unenforced_workers, :boolean, default: false
+
     has_many :grants, Troupe.Plane.Identity.Grant
 
     timestamps(type: :utc_datetime_usec)
@@ -65,7 +70,8 @@ defmodule Troupe.Plane.Identity.Team do
     :budget_micros,
     :budget_period,
     :volume_storage_class,
-    :volume_size
+    :volume_size,
+    :allow_unenforced_workers
   ]
 
   @spec changeset(t() | Ecto.Changeset.t(), map()) :: Ecto.Changeset.t()

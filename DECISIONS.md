@@ -3972,3 +3972,33 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      ceilings, and `amount/1` — whose every caller is a spend or a reservation — renders
      through `figure/1`. The test walks three screens and fails on the word appearing in
      any amount.
+
+594. **`allow_unenforced_workers` is a team's column, not a setting on the ladder.** A
+     platform-wide switch would be one value that turned the friction off everywhere, and
+     the friction is the feature: somebody has to decide per team, by name, in the audit
+     trail, with the list of what is missing in front of them. `false` for every team that
+     exists and every team made afterwards, because absence here has to mean the safe
+     reading rather than the convenient one.
+
+595. **A team admin is refused the flag rather than having it dropped.** They may set
+     everything else about their team; a flag a team could give itself is not a decision
+     anybody made about that team. Refusing is what the rest of this module does with a
+     value it will not use — a form that accepted it and ignored it would leave somebody
+     believing their team may run somewhere it may not.
+
+596. **The permission cannot be taken back while the grant it allowed still stands.** The
+     check at grant time exists to make "granted, and not allowed" impossible, and clearing
+     the flag afterwards would have produced exactly that state by the back door. The
+     refusal names the profiles, because the repair is to revoke them.
+
+597. **`Enum.find_value/2` reads a `false` result as "not found", and the value being
+     looked for here is very often `false`.** Clearing the flag was indistinguishable from
+     an update that never mentioned it, which left both checks above silently unarmed — the
+     test for taking the permission back is what caught it. The lookup wraps its answer in
+     a tuple.
+
+598. **What a substrate guarantees is answered by `Admin`, not read out of `Fleet` by a
+     screen.** `mix troupe.boundaries` would have failed the build, and the reason it would
+     is the reason not to want it: a console with a private path into the plane is a path no
+     other client has. So `admin.provisioners.list` exists, and the model reading it over
+     MCP gets the same four names the screen shows.

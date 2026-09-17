@@ -15,8 +15,7 @@ defmodule Troupe.Plane.ProvisionerTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.Enrolment
-  alias Troupe.Plane.Fleet
+  alias Troupe.Plane.{Admin, Enrolment, Fleet, Identity}
   alias Troupe.Plane.Fleet.{Host, Hosts, Provisioner}
 
   @moduletag timeout: 60_000
@@ -72,6 +71,99 @@ defmodule Troupe.Plane.ProvisionerTest do
       # enforcement would be a claim nobody checked, in the one place it matters most.
       refute Map.has_key?(profile("laptops", %{provisioner: "ssh"}), :unenforced)
       refute Map.has_key?(profile("laptops", %{provisioner: "ssh"}), :guarantees)
+    end
+  end
+
+  describe "granting a team a profile nothing enforces" do
+    setup do
+      {:ok, group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+      {:ok, _} = Identity.enable_team(group, %{name: "platform"})
+
+      {:ok, user} =
+        Identity.upsert_user(%{subject: "root@example.test", display_name: "root"})
+
+      {:ok, _} = Identity.set_memberships(user, ["platform"])
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+
+      {:ok, delivery_group} =
+        Identity.upsert_group(%{external_id: "delivery", display_name: "delivery"})
+
+      {:ok, delivery} = Identity.enable_team(delivery_group, %{name: "delivery"})
+      _laptops = profile("laptops", %{provisioner: "ssh"})
+      _dev = profile("dev")
+
+      %{actor: Admin.actor_for_subject("root@example.test"), team: delivery}
+    end
+
+    test "is refused, and the refusal names every guarantee that is missing", context do
+      assert {:error, error} = Admin.team_grant(context.actor, "delivery", "laptops")
+
+      assert error.message == "forbidden"
+      assert error.data.profile == "laptops"
+      assert error.data.provisioner == "ssh"
+
+      # Four names rather than one word. "Unenforced" is not a useful thing to tell
+      # somebody deciding whether their team's work may run on somebody's build box.
+      assert Enum.sort(error.data.missing) ==
+               ~w(admission_policy disruption_budget fqdn_egress network_policy)
+
+      assert error.data.reason =~ "a platform admin must allow unenforced workers"
+
+      # And nothing was granted, which is the half a refusal that only logged would miss.
+      refute "laptops" in Enum.map(Identity.grants_for_team(context.team), & &1.profile)
+    end
+
+    test "a profile the cluster enforces is granted without any of that", context do
+      assert {:ok, _team} = Admin.team_grant(context.actor, "delivery", "dev")
+      assert "dev" in Enum.map(Identity.grants_for_team(context.team), & &1.profile)
+    end
+
+    test "and is granted once a platform admin has allowed this team", context do
+      assert {:ok, _} =
+               Admin.team_update(context.actor, "delivery", %{allow_unenforced_workers: true})
+
+      assert {:ok, _team} = Admin.team_grant(context.actor, "delivery", "laptops")
+      assert "laptops" in Enum.map(Identity.grants_for_team(context.team), & &1.profile)
+    end
+
+    test "which a team admin cannot do for themselves", context do
+      {:ok, lead} = Identity.upsert_user(%{subject: "lead@example.test", display_name: "lead"})
+      {:ok, _} = Identity.set_memberships(lead, ["delivery"])
+      {:ok, _} = Identity.add_team_admin(context.team, "lead@example.test", "root@example.test")
+
+      lead_actor = Admin.actor_for_subject("lead@example.test")
+      assert lead_actor.role == :team_admin
+
+      assert {:error, error} =
+               Admin.team_update(lead_actor, "delivery", %{allow_unenforced_workers: true})
+
+      assert error.message == "forbidden"
+      assert error.data.field == "allow_unenforced_workers"
+
+      # Refused rather than dropped: a form that accepted the value and ignored it would
+      # leave somebody believing their team may run somewhere it may not.
+      refute Identity.get_team("delivery").allow_unenforced_workers
+    end
+
+    test "and cannot be taken back while the grant it allowed still stands", context do
+      {:ok, _} = Admin.team_update(context.actor, "delivery", %{allow_unenforced_workers: true})
+      {:ok, _} = Admin.team_grant(context.actor, "delivery", "laptops")
+
+      assert {:error, error} =
+               Admin.team_update(context.actor, "delivery", %{allow_unenforced_workers: false})
+
+      assert error.data.profiles == ["laptops"]
+      assert error.data.reason =~ "revoke them first"
+
+      # Revoke it and the permission goes back, which is the order that leaves no moment
+      # where the grant stands and the permission does not.
+      assert {:ok, _} = Admin.team_revoke(context.actor, "delivery", "laptops")
+
+      assert {:ok, _} =
+               Admin.team_update(context.actor, "delivery", %{allow_unenforced_workers: false})
+
+      refute Identity.get_team("delivery").allow_unenforced_workers
     end
   end
 

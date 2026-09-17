@@ -556,6 +556,47 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
+  describe "the provisioners page" do
+    setup do
+      {:ok, _} = Fleet.put_profile(%{name: "laptops", provisioner: "ssh"})
+      :ok
+    end
+
+    test "names every guarantee a substrate does not give, one at a time", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/provisioners")
+
+      assert html =~ "kubernetes"
+      assert html =~ "ssh"
+
+      # Four names rather than the word. "Unenforced" is not a useful thing to tell
+      # somebody deciding whether their team's work may run on somebody's build box.
+      for name <- [
+            "admission policy",
+            "network policy",
+            "egress by hostname",
+            "disruption budget"
+          ] do
+        assert html =~ name, "the #{name} guarantee is not named anywhere"
+      end
+
+      assert html =~ "not given"
+      assert html =~ "laptops"
+    end
+
+    test "and says plainly that this is not a way around the policy", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/provisioners")
+
+      assert html =~ "deliberate friction"
+      assert html =~ "not a way around the policy"
+
+      # Nobody has been allowed, so the page says so rather than showing an empty list
+      # that reads as "anybody may".
+      assert html =~ "No team may be granted"
+    end
+  end
+
   describe "the budgets page" do
     # The ceilings are actors, one per rung, registered with `:global` — so asking which
     # one binds starts three of them. The rest of the panel reads tables and does not,

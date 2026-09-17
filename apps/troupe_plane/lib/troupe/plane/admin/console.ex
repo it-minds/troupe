@@ -124,6 +124,7 @@ defmodule Troupe.Plane.Admin.Console do
 
     # -- Operate -------------------------------------------------------------
     pod_drain: {:screen, :fleet},
+    provisioners: {:screen, :provisioners},
     profiles_list: {:screen, :fleet},
     provisioning_mode: {:screen, :profiles},
     person_budget: {:screen, :teams},
@@ -164,7 +165,6 @@ defmodule Troupe.Plane.Admin.Console do
       identity:
         "the provider, claims, SCIM state and principals, which sit inside Policy and Teams",
       integrations: "org-level MCP servers and the egress allowlist as an object",
-      provisioners: "what can make a worker, and which guarantee each does not give",
       connections: "who connected a personal credential to which server, and revocation"
     }
   end
