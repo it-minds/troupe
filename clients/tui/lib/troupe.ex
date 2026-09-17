@@ -30,6 +30,11 @@ defmodule Troupe do
         else: overrides
 
     overrides =
+      if Keyword.get(opts, :full_send),
+        do: Map.put(overrides, :full_send, true),
+        else: overrides
+
+    overrides =
       if Keyword.has_key?(opts, :watch),
         do:
           Map.update(

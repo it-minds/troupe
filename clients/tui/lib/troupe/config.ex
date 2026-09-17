@@ -51,6 +51,7 @@ defmodule Troupe.Config do
             max_chars: pos_integer()
           },
           auto_approve: boolean(),
+          full_send: boolean(),
           mouse: boolean(),
           max_delegation_depth: pos_integer(),
           default_window: pos_integer(),
@@ -133,6 +134,7 @@ defmodule Troupe.Config do
               max_chars: 30_000
             },
             auto_approve: false,
+            full_send: false,
             mouse: true,
             max_delegation_depth: 3,
             default_window: 200_000,
@@ -578,6 +580,7 @@ defmodule Troupe.Config do
         reasoning_effort: effort(Map.get(yaml, "reasoning_effort")) || cfg.reasoning_effort,
         max_branches: Map.get(yaml, "max_branches", cfg.max_branches),
         auto_approve: Map.get(yaml, "auto_approve", cfg.auto_approve),
+        full_send: Map.get(yaml, "full_send", cfg.full_send),
         compaction: %{
           fraction: Map.get(compaction, "fraction", cfg.compaction.fraction) / 1,
           keep_last_turns: Map.get(compaction, "keep_last_turns", cfg.compaction.keep_last_turns)

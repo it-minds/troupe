@@ -5,7 +5,8 @@ defmodule Troupe.CLI do
       troupe                       open the TUI in the current directory
       troupe --watch               TUI with watch mode on
       troupe --no-mouse            TUI without mouse reporting, so the terminal's own selection works
-      troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--workspace DIR]
+      troupe --full-send           start with every budget/token limit lifted for the session
+      troupe run [AGENT] "task" [--headless] [--worktree] [--auto-approve] [--full-send] [--workspace DIR]
       troupe resume [SESSION_ID]   no id: reopen the last session here, picker open
       troupe --remote [PLANE_URL]  open HQ: teams, profiles and sessions on a plane
       troupe login PLANE_URL       sign in to a plane with the device flow
@@ -33,6 +34,7 @@ defmodule Troupe.CLI do
           headless: boolean(),
           worktree: boolean(),
           auto_approve: boolean(),
+          full_send: boolean(),
           watch: boolean(),
           mouse: boolean() | nil,
           workspace: String.t(),
@@ -51,6 +53,7 @@ defmodule Troupe.CLI do
           headless: :boolean,
           worktree: :boolean,
           auto_approve: :boolean,
+          full_send: :boolean,
           watch: :boolean,
           mouse: :boolean,
           workspace: :string,
@@ -69,6 +72,7 @@ defmodule Troupe.CLI do
       headless: Keyword.get(opts, :headless, false),
       worktree: Keyword.get(opts, :worktree, false),
       auto_approve: Keyword.get(opts, :auto_approve, false),
+      full_send: Keyword.get(opts, :full_send, false),
       watch: Keyword.get(opts, :watch, false),
       # nil, not false: no flag means "whatever the `mouse` setting says".
       mouse: Keyword.get(opts, :mouse),

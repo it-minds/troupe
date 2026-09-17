@@ -16,6 +16,11 @@ defmodule Troupe.CLITest do
     assert {:ok, %{mode: :run, agent: "plan", task: "x", worktree: true, auto_approve: true}} =
              CLI.parse(["run", "plan", "x", "--worktree", "--auto-approve"])
 
+    assert {:ok, %{mode: :run, agent: "code", task: "x", full_send: true}} =
+             CLI.parse(["run", "x", "--full-send"])
+
+    assert {:ok, %{mode: :tui, full_send: true}} = CLI.parse(["--full-send"])
+
     assert {:ok, %{mode: :resume, session_id: "abc"}} = CLI.parse(["resume", "abc"])
     assert {:ok, %{mode: :resume, session_id: nil}} = CLI.parse(["resume"])
     assert {:ok, %{mode: :version}} = CLI.parse(["--version"])
