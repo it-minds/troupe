@@ -42,7 +42,7 @@ defmodule Troupe.LLM.OpenAI do
 
     case result do
       {:ok, acc} -> send(reply_to, {:llm_done, ref, finalize(acc)})
-      {:error, reason} -> send(reply_to, {:llm_error, ref, reason})
+      {:error, reason} -> send(reply_to, {:llm_error, ref, Provider.classify(reason)})
     end
 
     :ok

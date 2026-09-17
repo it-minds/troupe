@@ -23,6 +23,7 @@ defmodule Troupe.Config do
           reasoning_effort: String.t() | nil,
           max_branches: pos_integer(),
           compaction: %{fraction: float(), keep_last_turns: pos_integer()},
+          budget: %{warn_at: float()},
           watch: %{
             debounce_ms: pos_integer(),
             poll_interval_ms: pos_integer(),
@@ -98,6 +99,7 @@ defmodule Troupe.Config do
             reasoning_effort: nil,
             max_branches: 8,
             compaction: %{fraction: 0.8, keep_last_turns: 4},
+            budget: %{warn_at: 0.8},
             watch: %{
               debounce_ms: 300,
               poll_interval_ms: 500,
@@ -536,6 +538,7 @@ defmodule Troupe.Config do
     models = Map.get(yaml, "models", %{})
     providers = yaml |> Map.get("providers", %{}) |> parse_providers()
     compaction = Map.get(yaml, "compaction", %{})
+    budget = Map.get(yaml, "budget", %{})
     watch = Map.get(yaml, "watch", %{})
     memory = Map.get(yaml, "memory", %{})
     cache = Map.get(yaml, "cache", %{})
@@ -559,6 +562,7 @@ defmodule Troupe.Config do
           fraction: Map.get(compaction, "fraction", cfg.compaction.fraction) / 1,
           keep_last_turns: Map.get(compaction, "keep_last_turns", cfg.compaction.keep_last_turns)
         },
+        budget: %{warn_at: Map.get(budget, "warn_at", cfg.budget.warn_at) / 1},
         watch: %{
           debounce_ms: Map.get(watch, "debounce_ms", cfg.watch.debounce_ms),
           poll_interval_ms: Map.get(watch, "poll_interval_ms", cfg.watch.poll_interval_ms),
@@ -693,6 +697,9 @@ defmodule Troupe.Config do
 
       {:compaction, c}, acc when is_map(c) ->
         %{acc | compaction: Map.merge(acc.compaction, c)}
+
+      {:budget, b}, acc when is_map(b) ->
+        %{acc | budget: Map.merge(acc.budget, b)}
 
       {:watch, w}, acc when is_map(w) ->
         %{acc | watch: Map.merge(acc.watch, w)}

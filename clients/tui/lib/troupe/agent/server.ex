@@ -8,7 +8,7 @@ defmodule Troupe.Agent.Server do
   @behaviour :gen_statem
   require Logger
 
-  alias Troupe.Agent.{Budget, Node, Prompt, Spec, State}
+  alias Troupe.Agent.{Budget, Headroom, Node, Prompt, Spec, State}
   alias Troupe.Events
   alias Troupe.LLM.Message
   alias Troupe.Session
@@ -28,7 +28,13 @@ defmodule Troupe.Agent.Server do
               compaction: nil,
               survey: nil,
               brief: "",
-              cache_bp: nil
+              cache_bp: nil,
+              # At-most-once guards for the two recoveries below. Both are facts
+              # about the turn in flight and not decisions, so — like `cache_bp`
+              # — they live here and never in the log: a restart must come back
+              # willing to try each recovery once more.
+              overflow_retried: false,
+              truncation_retried: false
   end
 
   ## API
@@ -120,6 +126,21 @@ defmodule Troupe.Agent.Server do
   def handle_event(:info, {:input, :tui_todo_edit, _}, _state, _data),
     do: {:keep_state_and_data, [:postpone]}
 
+  # `/compact` on a branch that is not mid-stream: the manual escape hatch for a
+  # conversation that has grown past what the model will take. Mid-turn it is
+  # postponed rather than refused — the turn will reach `:idle` or `:done`.
+  def handle_event(:info, :compact, state, data) when state in [:idle, :done] do
+    if compactable?(data) do
+      data = log(data, :compaction_started, %{reason: :requested})
+      start_compaction(data, if(state == :done, do: :done, else: :idle))
+    else
+      :keep_state_and_data
+    end
+  end
+
+  def handle_event(:info, :compact, :acting, _data), do: {:keep_state_and_data, [:postpone]}
+  def handle_event(:info, :compact, _state, _data), do: {:keep_state_and_data, [:postpone]}
+
   # -- idle -------------------------------------------------------------------
 
   def handle_event(:internal, :start_turn, :idle, data), do: start_turn(data)
@@ -190,10 +211,18 @@ defmodule Troupe.Agent.Server do
         stop_reason: Map.get(response, :stop_reason)
       })
 
-    if compaction_needed?(data, response) do
-      start_compaction(data)
-    else
-      continue_turn(data)
+    cond do
+      Map.get(response, :stop_reason) == :refusal ->
+        finish(data, :refused, refusal_summary(response))
+
+      Map.get(response, :stop_reason) == :max_tokens ->
+        truncated(data, response)
+
+      compaction_needed?(data, response) ->
+        start_compaction(data, :continue)
+
+      true ->
+        continue_turn(data)
     end
   end
 
@@ -205,14 +234,18 @@ defmodule Troupe.Agent.Server do
       ) do
     data = stream_finished(data, response)
     summary = Message.text(response.content)
+    then = data.compaction.then
     data = log(data, :compaction, %{summary: summary, dropped_messages: data.compaction.dropped})
-    continue_turn(%{data | compaction: nil, cache_bp: nil})
+    after_compaction(%{data | compaction: nil, cache_bp: nil}, then)
   end
 
   def handle_event(:info, {:llm_error, ref, reason}, :thinking, %Data{stream: %{ref: ref}} = data) do
     data = stream_finished(data, nil)
-    data = log(data, :llm_error, %{message: format(reason)})
-    finish(data, :llm_error, "LLM error: #{format(reason)}")
+
+    case Troupe.LLM.Provider.classify(reason) do
+      {:context_overflow, _} = overflow -> context_overflow(data, overflow)
+      classified -> llm_failed(data, classified)
+    end
   end
 
   def handle_event(:info, {:llm_error, ref, reason}, :compacting, %Data{stream: %{ref: ref}} = data) do
@@ -287,7 +320,14 @@ defmodule Troupe.Agent.Server do
       when decision in [:allow, :deny, :always] do
     case data.state.budget_ask_pending do
       true ->
-        data = log(data, :budget_ask_answered, %{call_id: call_id, decision: decision})
+        payload = %{call_id: call_id, decision: decision}
+
+        payload =
+          if decision == :allow,
+            do: Map.put(payload, :grant, Budget.slice(data.spec.budget)),
+            else: payload
+
+        data = log(data, :budget_ask_answered, payload)
 
         # Every answer to a budget question has to log `branch_state` — including
         # `y`/`a`, which used to resume the turn silently and leave the window
@@ -389,16 +429,61 @@ defmodule Troupe.Agent.Server do
 
   ## Turn machinery
 
+  # Compaction is reached from three places and each wants a different next step:
+  # the threshold check is mid-turn, an overflow 400 has to re-send the turn that
+  # failed, and `/compact` is the user tidying a branch that is not running.
+  defp after_compaction(%Data{} = data, :continue), do: continue_turn(data)
+  defp after_compaction(%Data{} = data, :idle), do: {:next_state, :idle, data}
+  defp after_compaction(%Data{} = data, :done), do: {:next_state, :done, data}
+
+  defp after_compaction(%Data{} = data, :retry_turn),
+    do: {:next_state, :idle, data, [{:next_event, :internal, :start_turn}]}
+
+  # The prompt no longer fits. The conversation is not lost — it is all in the log
+  # — but the only recovery the UI offered was typing more input, which rebuilds
+  # the same oversized prompt and fails identically. So compact once and re-send
+  # the turn; if that is not possible, or was already done, fail with a line that
+  # says what to do about it rather than the provider's raw 400.
+  defp context_overflow(%Data{} = data, {:context_overflow, body}) do
+    cond do
+      data.overflow_retried ->
+        llm_failed(
+          data,
+          {:context_overflow,
+           body <> " — already compacted once this turn; lower compaction.fraction"}
+        )
+
+      not compactable?(data) ->
+        llm_failed(
+          data,
+          {:context_overflow, body <> " — too few messages to compact; start a new branch"}
+        )
+
+      true ->
+        data = log(data, :compaction_started, %{reason: :context_overflow})
+        start_compaction(%{data | overflow_retried: true}, :retry_turn)
+    end
+  end
+
+  defp llm_failed(%Data{} = data, reason) do
+    message = Troupe.LLM.Provider.describe_error(reason)
+    data = log(data, :llm_error, %{message: message})
+    finish(data, :llm_error, "LLM error: " <> message)
+  end
+
   defp start_turn(%Data{} = data) do
+    data = warn_headroom(data)
     st = data.state
+    budget = effective_budget(data)
 
     cond do
-      not Budget.exhausted?(data.spec.budget, st.usage, State.elapsed_ms(st)) ->
+      not Budget.exhausted?(budget, st.usage, State.elapsed_ms(st)) ->
         launch_turn(data)
 
-      # `y` on the budget question overrides this agent's budget (folded into its
-      # own state); `a` overrides the whole session. Without the first check the
-      # question comes straight back and `y` can never make progress.
+      # `a` overrides this agent's budget for good (folded into its own state)
+      # and `allow_session` overrides every agent's. `y` no longer lands here: it
+      # grants one more slice, which raises `budget` above what was spent, so the
+      # first branch takes it and the checkpoint comes back at the end of it.
       st.budget_overridden ->
         launch_turn(data)
 
@@ -412,6 +497,47 @@ defmodule Troupe.Agent.Server do
       true ->
         ask_budget(data)
     end
+  end
+
+  defp effective_budget(%Data{spec: spec, state: st}),
+    do: Budget.with_grant(spec.budget, st.budget_grant)
+
+  defp headroom(%Data{spec: spec, state: st} = data) do
+    Headroom.of(
+      effective_budget(data),
+      st.usage,
+      State.elapsed_ms(st),
+      st.prompt_tokens,
+      context_window(spec, st)
+    )
+  end
+
+  defp context_window(%Spec{} = spec, %State{} = st),
+    do:
+      Troupe.Config.context_window(
+        spec.config,
+        Troupe.Config.resolve_model(spec.config, st.definition.model)
+      )
+
+  # A warning is a notice, not a stop: it is logged beside the exhaustion check
+  # and the turn goes ahead. Once per dimension per slice — the fold keeps the set
+  # of dimensions already warned about and clears it when a grant buys another
+  # slice — so it can never become a per-turn nag.
+  defp warn_headroom(%Data{spec: spec, state: st} = data) do
+    threshold = spec.config.budget.warn_at
+
+    data
+    |> headroom()
+    |> Headroom.crossed(threshold, st.warned)
+    |> Enum.reduce(data, fn {dim, entry}, acc ->
+      log(acc, :budget_warning, %{
+        dimension: dim,
+        used: entry.used,
+        limit: entry.limit,
+        fraction: entry.fraction,
+        detail: Headroom.describe(dim, entry)
+      })
+    end)
   end
 
   defp launch_turn(%Data{} = data) do
@@ -434,9 +560,31 @@ defmodule Troupe.Agent.Server do
     call_id = "budget-#{System.unique_integer([:positive])}"
     :ok = register_budget(data, call_id)
 
-    data = log(data, :budget_ask_started, %{call_id: call_id})
+    data = log(data, :budget_ask_started, Map.put(exhausted_detail(data), :call_id, call_id))
     data = log(data, :branch_state, %{state: :needs_input})
     {:next_state, :acting, data}
+  end
+
+  # Which ceiling was reached, spelled out, so the question reads
+  # `turns 150/150 (100%) — continue?` rather than the bare "budget exhausted"
+  # an `or` across four limits used to be able to say.
+  defp exhausted_detail(%Data{state: st} = data) do
+    budget = effective_budget(data)
+
+    case Budget.exhausted_dimension(budget, st.usage, State.elapsed_ms(st)) do
+      nil ->
+        %{dimension: nil, detail: "budget exhausted"}
+
+      dim ->
+        entry = headroom(data)[dim]
+
+        %{
+          dimension: dim,
+          used: entry.used,
+          limit: entry.limit,
+          detail: Headroom.describe(dim, entry)
+        }
+    end
   end
 
   defp register_budget(%Data{} = data, call_id) do
@@ -466,6 +614,7 @@ defmodule Troupe.Agent.Server do
 
   defp continue_turn(%Data{} = data) do
     st = data.state
+    data = %{data | truncation_retried: false}
 
     case State.current_calls(st) do
       [] ->
@@ -477,6 +626,67 @@ defmodule Troupe.Agent.Server do
         check_turn(data)
     end
   end
+
+  @truncated_note """
+  Your previous reply was cut off because it reached the output token cap. \
+  Answer again in smaller steps: make one tool call at a time, and keep text short.\
+  """
+
+  @truncated_call """
+  This tool call was cut off mid-argument because the reply reached the output \
+  token cap, so its input could not be parsed and it was not run. Re-issue it on \
+  its own, with a shorter argument.\
+  """
+
+  # `stop_reason: :max_tokens` was parsed, stored and read by nothing, so a reply
+  # the provider cut in half became `finish(:finished, …)` — the branch reported
+  # success with half a sentence, or with nothing at all when thinking ate the
+  # whole allowance. It must never end a turn silently.
+  #
+  # With tool calls in the reply the turn goes on: every `tool_use` still owes a
+  # `tool_result` or the next request is rejected, so a call whose arguments did
+  # not survive is completed with an error naming the cause instead of being run
+  # on a fragment of JSON. With no tool call there is nothing to carry the turn,
+  # so the model is told what happened and asked again — once, and then the
+  # branch fails visibly rather than claiming it finished.
+  defp truncated(%Data{} = data, response) do
+    calls = State.current_calls(data.state)
+
+    cond do
+      calls != [] ->
+        data = log(data, :truncated, %{reason: :max_tokens, calls: length(calls)})
+        continue_turn(data)
+
+      data.truncation_retried ->
+        text = Message.text(response.content)
+        data = log(data, :truncated, %{reason: :max_tokens, final: true})
+        finish(data, :output_truncated, truncation_summary(text))
+
+      true ->
+        data = log(data, :truncated, %{reason: :max_tokens, note: @truncated_note})
+        start_turn(%{data | truncation_retried: true})
+    end
+  end
+
+  defp truncation_summary(""),
+    do:
+      "The model hit its output token cap before writing anything (thinking used the whole allowance). Raise max_output for this model, or lower its reasoning effort."
+
+  defp truncation_summary(text),
+    do: "The reply was cut off at the output token cap and did not recover:\n\n" <> text
+
+  defp refusal_summary(response) do
+    case Message.text(response.content) do
+      "" -> "The model refused to answer."
+      text -> "The model refused to answer: " <> text
+    end
+  end
+
+  # A `tool_use` block whose arguments were cut off mid-JSON: the adapter keeps
+  # the fragment under `_raw` rather than losing it, and running a tool on a
+  # fragment is worse than saying so.
+  defp truncated_input?(%{input: input}) when is_map(input), do: Map.has_key?(input, "_raw")
+  defp truncated_input?(_call), do: false
 
   defp resume_acting(%Data{} = data) do
     data =
@@ -566,6 +776,11 @@ defmodule Troupe.Agent.Server do
     name = call.name
 
     cond do
+      truncated_input?(call) ->
+        data
+        |> log(:tool_call_started, started(call))
+        |> complete(call.call_id, false, @truncated_call)
+
       not Tools.allowed?(def_, name) ->
         complete(
           data,
@@ -919,21 +1134,27 @@ defmodule Troupe.Agent.Server do
     %{data | stream: nil}
   end
 
-  defp compaction_needed?(%Data{state: st, spec: spec}, response) do
-    input_tokens = get_in(response, [:usage, :input_tokens]) || 0
-    model = Troupe.Config.resolve_model(spec.config, st.definition.model)
-    window = Troupe.Config.context_window(spec.config, model)
-    keep = spec.config.compaction.keep_last_turns * 2
-    input_tokens > spec.config.compaction.fraction * window and length(st.messages) > keep + 2
+  # Against every token the prompt contained, cached or not. Anthropic's
+  # `input_tokens` excludes what it served from the prompt cache, so on a warm
+  # conversation it reads in the hundreds while the cache carries the real 200k —
+  # measuring against it meant compaction never fired once Decision 84 put cache
+  # breakpoints on every request.
+  defp compaction_needed?(%Data{spec: spec} = data, response) do
+    prompt_tokens = Troupe.LLM.Provider.total_input(Map.get(response, :usage) || %{})
+    window = context_window(spec, data.state)
+    prompt_tokens > spec.config.compaction.fraction * window and compactable?(data)
   end
 
-  defp start_compaction(%Data{state: st, spec: spec} = data) do
+  defp compactable?(%Data{state: st, spec: spec}),
+    do: length(st.messages) > spec.config.compaction.keep_last_turns * 2 + 2
+
+  defp start_compaction(%Data{state: st, spec: spec} = data, then) do
     keep = spec.config.compaction.keep_last_turns * 2
     n = compaction_boundary(st.messages, length(st.messages) - keep)
     dropped = Enum.take(st.messages, n)
     request = Prompt.compaction_request(st, State.conversation(%{st | messages: dropped}))
     data = spawn_stream(data, request, :compaction)
-    {:next_state, :compacting, %{data | compaction: %{dropped: n}}}
+    {:next_state, :compacting, %{data | compaction: %{dropped: n, then: then}}}
   end
 
   # Walk back to the nearest boundary that starts with a plain user message.

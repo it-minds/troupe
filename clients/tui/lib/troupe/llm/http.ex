@@ -55,11 +55,12 @@ defmodule Troupe.LLM.HTTP do
 
   @doc """
   Streams a POST. `handler` is called with `(event, data, acc)` for every SSE
-  event and must return the new acc. Returns `{:ok, acc}`, `{:retry, reason}`
-  or `{:error, reason}`.
+  event and must return the new acc. Returns `{:ok, acc}`, `{:retry, reason}`,
+  `{:retry, reason, delay_ms}` (the response said how long to wait) or
+  `{:error, reason}`.
   """
   @spec stream_post(String.t(), list(), map(), term(), handler()) ::
-          {:ok, term()} | {:retry, term()} | {:error, term()}
+          {:ok, term()} | {:retry, term()} | {:retry, term(), pos_integer()} | {:error, term()}
   def stream_post(url, headers, body, acc0, handler) do
     into = fn {:data, chunk}, {req, resp} ->
       {buffer, acc} = resp.private[:troupe] || {SSE.new(), acc0}
@@ -86,7 +87,10 @@ defmodule Troupe.LLM.HTTP do
         {:ok, acc}
 
       {:ok, %Req.Response{status: status} = resp} when status == 429 or status >= 500 ->
-        {:retry, {:http, status, resp.private[:troupe_error]}}
+        case retry_after_ms(resp) do
+          nil -> {:retry, {:http, status, resp.private[:troupe_error]}}
+          ms -> {:retry, {:http, status, resp.private[:troupe_error]}, ms}
+        end
 
       {:ok, %Req.Response{status: status} = resp} ->
         {:error, {:http, status, resp.private[:troupe_error]}}
@@ -96,6 +100,36 @@ defmodule Troupe.LLM.HTTP do
 
       {:error, reason} ->
         {:retry, reason}
+    end
+  end
+
+  # `retry-after` is seconds or an HTTP date; a provider that tells us when the
+  # limit lifts knows better than any backoff curve we could pick.
+  @spec retry_after_ms(Req.Response.t()) :: pos_integer() | nil
+  defp retry_after_ms(resp) do
+    with [value | _] <- Req.Response.get_header(resp, "retry-after"),
+         ms when is_integer(ms) and ms > 0 <- parse_retry_after(String.trim(value)) do
+      ms
+    else
+      _ -> nil
+    end
+  end
+
+  defp parse_retry_after(value) do
+    case Integer.parse(value) do
+      {seconds, ""} when seconds >= 0 -> seconds * 1000
+      _ -> http_date_ms(value)
+    end
+  end
+
+  defp http_date_ms(value) do
+    case value |> to_charlist() |> :httpd_util.convert_request_date() do
+      :bad_date ->
+        nil
+
+      erl_datetime ->
+        at = erl_datetime |> NaiveDateTime.from_erl!() |> DateTime.from_naive!("Etc/UTC")
+        max(DateTime.diff(at, DateTime.utc_now(), :millisecond), 0)
     end
   end
 end

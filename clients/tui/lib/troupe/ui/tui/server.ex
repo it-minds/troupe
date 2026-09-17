@@ -563,6 +563,14 @@ defmodule Troupe.UI.TUI.Server do
         "dismiss" ->
           with_target(target.(), &Client.dismiss(sid, &1))
 
+        "compact" ->
+          with_target(target.(), fn path ->
+            case Client.compact(sid, path) do
+              :ok -> {:notice, "compacting #{path}"}
+              other -> other
+            end
+          end)
+
         "merge" ->
           with_target(target.(), &Client.merge(sid, &1))
 
@@ -1675,11 +1683,11 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  @path_commands ~w(merge discard cancel dismiss copy)
+  @path_commands ~w(merge discard cancel dismiss compact copy)
 
   @doc """
   Tab completion on the command line: command names (`wor` → `worktree `), window paths
-  for `/merge`, `/discard`, `/cancel`, `/dismiss`, `/copy` (repeated Tab cycles through the
+  for `/merge`, `/discard`, `/cancel`, `/dismiss`, `/compact`, `/copy` (repeated Tab cycles through the
   matches), and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches
   that have finished and are neither merged nor discarded.
   """
@@ -1761,6 +1769,7 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp eligible?("cancel", w), do: w.state != :dismissed
+  defp eligible?("compact", w), do: w.state != :dismissed
   defp eligible?("dismiss", w), do: w.state in [:done_unread, :failed_unread]
   # Any window has a transcript worth copying, dismissed ones included.
   defp eligible?("copy", _w), do: true

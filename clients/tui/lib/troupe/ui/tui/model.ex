@@ -98,7 +98,8 @@ defmodule Troupe.UI.TUI.Model do
           message: String.t() | nil,
           diff_stat: String.t() | nil,
           worktree: map() | nil,
-          unconfirmed: %{optional(String.t()) => String.t()}
+          unconfirmed: %{optional(String.t()) => String.t()},
+          warnings: %{optional(atom()) => map()}
         }
 
   defstruct session_id: nil,
@@ -149,7 +150,8 @@ defmodule Troupe.UI.TUI.Model do
           message: nil,
           diff_stat: nil,
           worktree: nil,
-          unconfirmed: %{}
+          unconfirmed: %{},
+          warnings: %{}
         }
 
         order = if e.agent_path in m.order, do: m.order, else: m.order ++ [e.agent_path]
@@ -323,7 +325,9 @@ defmodule Troupe.UI.TUI.Model do
               %{
                 kind: :budget,
                 call_id: d.call_id,
-                agent_path: path
+                agent_path: path,
+                detail: d[:detail] || "budget exhausted",
+                dimension: d[:dimension]
               }
             ]
 
@@ -430,10 +434,36 @@ defmodule Troupe.UI.TUI.Model do
       :compaction ->
         push(w, path, {:system, "context compacted (#{d.dropped_messages} messages summarized)"})
 
+      :compaction_started ->
+        push(w, path, {:system, compaction_reason(d[:reason])})
+
+      # A warning is the one signal that arrives while there is still budget left
+      # to spend, so it goes in the transcript *and* stays on the window, where the
+      # tile and the token line can show the denominator the UI never had.
+      :budget_warning ->
+        %{w | warnings: Map.put(w.warnings, d.dimension, d)}
+        |> push(path, {:system, "⚠ " <> (d[:detail] || to_string(d.dimension)) <> " used"})
+
+      :truncated ->
+        push(w, path, {:system, truncation_line(d)})
+
       _ ->
         w
     end
   end
+
+  defp compaction_reason(:context_overflow),
+    do: "the prompt no longer fit the context window — compacting and retrying the turn"
+
+  defp compaction_reason(_requested), do: "compacting the conversation"
+
+  defp truncation_line(%{final: true}),
+    do: "the reply hit the output token cap again — stopping rather than reporting success"
+
+  defp truncation_line(%{calls: n}) when is_integer(n) and n > 0,
+    do: "the reply hit the output token cap mid-tool-call"
+
+  defp truncation_line(_d), do: "the reply hit the output token cap — asking again in smaller steps"
 
   defp set_state(w, state, _ts), do: %{w | state: state}
 
@@ -819,13 +849,49 @@ defmodule Troupe.UI.TUI.Model do
   @spec tokens(%{usage: usage()}) :: String.t()
   def tokens(%{usage: u}), do: "↑#{short(u.input + u.cache_write)} ↓#{short(u.output)}"
 
-  @doc "The same counts spelled out, with what the prompt cache served."
+  @doc """
+  The same counts spelled out, with what the prompt cache served and — once a
+  budget warning has fired — how close the tightest ceiling is. Cumulative counts
+  with no denominator were the whole of what the UI said about limits, so the
+  first signal a user got was the branch stopping.
+  """
   @spec token_detail(%{usage: usage()}) :: String.t()
-  def token_detail(%{usage: u}) do
+  def token_detail(%{usage: u} = a) do
     "↑ #{short(u.input + u.cache_write)} sent · ↓ #{short(u.output)} received" <>
-      if u.cache_read > 0 or u.cache_write > 0,
+      if(u.cache_read > 0 or u.cache_write > 0,
         do: " · #{short(u.cache_read)} of the prompt came from cache",
         else: ""
+      ) <> headroom_suffix(a)
+  end
+
+  @doc """
+  The tightest limit a warning has fired for, as `82% of input tokens`, or `""`
+  when nothing has crossed the threshold. Windows carry the warnings; an agent
+  map does not, so it reads as empty there.
+  """
+  @spec headroom_note(map()) :: String.t()
+  def headroom_note(%{warnings: warnings}) when map_size(warnings) > 0 do
+    {_dim, w} = Enum.max_by(warnings, fn {_dim, w} -> w[:fraction] || 0.0 end)
+    "#{round((w[:fraction] || 0.0) * 100)}% of #{dimension_label(w.dimension)}"
+  end
+
+  def headroom_note(_a), do: ""
+
+  # Spelled out here rather than read from `Agent.Headroom`: the UI may call
+  # `Troupe.Client` and the pure data modules and nothing else, and five words
+  # are not worth a new exception to that.
+  defp dimension_label(:turns), do: "turns"
+  defp dimension_label(:input), do: "input tokens"
+  defp dimension_label(:output), do: "output tokens"
+  defp dimension_label(:wall), do: "wall clock"
+  defp dimension_label(:context), do: "context window"
+  defp dimension_label(other), do: to_string(other)
+
+  defp headroom_suffix(a) do
+    case headroom_note(a) do
+      "" -> ""
+      note -> " · ⚠ " <> note
+    end
   end
 
   @doc """
@@ -833,9 +899,13 @@ defmodule Troupe.UI.TUI.Model do
   for `token_detail/1`. The cache line is only there when the provider cached.
   """
   @spec token_lines(%{usage: usage()}) :: [String.t()]
-  def token_lines(%{usage: u}) do
+  def token_lines(%{usage: u} = a) do
     ["↑ #{short(u.input + u.cache_write)} sent", "↓ #{short(u.output)} received"] ++
-      if u.cache_read > 0, do: ["⟳ #{short(u.cache_read)} from cache"], else: []
+      if(u.cache_read > 0, do: ["⟳ #{short(u.cache_read)} from cache"], else: []) ++
+      case headroom_note(a) do
+        "" -> []
+        note -> ["⚠ " <> note]
+      end
   end
 
   @doc "Every token a window or agent has accounted for, cached input included."

@@ -79,6 +79,11 @@ defmodule Troupe.Client.Remote do
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
+  # The plane owns a remote session's context and compacts it itself; there is no
+  # RPC to ask for one, and the client has no conversation of its own to shrink.
+  @impl true
+  def compact(_sid, _path), do: {:error, "a remote session compacts on the plane"}
+
   @impl true
   def dismiss(sid, _path) do
     Worker.detach(sid)

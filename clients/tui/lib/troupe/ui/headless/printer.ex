@@ -101,10 +101,30 @@ defmodule Troupe.UI.Headless.Printer do
   # Without this the branch waits for an answer nobody can type and the run never
   # rests. Stopping is the safe default: a headless run has a budget for a reason.
   defp print(%{type: :budget_ask_started, agent_path: p, data: d}, state) do
-    line(state, p, "budget exhausted; headless mode stops here (raise the budget to go further)")
+    detail = if d[:detail], do: " (#{d.detail})", else: ""
+
+    line(
+      state,
+      p,
+      "budget exhausted#{detail}; headless mode stops here (raise the budget to go further)"
+    )
+
     Troupe.approve(state.session_id, d.call_id, :deny)
     state
   end
+
+  # A warning does not stop anything; it is the one line a headless run gets while
+  # there is still budget left to raise.
+  defp print(%{type: :budget_warning, agent_path: p, data: d}, state),
+    do: say(state, p, "warning: #{d[:detail] || d.dimension} used")
+
+  defp print(%{type: :truncated, agent_path: p, data: d}, state) do
+    tail = if d[:final], do: "; stopping", else: "; asking again in smaller steps"
+    say(state, p, "the reply hit the output token cap" <> tail)
+  end
+
+  defp print(%{type: :compaction_started, agent_path: p, data: d}, state),
+    do: say(state, p, "compacting the conversation (#{d[:reason] || :requested})")
 
   defp print(%{type: :branch_state, agent_path: p, data: d}, state),
     do: say(state, p, "[#{d.state}]#{if d[:summary], do: " " <> d.summary, else: ""}")

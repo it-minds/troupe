@@ -848,7 +848,10 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     press(pid, "1")
     text = screen_text(pid, session)
     assert text =~ "[code-1/explore-1] BUDGET EXHAUSTED"
-    assert text =~ "budget exhausted (y / n / a)", "the side panel renders instead of raising"
+
+    assert text =~ "budget exhausted: turns 1/1 (100%) (y / n / a)",
+           "the side panel renders instead of raising, and names the ceiling reached"
+
     assert text =~ "y/n/a"
 
     # ←→ views the subagent, so its request is the one y/n/a answers.

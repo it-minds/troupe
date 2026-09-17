@@ -134,7 +134,40 @@ defmodule Troupe.CoreTest do
     assert Fake.call_count(fake) == 2
   end
 
-  test "budget: allowing the question lets that one agent past its budget, without a second ask" do
+  # `y` used to make an agent's budget unlimited for the rest of the session: one
+  # keystroke, no further checkpoint at any spend. It now buys one more slice of
+  # the same size, so the question comes back at the end of it — and the grant is
+  # folded from the log, so it survives a restart, which the old flag did not.
+  test "budget: y buys one more slice of the same size and the question comes back at its end" do
+    ws = tmp_workspace(%{"f.txt" => "x"})
+
+    script = [
+      {:tool, "read_file", %{"path" => "f.txt"}},
+      {:tool, "read_file", %{"path" => "f.txt"}},
+      {:finish, "done"}
+    ]
+
+    {sid, fake, _} = start_session!(workspace: ws, script: script)
+    {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
+
+    first = await_event(path, :budget_ask_started)
+    assert first.data.dimension == :turns
+    assert first.data.detail == "turns 1/1 (100%)"
+    :ok = Troupe.approve(sid, first.data.call_id, :allow)
+
+    # One turn later the slice is spent and the checkpoint is back.
+    second = await_event(path, :budget_ask_started, 15_000)
+    assert second.data.detail == "turns 2/2 (100%)"
+    assert Fake.call_count(fake) == 2
+
+    :ok = Troupe.approve(sid, second.data.call_id, :allow)
+    await_state(path, :done_unread)
+    assert window(sid, path).reason == :finished
+    assert Fake.call_count(fake) == 3
+    assert length(events_of(sid, path, :budget_ask_started)) == 2
+  end
+
+  test "budget: a grants the whole agent an override, and it is never asked again" do
     ws = tmp_workspace(%{"f.txt" => "x"})
 
     script = [
@@ -147,7 +180,7 @@ defmodule Troupe.CoreTest do
     {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
 
     ask = await_event(path, :budget_ask_started)
-    :ok = Troupe.approve(sid, ask.data.call_id, :allow)
+    :ok = Troupe.approve(sid, ask.data.call_id, :allow_session)
 
     await_state(path, :done_unread)
     assert window(sid, path).reason == :finished

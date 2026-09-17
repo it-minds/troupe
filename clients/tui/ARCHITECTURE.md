@@ -98,12 +98,15 @@ Events and transitions:
 
 | state        | event                                          | action                                                                                        | next        |
 |--------------|------------------------------------------------|-----------------------------------------------------------------------------------------------|-------------|
-| idle         | `{:input, source, content}`                    | log `input`; apply pending profile; budget check; start stream task                           | thinking / done(:budget_exhausted) |
+| idle         | `{:input, source, content}`                    | log `input`; apply pending profile; log `budget_warning` for any dimension past `budget.warn_at`; budget check (own budget + grants) ; start stream task | thinking / done(:budget_exhausted) |
 | idle         | `{:switch_profile, name}`                      | log `profile_switched` (applied at next request)                                              | idle        |
 | idle         | `{:input, :tui_todo_edit, change}`             | log `todo_updated`                                                                            | idle        |
 | thinking     | `{:llm_delta, ref, delta}`                     | publish transient `llm_delta`                                                                 | thinking    |
-| thinking     | `{:llm_done, ref, response}`                   | log `assistant_message`; if over compaction threshold -> compacting; tool calls -> acting; text only -> done(:finished) | acting / compacting / done |
-| thinking     | `{:llm_error, ref, reason}`                    | log `llm_error`                                                                               | done(:llm_error) |
+| thinking     | `{:llm_done, ref, response}`                   | log `assistant_message`; `stop_reason` first (see below); else if the whole prompt is over the compaction threshold -> compacting; tool calls -> acting; text only -> done(:finished) | acting / compacting / done |
+| thinking     | `{:llm_done, …}` with `stop_reason :max_tokens`| log `truncated`; with tool calls, a call whose input did not parse is completed with an error and the turn goes on; with none, append a note and re-issue the turn once, then done(:output_truncated) | acting / thinking / done |
+| thinking     | `{:llm_done, …}` with `stop_reason :refusal`   | done(:refused) with the refusal text — never a silent `:finished`                             | done(:refused) |
+| thinking     | `{:llm_error, ref, {:context_overflow, _}}`    | log `compaction_started`; compact once and re-issue the turn; already compacted or too short -> log `llm_error` | compacting / done(:llm_error) |
+| thinking     | `{:llm_error, ref, reason}`                    | log `llm_error` (classified: auth, unknown model, rate limit)                                 | done(:llm_error) |
 | thinking     | `{:input, _, _}`, `{:switch_profile, _}`       | **postpone**                                                                                  | thinking    |
 | acting       | (entry) for each tool_use in order             | allowlist/permission check -> error result, or `approval_requested` + `branch_state needs_input`, or log `tool_call_started` and start task / run inline | acting |
 | acting       | `{:approval, call_id, :allow}`                 | log `approval_answered`; start task                                                           | acting      |
@@ -114,11 +117,12 @@ Events and transitions:
 | acting       | `{:DOWN, ref, :process, pid, reason}` (child)  | error tool_result for that delegation only                                                    | acting      |
 | acting       | `{:DOWN, ...}` (tool task crashed)             | error tool_result for that call                                                               | acting      |
 | acting       | `{:input, _, _}`, `{:switch_profile, _}`       | **postpone**                                                                                  | acting      |
-| compacting   | `{:llm_done, ref, summary}`                    | log `compaction`; continue with the turn that was interrupted                                 | acting / thinking |
+| compacting   | `{:llm_done, ref, summary}`                    | log `compaction`; then continue the interrupted turn, re-issue it (overflow), or come to rest (`/compact`) | acting / thinking / idle / done |
 | compacting   | `{:llm_error, ref, _}`                         | log `llm_error`; continue without compacting                                                  | acting / thinking |
 | compacting   | anything from the user                         | **postpone**                                                                                  | compacting  |
 | done         | `{:input, :user, content}`                     | log `branch_state running`; log `input`; -> idle -> thinking                                  | thinking    |
 | done         | `{:switch_profile, name}`                      | log `profile_switched`                                                                        | done        |
+| idle, done   | `:compact`                                     | log `compaction_started`; summarize the older half on demand (`/compact`)                      | compacting  |
 | any          | `:cancel`                                      | kill tasks + children; log `cancelled`; `branch_state done_unread`                            | done(:cancelled) |
 | any          | unknown message                                | `Logger.warning`, drop                                                                        | same        |
 
@@ -130,7 +134,26 @@ dropped.
 Budgets: `max_turns` (LLM calls), `max_input_tokens`, `max_output_tokens`,
 `max_wall_clock_ms`, checked before every stream start. A child receives
 `budget_share` (a fraction) of the parent's remaining turns and tokens and
-reports its usage in `child_result`.
+reports its usage in `child_result`. `max_wall_clock_ms` counts the time the
+agent spent *working* — the sum of the gaps between its own events, gaps longer
+than one stream's lifetime excluded — so a session resumed the next day has not
+already spent it.
+
+Headroom (`Troupe.Agent.Headroom`, pure): those four plus the model's context
+window, as fractions, computed in one place so the compaction check, the warning
+and the budget question read the same numbers. Past `config.budget.warn_at`
+(default 0.8) a dimension logs one `budget_warning` and the turn goes ahead; at
+the ceiling the agent registers a `:budget` approval naming the dimension that
+tripped. `y` grants one more slice the size of the agent's own budget — folded
+from the log, so it survives a restart, and the checkpoint returns at the end of
+it — `a` overrides that agent for good, `n` finishes `:budget_exhausted`.
+
+The context window is the provider's limit, not Troupe's, so it answers a 400
+rather than a question: compaction is planned against
+`Troupe.LLM.Provider.total_input/1` (every token the prompt held, cache reads
+included), and an overflow that arrives anyway compacts once and re-sends the
+turn. `/compact` (`Troupe.Client.compact/2`) does the same by hand, through the
+Dispatcher, which restarts the Node of a branch that has come to rest.
 
 Replay: on start the server folds its own events (`Troupe.Agent.State.apply/2`)
 then decides where it is:
@@ -292,6 +315,11 @@ Persisted event types and data:
 | `todo_updated`         | agent           | `%{items, source}`                                                   |
 | `profile_switched`     | agent           | `%{name}`                                                            |
 | `compaction`           | agent           | `%{summary, dropped_messages}`                                       |
+| `compaction_started`   | agent           | `%{reason}` (`:context_overflow` or `:requested`)                    |
+| `budget_ask_started`   | agent           | `%{call_id, dimension, used, limit, detail}` — the ceiling that tripped, so the question says which |
+| `budget_ask_answered`  | agent           | `%{call_id, decision, grant}` — `grant` on `:allow` only; folded into the agent's effective budget |
+| `budget_warning`       | agent           | `%{dimension, used, limit, fraction, detail}` — a notice at `budget.warn_at`, once per dimension per slice; does not park the agent |
+| `truncated`            | agent           | `%{reason, note, calls, final}` — the reply hit the output cap; `note` is folded into the conversation as the retry's user message |
 | `llm_error`            | agent           | `%{reason}`                                                          |
 | `cancelled`            | agent           | `%{}`                                                                |
 | `finished`             | agent           | `%{summary, reason, diff_stat}`                                      |

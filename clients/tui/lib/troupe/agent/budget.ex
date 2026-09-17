@@ -52,9 +52,72 @@ defmodule Troupe.Agent.Budget do
   end
 
   @spec exhausted?(t(), usage(), integer()) :: boolean()
-  def exhausted?(%__MODULE__{} = b, usage, elapsed_ms) do
-    usage.turns >= b.max_turns or usage.input_tokens >= b.max_input_tokens or
-      usage.output_tokens >= b.max_output_tokens or elapsed_ms >= b.max_wall_clock_ms
+  def exhausted?(%__MODULE__{} = b, usage, elapsed_ms),
+    do: exhausted_dimension(b, usage, elapsed_ms) != nil
+
+  @doc """
+  Which ceiling was reached, or `nil`. `exhausted?/3` is an `or` across four
+  limits and the agent used to be unable to say which one tripped, so the
+  question it asked was the bare "budget exhausted" — this is what lets it say
+  `turns 150/150` instead. Order is the order they are reported in, not a
+  priority: at most one is usually over.
+  """
+  @spec exhausted_dimension(t(), usage(), integer()) :: :turns | :input | :output | :wall | nil
+  def exhausted_dimension(%__MODULE__{} = b, usage, elapsed_ms) do
+    cond do
+      usage.turns >= b.max_turns -> :turns
+      usage.input_tokens >= b.max_input_tokens -> :input
+      usage.output_tokens >= b.max_output_tokens -> :output
+      elapsed_ms >= b.max_wall_clock_ms -> :wall
+      true -> nil
+    end
+  end
+
+  @typedoc """
+  What answering the budget question added to a budget. A grant is folded out of
+  the log (`budget_ask_answered`), so it survives a restart — unlike the
+  session-wide override, which lives in `Session.Approvals` and does not.
+  """
+  @type grant :: %{
+          turns: non_neg_integer(),
+          input_tokens: non_neg_integer(),
+          output_tokens: non_neg_integer(),
+          wall_clock_ms: non_neg_integer()
+        }
+
+  @spec empty_grant() :: grant()
+  def empty_grant, do: %{turns: 0, input_tokens: 0, output_tokens: 0, wall_clock_ms: 0}
+
+  @doc """
+  One more slice of the same size: `y` on the budget question buys the agent the
+  budget it was given in the first place, again. The agent then asks again at the
+  end of it, which is the point — a checkpoint every slice rather than the single
+  irreversible `y` that used to make an agent's budget unlimited for good.
+  """
+  @spec slice(t()) :: grant()
+  def slice(%__MODULE__{} = b) do
+    %{
+      turns: b.max_turns,
+      input_tokens: b.max_input_tokens,
+      output_tokens: b.max_output_tokens,
+      wall_clock_ms: b.max_wall_clock_ms
+    }
+  end
+
+  @spec add_grant(grant(), grant()) :: grant()
+  def add_grant(a, b) do
+    Map.new(empty_grant(), fn {k, _} -> {k, Map.get(a, k, 0) + Map.get(b, k, 0)} end)
+  end
+
+  @doc "The budget an agent is actually running on: its own plus everything granted."
+  @spec with_grant(t(), grant()) :: t()
+  def with_grant(%__MODULE__{} = b, grant) do
+    %__MODULE__{
+      max_turns: b.max_turns + Map.get(grant, :turns, 0),
+      max_input_tokens: b.max_input_tokens + Map.get(grant, :input_tokens, 0),
+      max_output_tokens: b.max_output_tokens + Map.get(grant, :output_tokens, 0),
+      max_wall_clock_ms: b.max_wall_clock_ms + Map.get(grant, :wall_clock_ms, 0)
+    }
   end
 
   @spec empty_usage() :: usage()

@@ -405,7 +405,9 @@ defmodule Troupe.UI.TUI.View do
   # inside `render/2`, which ExRatatui rescues by dropping the frame — the screen
   # would freeze on stale content while the app kept consuming keys.
   defp pending_summary(%{kind: :approval, name: name}, keys), do: "approval: #{name} (#{keys})"
-  defp pending_summary(%{kind: :budget}, keys), do: "budget exhausted (#{keys})"
+
+  defp pending_summary(%{kind: :budget} = p, keys),
+    do: "budget exhausted: #{Map.get(p, :detail) || "limit reached"} (#{keys})"
 
   defp pending_summary(%{kind: :question, question: q, options: [_ | _] = opts}, _keys),
     do: "question: #{q} (#{length(opts)} options — open the window)"

@@ -89,6 +89,16 @@ defmodule Troupe.Session.Dispatcher do
   def continue(sid, path, text),
     do: GenServer.call(Session.via(sid, :dispatcher), {:continue, path, text}, 30_000)
 
+  @doc """
+  Asks a branch to compact its conversation. Like `continue/3` it goes through
+  the Dispatcher rather than straight to the agent, because a branch that has
+  come to rest has no agent process — and a branch wedged against the context
+  window is exactly the one that has come to rest.
+  """
+  @spec compact(String.t(), String.t()) :: :ok | {:error, String.t()}
+  def compact(sid, path),
+    do: GenServer.call(Session.via(sid, :dispatcher), {:compact, path}, 30_000)
+
   @spec merge(String.t(), String.t()) :: {:ok, String.t()} | {:error, String.t()}
   def merge(sid, path), do: GenServer.call(Session.via(sid, :dispatcher), {:merge, path}, 120_000)
 
@@ -256,28 +266,11 @@ defmodule Troupe.Session.Dispatcher do
   end
 
   def handle_call({:continue, path, text}, _from, state) do
-    case Map.get(state.ledger, path) do
-      nil ->
-        {:reply, {:error, "no window #{path}"}, state}
+    with_live_agent(state, path, &send(&1, {:input, :user, text}))
+  end
 
-      %{state: :dismissed} ->
-        {:reply, {:error, "window #{path} was dismissed"}, state}
-
-      window ->
-        state =
-          if Session.whereis(state.session_id, {:agent, path}),
-            do: state,
-            else: spawn_node(state, window, nil)
-
-        case Session.whereis(state.session_id, {:agent, path}) do
-          nil ->
-            {:reply, {:error, "branch #{path} could not be started"}, state}
-
-          pid ->
-            send(pid, {:input, :user, text})
-            {:reply, :ok, state}
-        end
-    end
+  def handle_call({:compact, path}, _from, state) do
+    with_live_agent(state, path, &send(&1, :compact))
   end
 
   def handle_call({:switch_profile, path, name}, _from, state) do
@@ -573,6 +566,34 @@ defmodule Troupe.Session.Dispatcher do
   defp normalize_args(args) when is_binary(args), do: {args, %{}}
   defp normalize_args(%{} = args), do: {Map.get(args, :prompt, ""), Map.drop(args, [:prompt])}
   defp normalize_args(_), do: {"", %{}}
+
+  # Runs `fun` against the branch's agent, starting its Node first when the
+  # branch has come to rest (a resting branch's Node is released; it is rebuilt
+  # from the log on demand).
+  defp with_live_agent(state, path, fun) do
+    case Map.get(state.ledger, path) do
+      nil ->
+        {:reply, {:error, "no window #{path}"}, state}
+
+      %{state: :dismissed} ->
+        {:reply, {:error, "window #{path} was dismissed"}, state}
+
+      window ->
+        state =
+          if Session.whereis(state.session_id, {:agent, path}),
+            do: state,
+            else: spawn_node(state, window, nil)
+
+        case Session.whereis(state.session_id, {:agent, path}) do
+          nil ->
+            {:reply, {:error, "branch #{path} could not be started"}, state}
+
+          pid ->
+            fun.(pid)
+            {:reply, :ok, state}
+        end
+    end
+  end
 
   defp spawn_node(state, window, initial_input) do
     def = Map.fetch!(state.definitions, window.name)

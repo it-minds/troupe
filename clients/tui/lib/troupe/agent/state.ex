@@ -45,7 +45,12 @@ defmodule Troupe.Agent.State do
           budget_ask_pending: boolean(),
           budget_call_id: String.t() | nil,
           budget_overridden: boolean(),
+          budget_grant: Budget.grant(),
+          warned: MapSet.t(atom()),
+          prompt_tokens: non_neg_integer(),
           started_at: integer() | nil,
+          last_event_at: integer() | nil,
+          work_ms: non_neg_integer(),
           child_counters: %{optional(String.t()) => pos_integer()},
           watch_context: String.t() | nil,
           worktree: %{path: String.t(), git_branch: String.t() | nil, managed: boolean()} | nil
@@ -66,7 +71,12 @@ defmodule Troupe.Agent.State do
             budget_ask_pending: false,
             budget_call_id: nil,
             budget_overridden: false,
+            budget_grant: %{turns: 0, input_tokens: 0, output_tokens: 0, wall_clock_ms: 0},
+            warned: MapSet.new(),
+            prompt_tokens: 0,
             started_at: nil,
+            last_event_at: nil,
+            work_ms: 0,
             child_counters: %{},
             watch_context: nil,
             worktree: nil
@@ -82,8 +92,20 @@ defmodule Troupe.Agent.State do
   @spec apply(t(), Event.t()) :: t()
   def apply(%__MODULE__{} = s, %Event{type: type, data: data, ts: ts}) do
     s = if s.started_at, do: s, else: %{s | started_at: ts}
-    do_apply(s, type, data)
+    do_apply(%{s | work_ms: s.work_ms + gap(s.last_event_at, ts), last_event_at: ts}, type, data)
   end
+
+  # The wall-clock budget counts time the agent was *working*, which is the sum
+  # of the gaps between its own events, and a gap longer than one stream's
+  # receive timeout is the session having been closed and reopened rather than a
+  # slow turn. Measuring from the first event instead (which is what this used to
+  # do) meant a session resumed the next day had already blown a three-hour
+  # budget, so the first thing a resumed branch did was ask the budget question.
+  @idle_gap_ms 600_000
+
+  defp gap(nil, _ts), do: 0
+  defp gap(previous, ts) when ts - previous > @idle_gap_ms, do: 0
+  defp gap(previous, ts), do: max(ts - previous, 0)
 
   defp do_apply(s, :input, %{source: :tui_todo_edit}), do: s
 
@@ -113,6 +135,7 @@ defmodule Troupe.Agent.State do
       s
       | messages: s.messages ++ [Message.assistant(content)],
         usage: Budget.add_usage(s.usage, Map.put(usage, :turns, 1)),
+        prompt_tokens: max(Troupe.LLM.Provider.total_input(usage), s.prompt_tokens),
         calls: calls,
         current_calls: Enum.map(tool_uses, & &1.id)
     }
@@ -157,9 +180,35 @@ defmodule Troupe.Agent.State do
     %{s | budget_ask_pending: false, budget_call_id: nil}
   end
 
-  defp do_apply(s, :budget_ask_answered, %{decision: _}) do
+  # `a` is still "never ask me again for this agent"; `y` buys one more slice and
+  # leaves the checkpoint standing, so the next slice asks again. The grant is
+  # folded from the log and therefore survives a restart. A fresh slice also
+  # clears the warnings, so the user is told once per slice rather than once ever.
+  defp do_apply(s, :budget_ask_answered, %{decision: :always}) do
     %{s | budget_ask_pending: false, budget_call_id: nil, budget_overridden: true}
   end
+
+  defp do_apply(s, :budget_ask_answered, %{decision: _} = data) do
+    %{
+      s
+      | budget_ask_pending: false,
+        budget_call_id: nil,
+        budget_grant: Budget.add_grant(s.budget_grant, Map.get(data, :grant) || %{}),
+        warned: MapSet.new()
+    }
+  end
+
+  defp do_apply(s, :budget_warning, %{dimension: dim}),
+    do: %{s | warned: MapSet.put(s.warned, dim)}
+
+  # The model was cut off mid-reply. The note goes into the conversation so the
+  # retry tells it why it is being asked again, and it is folded from the log so
+  # replay reconstructs the same messages the live turn sent.
+  defp do_apply(s, :truncated, %{note: note}) when is_binary(note) and note != "" do
+    %{s | messages: s.messages ++ [Message.user(note)], current_calls: []}
+  end
+
+  defp do_apply(s, :truncated, _data), do: s
 
   defp do_apply(s, :delegation_started, %{call_id: id, child_path: child_path}) do
     name = child_path |> String.split("/") |> List.last() |> String.replace(~r/-\d+$/, "")
@@ -187,7 +236,12 @@ defmodule Troupe.Agent.State do
 
   defp do_apply(s, :compaction, %{summary: summary, dropped_messages: n}) do
     kept = Enum.drop(s.messages, n)
-    %{s | messages: [Message.user("Summary of the earlier conversation:\n\n" <> summary) | kept]}
+
+    %{
+      s
+      | messages: [Message.user("Summary of the earlier conversation:\n\n" <> summary) | kept],
+        prompt_tokens: 0
+    }
   end
 
   defp do_apply(s, :branch_state, %{state: :done_unread} = data) do
@@ -315,9 +369,12 @@ defmodule Troupe.Agent.State do
     |> Enum.reverse()
   end
 
+  @doc "Time the agent has spent working, idle stretches between sessions excluded."
   @spec elapsed_ms(t()) :: integer()
-  def elapsed_ms(%__MODULE__{started_at: nil}), do: 0
-  def elapsed_ms(%__MODULE__{started_at: t}), do: System.system_time(:millisecond) - t
+  def elapsed_ms(%__MODULE__{last_event_at: nil}), do: 0
+
+  def elapsed_ms(%__MODULE__{work_ms: work_ms, last_event_at: t}),
+    do: work_ms + gap(t, System.system_time(:millisecond))
 
   @spec next_child_path(t(), String.t()) :: {String.t(), t()}
   def next_child_path(%__MODULE__{} = s, name) do

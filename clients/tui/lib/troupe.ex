@@ -126,6 +126,15 @@ defmodule Troupe do
   def cancel(sid, agent_path), do: send_agent(sid, agent_path, :cancel)
 
   @doc """
+  Summarizes the older half of an agent's conversation into one message, on
+  demand. This is the hand escape hatch for a branch whose prompt has grown past
+  what the model will take: compaction otherwise only happens after a *successful*
+  response, so a branch already answering 400s cannot reach it on its own.
+  """
+  @spec compact(session_id(), String.t()) :: :ok | {:error, String.t()}
+  def compact(sid, agent_path), do: Dispatcher.compact(sid, agent_path)
+
+  @doc """
   Cancels a branch and removes its window: stops it, discards the Troupe-managed
   worktree it was working in, and dismisses the window. This is what `/cancel`
   does in the TUI.

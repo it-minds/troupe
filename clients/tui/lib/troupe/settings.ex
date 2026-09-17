@@ -294,6 +294,22 @@ defmodule Troupe.Settings do
       """
     },
     %{
+      key: "budget.warn_at",
+      label: "warn at fraction of budget",
+      type: :float,
+      path: [:budget, :warn_at],
+      yaml: ["budget", "warn_at"],
+      effect: :new_branches,
+      help: """
+      Fraction of any one budget — turns, input tokens, output tokens, wall clock
+      or the model's context window — at which the branch says so in its
+      transcript and marks its tile.
+
+      The warning does not stop the agent; it is the signal that arrives while
+      there is still budget left to spend. 0.05 to 0.99.
+      """
+    },
+    %{
       key: "tool_timeout_ms",
       label: "tool timeout (ms)",
       type: :int,

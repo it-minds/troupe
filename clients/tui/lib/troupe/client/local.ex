@@ -71,6 +71,9 @@ defmodule Troupe.Client.Local do
   def cancel_branch(sid, path), do: Troupe.cancel_branch(sid, path)
 
   @impl true
+  def compact(sid, path), do: Troupe.compact(sid, path)
+
+  @impl true
   def dismiss(sid, path), do: Troupe.dismiss(sid, path)
 
   @impl true

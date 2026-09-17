@@ -114,7 +114,8 @@ defmodule Troupe.CLITest do
     assert_receive {:rest, 0}, 10_000
 
     {_, out} = StringIO.contents(io)
-    assert out =~ "#{path}> budget exhausted; headless mode stops here"
+    # The question names the ceiling that was reached, not just that one was.
+    assert out =~ "#{path}> budget exhausted (turns 1/1 (100%)); headless mode stops here"
     assert window(sid, path).reason == :budget_exhausted
   end
 
