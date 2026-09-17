@@ -77,6 +77,7 @@ defmodule Troupe.Plane.Admin.Console do
     session_erase: {:screen, :sessions},
     runs_list: {:screen, :triggers},
     audit_list: {:screen, :audit},
+    audit_verify: {:screen, :audit},
     connections: {:screen, :connections},
 
     # -- Configure -----------------------------------------------------------

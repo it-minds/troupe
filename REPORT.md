@@ -2296,3 +2296,58 @@ fails the build rather than needing a refusal somebody remembered to write.
 
     $ ./scripts/toolbox mix troupe.boundaries
     boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+## R8f — Audit's integrity tab
+
+Done item 7: *Audit's integrity tab verifies the record chain and names the first bad row
+when one byte is flipped.*
+
+The trail had no chain. Each row now carries a digest of its own content and of the row
+before it, over canonical JSON and excluding `prev_hash` — the same `Canonical.hash/1` and
+the same rule the session log has used since W1, so a verifier recomputes the chain from
+stored data alone.
+
+### One byte, changed behind the application
+
+Against a running plane, in `psql`:
+
+    UPDATE audit_events SET subject_id = 'desiqn' WHERE action = 'team.update';
+    UPDATE 1
+
+The console, on the next check:
+
+    A row does not verify   [altered]
+    checked 3 chained · 6 written before the chain existed and covered by nothing
+      · back to 2026-09-17 19:50:02.485511Z
+
+    team.update on desiqn by martin@objective-mj.com, at 2026-09-17T19:50:02.513640Z.
+
+    It says its digest is b7c5fc54cac5 and its content hashes to d0fa09c38409. Everything
+    before this row still verifies; nothing after it can be trusted until this is
+    explained.
+
+`Troupe.Plane.AuditChainTest` does the same thing in the suite, and also deletes a row from
+the middle — which is a *different* answer, `:chain_broken`, because the repair differs: one
+row was rewritten, or one is missing.
+
+### What it does not claim
+
+Rows from before the migration are counted as unchained and left alone. Computing hashes
+for them now would produce a trail claiming to be verified back to its first row when
+nothing verified it. Looking at the page found the same mistake in the wording: with six
+such rows and none chained, the panel said *"The chain verifies — 0 rows"*. It now says
+nothing is chained yet, and that the chain starts at the next change somebody makes.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/audit_chain_test.exs
+    Result: 5 passed
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs
+    Result: 48 passed
+
+    $ ./scripts/toolbox mix troupe.schema.diff
+    schema unchanged: 77 documents
+
+    $ ./scripts/credo
+    6635 mods/funs, found no issues.

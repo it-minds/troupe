@@ -477,6 +477,13 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.audit.verify",
+      function: :audit_verify,
+      summary:
+        "Check the audit trail's hash chain and name the first row that does not verify: altered content, or a predecessor that is not the one that was there. Rows written before the chain existed are counted as unchained rather than reported as bad.",
+      risk: :read
+    },
+    %Method{
       name: "admin.connections.list",
       function: :connections,
       summary:

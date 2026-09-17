@@ -13,6 +13,7 @@ defmodule Troupe.Plane.PanelTest do
 
   alias Troupe.Plane.{
     Admin,
+    Audit,
     Bundles,
     Fleet,
     Identity,
@@ -553,6 +554,87 @@ defmodule Troupe.Plane.PanelTest do
       assert [server] = draft["spec"]["mcpServers"]
       assert server["name"] == "jira"
       assert server["timeoutMs"] == 5000
+    end
+  end
+
+  describe "the audit page's integrity tab" do
+    test "says the chain verifies, and how far back it reaches", context do
+      {:ok, _} = Audit.record(context.root.subject, "team.grant", "engineering", %{"a" => 1})
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/audit")
+
+      # Run on request, not on load: the walk reads the whole trail.
+      assert html =~ "check the chain"
+      refute html =~ "The chain verifies"
+
+      html = view |> element("#audit-verify") |> render_submit()
+
+      assert html =~ "The chain verifies"
+      assert html =~ "back to"
+    end
+
+    test "and names the row when one byte is changed behind the application", context do
+      {:ok, _} = Audit.record(context.root.subject, "setting.put", "pins_allowed", %{})
+      {:ok, two} = Audit.record("ada@example.test", "team.grant", "delivery", %{})
+      {:ok, _} = Audit.record(context.root.subject, "team.revoke", "delivery", %{})
+
+      {:ok, _} =
+        Repo.query(
+          "UPDATE audit_events SET subject_id = $1 WHERE id = $2",
+          ["deIivery", Ecto.UUID.dump!(two.id)]
+        )
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/audit")
+
+      html = view |> element("#audit-verify") |> render_submit()
+
+      assert html =~ "A row does not verify"
+      assert html =~ "altered"
+
+      # The row, not the fact. "The trail is wrong" is not something anybody can act on.
+      assert html =~ "ada@example.test"
+      assert html =~ "team.grant"
+      assert html =~ "still verifies"
+    end
+
+    test "and a trail with nothing chained does not claim to have verified it", context do
+      # Read off the page against a plane whose six rows all predated the migration:
+      # "The chain verifies — 0 rows" is a verification of nothing, said as though it were
+      # one. The number is the honest headline.
+      #
+      # Reproduced by leaving exactly what an upgrade leaves: rows with no hash and nothing
+      # written since.
+      {:ok, _} = Repo.query("DELETE FROM audit_events", [])
+
+      {:ok, _} =
+        Repo.query(
+          """
+          INSERT INTO audit_events
+            (id, actor, on_behalf_of, action, subject_kind, subject_id, detail,
+             occurred_at, inserted_at, updated_at)
+          VALUES ($1, 'old@example.test', 'old@example.test', 'team.enable', 'team',
+                  'engineering', '{}', $2, $2, $2)
+          """,
+          [Ecto.UUID.dump!(Ecto.UUID.generate()), ~U[2020-01-01 00:00:00.000000Z]]
+        )
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/audit")
+
+      html = view |> element("#audit-verify") |> render_submit()
+
+      assert html =~ "Nothing is chained yet"
+      refute html =~ "The chain verifies"
+      assert html =~ "The chain starts at the next"
+    end
+
+    test "and a team admin is not offered a check of a trail they cannot see", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.lead.subject) |> live("/admin/audit")
+
+      refute html =~ "check the chain"
     end
   end
 

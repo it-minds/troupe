@@ -1577,6 +1577,29 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Check that the audit trail has not been altered, and name the first row that has.
+
+  A table of rows is exactly as trustworthy as the database it is in: somebody who can
+  write to PostgreSQL can change what a record says happened, and until there was a chain
+  nothing would have said so. Each row carries a digest of its own content and the digest
+  of the row before it, over canonical JSON and excluding `prev_hash` — the same rule the
+  session log has used since W1, so a verifier recomputes the chain from stored data alone.
+
+  Two failures, reported apart because the repairs differ. `:altered` is a row whose
+  content no longer hashes to what it says; `:chain_broken` is a row whose predecessor is
+  not the one that was there — something removed, or inserted.
+
+  A platform admin's, not a team admin's: the trail is the whole plane's, and a check that
+  answered "somewhere in the part you cannot see" would be worse than no check.
+  """
+  @spec audit_verify(actor()) :: result()
+  def audit_verify(actor) do
+    with :ok <- require_platform_admin(actor) do
+      {:ok, Audit.verify()}
+    end
+  end
+
   # The grant is the plane's record and is already made; rewriting the custom resource's
   # `teams` is a projection of it. A cluster that cannot be reached leaves the projection
   # stale for as long as it takes the operator's next resync, which is the right cost —

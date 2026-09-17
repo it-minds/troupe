@@ -4027,3 +4027,36 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      ignores the id list when the role is `:platform_admin`, and the teams passed here are
      already the ones this actor may see — so passing the real role would have made a team
      admin's Connections page list every session on the plane.
+
+603. **The audit trail is hash-chained, by the same rule the session log has used since
+     W1.** A table of rows is exactly as trustworthy as the database it is in: somebody who
+     can write to PostgreSQL can change what a record says happened, and until there was a
+     chain nothing would have said so. Each row carries a digest of its own content and the
+     digest of the row before it, over canonical JSON and excluding `prev_hash`, so a
+     verifier recomputes the chain from stored data alone.
+
+604. **Rows written before the chain are counted as unchained, never rewritten.** Computing
+     hashes for them now would produce a trail claiming to be verified back to its first
+     row when nothing verified it — the most expensive possible lie for this particular
+     table. The chain begins at the first row that has one, the answer says how far back
+     that is, and both counts are in it.
+
+605. **Two failures, reported apart.** `:altered` is a row whose content no longer hashes
+     to what it claims; `:chain_broken` is a row whose predecessor is not the one that was
+     there — something removed or inserted. The repairs differ, and "the trail is wrong" is
+     not something anybody can act on.
+
+606. **The chain is serialized on one advisory lock.** A chain is an order, and two writers
+     picking the same predecessor would put a fork in it. Audit writes happen at the rate
+     an administrator clicks, so one plane-wide lock costs nothing; a fork costs the
+     property the chain exists for.
+
+607. **"The chain verifies — 0 rows" was a verification of nothing said as though it were
+     one.** Found by looking at the page against a plane whose every audit row predated the
+     migration. A trail with nothing chained now says so, and says the chain starts at the
+     next change somebody makes.
+
+608. **The integrity check runs on request, and only for a platform admin.** The walk reads
+     the whole trail, so a page that ran it on every keystroke in the filter is a page
+     nobody opens. And the trail is the whole plane's — a check that answered "somewhere in
+     the part you cannot see" would be worse than no check.
