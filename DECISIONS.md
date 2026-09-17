@@ -3867,3 +3867,40 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 
 580. **`/.well-known/troupe` and the footer read one function.** A deploy check that
      disagreed with the page would be worse than either on its own.
+
+581. **The console's coverage is asserted against what screens *call*, not against a plan.**
+     `AdminParityTest` proves the context, the JSON-RPC surface and the MCP tools agree;
+     nothing proved the console did, which is how `admin.profile.put` came to be in the
+     TypeScript client and on no screen. `Troupe.Plane.Admin.Console` places every method on
+     a screen, and the test reads each screen's own source for `Admin.<function>(`. A map of
+     where things *should* be would pass while the button did not exist — which is the exact
+     failure it was written to catch.
+
+582. **Debt is named in two lists, and both may only shrink.** The design names fifteen
+     screens and eleven exist, so on the day this was written the honest answers were
+     neither "placed" nor "API-only with a reason": an `:api_only` reason for a screen that
+     is merely unbuilt is a backlog item wearing a reason's clothes, and the test cannot
+     tell the difference. So `owed/0` lists a method with nowhere to be and `unbuilt/0`
+     lists a screen with nothing of its own yet — and the test fails when an entry becomes
+     satisfied, which is what makes them shrink rather than accumulate.
+
+     The reasons that *are* reasons are held to it separately: longer than twenty
+     characters, not matching "not built", and at most three of them.
+
+583. **What the coverage test found, on its first run.** Five methods reachable from no
+     screen and six screens named by the design and absent. That list is the R8 backlog,
+     derived from the code rather than from the document — which is the difference between a
+     plan and an inventory.
+
+584. **A team is enabled from the console now, and the name is asked for rather than taken
+     from the group.** Turning a provider group into a team was a CLI or API step, which
+     made the first team of a new deployment a shell command in the middle of a console
+     somebody was otherwise configuring everything from. A group is called `itm-consultants`
+     because of how a directory is organised; a team is called `delivery` because of what it
+     does — and since one group may be two teams, the name has to be the team's own.
+
+585. **A run shows the revision it ran, and the revisions are fetched when asked for.** Done
+     item 5. The run already carried its revision number and hash and the table did not show
+     them; `trigger_revisions` carries each revision's whole document, so loading every
+     revision of every trigger to render a panel nobody has opened would be the page paying
+     for a question it was not asked.

@@ -65,6 +65,27 @@ defmodule Troupe.Plane.Web.Live.Teams do
     )
   end
 
+  # Turning a provider group into a team. Done from the CLI or the API before this, which
+  # made the first team of a new deployment a shell step in the middle of a console
+  # somebody was otherwise configuring everything from.
+  #
+  # The name is asked for rather than taken from the group: a group is called
+  # `itm-consultants` because of how somebody's directory is organised, and a team is
+  # called `delivery` because of what it does. One group may be two teams, so the name is
+  # the team's own and not a copy of the group's.
+  def handle_event("enable-team", %{"group" => group} = params, socket) do
+    attrs =
+      %{}
+      |> put_string("name", params["name"])
+      |> put_integer("budget_micros", params["budget_micros"])
+
+    respond(
+      socket,
+      Admin.team_enable(socket.assigns.actor, group, attrs),
+      "#{name_for(params, group)} is a team now, drawing its members from #{group}"
+    )
+  end
+
   def handle_event("link", %{"team" => name, "group" => group}, socket) do
     respond(
       socket,
@@ -283,6 +304,9 @@ defmodule Troupe.Plane.Web.Live.Teams do
     end
   end
 
+  defp name_for(%{"name" => name}, _group) when is_binary(name) and name != "", do: name
+  defp name_for(_params, group), do: group
+
   defp principals_of(actor, team) do
     case Admin.principals_list(actor, team) do
       {:ok, principals} -> principals
@@ -296,6 +320,44 @@ defmodule Troupe.Plane.Web.Live.Teams do
     <.shell actor={@actor} breakglass={@breakglass} page={:teams}>
       <p :if={@error} class="error">{@error}</p>
       <p :if={@flash_message} class="notice">{@flash_message}</p>
+
+      <section :if={@actor.role == :platform_admin} class="team">
+        <h2>Enable a team</h2>
+        <p class="hint">
+          A team is a Troupe object that draws its members from the provider's groups. It
+          is not the group: one group may be two teams with different budgets and different
+          grants, so the name is the team's own — what it does, rather than how somebody's
+          directory is organised.
+        </p>
+
+        <form id="enable-team" phx-submit="enable-team">
+          <label for="enable-team-group">Group</label>
+          <select id="enable-team-group" name="group">
+            <option :for={group <- @groups} value={group.external_id}>
+              {group.external_id} — {group.display_name}
+            </option>
+          </select>
+
+          <label for="enable-team-name">Team name</label>
+          <input
+            id="enable-team-name"
+            name="name"
+            placeholder="delivery"
+            autocomplete="off"
+          />
+
+          <label for="enable-team-budget">Monthly ceiling, in micros</label>
+          <input
+            id="enable-team-budget"
+            name="budget_micros"
+            inputmode="numeric"
+            placeholder="blank is no ceiling"
+            autocomplete="off"
+          />
+
+          <button type="submit">enable</button>
+        </form>
+      </section>
 
       <div :for={team <- @teams} class="team">
         <h2>{team.name}</h2>

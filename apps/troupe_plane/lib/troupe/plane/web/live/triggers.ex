@@ -91,6 +91,19 @@ defmodule Troupe.Plane.Web.Live.Triggers do
     end
   end
 
+  # Fetched when somebody asks rather than with the list: a revision carries its whole
+  # document, and loading every revision of every trigger to render a table nobody has
+  # opened would be the page paying for a question it was not asked.
+  def handle_event("revisions", %{"name" => name}, socket) do
+    case Admin.trigger_revisions(socket.assigns.actor, socket.assigns.team, name) do
+      {:ok, revisions} ->
+        {:noreply, assign(socket, revisions: Map.put(socket.assigns.revisions, name, revisions))}
+
+      {:error, error} ->
+        {:noreply, assign(socket, error: error.message)}
+    end
+  end
+
   defp toggle(socket, name, enabled?) do
     attrs = %{"team" => socket.assigns.team, "name" => name, "enabled" => enabled?}
 
@@ -112,15 +125,21 @@ defmodule Troupe.Plane.Web.Live.Triggers do
   end
 
   defp load(%{assigns: %{team: nil}} = socket) do
-    assign(socket, triggers: [], runs: %{}, error: nil)
+    assign(socket, triggers: [], runs: %{}, revisions: %{}, error: nil)
   end
 
   defp load(%{assigns: %{team: team}} = socket) do
     with {:ok, triggers} <- Admin.triggers_list(socket.assigns.actor, team),
          {:ok, runs} <- Admin.runs_list(socket.assigns.actor, team: team, limit: 100) do
-      assign(socket, triggers: triggers, runs: Enum.group_by(runs, & &1["trigger"]), error: nil)
+      assign(socket,
+        triggers: triggers,
+        runs: Enum.group_by(runs, & &1["trigger"]),
+        revisions: Map.get(socket.assigns, :revisions, %{}),
+        error: nil
+      )
     else
-      {:error, error} -> assign(socket, triggers: [], runs: %{}, error: error.message)
+      {:error, error} ->
+        assign(socket, triggers: [], runs: %{}, revisions: %{}, error: error.message)
     end
   end
 
@@ -205,6 +224,7 @@ defmodule Troupe.Plane.Web.Live.Triggers do
           <thead>
             <tr>
               <th>fired</th>
+              <th>ran</th>
               <th>by</th>
               <th>state</th>
               <th>session</th>
@@ -217,6 +237,7 @@ defmodule Troupe.Plane.Web.Live.Triggers do
           <tbody>
             <tr :for={run <- Enum.take(Map.get(@runs, trigger["name"], []), 10)} class={run_class(run)}>
               <td>{run["fired_at"]}</td>
+              <td>{revision_of(run)}</td>
               <td>{run["fired_by"]}</td>
               <td>{run["state"]}</td>
               <td>{run["session_id"] || "—"}</td>
@@ -226,10 +247,39 @@ defmodule Troupe.Plane.Web.Live.Triggers do
               <td>{run["reviewed_by"] || "—"}</td>
             </tr>
             <tr :if={Map.get(@runs, trigger["name"], []) == []}>
-              <td colspan="8" class="none">never run</td>
+              <td colspan="9" class="none">never run</td>
             </tr>
           </tbody>
         </table>
+
+        <h3>Revisions</h3>
+        <p class="hint">
+          A run shows the revision it ran, which is not the document as it is now. Editing a
+          trigger makes a new revision and leaves every earlier one readable — so a run from
+          last week can be read against what the trigger said last week, rather than against
+          what somebody changed it to since.
+        </p>
+
+        <form id={"revisions-#{trigger["name"]}"} phx-submit="revisions">
+          <input type="hidden" name="name" value={trigger["name"]} />
+          <button type="submit">show revisions</button>
+        </form>
+
+        <div :if={Map.has_key?(@revisions, trigger["name"])} class="revisions">
+          <div :for={revision <- Map.fetch!(@revisions, trigger["name"])} class="revision">
+            <h4>
+              revision {revision["revision"]}
+              <span class="hint">
+                by {revision["created_by"] || "—"} at {revision["created_at"] || "—"}
+              </span>
+            </h4>
+            <pre>{document_of(revision)}</pre>
+          </div>
+
+          <p :if={Map.fetch!(@revisions, trigger["name"]) == []} class="none">
+            no revisions recorded
+          </p>
+        </div>
       </div>
 
       <p :if={@triggers == [] and @team} class="none">no triggers in {@team}</p>
@@ -237,6 +287,21 @@ defmodule Troupe.Plane.Web.Live.Triggers do
     </.shell>
     """
   end
+
+  # The number, and the hash where there is no number — a run from before revisions were
+  # recorded has neither, and an em dash is the honest answer rather than a zero.
+  defp revision_of(%{"revision" => number}) when is_integer(number), do: "r#{number}"
+
+  defp revision_of(%{"revision_hash" => hash}) when is_binary(hash),
+    do: String.slice(hash, 0, 11)
+
+  defp revision_of(_run), do: "—"
+
+  defp document_of(%{"document" => document}) when is_map(document),
+    do: Jason.encode!(document, pretty: true)
+
+  defp document_of(%{"document" => document}) when is_binary(document), do: document
+  defp document_of(_revision), do: ""
 
   defp source(%{"kind" => "schedule"} = source),
     do: "cron #{source["cron"]} (#{source["tz"] || "UTC"})"
