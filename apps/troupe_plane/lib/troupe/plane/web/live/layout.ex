@@ -33,6 +33,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
     {:bundles, "Configuration bundles", "/admin/bundles"},
     {:triggers, "Triggers", "/admin/triggers"},
     {:sessions, "Sessions and spend", "/admin/sessions"},
+    {:budgets, "Budgets", "/admin/budgets"},
     {:audit, "Audit", "/admin/audit"},
     {:policy, "Policy", "/admin/policy"}
   ]
@@ -219,15 +220,34 @@ defmodule Troupe.Plane.Web.Live.Layout do
   @spec money(integer() | nil) :: String.t()
   def money(nil), do: "—"
   def money(0), do: "unlimited"
-  def money(micros), do: :erlang.float_to_binary(micros / 1_000_000, decimals: 2)
+  def money(micros), do: figure(micros)
 
-  @doc "An amount with its unit set quietly beside it, tabular so a column lines up."
+  @doc """
+  The same number, with none of `money/1`'s opinion about zero.
+
+  `money/1` reads a zero as *no ceiling*, which is right for a ceiling and wrong for
+  everything else: a team that has spent nothing was reported as having spent
+  "unlimited". A ceiling and a spend are two different quantities and only one of them
+  means something by being absent.
+  """
+  @spec figure(integer() | nil) :: String.t()
+  def figure(nil), do: "—"
+  def figure(micros), do: :erlang.float_to_binary(micros / 1_000_000, decimals: 2)
+
+  @doc """
+  An amount with its unit set quietly beside it, tabular so a column lines up.
+
+  `figure/1` rather than `money/1`, because every caller renders a spend or a reservation
+  and none of them renders a ceiling — a team that had spent nothing was being reported as
+  having spent "unlimited" on Overview, on Teams and on Budgets, which is the one word that
+  should never appear in a spend column.
+  """
   attr(:micros, :integer, default: nil)
 
   def amount(assigns) do
     ~H"""
     <span class="mono" style="font-variant-numeric: tabular-nums">
-      {money(@micros)}<span :if={is_integer(@micros) and @micros > 0} class="muted">&nbsp;kr</span>
+      {figure(@micros)}<span :if={is_integer(@micros) and @micros > 0} class="muted">&nbsp;kr</span>
     </span>
     """
   end
@@ -257,7 +277,7 @@ defmodule Troupe.Plane.Web.Live.Layout do
         <span class="budget__fill" style={"width: #{min(round(@fraction * 100), 100)}%"}></span>
       </span>
       <span class="budget__figures">
-        {money(@committed)} / {money(@team.budget_micros)} {@team.budget_period}
+        {figure(@committed)} / {money(@team.budget_micros)} {@team.budget_period}
       </span>
     </div>
     """

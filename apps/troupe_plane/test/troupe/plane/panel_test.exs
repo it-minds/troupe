@@ -556,6 +556,119 @@ defmodule Troupe.Plane.PanelTest do
     end
   end
 
+  describe "the budgets page" do
+    # The ceilings are actors, one per rung, registered with `:global` — so asking which
+    # one binds starts three of them. The rest of the panel reads tables and does not,
+    # which is why this is the one screen here that needs the supervisor they live under.
+    setup do
+      start_supervised!(Troupe.Plane.Singleton)
+      :ok
+    end
+
+    test "lists every team's ceiling with the figures, not only a bar", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      assert html =~ "engineering"
+      assert html =~ "design"
+
+      # The design's rule, and the reason this page exists rather than a bar on Overview:
+      # a bar alone says "quite full", which is not a number and is nothing at all without
+      # colour. The figures are in the markup beside every bar.
+      assert html =~ "budget__figures"
+      assert html =~ "1.00"
+    end
+
+    test "and a team that has spent nothing is not reported as having spent unlimited",
+         context do
+      # `money/1` reads a zero as *no ceiling*, which is right for a ceiling and wrong for
+      # a spend — and the figures beside every bar are a spend. Read off the rendered page
+      # as `unlimited / 500.00 this period` for a team that had spent nothing at all.
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      figures =
+        Regex.scan(~r{<span class="budget__figures">(.*?)</span>}s, html)
+        |> Enum.map(&(&1 |> List.last() |> String.trim()))
+
+      refute figures == [], "no budget bar rendered, so this proves nothing"
+
+      for figure <- figures do
+        refute String.starts_with?(figure, "unlimited"),
+               "a spend was rendered as a ceiling: #{inspect(figure)}"
+      end
+    end
+
+    test "and a spend column never says unlimited, on any screen that has one", context do
+      # `amount/1` rendered through `money/1`, which reads a zero as *no ceiling*. Every
+      # caller of it is a spend or a reservation and none is a ceiling, so a team that had
+      # spent nothing was reported as having spent "unlimited" — on three screens.
+      conn = sign_in(context.conn, context.root.subject)
+
+      for path <- ["/admin", "/admin/teams", "/admin/budgets"] do
+        {:ok, _view, html} = live(conn, path)
+
+        spends =
+          Regex.scan(
+            ~r{<span class="mono" style="font-variant-numeric: tabular-nums">\s*([^<]*)},
+            html
+          )
+          |> Enum.map(&(&1 |> List.last() |> String.trim()))
+
+        refute spends == [], "#{path} rendered no amount at all, so this proves nothing"
+
+        refute "unlimited" in spends,
+               "#{path} renders a spend as a ceiling: #{inspect(Enum.uniq(spends))}"
+      end
+    end
+
+    test "names which ceiling refuses first, and says it in words", context do
+      actor = Admin.actor_for_subject(context.root.subject)
+
+      # A personal cap tighter than the team's, so the answer is not the number somebody
+      # would have guessed from the team page.
+      {:ok, _} = Admin.person_budget(actor, context.lead.subject, 40_000)
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      html =
+        view
+        |> element("#explain-budget")
+        |> render_submit(%{"team" => "engineering", "subject" => context.lead.subject})
+
+      assert html =~ "this person&#39;s own cap" or html =~ "this person's own cap"
+      assert html =~ "is what refuses first"
+      # The number, not the word: a scope with nothing said about the amount is the
+      # support ticket this page exists to stop somebody opening.
+      assert html =~ "0.04 left"
+      assert html =~ "binds first"
+
+      # Every rung that was asked, not only the winner: the other two are what somebody
+      # changes if the tight one is right.
+      assert html =~ "the team&#39;s ceiling" or html =~ "the team's ceiling"
+
+      assert html =~ "the platform&#39;s, or the deployment&#39;s" or
+               html =~ "the platform's, or the deployment's"
+    end
+
+    test "and a rung with no ceiling is not reported as the reason", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      # `design` has no ceiling and nobody here has a personal cap, so nothing binds —
+      # and "absence means everything" has to read as nothing refusing rather than as a
+      # rung at zero.
+      html =
+        view
+        |> element("#explain-budget")
+        |> render_submit(%{"team" => "design", "subject" => ""})
+
+      assert html =~ "No rung here has a ceiling at all"
+      refute html =~ "binds first"
+    end
+  end
+
   describe "the policy page" do
     # Done item 3 of the console document, which is also rule 1: for a setting decided at
     # three rungs, the view names the winner and *both losers with their values*, and a

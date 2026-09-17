@@ -145,12 +145,7 @@ defmodule Troupe.Plane.Admin.Console do
     %{
       # No way to delete a profile from the console. The editor edits one, reached by name
       # from the fleet screen, and creating is a route of its own.
-      profile_delete: :profiles,
-
-      # Budgets is a screen of its own in the design. `person_budget` is reachable from
-      # Teams and `budget_explain` from nowhere — which is why the explanation of *which*
-      # ceiling is binding cannot be read anywhere a person looks.
-      budget_explain: :budgets
+      profile_delete: :profiles
     }
   end
 
@@ -170,7 +165,6 @@ defmodule Troupe.Plane.Admin.Console do
         "the provider, claims, SCIM state and principals, which sit inside Policy and Teams",
       integrations: "org-level MCP servers and the egress allowlist as an object",
       provisioners: "what can make a worker, and which guarantee each does not give",
-      budgets: "every ceiling, the spend against it, and which one is binding",
       connections: "who connected a personal credential to which server, and revocation"
     }
   end

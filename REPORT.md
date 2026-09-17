@@ -2141,3 +2141,47 @@ rather than omitted.
 `owed/0` holds `profile_delete` and `budget_explain`. `unbuilt/0` holds review, identity,
 integrations, provisioners, budgets and connections. Done items 2, 4, 6, 7, 8, 9 and 10 are
 open.
+
+## R8c — Budgets, and which ceiling binds
+
+Done item: the Budgets screen of `control-panel.md`, and `budget_explain` leaves `owed/0`.
+
+Every team's ceiling with the spend against it, and a second panel that asks all three
+rungs and names the one that would refuse first. A rung with no ceiling has `:unlimited`
+remaining and never binds — absence means everything, and a person with no personal cap
+must not be reported as the reason their session was refused.
+
+### What the browser showed that the tests did not
+
+Read from the rendered page at `http://localhost:4001/admin/budgets`, for a team that had
+spent nothing:
+
+    delivery    unlimited / 500.00 this period     spent: unlimited    reserved: unlimited
+
+`money/1` reads a zero as *no ceiling*, which is right for a ceiling and wrong for a spend
+— and `amount/1`, whose every caller renders a spend or a reservation, went through it. The
+same word was on Overview and on Teams. After the fix, the same page:
+
+    delivery    0.00 / 500.00 this period          spent: 0.00         reserved: 0.00
+
+And the explanation, for `grace@example.test` in `delivery`:
+
+    the team's ceiling is what refuses first, with 500.00 left.
+      this person's own cap, in every team   person   · no ceiling here
+      the team's ceiling  [binds first]      team     · 500.00 left     0.00 / 500.00
+      the platform's, or the deployment's    platform · no ceiling here
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs \
+        apps/troupe_plane/test/troupe/plane/console_coverage_test.exs \
+        apps/troupe_plane/test/troupe/plane/console_assets_test.exs
+    Finished in 52.3 seconds (0.3s async, 51.9s sync)
+    Result: 58 passed
+
+    $ ./scripts/credo
+    6572 mods/funs, found no issues.
+
+Five of those are new: every team's ceiling with its figures, which rung binds and the two
+that do not, a rung with no ceiling reported as nothing refusing, and — walking Overview,
+Teams and Budgets — no amount anywhere rendering as the word `unlimited`.

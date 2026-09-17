@@ -3947,3 +3947,28 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      The rule is the half an administrator has already worked out from being refused; the
      number is the half they do not have. Done item 3's second sentence is the flash naming
      the field, what was asked for, the ceiling, and the rung that set it.
+
+591. **Budgets is a screen, and it does not set anything.** The design gives it its own
+     place because the question somebody arrives with is never "what is this team's cap"
+     but "why was that refused" — and three rungs can refuse. So the screen lists every
+     ceiling, the spend against each, and names the one that binds first in words.
+
+     The person-cap form stays on Teams. Somebody wondering who is near their ceiling is
+     looking at a team when they wonder it, and a second editor for one value is how two
+     screens come to disagree about what it is.
+
+592. **A rung with no ceiling never binds.** `remaining_micros` is `:unlimited` there, and
+     the binding rung is the one with the least left among the rungs that have a number at
+     all. Absence means everything, in the place it costs the most to get wrong: a person
+     with no personal cap must not be reported as the reason their session was refused.
+
+593. **`money/1` reads a zero as "no ceiling", and three screens were rendering a spend
+     through it.** Found by looking at the page: `delivery` had spent nothing and the bar
+     beside it read `unlimited / 500.00 this period`, and the spend and reserved columns on
+     Overview, Teams and Budgets each said `unlimited`.
+
+     A ceiling and a spend are different quantities and only one of them means something by
+     being absent. So `figure/1` is the plain number, `money/1` keeps its opinion for
+     ceilings, and `amount/1` — whose every caller is a spend or a reservation — renders
+     through `figure/1`. The test walks three screens and fails on the word appearing in
+     any amount.
