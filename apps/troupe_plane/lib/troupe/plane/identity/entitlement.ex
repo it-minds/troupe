@@ -28,7 +28,11 @@ defmodule Troupe.Plane.Identity.Entitlement do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @kinds ~w(agent skill mcp_server)
+  # `acp_agent` is here for the same reason the other three are: a team's grant is what
+  # narrows what a session may reach, and a third-party agent run as a subprocess is
+  # exactly the sort of thing a team should have to be granted. Nothing else had to change
+  # for it — which is the argument for putting an ACP agent in the bundle.
+  @kinds ~w(agent skill mcp_server acp_agent)
   @modes ~w(allow deny)
 
   schema "grant_entitlements" do

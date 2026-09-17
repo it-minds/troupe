@@ -142,6 +142,61 @@ defmodule Troupe.Plane.EntitlementsTest do
     end
   end
 
+  describe "a third-party ACP agent" do
+    test "is one more kind in the same list, narrowed by the same grant", context do
+      # Done item 3, and the argument for putting an ACP agent in the bundle: nothing new
+      # had to be built. Absence still means everything.
+      assert {:ok, %{"profiles" => [before]}} =
+               Harness.call("profiles.list", %{}, as(context.ada))
+
+      assert before["acp_agents"] == ["gemini", "codex"]
+
+      entitle(context.team, [%{"kind" => "acp_agent", "name" => "gemini", "mode" => "allow"}])
+
+      assert {:ok, %{"profiles" => [narrowed]}} =
+               Harness.call("profiles.list", %{}, as(context.ada))
+
+      # An allow row makes the kind an allowlist, exactly as it does for a skill.
+      assert narrowed["acp_agents"] == ["gemini"]
+
+      # And the other kinds are untouched, because narrowing one kind is not narrowing the
+      # rest — which is the rule that made the table worth having.
+      assert narrowed["mcp_servers"] == ["jira", "pager"]
+    end
+
+    test "a denied one is subtracted, and deny wins over allow", context do
+      entitle(context.team, [%{"kind" => "acp_agent", "name" => "codex", "mode" => "deny"}])
+
+      assert {:ok, %{"profiles" => [profile]}} =
+               Harness.call("profiles.list", %{}, as(context.ada))
+
+      assert profile["acp_agents"] == ["gemini"]
+
+      entitle(context.team, [
+        %{"kind" => "acp_agent", "name" => "codex", "mode" => "allow"},
+        %{"kind" => "acp_agent", "name" => "codex", "mode" => "deny"}
+      ])
+
+      assert {:ok, %{"profiles" => [both]}} =
+               Harness.call("profiles.list", %{}, as(context.ada))
+
+      refute "codex" in both["acp_agents"]
+    end
+
+    test "and the set the pod is told carries it", context do
+      entitle(context.team, [%{"kind" => "acp_agent", "name" => "gemini", "mode" => "allow"}])
+
+      set =
+        "stable"
+        |> Bundles.offering(Identity.entitlements_for(context.team, "dev"))
+        |> Bundles.entitlement_set()
+
+      # Recorded in `session_created`, which is what a fork later inherits and what a
+      # replay reads to say what the session was allowed at the time.
+      assert set["acp_agents"] == ["gemini"]
+    end
+  end
+
   describe "the session" do
     test "is told its set, and the set is what the log will record", context do
       _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0")
@@ -156,10 +211,13 @@ defmodule Troupe.Plane.EntitlementsTest do
 
       assert_receive {:pushed, "session.activate", pushed}, 5_000
 
+      # `acp_agents` is unnarrowed here and so is every one the bundle has, which is the
+      # rule: absence means everything, for the fourth kind as for the other three.
       assert pushed["entitlements"] == %{
                "agents" => ["reviewer", "build", "plan"],
                "skills" => ["review"],
-               "mcp_servers" => ["jira"]
+               "mcp_servers" => ["jira"],
+               "acp_agents" => ["gemini", "codex"]
              }
     end
 
@@ -198,7 +256,10 @@ defmodule Troupe.Plane.EntitlementsTest do
                  ]
                })
 
-      assert [%{kind: "mcp_server", name: "pager", mode: "deny"}, %{kind: "skill", name: "review"}] =
+      assert [
+               %{kind: "mcp_server", name: "pager", mode: "deny"},
+               %{kind: "skill", name: "review"}
+             ] =
                Identity.entitlements_for(context.team, "dev")
 
       assert {:ok, events} = Admin.audit_list(root, limit: 5)
@@ -214,7 +275,9 @@ defmodule Troupe.Plane.EntitlementsTest do
          context do
       # A bundle can be rolled back, and an entitlement that vanished with a publish and
       # did not come back with the revert would be a silent widening.
-      entitle(context.team, [%{"kind" => "skill", "name" => "not-published-yet", "mode" => "allow"}])
+      entitle(context.team, [
+        %{"kind" => "skill", "name" => "not-published-yet", "mode" => "allow"}
+      ])
 
       assert [%{name: "not-published-yet"}] = Identity.entitlements_for(context.team, "dev")
 
@@ -287,6 +350,10 @@ defmodule Troupe.Plane.EntitlementsTest do
       "mcp_servers" => [
         %{"name" => "jira", "url" => "https://mcp.jira.example/mcp"},
         %{"name" => "pager", "url" => "https://mcp.pager.example/mcp"}
+      ],
+      "acp_agents" => [
+        %{"name" => "gemini", "command" => "gemini-cli", "args" => ["--acp"]},
+        %{"name" => "codex", "command" => "codex-cli", "args" => ["--acp"]}
       ]
     }
   end

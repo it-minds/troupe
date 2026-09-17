@@ -2032,7 +2032,8 @@ defmodule Troupe.Plane.Harness do
       "agents" => offering.agents,
       "skills" =>
         Enum.map(offering.skills, &%{"name" => &1.name, "description" => &1.description}),
-      "mcp_servers" => offering.mcp_servers
+      "mcp_servers" => offering.mcp_servers,
+      "acp_agents" => Map.get(offering, :acp_agents, [])
     }
   end
 

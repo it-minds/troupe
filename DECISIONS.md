@@ -3781,3 +3781,41 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      one must say so.** `Troupe.stop_session/1` on exit. Without it the session stays in
      the VM and the next file's "nothing is running yet" fails about something that
      happened in another file — which it did.
+
+568. **An ACP agent is a bundle entry, which is the whole argument for where it lives.** A
+     third-party coding agent run as a subprocess is exactly the sort of thing a team should
+     have to be granted — and a bundle entry is already narrowed by a grant. `acp_agent`
+     became a fourth entitlement kind and nothing else had to be built: absence means
+     everything, an allow row makes it an allowlist, deny wins. Done item 3 came free, which
+     is the evidence that the placement was right rather than convenient.
+
+569. **An ACP agent and a Troupe agent share one namespace.** One name is what a model says
+     when it delegates, so two entries called `reviewer` would make which one ran depend on
+     which list was searched first. Refused at publish.
+
+570. **A bundle entry carries the command and the hash of what it should be.** Without the
+     hash the entry says *run whatever is on the path under this name*, which is the one
+     thing a content-addressed bundle exists not to say. The hash is not verified in the
+     protocol module — the worker is the only thing holding the binary — but a malformed one
+     is refused at publish rather than at every start, where the reason would be in a log
+     nobody is reading.
+
+571. **The subprocess is started without a shell.** `:spawn_executable` with the bundle's
+     own argument list. An argument a bundle carried would otherwise be a place to put a
+     pipeline, and the bundle is signed for what it says rather than for what a shell makes
+     of it.
+
+572. **An ACP agent's filesystem is `Troupe.Workspace`, not a check that agrees with it.**
+     ACP's client side is where the filesystem lives, and an editor implementing it hands an
+     agent the real disk because the editor *is* the machine. A worker is not: a session has
+     a mount table with names and modes. Serving `fs/*` through `Workspace.resolve/3` means
+     the refusal an ACP agent gets is the refusal a tool gets — the same call, so the two
+     cannot drift and a mount added later applies without anybody remembering to apply it
+     here. That is done item 2, and it is why this belongs in the worker rather than a client.
+
+573. **The terminal is refused, and the handshake says so.** ACP defines one and Troupe has
+     one, but a session's shell is approved, budgeted and logged; an unmediated terminal
+     handed to a subprocess would be a way round all three. `terminal: false` at the
+     handshake rather than an error at the first call, so an agent that can work either way
+     picks the way that works — and the refusal names the reason rather than reporting a
+     capability that does not exist.

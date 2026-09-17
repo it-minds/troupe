@@ -62,7 +62,8 @@ defmodule Troupe.Protocol.BundleTest do
                "schema" => 1,
                "agents" => ["reviewer"],
                "skills" => ["review-checklist"],
-               "mcp_servers" => ["jira"]
+               "mcp_servers" => ["jira"],
+               "acp_agents" => []
              }
     end
 

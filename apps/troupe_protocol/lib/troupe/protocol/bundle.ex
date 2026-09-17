@@ -16,7 +16,9 @@ defmodule Troupe.Protocol.Bundle do
        "mcp_servers": [{"name": "jira", "url": "https://mcp.jira.example/mcp",
                         "credential_ref": "JIRA_MCP_TOKEN", "header": "authorization",
                         "timeout_ms": 30000, "permission": "ask",
-                        "tools": ["search_issues", "get_issue"]}]}
+                        "tools": ["search_issues", "get_issue"]}],
+       "acp_agents":  [{"name": "gemini", "command": "gemini-cli",
+                        "args": ["--acp"], "hash": "sha256:…"}]}
 
   A document with no `schema` is schema 0: the free-form map the first bundles were,
   of which only `mcp_servers` was ever read. It is accepted as exactly that, so a plane
@@ -36,6 +38,24 @@ defmodule Troupe.Protocol.Bundle do
   The egress check — is this host one the cluster policy lets a pod reach — is the
   caller's, because only the plane can read the policy. `validate/2` takes it as a
   function so the rule lives once.
+
+  ## An ACP agent is an entitlement, like an agent or a skill
+
+  `acp_agents` names a third-party coding agent the worker runs as a subprocess and speaks
+  ACP to. It is in the bundle rather than in a client because of where the safety comes
+  from: the worker serves its filesystem and terminal requests **through the mount table**,
+  so a subprocess somebody else wrote gets the session's mounts at their modes rather than
+  the pod's disk.
+
+  Being a bundle entry is what makes it narrowable. A team's grant lists the agents, skills
+  and MCP servers it may use; an ACP agent is one more kind in that list, so a team that was
+  not granted one cannot name it and it is not in the session's offering. Nothing new had to
+  be built for that, which is the argument for putting it here.
+
+  `command` is what to run and `hash` is what it should be. The hash is not verified in this
+  module — the worker is the only thing holding the binary — but a bundle entry without one
+  would be a bundle that says *run whatever is on the path under this name*, and the whole
+  point of a content-addressed bundle is that it does not say that.
   """
 
   alias Troupe.Protocol.{AgentDefinition, Canonical}
@@ -80,11 +100,27 @@ defmodule Troupe.Protocol.Bundle do
           permission: :ask | :auto,
           tools: :all | [String.t()]
         }
+  @typedoc """
+  One third-party ACP agent a profile's sessions may delegate to.
+
+  `command` and `args` are what the worker runs; `hash` is what the binary should be, and
+  is the bundle's half of *which* agent this is. A worker that finds something else refuses
+  to start it, which it can only do because the bundle said what to expect.
+  """
+  @type acp_agent :: %{
+          name: String.t(),
+          command: String.t(),
+          args: [String.t()],
+          hash: String.t() | nil,
+          description: String.t() | nil
+        }
+
   @type t :: %{
           schema: 0 | 1,
           agents: [agent()],
           skills: [skill()],
-          mcp_servers: [mcp_server()]
+          mcp_servers: [mcp_server()],
+          acp_agents: [acp_agent()]
         }
 
   @type option :: {:egress_allowed?, (String.t() -> boolean())} | {:builtin_agents, [String.t()]}
@@ -138,7 +174,8 @@ defmodule Troupe.Protocol.Bundle do
       "schema" => bundle.schema,
       "agents" => Enum.map(agents, & &1.name),
       "skills" => Enum.map(skills, & &1.name),
-      "mcp_servers" => Enum.map(servers, & &1.name)
+      "mcp_servers" => Enum.map(servers, & &1.name),
+      "acp_agents" => bundle |> Map.get(:acp_agents, []) |> Enum.map(& &1.name)
     }
   end
 
@@ -300,10 +337,90 @@ defmodule Troupe.Protocol.Bundle do
          {:ok, agents} <- collect(Map.get(content, "agents", []), &agent(&1, skills, builtins)),
          {:ok, servers} <-
            collect(Map.get(content, "mcp_servers", []), &server(&1, egress_allowed?)),
+         {:ok, acp_agents} <- collect(Map.get(content, "acp_agents", []), &acp_agent/1),
          :ok <- unique(:agents, agents),
          :ok <- unique(:skills, skills),
-         :ok <- unique(:mcp_servers, servers) do
-      {:ok, %{schema: @schema, agents: agents, skills: skills, mcp_servers: servers}}
+         :ok <- unique(:mcp_servers, servers),
+         :ok <- unique(:acp_agents, acp_agents),
+         :ok <- distinct_names(agents, acp_agents) do
+      {:ok,
+       %{
+         schema: @schema,
+         agents: agents,
+         skills: skills,
+         mcp_servers: servers,
+         acp_agents: acp_agents
+       }}
+    end
+  end
+
+  defp acp_agent(%{"name" => name, "command" => command} = entry)
+       when is_binary(name) and is_binary(command) do
+    with true <-
+           AgentDefinition.valid_name?(name) ||
+             {:error, "acp_agent #{inspect(name)}: not a valid name"},
+         :ok <- present(:acp_agent, name, "command", command),
+         {:ok, args} <- acp_args(name, Map.get(entry, "args", [])),
+         :ok <- acp_hash(name, Map.get(entry, "hash")) do
+      {:ok,
+       %{
+         name: name,
+         command: command,
+         args: args,
+         hash: Map.get(entry, "hash"),
+         description: Map.get(entry, "description")
+       }}
+    end
+  end
+
+  defp acp_agent(entry) do
+    {:error, ["an acp_agent needs a name and a command: #{inspect(entry)}"]}
+  end
+
+  defp acp_args(name, args) when is_list(args) do
+    if Enum.all?(args, &is_binary/1) do
+      {:ok, args}
+    else
+      {:error, ["acp_agent #{name}: every argument is a string"]}
+    end
+  end
+
+  defp acp_args(name, _args), do: {:error, ["acp_agent #{name}: args is a list of strings"]}
+
+  # A hash is optional in the document and named in the error when it is wrong, because a
+  # bundle that carried a malformed one would be worse than one that carried none: the
+  # worker would refuse every start and the reason would be in a log nobody is reading.
+  defp acp_hash(_name, nil), do: :ok
+
+  defp acp_hash(_name, "sha256:" <> digest) when byte_size(digest) == 64, do: :ok
+
+  defp acp_hash(name, other) do
+    {:error, ["acp_agent #{name}: hash is `sha256:` and 64 hex characters, not #{inspect(other)}"]}
+  end
+
+  defp present(kind, name, field, value) do
+    if is_binary(value) and String.trim(value) != "" do
+      :ok
+    else
+      {:error, ["#{kind} #{name}: #{field} cannot be empty"]}
+    end
+  end
+
+  # One namespace, because one name is what a model says when it delegates. Two entries
+  # called `reviewer` — one a Troupe definition and one a subprocess — would make which one
+  # ran depend on which list was searched first.
+  defp distinct_names(agents, acp_agents) do
+    clash =
+      MapSet.intersection(
+        MapSet.new(agents, & &1.name),
+        MapSet.new(acp_agents, & &1.name)
+      )
+
+    if MapSet.size(clash) == 0 do
+      :ok
+    else
+      {:error,
+       ["these names are both an agent and an acp_agent: #{Enum.join(MapSet.to_list(clash), ", ")}"]}
     end
   end
 
@@ -313,7 +430,7 @@ defmodule Troupe.Protocol.Bundle do
       else: :ok
   end
 
-  @known ~w(schema agents skills mcp_servers)
+  @known ~w(schema agents skills mcp_servers acp_agents)
   defp only_known_keys(content) do
     case Map.keys(content) -- @known do
       [] -> :ok

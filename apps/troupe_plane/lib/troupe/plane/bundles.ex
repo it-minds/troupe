@@ -354,7 +354,8 @@ defmodule Troupe.Plane.Bundles do
       bundle_hash: nil,
       agents: narrow(@builtin_primaries, entitlements, "agent"),
       skills: [],
-      mcp_servers: []
+      mcp_servers: [],
+      acp_agents: []
     }
   end
 
@@ -368,7 +369,8 @@ defmodule Troupe.Plane.Bundles do
       bundle_hash: bundle.hash,
       agents: narrow(primaries(parsed), entitlements, "agent"),
       skills: narrow_by(skills, & &1.name, entitlements, "skill"),
-      mcp_servers: narrow(for(server <- servers_of(parsed), do: server.name), entitlements, "mcp_server")
+      mcp_servers: narrow(for(server <- servers_of(parsed), do: server.name), entitlements, "mcp_server"),
+      acp_agents: narrow(for(agent <- acp_agents_of(parsed), do: agent.name), entitlements, "acp_agent")
     }
   end
 
@@ -389,11 +391,12 @@ defmodule Troupe.Plane.Bundles do
   bundle said that day, nor re-run the allow-and-deny rules to find out.
   """
   @spec entitlement_set(map()) :: map()
-  def entitlement_set(%{agents: agents, skills: skills, mcp_servers: servers}) do
+  def entitlement_set(%{agents: agents, skills: skills, mcp_servers: servers} = offering) do
     %{
       "agents" => agents,
       "skills" => Enum.map(skills, & &1.name),
-      "mcp_servers" => servers
+      "mcp_servers" => servers,
+      "acp_agents" => Map.get(offering, :acp_agents, [])
     }
   end
 
@@ -402,6 +405,11 @@ defmodule Troupe.Plane.Bundles do
 
   defp servers_of(nil), do: []
   defp servers_of(%{mcp_servers: servers}), do: servers
+
+  # `Map.get`, because a schema-0 bundle has no such key and a plane upgraded under one
+  # keeps working — which is the same reason every other accessor here is forgiving.
+  defp acp_agents_of(nil), do: []
+  defp acp_agents_of(parsed), do: Map.get(parsed, :acp_agents, [])
 
   @doc """
   A bundle in the shape a panel renders: each agent with its mode, description and

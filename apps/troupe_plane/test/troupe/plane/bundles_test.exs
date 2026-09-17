@@ -107,7 +107,8 @@ defmodule Troupe.Plane.BundlesTest do
                "schema" => 0,
                "agents" => [],
                "skills" => [],
-               "mcp_servers" => ["jira"]
+               "mcp_servers" => ["jira"],
+               "acp_agents" => []
              }
 
       # An old worker applies `mcp_servers` from the push and fetches nothing, so the
@@ -175,7 +176,8 @@ defmodule Troupe.Plane.BundlesTest do
                "schema" => 1,
                "agents" => ["reviewer", "helper"],
                "skills" => ["review-checklist"],
-               "mcp_servers" => ["jira"]
+               "mcp_servers" => ["jira"],
+               "acp_agents" => []
              }
 
       assert Bundles.get("stable", bundle.version).summary == bundle.summary
