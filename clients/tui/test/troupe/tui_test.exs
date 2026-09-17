@@ -624,6 +624,45 @@ defmodule Troupe.TUIWorktreeCompletionTest do
     assert answered.data.text == "a multi-\nline answer"
   end
 
+  test "the command box grows and shows the tail of a long single-line input, so the end you type stays visible" do
+    ws = tmp_workspace()
+    scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => "what?"}}, {:finish, "ok"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid, width: 80, height: 24)
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask")
+    await_state("code-1", :needs_input)
+    press(pid, "1")
+
+    # One line much longer than the (grown) box can hold: the box shows the
+    # *end* of the input — the newest characters, ending with the cursor marker —
+    # never the start, which the user typed long before and already saw.
+    long = "START " <> String.duplicate("x", 600) <> " END"
+    type(pid, long)
+
+    text = screen_text(pid, session)
+    assert text =~ "END▏", "the end of the typed line (with its cursor) is on the box"
+    refute text =~ "START", "the start of the line is not what the box shows"
+  end
+
+  test "a pasted multiline shows its tail on screen, and typing after the paste is visible too" do
+    ws = tmp_workspace()
+    scripts = %{"code-1" => [{:tool, "ask_user", %{"question" => "what?"}}, {:finish, "ok"}]}
+    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
+    {pid, session} = start_tui(sid, width: 80, height: 24)
+    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "ask")
+    await_state("code-1", :needs_input)
+    press(pid, "1")
+
+    # A paste with more lines than the box, then more typing: the box shows the
+    # last rows (the newest content), including what follows the paste.
+    paste(pid, "first\nsecond\nthird\nfourth\nfifth")
+    type(pid, "-more")
+
+    text = screen_text(pid, session)
+    assert text =~ "fifth-more▏", "the tail after the paste is on the box with its cursor"
+    refute text =~ "first", "the first pasted line is not what the box shows"
+  end
+
   test "a question with options renders a numbered menu and a digit answers it" do
     ws = tmp_workspace()
 

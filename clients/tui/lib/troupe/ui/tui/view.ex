@@ -16,6 +16,15 @@ defmodule Troupe.UI.TUI.View do
   alias Troupe.Settings
   alias Troupe.UI.TUI.Model
 
+  # Command-box geometry: `@cmd_rows` console rows when the input fits one row,
+  # growing (to a maximum of `@max_content_rows + 2`) as the focused box holds
+  # more: a line that folds past the width, or a pasted / Alt-Enter multiline.
+  # The box always shows the *tail* of the input — the rows the user is
+  # producing right now — never the first rows of a long input, which they
+  # typed rows ago and already saw.
+  @cmd_rows 3
+  @max_content_rows 4
+
   @spec render(map(), ExRatatui.Frame.t()) :: [{term(), Rect.t()}]
   def render(%{focus: :settings} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
@@ -52,33 +61,32 @@ defmodule Troupe.UI.TUI.View do
   def render(state, frame) do
     windows = Model.windows(state.model)
     geometry = pane_geometry(state, {frame.width, frame.height})
+    cmd_rows = box_height(frame.width, frame.height, state)
 
     {strip_rect, _pane_rect, status_rect, cmd_rect} =
-      layout(frame.width, frame.height, geometry != nil, length(windows))
+      layout(frame.width, frame.height, geometry != nil, length(windows), cmd_rows)
 
     strip(windows, strip_rect, state) ++
       if(geometry, do: pane(geometry, state), else: []) ++
-      [status(state, status_rect), command_line(state, cmd_rect)]
+      [status(state, status_rect), command_line(state, cmd_rect, cmd_rows)]
   end
 
   @doc """
   The vertical layout for a frame: `{strip, pane | nil, status, command}` rects.
   With a pane open the strip becomes a compact tray (at most 8 rows) so the
-  transcript gets the screen.
+  transcript gets the screen. `cmd_rows` sets the command box height; callers
+  hand in `box_height/3` so the pane shrinks to leave room for a multiline
+  input's tail.
   """
-  @spec layout(non_neg_integer(), non_neg_integer(), boolean()) ::
+  @spec layout(non_neg_integer(), non_neg_integer(), boolean(), non_neg_integer(), pos_integer()) ::
           {Rect.t(), Rect.t() | nil, Rect.t(), Rect.t()}
-  def layout(width, height, activated?), do: layout(width, height, activated?, 2)
-
-  @spec layout(non_neg_integer(), non_neg_integer(), boolean(), non_neg_integer()) ::
-          {Rect.t(), Rect.t() | nil, Rect.t(), Rect.t()}
-  def layout(width, height, activated?, windows) do
+  def layout(width, height, activated?, windows \\ 2, cmd_rows \\ @cmd_rows) do
     area = %Rect{x: 0, y: 0, width: width, height: height}
 
     constraints =
       if activated?,
-        do: [{:length, tray_height(height, windows)}, {:fill, 1}, {:length, 1}, {:length, 3}],
-        else: [{:fill, 1}, {:length, 1}, {:length, 3}]
+        do: [{:length, tray_height(height, windows)}, {:fill, 1}, {:length, 1}, {:length, cmd_rows}],
+        else: [{:fill, 1}, {:length, 1}, {:length, cmd_rows}]
 
     rects = Layout.split(area, :vertical, constraints)
     {strip_rect, rest} = List.pop_at(rects, 0)
@@ -139,7 +147,13 @@ defmodule Troupe.UI.TUI.View do
 
       w ->
         {_strip, pane_rect, _status, _cmd} =
-          layout(width, height, true, map_size(state.model.windows))
+          layout(
+            width,
+            height,
+            true,
+            map_size(state.model.windows),
+            box_height(width, height, state)
+          )
 
         {left, side} = pane_split(pane_rect)
         inner_w = max(left.width - 2, 1)
@@ -1206,13 +1220,14 @@ defmodule Troupe.UI.TUI.View do
     end
   end
 
-  defp command_line(state, rect) do
+  defp command_line(state, rect), do: command_line(state, rect, @cmd_rows)
+
+  defp command_line(state, rect, box_rows) do
     {text, title} =
       case state.focus do
         :command ->
-          cmd = "/" <> state.cmd_text <> "▏"
-          title = if multiline?(state.cmd_text), do: pasted_title(state.cmd_text), else: " command "
-          {cmd, title}
+          {"#{"/" <> state.cmd_text <> "▏"}",
+           if(multiline?(state.cmd_text), do: pasted_title(state.cmd_text), else: " command ")}
 
         {:window, path} ->
           target = if state.pane.agent in [nil, path], do: "", else: " to the branch root"
@@ -1246,13 +1261,70 @@ defmodule Troupe.UI.TUI.View do
     focused_cmd? = state.focus == :command
 
     {%Paragraph{
-       text: text,
+       text: input_box_text(state, text, box_rows),
        block: %Block{
          title: title,
          borders: [:all],
          border_style: %Style{fg: if(focused_cmd?, do: :white, else: :dark_gray)}
-       }
+       },
+       wrap: false
      }, rect}
+  end
+
+  # The box always shows the *tail* of the input — the rows the user is
+  # producing right now — never the first rows of a long input, which they typed
+  # rows ago and already saw. Fold the last lines to the inner width (hard
+  # breaking so a too-long row's continuation stays visible), then show the last
+  # `content_rows` rows, ending with the cursor marker. The box never scrolls.
+  defp input_box_text(state, text, box_rows) do
+    w = cmd_inner_width(state, box_rows)
+    content = max(box_rows - 2, 1)
+
+    text
+    |> String.split("\n")
+    |> Enum.take(-content)
+    |> Enum.map(&Model.wrap(&1, w, :char))
+    |> List.flatten()
+    |> Enum.take(-content)
+    |> Enum.join("\n")
+  end
+
+  # The inner width the box draws at, matching the layout: the command rect
+  # minus its two border columns.
+  defp cmd_inner_width(%{size: {w, h}} = state, box_rows) do
+    activated? = match?({:window, _}, state.focus)
+    {_, _, _, cmd} = layout(w, h, activated?, 0, box_rows)
+    max(cmd.width - 2, 1)
+  end
+
+  defp cmd_inner_width(_state, _box_rows), do: 120
+
+  # How tall the command box should be: one content row per wrapped row of the
+  # active input, plus the two border rows, up to `@max_content_rows` content
+  # rows, never below `@cmd_rows` (so there is always a content row to type
+  # into) and never so tall it would collapse the pane (leave the strip, status
+  # and at least two pane rows). Folding here matches exactly how the box will
+  # draw it, so the pane always leaves the room the box needs. Everything typed
+  # grows the box; nothing scrolls.
+  defp box_height(width, height, state) do
+    text =
+      case state.focus do
+        {:window, _} -> state.win_text
+        :command -> state.cmd_text
+        _ -> ""
+      end
+
+    w = max(width - 2, 1)
+
+    content =
+      text
+      |> String.split("\n")
+      |> Enum.map(&Model.wrap(&1, w, :char))
+      |> List.flatten()
+      |> length()
+      |> min(@max_content_rows)
+
+    max(@cmd_rows, min(content + 2, height - 5))
   end
 
   # The wizard's free-text steps type into the command line, so the page itself
