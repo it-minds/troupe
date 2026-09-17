@@ -77,6 +77,7 @@ defmodule Troupe.Plane.Admin.Console do
     session_erase: {:screen, :sessions},
     session_erase_preview: {:screen, :sessions},
     runs_list: {:screen, :triggers},
+    run_review: {:screen, :review},
     audit_list: {:screen, :audit},
     audit_verify: {:screen, :audit},
     connections: {:screen, :connections},
@@ -123,9 +124,10 @@ defmodule Troupe.Plane.Admin.Console do
     principal_rotate: {:screen, :identity},
     principal_disable: {:screen, :identity},
 
-    # Integrations likewise: checking whether a pod may reach an MCP host is a question the
-    # profile editor asks while somebody is editing a profile.
+    # Checking one host is a question the profile editor asks while somebody is editing a
+    # profile; Integrations answers it for every host at once, which is a different question.
     mcp_check: {:screen, :profiles},
+    integrations: {:screen, :integrations},
 
     # -- Operate -------------------------------------------------------------
     pod_drain: {:screen, :fleet},
@@ -161,10 +163,7 @@ defmodule Troupe.Plane.Admin.Console do
   """
   @spec unbuilt() :: %{atom() => String.t()}
   def unbuilt do
-    %{
-      review: "what ran unattended and needs a person; exists in the GUI, not here",
-      integrations: "org-level MCP servers and the egress allowlist as an object"
-    }
+    %{}
   end
 
   @doc """

@@ -50,8 +50,10 @@ defmodule Troupe.Plane.Web.AdminRouter do
       live("/budgets", Live.Budgets)
       live("/connections", Live.Connections)
       live("/bundles", Live.Bundles)
+      live("/integrations", Live.Integrations)
       live("/triggers", Live.Triggers)
       live("/triggers/:team", Live.Triggers)
+      live("/review", Live.Review)
       live("/audit", Live.Audit)
       # Readable by a team admin and writable only by a platform admin, which the page
       # enforces per field rather than by not being routed: a team admin who cannot see

@@ -4102,3 +4102,32 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      which is the honest answer — the alternative was refusing to preview against a version
      an older schema wrote, which would make the diff unavailable exactly when a migration
      makes it most worth reading.
+
+617. **Review groups by the trigger and orders by outcome, not by time.** A flat list
+     ordered by time is a list where the one run that failed at three in the morning is
+     nine screens down, and a trigger that fails every night is one problem rather than
+     thirty. Worst first: failed, then waiting on somebody, then the rest.
+
+618. **Reviewed is a state somebody puts a run into, not a filter that hides it.** The page
+     leads with what nobody has read, because that is what makes the list shrink; showing
+     everything brings the rest back with the name of whoever said it was fine. The mark is
+     in the audit trail, because "who said this was fine" is exactly what is asked later.
+
+619. **`runs_list` with no team answers across every team the actor administers.** Review's
+     question is not about one team, and asking it one team at a time is how a run that
+     failed in the team nobody was looking at goes unread. Naming a team still narrows it.
+
+620. **Integrations is read-only, and that is the decision rather than the shortcut.** The
+     allowlist is trustworthy *because* it is generated from what each component declares it
+     dials. One edited in two places is one nobody trusts — so the page names where each
+     host came from and leaves the editing to the thing that declared it.
+
+621. **A notification target is re-checked on the page rather than trusted.** It passed
+     `Notify.validate/1` when it was saved; whether it would pass now is a different
+     question, and the answer is what somebody needs told. The rule is stated beside the
+     list, where a person would otherwise wonder why their localhost target was refused.
+
+622. **Every screen the design names now exists.** `Console.owed/0` and `Console.unbuilt/0`
+     are both empty, which is the first time the two lists have said the console is not
+     behind the API — and the tests that hold them to only shrinking are what will say so
+     the moment it is again.

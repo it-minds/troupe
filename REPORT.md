@@ -2445,3 +2445,56 @@ holds an entitlement naming an entry this version removes".
 
     $ ./scripts/credo
     6649 mods/funs, found no issues.
+
+## R8i — Review, Integrations, and the fifteenth screen
+
+The three screens the design named and the console did not have: **Identity**, **Review**,
+**Integrations**. With `profile_delete` landing on Profiles, both debt lists are empty.
+
+    owed:    %{}
+    unbuilt: []
+
+**Identity** takes the provider check, the groups this plane has actually seen, and every
+service principal with its sponsor onto one screen. Half of it was inside Settings and half
+inside Teams, which is how a sponsor — an identity fact if there ever was one — came to be
+edited on the page about budgets and retention. `identity_check` stays placed on Policy
+because that is where the value it gates is saved, and a save gated on a check somewhere
+else is a gate somebody walks around; Identity runs the same check.
+
+**Review** answers what Triggers does not: of everything that fired, what should somebody
+read? Grouped by the trigger and ordered worst-first, because a flat list by time buries
+the one run that failed at three in the morning, and a trigger that fails every night is one
+problem rather than thirty. Reviewed is a state somebody puts a run into — the page leads
+with what nobody has read, and marking one is in the audit trail with the reviewer's name.
+
+`runs_list` with no team now answers across every team the actor administers. Asking
+Review's question one team at a time is how a run that failed in the team nobody was
+looking at goes unread.
+
+**Integrations** lists the servers more than one profile carries, every host anything here
+dials with the cluster policy's verdict on it, and each trigger's notification target
+re-checked rather than trusted. Read-only on purpose: the allowlist is trustworthy because
+it is generated from what each component declares, and one edited in two places is one
+nobody trusts.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/panel_test.exs \
+        apps/troupe_plane/test/troupe/plane/console_coverage_test.exs
+    Result: 76 passed
+
+    $ ./scripts/credo
+    6706 mods/funs, found no issues.
+
+    $ ./scripts/toolbox mix troupe.boundaries
+    boundaries ok: 3 app rule(s), 1 module rule(s), no violations
+
+    $ ./scripts/toolbox mix troupe.schema.diff
+    schema unchanged: 77 documents
+
+## What R8 still owes
+
+Done item 2 — a platform admin configuring a complete working deployment from the console
+alone, end to end, with every step in the audit trail. Every piece of it now exists; what
+is missing is the walkthrough that proves the pieces join up, which is a test that drives
+the console from an empty plane to a running session.

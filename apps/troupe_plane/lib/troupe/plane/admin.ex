@@ -50,7 +50,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
   alias Troupe.Plane.Settings.Ladder
-  alias Troupe.Plane.Triggers.Revision
+  alias Troupe.Plane.Triggers.{Notify, Revision}
   alias Troupe.Protocol.Bundle, as: Document
   alias Troupe.Protocol.Error
 
@@ -1698,15 +1698,160 @@ defmodule Troupe.Plane.Admin do
   @doc "A team's runs, newest first; `trigger:` narrows to one, `limit:` caps the list."
   @spec runs_list(actor(), keyword()) :: result()
   def runs_list(actor, opts \\ []) do
-    with {:ok, team} <- fetch_team(actor, Keyword.get(opts, :team)) do
-      runs =
-        team
-        |> Triggers.runs(Keyword.take(opts, [:trigger, :limit]))
-        |> Enum.map(fn {run, trigger, session} ->
-          run |> Triggers.run_json(session) |> Map.put("trigger", trigger.name)
-        end)
+    case Keyword.get(opts, :team) do
+      nil -> runs_across_teams(actor, opts)
+      name -> with {:ok, team} <- fetch_team(actor, name), do: {:ok, runs_of(team, opts)}
+    end
+  end
 
-      {:ok, runs}
+  # Every team this actor administers. Review's question — of everything that fired, what
+  # needs a person — is not a question about one team, and asking it one team at a time is
+  # how a run that failed in the team somebody was not looking at goes unread.
+  defp runs_across_teams(actor, opts) do
+    with :ok <- require_admin(actor) do
+      {:ok, actor |> visible_teams() |> Enum.flat_map(&runs_of(&1, opts))}
+    end
+  end
+
+  defp runs_of(team, opts) do
+    team
+    |> Triggers.runs(Keyword.take(opts, [:trigger, :limit]))
+    |> Enum.map(fn {run, trigger, session} ->
+      run |> Triggers.run_json(session) |> Map.put("trigger", trigger.name)
+    end)
+  end
+
+  @doc """
+  Mark a run reviewed, by the session it created.
+
+  What Review is for. A run that ended badly and that nobody has looked at is the state the
+  whole screen exists to empty, and an administrator who has looked at one has to be able
+  to say so — otherwise the list is a backlog that only grows and stops being read.
+
+  Keyed by the session rather than the run, because that is the identifier a person has in
+  front of them and the one the run already carries. A run that created no session cannot
+  be reviewed: there is nothing to have looked at.
+  """
+  @spec run_review(actor(), String.t()) :: result()
+  def run_review(actor, session_id) do
+    with :ok <- require_admin(actor),
+         {:ok, session} <- fetch_session(actor, session_id) do
+      :ok = Triggers.reviewed(session.id, actor.subject)
+      {:ok, _} = Audit.record(actor.subject, "run.review", session.id, %{}, kind: "run")
+      {:ok, %{session_id: session.id, reviewed_by: actor.subject}}
+    end
+  end
+
+  @doc """
+  What this plane talks to that is not a person: servers, hosts and notification targets.
+
+  Three lists that were each somebody's private knowledge, and each of them answers a
+  question that has been answered by reading a values file until now.
+
+  * **Servers on more than one profile.** A server carried by two bundles is an
+    organisation's integration rather than one profile's, and it is connected, credentialed
+    and retired once. Which profiles carry it is the useful column, because it is the blast
+    radius of retiring it.
+  * **Every host anything here dials**, each marked allowed or not by the same
+    `ClusterPolicy.egress_allowed?/1` a pod's NetworkPolicy is generated from. A host in a
+    bundle that the policy refuses is a tool that will fail at the moment somebody uses it,
+    and this is where that is visible before then rather than after.
+  * **Notification targets**, with the rule they are held to: absolute, and not loopback.
+    A relative target resolved against the plane's own base URL is the advisory LangGraph
+    shipped in 2026, and it is cheaper to have this check than to explain it.
+
+  Read-only. The allowlist is generated from what each component declares it dials, and an
+  allowlist edited in two places is an allowlist nobody trusts — so this page says where
+  each host comes from and leaves editing to the thing that declared it.
+  """
+  @spec integrations(actor()) :: result()
+  def integrations(actor) do
+    with :ok <- require_admin(actor) do
+      servers = servers_by_profile()
+
+      {:ok,
+       %{
+         servers: Enum.filter(servers, &(length(&1.profiles) > 1)),
+         profile_servers: Enum.reject(servers, &(length(&1.profiles) > 1)),
+         egress: egress_hosts(servers),
+         notify: notify_targets(actor)
+       }}
+    end
+  end
+
+  # Every MCP server any channel's current bundle carries, with the profiles that carry it.
+  defp servers_by_profile do
+    for profile <- Fleet.list_profiles(),
+        server <- bundle_servers(profile),
+        reduce: %{} do
+      acc ->
+        entry =
+          Map.get(acc, server.name, %{
+            name: server.name,
+            url: server.url,
+            credential_mode: to_string(server.credential_mode),
+            credential_ref: server.credential_ref,
+            profiles: []
+          })
+
+        Map.put(acc, server.name, %{entry | profiles: Enum.uniq([profile.name | entry.profiles])})
+    end
+    |> Map.values()
+    |> Enum.sort_by(& &1.name)
+  end
+
+  defp bundle_servers(%{config_bundle_channel: channel}) do
+    with %{} = bundle <- Bundles.current(channel),
+         {:ok, %{mcp_servers: servers}} <- Document.validate(bundle.content) do
+      servers
+    else
+      _absent -> []
+    end
+  end
+
+  defp bundle_servers(_profile), do: []
+
+  # The hosts, each against the policy that will actually decide. Two sources today —
+  # a server's URL and a profile's declared FQDNs — and the source is named because the
+  # repair is made where the host was declared rather than here.
+  defp egress_hosts(servers) do
+    from_servers =
+      for server <- servers,
+          {:ok, host} <- [host_of(server.url)],
+          do: %{host: host, from: server.name}
+
+    from_profiles =
+      for profile <- Fleet.list_profiles(),
+          host <- get_in(profile.spec || %{}, ["egress", "fqdns"]) || [],
+          do: %{host: host, from: profile.name}
+
+    (from_servers ++ from_profiles)
+    |> Enum.uniq_by(& &1.host)
+    |> Enum.sort_by(& &1.host)
+    |> Enum.map(&Map.put(&1, :allowed, ClusterPolicy.egress_allowed?(&1.host)))
+  end
+
+  # Where a trigger sends its outcome, and whether that target still passes the rule it
+  # was accepted under. Checked again here rather than trusted: a target that was allowed
+  # when it was saved and is not now is exactly what somebody needs told.
+  defp notify_targets(actor) do
+    for team <- visible_teams(actor),
+        trigger <- Triggers.list(team),
+        is_binary(trigger.notify_url),
+        trigger.notify_url != "" do
+      %{
+        team: team.name,
+        trigger: trigger.name,
+        url: trigger.notify_url,
+        refusal: refusal_for(trigger.notify_url)
+      }
+    end
+  end
+
+  defp refusal_for(url) do
+    case Notify.validate(url) do
+      :ok -> nil
+      {:error, reason} -> reason
     end
   end
 

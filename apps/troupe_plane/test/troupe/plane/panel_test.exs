@@ -25,6 +25,7 @@ defmodule Troupe.Plane.PanelTest do
   }
 
   alias Troupe.Plane.Identity.ServicePrincipal
+  alias Troupe.Plane.Triggers.Run
   alias Troupe.Plane.Web.Live.ProfileEditor
 
   @moduletag timeout: 60_000
@@ -493,6 +494,145 @@ defmodule Troupe.Plane.PanelTest do
       assert [server] = draft["spec"]["mcpServers"]
       assert server["name"] == "jira"
       assert server["timeoutMs"] == 5000
+    end
+  end
+
+  describe "the review page" do
+    setup context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "nightly-bot", profiles: ["dev"]})
+
+      {:ok, trigger} =
+        Triggers.put(
+          context.engineering,
+          %{
+            "name" => "nightly",
+            "principal" => principal.subject,
+            "profile" => "dev",
+            "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"},
+            "prompt_template" => "Update every dependency."
+          },
+          "root"
+        )
+
+      # A session that ended badly. The run row is written here rather than fired, because
+      # firing one would create a session on a worker and what is under test is the screen.
+      failed = session!(context.engineering, "dev")
+
+      failed
+      |> Ecto.Changeset.change(%{status: "interrupted"})
+      |> Repo.update!()
+
+      # The revision the run ran, which every firing names: a run is answered against the
+      # document as it was, not as it is now.
+      {:ok, revision} = Triggers.revise(trigger, "root")
+
+      run =
+        %Run{}
+        |> Run.changeset(%{
+          trigger_id: trigger.id,
+          revision_id: revision.id,
+          idempotency_key: "nightly-#{System.unique_integer([:positive])}",
+          session_id: failed.id,
+          fired_at: DateTime.utc_now(),
+          fired_by: "schedule",
+          source: "schedule",
+          event: %{},
+          payload_digest: "sha256:none",
+          state: "created"
+        })
+        |> Repo.insert!()
+
+      %{trigger: trigger, run: run, session: failed}
+    end
+
+    test "leads with what needs a person, grouped by what fired it", context do
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/review")
+
+      assert html =~ "nightly"
+      assert html =~ "failed"
+
+      # Unreviewed, and said as a word rather than as an empty cell somebody has to
+      # interpret.
+      assert html =~ "nobody"
+      assert html =~ "mark read"
+    end
+
+    test "and marking one read takes it off the list, with the reviewer's name", context do
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/review")
+
+      html =
+        view
+        |> element(~s(button[phx-value-session="#{context.session.id}"]))
+        |> render_click()
+
+      assert html =~ "marked read"
+
+      # It is gone from the default view, because reviewed is a state somebody put it in
+      # rather than a filter that hides it — and showing everything brings it back with the
+      # name of whoever said it was fine.
+      refute html =~ "mark read"
+
+      html = view |> element("#review-scope") |> render_submit()
+      assert html =~ context.root.subject
+    end
+  end
+
+  describe "the integrations page" do
+    test "checks every host against the policy that will actually decide", context do
+      # A policy that allows nothing, which is the seam the bundle validator uses too.
+      Application.put_env(:troupe_plane, :egress_allowed, fn host -> host == "ok.example" end)
+      on_exit(fn -> Application.delete_env(:troupe_plane, :egress_allowed) end)
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          spec: %{"egress" => %{"fqdns" => ["ok.example", "refused.example"]}}
+        })
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/integrations")
+
+      assert html =~ "ok.example"
+      assert html =~ "refused.example"
+      assert html =~ "allowed"
+      assert html =~ "refused"
+
+      # And where the host was declared, because that is where the repair is made.
+      assert html =~ "declared by"
+      assert html =~ "dev"
+    end
+
+    test "and re-checks a notification target rather than trusting that it passed once",
+         context do
+      {:ok, principal, _secret} =
+        principal!(context.engineering, %{name: "nightly-bot", profiles: ["dev"]})
+
+      {:ok, _} =
+        Triggers.put(
+          context.engineering,
+          %{
+            "name" => "nightly",
+            "principal" => principal.subject,
+            "profile" => "dev",
+            "source" => %{"kind" => "schedule", "cron" => "0 3 * * *"},
+            "prompt_template" => "Update every dependency.",
+            "notify_url" => "https://hooks.example/troupe"
+          },
+          "root"
+        )
+
+      {:ok, _view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/integrations")
+
+      assert html =~ "Where outcomes are sent"
+      assert html =~ "hooks.example"
+
+      # The rule it is held to is stated where somebody would otherwise wonder why their
+      # localhost target was refused.
+      assert html =~ "must name a host"
     end
   end
 

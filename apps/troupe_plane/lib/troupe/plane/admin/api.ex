@@ -477,6 +477,28 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.integrations.list",
+      function: :integrations,
+      summary:
+        "What this plane talks to that is not a person: MCP servers carried by more than one profile, every host anything here dials with whether the cluster policy allows it, and each trigger's notification target with the rule it is held to.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.run.review",
+      function: :run_review,
+      summary:
+        "Mark the run behind a session as looked at, by whoever is asking. What Review is for: a run that ended badly and that nobody has read is the state that screen exists to empty.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "session_id",
+          type: :string,
+          required: true,
+          description: "The session the run created."
+        }
+      ]
+    },
+    %Method{
       name: "admin.audit.verify",
       function: :audit_verify,
       summary:
@@ -939,7 +961,8 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.runs.list",
       function: :runs_list,
-      summary: "A team's trigger runs, newest first.",
+      summary:
+        "Trigger runs, newest first: one team's where a team is named, and every team you administer where none is.",
       risk: :read,
       arguments: [
         %Argument{
