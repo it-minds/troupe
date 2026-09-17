@@ -19,9 +19,11 @@ defmodule Troupe.SettingsTest do
       cfg = %Config{}
 
       for field <- Settings.fields() do
-        # `nil` is a real value for an override that means "inherit"; every other
-        # field must have a default, and all of them must render.
-        assert Settings.get(cfg, field.key) != nil or field.type == :effort, field.key
+        # `nil` is a real value for an override that means "inherit" — the
+        # provider's own effort, and the default model for `models.expensive`;
+        # every other field must have a default, and all of them must render.
+        inherits? = field.type == :effort or field.key == "models.expensive"
+        assert Settings.get(cfg, field.key) != nil or inherits?, field.key
         assert is_binary(Settings.format(cfg, field.key)), field.key
       end
     end

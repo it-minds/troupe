@@ -2,7 +2,8 @@ defmodule Troupe.Config do
   @moduledoc """
   Harness configuration: platform config dir `config.yaml`, overridden key-wise
   by the project's `.troupe/config.yaml`, overridden by environment variables
-  (`TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`), then
+  (`TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`,
+  `TROUPE_EXPENSIVE_MODEL`), then
   by explicit overrides passed to `Troupe.start_session/1`. `TROUPE_AUTH_TOKEN`
   is `TROUPE_API_KEY` sent as `Authorization: Bearer`, for a gateway that speaks
   a provider's API but not its authentication.
@@ -18,6 +19,7 @@ defmodule Troupe.Config do
           models: %{
             default: String.t(),
             cheap: String.t(),
+            expensive: String.t() | nil,
             windows: %{optional(String.t()) => pos_integer()}
           },
           reasoning_effort: String.t() | nil,
@@ -95,7 +97,12 @@ defmodule Troupe.Config do
             base_url: nil,
             api_key: nil,
             auth: :api_key,
-            models: %{default: "claude-sonnet-5", cheap: "claude-haiku-4-5-20251001", windows: %{}},
+            models: %{
+              default: "claude-sonnet-5",
+              cheap: "claude-haiku-4-5-20251001",
+              expensive: nil,
+              windows: %{}
+            },
             reasoning_effort: nil,
             max_branches: 8,
             compaction: %{fraction: 0.8, keep_last_turns: 4},
@@ -236,8 +243,9 @@ defmodule Troupe.Config do
   @doc """
   Every model this configuration can address, in menu order: the models each
   named provider declares (from `config.yaml` or from opencode), any model with
-  a context window of its own, and whatever `models.default` and `models.cheap`
-  currently name, so the value in use is always in the list.
+  a context window of its own, and whatever `models.default`, `models.cheap`
+  and `models.expensive` currently name, so the value in use is always in the
+  list.
   """
   @spec models(t()) :: [model_choice()]
   def models(%__MODULE__{} = cfg) do
@@ -264,7 +272,9 @@ defmodule Troupe.Config do
       end)
 
     current =
-      Enum.map([cfg.models.default, cfg.models.cheap], fn id ->
+      [cfg.models.default, cfg.models.cheap, cfg.models.expensive]
+      |> Enum.reject(&is_nil/1)
+      |> Enum.map(fn id ->
         {provider, model} = split_model(cfg, id)
 
         choice(
@@ -375,7 +385,7 @@ defmodule Troupe.Config do
 
     """
     provider: #{inspect(cfg.provider)} base_url=#{cfg.base_url || "(default)"} key=#{mask(cfg.api_key)} auth=#{cfg.auth}
-    models: default=#{cfg.models.default} cheap=#{cfg.models.cheap} reasoning_effort=#{cfg.reasoning_effort || "(provider default)"}
+    models: default=#{cfg.models.default} cheap=#{cfg.models.cheap} expensive=#{cfg.models.expensive || "(default)"} reasoning_effort=#{cfg.reasoning_effort || "(provider default)"}
     watch: #{if cfg.watch.enabled, do: "on", else: "off"} AI!=/#{cfg.watch.change_command} AI?=/#{cfg.watch.question_command}
     named providers (use as <name>/<model>):
     #{if providers == "", do: "  (none; add `providers:` to config.yaml or set up opencode)", else: providers}
@@ -409,6 +419,7 @@ defmodule Troupe.Config do
             cond do
               m.id == cfg.models.default -> "  <- default"
               m.id == cfg.models.cheap -> "  <- cheap"
+              m.id == cfg.models.expensive -> "  <- expensive"
               true -> ""
             end
 
@@ -436,6 +447,7 @@ defmodule Troupe.Config do
               cond do
                 m.id == cfg.models.default -> "  <- default"
                 m.id == cfg.models.cheap -> "  <- cheap"
+                m.id == cfg.models.expensive -> "  <- expensive"
                 true -> ""
               end
 
@@ -495,6 +507,11 @@ defmodule Troupe.Config do
   def resolve_model(%__MODULE__{} = cfg, alias) when alias in ["cheap", :cheap],
     do: cfg.models.cheap
 
+  # An unset `expensive` is the default model, so an orchestrator profile still
+  # runs on a provider that has no premium tier configured.
+  def resolve_model(%__MODULE__{} = cfg, alias) when alias in ["expensive", :expensive],
+    do: cfg.models.expensive || cfg.models.default
+
   def resolve_model(%__MODULE__{}, model) when is_binary(model), do: model
 
   @doc """
@@ -553,6 +570,7 @@ defmodule Troupe.Config do
         models: %{
           default: Map.get(models, "default", cfg.models.default),
           cheap: Map.get(models, "cheap", cfg.models.cheap),
+          expensive: Map.get(models, "expensive", cfg.models.expensive),
           windows: Map.get(models, "windows", cfg.models.windows)
         },
         reasoning_effort: effort(Map.get(yaml, "reasoning_effort")) || cfg.reasoning_effort,
@@ -682,6 +700,12 @@ defmodule Troupe.Config do
       case System.get_env("TROUPE_MODEL") do
         nil -> c
         m -> %{c | models: %{c.models | default: m}, models_explicit?: true}
+      end
+    end)
+    |> then(fn c ->
+      case System.get_env("TROUPE_EXPENSIVE_MODEL") do
+        nil -> c
+        m -> %{c | models: %{c.models | expensive: m}}
       end
     end)
   end

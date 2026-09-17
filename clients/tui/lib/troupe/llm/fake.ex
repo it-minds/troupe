@@ -46,10 +46,27 @@ defmodule Troupe.LLM.Fake do
   def requests(pid), do: GenServer.call(pid, :requests)
   def call_count(pid), do: GenServer.call(pid, :call_count)
 
-  @doc "Loads a script from a JSON file (used by `TROUPE_PROVIDER=fake`)."
-  @spec load_script(String.t()) :: list()
+  @doc """
+  Loads a script from a JSON file (used by `TROUPE_PROVIDER=fake`). A bare JSON
+  array is the default script; an object scripts a whole agent tree:
+
+      {"script": [...], "scripts": {"workflow-1/implementer-1": [...]}}
+
+  Returns `{script, scripts}` so a delegating agent and its children can each
+  have their own turns.
+  """
+  @spec load_script(String.t()) :: {list(), %{optional(String.t()) => list()}}
   def load_script(path) do
-    path |> File.read!() |> Jason.decode!() |> Enum.map(&decode_turn/1)
+    case path |> File.read!() |> Jason.decode!() do
+      list when is_list(list) ->
+        {Enum.map(list, &decode_turn/1), %{}}
+
+      %{} = obj ->
+        {Enum.map(Map.get(obj, "script", []), &decode_turn/1),
+         obj
+         |> Map.get("scripts", %{})
+         |> Map.new(fn {prefix, turns} -> {prefix, Enum.map(turns, &decode_turn/1)} end)}
+    end
   end
 
   defp decode_turn(%{"text" => t}), do: {:text, t}

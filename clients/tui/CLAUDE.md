@@ -31,6 +31,9 @@ build from before your change is this, not a build failure: check `troupe
 config` against `scripts/dev config`.
 
 Manual smoke without a model: `TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/fake_scripts/smoke.json scripts/dev run code smoke --headless --auto-approve`.
+The same for the `/workflow` orchestration (one script per agent path in the
+fixture, the orchestrator's under `workflow-1`):
+`TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=$PWD/fixtures/fake_scripts/workflow.json scripts/dev run workflow "add a greeting" --headless --auto-approve --workspace <a fresh git repo>`.
 Real providers come from `~/.config/troupe/config.yaml`, env (`TROUPE_*`), or
 opencode's `~/.config/opencode/opencode.jsonc` as a fallback; `scripts/dev config` shows the resolution.
 

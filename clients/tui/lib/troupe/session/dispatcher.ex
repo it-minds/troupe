@@ -396,16 +396,19 @@ defmodule Troupe.Session.Dispatcher do
 
   ## Dispatch
 
-  # `/workflow <name> <task>` (or `<task>`) turns the task into a plan and
-  # dispatches the `workflow` agent in an isolated worktree. The prompt the
-  # user typed is translated, everything else is plain dispatch.
+  # `/workflow <name> <task>` (or `<task>`) turns the task into an orchestration
+  # plan — the ordered steps and the subagent that owns each — and dispatches the
+  # `workflow` orchestrator in an isolated worktree. The prompt the user typed is
+  # translated, everything else is plain dispatch.
   defp dispatch(state, "workflow", args, source) do
     {prompt, opts} = normalize_args(args)
     {wf_name, task} = Troupe.Workflow.split(state.workspace, prompt)
     task = if task == "", do: prompt, else: task
     steps = Troupe.Workflow.load(state.workspace, wf_name)
     plan = Troupe.Workflow.plan(steps, task)
-    do_dispatch(state, "workflow", %{prompt: plan}, source, opts)
+    # The plan is generated text, not something to parse for a worktree name:
+    # its first line is `Task: <task>`, which reads as `<name>: <prompt>`.
+    do_dispatch(state, "workflow", %{prompt: plan}, source, Map.put(opts, :parse_target, false))
   end
 
   defp dispatch(state, name, args, source) do
@@ -428,7 +431,7 @@ defmodule Troupe.Session.Dispatcher do
           isolation = Map.get(opts, :isolation) || def.isolation
 
           with {:ok, prompt, branch_id, existing} <-
-                 worktree_target(state, isolation, path, prompt) do
+                 worktree_target(state, isolation, path, prompt, Map.get(opts, :parse_target, true)) do
             spawn_window(state, name, path, n, %{
               isolation: isolation,
               prompt: prompt,
@@ -496,7 +499,12 @@ defmodule Troupe.Session.Dispatcher do
   # worktree of that name, created the first time and reused after (Decision 42);
   # `<existing> <prompt>` is a worktree the user checked out themselves (Decision 39);
   # anything else is all prompt and gets the automatic `<agent>-<n>` worktree.
-  defp worktree_target(state, :worktree, default_id, prompt) do
+  # A generated prompt (`/workflow`'s plan) is never parsed: `parse?` is false and
+  # the branch takes the automatic `<agent>-<n>` worktree.
+  defp worktree_target(_state, _isolation, default_id, prompt, false),
+    do: {:ok, prompt, default_id, nil}
+
+  defp worktree_target(state, :worktree, default_id, prompt, _parse?) do
     case named_worktree(prompt) do
       {:ok, wt_name, rest} ->
         named_target(state, wt_name, rest)
@@ -510,7 +518,7 @@ defmodule Troupe.Session.Dispatcher do
     end
   end
 
-  defp worktree_target(_state, _isolation, default_id, prompt),
+  defp worktree_target(_state, _isolation, default_id, prompt, _parse?),
     do: {:ok, prompt, default_id, nil}
 
   defp named_target(state, wt_name, prompt) do

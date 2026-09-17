@@ -371,12 +371,46 @@ Like the survey, the brief is derived and never authoritative: it is not an
 event, replay ignores it, and `list_files`/`grep`/`read_file` remain the truth
 about current contents.
 
+## 4.7b Workflows (orchestration)
+
+`Troupe.Workflow` is a pure module: it loads an ordered list of steps and
+renders the prompt for one. A step is `%{name, prompt, agent, parallel}` —
+`agent` naming the **subagent responsible for it**, `nil` meaning the
+orchestrator's own step. `Workflow.load/2` reads
+`.troupe/workflows/<name>.json` (a missing, unparseable or empty file falls
+back to `default_steps/0`), `Workflow.split/2` resolves `<name> <task>` or
+`<name>: <task>` off the dispatch prompt, and `Workflow.plan/2` renders the
+task, the step list with each step's owner, and the delegation rules.
+
+Running a workflow is `Dispatcher.dispatch(state, "workflow", …)` with that
+plan as the prompt, so every existing mechanism applies unchanged: branch
+window, `:worktree` isolation, approvals, budgets, resume. Two properties
+belong to this layer rather than to the prompt:
+
+* The `workflow` definition denies `write_file`, `edit_file` and `shell`. The
+  orchestrator delegates or it does nothing, and the worktree is still
+  committed by `Agent.Server.maybe_commit/2` on `finish`, not by the agent.
+* The plan is **generated** text beginning `Task: <task>`, which the
+  `<name>: <prompt>` worktree syntax would otherwise claim as a worktree name,
+  so this dispatch passes `parse_target: false` and takes the automatic
+  `<agent>-<n>` worktree.
+
+Subagents inherit the orchestrator's worktree as their workspace
+(`Agent.Server.spawn_child/5` passes `workspace: data.state.workspace`) and may
+delegate further, up to `config.max_delegation_depth`.
+
 ## 4.8 Model catalog
 
 What a provider says about its own models — context window, output cap, price —
 cached in `models.json` in the config dir, keyed by the addressable id
 (`portal/glm-5.2`, or a bare id for the session-wide provider), which is exactly
 what `models.default` takes.
+
+A definition's `model:` is one of three aliases or a model named outright.
+`Config.resolve_model/2` maps `default` and `cheap` to their settings, and
+`expensive` — the orchestrator tier — to `models.expensive` **or**
+`models.default` when that is unset, so a provider with no premium tier still
+runs the `workflow` profile.
 
 `Troupe.LLM.Catalog` is the pure format module: `parse/2` for the three shapes
 that exist, `describe_price/1`, `cost/2`, and the cache-file mapping. It never

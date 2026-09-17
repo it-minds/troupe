@@ -1,0 +1,91 @@
+{
+  "scripts": {
+    "workflow-1": [
+      {
+        "tool": "todo_write",
+        "input": {
+          "items": [
+            {
+              "id": "1",
+              "content": "understand (explore)",
+              "status": "in_progress"
+            },
+            {
+              "id": "2",
+              "content": "implement (implementer)",
+              "status": "pending"
+            },
+            {
+              "id": "3",
+              "content": "verify (reviewer)",
+              "status": "pending"
+            }
+          ]
+        }
+      },
+      {
+        "tool": "delegate",
+        "input": {
+          "agent": "explore",
+          "prompt": "Report what this repository is and where the entry point lives."
+        }
+      },
+      {
+        "tool": "delegate",
+        "input": {
+          "agent": "implementer",
+          "prompt": "Write hello.txt containing a greeting. Touch no other file."
+        }
+      },
+      {
+        "tool": "delegate",
+        "input": {
+          "agent": "reviewer",
+          "prompt": "Confirm hello.txt exists and says what it should."
+        }
+      },
+      {
+        "finish": "orchestrated: explore researched, implementer wrote hello.txt, reviewer confirmed it"
+      }
+    ],
+    "workflow-1/explore-1": [
+      {
+        "tool": "list_files",
+        "input": {
+          "path": "."
+        }
+      },
+      {
+        "finish": "a fixture workspace; nothing to read"
+      }
+    ],
+    "workflow-1/implementer-1": [
+      {
+        "tool": "write_file",
+        "input": {
+          "path": "hello.txt",
+          "content": "hello from the workflow\n"
+        }
+      },
+      {
+        "finish": "wrote hello.txt"
+      }
+    ],
+    "workflow-1/reviewer-1": [
+      {
+        "tool": "shell",
+        "input": {
+          "command": "cat hello.txt"
+        }
+      },
+      {
+        "finish": "hello.txt exists and reads 'hello from the workflow'"
+      }
+    ]
+  },
+  "script": [
+    {
+      "finish": "fixture workspace; no brief to write"
+    }
+  ]
+}

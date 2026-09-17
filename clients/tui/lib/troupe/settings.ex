@@ -234,6 +234,19 @@ defmodule Troupe.Settings do
       """
     },
     %{
+      key: "models.expensive",
+      label: "expensive model",
+      type: :model,
+      path: [:models, :expensive],
+      yaml: ["models", "expensive"],
+      effect: :new_branches,
+      help: """
+      The model for agents whose definition asks for the "expensive" alias — the
+      `workflow` orchestrator, which reads, plans and hands every step to a
+      subagent rather than doing the work itself. Unset, it is the default model.
+      """
+    },
+    %{
       key: "reasoning_effort",
       label: "reasoning effort",
       type: :effort,
@@ -562,8 +575,9 @@ defmodule Troupe.Settings do
          "/worktree <prompt>    same, but in an isolated git worktree",
          "/worktree <name>: <p>  in a worktree of that name, created if it is new",
          "/worktree <wt> <p>    run in a worktree you already checked out",
-         "/workflow <task>      run the named engineering pipeline (branch, describe,",
-         "                      implement, test, verify) in a worktree it commits",
+         "/workflow <task>      orchestrate the engineering pipeline: an expensive",
+         "                      orchestrator delegates every step to a subagent, in a",
+         "                      worktree it commits when the last step is done",
          "/workflow plan: <t>   run the `plan` workflow from .troupe/workflows/*.json",
          "@path                 Tab-completes a file path into the prompt",
          "/agents               list the agents this workspace defines",

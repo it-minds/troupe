@@ -253,11 +253,14 @@ defmodule Troupe do
     if Process.whereis(Troupe.LLM.Fake) do
       :ok
     else
-      script = if config.fake_script, do: Troupe.LLM.Fake.load_script(config.fake_script), else: []
+      {script, scripts} =
+        if config.fake_script,
+          do: Troupe.LLM.Fake.load_script(config.fake_script),
+          else: {[], %{}}
 
       case DynamicSupervisor.start_child(
              Troupe.Providers,
-             {Troupe.LLM.Fake, [name: Troupe.LLM.Fake, script: script]}
+             {Troupe.LLM.Fake, [name: Troupe.LLM.Fake, script: script, scripts: scripts]}
            ) do
         {:ok, _} -> :ok
         {:error, {:already_started, _}} -> :ok

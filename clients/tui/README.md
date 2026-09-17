@@ -144,6 +144,8 @@ Inside the TUI, everything starts with `/`:
 | `/worktree <prompt>` | same, in its own git worktree; then `/merge` or `/discard` |
 | `/worktree <name>: <prompt>` | run in a Troupe worktree of that name, created the first time and reused after |
 | `/worktree <existing> <prompt>` | run in a worktree you already checked out (Tab completes them); nothing is committed for you |
+| `/workflow <task>` | orchestrate the engineering pipeline in a worktree: an expensive orchestrator delegates every step to a subagent |
+| `/workflow <name> <task>` | the same, with the steps from `.troupe/workflows/<name>.json` |
 | `/plan <prompt>` | investigate and write a task list; read-only |
 | `/ask <question>` | answer across finished branches with the cheap model |
 | `/watch` | toggle AI-comment watch mode |
@@ -291,9 +293,11 @@ Agent definitions are markdown files with YAML frontmatter; the filename is
 the name and every `primary` one is a command. Project `.troupe/agents/`
 overrides the global `agents/` dir which overrides the built-ins (`code`,
 `worktree`, `plan`, `workflow`, `ask`, the watch-mode pair `quick` and `answer`,
-and the subagents `general`, `explore` and `librarian`).
+and the subagents `general`, `explore`, `implementer`, `reviewer` and
+`librarian`).
 
-A definition's `model:` is `default`, `cheap`, or a model named outright, and
+A definition's `model:` is `default`, `cheap`, `expensive`, or a model named
+outright, and
 `reasoning_effort:` (`none` | `minimal` | `low` | `medium` | `high` | `xhigh`,
 or a token budget) says how much thinking its turns are worth. That beats what a
 provider declares for the model, which beats the global `reasoning_effort`
@@ -309,6 +313,46 @@ unattended; a definition can change either with a `permissions:` block.
 `web_fetch` is a GET that returns a URL as text, HTML reduced to readable text
 with its links kept, so an agent can read the documentation it is pointed at
 instead of guessing; `explore` and `plan` have it as well.
+
+### Workflows
+
+`/workflow <task>` runs an *orchestration* rather than one agent doing
+everything. The `workflow` agent is the expensive one — `model: expensive`, and
+it cannot write a file, edit a file or run a command. What it does is decide:
+it writes the step list as its todo list, hands each step to the subagent that
+owns it, judges what comes back, and carries each result into the next step's
+prompt. The steps run in its own git worktree, which is committed on `finish`
+and reviewed with `/merge` or `/discard`, exactly like `/worktree`.
+
+The bundled pipeline is `understand` (`explore`), `plan` (the orchestrator
+itself), `implement`, `test` and `document` (`implementer`), then `verify`
+(`reviewer` — it runs the build, tests and lint, reads the diff and reports
+problems, but is not allowed to fix them). Those subagents delegate further
+themselves, up to `max_delegation_depth`; `/observer` shows the whole tree.
+
+A project defines its own pipelines as `.troupe/workflows/<name>.json`, and
+`/workflow <name> <task>` runs one:
+
+```json
+[
+  {"name": "research", "agent": "explore", "prompt": "Find every call site of ..."},
+  {"name": "decide", "prompt": "Pick the approach and write the todo list."},
+  {"name": "port", "agent": "implementer", "prompt": "Apply the change ...", "parallel": true},
+  {"name": "docs", "agent": "implementer", "prompt": "Update the guide ...", "parallel": true},
+  {"name": "verify", "agent": "reviewer", "prompt": "mix test && mix credo --strict"}
+]
+```
+
+`agent` is the subagent responsible for the step; leave it out and the
+orchestrator does that step itself. `parallel` marks steps that may be
+delegated in one turn, which runs them concurrently — only do that for steps
+that write disjoint files. A file that is missing or does not parse falls back
+to the bundled pipeline rather than failing the run.
+
+`models.expensive` is what `model: expensive` resolves to; unset, it is
+`models.default`, so the orchestrator still runs on a provider with no premium
+tier. Set it in `config.yaml`, on the settings page, or with
+`TROUPE_EXPENSIVE_MODEL`.
 
 ```markdown
 ---

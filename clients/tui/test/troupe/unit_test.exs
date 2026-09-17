@@ -61,7 +61,21 @@ defmodule Troupe.UnitTest do
       ~s([{"tool": "write_file", "input": {"path": "a", "content": "b"}}, {"finish": "done"}])
     )
 
-    assert [{:tool, "write_file", %{"path" => "a"}}, {:finish, "done"}] =
+    assert {[{:tool, "write_file", %{"path" => "a"}}, {:finish, "done"}], %{}} =
+             Troupe.LLM.Fake.load_script(path)
+  end
+
+  test "a fake script file can script a whole agent tree" do
+    path = Path.join(System.tmp_dir!(), "tree-#{System.unique_integer([:positive])}.json")
+
+    File.write!(path, ~s({
+      "script": [{"tool": "delegate", "input": {"agent": "implementer", "prompt": "go"}},
+                 {"finish": "orchestrated"}],
+      "scripts": {"workflow-1/implementer-1": [{"finish": "did the step"}]}
+    }))
+
+    assert {[{:tool, "delegate", %{"agent" => "implementer"}}, {:finish, "orchestrated"}],
+            %{"workflow-1/implementer-1" => [{:finish, "did the step"}]}} =
              Troupe.LLM.Fake.load_script(path)
   end
 
@@ -72,5 +86,18 @@ defmodule Troupe.UnitTest do
     assert cfg.max_branches == 3
     assert Troupe.Config.resolve_model(cfg, "default") == "x"
     assert Troupe.Config.resolve_model(cfg, "literal-model") == "literal-model"
+  end
+
+  test "the expensive model alias falls back to the default until it is set" do
+    cfg = Troupe.Config.load(System.tmp_dir!(), %{models: %{default: "x"}})
+    assert cfg.models.expensive == nil
+    assert Troupe.Config.resolve_model(cfg, "expensive") == "x"
+    assert Troupe.Config.describe(cfg) =~ "expensive=(default)"
+
+    premium = Troupe.Config.load(System.tmp_dir!(), %{models: %{default: "x", expensive: "big"}})
+    assert Troupe.Config.resolve_model(premium, "expensive") == "big"
+    assert Troupe.Config.describe(premium) =~ "expensive=big"
+    # the alias in use is always addressable from the settings menu
+    assert Enum.any?(Troupe.Config.models(premium), &(&1.id == "big"))
   end
 end
