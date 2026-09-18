@@ -4,7 +4,7 @@ defmodule Troupe.A2A.MixProject do
   def project do
     [
       app: :troupe_a2a,
-      version: "0.2.0",
+      version: File.read!("../../VERSION") |> String.trim(),
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",

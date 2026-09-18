@@ -132,6 +132,10 @@ defmodule Troupe.Plane.Admin.Console do
     # -- Operate -------------------------------------------------------------
     pod_drain: {:screen, :fleet},
     provisioners: {:screen, :provisioners},
+    hosts_list: {:screen, :provisioners},
+    host_register: {:screen, :provisioners},
+    host_rotate: {:screen, :provisioners},
+    host_set_enabled: {:screen, :provisioners},
     profiles_list: {:screen, :fleet},
     provisioning_mode: {:screen, :profiles},
     person_budget: {:screen, :teams},

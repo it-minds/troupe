@@ -314,6 +314,134 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  Every machine registered to a profile, and whether each has ever been seen.
+
+  `Troupe.Plane.Fleet.Hosts` has existed since R6 and nothing called it: a host could be
+  registered by a function in the plane and by no person anywhere, which made the
+  single-machine case a feature the code had and the product did not.
+
+  "Registered and never seen" is its own state and is the one somebody needs. A host that
+  has never enrolled is a worker somebody has not installed yet; one that enrolled and went
+  quiet is a machine that is off, or a secret that was rotated out from under it.
+  """
+  @spec hosts_list(actor(), String.t()) :: result()
+  def hosts_list(actor, profile) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, _profile} <- fetch_profile(profile) do
+      {:ok, profile |> Fleet.Hosts.for_profile() |> Enum.map(&host_summary/1)}
+    end
+  end
+
+  @doc """
+  Register a machine against a profile, and mint the secret it enrols with.
+
+  **The secret crosses once.** It is returned here, shown once, and stored only as a hash —
+  the same discipline a service principal's is held to, for the same reason: a secret the
+  plane could show twice is a secret the plane is keeping.
+
+  The profile decides what the host may run, which is how a machine outside the cluster is
+  bound to a policy at all: enrolment proves the host is *this* host of *that* profile, and
+  the profile's grants decide the rest. A host registered against a profile no substrate
+  enforces is why `allow_unenforced_workers` exists.
+  """
+  @spec host_register(actor(), String.t(), map()) :: result()
+  def host_register(actor, profile, attrs) do
+    attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+
+    with :ok <- require_platform_admin(actor),
+         {:ok, _profile} <- fetch_profile(profile) do
+      # Who registered it, from the actor rather than from the caller: a field a client
+      # filled in is a field a client can put somebody else's name in.
+      attrs = Map.put(attrs, "registered_by", actor.subject)
+
+      case Fleet.Hosts.register(profile, attrs) do
+        {:ok, host, secret} ->
+          {:ok, _} =
+            Audit.record(actor.subject, "host.register", "#{profile}/#{host.name}", %{
+              "profile" => profile,
+              "address" => host.address
+            })
+
+          {:ok, host |> host_summary() |> Map.put(:secret, secret)}
+
+        {:error, %Ecto.Changeset{} = changeset} ->
+          {:error, invalid(changeset)}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+      end
+    end
+  end
+
+  @doc """
+  Mint a new secret for a host, keeping the host.
+
+  The id has to survive: a rotation that made a new row would leave the new secret naming a
+  host nothing knows about, which is indistinguishable from a rotation that did not take.
+  The old secret stops working the moment this returns.
+  """
+  @spec host_rotate(actor(), String.t(), String.t()) :: result()
+  def host_rotate(actor, profile, name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, host} <- fetch_host(profile, name) do
+      {:ok, rotated, secret} = Fleet.Hosts.rotate(host, actor.subject)
+      {:ok, _} = Audit.record(actor.subject, "host.rotate", "#{profile}/#{name}", %{})
+      {:ok, rotated |> host_summary() |> Map.put(:secret, secret)}
+    end
+  end
+
+  @doc """
+  Stop a machine enrolling, or let it again.
+
+  Disabling does not reach the machine — nothing here can — so what it does is refuse the
+  next enrolment and every one after it. A worker already connected keeps its sessions
+  until it is drained, which is the same sequence a pod gets and for the same reason.
+  """
+  @spec host_set_enabled(actor(), String.t(), String.t(), boolean()) :: result()
+  def host_set_enabled(actor, profile, name, enabled?) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, host} <- fetch_host(profile, name) do
+      host |> Fleet.Hosts.set_enabled(enabled?) |> recorded(actor, profile, name, enabled?)
+    end
+  end
+
+  defp recorded({:ok, host}, actor, profile, name, enabled?) do
+    action = if enabled?, do: "host.enable", else: "host.disable"
+    {:ok, _} = Audit.record(actor.subject, action, "#{profile}/#{name}", %{})
+    {:ok, host_summary(host)}
+  end
+
+  defp recorded({:error, :not_found}, _actor, profile, name, _enabled?) do
+    {:error, Error.new(:not_found, %{profile: profile, host: name})}
+  end
+
+  defp fetch_host(profile, name) do
+    case Fleet.Hosts.by_name(profile, name) do
+      nil -> {:error, Error.new(:not_found, %{profile: profile, host: name})}
+      host -> {:ok, host}
+    end
+  end
+
+  # Never the hash and never the salt: what a machine is, and whether it has ever arrived.
+  defp host_summary(host) do
+    %{
+      name: host.name,
+      profile: host.profile,
+      address: host.address,
+      enabled: host.enabled,
+      registered_at: host.inserted_at,
+      last_enrolled_at: host.last_enrolled_at,
+      # Three states rather than two, for the reason a principal has three: a machine
+      # nobody has installed the worker on yet is a different job from one that is off.
+      state: host_state(host)
+    }
+  end
+
+  defp host_state(%{enabled: false}), do: :disabled
+  defp host_state(%{last_enrolled_at: nil}), do: :never_seen
+  defp host_state(_host), do: :enrolled
+
   @doc "Drain a pod, returning what it was holding."
   @spec pod_drain(actor(), String.t()) :: result()
   def pod_drain(actor, worker_id) do

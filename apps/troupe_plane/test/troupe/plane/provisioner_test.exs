@@ -167,6 +167,85 @@ defmodule Troupe.Plane.ProvisionerTest do
     end
   end
 
+  describe "registering a machine, from a surface" do
+    setup do
+      {:ok, group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+      {:ok, _} = Identity.enable_team(group, %{name: "platform"})
+      {:ok, user} = Identity.upsert_user(%{subject: "root@example.test", display_name: "root"})
+      {:ok, _} = Identity.set_memberships(user, ["platform"])
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+
+      _laptops = profile("laptops", %{provisioner: "ssh"})
+      %{actor: Admin.actor_for_subject("root@example.test")}
+    end
+
+    test "mints a secret that crosses once and is kept only as a hash", context do
+      assert {:ok, host} =
+               Admin.host_register(context.actor, "laptops", %{
+                 "name" => "build-box",
+                 "address" => "10.0.0.9"
+               })
+
+      assert host.name == "build-box"
+      assert String.starts_with?(host.secret, "twh_")
+
+      # Registered and never seen, which is its own state: a worker nobody has installed
+      # there yet is a different job from a machine that is switched off.
+      assert host.state == :never_seen
+
+      # And nothing else can produce it. The listing has no secret at all, and the row
+      # keeps a hash — a secret the plane could show twice is a secret the plane is keeping.
+      assert {:ok, [listed]} = Admin.hosts_list(context.actor, "laptops")
+      refute Map.has_key?(listed, :secret)
+      refute Hosts.by_name("laptops", "build-box").secret_hash == host.secret
+    end
+
+    test "and the secret it minted is the one enrolment accepts", context do
+      {:ok, host} = Admin.host_register(context.actor, "laptops", %{"name" => "build-box"})
+
+      assert {:ok, accepted} = Hosts.authenticate(host.secret, "build-box")
+      assert accepted.name == "build-box"
+
+      # Rotating keeps the machine and replaces the secret. The id has to survive: a new
+      # row would leave the new secret naming a host nothing knows about, which looks
+      # exactly like a rotation that did not take.
+      {:ok, rotated} = Admin.host_rotate(context.actor, "laptops", "build-box")
+
+      assert rotated.secret != host.secret
+      assert {:error, :unauthenticated} = Hosts.authenticate(host.secret, "build-box")
+      assert {:ok, _} = Hosts.authenticate(rotated.secret, "build-box")
+    end
+
+    test "and a machine stopped from enrolling is refused with everything else's refusal",
+         context do
+      {:ok, host} = Admin.host_register(context.actor, "laptops", %{"name" => "build-box"})
+
+      assert {:ok, disabled} =
+               Admin.host_set_enabled(context.actor, "laptops", "build-box", false)
+
+      assert disabled.state == :disabled
+      assert {:error, :unauthenticated} = Hosts.authenticate(host.secret, "build-box")
+
+      # One refusal for every way of failing, so a caller learns nothing from which.
+      assert {:ok, _} = Admin.host_set_enabled(context.actor, "laptops", "build-box", true)
+      assert {:ok, _} = Hosts.authenticate(host.secret, "build-box")
+    end
+
+    test "and a team admin registers nothing", context do
+      {:ok, lead} = Identity.upsert_user(%{subject: "lead@example.test", display_name: "lead"})
+      {:ok, _} = Identity.set_memberships(lead, ["platform"])
+
+      lead_actor = %{subject: "lead@example.test", role: :team_admin, teams: ["platform"]}
+
+      assert {:error, error} =
+               Admin.host_register(lead_actor, "laptops", %{"name" => "their-laptop"})
+
+      assert error.message == "forbidden"
+      assert Hosts.for_profile("laptops") == []
+    end
+  end
+
   describe "ensure, on a substrate that cannot make machines" do
     test "reports the shortfall rather than failing at it" do
       laptops = profile("laptops", %{provisioner: "ssh", replicas: 3})

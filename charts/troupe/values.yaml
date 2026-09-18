@@ -248,8 +248,17 @@ policy:
   maxResources:
     cpu: "4"
     memory: 8Gi
+  # Both providers the source has a default base URL for, and the git host. A profile can
+  # choose either provider by configuration alone, so a default policy that allowed one of
+  # them would refuse the other at the moment somebody first selected it —
+  # `Troupe.EgressTest` checks this list against `Troupe.Egress` for exactly that.
+  #
+  # A deployment that uses neither narrows this to its own gateway, as `values.small.yaml`
+  # and `values.scaleway.yaml` do. Narrowing is the operator's decision; shipping a default
+  # the shipped code cannot work under is not.
   allowedEgress:
     - "*.anthropic.com"
+    - api.openai.com
     - github.com
   allowedStorageClasses:
     - standard

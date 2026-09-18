@@ -1,7 +1,11 @@
 defmodule Troupe.Umbrella.MixProject do
   use Mix.Project
 
-  @version "0.2.0"
+  # One string, in a file both `mix.exs` and the compiler can read. `mix.exs` runs before
+  # any application is compiled, so it cannot call `Troupe.Release.version/0` — and seven
+  # copies with a convention is how a chart at 0.2.0 comes to deploy images built from
+  # 0.3.0 with nothing saying so.
+  @version "VERSION" |> File.read!() |> String.trim()
 
   def project do
     [

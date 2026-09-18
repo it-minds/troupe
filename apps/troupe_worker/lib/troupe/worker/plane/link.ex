@@ -134,7 +134,8 @@ defmodule Troupe.Worker.Plane.Link do
         )
         |> to_charlist(),
       port: Keyword.get(opts, :port, Keyword.get(configured, :port, 4001)),
-      token: Keyword.get(opts, :token, {:file, @default_token_path}),
+      token:
+        Keyword.get(opts, :token, Keyword.get(configured, :token, {:file, @default_token_path})),
       claims: Keyword.get(opts, :claims, %{}),
       opts: opts
     }
@@ -291,6 +292,10 @@ defmodule Troupe.Worker.Plane.Link do
     end
   end
 
+  # A machine's own secret, handed over as a string. A pod's token is a file because the
+  # projection rotates it in place; a machine has no projection and the secret does not
+  # rotate on its own, so the two are different shapes on purpose rather than one shape
+  # with a special case.
   defp token({:file, path}) do
     # Re-read on every connect: a projected ServiceAccount token is rotated in place,
     # and one cached at boot expires while the pod is still running.

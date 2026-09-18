@@ -2558,3 +2558,183 @@ that exact string. Changing the placeholder did not fix it, because the explanat
 comment left in its place still carried the name: **HEEx emits an HTML comment into the
 page** rather than swallowing it, so a comment is page content and can satisfy an assertion
 about a leak. The note now lives above the handler, in Elixir.
+
+---
+
+# R2, R3 and R4 — the sections this report owed
+
+Written after the fact, which is worth saying plainly: these three packages landed in
+earlier sessions and their evidence was not recorded here at the time. Nothing below is
+reconstructed from memory. Every figure is from a run made while writing this section,
+against the code as it stands — which is weaker than a contemporaneous record in one way
+(it cannot say what was true on the day) and stronger in another (it says what is true now,
+which is what a release depends on).
+
+## R2 — one trigger, one principal
+
+    $ ./scripts/toolbox mix test \
+        apps/troupe_plane/test/troupe/plane/sponsors_test.exs \
+        apps/troupe_plane/test/troupe/plane/budget_ladder_test.exs \
+        apps/troupe_plane/test/troupe/plane/policy_ladder_test.exs \
+        apps/troupe_plane/test/troupe/plane/principal_pair_test.exs \
+        apps/troupe_plane/test/troupe/plane/trigger_ingress_test.exs \
+        apps/troupe_plane/test/troupe/plane/session_mcp_test.exs
+    Result: 52 passed
+
+What those files hold, against W2's done items:
+
+* **One `trigger_fired` event with a source discriminator**, the document's content hash,
+  the principal pair, an idempotency key and a payload *digest* — `trigger_ingress_test`.
+* **Two ways in, one event**: `POST /trigger/<id>` with the trigger's own rotatable key, and
+  `trigger.fire` on `/rpc` with a principal's credential. There is no second-class run.
+* **Subject and actor as a pair**, written even where they are equal — `principal_pair_test`.
+* **A sponsor on every principal**, required, a person in a granted team; removed by SCIM
+  and the principal reports *needs a sponsor* rather than *disabled* — `sponsors_test`, and
+  the console's three states are asserted in `panel_test`.
+* **`PersonBudget` beside `TeamBudget`**, same ledger and same idempotency, with the refusal
+  naming the binding ceiling — `budget_ladder_test`, and R8's Budgets screen is the same
+  answer rendered.
+* **The policy ladder**, deployment → platform → team, narrowing only, deny winning from any
+  rung — `policy_ladder_test`, and R8's Policy screen is what made it visible.
+* **The in-system MCP projection**, with nothing destructive in it — `session_mcp_test`.
+
+**The negative requirement** — outbound targets absolute only, not loopback, checked at save
+and again at send — is `Troupe.Plane.Triggers.Notify`, and R8's Integrations screen lists
+every target with the verdict on it *now* rather than at the time it was saved.
+
+**Still owed here:** the R7 done item asking that `POST /mcp` answer `initialize` with
+different tool lists for an administrator and an in-system agent, the agent's containing
+nothing destructive. R2 built the in-system server, so this may already hold — it has not
+been checked, and an unchecked "probably" is not a done item.
+
+## R3 — capacity without a capacity question
+
+    $ ./scripts/toolbox mix test \
+        apps/troupe_plane/test/troupe/plane/scaling_test.exs \
+        apps/troupe_plane/test/troupe/plane/placement_test.exs
+    Result: 26 passed
+
+The size class replacing seven numbers an administrator was asked for before they could
+reach anything they came to configure; the scaler deriving replicas from the class and from
+what is running; and placement refusing to conflate *no placeable pod* with *every pod is
+full* — two states that used to answer the same sentence and that send a person to opposite
+places.
+
+**Not proven here:** the kind cluster has not been exercised since early R3, so the operator
+half of this package rests on the unit suite. `mix troupe.release.check` reports `e2e` as
+not run for exactly this reason rather than letting the omission pass quietly.
+
+## R4 — teams link to groups
+
+    $ ./scripts/toolbox mix test \
+        apps/troupe_plane/test/troupe/plane/team_links_test.exs \
+        apps/troupe_plane/test/troupe/plane/grant_visibility_test.exs \
+        apps/troupe_plane/test/troupe/plane/entitlements_test.exs
+    Result: 28 passed
+
+A team drawing its members from any number of provider groups, with membership the union
+and still nobody's here to edit; entitlements below the grant, resolved at create and
+recorded in `session_created`; and the unlink preview that counts the people who are in the
+team *only* through the group being removed — the count before the deed, which R8 then
+applied to erasing a session and deleting a profile.
+
+---
+
+# R9 — release
+
+## R9a — one version string
+
+`VERSION` at the root is the source. `mix.exs` reads it, every app's `mix.exs` reads it,
+`Troupe.Version` compiles it in, and `Troupe.VersionTest` asserts the chart's `version` and
+`appVersion` say the same thing. A copy that drifts fails the build rather than the deploy.
+
+    $ ./scripts/toolbox mix test apps/troupe_protocol/test/troupe/version_test.exs
+    Result: 5 passed
+
+The protocol version is deliberately *not* this number, and a test says so: one moves when
+the wire contract breaks and the other when a release is cut, and letting them be one string
+would make the next protocol break look like a patch release.
+
+## R9b — the generated egress allowlist
+
+`Troupe.Egress` declares, per component, everything this product dials and why.
+`mix troupe.egress` writes `docs/egress-allowlist.md` from it and `--check` fails on drift,
+the same discipline as the vendored assets and the generated tokens.
+
+### What the check found on its first run
+
+    The chart's `troupePolicy.allowedEgress` does not allow: api.openai.com
+    Its patterns are: *.anthropic.com, github.com
+
+`api.openai.com` is a default base URL in the source and a profile can select that provider
+by configuration alone — so the shipped policy would have refused it at the moment somebody
+first switched. Narrowing the defaults is an operator's decision, and two of the values
+files do exactly that; shipping a default the shipped code cannot work under is not.
+
+    $ ./scripts/toolbox mix test apps/troupe_protocol/test/troupe/egress_test.exs
+    Result: 6 passed
+
+## R9c — `mix troupe.release.check`
+
+Every gate that already exists, composed, with the honest reporting that makes it usable on
+a laptop:
+
+    release check
+
+      ok   version       one version string, everywhere it is written
+      ok   egress        the generated allowlist matches the code, and the chart allows it
+      ok   schema        no breaking protocol schema change
+      --   check         compile, format, credo, boundaries, tests
+          asked to skip it
+      --   kubeconform   the chart renders and validates
+          kubeconform is not on PATH — `brew install kubeconform`, or see its README
+      --   e2e           the end-to-end suite, twice
+          no current kubeconfig context — `scripts/remote-up` brings one up
+      --   gui           the GUI's Playwright suite, against the same cluster
+          it lives in the GUI's repository — run `pnpm test:e2e` there against the same cluster
+
+      3 passed · 0 failed · 4 not run here
+
+A step that cannot run is reported with the reason and the command that would run it, and
+the exit code is decided only by the steps that could. A release check that failed on a
+laptop is one people learn to pass with `--skip`; one that passed silently is a checklist
+with a progress bar.
+
+## R9d — the three documents that had to be true
+
+**`docs/egress-allowlist.md`** is generated, so it cannot claim less than the code reaches
+for.
+
+**`docs/admin/installing.md`** starts from a cluster with nothing on it: no CNI that
+enforces policy, no ingress, no database, no bucket, no key manager, no identity provider.
+Each prerequisite says what Troupe does *without* it, because "install cert-manager" is not
+an instruction anybody can act on. Its last section is the console walkthrough, which is a
+claim rather than a hope because `ConsoleWalkthroughTest` drives that exact sequence on
+every build.
+
+**`docs/admin/single-machine.md`** could not be written truthfully when it was started.
+`Troupe.Plane.Fleet.Hosts` had existed since R6 and **nothing called it** — a machine could
+be registered by a function inside the plane and by no person anywhere, which made the
+single-machine case a feature the code had and the product did not.
+
+So the page is now four methods (`admin.hosts.list`, `admin.host.register`,
+`admin.host.rotate`, `admin.host.enabled`), a panel on Provisioners, and a worker that takes
+its enrolment secret from a file or the environment:
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/provisioner_test.exs
+    Result: 25 passed
+
+Four of those are new: the secret crosses once and is kept as a hash, the minted secret is
+the one enrolment accepts, rotation keeps the machine and invalidates the old secret, and a
+team admin registers nothing.
+
+## What R9 still owes
+
+* **`kubeconform`** has never run here: the binary is not in the toolbox image. The step
+  reports itself as not run, which is honest and is not the same as passing.
+* **The e2e suite** has not run since early R3. `scripts/remote-up` brings the cluster up and
+  `mix troupe.release.check` refuses to pretend in the meantime.
+* **The GUI's half** — one version string across *both* repositories, and the client that
+  refuses a plane one major ahead — is owed by `troupe-gui`. This repository now has the
+  number and the module a client compares against; nothing here can make the other repository
+  read it.

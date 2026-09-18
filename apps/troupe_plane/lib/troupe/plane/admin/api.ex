@@ -220,6 +220,96 @@ defmodule Troupe.Plane.Admin.API do
       risk: :read
     },
     %Method{
+      name: "admin.hosts.list",
+      function: :hosts_list,
+      summary:
+        "Every machine registered to a profile, with whether it has ever enrolled. Registered-and-never-seen is its own state: a worker nobody has installed yet is a different job from a machine that is off.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "profile",
+          type: :string,
+          required: true,
+          description: "The profile the hosts belong to."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.host.register",
+      function: :host_register,
+      summary:
+        "Register a machine against a profile and mint the secret it enrols with. The secret is returned once and stored only as a hash; there is no method that shows it again.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "profile",
+          type: :string,
+          required: true,
+          description: "The profile whose policy this machine runs under."
+        },
+        %Argument{
+          name: "host",
+          type: :object,
+          required: true,
+          description: "The machine: a name of your choosing, and optionally an address.",
+          properties: [
+            %Argument{
+              name: "name",
+              type: :string,
+              required: true,
+              description: "What you call this machine. Unique within the profile."
+            },
+            %Argument{
+              name: "address",
+              type: :string,
+              description:
+                "Where it is, for your own records. The plane never dials a host — the worker dials the plane."
+            }
+          ]
+        }
+      ]
+    },
+    %Method{
+      name: "admin.host.rotate",
+      function: :host_rotate,
+      summary:
+        "Mint a new enrolment secret for a machine, keeping the machine. The old secret stops working immediately, and the new one is shown once.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "profile", type: :string, required: true, description: "The profile."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The machine's name."
+        }
+      ]
+    },
+    %Method{
+      # No underscore: an MCP tool name is this with the dots swapped for underscores, and
+      # `set_enabled` would not survive the trip back.
+      name: "admin.host.enabled",
+      function: :host_set_enabled,
+      summary:
+        "Stop a machine enrolling, or let it again. Nothing here reaches the machine: a worker already connected keeps its sessions until it is drained.",
+      risk: :write,
+      arguments: [
+        %Argument{name: "profile", type: :string, required: true, description: "The profile."},
+        %Argument{
+          name: "name",
+          type: :string,
+          required: true,
+          description: "The machine's name."
+        },
+        %Argument{
+          name: "enabled",
+          type: :boolean,
+          required: true,
+          description: "Whether it may enrol."
+        }
+      ]
+    },
+    %Method{
       name: "admin.provisioners.list",
       function: :provisioners,
       summary:

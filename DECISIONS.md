@@ -4148,3 +4148,51 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      create its own administrators is the escalation the whole arrangement refuses. Every
      other step is a form on a screen, and a step that needed a shell fails the test rather
      than being discovered by somebody on their first evening.
+
+625. **`VERSION` is a file, not an attribute.** `mix.exs` is read before any application
+     compiles, so it cannot call into one — and a file is also what a release script, a CI
+     job and a person can each read without starting Elixir. Seven copies with a convention
+     is how a chart at `0.2.0` comes to deploy images built from `0.3.0` with nothing saying
+     so, and `Troupe.VersionTest` is what makes the copies agree by failing rather than by
+     care.
+
+626. **The release version and the protocol version are different numbers, and a test says
+     so.** `Troupe.Protocol.version/0` moves when the wire contract breaks; the release
+     version moves when a release is cut. A test that let them be the same string would make
+     the next protocol break look like a patch release.
+
+627. **The egress allowlist is generated from declarations, and the chart is checked against
+     it.** A hand-written allowlist is a list of what somebody remembered, and what it
+     produces is a NetworkPolicy that looks complete and refuses one host at the moment
+     somebody first needs it. Three kinds of entry, because the difference is what an
+     operator needs: a host in the source, a host named by a setting, and a host only the
+     reader's browser fetches.
+
+628. **The check found that the shipped chart refused a provider the code defaults to.**
+     `api.openai.com` is a default base URL in `Troupe.LLM.Providers.OpenAI` and
+     `troupePolicy.allowedEgress` allowed only Anthropic and GitHub — so a profile switched
+     to OpenAI by configuration alone would have been refused by the cluster. Narrowing is
+     an operator's decision; shipping a default the shipped code cannot work under is not.
+
+629. **`mix troupe.release.check` reports a step it cannot run rather than passing or
+     failing it.** A release check that failed on a laptop is one people learn to pass with
+     `--skip`; one that passed silently is a checklist with a progress bar. So every step
+     ends as a pass, a failure, or the reason it could not be attempted here — and the exit
+     code is decided only by the steps that could.
+
+630. **The GUI's Playwright suite is listed as owed by the other repository.** No task here
+     can claim it passed, and leaving it out would make the list of what a tag needs
+     incomplete in the one direction that matters.
+
+631. **`Fleet.Hosts` had no caller, so the single-machine page could not be written
+     truthfully.** R6 built host registration and nothing reached it: a machine could be
+     registered by a function inside the plane and by no person anywhere. R9's requirement
+     that the page be *true rather than plausible* is what surfaced it — the page is now
+     four methods, a panel on Provisioners, and a worker that accepts the secret from a file
+     or the environment.
+
+632. **A machine's secret is a string and a pod's is a file, on purpose.** A projected
+     ServiceAccount token rotates in place, which is why it is re-read on every connect; a
+     machine's does not rotate on its own. Two shapes rather than one with a special case —
+     and the file is documented first because an environment variable is readable in `/proc`
+     and in `ps` by anybody on that machine.

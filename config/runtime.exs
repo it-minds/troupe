@@ -380,6 +380,33 @@ if config_env() == :prod do
     end
   end
 
+  # How a worker proves which worker it is.
+  #
+  # A pod's is a projected ServiceAccount token at a fixed path, rotated in place, and is
+  # the default. A machine registered on the Provisioners screen has neither a projection
+  # nor a rotation, so it presents the secret that registration minted — from a file where
+  # one is named, and from the environment where one is not.
+  #
+  # The file is the better of the two and is listed first for that reason: an environment
+  # variable is readable in `/proc` and in `ps` output by anybody on that machine, which a
+  # laptop has more of than a pod does.
+  worker_token = fn
+    nil ->
+      nil
+
+    plane_opts ->
+      cond do
+        path = presence.(System.get_env("TROUPE_TOKEN_PATH")) ->
+          Keyword.put(plane_opts, :token, {:file, path})
+
+        secret = presence.(System.get_env("TROUPE_HOST_SECRET")) ->
+          Keyword.put(plane_opts, :token, secret)
+
+        true ->
+          plane_opts
+      end
+  end
+
   # -- a worker pod ---------------------------------------------------------
 
   if System.get_env("TROUPE_WORKER_AUTOSTART") == "true" do
@@ -418,7 +445,7 @@ if config_env() == :prod do
       token_issuer: presence.(System.get_env("TROUPE_TOKEN_ISSUER")),
       # Absent means there is no plane to dial. A pod configured without one does not
       # start the link at all rather than retrying a name that does not resolve.
-      plane: enrolment.(plane_control.(plane)),
+      plane: enrolment.(plane_control.(plane)) |> worker_token.(),
       kms: [
         address: System.get_env("TROUPE_BAO_ADDR", "http://openbao.troupe-system.svc:8200"),
         token: presence.(System.get_env("TROUPE_BAO_TOKEN")),

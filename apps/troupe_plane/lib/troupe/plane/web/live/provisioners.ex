@@ -22,6 +22,21 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
 
   A console that softened that would be the most dangerous thing in the console, so the
   page states it where somebody is deciding rather than in a document they will not read.
+
+  ## Machines, which is the other half of the SSH provisioner
+
+  `Troupe.Plane.Fleet.Hosts` had existed since R6 and nothing called it: a host could be
+  registered by a function inside the plane and by no person anywhere, which made the
+  single-machine case a feature the code had and the product did not. This is where a
+  machine is registered, its secret minted, rotated, and stopped.
+
+  **The secret crosses once.** It is in the notice after registering or rotating and in no
+  page after the next event, in no process state and in no table — the same discipline a
+  service principal's is held to, because a secret the plane could show twice is a secret
+  the plane is keeping.
+
+  "Registered and never seen" is its own state and the one somebody needs: a machine nobody
+  has installed the worker on yet is a different job from a machine that is switched off.
   """
 
   use Phoenix.LiveView, layout: false
@@ -32,7 +47,55 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
 
   @impl Phoenix.LiveView
   def mount(_params, _session, socket) do
-    {:ok, socket |> assign(profiles: [], teams: [], substrates: [], error: nil) |> load()}
+    {:ok,
+     socket
+     |> assign(
+       profiles: [],
+       teams: [],
+       substrates: [],
+       hosts: %{},
+       flash_message: nil,
+       error: nil
+     )
+     |> load()}
+  end
+
+  @impl Phoenix.LiveView
+  def handle_event("register-host", %{"profile" => profile} = params, socket) do
+    attrs = %{"name" => params["name"], "address" => params["address"]}
+
+    case Admin.host_register(socket.assigns.actor, profile, attrs) do
+      {:ok, host} -> shown_once(socket, host, "registered")
+      {:error, error} -> {:noreply, assign(socket, flash_message: describe(error))}
+    end
+  end
+
+  def handle_event("rotate-host", %{"profile" => profile, "name" => name}, socket) do
+    case Admin.host_rotate(socket.assigns.actor, profile, name) do
+      {:ok, host} -> shown_once(socket, host, "has a new secret")
+      {:error, error} -> {:noreply, assign(socket, flash_message: describe(error))}
+    end
+  end
+
+  def handle_event("host-enabled", %{"profile" => profile, "name" => name} = params, socket) do
+    enabled? = params["enabled"] == "true"
+
+    case Admin.host_set_enabled(socket.assigns.actor, profile, name, enabled?) do
+      {:ok, _host} ->
+        said = if enabled?, do: "may enrol again", else: "will not enrol again"
+        {:noreply, socket |> assign(flash_message: "#{name} #{said}") |> load()}
+
+      {:error, error} ->
+        {:noreply, assign(socket, flash_message: describe(error))}
+    end
+  end
+
+  # Once, in the notice. The worker on that machine is configured with it and the plane
+  # keeps only a hash — there is no method that shows it again, and losing it means
+  # rotating rather than looking it up.
+  defp shown_once(socket, host, what) do
+    message = "#{host.name} #{what} — secret, shown once: #{host.secret}"
+    {:noreply, socket |> assign(flash_message: message) |> load()}
   end
 
   # Three answers, all through `Admin`. What a substrate guarantees is not read out of
@@ -43,12 +106,42 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
     with {:ok, substrates} <- Admin.provisioners(socket.assigns.actor),
          {:ok, profiles} <- Admin.profiles_list(socket.assigns.actor),
          {:ok, teams} <- Admin.teams_list(socket.assigns.actor) do
-      assign(socket, substrates: substrates, profiles: profiles, teams: teams, error: nil)
+      assign(socket,
+        substrates: substrates,
+        profiles: profiles,
+        teams: teams,
+        hosts: hosts_of(socket.assigns.actor, profiles),
+        error: nil
+      )
     else
       {:error, error} ->
-        assign(socket, substrates: [], profiles: [], teams: [], error: describe(error))
+        assign(socket,
+          substrates: [],
+          profiles: [],
+          teams: [],
+          hosts: %{},
+          error: describe(error)
+        )
     end
   end
+
+  # Asked only of the profiles whose substrate makes workers out of machines. A Kubernetes
+  # profile has no hosts and never will, and a listing that asked anyway would answer an
+  # empty list that reads as "none registered yet".
+  defp hosts_of(actor, profiles) do
+    for profile <- profiles, profile.provisioner == "ssh", into: %{} do
+      case Admin.hosts_list(actor, profile.name) do
+        {:ok, hosts} -> {profile.name, hosts}
+        {:error, _error} -> {profile.name, []}
+      end
+    end
+  end
+
+  defp host_note(%{state: :never_seen}),
+    do: "registered, never seen — the worker is not installed there yet, or cannot reach here"
+
+  defp host_note(%{state: :disabled}), do: "will not enrol again"
+  defp host_note(%{last_enrolled_at: at}), do: "last enrolled #{at}"
 
   defp describe(%{message: message, data: %{reason: reason}}), do: "#{message}: #{reason}"
   defp describe(%{message: message}), do: message
@@ -87,6 +180,7 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
         act on when they are deciding whether their team's work may run there.
       </p>
 
+      <p :if={@flash_message} class="banner" role="status">{@flash_message}</p>
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
 
       <section class="panel">
@@ -155,6 +249,60 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
             </tbody>
           </table>
         </div>
+      </section>
+
+      <section :for={{profile, hosts} <- @hosts} class="panel">
+        <h2>Machines registered to {profile}</h2>
+        <p class="hint">
+          A host is a machine somebody already has. The plane never dials one — the worker
+          dials the plane — so registering a machine mints a secret it enrols with, and the
+          secret is shown once. Losing it means rotating rather than looking it up.
+        </p>
+
+        <ul :if={hosts != []} class="checks">
+          <li
+            :for={host <- hosts}
+            class={if host.state == :enrolled, do: "checks__ok", else: "checks__bad"}
+          >
+            <span class="checks__name">{host.name}</span>
+            <span class="checks__detail">
+              {host.address || "no address recorded"} · {host_note(host)}
+            </span>
+            <span class="checks__took">
+              <button phx-click="rotate-host" phx-value-profile={profile} phx-value-name={host.name}>
+                rotate
+              </button>
+              <button
+                phx-click="host-enabled"
+                phx-value-profile={profile}
+                phx-value-name={host.name}
+                phx-value-enabled={to_string(not host.enabled)}
+              >
+                {if host.enabled, do: "stop it enrolling", else: "let it enrol"}
+              </button>
+            </span>
+          </li>
+        </ul>
+
+        <p :if={hosts == []} class="empty">
+          No machine is registered to {profile}, so it has no workers and can have none.
+        </p>
+
+        <form id={"register-host-#{profile}"} phx-submit="register-host">
+          <input type="hidden" name="profile" value={profile} />
+
+          <label for={"host-name-#{profile}"}>A machine for {profile}</label>
+          <input id={"host-name-#{profile}"} name="name" placeholder="the build box" autocomplete="off" />
+          <input name="address" placeholder="where it is, for your own records" autocomplete="off" />
+
+          <p class="field-help">
+            The address is for you. Nothing here connects to it: enrolment is the worker
+            dialling this plane with the secret, which is what makes a machine behind NAT
+            work at all.
+          </p>
+
+          <button type="submit">register</button>
+        </form>
       </section>
 
       <section class="panel">
