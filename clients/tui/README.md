@@ -119,6 +119,30 @@ own `reasoning_effort:` overrides it, and a top-level `reasoning_effort:` (or
 `TROUPE_REASONING_EFFORT`) is the fallback when neither says anything. The
 session-wide provider takes `auth_token:` too, or `TROUPE_AUTH_TOKEN`.
 
+### MCP servers
+
+[MCP (Model Context Protocol)](https://modelcontextprotocol.io) servers extend
+the agent with extra tools — a filesystem, a database, a browser — without
+changing how Troupe works. Each server you configure connects at session start,
+advertises its tools, and the agent can call them with `y`/`n` approval, just
+like `shell` or `web_fetch`. Tools are namespaced `mcp__<server>__<tool>`, so
+they never collide with built-in tools.
+
+```yaml
+mcp:
+  filesystem:                       # stdio server: a subprocess Troupe talks to over stdin/stdout
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+    env: {FOO: bar}                 # optional
+    cd: /some/dir                   # optional working directory
+  remote:                           # SSE server: an HTTP event stream
+    url: http://localhost:3001/sse
+```
+
+`/mcp` in the TUI shows each server's state (✓ ready, … connecting, ✗ error)
+and its tools. A server that fails to start is marked, not fatal — the rest
+still work.
+
 If Troupe has no API key of its own, it reads the providers from opencode's
 `~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
 opencode's `model` as the default, so an existing opencode setup works with no
@@ -165,6 +189,7 @@ Inside the TUI, everything starts with `/`:
 | `/settings`, `/help` | settings page: tweak settings and read the curated help |
 | `/hq`, `/remote` | HQ: a plane's teams, profiles and sessions, with this machine's own listed alongside |
 | `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
+| `/mcp` | MCP servers: each one's state, tools and errors |
 | `/upload <path>` | send a local file into the session's own mount |
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |
@@ -468,6 +493,6 @@ original specification.
 ## Out of scope (for now)
 
 Offering this machine's tools to a remote session, a GUI for the remote side,
-Web UI, MCP client, multi-node distribution, a resident assistant or free-text
+Web UI, multi-node distribution, a resident assistant or free-text
 routing at the dispatcher, auto-commit or undo in the user's checkout,
 auto-update, code signing and notarization, native Windows ARM builds.

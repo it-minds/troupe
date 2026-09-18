@@ -92,6 +92,9 @@ defmodule Troupe.Client.Local do
   def watch_status(sid), do: Watcher.status(sid)
 
   @impl true
+  def mcp_status(sid), do: Troupe.MCP.status(sid)
+
+  @impl true
   def memory(sid, "refresh") do
     case Troupe.dispatch(
            sid,

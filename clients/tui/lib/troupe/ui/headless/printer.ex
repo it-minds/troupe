@@ -140,6 +140,21 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :branch_spawned, agent_path: p, data: d}, state),
     do: say(state, p, "spawned /#{d.name} (#{d.isolation})")
 
+  defp print(
+         %{type: :mcp_status, agent_path: p, data: %{server: name, state: st, tools: tools}},
+         state
+       ) do
+    glyph =
+      case st do
+        :ready -> "✓"
+        :connecting -> "…"
+        :error -> "✗"
+        _ -> "○"
+      end
+
+    say(state, p, "mcp: #{glyph} #{name} (#{length(tools)} tools)")
+  end
+
   defp print(_event, state), do: state
 
   # Every line carries the prefix, not just the first: a tool result is routinely

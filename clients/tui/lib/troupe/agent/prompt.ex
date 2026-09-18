@@ -28,7 +28,7 @@ defmodule Troupe.Agent.Prompt do
       model: Config.resolve_model(cfg, def.model),
       system: system(s, survey, brief),
       messages: s |> State.conversation() |> append_volatile(volatile(s)),
-      tools: Tools.specs(def, s.spec.definitions),
+      tools: Tools.specs(def, s.spec.definitions) ++ Troupe.MCP.tool_specs(s.spec.session_id),
       max_tokens: 8192,
       reasoning_effort: def.reasoning_effort || cfg.reasoning_effort,
       agent_path: s.spec.agent_path,

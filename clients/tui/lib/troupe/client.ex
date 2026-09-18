@@ -81,6 +81,7 @@ defmodule Troupe.Client do
               {:ok, Config.t(), String.t()} | {:error, term()}
   @callback watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   @callback watch_status(session_id()) :: map()
+  @callback mcp_status(session_id()) :: [map()]
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -195,6 +196,9 @@ defmodule Troupe.Client do
 
   @spec watch_status(session_id()) :: map()
   def watch_status(sid), do: impl(sid).watch_status(sid)
+
+  @spec mcp_status(session_id()) :: [map()]
+  def mcp_status(sid), do: impl(sid).mcp_status(sid)
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)
