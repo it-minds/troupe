@@ -185,6 +185,7 @@ defmodule Troupe.LLM.Fake do
   defp block_size(%{type: :text, text: t}), do: byte_size(t)
   defp block_size(%{type: :tool_result, content: c}), do: byte_size(c)
   defp block_size(%{type: :tool_use, input: i}), do: i |> Jason.encode!() |> byte_size()
+  defp block_size(%{type: :reasoning, text: t}), do: byte_size(t)
 
   ## Server
 

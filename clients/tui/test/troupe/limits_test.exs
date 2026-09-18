@@ -244,6 +244,74 @@ defmodule Troupe.LimitsTest do
     end
   end
 
+  describe "an empty reply" do
+    # worktree-2 in the wild: a reasoning model spent 16k output tokens thinking,
+    # emitted a single reasoning block, no text, no tool call — and said
+    # `end_turn`. `Message.text/1` drops reasoning, so `continue_turn` finished
+    # the branch as `:finished` with `summary: ""` and `diff_stat: ""`, and no
+    # `truncated` event ever said why. Same recovery as the output cap: once.
+    test "a reasoning-only reply is retried once and then fails visibly" do
+      ws = tmp_workspace()
+
+      thought = %{
+        content: [Message.reasoning(:anthropic, "hmm, let me think about this")],
+        usage: Provider.empty_usage(),
+        stop_reason: :end_turn
+      }
+
+      {sid, fake, _} = start_session!(workspace: ws, script: [thought, thought])
+
+      {:ok, path} = Troupe.dispatch(sid, "code", "fix the thing")
+      await_state(path, :done_unread, 15_000)
+
+      assert window(sid, path).reason == :empty_reply
+      assert window(sid, path).summary =~ "no text and no tool call"
+      assert [first, second] = events_of(sid, path, :truncated)
+      assert first.data.reason == :empty
+      assert first.data.note =~ "no text and no tool call"
+      assert second.data.final == true
+
+      retry = fake |> Fake.requests() |> Enum.filter(&(&1.purpose == :turn)) |> List.last()
+      text = retry.messages |> List.last() |> Map.get(:content) |> Message.text()
+      assert text =~ "nothing to act on"
+    end
+
+    test "a reply that recovers after the nudge finishes normally" do
+      ws = tmp_workspace()
+
+      {sid, _fake, _} =
+        start_session!(workspace: ws, script: [{:reasoning, "thinking..."}, {:finish, "did it"}])
+
+      {:ok, path} = Troupe.dispatch(sid, "code", "fix the thing")
+      await_state(path, :done_unread, 15_000)
+
+      assert window(sid, path).reason == :finished
+      assert window(sid, path).summary == "did it"
+      assert [%{data: %{reason: :empty, note: _}}] = events_of(sid, path, :truncated)
+    end
+
+    # The retry guard is per turn: a recovered branch that later goes quiet
+    # again gets its one nudge again rather than failing on the spot.
+    test "the nudge is available again once a turn has produced something" do
+      ws = tmp_workspace()
+
+      script = [
+        {:reasoning, "…"},
+        {:tool, "list_files", %{}},
+        {:reasoning, "…"},
+        {:finish, "ok"}
+      ]
+
+      {sid, _fake, _} = start_session!(workspace: ws, script: script)
+
+      {:ok, path} = Troupe.dispatch(sid, "code", "look around")
+      await_state(path, :done_unread, 15_000)
+
+      assert window(sid, path).reason == :finished
+      assert length(events_of(sid, path, :truncated)) == 2
+    end
+  end
+
   describe "warnings before the wall" do
     # The signal that arrives while there is still budget left to spend. Before
     # this there was no denominator anywhere in the UI: the first thing a user

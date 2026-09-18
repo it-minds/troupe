@@ -29,9 +29,10 @@ defmodule Troupe.Agent.Server do
               survey: nil,
               brief: "",
               cache_bp: nil,
-              # At-most-once guards for the two recoveries below. Both are facts
-              # about the turn in flight and not decisions, so — like `cache_bp`
-              # — they live here and never in the log: a restart must come back
+              # At-most-once guards for the recoveries below (context overflow;
+              # a cut-off or empty reply share one). They are facts about the
+              # turn in flight and not decisions, so — like `cache_bp` — they
+              # live here and never in the log: a restart must come back
               # willing to try each recovery once more.
               overflow_retried: false,
               truncation_retried: false
@@ -617,17 +618,45 @@ defmodule Troupe.Agent.Server do
 
   defp continue_turn(%Data{} = data) do
     st = data.state
-    data = %{data | truncation_retried: false}
 
     case State.current_calls(st) do
       [] ->
-        text = st.messages |> List.last() |> Map.get(:content) |> Message.text()
-        finish(data, :finished, text)
+        case st.messages |> List.last() |> Map.get(:content) |> Message.text() do
+          "" -> empty_reply(data)
+          text -> finish(%{data | truncation_retried: false}, :finished, text)
+        end
 
       calls ->
+        data = %{data | truncation_retried: false}
         data = Enum.reduce(calls, data, fn call, acc -> dispatch_call(acc, call) end)
         check_turn(data)
     end
+  end
+
+  @empty_note """
+  Your previous reply contained no text and no tool call, so there was nothing \
+  to act on. Continue the task: make a tool call, or call `finish` with a summary \
+  of what you did.\
+  """
+
+  @empty_summary "The model ended its turn with no text and no tool call, twice in a row (reasoning only, or nothing at all). Nothing was finished."
+
+  # A reply with `stop_reason: :end_turn` but neither text nor a tool call —
+  # typically a reasoning model that spent its whole allowance thinking and then
+  # declared itself done — used to become `finish(:finished, "")`: a branch that
+  # reported success with an empty summary and an empty diff. `Message.text/1`
+  # drops reasoning blocks, so this is exactly the "nothing to carry the turn"
+  # case `truncated/2` handles for `:max_tokens`, minus the stop reason. Same
+  # recovery: tell the model, ask once more, then fail visibly. The `:truncated`
+  # event is reused with `reason: :empty` so the fold and the UIs need no new type.
+  defp empty_reply(%Data{truncation_retried: true} = data) do
+    data = log(data, :truncated, %{reason: :empty, final: true})
+    finish(data, :empty_reply, @empty_summary)
+  end
+
+  defp empty_reply(%Data{} = data) do
+    data = log(data, :truncated, %{reason: :empty, note: @empty_note})
+    start_turn(%{data | truncation_retried: true})
   end
 
   @truncated_note """

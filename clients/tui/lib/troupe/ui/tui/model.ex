@@ -457,6 +457,12 @@ defmodule Troupe.UI.TUI.Model do
 
   defp compaction_reason(_requested), do: "compacting the conversation"
 
+  defp truncation_line(%{reason: :empty, final: true}),
+    do: "the reply had no text and no tool call again — stopping rather than reporting success"
+
+  defp truncation_line(%{reason: :empty}),
+    do: "the reply had no text and no tool call — asking the model to continue"
+
   defp truncation_line(%{final: true}),
     do: "the reply hit the output token cap again — stopping rather than reporting success"
 

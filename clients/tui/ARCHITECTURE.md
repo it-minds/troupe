@@ -104,6 +104,7 @@ Events and transitions:
 | thinking     | `{:llm_delta, ref, delta}`                     | publish transient `llm_delta`                                                                 | thinking    |
 | thinking     | `{:llm_done, ref, response}`                   | log `assistant_message`; `stop_reason` first (see below); else if the whole prompt is over the compaction threshold -> compacting; tool calls -> acting; text only -> done(:finished) | acting / compacting / done |
 | thinking     | `{:llm_done, …}` with `stop_reason :max_tokens`| log `truncated`; with tool calls, a call whose input did not parse is completed with an error and the turn goes on; with none, append a note and re-issue the turn once, then done(:output_truncated) | acting / thinking / done |
+| thinking     | `{:llm_done, …}` with no text and no tool call | log `truncated` (`reason: :empty`); append a note and re-issue the turn once, then done(:empty_reply) — never a `:finished` with an empty summary | thinking / done(:empty_reply) |
 | thinking     | `{:llm_done, …}` with `stop_reason :refusal`   | done(:refused) with the refusal text — never a silent `:finished`                             | done(:refused) |
 | thinking     | `{:llm_error, ref, {:context_overflow, _}}`    | log `compaction_started`; compact once and re-issue the turn; already compacted or too short -> log `llm_error` | compacting / done(:llm_error) |
 | thinking     | `{:llm_error, ref, reason}`                    | log `llm_error` (classified: auth, unknown model, rate limit)                                 | done(:llm_error) |
@@ -319,7 +320,7 @@ Persisted event types and data:
 | `budget_ask_started`   | agent           | `%{call_id, dimension, used, limit, detail}` — the ceiling that tripped, so the question says which |
 | `budget_ask_answered`  | agent           | `%{call_id, decision, grant}` — `grant` on `:allow` only; folded into the agent's effective budget |
 | `budget_warning`       | agent           | `%{dimension, used, limit, fraction, detail}` — a notice at `budget.warn_at`, once per dimension per slice; does not park the agent |
-| `truncated`            | agent           | `%{reason, note, calls, final}` — the reply hit the output cap; `note` is folded into the conversation as the retry's user message |
+| `truncated`            | agent           | `%{reason, note, calls, final}` — the reply hit the output cap (`reason: :max_tokens`) or carried neither text nor a tool call (`reason: :empty`); `note` is folded into the conversation as the retry's user message |
 | `llm_error`            | agent           | `%{reason}`                                                          |
 | `cancelled`            | agent           | `%{}`                                                                |
 | `finished`             | agent           | `%{summary, reason, diff_stat}`                                      |

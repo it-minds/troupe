@@ -118,6 +118,11 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :budget_warning, agent_path: p, data: d}, state),
     do: say(state, p, "warning: #{d[:detail] || d.dimension} used")
 
+  defp print(%{type: :truncated, agent_path: p, data: %{reason: :empty} = d}, state) do
+    tail = if d[:final], do: "; stopping", else: "; asking the model to continue"
+    say(state, p, "the reply had no text and no tool call" <> tail)
+  end
+
   defp print(%{type: :truncated, agent_path: p, data: d}, state) do
     tail = if d[:final], do: "; stopping", else: "; asking again in smaller steps"
     say(state, p, "the reply hit the output token cap" <> tail)
