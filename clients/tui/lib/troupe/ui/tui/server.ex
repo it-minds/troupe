@@ -24,7 +24,14 @@ defmodule Troupe.UI.TUI.Server do
           workspace: String.t(),
           model: Model.t(),
           focus:
-            :command | {:window, String.t()} | :settings | :observer | :sessions | :files | :hq,
+            :command
+            | {:window, String.t()}
+            | :settings
+            | :observer
+            | :sessions
+            | :files
+            | :mcp
+            | :hq,
           cmd_text: String.t(),
           cmd_pos: non_neg_integer(),
           win_text: String.t(),
@@ -45,6 +52,7 @@ defmodule Troupe.UI.TUI.Server do
           observer: %{cursor: non_neg_integer()} | nil,
           sessions: sessions() | nil,
           files: files() | nil,
+          mcp_cursor: non_neg_integer(),
           hq: HQ.t() | nil,
           slow_render_ms: non_neg_integer(),
           on_quit: (-> any())
@@ -163,6 +171,7 @@ defmodule Troupe.UI.TUI.Server do
       observer: nil,
       sessions: nil,
       files: nil,
+      mcp_cursor: 0,
       hq: nil,
       quitting: false,
       size: initial_size(opts),
@@ -299,6 +308,9 @@ defmodule Troupe.UI.TUI.Server do
   def handle_event(%Key{} = key, %{focus: :files} = state),
     do: {:noreply, files_key(key, %{state | quit_armed: false})}
 
+  def handle_event(%Key{} = key, %{focus: :mcp} = state),
+    do: {:noreply, mcp_key(key, %{state | quit_armed: false})}
+
   def handle_event(%Key{} = key, %{focus: :hq} = state),
     do: {:noreply, hq_key(key, %{state | quit_armed: false})}
 
@@ -335,6 +347,9 @@ defmodule Troupe.UI.TUI.Server do
       :files ->
         {:noreply, state, render?: false}
 
+      :mcp ->
+        {:noreply, state, render?: false}
+
       :hq ->
         {:noreply, state, render?: false}
 
@@ -344,7 +359,7 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   def handle_event(%Mouse{kind: "down"}, %{focus: focus} = state)
-      when focus in [:settings, :observer, :sessions, :files, :hq],
+      when focus in [:settings, :observer, :sessions, :files, :mcp, :hq],
       do: {:noreply, state, render?: false}
 
   # Click-drag inside the transcript selects text: with mouse reporting on the
@@ -424,6 +439,14 @@ defmodule Troupe.UI.TUI.Server do
         {entries, cursor} = View.files_view(state)
         cursor = cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(entries) - 1, 0))
         {:noreply, %{state | files: %{state.files | cursor: cursor}}}
+
+      :mcp ->
+        servers = Model.mcp_servers(state.model)
+
+        cursor =
+          state.mcp_cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(servers) - 1, 0))
+
+        {:noreply, %{state | mcp_cursor: cursor}}
 
       :settings when state.settings.picker != nil ->
         p = state.settings.picker
@@ -649,6 +672,9 @@ defmodule Troupe.UI.TUI.Server do
         "files" ->
           :files
 
+        "mcp" ->
+          :mcp
+
         n when n in ["hq", "remote"] ->
           {:hq, args}
 
@@ -664,6 +690,7 @@ defmodule Troupe.UI.TUI.Server do
     case result do
       :quit -> %{state | quitting: true}
       :files -> toggle_files(state)
+      :mcp -> open_mcp(state)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
       :models -> open_models(state)
@@ -957,6 +984,19 @@ defmodule Troupe.UI.TUI.Server do
 
   defp toggle_files(state), do: %{state | focus: :command, files: nil}
 
+  # `/mcp` opens the page on a live query: the fold is transient (driven by
+  # `:mcp_status` events) and empty after a crash, so the page asks the session
+  # for the current state when it opens and folds it in — like `/files` listing.
+  defp open_mcp(state) do
+    model =
+      Enum.reduce(Client.mcp_status(state.session_id), state.model, fn server, m ->
+        entry = %{state: server.state, tools: server.tools, error: server.error}
+        %{m | mcp: Map.put(m.mcp, server.name, entry)}
+      end)
+
+    %{put_cmd(state, "") | focus: :mcp, mcp_cursor: 0, model: model}
+  end
+
   defp load_files(state, path) do
     case Client.fs_list(state.session_id, path) do
       {:ok, entries} ->
@@ -1017,6 +1057,22 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp files_key(_key, state), do: state
+
+  ## MCP page
+
+  defp mcp_key(%Key{code: "esc"}, state), do: to_command_line(state)
+
+  defp mcp_key(%Key{code: code}, state) when code in ["up", "k"],
+    do: %{state | mcp_cursor: max(state.mcp_cursor - 1, 0)}
+
+  defp mcp_key(%Key{code: code}, state) when code in ["down", "j"] do
+    count = length(Model.mcp_servers(state.model))
+    %{state | mcp_cursor: min(state.mcp_cursor + 1, max(count - 1, 0))}
+  end
+
+  defp mcp_key(%Key{code: "r"}, state), do: open_mcp(state)
+
+  defp mcp_key(_key, state), do: state
 
   defp preview(state, entry) do
     path = mount_of(state.files.path) <> entry.path
@@ -1756,7 +1812,7 @@ defmodule Troupe.UI.TUI.Server do
           text,
           state.commands ++
             @path_commands ++
-            ~w(settings help observer models watch agents sessions resume memory quit)
+            ~w(settings help observer models watch agents sessions resume memory mcp quit)
         )
 
       true ->

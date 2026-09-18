@@ -40,7 +40,8 @@ defmodule Troupe.Session do
       {Locks, opts},
       {Branches, opts},
       {Dispatcher, opts},
-      {Watcher, opts}
+      {Watcher, opts},
+      {Troupe.MCP.Supervisor, Map.merge(opts, %{servers: opts.config.mcp})}
     ]
 
     Supervisor.init(children, strategy: :rest_for_one, max_restarts: 10, max_seconds: 10)

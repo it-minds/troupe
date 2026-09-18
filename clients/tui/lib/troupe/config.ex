@@ -58,6 +58,7 @@ defmodule Troupe.Config do
           fake_script: String.t() | nil,
           providers: %{optional(String.t()) => provider()},
           models_explicit?: boolean(),
+          mcp: %{optional(String.t()) => map()},
           catalog: %{optional(String.t()) => Troupe.LLM.Catalog.t()}
         }
 
@@ -141,6 +142,7 @@ defmodule Troupe.Config do
             fake_script: nil,
             providers: %{},
             models_explicit?: false,
+            mcp: %{},
             catalog: %{}
 
   @spec load(String.t(), map() | keyword()) :: t()
@@ -564,6 +566,7 @@ defmodule Troupe.Config do
     memory = Map.get(yaml, "memory", %{})
     cache = Map.get(yaml, "cache", %{})
     limits = Map.get(yaml, "limits", %{})
+    mcp = parse_mcp(Map.get(yaml, "mcp", %{}))
 
     %__MODULE__{
       cfg
@@ -614,7 +617,8 @@ defmodule Troupe.Config do
         max_delegation_depth: Map.get(yaml, "max_delegation_depth", cfg.max_delegation_depth),
         default_window: Map.get(yaml, "default_window", cfg.default_window),
         providers: providers,
-        models_explicit?: Map.has_key?(models, "default")
+        models_explicit?: Map.has_key?(models, "default"),
+        mcp: mcp
     }
   end
 
@@ -650,6 +654,28 @@ defmodule Troupe.Config do
   end
 
   defp parse_providers(_), do: %{}
+
+  # MCP servers: a map of `name => config`. Each config is either stdio
+  # (`command`, `args`, `env`, `cd`) or SSE (`url`). Keys are normalized to atoms;
+  # a non-map value is skipped.
+  defp parse_mcp(map) when is_map(map) do
+    map
+    |> Enum.filter(fn {_name, config} -> is_map(config) end)
+    |> Map.new(fn {name, config} ->
+      parsed =
+        %{
+          command: Map.get(config, "command"),
+          args: Map.get(config, "args") || [],
+          env: Map.get(config, "env") || %{},
+          cd: Map.get(config, "cd"),
+          url: Map.get(config, "url")
+        }
+
+      {to_string(name), parsed}
+    end)
+  end
+
+  defp parse_mcp(_), do: %{}
 
   @doc """
   Parses one provider's `models:` block into model specs. Public because
@@ -756,6 +782,9 @@ defmodule Troupe.Config do
 
       {:limits, l}, acc when is_map(l) ->
         %{acc | limits: Map.merge(acc.limits, l)}
+
+      {:mcp, m}, acc when is_map(m) ->
+        %{acc | mcp: Map.merge(acc.mcp, m)}
 
       {k, v}, acc when is_map_key(acc, k) ->
         Map.put(acc, k, v)

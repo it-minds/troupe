@@ -59,6 +59,12 @@ defmodule Troupe.UI.TUI.View do
     files_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
+  def render(%{focus: :mcp} = state, frame) do
+    area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
+    [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
+    mcp_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
   def render(state, frame) do
     windows = Model.windows(state.model)
     geometry = pane_geometry(state, {frame.width, frame.height})
@@ -686,6 +692,77 @@ defmodule Troupe.UI.TUI.View do
   defp human_size(size) when is_integer(size), do: "#{size} B"
   defp human_size(_size), do: ""
 
+  ## MCP page
+
+  defp mcp_page(state, rect) do
+    servers = Model.mcp_servers(state.model)
+    [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
+
+    items =
+      case servers do
+        [] ->
+          [
+            "No MCP servers configured.",
+            "",
+            "Add servers to .troupe/config.yaml under 'mcp':",
+            "",
+            "Example:",
+            "  mcp:",
+            "    filesystem:",
+            "      command: npx",
+            "      args: [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/tmp\"]"
+          ]
+
+        list ->
+          Enum.map(list, &mcp_server_line/1)
+      end
+
+    list = %ExRatatui.Widgets.List{
+      items: items,
+      selected: if(servers == [], do: nil, else: min(state.mcp_cursor, length(servers) - 1)),
+      highlight_symbol: "▸ ",
+      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      block: %Block{
+        title: " MCP servers ",
+        borders: [:all],
+        border_type: :double
+      }
+    }
+
+    detail = %Paragraph{
+      text: mcp_detail(state, Enum.at(servers, state.mcp_cursor)),
+      wrap: false,
+      block: %Block{title: mcp_detail_title(), borders: [:all]}
+    }
+
+    [{list, list_rect}, {detail, detail_rect}]
+  end
+
+  defp mcp_server_line(%{name: name, state: state, tools: tools}),
+    do: "#{mcp_glyph(state)} #{name} (#{tools} tools)"
+
+  defp mcp_glyph(:ready), do: "✓"
+  defp mcp_glyph(:connecting), do: "…"
+  defp mcp_glyph(:error), do: "✗"
+  defp mcp_glyph(:stopped), do: "○"
+  defp mcp_glyph(_), do: " "
+
+  defp mcp_detail_title, do: " ↑↓ move · r refreshes · Esc back "
+
+  defp mcp_detail(_state, nil), do: "Select a server to see its tools."
+
+  defp mcp_detail(_state, %{name: name, state: state, tools: tools, error: error}) do
+    parts =
+      [
+        field("name", name),
+        field("state", state),
+        field("tools", tools)
+      ]
+
+    parts = if error, do: parts ++ [field("error", error)], else: parts
+    Enum.join(parts, "\n")
+  end
+
   ## Settings page
 
   defp settings_page(state, rect) do
@@ -1172,8 +1249,20 @@ defmodule Troupe.UI.TUI.View do
         i -> " · press #{i + 1} (or Enter, or click the window) to answer"
       end
 
+    mcp =
+      case state.model.mcp do
+        map when map_size(map) > 0 ->
+          total = map_size(map)
+          ready = Enum.count(map, fn {_, v} -> v.state == :ready end)
+          tools = Enum.reduce(map, 0, fn {_, v}, acc -> acc + v.tools end)
+          " · mcp: #{ready}/#{total} srvs · #{tools} tools"
+
+        _ ->
+          ""
+      end
+
     text =
-      "#{Model.attention_summary(state.model)}#{hint} · #{watch} · #{state.session_id}" <>
+      "#{Model.attention_summary(state.model)}#{hint} · #{watch}#{mcp} · #{state.session_id}" <>
         remote_note(state) <>
         if(notice, do: " · #{notice}", else: "")
 
@@ -1252,6 +1341,9 @@ defmodule Troupe.UI.TUI.View do
 
         :files ->
           {"", " files — ↑↓ move · Enter opens · ← up · r reloads · Esc back "}
+
+        :mcp ->
+          {"", " mcp — ↑↓ move · r refreshes · Esc back "}
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}

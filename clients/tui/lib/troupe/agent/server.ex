@@ -287,7 +287,9 @@ defmodule Troupe.Agent.Server do
         data =
           case decision do
             :allow ->
-              run_tool(data, %{call | status: :approved})
+              if Troupe.MCP.mcp?(call.name),
+                do: run_mcp_tool(data, %{call | status: :approved}),
+                else: run_tool(data, %{call | status: :approved})
 
             :deny ->
               complete(
@@ -813,6 +815,9 @@ defmodule Troupe.Agent.Server do
         |> log(:tool_call_started, started(call))
         |> complete(call.call_id, false, @truncated_call)
 
+      Troupe.MCP.mcp?(name) ->
+        dispatch_mcp(data, call)
+
       not Tools.allowed?(def_, name) ->
         complete(
           data,
@@ -939,6 +944,72 @@ defmodule Troupe.Agent.Server do
     {:ok, pid} =
       Task.Supervisor.start_child(tasks_sup(data), fn ->
         result = Runner.run(mod, input, ctx, timeout)
+        send(me, {:tool_result, call_id, result})
+      end)
+
+    mon = Process.monitor(pid)
+
+    %{
+      data
+      | tasks:
+          Map.put(data.tasks, call_id, %{
+            pid: pid,
+            mon: mon,
+            started_at: started_at,
+            name: call.name
+          })
+    }
+  end
+
+  # MCP tools are namespaced `mcp__<server>__<tool>`: they live outside the
+  # static `Tools` registry, so they get their own dispatch + run path that
+  # mirrors the `:ask` approval door and the `Task.Supervisor` spawn of
+  # `run_tool/2`. The result flows back through the same `{:tool_result, ...}`
+  # message, so `complete/4` and the DOWN handler are unchanged.
+  defp dispatch_mcp(%Data{} = data, call) do
+    name = call.name
+    session_id = data.spec.session_id
+
+    cond do
+      Troupe.MCP.permission(session_id, name) == :deny ->
+        complete(data, call.call_id, false, "tool #{name} is denied")
+
+      not Approvals.session_allowed?(session_id, name) ->
+        preview = Jason.encode!(call.input, pretty: true)
+        payload = %{name: name, input: call.input, preview: preview}
+
+        :ok =
+          Approvals.register(
+            session_id,
+            call.call_id,
+            self(),
+            data.spec.agent_path,
+            :approval,
+            payload
+          )
+
+        data
+        |> log(:approval_requested, Map.put(payload, :call_id, call.call_id))
+        |> notify_needs_input()
+
+      true ->
+        run_mcp_tool(data, call)
+    end
+  end
+
+  defp run_mcp_tool(%Data{} = data, call) do
+    session_id = data.spec.session_id
+    name = call.name
+    data = log(data, :tool_call_started, started(call))
+    me = self()
+    timeout = (Map.get(call.input, "timeout_ms") || data.spec.config.tool_timeout_ms) + 5_000
+    input = call.input
+    call_id = call.call_id
+    started_at = Telemetry.start([:troupe, :tool, :run], tool_meta(data, call))
+
+    {:ok, pid} =
+      Task.Supervisor.start_child(tasks_sup(data), fn ->
+        result = Troupe.MCP.call(session_id, name, input, timeout)
         send(me, {:tool_result, call_id, result})
       end)
 

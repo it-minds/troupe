@@ -17,6 +17,7 @@ const is_windows = builtin.os.tag == .windows;
 
 pub export fn main(argc: c_int, argv: [*][*:0]u8) c_int {
     if (argc < 2) return 2;
+    if (!is_windows and getenv("TROUPE_REAPER_STDIO") != null) return stdioMain(argv);
     if (is_windows) {
         return windowsMain();
     } else {
@@ -39,6 +40,10 @@ extern "c" fn read(fd: c_int, buf: [*]u8, n: usize) isize;
 extern "c" fn waitpid(pid: c_int, status: *c_int, options: c_int) c_int;
 extern "c" fn kill(pid: c_int, sig: c_int) c_int;
 extern "c" fn usleep(usec: c_uint) c_int;
+extern "c" fn pipe(fds: [*]c_int) c_int;
+extern "c" fn close(fd: c_int) c_int;
+extern "c" fn write(fd: c_int, buf: [*]const u8, n: usize) isize;
+extern "c" fn getenv(name: [*:0]const u8) ?[*:0]u8;
 
 const POLLIN: c_short = 0x0001;
 const POLLHUP: c_short = 0x0010;
@@ -74,6 +79,85 @@ fn unixMain(argv: [*][*:0]u8) c_int {
             }
             const n = read(0, &buf, buf.len);
             if (n <= 0) return killTree(pid);
+        }
+    }
+}
+
+fn stdioMain(argv: [*][*:0]u8) c_int {
+    var stdin_pipe: [2]c_int = undefined;
+    var stdout_pipe: [2]c_int = undefined;
+    if (pipe(&stdin_pipe) != 0) return 2;
+    if (pipe(&stdout_pipe) != 0) return 2;
+
+    const pid = fork();
+    if (pid < 0) return 2;
+    if (pid == 0) {
+        _ = setsid();
+        _ = dup2(stdin_pipe[0], 0);
+        _ = dup2(stdout_pipe[1], 1);
+        _ = close(stdin_pipe[0]);
+        _ = close(stdin_pipe[1]);
+        _ = close(stdout_pipe[0]);
+        _ = close(stdout_pipe[1]);
+        const child_argv: [*:null]const ?[*:0]const u8 = @ptrCast(argv + 1);
+        _ = execvp(argv[1], child_argv);
+        _exit(127);
+    }
+
+    // Parent keeps only the child's stdin (write end) and stdout (read end).
+    _ = close(stdin_pipe[0]);
+    _ = close(stdout_pipe[1]);
+
+    var fds = [_]pollfd{
+        .{ .fd = 0, .events = POLLIN, .revents = 0 },
+        .{ .fd = stdout_pipe[0], .events = POLLIN, .revents = 0 },
+    };
+    var buf: [256]u8 = undefined;
+    var stdin_eof = false;
+    var stdout_eof = false;
+
+    while (true) {
+        var status: c_int = 0;
+        const w = waitpid(pid, &status, WNOHANG);
+        if (w == pid) {
+            // Child exited: drain any buffered stdout before returning.
+            while (true) {
+                const n = read(stdout_pipe[0], &buf, buf.len);
+                if (n <= 0) break;
+                _ = write(1, &buf, @as(usize, @intCast(n)));
+            }
+            _ = killTree(pid);
+            return exitCode(status);
+        }
+        if (w < 0) return 2;
+        if (stdin_eof and stdout_eof) return exitCode(status);
+
+        const r = poll(&fds, 2, 100);
+        if (r > 0) {
+            // fd 0: reaper's stdin (from Erlang) -> child's stdin.
+            // POLLHUP/POLLNVAL without POLLIN is EOF on a pipe (the kernel
+            // reports POLLHUP alone once the write end closes and the buffer
+            // is empty); read returns 0, so we close the child's stdin.
+            if (!stdin_eof and (fds[0].revents & (POLLIN | POLLHUP | POLLNVAL)) != 0) {
+                const n = read(0, &buf, buf.len);
+                if (n > 0) {
+                    _ = write(stdin_pipe[1], &buf, @as(usize, @intCast(n)));
+                } else {
+                    _ = close(stdin_pipe[1]);
+                    stdin_eof = true;
+                    fds[0].fd = -1;
+                }
+            }
+            // stdout_pipe[0]: child's stdout -> reaper's stdout (fd 1, Erlang reads).
+            if (!stdout_eof and (fds[1].revents & (POLLIN | POLLHUP)) != 0) {
+                const n = read(stdout_pipe[0], &buf, buf.len);
+                if (n > 0) {
+                    _ = write(1, &buf, @as(usize, @intCast(n)));
+                } else {
+                    stdout_eof = true;
+                    fds[1].fd = -1;
+                }
+            }
         }
     }
 }

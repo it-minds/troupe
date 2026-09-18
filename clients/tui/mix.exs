@@ -118,6 +118,10 @@ defmodule Troupe.MixProject do
     ]
   end
 
+  def cli do
+    [preferred_envs: [check: :test]]
+  end
+
   def application do
     [
       extra_applications: [:logger, :crypto, :inets, :ssl],

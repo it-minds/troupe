@@ -109,9 +109,10 @@ defmodule Troupe.UI.TUI.Model do
             notices: [],
             watch: %{enabled: false, backend: nil},
             remote: nil,
-            files_version: 0
+            files_version: 0,
+            mcp: %{}
 
-  @type t :: %__MODULE__{}
+  @type t :: %__MODULE__{mcp: %{optional(String.t()) => map()}}
 
   # Tool results kept in the view model are capped here; the log keeps them whole.
   @result_cap 200_000
@@ -173,6 +174,18 @@ defmodule Troupe.UI.TUI.Model do
       # allowed and to say why (Decision 77).
       :remote_status ->
         %{m | remote: Map.merge(m.remote || %{}, e.data)}
+
+      # MCP server status is transient: the latest state per server is folded
+      # here so the status line and the /mcp page read from the model, and the
+      # page's live query (Client.mcp_status/1) repopulates it when it opens.
+      :mcp_status ->
+        entry = %{
+          state: e.data.state,
+          tools: length(e.data.tools),
+          error: e.data.error
+        }
+
+        %{m | mcp: Map.put(m.mcp, e.data.server, entry)}
 
       # The files panel is a fold too: a bumped version is what tells it its
       # listing is stale, without the panel subscribing to anything itself.
@@ -646,6 +659,25 @@ defmodule Troupe.UI.TUI.Model do
 
   @spec windows(t()) :: [window()]
   def windows(%__MODULE__{} = m), do: Enum.map(m.order, &Map.fetch!(m.windows, &1))
+
+  @doc """
+  MCP servers as the `/mcp` page and the status line read them: the latest
+  folded status per server, sorted by name. The fold is transient (driven by
+  `:mcp_status` events) so it may be empty after a crash until the page's live
+  query repopulates it.
+  """
+  @spec mcp_servers(t()) :: [
+          %{name: String.t(), state: atom(), tools: non_neg_integer(), error: String.t() | nil}
+        ]
+  def mcp_servers(%__MODULE__{mcp: mcp}) do
+    mcp
+    |> Enum.map(fn {name, %{state: state, tools: tools, error: error}} ->
+      %{name: name, state: state, tools: tools, error: error}
+    end)
+    |> Enum.sort_by(& &1.name)
+  end
+
+  def mcp_servers(_), do: []
 
   @doc "The agents of a window in display order: the root first, then its subagents by path."
   @spec agent_paths(window()) :: [String.t()]

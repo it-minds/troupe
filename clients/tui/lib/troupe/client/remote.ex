@@ -107,6 +107,9 @@ defmodule Troupe.Client.Remote do
   def watch_status(_sid), do: %{enabled: false, backend: nil}
 
   @impl true
+  def mcp_status(_sid), do: []
+
+  @impl true
   def memory(_sid, _command), do: {:error, "the project brief lives on the worker"}
 
   @impl true

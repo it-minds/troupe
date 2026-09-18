@@ -327,7 +327,8 @@ Persisted event types and data:
 | `watch_trigger`        | `"watcher"`     | `%{kind, markers}`                                                   |
 | `session_closed`       | `"session"`     | `%{branches, done, failed, forced}`                                  |
 
-Transient: `llm_delta %{ref, text}`, `agent_state %{from, to}`, `notice %{text}`.
+Transient: `llm_delta %{ref, text}`, `agent_state %{from, to}`, `notice %{text}`,
+`remote_status %{state, scopes, connection_health}`, `fs_changed %{}`, `mcp_status %{server, state, tools, error}`.
 
 ## 4.6 Workspace survey
 
@@ -473,6 +474,69 @@ not list goes out as typed with nothing added.
     definition is the more specific of the two — how much thinking work is worth
     is a property of the agent, not of the model it happens to run on.
   * `max_output` overrides the request's own `max_tokens` for that model.
+
+## 4.10 MCP (Model Context Protocol)
+
+An MCP server exposes tools over a JSON-RPC 2.0 transport (stdio or SSE). Troupe
+connects to each configured server at session start, discovers its tools, and
+exposes them to agents as namespaced tools (`mcp__<server>__<tool>`), so they
+flow through the same `%{name, description, input_schema}` tool seam as native
+tools — providers, the UI fold, approvals and the Runner are unchanged.
+
+### Configuration
+
+The `mcp:` key in `config.yaml` maps a server name to its transport config:
+
+| keys | transport |
+|---|---|
+| `command`, `args`, `env`, `cd` | stdio: a subprocess spawned via the reaper in stdio mode (`TROUPE_REAPER_STDIO=1`), which pipes Troupe's stdin to the child and the child's stdout back. |
+| `url` | SSE/HTTP: a server-sent-events stream for inbound, POST for outbound. |
+
+```yaml
+mcp:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  remote:
+    url: http://localhost:3001/sse
+```
+
+### Lifecycle
+
+`Troupe.MCP.Supervisor` is the last child of the session's `rest_for_one`
+supervisor, so an MCP server crash never restarts the Dispatcher or Watcher.
+Each server runs as a `Troupe.MCP.Server` GenServer (`:transient` restart),
+registered via `Session.via(sid, {:mcp_server, name})`.
+
+On init, a server sends `initialize` (protocol version `2024-11-05`), then
+`notifications/initialized`, then `tools/list`. The tools are namespaced and
+stored; `Troupe.MCP.tool_specs/1` appends them to the static tool list in
+`Prompt.request/2`. The order is stable per session (tools are loaded once at
+start), so the provider's prompt cache stays valid.
+
+Tool calls (`tools/call`) are dispatched from `Agent.Server.dispatch_call/2`:
+an `mcp?` branch before the static-tool allowlist gates `Troupe.MCP.call/4`,
+which routes to the owning server. MCP tools default to `:ask` permission, so
+they reuse the existing approval door; the result flows back through the same
+`:tool_call_started`/`:tool_call_completed` events as a native tool.
+
+### Reaper stdio mode
+
+The reaper's default mode nulls the child's stdin and polls its own stdin for
+EOF — a one-way path that cannot serve an MCP stdio server (which reads
+JSON-RPC from stdin and writes to stdout). Setting `TROUPE_REAPER_STDIO=1`
+switches the reaper to a bidirectional mode: two pipes connect Troupe's stdin
+to the child's stdin and the child's stdout to Troupe's stdout, while the
+reaper `poll()`s both ends and `waitpid`s the child. The default path is
+unchanged when the env var is absent; every existing shell-tool test depends on it.
+
+### UI
+
+`/mcp` opens a two-pane page: the server list (with a state glyph and tool
+count) and a detail pane for the selected server's status and error. The
+status bar shows `mcp: <ready>/<total> srvs · <N> tools` when servers are
+configured. The model folds `:mcp_status` events (transient); after a crash
+the page re-seeds via the synchronous `Troupe.MCP.status/1` query, like `/files`.
 
 ## 5. Tools
 
