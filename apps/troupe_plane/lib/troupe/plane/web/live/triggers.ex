@@ -101,6 +101,10 @@ defmodule Troupe.Plane.Web.Live.Triggers do
   #
   # Found by the walkthrough: the step between granting a profile and having something fire
   # on its own was a shell command, which is exactly the seam done item 2 is for.
+  # The name field's placeholder is deliberately not a name a fixture uses. It was
+  # `nightly-deps`, and the test that refutes one team's trigger appearing on another
+  # team's page matched the *empty form* — a comment in the template did the same, because
+  # HEEx emits an HTML comment into the page rather than swallowing it.
   def handle_event("create", params, socket) do
     attrs =
       %{
@@ -216,7 +220,12 @@ defmodule Troupe.Plane.Web.Live.Triggers do
 
         <form id="new-trigger" phx-submit="create">
           <label for="new-trigger-name">Name</label>
-          <input id="new-trigger-name" name="name" placeholder="nightly-deps" autocomplete="off" />
+          <input
+            id="new-trigger-name"
+            name="name"
+            placeholder="what it does"
+            autocomplete="off"
+          />
 
           <label for="new-trigger-principal">Runs as</label>
           <input

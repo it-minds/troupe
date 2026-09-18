@@ -21,7 +21,7 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
 
   use Troupe.Plane.PanelCase, async: false
 
-  alias Troupe.Plane.{Audit, Bundles, Fleet, Identity, Sessions}
+  alias Troupe.Plane.{Audit, Bundles, Fleet, Identity, Sessions, Settings, Triggers}
 
   @moduletag timeout: 120_000
 
@@ -76,7 +76,7 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
     |> element(~s(form[phx-submit="save"]), "default_erase_after_days")
     |> render_submit(%{"key" => "default_erase_after_days", "value" => "30"})
 
-    assert Troupe.Plane.Settings.get("default_erase_after_days") == 30
+    assert Settings.get("default_erase_after_days") == 30
 
     # -- 3. Teams: a provider group becomes a team ----------------------------
     {:ok, teams, _html} = live(conn, "/admin/teams")
@@ -160,7 +160,10 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
     |> form("#grant-delivery", %{"team" => "delivery", "profile" => "dev"})
     |> render_submit()
 
-    assert "dev" in Enum.map(Identity.grants_for_team(Identity.get_team("delivery")), & &1.profile)
+    assert "dev" in Enum.map(
+             Identity.grants_for_team(Identity.get_team("delivery")),
+             & &1.profile
+           )
 
     # -- 8. Identity again: a principal for work nobody starts by hand --------
     {:ok, identity, _html} = live(conn, "/admin/identity")
@@ -191,7 +194,7 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
     })
     |> render_submit()
 
-    assert Troupe.Plane.Triggers.get(Identity.get_team("delivery"), "nightly")
+    assert Triggers.get(Identity.get_team("delivery"), "nightly")
 
     # -- 10. Budgets: which ceiling would refuse, and for whom ----------------
     {:ok, budgets, _html} = live(conn, "/admin/budgets")

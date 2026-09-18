@@ -2540,3 +2540,21 @@ something fire on its own should not be a shell command.
 
     $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/console_walkthrough_test.exs
     Result: 1 passed
+
+    $ ./scripts/toolbox mix cmd --app troupe_plane mix test
+    Result: 604 passed, 9 excluded
+
+    $ ./scripts/credo
+    6715 mods/funs, found no issues.
+
+    $ ./scripts/toolbox mix troupe.schema.diff
+    schema unchanged: 77 documents
+
+### One thing the new form broke, and what it taught
+
+`refute design_html =~ "nightly-deps"` — one team's trigger must not appear on another
+team's page — started failing against an *empty* form: the new name field's placeholder was
+that exact string. Changing the placeholder did not fix it, because the explanatory HTML
+comment left in its place still carried the name: **HEEx emits an HTML comment into the
+page** rather than swallowing it, so a comment is page content and can satisfy an assertion
+about a leak. The note now lives above the handler, in Elixir.
