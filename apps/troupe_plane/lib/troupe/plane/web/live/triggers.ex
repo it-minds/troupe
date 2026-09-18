@@ -94,6 +94,34 @@ defmodule Troupe.Plane.Web.Live.Triggers do
   # Fetched when somebody asks rather than with the list: a revision carries its whole
   # document, and loading every revision of every trigger to render a table nobody has
   # opened would be the page paying for a question it was not asked.
+  # Making one. The screen could enable, disable, run and delete a trigger and not create
+  # one — which the coverage test could not see, because `trigger_put` *was* reached here,
+  # by the enable toggle. A placement is a claim that somebody can do the thing, and
+  # "somebody can change one that already exists" was a narrower claim than it looked.
+  #
+  # Found by the walkthrough: the step between granting a profile and having something fire
+  # on its own was a shell command, which is exactly the seam done item 2 is for.
+  def handle_event("create", params, socket) do
+    attrs =
+      %{
+        "team" => socket.assigns.team,
+        "name" => params["name"],
+        "profile" => params["profile"],
+        "principal" => params["principal"],
+        "prompt_template" => params["prompt_template"],
+        "source" => source_from(params)
+      }
+      |> put_present("notify_url", params["notify_url"])
+
+    case Admin.trigger_put(socket.assigns.actor, attrs) do
+      {:ok, _result} ->
+        {:noreply, socket |> assign(flash_message: "#{params["name"]} created") |> load()}
+
+      {:error, error} ->
+        {:noreply, assign(socket, error: refusal(error))}
+    end
+  end
+
   def handle_event("revisions", %{"name" => name}, socket) do
     case Admin.trigger_revisions(socket.assigns.actor, socket.assigns.team, name) do
       {:ok, revisions} ->
@@ -103,6 +131,23 @@ defmodule Troupe.Plane.Web.Live.Triggers do
         {:noreply, assign(socket, error: error.message)}
     end
   end
+
+  # The two sources a form can express. A webhook needs no field of its own — its URL and
+  # key are minted when it is made — and anything else is a document somebody writes.
+  defp source_from(%{"kind" => "webhook"}), do: %{"kind" => "webhook"}
+
+  defp source_from(params),
+    do: %{"kind" => "schedule", "cron" => params["cron"], "timezone" => params["timezone"]}
+
+  defp put_present(attrs, _key, value) when value in [nil, ""], do: attrs
+  defp put_present(attrs, key, value), do: Map.put(attrs, key, value)
+
+  # What the plane refused, in its own words. `trigger_put` distinguishes a missing sponsor
+  # from an unknown principal from a cron nobody can parse, and a form that said
+  # "invalid_params" to all three would leave somebody guessing which.
+  defp refusal(%{data: %{reason: reason}}) when is_binary(reason), do: reason
+  defp refusal(%{data: %{missing: field}}) when is_binary(field), do: "#{field} is required"
+  defp refusal(error), do: error.message
 
   defp toggle(socket, name, enabled?) do
     attrs = %{"team" => socket.assigns.team, "name" => name, "enabled" => enabled?}
@@ -160,9 +205,71 @@ defmodule Troupe.Plane.Web.Live.Triggers do
       </form>
 
       <p class="hint">
-        Definitions live in git and arrive by <code>troupe admin trigger put</code>. From here:
-        switch one off, fire one now, and see what the last runs did.
+        A trigger kept in git arrives by <code>troupe admin trigger put</code>, which is
+        where a fleet of them belongs. The form below is for the first one and the quick
+        one — because the step between granting a team a profile and having something fire
+        on its own should not be a shell command.
       </p>
+
+      <section :if={@team} class="panel">
+        <h2>A new trigger for {@team}</h2>
+
+        <form id="new-trigger" phx-submit="create">
+          <label for="new-trigger-name">Name</label>
+          <input id="new-trigger-name" name="name" placeholder="nightly-deps" autocomplete="off" />
+
+          <label for="new-trigger-principal">Runs as</label>
+          <input
+            id="new-trigger-principal"
+            name="principal"
+            placeholder="svc:team/name"
+            autocomplete="off"
+          />
+          <p class="field-help">
+            A service principal of this team, made on
+            <.link navigate="/admin/identity">Identity</.link>. A trigger fires unattended,
+            so it runs as a credential somebody is answerable for rather than as whoever
+            happened to create it.
+          </p>
+
+          <label for="new-trigger-profile">Profile</label>
+          <input id="new-trigger-profile" name="profile" placeholder="dev" autocomplete="off" />
+
+          <label for="new-trigger-kind">Fired by</label>
+          <select id="new-trigger-kind" name="kind">
+            <option value="schedule">a schedule</option>
+            <option value="webhook">a webhook</option>
+          </select>
+
+          <label for="new-trigger-cron">Schedule</label>
+          <input id="new-trigger-cron" name="cron" placeholder="0 3 * * 1-5" autocomplete="off" />
+          <p class="field-help">
+            Five fields, in UTC unless a timezone is given. Ignored for a webhook, whose URL
+            and key are minted when it is made and shown once.
+          </p>
+
+          <label for="new-trigger-timezone">Timezone</label>
+          <input id="new-trigger-timezone" name="timezone" placeholder="UTC" autocomplete="off" />
+
+          <label for="new-trigger-prompt">What the session is asked to do</label>
+          <textarea id="new-trigger-prompt" name="prompt_template" rows="3"></textarea>
+
+          <label for="new-trigger-notify">Where its outcome is posted</label>
+          <input
+            id="new-trigger-notify"
+            name="notify_url"
+            placeholder="https://hooks.example/troupe"
+            autocomplete="off"
+          />
+          <p class="field-help">
+            Optional, absolute, and not loopback — the rule is checked here and again at
+            send, and <.link navigate="/admin/integrations">Integrations</.link> lists every
+            target with the verdict on it.
+          </p>
+
+          <button type="submit">create</button>
+        </form>
+      </section>
 
       <div :for={trigger <- @triggers} class="trigger">
         <h2>

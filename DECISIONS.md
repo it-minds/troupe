@@ -4131,3 +4131,20 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      are both empty, which is the first time the two lists have said the console is not
      behind the API — and the tests that hold them to only shrinking are what will say so
      the moment it is again.
+
+623. **The walkthrough found a gap the coverage test could not see.** Triggers could enable,
+     disable, run and delete a trigger and not *create* one — and `trigger_put` was placed on
+     that screen honestly, because the enable toggle calls it. A placement is a claim that
+     somebody can do the thing, and "somebody can change one that already exists" was a
+     narrower claim than it looked.
+
+     This is the difference between done item 1 and done item 2. One asks whether every
+     method is reachable; the other asks whether the steps join up, and only the second can
+     notice that the step between granting a profile and having something fire on its own
+     was a shell command.
+
+624. **The walkthrough starts from a plane with nothing in it but one person and their
+     group.** That is the one thing a console cannot do for itself: a console with a way to
+     create its own administrators is the escalation the whole arrangement refuses. Every
+     other step is a form on a screen, and a step that needed a shell fails the test rather
+     than being discovered by somebody on their first evening.

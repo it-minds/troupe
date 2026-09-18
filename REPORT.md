@@ -2498,3 +2498,45 @@ Done item 2 — a platform admin configuring a complete working deployment from 
 alone, end to end, with every step in the audit trail. Every piece of it now exists; what
 is missing is the walkthrough that proves the pieces join up, which is a test that drives
 the console from an empty plane to a running session.
+
+## R8j — the walkthrough, and what it found
+
+Done item 2: *a platform admin configures a complete working deployment from the console
+alone — identity, a team, a policy, a bundle, a profile, a provisioner, a trigger, a budget
+— with no `kubectl`, no environment variable and no database write, and every step is in the
+audit trail with a diff keyed by path.*
+
+`Troupe.Plane.ConsoleWalkthroughTest` drives twelve steps through the LiveViews, starting
+from a plane that holds one person and the group they arrive carrying — the one thing a
+console cannot do for itself, because a console that could create its own administrators is
+the escalation the whole design refuses.
+
+    1. Identity      the check says "including you."
+    2. Policy        the admin group saved behind that check; retention narrowed to 30
+    3. Teams         a provider group becomes `delivery`, inheriting the platform's 30
+    4. Profiles      `dev` written from the editor
+    5. Provisioners  kubernetes, everything enforced
+    6. Bundles       the diff first — "this would be the first version" — then publish
+    7. Teams         the grant
+    8. Identity      a principal, its secret shown once
+    9. Triggers      a schedule that fires as that principal
+   10. Budgets       which ceiling would refuse, and for whom
+   11. a session created on what was configured
+   12. Audit         every action recorded, the diff keyed by path, and the chain verifies
+
+### What it found
+
+Step 9 did not exist. Triggers could enable, disable, run and delete a trigger and **not
+create one** — and the coverage test could not see it, because `trigger_put` *is* reached
+from that screen, by the enable toggle. A placement is a claim that somebody can do the
+thing, and "can change one that already exists" was a narrower claim than it looked.
+
+That is the difference between done item 1 and done item 2, and the reason the document asks
+for both. The screen now carries a create form, and the hint above it says what it is for:
+a fleet of triggers belongs in git, and the step between granting a team a profile and having
+something fire on its own should not be a shell command.
+
+### The gate
+
+    $ ./scripts/toolbox mix test apps/troupe_plane/test/troupe/plane/console_walkthrough_test.exs
+    Result: 1 passed
