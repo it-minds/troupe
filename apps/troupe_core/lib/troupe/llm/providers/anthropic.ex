@@ -57,7 +57,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
       method: :post,
       json: body(request),
       headers: [
-        {"x-api-key", key},
+        auth_header(request, key),
         {"anthropic-version", @api_version},
         {"accept", "text/event-stream"}
       ],
@@ -262,6 +262,11 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   defp api_key(%Request{api_key: key}) when is_binary(key) and key != "", do: key
   defp api_key(_request), do: System.get_env("ANTHROPIC_API_KEY")
+
+  # Anthropic's own scheme is `x-api-key`; a gateway in front of its API usually wants
+  # the same token as a bearer, which is what `auth_token` in a config file says.
+  defp auth_header(%Request{auth: :bearer}, key), do: {"authorization", "Bearer " <> key}
+  defp auth_header(_request, key), do: {"x-api-key", key}
 
   defp describe(%{"message" => message}), do: message
   defp describe(body) when is_binary(body), do: String.slice(body, 0, 400)

@@ -113,3 +113,25 @@ Not on the list because they are by design and already right for a laptop: `kind
 local` and `visibility: private` in `session_created`; `Troupe.Identity` naming the
 person `local:<username>` until linked; `attribution: %{}` (nobody to bill);
 `Worktrees.resolve` falling back to the plain workspace outside a git repository.
+
+## Phase 1 — what landed here
+
+The binary lives in the `troupe` repository (Decision 639; sections 7.1 and 7.2 of the
+brief, as answered). What this repository had to change for that, and what proves it:
+
+| item | change | proof |
+|---|---|---|
+| 1 — a release | none here, by decision; the three apps compile as another project's sparse git dependencies: `version/0` and `Troupe.Version` fall back to `TROUPE_VERSION`, `harness/1` declares siblings, the reaper source moved into `troupe_core` | `mix troupe.boundaries` reads `harness/1`; `Troupe.VersionTest` unchanged; `troupe/daemon/` builds from these |
+| 2 — three transports | the TCP listener publishes its bound port (Decision 642) | `tcp_transport_test.exs` (TCP: bound port in `daemon.json`, token admits, wrong token refused), `daemon_test.exs` (Unix socket), `loopback_test.exs` (WebSocket, origin fence) |
+| 3 — one on-disk format | already so; `Troupe.Sessions.Sealer` is in `troupe_protocol` | `storage_test.exs`, `private_test.exs` |
+| 4 — a laptop's configuration | `Troupe.Config` gained named providers, the opencode fallback and the model catalog; `Config.target/2`; requests aimed per model; bearer auth on the Anthropic adapter (Decision 640) | `config_providers_test.exs` (19 tests), `providers_test.exs` "auth schemes" |
+| 5 — honest capabilities | already so | `daemon_test.exs` handshake |
+| 6 — packaging | in `troupe/daemon/` | that repository's release workflow and smoke |
+| 7 — eval-safe config | no `to_existing_atom` on environment values here; the daemon's `runtime.exs` is in `troupe/daemon/` | Decision 634's test |
+| 8 — README | says what the repository ships now | — |
+| spawn (list item 2) | `Protocol.Daemon.command/1` finds `troupe-daemon` on the `PATH` (Decision 641) | — |
+| discovery path (list item 9) | `PROTOCOL.md` §1 now matches the code and the Tauri shell | — |
+
+Still open from the list above and deliberately not here: logging for a detached daemon
+(the release's `runtime.exs`), the twelve agent definitions and the TUI-only tools
+(phase 3), `private_sessions` needing an off-cluster OpenBao address (deployment).

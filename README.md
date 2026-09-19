@@ -4,11 +4,15 @@ A coding-agent harness that runs on Kubernetes. Teams' agents run on pods this c
 schedules; a control plane hands out the sessions, endpoints and tokens to reach them,
 and an admin console runs the whole fleet from a browser.
 
-**This repository is the remote, and nothing else.** It ships four container images and
-a Helm chart. It ships no client — no binary, no installer, no TUI, no CLI, no Python
-package — and it is installed on nobody's machine. Clients are separate releases from
-separate repositories that speak [PROTOCOL.md](PROTOCOL.md) and get no private access to
-any of this; the plane's front page links to whichever ones your organisation publishes.
+**This repository is the remote, and the harness the daemon is built from.** It ships
+four container images and a Helm chart. It ships no client and no binary — no installer,
+no TUI, no CLI, no Python package — and it is installed on nobody's machine. Three of
+its apps, `troupe_core`, `troupe_gateway` and `troupe_protocol`, are also the whole of
+the **local daemon**: the [`troupe`](https://github.com/it-minds/troupe) repository pins
+them by git ref and packages them as `troupe-daemon`, one binary per platform, and the
+clients stand on that. Clients are separate releases from separate repositories that
+speak [PROTOCOL.md](PROTOCOL.md) and get no private access to any of this; the plane's
+front page links to whichever ones your organisation publishes.
 
 Sessions live on a **pod**, not in whatever window you happened to open. Close the
 client and the work carries on; open it again, or a second one, or a script, and you are
@@ -213,8 +217,9 @@ no credential of its own, and exchanges each caller's at the plane.
 
 ## Not included
 
-No client of any kind, and no packaged binary for any platform. No MCP client, no git
-auto-commit or undo, no image signing.
+No client of any kind, and no packaged binary for any platform — the daemon binary is
+built from this repository's apps, in the `troupe` repository, on its runners. No MCP
+client, no git auto-commit or undo, no image signing.
 
 [docs/user/](docs/user/README.md) documents the terminal client that used to live here.
 It is deprecated and kept as an artifact: the code it cites is in git history, and the

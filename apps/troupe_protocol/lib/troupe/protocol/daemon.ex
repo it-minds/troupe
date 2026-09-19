@@ -231,17 +231,18 @@ defmodule Troupe.Protocol.Daemon do
   @doc """
   The shell command that starts a daemon, or why there isn't one.
 
-  `:command` wins, then `TROUPE_DAEMON_COMMAND`. There is no third answer: what starts
-  a local daemon is whatever the client was shipped as, and this repository ships no
-  client — a worker pod's daemon is started by its own release, never spawned from
-  here. So a caller that wants one says how, and otherwise this says it cannot rather
-  than guessing at a binary that does not exist.
+  `:command` wins, then `TROUPE_DAEMON_COMMAND`, then a `troupe-daemon` executable on
+  the `PATH` — which is what the daemon is shipped as, by the `troupe` repository, and
+  what its installers put there. A worker pod's daemon is started by its own release
+  and never spawned from here. With none of the three this says it cannot, rather than
+  guessing at a binary that is not installed.
   """
   @spec command([option()]) :: {:ok, String.t()} | {:error, :no_daemon_command}
   def command(opts \\ []) do
     cond do
       command = Keyword.get(opts, :command) -> {:ok, command}
       command = env("TROUPE_DAEMON_COMMAND") -> {:ok, command}
+      command = System.find_executable("troupe-daemon") -> {:ok, command}
       true -> {:error, :no_daemon_command}
     end
   end

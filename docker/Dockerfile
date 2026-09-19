@@ -62,8 +62,8 @@ COPY apps/troupe_a2a/mix.exs apps/troupe_a2a/
 RUN mix deps.get --only prod
 
 COPY config config
+# `apps/troupe_core/native/` — the reaper's Zig source — comes with the apps.
 COPY apps apps
-COPY native native
 
 RUN mix deps.compile && mix compile && mix release ${RELEASE} --overwrite \
  && mv _build/prod/rel/${RELEASE} /app/release

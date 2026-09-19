@@ -32,14 +32,25 @@ defmodule Troupe.Version do
 
   @path Path.join([__DIR__, "..", "..", "..", "..", "VERSION"]) |> Path.expand()
   @external_resource @path
-  @version @path |> File.read!() |> String.trim()
+  @version (case File.read(@path) do
+              {:ok, contents} ->
+                String.trim(contents)
+
+              # This app compiled as another project's dependency: a sparse checkout of
+              # `apps/troupe_protocol` has no repository root. The consumer says which
+              # version it pinned, the same way each `mix.exs` here reads it.
+              {:error, _} ->
+                System.get_env("TROUPE_VERSION") ||
+                  raise "neither #{@path} nor TROUPE_VERSION says which version this is"
+            end)
 
   @doc """
   The release version, as `MAJOR.MINOR.PATCH`.
 
-  Read from `VERSION` at compile time, so a build that has it and a build that does not
-  cannot both exist — a missing file fails the compile rather than defaulting to something
-  plausible.
+  Read from `VERSION` at compile time — or from `TROUPE_VERSION` where there is no
+  `VERSION`, which is what a consumer outside this umbrella sets — so a build that knows
+  its version and a build that does not cannot both exist: a missing answer fails the
+  compile rather than defaulting to something plausible.
   """
   @spec version() :: String.t()
   def version, do: @version

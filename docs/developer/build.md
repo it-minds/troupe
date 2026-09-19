@@ -99,8 +99,9 @@ inside it.
 ### The reaper
 
 `mix compile.reaper` is a `Mix.Task.Compiler` appended to `troupe_core`'s compilers
-(`apps/troupe_core/mix.exs:14-15`). It runs `zig build-exe native/reaper/reaper.zig
--target <triple> -O ReleaseSafe -lc -fstrip` into `apps/troupe_core/priv/reaper/<triple>/reaper[.exe]`
+(`apps/troupe_core/mix.exs:14-15`). It runs `zig build-exe native/reaper/reaper.zig`
+(the source lives in `apps/troupe_core/native/`, so a checkout of that app alone can build
+it) with `-target <triple> -O ReleaseSafe -lc -fstrip` into `apps/troupe_core/priv/reaper/<triple>/reaper[.exe]`
 for the host triple by default, all five (`x86_64-linux-musl`, `aarch64-linux-musl`,
 `x86_64-macos`, `aarch64-macos`, `x86_64-windows`) under `TROUPE_REAPER_TARGETS=all`, or
 a comma-separated list. Outputs are skipped when newer than the source and `mix clean`

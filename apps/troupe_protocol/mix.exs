@@ -4,7 +4,7 @@ defmodule Troupe.Protocol.MixProject do
   def project do
     [
       app: :troupe_protocol,
-      version: File.read!("../../VERSION") |> String.trim(),
+      version: version(),
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
@@ -25,6 +25,16 @@ defmodule Troupe.Protocol.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
+
+  # `VERSION` at the umbrella root, or `TROUPE_VERSION` when this app is a dependency of
+  # another project — a sparse git checkout of `apps/troupe_protocol` has no root — and
+  # never a plausible default: a consumer that pins this app says which version it is.
+  defp version do
+    case File.read("../../VERSION") do
+      {:ok, contents} -> String.trim(contents)
+      {:error, _} -> System.get_env("TROUPE_VERSION") || raise "TROUPE_VERSION is not set and ../../VERSION is not here"
+    end
+  end
 
   defp deps do
     [
