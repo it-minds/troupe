@@ -52,8 +52,16 @@ defmodule Troupe.LLM.Fake do
     GenServer.start_link(__MODULE__, opts, name: name)
   end
 
-  @doc "Load a script from a JSON file, for release smoke tests."
-  @spec load_script!(Path.t()) :: [step()]
+  @doc """
+  Load a script from a JSON file, for release smoke tests and for clients that drive a
+  daemon with no model behind it.
+
+  A bare list is the shared script. An object carries `steps` and, optionally, `routes`:
+  per-agent scripts keyed by agent name, which is what a session with subagents needs,
+  because one shared list cannot say which answer belongs to whom. Returned as the
+  options `start_link/1` takes.
+  """
+  @spec load_script!(Path.t()) :: [steps: [step()], routes: %{optional(String.t()) => [step()]}]
   def load_script!(path) do
     path
     |> File.read!()
@@ -62,9 +70,18 @@ defmodule Troupe.LLM.Fake do
   end
 
   @doc false
-  @spec normalize_script(term()) :: [step()]
-  def normalize_script(%{"steps" => steps}), do: normalize_script(steps)
-  def normalize_script(steps) when is_list(steps), do: Enum.map(steps, &normalize_step/1)
+  @spec normalize_script(term()) :: [steps: [step()], routes: %{optional(String.t()) => [step()]}]
+  def normalize_script(%{} = script) do
+    routes =
+      script
+      |> Map.get("routes", %{})
+      |> Map.new(fn {agent, steps} -> {to_string(agent), Enum.map(steps, &normalize_step/1)} end)
+
+    [steps: script |> Map.get("steps", []) |> Enum.map(&normalize_step/1), routes: routes]
+  end
+
+  def normalize_script(steps) when is_list(steps),
+    do: [steps: Enum.map(steps, &normalize_step/1), routes: %{}]
 
   defp normalize_step(%{"text" => text} = step) when not is_map_key(step, "tools") do
     {:text, text}
