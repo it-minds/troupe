@@ -245,23 +245,23 @@ defmodule Troupe.Agent.Server do
       "compacted" ->
         %{state | conversation: Enum.map(data["conversation"], &Message.from_json/1)}
 
-      # Being finished is not visible in the conversation — a subagent's last message
-      # is the tool_results of its own `finish` call, which looks exactly like owing
-      # the model a turn. Without this, a restarted `:done` agent would resume, spend
-      # budget it has none of, and report to its parent a second time.
-      "agent_done" ->
-        %{state | done_reason: safe_reason(data["reason"])}
-
-      # …and being woken again is not visible in it either: the turn that followed
-      # looks like any other. Without this a restarted agent would come back `:done`
-      # with a conversation that has moved on.
-      "agent_woken" ->
-        %{state | done_reason: nil}
+      type when type in ["agent_done", "agent_woken"] ->
+        fold_done(state, type, data)
 
       _ ->
         state
     end
   end
+
+  # Being finished is not visible in the conversation — a subagent's last message is
+  # the tool_results of its own `finish` call, which looks exactly like owing the model
+  # a turn. Without folding `agent_done`, a restarted `:done` agent would resume, spend
+  # budget it has none of, and report to its parent a second time. Being woken again is
+  # not visible either: the turn that followed looks like any other, and without
+  # folding `agent_woken` a restarted agent would come back `:done` with a
+  # conversation that has moved on.
+  defp fold_done(state, "agent_done", data), do: %{state | done_reason: safe_reason(data["reason"])}
+  defp fold_done(state, "agent_woken", _data), do: %{state | done_reason: nil}
 
   # Reasons are a closed set this module writes, so an unknown one from a log written
   # by a newer version still marks the agent finished rather than crashing replay.
