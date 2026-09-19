@@ -57,8 +57,10 @@ defmodule Troupe.Protocol.MixProject do
       {:aws_signature, "~> 0.4"},
       # Segments are zstd JSONL, as the spec says. A NIF rather than gzip because a
       # session log is highly repetitive and the ratio is what keeps the object tier
-      # affordable.
-      {:ezstd, "~> 1.2"},
+      # affordable. The it-minds fork of ezstd 1.2.4 adds the Windows build (a `win32`
+      # rebar hook that compiles the NIF with Zig); upstream has hooks for Linux and
+      # macOS only, and the daemon is released for Windows too. See DECISIONS.md 643.
+      {:ezstd, git: "https://github.com/it-minds/ezstd.git", ref: "e3c9239fc1ead0fab110e82a9c3cf4ffb5add88d"},
       # Agent definitions and skills carry YAML frontmatter, and a bundle is checked by
       # the plane before it is published as well as by the worker that applies it, so
       # the parser sits where both can reach it.
