@@ -16,7 +16,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Config    the settings page renders a config struct
       Troupe.Settings  field definitions, parsing and formatting
       Troupe.Event     the struct the model folds
-      Troupe.LLM.Message  content blocks, for the text of an assistant message
+      Troupe.Client.Message  content blocks, for the text of an assistant message
       Troupe.Codec     decoding events the client hands over
 
   Run it with `mix troupe.xref`; CI runs it alongside `mix test`.
@@ -31,7 +31,7 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Config,
     Troupe.Settings,
     Troupe.Event,
-    Troupe.LLM.Message,
+    Troupe.Client.Message,
     Troupe.Codec
   ]
 

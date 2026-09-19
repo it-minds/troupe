@@ -40,11 +40,11 @@ defmodule Troupe.Remote.Journal do
   end
 
   @spec via(String.t()) :: GenServer.name()
-  def via(session_id), do: {:via, Registry, {Troupe.Registry, {:remote_journal, session_id}}}
+  def via(session_id), do: {:via, Registry, {Troupe.Client.Registry, {:remote_journal, session_id}}}
 
   @spec whereis(String.t()) :: pid() | nil
   def whereis(session_id) do
-    case Registry.lookup(Troupe.Registry, {:remote_journal, session_id}) do
+    case Registry.lookup(Troupe.Client.Registry, {:remote_journal, session_id}) do
       [{pid, _}] -> pid
       [] -> nil
     end

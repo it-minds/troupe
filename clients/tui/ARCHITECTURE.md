@@ -675,21 +675,27 @@ same `UI.TUI.Model.rebuild/3` a restart uses.
 The TUI and HQ call one module. `Troupe.Client` is a behaviour with two
 implementations and a facade that routes by session id:
 
-* `Troupe.Client.Local` wraps the in-process session API (`Troupe`,
-  `Session.Dispatcher`, `Session.Log`, `Session.Index`, …).
+* `Troupe.Client.Daemon` speaks the same contract to the local daemon: the
+  `troupe-daemon` on this machine, or the `Troupe.Gateway.Daemon` this VM
+  embeds when none answers (`Troupe.Client.Daemon.Link`). Since phase 2 of the
+  daemon plan (Decision 100) there is no in-process session API here at all;
+  `troupe_core` runs the session and the TUI reaches it over the daemon's
+  loopback WebSocket, through the same `Troupe.Remote.Worker` a pod session
+  uses.
 * `Troupe.Client.Remote` speaks the remote contract over the plane and worker
   connections.
 
-A session's implementation is found in `Troupe.Registry` under `{:client,
-session_id}`; the worker connection registers it while a remote session is
-attached, and everything else is local. Fleet-level calls (teams, profiles,
+A session's implementation is found in `Troupe.Client.Registry` under
+`{:client, session_id}`; the worker connection registers it while a session is
+attached — with the daemon implementation for a local one, the remote
+implementation for a pod's. Fleet-level calls (teams, profiles,
 listing, creating) take an *origin* — `{:local, workspace}` or `{:remote,
 plane_url}` — instead of a session id.
 
 `mix troupe.xref` fails the build if any module under `Troupe.UI` calls a
 `Troupe.*` module other than `Troupe.Client`, its own namespace, or the pure
 data modules a renderer needs (`Troupe.Config`, `Troupe.Settings`,
-`Troupe.Event`, `Troupe.LLM.Message`, `Troupe.Codec`). It reads the BEAM import
+`Troupe.Event`, `Troupe.Client.Message`, `Troupe.Codec`). It reads the BEAM import
 table of each compiled UI module, so it cannot be argued with.
 
 ### 9.2 Processes

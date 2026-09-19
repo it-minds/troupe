@@ -1,25 +1,31 @@
 defmodule Troupe.Settings do
   @moduledoc """
-  The tweakable subset of `Troupe.Config`, as data: one entry per setting with
-  its type, where it lives in the struct, where it lives in YAML, when a change
+  The tweakable subset of the daemon's `Troupe.Config`, as data: one entry per setting
+  with its type, the field it lives in, the YAML key it is written under, when a change
   takes effect, and the help text the settings page shows next to it.
 
-  `put/3` returns an updated config; `persist/3` writes the value back to the
-  config file that owns it (the project's `.troupe/config.yaml` when the project
-  has one, otherwise the global `config.yaml`). Applying a change to a running
-  session is `Troupe.put_setting/3`.
+  A setting is a line in a config file the daemon reads when a session starts — the
+  project's `.troupe/config.yaml` when the project has one, else the global
+  `config.yaml`. `put/3` returns the config as it will read; `persist/3` writes the value
+  back. Nothing here reaches into a running agent: `watch` is the one setting a session
+  takes live, through the protocol (`Troupe.Client.put_setting/3`), and everything else
+  is for the next session.
+
+  `mouse` is the TUI's own and rides in the config's `extra` map, because the daemon has
+  no opinion about terminals.
   """
 
-  alias Troupe.{Config, Paths}
+  alias Troupe.Config
+  alias Troupe.Paths
 
-  @type type :: :bool | :int | :float | :string | :model | :effort
-  @type effect :: :now | :new_branches | :next_run
+  @type type :: :bool | :int | :float | :string | :model
+  @type effect :: :now | :next_run
 
   @type field :: %{
           key: String.t(),
           label: String.t(),
           type: type(),
-          path: [atom()],
+          path: atom() | {:extra, String.t()},
           yaml: [String.t()],
           effect: effect(),
           help: String.t()
@@ -30,327 +36,140 @@ defmodule Troupe.Settings do
       key: "auto_approve",
       label: "auto approve",
       type: :bool,
-      path: [:auto_approve],
+      path: :auto_approve,
       yaml: ["auto_approve"],
-      effect: :now,
+      effect: :next_run,
       help: """
       Run every tool call without asking. Off means writes, edits and shell
-      commands stop the branch until you answer y (allow once), a (allow that
+      commands stop the agent until you answer y (allow once), a (allow that
       tool for the whole session) or n (deny) in the activated window.
-
-      Turn it on for a sandbox or a worktree branch you intend to review as a
-      diff; leave it off when agents work in your own checkout.
       """
     },
     %{
       key: "mouse",
-      label: "mouse reporting",
+      label: "mouse",
       type: :bool,
-      path: [:mouse],
+      path: {:extra, "mouse"},
       yaml: ["mouse"],
       effect: :next_run,
       help: """
-      Let Troupe see the mouse: clicking a tile activates that window, the
-      wheel scrolls the pane under the cursor, and dragging across the pane
-      selects text — releasing copies it, so this is on by default.
-
-      The cost is that the terminal hands every click to Troupe, so the
-      *terminal's* own click-and-drag selection stops working inside the TUI.
-      Troupe's own drag-to-select covers most of it; turn this off if you want
-      the emulator's (rectangular blocks, selecting from the tiles). You keep
-      1-9 for windows and PgUp/PgDn, ↑↓ and End for scrolling, and Ctrl-Y (or
-      /copy) copies a whole transcript either way.
-
-      Most terminals also let you hold a modifier to bypass mouse reporting
-      for one selection (Option on iTerm2 and Terminal.app, Shift on
-      GNOME Terminal, Konsole and most X11 terminals).
+      Capture the mouse: click tiles to activate them, wheel to scroll. Off keeps
+      the terminal's own click-and-drag selection. `troupe --no-mouse` overrides
+      it for one run.
       """
     },
     %{
-      key: "watch.enabled",
+      key: "watch",
       label: "watch mode",
       type: :bool,
-      path: [:watch, :enabled],
-      yaml: ["watch", "enabled"],
+      path: :watch,
+      yaml: ["watch"],
       effect: :now,
       help: """
-      Watch the workspace for `AI!` / `AI?` comments and dispatch a branch when
-      you save one. `AI!` asks for a change, `AI?` asks a question; a bare `AI`
-      comment is context the branch is told about but is not triggered by. The
-      agent is asked to delete the marker as part of its work, so a branch that
-      fails leaves the comment behind and the next save triggers it again.
-
-      Same thing as the /watch command, and the status line shows the backend
-      in use (file_system, or polling where inotify is unavailable).
+      Watch the workspace for `AI!` and `AI?` comments and act on them. Takes
+      effect on the open session at once, and on every new one.
       """
     },
     %{
-      key: "watch.debounce_ms",
-      label: "watch debounce (ms)",
-      type: :int,
-      path: [:watch, :debounce_ms],
-      yaml: ["watch", "debounce_ms"],
-      effect: :now,
-      help: """
-      How long the watcher waits after the last file change before it reads the
-      batch. Raise it if your editor writes a file several times per save or a
-      formatter rewrites it right after you.
-      """
-    },
-    %{
-      key: "watch.poll_interval_ms",
-      label: "watch poll interval (ms)",
-      type: :int,
-      path: [:watch, :poll_interval_ms],
-      yaml: ["watch", "poll_interval_ms"],
-      effect: :now,
-      help: """
-      Interval for the polling backend, used where filesystem events are not
-      available (network mounts, some containers). Ignored by the file_system
-      backend.
-      """
-    },
-    %{
-      key: "watch.change_command",
-      label: "watch AI! profile",
-      type: :string,
-      path: [:watch, :change_command],
-      yaml: ["watch", "change_command"],
-      effect: :now,
-      help: """
-      The agent profile a saved `AI!` comment dispatches. The default `quick` is a
-      cheap, few-turn editor for the small local change a comment usually asks
-      for; name `code` here instead if you want the full workhorse profile, with
-      the default model and the token bill that goes with it.
-      """
-    },
-    %{
-      key: "watch.question_command",
-      label: "watch AI? profile",
-      type: :string,
-      path: [:watch, :question_command],
-      yaml: ["watch", "question_command"],
-      effect: :now,
-      help: """
-      The agent profile a saved `AI?` comment dispatches. The default `answer`
-      reads at most a file or two on the cheap model and replies in its summary;
-      `plan` investigates properly and writes a task list, for a lot more tokens.
-      """
-    },
-    %{
-      key: "memory.enabled",
-      label: "project brief",
-      type: :bool,
-      path: [:memory, :enabled],
-      yaml: ["memory", "enabled"],
-      effect: :new_branches,
-      help: """
-      Open every agent's prompt with the project brief kept in
-      `.troupe/memory.md`: what this project is, where things live, how to build
-      and test it, and the conventions that matter.
-
-      The point is the first question. An agent that already knows the layout
-      does not spend turns and tokens rediscovering it, and what one agent
-      learns with `remember` the next one starts with. Off means no brief is
-      read or written, and the file is left alone.
-      """
-    },
-    %{
-      key: "memory.auto_refresh",
-      label: "refresh brief automatically",
-      type: :bool,
-      path: [:memory, :auto_refresh],
-      yaml: ["memory", "auto_refresh"],
-      effect: :new_branches,
-      help: """
-      Dispatch the `librarian` agent once per session when the brief is missing
-      or stale, so it is written without you asking.
-
-      It runs on the cheap model, reads only, and dismisses its own window when
-      it finishes. Off means the brief changes only when you run
-      `/memory refresh` or an agent calls `remember`.
-      """
-    },
-    %{
-      key: "memory.max_age_days",
-      label: "brief goes stale after (days)",
-      type: :int,
-      path: [:memory, :max_age_days],
-      yaml: ["memory", "max_age_days"],
-      effect: :new_branches,
-      help: """
-      How old the brief may get before an automatic refresh rewrites it. A
-      refresh also triggers when the repository's tracked-file count has drifted
-      by more than a tenth.
-
-      A new commit deliberately does not make the brief stale: every commit
-      would, and the brief describes the shape of the project rather than its
-      current contents.
-      """
-    },
-    %{
-      key: "max_branches",
-      label: "max branches",
-      type: :int,
-      path: [:max_branches],
-      yaml: ["max_branches"],
-      effect: :now,
-      help: """
-      How many branches may be running or waiting for you at once. Dispatching
-      past the limit is refused until one finishes, is cancelled, or you dismiss
-      it. Finished branches do not count.
-
-      The window strip shows at most nine tiles regardless of this number.
-      """
-    },
-    %{
-      key: "models.default",
-      label: "default model",
+      key: "model",
+      label: "model",
       type: :model,
-      path: [:models, :default],
-      yaml: ["models", "default"],
-      effect: :new_branches,
+      path: :model,
+      yaml: ["model"],
+      effect: :next_run,
       help: """
-      The model agents use unless their definition names another one. Enter opens
-      a menu of every model Troupe detected — from config.yaml's providers and
-      from opencode's config — and the last entry lets you type one instead.
-
-      A typed value is bare (claude-sonnet-5) to use the session provider, or
-      <provider>/<model> to send it to a named provider. `troupe config` prints
-      every provider and model Troupe resolved, with keys masked.
+      The model every agent uses unless its definition names one. A bare id goes
+      to the session-wide provider; `<provider>/<model>` goes to a named one from
+      `providers:` or opencode. `troupe models` lists what this machine can address.
       """
     },
     %{
-      key: "models.cheap",
+      key: "small_model",
       label: "cheap model",
       type: :model,
-      path: [:models, :cheap],
-      yaml: ["models", "cheap"],
-      effect: :new_branches,
+      path: :small_model,
+      yaml: ["small_model"],
+      effect: :next_run,
       help: """
-      The model for agents whose definition asks for the "cheap" alias — summaries,
-      compaction and other short work. Same menu and same <provider>/<model>
-      syntax as the default model.
+      The model for the small jobs — compaction summaries among them. Unset means
+      the default model.
       """
     },
     %{
-      key: "models.expensive",
+      key: "expensive_model",
       label: "expensive model",
       type: :model,
-      path: [:models, :expensive],
-      yaml: ["models", "expensive"],
-      effect: :new_branches,
+      path: :expensive_model,
+      yaml: ["expensive_model"],
+      effect: :next_run,
       help: """
-      The model for agents whose definition asks for the "expensive" alias — the
-      `workflow` orchestrator, which reads, plans and hands every step to a
-      subagent rather than doing the work itself. Unset, it is the default model.
+      The model for agents whose definition asks for the "expensive" alias. Unset
+      means the default model.
       """
     },
     %{
-      key: "reasoning_effort",
-      label: "reasoning effort",
-      type: :effort,
-      path: [:reasoning_effort],
-      yaml: ["reasoning_effort"],
-      effect: :new_branches,
-      help: """
-      How much thinking to buy on every turn: none, minimal, low, medium, high,
-      xhigh, or a token budget as a number. Anthropic turns the level into a
-      thinking budget (low is 4k tokens, high is 16k) and raises the output cap to
-      fit it; an OpenAI-compatible provider gets the level verbatim.
-
-      This is the weakest of three: an agent definition's own `reasoning_effort:`
-      wins, then what a named provider declares for the model, then this. Leave it
-      unset to inherit, and set it to none when a session is costing more in
-      thinking than the answers are worth.
-      """
-    },
-    %{
-      key: "default_window",
-      label: "default context window",
+      key: "context_window",
+      label: "context window",
       type: :int,
-      path: [:default_window],
-      yaml: ["default_window"],
-      effect: :new_branches,
+      path: :context_window,
+      yaml: ["context_window"],
+      effect: :next_run,
       help: """
-      Context window assumed for a model whose real window Troupe does not know.
-      It decides when compaction kicks in, so a value far above the model's real
-      window means requests fail instead of compacting.
+      Tokens the model is assumed to hold when nothing else says: a provider's
+      declaration or the catalog wins where they exist. Compaction is planned
+      against this.
       """
     },
     %{
-      key: "compaction.fraction",
-      label: "compact at fraction",
+      key: "compact_at",
+      label: "compact at",
       type: :float,
-      path: [:compaction, :fraction],
-      yaml: ["compaction", "fraction"],
-      effect: :new_branches,
+      path: :compact_at,
+      yaml: ["compact_at"],
+      effect: :next_run,
       help: """
-      Fraction of the context window that triggers compaction: the older part of
-      the conversation is summarized into one message and the recent turns are
-      kept verbatim.
-
-      Lower compacts sooner (cheaper, more forgetting), higher runs closer to the
-      limit. 0.05 to 0.95.
+      The fraction of the context window at which an agent summarises the older
+      part of its conversation.
       """
     },
     %{
-      key: "compaction.keep_last_turns",
-      label: "turns kept on compaction",
+      key: "max_turns",
+      label: "max turns",
       type: :int,
-      path: [:compaction, :keep_last_turns],
-      yaml: ["compaction", "keep_last_turns"],
-      effect: :new_branches,
-      help: """
-      How many recent user/assistant turns survive a compaction untouched.
-      Everything older becomes the summary.
-      """
+      path: :max_turns,
+      yaml: ["max_turns"],
+      effect: :next_run,
+      help: "Model calls an agent may make before its budget stops it."
     },
     %{
-      key: "budget.warn_at",
-      label: "warn at fraction of budget",
-      type: :float,
-      path: [:budget, :warn_at],
-      yaml: ["budget", "warn_at"],
-      effect: :new_branches,
-      help: """
-      Fraction of any one budget — turns, input tokens, output tokens, wall clock
-      or the model's context window — at which the branch says so in its
-      transcript and marks its tile.
-
-      The warning does not stop the agent; it is the signal that arrives while
-      there is still budget left to spend. 0.05 to 0.99.
-      """
-    },
-    %{
-      key: "tool_timeout_ms",
-      label: "tool timeout (ms)",
+      key: "max_depth",
+      label: "delegation depth",
       type: :int,
-      path: [:tool_timeout_ms],
-      yaml: ["tool_timeout_ms"],
-      effect: :new_branches,
-      help: """
-      How long a single tool call may run before it is killed and reported as an
-      error to the agent. A shell tool call can pass its own timeout_ms; this is
-      the default and the ceiling the agent loop waits on.
-      """
+      path: :max_depth,
+      yaml: ["max_depth"],
+      effect: :next_run,
+      help: "How deep subagents may delegate: 1 means the root alone may."
     },
     %{
-      key: "max_delegation_depth",
-      label: "max delegation depth",
+      key: "shell_timeout_ms",
+      label: "shell timeout (ms)",
       type: :int,
-      path: [:max_delegation_depth],
-      yaml: ["max_delegation_depth"],
-      effect: :new_branches,
-      help: """
-      How deep the delegate tool may nest subagents (code-1 → code-1/review-1 →
-      …). Past the limit delegate returns an error to the agent instead of
-      spawning, which is what stops a runaway tree.
-      """
+      path: :shell_timeout_ms,
+      yaml: ["shell_timeout_ms"],
+      effect: :next_run,
+      help: "How long a shell command may run before it and everything it spawned are killed."
+    },
+    %{
+      key: "tool_output_limit",
+      label: "tool output limit",
+      type: :int,
+      path: :tool_output_limit,
+      yaml: ["tool_output_limit"],
+      effect: :next_run,
+      help: "Bytes of a tool's output the model sees before the rest becomes a blob."
     }
   ]
 
-  @doc "Every tweakable setting, in the order the settings page shows them."
   @spec fields() :: [field()]
   def fields, do: @fields
 
@@ -366,8 +185,18 @@ defmodule Troupe.Settings do
   @spec get(Config.t(), String.t()) :: term()
   def get(%Config{} = cfg, key) do
     {:ok, field} = fetch(key)
-    Enum.reduce(field.path, cfg, &Map.fetch!(&2, &1))
+    read(cfg, field.path)
   end
+
+  defp read(cfg, {:extra, key}), do: Map.get(cfg.extra, key, default(key))
+  defp read(cfg, field) when is_atom(field), do: Map.fetch!(cfg, field)
+
+  defp default("mouse"), do: true
+  defp default(_key), do: nil
+
+  @doc "Whether the TUI should capture the mouse, as the config says."
+  @spec mouse?(Config.t()) :: boolean()
+  def mouse?(%Config{} = cfg), do: get(cfg, "mouse") == true
 
   @doc "The value as shown on the settings page."
   @spec format(Config.t(), String.t()) :: String.t()
@@ -375,7 +204,7 @@ defmodule Troupe.Settings do
     case get(cfg, key) do
       true -> "on"
       false -> "off"
-      nil -> "(inherit)"
+      nil -> "(default)"
       "" -> "(unset)"
       value when is_binary(value) -> value
       value -> to_string(value)
@@ -411,13 +240,12 @@ defmodule Troupe.Settings do
     end
   end
 
-  # "inherit" is a real value here — it is how you take the override back off and
-  # fall through to the provider's own declaration for the model.
-  def parse(%{type: :effort, key: key}, text) do
-    case String.downcase(String.trim(text)) do
-      t when t in ~w(inherit default provider -) or t == "" -> {:ok, nil}
-      t when t in ~w(none off minimal low medium high xhigh) -> {:ok, t}
-      t -> effort_number(t, key)
+  # "default" takes an override off: the cheap and expensive models fall back to the
+  # default model when they are unset.
+  def parse(%{type: :model, key: key}, text) when key in ["small_model", "expensive_model"] do
+    case String.trim(text) do
+      t when t in ["", "default", "-"] -> {:ok, nil}
+      value -> {:ok, value}
     end
   end
 
@@ -428,23 +256,12 @@ defmodule Troupe.Settings do
     end
   end
 
-  defp effort_number(text, key) do
-    case Integer.parse(text) do
-      {n, ""} when n >= 1_024 ->
-        {:ok, Integer.to_string(n)}
-
-      _ ->
-        {:error, "#{key} must be inherit, none, minimal, low, medium, high, xhigh or ≥1024 tokens"}
-    end
-  end
-
   @typedoc "One entry of a setting's menu: the value it sets, and how it reads at three widths."
   @type choice :: %{value: String.t(), label: String.t(), notes: [String.t()]}
 
   @doc """
-  The values a setting offers as a menu, or `[]` when it is free text. Model
-  settings offer every model `Troupe.Config.models/1` detected, with the value
-  in use first.
+  The values a setting offers as a menu, or `[]` when it is free text. Model settings
+  offer every model `Troupe.Config.models/1` detected, with the value in use first.
   """
   @spec choices(field(), Config.t()) :: [choice()]
   def choices(%{type: :model} = field, %Config{} = cfg) do
@@ -452,32 +269,49 @@ defmodule Troupe.Settings do
 
     cfg
     |> Config.models()
-    |> Enum.map(
-      &%{
-        value: &1.id,
-        label: &1.id,
-        notes: Enum.map([:long, :short, :minimal], fn f -> Config.describe_model(&1, f) end)
+    |> Enum.map(fn model ->
+      %{
+        value: model.id,
+        label: model.id,
+        notes: [
+          describe_model(model, :long),
+          describe_model(model, :short),
+          describe_model(model, :minimal)
+        ]
       }
-    )
+    end)
     |> Enum.sort_by(&(&1.value != current))
   end
 
   def choices(_field, _cfg), do: []
+
+  @doc """
+  How a model reads in a menu: its context window, where it came from, and whether a
+  key was found. Narrower forms drop the source and then the word "ctx" — a missing key
+  is the part worth keeping to the last column.
+  """
+  @spec describe_model(map(), :long | :short | :minimal) :: String.t()
+  def describe_model(%{context: context, source: source, key?: key?} = model, form) do
+    [
+      context && "#{div(context, 1000)}k" <> if(form == :minimal, do: "", else: " ctx"),
+      form != :minimal && Map.get(model, :price),
+      form == :long && to_string(source),
+      if(key?, do: nil, else: "no key")
+    ]
+    |> Enum.filter(&(is_binary(&1) and &1 != ""))
+    |> Enum.join(" · ")
+  end
 
   @doc "Returns the config with one setting changed."
   @spec put(Config.t(), String.t(), term()) :: Config.t()
   def put(%Config{} = cfg, key, value) do
     {:ok, field} = fetch(key)
 
-    %Config{} =
-      cfg =
-      case field.path do
-        [k] -> Map.put(cfg, k, value)
-        [outer, inner] -> Map.put(cfg, outer, Map.put(Map.fetch!(cfg, outer), inner, value))
-      end
-
-    # An explicit default model must not be overwritten by opencode's default on reload.
-    if key == "models.default", do: %Config{cfg | models_explicit?: true}, else: cfg
+    case field.path do
+      {:extra, k} -> %Config{cfg | extra: Map.put(cfg.extra, k, value)}
+      :model -> %Config{cfg | model: value, models_explicit?: true}
+      k when is_atom(k) -> Map.put(cfg, k, value)
+    end
   end
 
   @doc """
@@ -487,17 +321,22 @@ defmodule Troupe.Settings do
   """
   @spec persist(String.t(), String.t(), term()) :: {:ok, String.t()} | {:error, String.t()}
   def persist(workspace, key, value) do
-    {:ok, field} = fetch(key)
-    path = target_path(workspace)
+    case fetch(key) do
+      :error ->
+        {:error, "unknown setting #{key}"}
 
-    with {:ok, existing} <- read_yaml(path),
-         merged = put_in_yaml(existing, field.yaml, value),
-         :ok <- File.mkdir_p(Path.dirname(path)),
-         :ok <- File.write(path, encode_yaml(merged)) do
-      {:ok, path}
-    else
-      {:error, reason} when is_binary(reason) -> {:error, reason}
-      {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
+      {:ok, field} ->
+        path = target_path(workspace)
+
+        with {:ok, existing} <- read_yaml(path),
+             merged = put_in_yaml(existing, field.yaml, value),
+             :ok <- File.mkdir_p(Path.dirname(path)),
+             :ok <- File.write(path, encode_yaml(merged)) do
+          {:ok, path}
+        else
+          {:error, reason} when is_binary(reason) -> {:error, reason}
+          {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
+        end
     end
   end
 
@@ -520,8 +359,7 @@ defmodule Troupe.Settings do
     end
   end
 
-  # "inherit" is the absence of a key, not a key holding nothing: written out as a
-  # value it would come back as the empty string and read as a bogus effort level.
+  # "default" is the absence of a key, not a key holding nothing.
   defp put_in_yaml(map, [key], nil), do: Map.delete(map, key)
   defp put_in_yaml(map, [key], value), do: Map.put(map, key, value)
 
@@ -561,85 +399,37 @@ defmodule Troupe.Settings do
   @spec help_sections() :: [{String.t(), [String.t()]}]
   def help_sections do
     [
-      {"What Troupe is",
+      {"Keys",
        [
-         "Every task runs as a branch: its own agent, its own window tile, its own",
-         "transcript. Branches run in parallel and never steal your focus — a tile",
-         "lights up and waits, you go look when you want to.",
-         "A branch rests as done or failed; it keeps its transcript until you",
-         "dismiss it, and typing into it picks the conversation back up."
+         "Tab / Shift-Tab  next / previous window",
+         "1-9              activate window n",
+         "Esc              back to the command line",
+         "Ctrl-C twice     quit"
        ]},
-      {"Dispatching work",
+      {"Commands",
        [
-         "/<agent> <prompt>     run an agent in a new branch (e.g. /code fix the test)",
-         "/worktree <prompt>    same, but in an isolated git worktree",
-         "/worktree <name>: <p>  in a worktree of that name, created if it is new",
-         "/worktree <wt> <p>    run in a worktree you already checked out",
-         "/workflow <task>      orchestrate the engineering pipeline: an expensive",
-         "                      orchestrator delegates every step to a subagent, in a",
-         "                      worktree it commits when the last step is done",
-         "/workflow plan: <t>   run the `plan` workflow from .troupe/workflows/*.json",
-         "@path                 Tab-completes a file path into the prompt",
-         "/agents               list the agents this workspace defines",
-         "/observer             the agent tree: who is working, where, on what"
+         "/settings        this page",
+         "/sessions        every session in this directory",
+         "/files           the session's files",
+         "/hq              teams, profiles and sessions on a plane",
+         "/watch on|off    act on AI! and AI? comments",
+         "/cancel          stop the agent mid-turn",
+         "/dismiss         let go of the session on screen"
        ]},
-      {"Living with branches",
+      {"Where things live",
        [
-         "1-9 or click          activate a window (Enter picks the one needing input)",
-         "Esc                   back to the command line",
-         "y / n / a             approve once / deny / approve that tool all session",
-         "x                     stop the branch and remove its window (see /cancel)",
-         "d                     dismiss a resting branch, keeping its worktree",
-         "e                     expand tool output in the transcript",
-         "Ctrl-Y or /copy       copy the activated transcript to the clipboard",
-         "Tab                   switch the branch's agent profile (plan → build)",
-         "type + Enter          answer a question, or send follow-up input",
-         "Alt-Enter or Ctrl-J   a newline in the input box instead of sending"
-       ]},
-      {"Isolation and review",
-       [
-         "/cancel <n>           stop branch n and remove it: the window goes and so",
-         "                      does the worktree Troupe made for it",
-         "/dismiss <n>          remove a resting window, keeping its worktree",
-         "/merge <branch>       merge a finished worktree branch into your checkout",
-         "/discard <branch>     throw the worktree away",
-         "Shared-checkout branches write straight into your files; worktree branches",
-         "commit on a troupe/ branch, so review the diff before merging.",
-         "In a worktree you checked out yourself, Troupe never commits or merges."
-       ]},
-      {"Watch mode",
-       [
-         "/watch                toggle; also the watch setting on the left",
-         "Leave `AI!` in a comment and save: a branch picks the task up.",
-         "`AI?` asks a question instead, answered in that branch's summary.",
-         "A bare `AI` comment is context the branch is told about, not a trigger.",
-         "Both go to a cheap, few-turn profile (`quick` / `answer`); point them at",
-         "`code` / `plan` on the left when a comment deserves the full treatment.",
-         "The agent deletes the marker, so a failed branch retriggers on next save."
-       ]},
-      {"Sessions",
-       [
-         "/resume  /sessions    pick another session here (/resume <n|ID> switches)",
-         "troupe resume [ID]    reopen one from the shell (the log replays the UI)",
-         "/quit, Ctrl-D, Ctrl-Q, or Ctrl-C twice exits.",
-         "Everything is a log of events: the screen you see is a fold over it."
-       ]},
-      {"Where settings live",
-       [
-         "Global   <config dir>/config.yaml",
-         "Project  .troupe/config.yaml   (overrides the global file)",
-         "Env      TROUPE_PROVIDER, TROUPE_BASE_URL, TROUPE_API_KEY, TROUPE_MODEL",
-         "Env wins over both files, so a setting you change here can be masked by",
-         "an env var for this session. `troupe config` prints what was resolved."
+         "settings         the project's .troupe/config.yaml, else ~/.config/troupe/config.yaml",
+         "sessions         the daemon's state directory; `troupe daemon status` says where",
+         "models           `troupe models` lists what this machine can address"
        ]}
     ]
   end
 
-  @doc "The curated help as plain lines."
+  @doc "The help as flat lines, for a narrow screen."
   @spec help_lines() :: [String.t()]
   def help_lines do
     Enum.flat_map(help_sections(), fn {heading, lines} ->
-      [heading, String.duplicate("─", String.length(heading))] ++ lines ++ [""]
+      [heading | Enum.map(lines, &("  " <> &1))] ++ [""]
     end)
   end
 end

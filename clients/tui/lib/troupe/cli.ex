@@ -76,7 +76,7 @@ defmodule Troupe.CLI do
 
     base = %{
       mode: :tui,
-      agent: "code",
+      agent: "build",
       task: nil,
       headless: Keyword.get(opts, :headless, false),
       worktree: Keyword.get(opts, :worktree, false),

@@ -17,7 +17,12 @@ defmodule Troupe.OS.Process do
   """
   @spec run(String.t(), [String.t()], keyword()) :: result()
   def run(cmd, args, opts \\ []) when is_binary(cmd) and is_list(args) do
-    reaper = Troupe.Reaper.path!()
+    reaper =
+      case Troupe.Reaper.path() do
+        {:ok, path} -> String.to_charlist(path)
+        {:error, :reaper_missing} -> raise "the reaper helper is not built for this host"
+      end
+
     timeout = Keyword.get(opts, :timeout_ms, @default_timeout)
     max_output = Keyword.get(opts, :max_output, @default_max_output)
 

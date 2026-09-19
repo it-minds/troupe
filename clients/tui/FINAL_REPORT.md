@@ -212,3 +212,394 @@ The four failures are the same four in both runs and none of them is remote:
 The last two are pre-existing drift in this checkout, proven by running the
 same suite from a pristine `git archive HEAD`; they are named here rather than
 fixed because they belong to different features.
+
+## Phase 2 of the daemon plan — the TUI as a client (2026-09-20)
+
+`troupe` no longer runs a harness of its own. `troupe_core`, `troupe_gateway` and
+`troupe_protocol` are dependencies (sparse git, one pinned `troupe-remote` commit), a
+session is created in the daemon — embedded in this VM when none answers, over its
+loopback WebSocket either way — and the UI still calls `Troupe.Client` and nothing else.
+Decisions 100–102 in `DECISIONS.md`; the plan's phase 2 items and where each stands:
+
+| item | state | proof |
+|---|---|---|
+| 1. `troupe` boots the daemon in the same BEAM when none runs, or attaches to the one that does | done, over the socket in both cases (Decision 100 (1)) | `daemon_client_test.exs` "the embedded daemon comes up…" |
+| 2. `lib/troupe/agent`, `session/*`, `tools/*`, `llm/*`, `reaper`, `watch` gone | done (12,718 → ~9,000 lines; 32 test files dropped, named below) | `git diff --stat main` |
+| 3. `Troupe.Remote.Translate` gone, model folds protocol events | **kept, deliberately** (Decision 100 (2)): it is the one adapter for daemon and pod sessions alike | `remote_translate_test.exs`, `mix troupe.xref` |
+| 4. every local-session test drives a daemon session through the socket | done for what remains; the rest dropped with notes below | `mix test`: 92 tests, 92 passing (Linux, WSL) |
+| 5. `mix troupe.remote.smoke` against the live plane, including an approval | done | run 2026-09-20: `TROUPE_REMOTE_CREATE=1 … troupe.remote.smoke: ok` (create, input, reply, approval) |
+
+Known environmental miss, unchanged: `remote_session_test.exs` "a slow TUI keeps the
+connection process bounded" (the 4 MB bound) fails about one run in five, here as on
+`main`. `WatchTest` and its inotify-tools miss are gone with the watch tests.
+
+### Tests dropped, and why
+
+Each file below tested the harness this repository no longer has. Their subjects are
+`troupe_core`'s now (its suite covers the agent loop, tools, approvals, compaction,
+replay, budgets, the fake) or are phase 3 of the plan (branches inside a session,
+workflows, project memory, watch markers, `read_output`, the model catalog's `troupe
+models --refresh` UI). Nothing here was silently lost: a name in this list is a feature
+to bring back through the protocol, or a check that lives in the core.
+
+### ask_user_test.exs
+- a bare question has no options and is single-choice
+- options may be plain strings
+- options may be objects with a label and a description
+- a label is taken from name, value, text or title too
+- blank and unusable options are dropped, duplicates collapse
+- a label is flattened to one line so it cannot abort a frame
+- more options than there are digit keys are cut off
+- multiple is only true when actually asked for
+- junk in place of options or the whole input does not raise
+- a non-string question is coerced rather than rejected
+- selected labels go back as the labels themselves, not indices
+### bound_test.exs
+- leaves output that is already clean alone
+- strips ANSI colour and cursor escapes
+- replaces invalid UTF-8 so Jason can encode the result
+- a binary file does not raise on the way into a message
+- multibyte text at the cut point stays valid UTF-8
+- emoji at the cut point survive as whole graphemes
+- text under the limit is returned unchanged and unmarked
+- output under the limit is returned unchanged
+- keeps the head, keeps the tail, and counts what it left out
+- trims a long array to its first elements and counts the rest
+- a short document is left alone
+- shell keeps the exit code, the head and the tail, and stores the rest
+- short shell output is not truncated
+- paging a stored output with read_output reconstructs it exactly
+- read_file returns a line window and points at the next offset
+- a short file is returned whole and unmarked
+- list_files caps the number of paths and names the next call
+- grep caps matches and offers the next page
+### catalog_test.exs
+- a LiteLLM model group carries the window and the price
+- embeddings, the wildcard group and malformed rows are not addressable models
+- Anthropic reports windows and no price
+- a plain OpenAI listing yields ids, and windows only when volunteered
+- cost prices each token class at its own rate
+- without quoted cache rates, cache tokens bill at the input rate
+- ids are qualified by the provider that serves them
+- the cache round-trips through disk
+- no cache file is an empty catalog, not a crash
+- a corrupt cache file is an empty catalog
+- config declares the window, the catalog fills the gap, default_window is last
+- a model only the catalog knows is addressable, with its price
+- troupe models flags a hand-written window the provider contradicts
+- the report says when the catalog was never fetched
+### core_test.exs
+- single-branch loop: read_file, edit_file, finish changes the file and rests done_unread
+- three 500ms tool calls in one turn complete in under 1s
+- a tool that raises yields an error tool_result and the agent pid is unchanged
+- budget: max_turns 2 asks after exactly 2 Fake calls; deny stops with :budget_exhausted
+- budget: y buys one more slice of the same size and the question comes back at its end
+- budget: a grants the whole agent an override, and it is never asked again
+- approvals: ask tool blocks until allow; deny produces a readable denial; needs_input carries agent_path
+- allow-for-session skips later approvals for the same tool
+- edit_file on a CRLF file keeps CRLF
+- free text without a leading slash is rejected with a hint
+- continue: input to a done_unread branch returns it to running and the next request has the prior conversation
+- context past the configured fraction of the window is compacted into a summary and the agent continues
+### definitions_test.exs
+- project definitions override built-ins; explore cannot write; depth is capped; delegate names model aliases
+- delegation past the depth cap is an error tool_result
+- plan rejects write_file and shell; Tab to code carries conversation, todo list and the code tool set
+- todo: two in_progress items is an error; a window cancel appears in the next request
+- /ask uses the cheap model and its read_branch results appear in the Fake request
+### dispatcher_test.exs
+- four /code commands run concurrently with distinct paths and all rest done_unread
+- a branch crashing past restart intensity is failed_unread while the other three finish
+- truly idle: no commands means zero Fake calls and no Agent.Node; done_unread windows behave the same
+- dispatcher crash leaves branches running and rebuilds an identical ledger
+- resume restores running, needs_input and done_unread windows and skips dismissed ones
+- the ninth command is refused with a message and no Node is started
+- cancel_branch stops a running branch, removes its window and frees the slot
+- cancel_branch removes a resting window, and refuses one already removed
+### isolation_test.exs
+- shared locks: contention returns an error naming the holder and both branches finish
+- worktree: isolated write, merge creates a merge commit, discard removes worktree and branch
+- cancelling a worktree branch discards its worktree and branch with the window
+- /worktree <checked-out worktree> <prompt> works in the user's worktree and never commits there
+- /worktree <name>: <prompt> creates the named worktree, then reuses it
+- a named worktree in use by a running branch is refused, and a bad name is reported
+- a named worktree whose directory was removed is recreated on its surviving branch
+### limits_test.exs
+- a prompt the provider served from cache still crosses the compaction threshold
+- a prompt the provider did not cache and that fits does not compact
+- a context-overflow 400 compacts once and re-sends the turn instead of failing
+- a branch that overflows again after compacting fails with an actionable message
+- a branch too short to compact says so rather than compacting nothing
+- /compact summarizes a resting branch on demand
+- a reply cut off with no tool call is retried once and then fails visibly
+- the retry carries a note telling the model to answer in smaller steps
+- a tool call cut off mid-argument is answered with an error, not run
+- a refusal ends the branch as :refused, not as a successful finish
+- a reasoning-only reply is retried once and then fails visibly
+- a reply that recovers after the nudge finishes normally
+- the nudge is available again once a turn has produced something
+- each dimension warns once per slice, not once per turn
+- reports every dimension and names the tightest
+- crossed/3 skips what has already been warned about, tightest first
+- a zero prompt reads as an empty context, not a full one
+- a slice is the budget's own size again, and grants accumulate
+- exhausted_dimension names which ceiling tripped
+- a 400 naming a context error is an overflow; every other 400 is not
+- auth, unknown model and rate limits are told apart
+- an overflow that exhausted its retries is still an overflow
+- describe_error says what happened in words a user can act on
+- a gap longer than a stream's lifetime is not counted as work
+- an exhausted budget is not asked about and no warnings are logged
+- without full send an exhausted budget asks, as it does without the flag
+### mcp_config_test.exs
+- YAML mcp config is parsed into the mcp field
+- config override merges mcp servers
+- empty mcp config defaults to empty map
+- malformed mcp entry is skipped
+- model folds :mcp_status events
+- mcp_servers/1 returns sorted list
+- mcp_servers/1 returns [] for empty model
+### mcp_test.exs
+- JSON-RPC encode/decode
+- MCP.Server lifecycle: initialize → tools/list → ready
+- call_tool returns text content
+- call_tool returns error when isError is true
+- call on unknown server returns error
+- mcp? predicate
+- tool_specs returns [] when no MCP configured
+- MCP tools appear in the LLM request
+- agent dispatches an MCP tool call through the approval door
+### memory_session_test.exs
+- a hand-written brief is read at session start
+- an unreadable brief is ignored rather than fatal
+- notes are written through, survive a crash and do not stamp the brief
+- put_section stamps the brief and a later read sees the merge
+- a hand edit between two writes is not clobbered
+- forget deletes the brief
+- the brief reaches the system prompt and shrinks the survey
+- the system prompt stays byte-stable across turns even after a remember
+- remember writes a note and reports it, and the next agent starts with it
+- remember rejects an empty text and an unknown section
+- a worktree branch writes to the main checkout's brief
+- a session without a brief dispatches exactly one self-dismissing librarian
+- a fresh brief raises no librarian
+### memory_test.exs
+- parse reads frontmatter and keeps sections in order
+- render/parse is a fixpoint, including unknown sections
+- a file with no frontmatter parses, round-trips and reads as stale
+- text before the first heading survives a round trip
+- put_section replaces in place and preserves order, or appends
+- add_note prepends, dedupes on text and caps the list
+- add_note squishes whitespace so one note stays one line
+- stale? triggers on absence, age and file drift but not on a new commit
+- to_prompt renders a capped, clearly non-authoritative block
+- unterminated frontmatter is an error, not a crash
+### memory_tui_test.exs
+- /memory summarises the brief, and /memory forget deletes it
+- /memory beats an agent profile of the same name
+- an unknown /memory subcommand explains itself
+### native_tools_test.exs
+- status reports a modified file
+- diff shows the change, and staged shows nothing until staged
+- log lists commits and honours limit
+- show and branch work
+- path narrows the read
+- a ref or path that looks like a flag is refused
+- an unknown op is refused rather than passed to git
+- is registered as a read-only tool
+- reads them all under headers in one call
+- a missing file is reported in place, the others still read
+- an empty or non-list paths is refused
+- single path still works unchanged
+- matches a pattern and excludes directories
+- sorts most recently modified first
+- says so when nothing matches
+- is registered as a read-only tool
+### observer_test.exs
+- /observer shows every agent as a tree, with the selected one's detail
+- the observer is empty and safe before anything is dispatched
+- rows carry state, elapsed time and per-agent tokens
+### opencode_config_test.exs
+- JSONC strips comments and trailing commas but not inside strings
+- providers come from opencode.jsonc with keys filled from auth.json and windows from limits
+- an authToken is a bearer key and a model's own id, limits and effort come across
+- config falls back to opencode providers, uses its default model, and resolves provider/model per request
+- an explicit Troupe key or explicit models are not overridden by opencode
+- a session with named providers streams each request to the provider named by its model prefix
+### prompt_cache_test.exs
+- the system block carries a breakpoint, so tools and system cache together
+- the last stable block of the final message carries a breakpoint
+- a volatile block sits after the breakpoint, never on it
+- the previous request's position gets a second breakpoint, and never more than four
+- an out-of-range previous index is dropped rather than misplaced
+- a one-hour ttl is asked for on every breakpoint of a request or none
+- a compaction request pays no write premium it can never read back
+- consecutive turns agree on tools, system and every earlier message
+- the prompt prefix stays byte-identical across turns while tools run
+### property_test.exs
+### provider_config_test.exs
+- a named provider hands the adapter its wire id, auth scheme and effort
+- every model a provider declares is addressable, window and all
+- troupe config shows the renamed model and the auth scheme, never the token
+- a base url that already names the api version is not doubled
+- an anthropic request asks for thinking inside an output cap that fits it
+- an openai reasoning model gets the effort verbatim and a completion-token cap
+- a model that refuses max_tokens is asked again with max_completion_tokens
+- the session-wide provider can send its key as a bearer token
+### read_roots_test.exs
+- still resolves paths inside the workspace
+- rejects an outside path when no read root allows it
+- allows an outside path under a read root
+- a read root does not allow its siblings
+- judges a symlink by where it lands, not by its name
+- a null byte is still invalid, read root or not
+- read_file reaches a read root and refuses without one
+- the refusal names the roots that were tried
+- grep searches a read root
+- list_files lists a read root relative to that root
+- read_roots is expanded, and junk entries are dropped
+- defaults to none, which is the pre-existing confinement
+- write_file cannot write into a read root
+- edit_file cannot edit inside a read root
+### reasoning_test.exs
+- captures a thinking block and its signature off the stream
+- re-encodes thinking, signature and order when thinking is enabled
+- redacted thinking goes back as its opaque payload
+- drops thinking when the request has no thinking enabled
+- drops another provider's reasoning rather than signing it as its own
+- accumulates reasoning_content alongside a tool call
+- the `reasoning` spelling is accepted too
+- reasoning goes back as a sibling of content, not a content block
+- drops another provider's reasoning
+- an assistant turn with no reasoning carries no reasoning_content key
+- reasoning is invisible to text and tool_uses
+- survives the persisted-event round trip
+### recovery_test.exs
+- killing the agent server during :acting restarts it from the log; completed calls never run twice
+- restarting an agent re-registers its budget question under the same id, logging none
+- restarting an agent re-registers its question with the options it offered
+- cancel during a shell sleep kills child and grandchild within 1s (by OS pid)
+- SIGKILLing the VM kills the shell child and grandchild within 3s
+- killing a branch Node leaves zero live processes under its subtree
+### survey_test.exs
+- detects language mix, project markers and their names
+- walks the filesystem when there is no git repo, pruning build directories
+- uses git for the file list and reports the branch
+- lists every file when the listing fits the budget
+- falls back to directory counts when the listing is too large
+- renders a file listing an agent can pick a first file from
+- renders the directory summary when the listing is too large
+- is empty for an empty workspace
+- the agent's first request already carries the workspace layout
+### usage_test.exs
+- anthropic keeps its three input figures apart and disjoint
+- anthropic without caching reports no cache figures
+- openai's prompt_tokens includes the cached ones, so they come back out of it
+- openai without a cache breakdown counts every prompt token as billed
+- a budget spends on what was billed, not on what the cache served
+- the compact form is sent and received, cache reads excluded
+- the detail names what the cache served, and says nothing when it served nothing
+- the total still accounts for every token, cached input included
+- the side panel gets a line each, and no cache line when nothing was cached
+- a cached turn shows sent, received and cached in the activated pane
+### watch_test.exs
+- #{backend}: AI! spawns one quick branch with file, line, comment and context; debounced; own edits ignored; gitignored ignored; AI? spawns answer
+- the profile each marker dispatches is a setting
+### web_fetch_test.exs
+- fetches an HTML page as readable text with links and without scripts or styles
+- returns JSON and plain text verbatim
+- follows redirects
+- a failure status is an error carrying the body as explanation
+- binary content is refused rather than dumped into the transcript
+- only absolute http(s) urls are accepted
+- a connection that goes nowhere is an error tool result, not a crash
+- decodes entities, keeps heading levels and collapses blank runs
+- drops in-page and javascript hrefs but keeps the link text
+- a link whose text is already the url is not doubled
+- unknown entities and stray angle brackets survive
+- an agent can call web_fetch and gets the page back as a tool result
+### workflow_test.exs
+- default_steps is an ordered, non-empty list of steps, each with an owner
+- the agents the default workflow delegates to exist and are subagents
+- split parses <name> <task> and name: task, defaulting to a bare task
+- available lists on-disk workflows, default when none
+- load reads a named workflow's owners and parallel flags
+- load falls back to the default for a missing, malformed or blank-agent file
+- plan renders the task, the owner of each step and the delegation rules
+- plan without parallel steps leaves out the concurrency rule
+- plan falls back to the default steps for an empty list
+- the orchestrator delegates its steps and auto-commits the worktree
+- the orchestrator cannot edit the repository itself
+- a named /workflow <name> task loads that file's steps and owners
+### workspace_test.exs
+- rejects ../ escapes and symlinks pointing outside the workspace
+- windows: backslash escapes, other drives, UNC, junctions and case variants are rejected
+### close_session_test.exs
+- a fresh session is not finished and closes with an empty report
+- closing counts a finished branch and writes session_closed plus closed_at
+- an active branch blocks the close until it is forced
+- the counts survive dismissal
+- a worktree that is neither merged nor discarded blocks the close
+### session_picker_test.exs
+- summarises the sessions of one workspace and ignores every other one
+- a dismissed branch stays out of the live ones, and a stopped session is still listed
+- lists this directory's sessions and switches the window to the one picked
+- an empty session is retired when you switch away from it
+- /resume takes a row number, reports an id that is not here, and Esc backs out
+- the picker opens straight away when the TUI is started on it
+### tui_scroll_test.exs
+- the pane scrolls: PgUp leaves the tail, the view stays put while the branch works on, End follows again, Home goes to the top, the wheel scrolls
+- a line wider than the pane is wrapped and fully visible; nothing is clipped at the bottom
+- expanded read_file output keeps its indentation, tabs included, and the collapsed head says how much there is
+- full tool results are kept (not a 300-character slice) and escape sequences are stripped
+- ←/→ show a subagent's transcript; input still goes to the branch root
+- an edit's diff lives on its tool call: shown while the approval waits, then as +/- and, expanded, in full
+- with a pane open the strip is a compact tray, clicking the active tile jumps to the latest, and 80x24 works without a side panel
+- expanding or collapsing output keeps the entry at the top of the view in place
+- the 'new' counter counts what arrived, not rows the terminal re-wrapped after a resize
+- sanitize expands tabs to 4-column stops, strips escape sequences and control bytes, keeps newlines
+- cell_width counts wide glyphs as two columns and combining marks as none
+- wrap never trims and breaks prose at spaces, code anywhere
+- the ASCII fast path wraps exactly like the grapheme path
+- rows materialises only the visible slice and tail_rows the last rows
+- a line kind's rail is drawn on every row it wraps onto
+- tail_rows measures only the lines it shows
+- reasoning deltas stream into their own block and fold to a collapsible entry
+- a window dismissed from outside the pane returns focus to the command line instead of crashing it
+- clicking on the observer or the settings page does not activate an invisible tile
+- a branch told to carry on is no longer shown as done
+- a pending approval taller than the pane opens at its header, not its last rows
+- at 80 columns the pane still says how to get back to the tail
+- markdown in an assistant message: headings, bullets, quotes, rules, inline code and bold
+- a fenced code block is highlighted, railed and labelled with its language
+- a file read shows numbered, highlighted source
+- output that is not code is left alone, and a body too big to highlight still renders
+- text still streaming is shown plain and becomes markdown when the message lands
+- reasoning streams collapsibly and folds to a block when the message lands
+### tui_test.exs
+- snapshots: window strip states, activated pane with transcript and todo list, approval with diff, ask_user question
+- focus: an approval in window 2 while window 1 is activated does not move focus; Esc 2 y Esc returns to the command line
+- killing the TUI mid-stream leaves branches running; it restarts and redraws from the log
+- backpressure: 10k deltas across four branches while the TUI renders slowly do not slow a branch; mailbox stays bounded
+- a working window shows what it is doing: thinking, then the running tool, then waiting for you
+- clicking a tile activates that window; the status line says which key answers a waiting window
+- Tab completes command names and worktree paths for /merge and /discard, cycling on repeat
+- /worktree <Tab> completes the user's checked-out worktrees by path or branch
+- /worktree <Tab> offers a Troupe-managed worktree as <name>:
+- /cancel <n> stops the branch on tile n and takes its window off the strip
+- typing a reply that starts with d or x neither dismisses nor cancels the branch
+- pressing d twice dismisses the window and x twice cancels the branch
+- a multi-line tool argument renders on one row instead of aborting the frame
+- bracketed paste inserts into the command line, a window input, and a settings field
+- the command box shows the tail of a long single-line input, so the end you type stays visible
+- a pasted multiline shows its tail on screen, and typing after the paste is visible too
+- the cursor moves and edits inside the line: arrows, Alt-word jumps, Home/End, Delete
+- an input taller than the box scrolls to wherever the cursor is
+- a question with options renders a numbered menu and a digit answers it
+- a multiple-choice question ticks with digits and sends the ticked set on Enter
+- a free-text answer still works when options are offered
+- a modified Enter or Ctrl-J inserts a newline; a multiline window input sends whole
+- a subagent's budget question renders in the pane and side panel, and n answers it
+- allowing a subagent's budget question stops the window needing input
+- a request left behind by a dead subagent does not pin the window
+- the window keeps needing input while a subagent waits, after the root is answered

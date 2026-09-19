@@ -22,7 +22,7 @@ defmodule Troupe.Remote.Worker do
 
   use GenServer
 
-  alias Troupe.Events
+  alias Troupe.Client.Events
   alias Troupe.Remote.{Backoff, Capability, Journal, Plane, RPC, Socket, Tokens, Translate}
 
   require Logger
@@ -52,11 +52,11 @@ defmodule Troupe.Remote.Worker do
   end
 
   @spec via(String.t()) :: GenServer.name()
-  def via(session_id), do: {:via, Registry, {Troupe.Registry, {:remote_worker, session_id}}}
+  def via(session_id), do: {:via, Registry, {Troupe.Client.Registry, {:remote_worker, session_id}}}
 
   @spec whereis(String.t()) :: pid() | nil
   def whereis(session_id) do
-    case Registry.lookup(Troupe.Registry, {:remote_worker, session_id}) do
+    case Registry.lookup(Troupe.Client.Registry, {:remote_worker, session_id}) do
       [{pid, _}] -> pid
       [] -> nil
     end
@@ -87,6 +87,10 @@ defmodule Troupe.Remote.Worker do
 
   @spec fs_upload(String.t(), String.t(), binary()) :: :ok | {:error, term()}
   def fs_upload(session_id, path, content), do: call(session_id, {:upload, path, content})
+
+  @doc "Any command on the session's socket, for what has no method of its own here."
+  @spec rpc(String.t(), String.t(), map()) :: {:ok, term()} | :ok | {:error, term()}
+  def rpc(session_id, method, params), do: call(session_id, {:rpc, method, params})
 
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
@@ -141,11 +145,16 @@ defmodule Troupe.Remote.Worker do
   @impl true
   def init(opts) do
     sid = Keyword.fetch!(opts, :session_id)
-    :ok = Troupe.Client.register(sid, Troupe.Client.Remote)
+    :ok = Troupe.Client.register(sid, Keyword.get(opts, :impl, Troupe.Client.Remote))
 
     state = %{
       session_id: sid,
-      plane_url: Keyword.fetch!(opts, :plane_url),
+      # `nil` for a daemon session: no plane mints its tokens or reopens it. The daemon's
+      # own token comes in `:token`, and a dormant daemon session wakes on its first
+      # activating command by itself.
+      plane_url: Keyword.get(opts, :plane_url),
+      token: Keyword.get(opts, :token),
+      workspace: Keyword.get(opts, :workspace),
       endpoint: Keyword.fetch!(opts, :endpoint),
       session_state: Keyword.get(opts, :state, :active),
       tokens: Keyword.get(opts, :tokens, Tokens),
@@ -197,6 +206,7 @@ defmodule Troupe.Remote.Worker do
      %{
        plane_url: state.plane_url,
        endpoint: state.endpoint,
+       workspace: state.workspace,
        team: state.team,
        profile: state.profile,
        title: state.title,
@@ -380,10 +390,13 @@ defmodule Troupe.Remote.Worker do
            ]) do
       state = %{state | socket: socket, status: :handshaking, error: nil}
 
+      # A worker reads the bearer header; the daemon's loopback socket reads `auth.token`
+      # (PROTOCOL.md §1), so the token goes in both places.
       send_request(state, {:internal, :initialize}, "initialize", %{
         protocol_version: Troupe.Remote.Discovery.wire_version(),
         client_info: %{name: "troupe", version: to_string(Application.spec(:troupe, :vsn))},
-        capabilities: %{}
+        capabilities: %{},
+        auth: %{token: token}
       })
     else
       {:error, reason} -> state |> put_error(reason) |> schedule_reconnect()
@@ -393,6 +406,9 @@ defmodule Troupe.Remote.Worker do
 
   # The plane mints session tokens; the client only reads `exp` to know when the
   # one it holds is too old to reconnect with.
+  defp session_token(%{plane_url: nil, token: token} = state) when is_binary(token),
+    do: {:ok, token, state}
+
   defp session_token(state) do
     case Tokens.session_token(state.session_id, name: state.tokens) do
       {:ok, token, false} -> {:ok, token, state}
@@ -665,6 +681,8 @@ defmodule Troupe.Remote.Worker do
 
   # `auth.expiring` is answered on the same connection: mint through the plane,
   # send `auth.refresh`, keep streaming. Reconnecting would cost a replay.
+  defp refresh_auth(%{plane_url: nil} = state), do: state
+
   defp refresh_auth(state) do
     case mint(state) do
       {:ok, token, state} ->
@@ -685,6 +703,8 @@ defmodule Troupe.Remote.Worker do
   # `session.open` is what turns a dormant session into a live one, and what a
   # moved session is followed with. The endpoint it returns may be a different
   # worker, so the socket is dropped and rebuilt against whatever it says.
+  defp reopen(%{plane_url: nil} = state, _mode), do: {:ok, state}
+
   defp reopen(state, mode) do
     case Plane.call(state.plane_url, "session.open", %{
            session_id: state.session_id,
@@ -739,7 +759,7 @@ defmodule Troupe.Remote.Worker do
   defp ensure_window(%{agent: agent} = state) when is_binary(agent), do: state
 
   defp ensure_window(state) do
-    root = state.profile <> "-1"
+    root = "root"
 
     spawned = %Troupe.Event{
       session_id: state.session_id,

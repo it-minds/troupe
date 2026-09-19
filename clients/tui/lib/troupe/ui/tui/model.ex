@@ -12,8 +12,8 @@ defmodule Troupe.UI.TUI.Model do
 
   import Kernel, except: [apply: 2]
 
+  alias Troupe.Client.Message
   alias Troupe.Event
-  alias Troupe.LLM.Message
 
   @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown."
   @type tool_entry :: %{

@@ -8,3 +8,5 @@ if config_env() == :test do
 end
 
 import_config "#{config_env()}.exs"
+
+config :troupe_gateway, autostart: false

@@ -137,7 +137,7 @@ defmodule Troupe.UI.TUI.Server do
           version: non_neg_integer()
         }
 
-  def via(sid), do: {:via, Registry, {Troupe.Registry, {:tui, sid}}}
+  def via(sid), do: {:via, Registry, {Troupe.Client.Registry, {:tui, sid}}}
 
   ## ExRatatui.App
 
@@ -606,6 +606,8 @@ defmodule Troupe.UI.TUI.Server do
 
   defp run_command(state, text) do
     sid = state.session_id
+    slash? = String.starts_with?(text, "/")
+    typed = String.trim(text)
     text = String.trim_leading(text, "/")
     {name, args} = split_first(text)
 
@@ -680,6 +682,13 @@ defmodule Troupe.UI.TUI.Server do
 
         "copy" ->
           copy_command(state, String.trim(args))
+
+        # A line with no slash is what the person wants to say to the session's agent:
+        # one agent per session, so there is one place for it to go. A slash names a
+        # command, and one this table does not know is asked of the client (a profile
+        # to dispatch, where the client supports that).
+        _cmd when not slash? ->
+          Client.send_input(sid, "root", typed)
 
         cmd ->
           Client.dispatch(sid, cmd, args)
@@ -909,9 +918,9 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp rename(previous, sid) do
-    if {:tui, previous} in Registry.keys(Troupe.Registry, self()) do
-      Registry.unregister(Troupe.Registry, {:tui, previous})
-      _ = Registry.register(Troupe.Registry, {:tui, sid}, nil)
+    if {:tui, previous} in Registry.keys(Troupe.Client.Registry, self()) do
+      Registry.unregister(Troupe.Client.Registry, {:tui, previous})
+      _ = Registry.register(Troupe.Client.Registry, {:tui, sid}, nil)
     end
 
     :ok

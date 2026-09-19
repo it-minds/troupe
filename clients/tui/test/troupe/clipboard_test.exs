@@ -56,10 +56,12 @@ defmodule Troupe.ClipboardTest do
       path = clipboard_path()
 
       ws = tmp_workspace()
-      scripts = %{"code-1" => [{:text, "the reply worth keeping"}]}
-      {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
-      {:ok, "code-1"} = Troupe.dispatch(sid, "code", "do the thing")
-      await_state("code-1", :done_unread)
+
+      {sid, _, _} =
+        start_session!(workspace: ws, script: [{:text, "the reply worth keeping"}, {:finish, "ok"}])
+
+      say!(sid, "do the thing")
+      await_done()
 
       {pid, session} = start_tui(sid)
 

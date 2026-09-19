@@ -2,12 +2,13 @@ defmodule Troupe.Client do
   @moduledoc """
   The only thing the TUI and HQ are allowed to talk to.
 
-  Two implementations sit behind it: `Troupe.Client.Local`, which wraps the
-  in-process session API, and `Troupe.Client.Remote`, which speaks the remote
-  contract over the plane and worker connections. A session routes to one of
-  them by id — a remote session's worker registers the route while it is
-  attached, and everything else is local — so the two kinds can be on screen at
-  the same time and the UI cannot tell them apart (Decision 73).
+  Two implementations sit behind it, and both speak the protocol: `Troupe.Client.Daemon`
+  reaches the local daemon (embedded in this VM when nothing else answers), and
+  `Troupe.Client.Remote` reaches a plane and its worker pods. A session routes to one of
+  them by id — the worker connection registers the route while it is attached, and
+  everything else is the daemon's — so the two kinds can be on screen at the same time
+  and the UI cannot tell them apart (Decision 73). Nothing here runs an agent in-process
+  any more (Decision 100).
 
   Fleet-level calls (teams, profiles, listing and creating sessions) take an
   *origin* instead of a session id: `{:local, workspace}` or `{:remote,
@@ -17,7 +18,7 @@ defmodule Troupe.Client do
   this module.
   """
 
-  alias Troupe.Client.{Local, Remote}
+  alias Troupe.Client.{Daemon, Remote}
   alias Troupe.{Config, Event}
 
   @type session_id :: String.t()
@@ -110,16 +111,16 @@ defmodule Troupe.Client do
   """
   @spec impl(session_id()) :: module()
   def impl(session_id) do
-    case Registry.lookup(Troupe.Registry, {:client, session_id}) do
+    case Registry.lookup(Troupe.Client.Registry, {:client, session_id}) do
       [{_pid, module}] when is_atom(module) -> module
-      _ -> Local
+      _ -> Daemon
     end
   end
 
   @doc "Registers the calling process as the owner of a session's route."
   @spec register(session_id(), module()) :: :ok
   def register(session_id, module) do
-    case Registry.register(Troupe.Registry, {:client, session_id}, module) do
+    case Registry.register(Troupe.Client.Registry, {:client, session_id}, module) do
       {:ok, _pid} -> :ok
       {:error, {:already_registered, _pid}} -> :ok
     end
@@ -127,7 +128,7 @@ defmodule Troupe.Client do
 
   @spec impl_for(origin()) :: module()
   def impl_for({:remote, _plane_url}), do: Remote
-  def impl_for(_origin), do: Local
+  def impl_for(_origin), do: Daemon
 
   @doc "Whether a session is a remote one."
   @spec remote?(session_id()) :: boolean()
@@ -254,11 +255,11 @@ defmodule Troupe.Client do
 
   @doc "The worktrees `/worktree <Tab>` offers: checked out, and Troupe-managed."
   @spec worktrees(String.t()) :: {[map()], [String.t()]}
-  def worktrees(workspace), do: Local.worktrees(workspace)
+  def worktrees(workspace), do: Daemon.worktrees(workspace)
 
   @doc "The text a multiple-choice answer is sent as."
   @spec answer_text([String.t()]) :: String.t()
-  def answer_text(labels), do: Local.answer_text(labels)
+  def answer_text(labels), do: Daemon.answer_text(labels)
 
   @doc """
   Copies text to this machine's clipboard. The clipboard is the user's own

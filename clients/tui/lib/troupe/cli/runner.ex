@@ -5,12 +5,15 @@ defmodule Troupe.CLI.Runner do
   TUI's lifetime, then halts with an exit code. The TUI and the headless
   printer run supervised under `Troupe.UI.Windows`, so a TUI crash is a
   restart and a redraw, not an exit.
+
+  Every session is the daemon's — the one on this machine, or the one this VM embeds
+  when none answers — and every command here reaches it through `Troupe.Client`, which
+  is the same door the UI uses.
   """
 
   use Task
 
-  alias Troupe.CLI
-  alias Troupe.Session.Index
+  alias Troupe.{CLI, Client}
   alias Troupe.UI.Headless.Printer
   alias Troupe.UI.TUI
 
@@ -91,12 +94,10 @@ defmodule Troupe.CLI.Runner do
         # somewhere real.
         page = if args.remote, do: [page: :hq, plane: plane(args)], else: []
 
-        case Troupe.start_session(
-               workspace: args.workspace,
-               watch: args.watch,
-               auto_approve: args.auto_approve,
-               full_send: args.full_send
-             ) do
+        case Client.create_session({:local, args.workspace}, %{
+               worktree: "never",
+               config: config(args)
+             }) do
           {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
           {:error, reason} -> fail("could not start session: #{inspect(reason)}")
         end
@@ -112,44 +113,39 @@ defmodule Troupe.CLI.Runner do
   defp plane(%{plane_url: url}) when is_binary(url), do: url
   defp plane(_args), do: nil
 
+  # What a client may ask the daemon to set on a session, and only that (the daemon
+  # refuses the rest; the provider and its key are the machine's).
+  defp config(args) do
+    %{auto_approve: args.auto_approve, watch: args.watch}
+  end
+
+  # `troupe run AGENT "task"`: one session, one agent, one task, in its own worktree
+  # when asked. Headless prints the transcript and exits when the agent rests; the TUI
+  # opens on it otherwise.
   defp run(args) do
-    isolation = if args.worktree, do: :worktree, else: nil
+    params = %{
+      profile: args.agent,
+      prompt: args.task,
+      worktree: if(args.worktree, do: "always", else: "never"),
+      config: config(args)
+    }
 
-    dispatch = fn sid ->
-      Troupe.dispatch(sid, args.agent, %{prompt: args.task, isolation: isolation})
-    end
-
-    case Troupe.start_session(
-           workspace: args.workspace,
-           auto_approve: args.auto_approve,
-           full_send: args.full_send,
-           watch: args.watch
-         ) do
+    case Client.create_session({:local, args.workspace}, params) do
       {:ok, sid} when args.headless ->
-        # The printer subscribes before the dispatch so the first lines are not missed.
         me = self()
-        target = "#{args.agent}-1"
 
         spec =
           {Printer,
-           session_id: sid, target: target, on_rest: fn code -> send(me, {:quit, code}) end}
+           session_id: sid, target: "root", on_rest: fn code -> send(me, {:quit, code}) end}
 
         {:ok, _} = DynamicSupervisor.start_child(Troupe.UI.Windows, spec)
-
-        case dispatch.(sid) do
-          {:ok, ^target} -> wait()
-          {:ok, other} -> fail("unexpected branch path #{other}")
-          {:error, reason} -> fail("could not start: #{inspect(reason)}")
-        end
+        wait()
 
       {:ok, sid} ->
-        case dispatch.(sid) do
-          {:ok, _path} -> tui(sid, mouse_opts(args))
-          {:error, reason} -> fail("could not start: #{inspect(reason)}")
-        end
+        tui(sid, mouse_opts(args))
 
       {:error, reason} ->
-        fail("could not start session: #{inspect(reason)}")
+        fail("could not start: #{inspect(reason)}")
     end
   end
 
@@ -159,26 +155,18 @@ defmodule Troupe.CLI.Runner do
     sid = args.session_id || newest(args.workspace)
     page = if args.session_id, do: [], else: [page: :sessions]
 
-    case sid &&
-           Troupe.resume(sid,
-             auto_approve: args.auto_approve,
-             full_send: args.full_send,
-             watch: args.watch
-           ) do
+    case sid && Client.open_session({:local, args.workspace}, sid, :read, []) do
       {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
       nil -> fail("no session to resume in #{args.workspace}")
       {:error, reason} -> fail("could not resume: #{inspect(reason)}")
     end
   end
 
-  # The most recently written session that got as far as a branch; an abandoned
-  # empty one is not worth reopening when a real one is right behind it.
+  # The most recently active session in this directory, as the daemon lists them.
   defp newest(workspace) do
-    entries = Index.list(workspace)
-
-    case Enum.find(entries, &(Index.live_branches(&1) != [])) || List.first(entries) do
-      nil -> nil
-      entry -> entry.session_id
+    case Client.sessions({:local, workspace}) do
+      {:ok, [entry | _]} -> entry.id
+      _ -> nil
     end
   end
 
@@ -188,7 +176,7 @@ defmodule Troupe.CLI.Runner do
   defp mouse_opts(args) do
     mouse? =
       case args.mouse do
-        nil -> Troupe.Config.load(args.workspace).mouse
+        nil -> Troupe.Settings.mouse?(Troupe.Config.load(args.workspace))
         flag -> flag
       end
 
@@ -252,7 +240,7 @@ defmodule Troupe.CLI.Runner do
         "  ! #{name}: #{inspect(reason)}"
       end)
 
-    Enum.join([Troupe.Config.describe_catalog(cfg) | notes], "\n")
+    Enum.join([Troupe.Config.describe(cfg) | notes], "\n")
   end
 
   defp fail(msg) do
