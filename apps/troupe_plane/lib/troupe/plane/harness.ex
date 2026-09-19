@@ -229,13 +229,16 @@ defmodule Troupe.Plane.Harness do
       |> granted_profiles()
       |> Enum.map(fn profile ->
         workers = Fleet.list_workers(profile)
+        # A draining pod is listed, so a person can see it, and counts for nothing: it
+        # takes no session and is out of its Service, so it is neither room nor health.
+        placeable = Enum.reject(workers, & &1.draining)
 
         %{
           "name" => profile,
           "pods" => Enum.map(workers, &worker_json/1),
-          "capacity" => Enum.sum(Enum.map(workers, & &1.capacity)),
+          "capacity" => Enum.sum(Enum.map(placeable, & &1.capacity)),
           "active_sessions" => Enum.sum(Enum.map(workers, & &1.active_sessions)),
-          "healthy_pods" => Enum.count(workers, & &1.healthy)
+          "healthy_pods" => Enum.count(placeable, & &1.healthy)
         }
         |> Map.merge(offering_json(profile, entitlements_of(user, profile)))
       end)

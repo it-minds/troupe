@@ -68,6 +68,21 @@ defmodule Troupe.Plane.HarnessTest do
       refute Enum.any?(profile["pods"], &(&1["pod"] == "troupe-w-ux-0"))
     end
 
+    test "a draining pod is listed and counts for nothing: it is out of its Service" do
+      team_with_grant("engineering", "dev", name: "engineering")
+      user = person("ada@example.test", ["engineering"])
+
+      {:ok, _} = enrol_worker("dev", "troupe-w-dev-0", capacity: 4)
+      {:ok, draining} = enrol_worker("dev", "troupe-w-dev-1", capacity: 4)
+      {:ok, _} = Fleet.drain(draining)
+
+      assert {:ok, %{"profiles" => [profile]}} = Harness.call("profiles.list", %{}, context(user))
+      assert length(profile["pods"]) == 2
+      assert profile["capacity"] == 4
+      assert profile["healthy_pods"] == 1
+      assert Enum.find(profile["pods"], &(&1["pod"] == "troupe-w-dev-1"))["draining"] == true
+    end
+
     test "says what a session on each profile will have" do
       team_with_grant("engineering", "dev", name: "engineering")
       user = person("ada@example.test", ["engineering"])

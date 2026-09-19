@@ -4196,3 +4196,21 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      machine's does not rotate on its own. Two shapes rather than one with a special case —
      and the file is documented first because an environment variable is readable in `/proc`
      and in `ps` by anybody on that machine.
+
+633. **A drained pod that stays is a pod nothing can reach, and the plane now knows it.**
+     `troupe-w-dev-0` sat Not Ready for five days after an admin pressed *Drain*: the pod's
+     readiness probe answers 503 while draining — by design, so its Service drops it — and
+     `Troupe.Plane.Drain` deletes nothing, because removing the pod is the operator's business.
+     But the operator has no drain logic and `undrain/1` has no caller, so on a one-replica
+     profile the drain simply left the pod in place with the flag up. Meanwhile the plane kept
+     handing it out: `Placement.reader/2` filtered on `healthy` alone, so every `session.open`
+     returned an endpoint the Ingress answered with nginx's 503, and `profiles.list` counted
+     the pod as a healthy pod with four free slots. Three changes. The reader skips draining
+     pods, like placement always has. `profiles.list` lists a draining pod (a person should
+     see it) and counts it for nothing — no capacity, not a healthy pod. And the flag is now
+     the pod's own fact on the wire: the worker sends `draining` on `enrol` and `heartbeat`;
+     a heartbeat may only raise it (the plane raises it first when it orders a drain, and a
+     heartbeat from a moment before must not undo that); enrolment takes it as given, because
+     the one honest way the flag comes down is a pod that restarted and is therefore not
+     draining. Still owed: something that *removes or restarts* a drained pod nobody scaled
+     away, and an `undrain` an admin can press.

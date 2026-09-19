@@ -296,7 +296,7 @@ troupe admin profiles
 troupe admin pod drain <worker id from the listing>
 ```
 
-Nothing in the repository deletes the pod afterwards ([AUDIT.md §3.13](../AUDIT.md)). To pick up a new image or env (`UpgradePending: True`):
+Nothing in the repository deletes the pod afterwards ([AUDIT.md §3.13](../AUDIT.md)), and a drained pod that is left running stays out of its Service — its readiness probe answers 503 until it is deleted, so the Ingress answers 503 to every client. **Always follow a drain with the delete below**, even when there is no new revision. While it waits, the plane lists the pod as `draining` and neither places on it nor reads from it (Decision 633); the recreated pod lowers the flag itself by enrolling. To pick up a new image or env (`UpgradePending: True`), the same delete:
 
 ```bash
 kubectl -n troupe-w-<profile> delete pod troupe-w-<profile>-<ordinal>

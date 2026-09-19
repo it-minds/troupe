@@ -26,6 +26,7 @@ defmodule Troupe.Worker.Plane.Link do
   alias Troupe.Worker.Auth
   alias Troupe.Worker.Bundles
   alias Troupe.Worker.Disk
+  alias Troupe.Worker.Drain
   alias Troupe.Worker.Plane.Commands
   alias Troupe.Worker.Sessions
 
@@ -234,7 +235,13 @@ defmodule Troupe.Worker.Plane.Link do
   defp enrol(state) do
     case token(state.token) do
       {:ok, token} ->
-        params = state.claims |> with_bundle_hash() |> Map.put("token", token)
+        # Whether this pod is draining is the pod's own fact, and a fresh pod says no:
+        # that is how a restart after a drain gets its flag lowered (Decision 633).
+        params =
+          state.claims
+          |> with_bundle_hash()
+          |> Map.put("draining", Drain.draining?())
+          |> Map.put("token", token)
 
         case exchange(state, "enrol", params) do
           {:ok, result} ->
@@ -390,7 +397,8 @@ defmodule Troupe.Worker.Plane.Link do
     |> Map.merge(%{
       "active_sessions" => Sessions.active_count(),
       "disk_used_bytes" => disk.used_bytes,
-      "disk_total_bytes" => disk.total_bytes
+      "disk_total_bytes" => disk.total_bytes,
+      "draining" => Drain.draining?()
     })
   end
 
