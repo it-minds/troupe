@@ -1,5 +1,39 @@
-[
-  {"tool": "write_file", "input": {"path": "hello.txt", "content": "hello from troupe\n"}},
-  {"tool": "shell", "input": {"command": "cat hello.txt"}},
-  {"finish": "smoke test complete: wrote hello.txt and read it back through reaper"}
-]
+{
+  "routes": {
+    "root": [
+      {
+        "text": "Writing hello.txt.",
+        "tools": [
+          {
+            "name": "write_file",
+            "input": {
+              "path": "hello.txt",
+              "content": "hello from troupe\n"
+            }
+          }
+        ]
+      },
+      {
+        "tools": [
+          {
+            "name": "shell",
+            "input": {
+              "command": "cat hello.txt"
+            }
+          }
+        ]
+      },
+      {
+        "text": "Wrote hello.txt and read it back.",
+        "tools": [
+          {
+            "name": "finish",
+            "input": {
+              "summary": "smoke test complete: wrote hello.txt and read it back through reaper"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

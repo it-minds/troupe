@@ -1,9 +1,9 @@
 name: CI
 
 # The gate for a change: zero warnings, formatted, credo-clean, the UI talking
-# only to Troupe.Client (mix troupe.xref), and the whole suite green. The remote
-# smoke task is deliberately not here — it needs a deployment, and skips itself
-# without TROUPE_REMOTE_URL.
+# only to Troupe.Client (mix troupe.xref), and the whole suite green — every session
+# in the suite runs in the daemon this VM embeds. The remote smoke task is deliberately
+# not here — it needs a deployment, and skips itself without TROUPE_REMOTE_URL.
 
 on:
   push:
@@ -31,11 +31,6 @@ jobs:
         with:
           version: 0.16.0
 
-      # watch mode's file_system backend shells out to inotifywait on Linux;
-      # without it that test falls back and fails rather than being skipped.
-      - name: Install inotify-tools
-        run: sudo apt-get update && sudo apt-get install -y inotify-tools
-
       - name: Cache deps and build
         uses: actions/cache@v4
         with:
@@ -44,6 +39,12 @@ jobs:
             _build
           key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
           restore-keys: ${{ runner.os }}-mix-
+
+      # The harness (troupe_core, troupe_gateway, troupe_protocol) comes from the private
+      # `it-minds/troupe-remote` repository as sparse git dependencies; `HARNESS_TOKEN` is a
+      # fine-grained token with read access to that repository's contents.
+      - name: Reach the harness repository
+        run: git config --global url."https://x-access-token:${{ secrets.HARNESS_TOKEN }}@github.com/".insteadOf "https://github.com/"
 
       - name: Get deps
         run: mix deps.get
