@@ -4214,3 +4214,15 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      the one honest way the flag comes down is a pod that restarted and is therefore not
      draining. Still owed: something that *removes or restarts* a drained pod nobody scaled
      away, and an `undrain` an admin can press.
+
+634. **Runtime config names its atoms; it does not look them up.** `bin/troupe_plane eval
+     '…'` on the live plane died in `Config.Reader` with `binary_to_existing_atom("direct")`:
+     the `start` boot runs embedded, every module is loaded before the config provider runs
+     and `:direct` exists; `eval` boots `start_clean` interactively, nothing of the
+     application is loaded, and the same line raises. So the recipe the admin docs give for
+     rebuilding the index, reconciling, rolling back — and the one this session needed, to
+     lower a stale `draining` flag — could not run on this image, and the migration Job would
+     have met the same wall on its next run. `TROUPE_PROVISIONING_MODE` is now matched
+     against the two values `Troupe.Plane.Settings` allows and anything else is a named
+     error rather than a crash in the boot script. The rule for `runtime.exs` from here:
+     never `to_existing_atom` on a value read from the environment.
