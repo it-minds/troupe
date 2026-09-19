@@ -206,8 +206,17 @@ defmodule Troupe.Gateway.RestartTest do
     |> Path.join()
     |> Path.wildcard()
     |> case do
-      [path] -> path |> File.read!() |> String.split("\n", trim: true) |> Enum.map(&Jason.decode!/1)
+      [path] -> path |> File.read!() |> String.split("\n", trim: true) |> Enum.flat_map(&decode/1)
       _ -> []
+    end
+  end
+
+  # The daemon is writing this file while the test polls it, and a hard kill leaves a torn
+  # last line behind on purpose. Either way a line that is not JSON yet is not an event yet.
+  defp decode(line) do
+    case Jason.decode(line) do
+      {:ok, event} -> [event]
+      {:error, _} -> []
     end
   end
 
