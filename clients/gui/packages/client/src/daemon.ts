@@ -97,6 +97,11 @@ export class DaemonClient {
   readonly endpoint: DaemonEndpoint;
   private conn: TroupeConnection | null = null;
   private readonly views = new Map<string, SessionView>();
+  // Sessions whose `open` is between dialling and subscribing. A second `open` for the
+  // same session during that window joins the first rather than making a second view:
+  // two views for one session would each claim the envelope first, and the one that
+  // lost would never see an event — which is a transcript that silently stops.
+  private readonly openingViews = new Map<string, Promise<SessionView>>();
   private readonly hooks: DaemonHooks;
   private opening: Promise<TroupeConnection> | null = null;
 
@@ -185,12 +190,19 @@ export class DaemonClient {
   async open(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2] = {}): Promise<SessionView> {
     const existing = this.views.get(sessionId);
     if (existing) return existing;
+    const pending = this.openingViews.get(sessionId);
+    if (pending) return pending;
 
-    const conn = await this.connection();
-    const view = new SessionView(conn, sessionId, hooks);
-    this.views.set(sessionId, view);
-    await view.subscribe(0);
-    return view;
+    const opening = (async () => {
+      const conn = await this.connection();
+      const view = new SessionView(conn, sessionId, hooks);
+      this.views.set(sessionId, view);
+      await view.subscribe(0);
+      return view;
+    })().finally(() => this.openingViews.delete(sessionId));
+
+    this.openingViews.set(sessionId, opening);
+    return opening;
   }
 
   /** Stop following a session. The socket stays: other sessions are on it. */

@@ -128,6 +128,25 @@ describe("stage 2: several sessions on one socket", () => {
     assert.equal(b.lastSeq, 2);
   });
 
+  it("opening the same session twice at once makes one view and one subscription", async () => {
+    const fourth = daemon.seed("/home/ada/four");
+    const before = daemon.calls.filter((c) => c.method === "subscribe").length;
+
+    const heard: string[] = [];
+    const [a, b] = await Promise.all([
+      client.open(fourth.id, { onEvent: (e) => heard.push(e.type) }),
+      client.open(fourth.id),
+    ]);
+
+    assert.equal(a, b, "both callers got the same view");
+    assert.equal(daemon.calls.filter((c) => c.method === "subscribe").length, before + 1);
+
+    // And the hooks the first caller registered are the ones that fire.
+    daemon.say(fourth.id, "once");
+    await settle();
+    assert.deepEqual(heard, ["session_created", "llm_response"]);
+  });
+
   it("closing one session leaves the other's socket alone", async () => {
     const third = daemon.seed("/home/ada/three");
     const view = await client.open(third.id, {});
