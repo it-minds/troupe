@@ -157,9 +157,35 @@ defmodule Troupe.Remote.Discovery do
     end
   end
 
+  @doc """
+  The WebSocket URL for a worker `endpoint` as the plane hands it out: `ws(s)://`
+  as it is; `http(s)://` with the scheme swapped and `/v1/socket` where the path
+  is empty; a bare host as `wss://<host>/v1/socket`. The same rule the reference
+  clients apply (Decision 94).
+  """
+  @spec worker_url(String.t()) :: String.t()
+  def worker_url("ws://" <> _ = url), do: url
+  def worker_url("wss://" <> _ = url), do: url
+
+  def worker_url("http" <> _ = url) do
+    uri = URI.parse(ws_scheme(url))
+    path = if uri.path in [nil, "", "/"], do: "/v1/socket", else: uri.path
+    URI.to_string(%{uri | path: path})
+  end
+
+  def worker_url(host) when is_binary(host), do: "wss://" <> host <> "/v1/socket"
+
   @doc "The protocol version this client speaks."
   @spec client_version() :: pos_integer()
   def client_version, do: 1
+
+  @doc """
+  The same version as `initialize` carries it. The contract's example writes
+  `"protocol_version": "1"`, and the worker compares strings — an integer `1` is
+  `unsupported_version` to it (Decision 95).
+  """
+  @spec wire_version() :: String.t()
+  def wire_version, do: Integer.to_string(client_version())
 
   @doc "Whether a plane's advertised versions include the one this client speaks."
   @spec compatible?(t()) :: boolean()

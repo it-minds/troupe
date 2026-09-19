@@ -99,7 +99,7 @@ defmodule Troupe.Remote.RPC do
     case reason(error) do
       :unauthorized -> "signed out: #{message}"
       :forbidden -> "not allowed: #{message}" <> scope_hint(error)
-      :no_capacity -> "no capacity: #{message}"
+      :no_capacity -> "unavailable: #{message}" <> reason_hint(error)
       :conflict -> "conflict: #{message}"
       :not_found -> "not found: #{message}"
       _ -> message
@@ -107,6 +107,17 @@ defmodule Troupe.Remote.RPC do
   end
 
   def describe(error), do: inspect(reason(error))
+
+  # -32010 (`unavailable`) carries what was unavailable in `data`: the reason, and
+  # sometimes the component. A message without them is "unavailable: unavailable".
+  defp reason_hint(%{data: %{"reason" => reason} = data}) when is_binary(reason) do
+    case data["component"] do
+      component when is_binary(component) -> " (#{component}: #{reason})"
+      _ -> " (#{reason})"
+    end
+  end
+
+  defp reason_hint(_error), do: ""
 
   # -32003 says which scope was missing when it can; saying so is the whole
   # point of the code.

@@ -154,7 +154,7 @@ defmodule Troupe.Client.Remote do
   @impl true
   def teams({:remote, plane}) do
     case call(plane, "me") do
-      {:ok, %{"teams" => teams}} -> {:ok, Enum.map(List.wrap(teams), &team/1)}
+      {:ok, %{} = me} -> {:ok, identity_of(plane, me).teams}
       {:ok, _other} -> {:ok, []}
       {:error, reason} -> {:error, message(reason)}
     end
@@ -165,7 +165,7 @@ defmodule Troupe.Client.Remote do
   @impl true
   def profiles({:remote, plane}, team) do
     case call(plane, "profiles.list", params(%{team: team})) do
-      {:ok, list} -> {:ok, list |> List.wrap() |> Enum.map(&profile/1)}
+      {:ok, list} -> {:ok, list |> unwrap("profiles") |> Enum.map(&profile/1)}
       {:error, reason} -> {:error, message(reason)}
     end
   end
@@ -182,7 +182,7 @@ defmodule Troupe.Client.Remote do
       params(%{team: filter[:team] || filter["team"], state: filter[:state] || filter["state"]})
 
     case call(plane, "sessions.list", params) do
-      {:ok, list} -> {:ok, list |> List.wrap() |> Enum.map(&summary(&1, origin))}
+      {:ok, list} -> {:ok, list |> unwrap("sessions") |> Enum.map(&summary(&1, origin))}
       {:error, :plane_down} -> {:ok, attached(origin)}
       {:error, reason} -> {:error, message(reason)}
     end
@@ -194,7 +194,7 @@ defmodule Troupe.Client.Remote do
   def create_session({:remote, plane} = origin, params) do
     body =
       params(%{
-        team: params[:team],
+        team: team_name(plane, params[:team]),
         profile: params[:profile],
         source: source(params[:source]),
         visibility: params[:visibility] || "private",
@@ -249,16 +249,7 @@ defmodule Troupe.Client.Remote do
   def whoami({:remote, plane}) do
     case call(plane, "me") do
       {:ok, %{} = me} ->
-        identity = %{
-          sub: me["sub"],
-          name: me["name"],
-          teams: me |> Map.get("teams", []) |> List.wrap() |> Enum.map(&team/1),
-          plane_url: plane,
-          workspace: nil
-        }
-
-        Tokens.put_identity(plane, identity)
-        {:ok, identity}
+        {:ok, identity_of(plane, me)}
 
       {:error, reason} ->
         {:error, message(reason)}
@@ -438,18 +429,51 @@ defmodule Troupe.Client.Remote do
   defp source(nil), do: %{type: "empty"}
   defp source(%{} = source), do: source
 
+  # `me`, as this client keeps it: for `troupe whoami`, for the HQ header, and for
+  # naming a team the plane way. Remembered whenever it is fetched, by either door.
+  defp identity_of(plane, me) do
+    identity = %{
+      sub: me["subject"] || me["sub"],
+      name: me["display_name"] || me["name"],
+      teams: me |> Map.get("teams", []) |> List.wrap() |> Enum.map(&team/1),
+      plane_url: plane,
+      workspace: nil
+    }
+
+    Tokens.put_identity(plane, identity)
+    identity
+  end
+
+  # The plane matches `team` by *name*; this client addresses a team by its id, which
+  # the live plane makes a GUID. A known id goes out as its name; anything else as it
+  # came (Decision 97).
+  defp team_name(plane, team) when is_binary(team) do
+    case Tokens.identity(plane) do
+      {:ok, %{teams: teams}} ->
+        Enum.find_value(teams, team, fn t -> if t.id == team, do: t.name end)
+
+      :error ->
+        team
+    end
+  end
+
+  defp team_name(_plane, team), do: team
+
+  # The contract answers a list; the live plane wraps it in an object under
+  # the method's noun (Decision 93).
+  defp unwrap(%{} = envelope, key), do: List.wrap(Map.get(envelope, key, []))
+  defp unwrap(list, _key), do: List.wrap(list)
+
   defp team(%{} = team), do: %{id: team["id"], name: team["name"] || team["id"]}
   defp team(name) when is_binary(name), do: %{id: name, name: name}
   defp team(_other), do: %{id: nil, name: "?"}
 
   defp profile(%{} = profile) do
-    capacity = profile["capacity"] || %{}
-
     %{
       name: profile["name"] || "?",
-      description: profile["description"] || "",
-      health: profile["health"] || "unknown",
-      capacity: %{free: capacity["free"], total: capacity["total"]}
+      description: profile["description"] || offering(profile),
+      health: profile["health"] || health(profile),
+      capacity: capacity(profile["capacity"], profile["active_sessions"])
     }
   end
 
@@ -461,6 +485,39 @@ defmodule Troupe.Client.Remote do
       capacity: %{free: nil, total: nil}
     }
 
+  # The contract's `{free, total}`, or the live plane's total with the sessions
+  # on it counted separately.
+  defp capacity(%{} = capacity, _active), do: %{free: capacity["free"], total: capacity["total"]}
+
+  defp capacity(total, active) when is_integer(total) and is_integer(active),
+    do: %{free: max(total - active, 0), total: total}
+
+  defp capacity(total, _active) when is_integer(total), do: %{free: nil, total: total}
+  defp capacity(_capacity, _active), do: %{free: nil, total: nil}
+
+  # The live plane reports its pods rather than a verdict; the verdict is drawn here.
+  defp health(%{"pods" => pods, "healthy_pods" => healthy})
+       when is_list(pods) and is_integer(healthy) do
+    cond do
+      pods == [] -> "no pods"
+      healthy == length(pods) -> "ok"
+      healthy == 0 -> "down"
+      true -> "degraded"
+    end
+  end
+
+  defp health(_profile), do: "unknown"
+
+  defp offering(%{"channel" => channel} = profile) when is_binary(channel),
+    do:
+      Enum.map_join(
+        Enum.reject([channel, profile["bundle_version"]], &is_nil/1),
+        " · ",
+        &to_string/1
+      )
+
+  defp offering(_profile), do: ""
+
   defp summary(%{} = session, origin) do
     %{
       id: session["id"],
@@ -471,13 +528,16 @@ defmodule Troupe.Client.Remote do
       state: Worker.session_state(session["state"]) || :dormant,
       status: session["status"],
       tokens: session["tokens"],
-      cost: session["cost"],
-      updated_at: updated_at(session["updated_at"]),
+      cost: session["cost"] || from_micros(session["cost_micros"]),
+      updated_at: updated_at(session["updated_at"] || session["last_active_at"]),
       origin: origin,
       branches: [],
       workspace: nil
     }
   end
+
+  defp from_micros(micros) when is_integer(micros), do: micros / 1_000_000
+  defp from_micros(_other), do: nil
 
   defp updated_at(value) when is_integer(value), do: value
 

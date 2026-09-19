@@ -52,6 +52,20 @@ defmodule Troupe.RemoteTransportTest do
       eventually(fn -> Enum.any?(Client.events(sid), &(&1.type == :input_accepted)) end)
     end
 
+    test "the handshake is `me`, and /rpc is shown the plane token /auth/exchange minted" do
+      {remote, url} = start_remote!(transport: :http, sessions: [fixture()])
+      login!(remote, url)
+      {:ok, origin} = Client.connect_plane(url)
+      eventually(fn -> Client.fleet_status(origin).up? end)
+
+      calls = FakeRemote.calls(remote)
+      assert Enum.any?(calls, &match?({"auth.exchange", %{"id_token" => _}}, &1))
+      refute Enum.any?(calls, &match?({"initialize", _}, &1))
+
+      # the principal comes out of `me`, in the live plane's spelling
+      assert %{"sub" => "alice", "name" => "Alice"} = Client.fleet_status(origin).principal
+    end
+
     test "no fleet subscription is attempted: a POST endpoint cannot push" do
       {remote, url} = start_remote!(transport: :http, sessions: [fixture()])
       login!(remote, url)
@@ -62,6 +76,25 @@ defmodule Troupe.RemoteTransportTest do
       Process.sleep(100)
 
       refute Enum.any?(FakeRemote.calls(remote), &match?({"subscribe", %{"topic" => "fleet"}}, &1))
+    end
+  end
+
+  describe "a worker endpoint" do
+    test "is turned into the socket URL the way the reference clients do it" do
+      assert Discovery.worker_url("wss://0-dev.workers.example/v1/socket") ==
+               "wss://0-dev.workers.example/v1/socket"
+
+      assert Discovery.worker_url("https://0-dev.workers.example") ==
+               "wss://0-dev.workers.example/v1/socket"
+
+      assert Discovery.worker_url("https://0-dev.workers.example/") ==
+               "wss://0-dev.workers.example/v1/socket"
+
+      assert Discovery.worker_url("http://127.0.0.1:4100/worker/w1") ==
+               "ws://127.0.0.1:4100/worker/w1"
+
+      assert Discovery.worker_url("0-dev.workers.example") ==
+               "wss://0-dev.workers.example/v1/socket"
     end
   end
 

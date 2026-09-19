@@ -152,6 +152,9 @@ Extra, because the live deployment disagreed with the contract:
 | a plane that speaks JSON-RPC over `POST` instead of a WebSocket | ✅ `remote_transport_test.exs` "is discovered as such, and every plane call works over it"; "no fleet subscription is attempted: a POST endpoint cannot push" |
 | the live plane's `-32003 unauthenticated` is a token problem, not a missing scope | ✅ `remote_transport_test.exs` "an unauthenticated -32003 is treated as a token problem, not a missing scope" and "the contract's codes keep their meanings" |
 | both discovery shapes | ✅ `remote_login_test.exs` "reads the contract's shape and the live deployment's shape alike" |
+| the live plane's login: `/auth/exchange`, `me` as the `POST` handshake, no `initialize` | ✅ `remote_transport_test.exs` "the handshake is `me`, and /rpc is shown the plane token /auth/exchange minted"; `remote_login_test.exs` "a plane with no /auth/exchange is handed the issuer's token" |
+| the live plane's answer shapes (`subject`/`display_name`, `{"profiles"}`/`{"sessions"}` envelopes, pods and micros) | ✅ `remote_transport_test.exs` "is discovered as such, and every plane call works over it" — the fake answers in those shapes over `POST` |
+| a worker endpoint with no socket path | ✅ `remote_transport_test.exs` "is turned into the socket URL the way the reference clients do it" |
 
 And the feature list's screen-level promises:
 

@@ -295,30 +295,42 @@ defmodule Troupe.Remote.Worker do
 
   ## Sending
 
+  # Every command names its session. One socket serves one session here, but the
+  # worker's schema requires `session_id` on each command all the same, and
+  # answers `invalid_params` without it (Decision 96).
+  defp activating(state, from, method, params),
+    do: do_activating(state, from, method, addressed(state, params))
+
+  defp command(state, from, method, params),
+    do: do_command(state, from, method, addressed(state, params))
+
+  defp addressed(state, params), do: Map.put_new(params, :session_id, state.session_id)
+
   # An activating action on a session that is not active opens it through the
   # plane first; that is the only place `session.open {mode: "activate"}` is
   # ever called, so browsing costs nothing.
-  defp activating(%{session_state: :active} = state, from, method, params),
-    do: command(state, from, method, params)
+  defp do_activating(%{session_state: :active} = state, from, method, params),
+    do: do_command(state, from, method, params)
 
-  defp activating(%{session_state: :read_only} = state, _from, _method, _params) do
+  defp do_activating(%{session_state: :read_only} = state, _from, _method, _params) do
     {:reply, {:error, :read_only}, state}
   end
 
-  defp activating(state, from, method, params) do
+  defp do_activating(state, from, method, params) do
     case reopen(state, :activate) do
       {:ok, state} -> {:noreply, queue(state, from, method, params)}
       {:error, reason, state} -> {:reply, {:error, reason}, state}
     end
   end
 
-  defp command(%{status: :up} = state, from, method, params),
+  defp do_command(%{status: :up} = state, from, method, params),
     do: {:noreply, send_request(state, from, method, params)}
 
-  defp command(%{status: :down} = state, _from, _method, _params),
+  defp do_command(%{status: :down} = state, _from, _method, _params),
     do: {:reply, {:error, :disconnected}, state}
 
-  defp command(state, from, method, params), do: {:noreply, queue(state, from, method, params)}
+  defp do_command(state, from, method, params),
+    do: {:noreply, queue(state, from, method, params)}
 
   defp queue(state, from, method, params) do
     if length(state.waiting) >= @max_waiting do
@@ -362,11 +374,14 @@ defmodule Troupe.Remote.Worker do
 
   defp connect(state) do
     with {:ok, token, state} <- session_token(state),
-         {:ok, socket} <- Socket.connect(state.endpoint, [{"authorization", "Bearer " <> token}]) do
+         {:ok, socket} <-
+           Socket.connect(Troupe.Remote.Discovery.worker_url(state.endpoint), [
+             {"authorization", "Bearer " <> token}
+           ]) do
       state = %{state | socket: socket, status: :handshaking, error: nil}
 
       send_request(state, {:internal, :initialize}, "initialize", %{
-        protocol_version: Troupe.Remote.Discovery.client_version(),
+        protocol_version: Troupe.Remote.Discovery.wire_version(),
         client_info: %{name: "troupe", version: to_string(Application.spec(:troupe, :vsn))},
         capabilities: %{}
       })
@@ -446,8 +461,19 @@ defmodule Troupe.Remote.Worker do
     end
   end
 
-  defp dispatch({:notification, "event", params}, state), do: durable(state, params)
-  defp dispatch({:notification, "ephemeral", params}, state), do: ephemeral(state, params)
+  # The worker wraps every notification — `{"topic", "session_id", "event"}` — and
+  # marks an ephemeral with `"ephemeral": true` inside it; the contract's example
+  # puts the event at the top level, and the fake used to. Both are read
+  # (Decision 98).
+  defp dispatch({:notification, "event", params}, state) do
+    case unwrap_event(params) do
+      %{"ephemeral" => true} = event -> ephemeral(state, event)
+      event -> durable(state, event)
+    end
+  end
+
+  defp dispatch({:notification, "ephemeral", params}, state),
+    do: ephemeral(state, unwrap_event(params))
 
   # The subscription is gone; the events are not. Re-subscribing from the
   # cursor is the whole recovery.
@@ -535,6 +561,9 @@ defmodule Troupe.Remote.Worker do
 
   ## Events
 
+  defp unwrap_event(%{"event" => %{} = event}), do: event
+  defp unwrap_event(params), do: params
+
   defp durable(state, %{} = params) do
     {events, memory} = Translate.durable(state.session_id, params, state.memory)
     state = %{state | memory: memory, agent: state.agent || Translate.root_of(params)}
@@ -570,11 +599,22 @@ defmodule Troupe.Remote.Worker do
 
   defp forget_command(state, _params, _command_id), do: state
 
-  defp ephemeral(state, %{"type" => "llm.delta"} = params) do
-    agent = params["agent"] || state.agent || "session"
-    text = get_in(params, ["data", "text"]) || ""
-    reasoning? = get_in(params, ["data", "reasoning"]) == true
-    buffer_delta(state, agent, text, reasoning?)
+  defp ephemeral(state, %{"type" => type} = params) when type in ["llm.delta", "llm_delta"] do
+    agent = Translate.agent_of(params) || state.agent || "session"
+    data = params["data"] || %{}
+
+    # The worker says what kind of delta it is; only text and reasoning are shown as
+    # they stream. A tool-use fragment lands whole in `llm_response`.
+    case data["kind"] do
+      kind when kind in [nil, "text"] ->
+        buffer_delta(state, agent, data["text"] || "", data["reasoning"] == true)
+
+      kind when kind in ["reasoning", "thinking"] ->
+        buffer_delta(state, agent, data["text"] || "", true)
+
+      _other ->
+        state
+    end
   end
 
   defp ephemeral(state, %{} = params) do

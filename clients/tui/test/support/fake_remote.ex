@@ -182,6 +182,8 @@ defmodule Troupe.FakeRemote do
       calls: [],
       failures: %{},
       transport: Keyword.get(opts, :transport, :websocket),
+      exchange?: Keyword.get(opts, :exchange, true),
+      plane_tokens: MapSet.new(),
       device: %{code: "DEV-CODE", user_code: "WXYZ-1234", approved?: false},
       refresh_broken?: false,
       seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end),
@@ -202,18 +204,19 @@ defmodule Troupe.FakeRemote do
 
   def handle_call({:emit, session_id, type, data, opts}, _from, state) do
     {event, state} = append(state, session_id, type, data, opts)
-    push(state, session_id, %{"jsonrpc" => "2.0", "method" => "event", "params" => event})
+    push(state, session_id, notification(session_id, event))
     {:reply, event, state}
   end
 
   def handle_call({:ephemeral, session_id, type, data, opts}, _from, state) do
-    params = %{
+    event = %{
+      "ephemeral" => true,
       "agent" => Keyword.get(opts, :agent, agent_of(state, session_id)),
       "type" => type,
       "data" => data
     }
 
-    push(state, session_id, %{"jsonrpc" => "2.0", "method" => "ephemeral", "params" => params})
+    push(state, session_id, notification(session_id, event))
     {:reply, :ok, state}
   end
 
@@ -221,11 +224,14 @@ defmodule Troupe.FakeRemote do
     agent = agent_of(state, session_id)
 
     for _ <- 1..n do
-      push(state, session_id, %{
-        "jsonrpc" => "2.0",
-        "method" => "ephemeral",
-        "params" => %{"agent" => agent, "type" => "llm.delta", "data" => %{"text" => text}}
-      })
+      event = %{
+        "ephemeral" => true,
+        "agent" => agent,
+        "type" => "llm.delta",
+        "data" => %{"text" => text}
+      }
+
+      push(state, session_id, notification(session_id, event))
     end
 
     {:reply, :ok, state}
@@ -313,7 +319,8 @@ defmodule Troupe.FakeRemote do
 
   def handle_call(:plane_up?, _from, state), do: {:reply, state.plane_up?, state}
 
-  def handle_call({:http, method, path, body}, _from, state), do: http(state, method, path, body)
+  def handle_call({:http, method, path, headers, body}, _from, state),
+    do: http(state, method, path, headers, body)
 
   @impl true
   def handle_info({:DOWN, _ref, :process, pid, _reason}, state) do
@@ -335,20 +342,56 @@ defmodule Troupe.FakeRemote do
 
   ## The protocol
 
+  # Every method whose schema requires `session_id` on the worker (`Troupe.Protocol.Schema`).
+  @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
+                profile.switch session.archive session.erase session.get session.pin
+                session.unpin todo.edit tools.register tools.unregister turn.cancel)
+
+  defp dispatch(state, :worker, method, params, _pid)
+       when method in @addressed and not is_map_key(params, "session_id") do
+    {{:error, -32_602, "invalid_params"}, state}
+  end
+
+  # The worker compares `protocol_version` as a string, and so does this: an integer
+  # `1` is refused the way the live worker refuses it.
+  defp dispatch(state, _kind, "initialize", %{"protocol_version" => version}, _pid)
+       when version != "1" do
+    {{:error, -32_602, "unsupported_version"}, state}
+  end
+
   defp dispatch(state, _kind, "initialize", _params, _pid) do
     {{:ok,
       %{
         "server_info" => %{"name" => "fake-remote", "version" => "1.0.0"},
-        "protocol_version" => 1,
+        "protocol_version" => "1",
         "capabilities" => %{"fs" => true, "something_unknown" => true},
         "principal" => state.principal,
         "scopes" => state.scopes
       }}, state}
   end
 
+  # Over POST the answers wear the live plane's shapes: `me` says `subject` and
+  # `display_name`, and every list arrives under the method's noun.
+  defp dispatch(%{transport: :http} = state, _kind, "me", _params, _pid) do
+    me = %{
+      "subject" => state.principal["sub"],
+      "display_name" => state.principal["name"],
+      "email" => nil,
+      "kind" => "person",
+      "teams" => state.teams,
+      "profiles" => Enum.map(state.profiles, & &1["name"]),
+      "platform_admin" => false
+    }
+
+    {{:ok, me}, state}
+  end
+
   defp dispatch(state, _kind, "me", _params, _pid) do
     {{:ok, Map.put(state.principal, "teams", state.teams)}, state}
   end
+
+  defp dispatch(%{transport: :http} = state, _kind, "profiles.list", _params, _pid),
+    do: {{:ok, %{"profiles" => Enum.map(state.profiles, &live_profile/1)}}, state}
 
   defp dispatch(state, _kind, "profiles.list", _params, _pid), do: {{:ok, state.profiles}, state}
 
@@ -357,9 +400,11 @@ defmodule Troupe.FakeRemote do
       state.sessions
       |> Map.values()
       |> Enum.filter(&matches?(&1, params))
-      |> Enum.map(&summary/1)
 
-    {{:ok, sessions}, state}
+    case state.transport do
+      :http -> {{:ok, %{"sessions" => Enum.map(sessions, &live_summary/1)}}, state}
+      _socket -> {{:ok, Enum.map(sessions, &summary/1)}, state}
+    end
   end
 
   defp dispatch(state, _kind, "session.create", params, _pid) do
@@ -429,8 +474,7 @@ defmodule Troupe.FakeRemote do
     # anything the client already has.
     replay = Enum.filter(events, &(&1["seq"] >= from_seq))
 
-    for event <- replay,
-        do: send(pid, {:push, %{"jsonrpc" => "2.0", "method" => "event", "params" => event}})
+    for event <- replay, do: send(pid, {:push, notification(id, event)})
 
     head = events |> Enum.map(& &1["seq"]) |> Enum.max(fn -> 0 end)
     {{:ok, %{"head_seq" => head}}, put_in(state.subscriptions[pid], id)}
@@ -451,8 +495,8 @@ defmodule Troupe.FakeRemote do
       append(state, id, "input.queued", %{"text" => params["text"]}, command_id: command)
 
     {accepted, state} = append(state, id, "input.accepted", %{}, command_id: command)
-    push(state, id, %{"jsonrpc" => "2.0", "method" => "event", "params" => queued})
-    push(state, id, %{"jsonrpc" => "2.0", "method" => "event", "params" => accepted})
+    push(state, id, notification(id, queued))
+    push(state, id, notification(id, accepted))
 
     {{:ok, %{"accepted" => true}}, state}
   end
@@ -486,7 +530,7 @@ defmodule Troupe.FakeRemote do
         command_id: params["command_id"]
       )
 
-    push(state, id, %{"jsonrpc" => "2.0", "method" => "event", "params" => event})
+    push(state, id, notification(id, event))
     {{:ok, %{"accepted" => true}}, state}
   end
 
@@ -546,6 +590,21 @@ defmodule Troupe.FakeRemote do
     {event, state}
   end
 
+  # Every event goes out the way the worker sends it: an `event` notification whose
+  # params name the topic and the session and carry the event itself, ephemerals
+  # included (they say so with `"ephemeral": true`).
+  defp notification(session_id, event) do
+    %{
+      "jsonrpc" => "2.0",
+      "method" => "event",
+      "params" => %{
+        "topic" => "session:" <> session_id,
+        "session_id" => session_id,
+        "event" => event
+      }
+    }
+  end
+
   defp put_command(event, nil), do: event
   defp put_command(event, command_id), do: Map.put(event, "command_id", command_id)
 
@@ -597,6 +656,45 @@ defmodule Troupe.FakeRemote do
     }
   end
 
+  # The live plane's rows: pods and micros rather than a verdict and a price,
+  # and no team on a session.
+  defp live_profile(profile) do
+    %{"free" => free, "total" => total} = profile["capacity"]
+
+    {pods, healthy} =
+      case profile["health"] do
+        "ok" -> {1, 1}
+        "degraded" -> {2, 1}
+        _down -> {1, 0}
+      end
+
+    %{
+      "name" => profile["name"],
+      "pods" => List.duplicate(%{"pod" => profile["name"] <> "-0", "healthy" => healthy > 0}, pods),
+      "capacity" => total,
+      "active_sessions" => total - free,
+      "healthy_pods" => healthy,
+      "channel" => "stable",
+      "bundle_version" => "1",
+      "agents" => ["code"]
+    }
+  end
+
+  defp live_summary(session) do
+    %{
+      "id" => session.id,
+      "owner" => session.owner,
+      "profile" => session.profile,
+      "state" => session.state,
+      "status" => session.status,
+      "title" => session.title,
+      "last_active_at" => session.updated_at,
+      "cost_micros" => session.cost && round(session.cost * 1_000_000),
+      "pending_approvals" => 0,
+      "your_role" => "owner"
+    }
+  end
+
   defp normalise(session) do
     session
     |> Map.put_new(:events, [])
@@ -636,7 +734,94 @@ defmodule Troupe.FakeRemote do
     header <> "." <> claims <> ".x"
   end
 
-  ## HTTP (discovery, OIDC, device flow)
+  ## HTTP (discovery, OIDC, device flow, the exchange door)
+
+  @id_token "id-token-alice"
+
+  # The POST transport, as the live plane speaks it: `/rpc` takes the plane token
+  # `/auth/exchange` minted and nothing else, an unauthenticated call is a 401
+  # whose body is still a JSON-RPC error object, and there is no `initialize`.
+  defp http(state, "POST", "/rpc", headers, body) do
+    case Jason.decode(body) do
+      {:ok, %{"method" => method, "id" => id} = request} ->
+        params = Map.get(request, "params", %{})
+        state = %{state | calls: [{method, params} | state.calls]}
+
+        cond do
+          state.exchange? and not plane_token?(state, headers) ->
+            error = %{
+              "code" => -32_003,
+              "message" => "unauthenticated",
+              "data" => %{"reason" => "bad_signature"}
+            }
+
+            {:reply, {401, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
+
+          method == "initialize" ->
+            error = %{
+              "code" => -32_601,
+              "message" => "method not found",
+              "data" => %{"method" => method}
+            }
+
+            {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
+
+          true ->
+            case dispatch(state, :plane, method, params, self()) do
+              {{:ok, result}, state} ->
+                {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "result" => result}}, state}
+
+              {{:error, code, message}, state} ->
+                error = %{"code" => code, "message" => message, "data" => %{"params" => params}}
+                {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
+            end
+        end
+
+      _ ->
+        {:reply, {400, %{"error" => "bad request"}}, state}
+    end
+  end
+
+  # `POST /auth/exchange {id_token}` → a plane token, as the live plane does it.
+  # A fake started with `exchange: false` has no such door, like the contract's.
+  defp http(%{exchange?: false} = state, "POST", "/auth/exchange", _headers, _body),
+    do: {:reply, {404, %{"error" => "not_found"}}, state}
+
+  defp http(state, "POST", "/auth/exchange", _headers, body) do
+    case Jason.decode(body) do
+      {:ok, %{"id_token" => @id_token} = params} ->
+        token = "plane-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
+
+        state = %{
+          state
+          | calls: [{"auth.exchange", params} | state.calls],
+            plane_tokens: MapSet.put(state.plane_tokens, token)
+        }
+
+        body = %{
+          "token" => token,
+          "expires_at" => System.system_time(:second) + 900,
+          "subject" => state.principal["sub"],
+          "display_name" => state.principal["name"],
+          "teams" => Enum.map(state.teams, & &1["name"]),
+          "profiles" => Enum.map(state.profiles, & &1["name"])
+        }
+
+        {:reply, {200, body}, state}
+
+      _ ->
+        {:reply, {401, %{"error" => "unauthenticated", "reason" => "bad_signature"}}, state}
+    end
+  end
+
+  defp http(state, method, path, _headers, body), do: http(state, method, path, body)
+
+  defp plane_token?(state, headers) do
+    case Map.get(headers, "authorization", "") do
+      "Bearer " <> token -> MapSet.member?(state.plane_tokens, token)
+      _other -> false
+    end
+  end
 
   # Two discovery shapes, one per transport: the contract's `plane_ws`, and the
   # live deployment's `plane.rpc` path, which is JSON-RPC over POST.
@@ -658,28 +843,6 @@ defmodule Troupe.FakeRemote do
       end)
 
     {:reply, {200, body}, state}
-  end
-
-  # The POST transport. An unauthenticated call is answered the way the live
-  # plane answers one: a 401 whose body is still a JSON-RPC error object.
-  defp http(state, "POST", "/rpc", body) do
-    case Jason.decode(body) do
-      {:ok, %{"method" => method, "id" => id} = request} ->
-        params = Map.get(request, "params", %{})
-        state = %{state | calls: [{method, params} | state.calls]}
-
-        case dispatch(state, :plane, method, params, self()) do
-          {{:ok, result}, state} ->
-            {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "result" => result}}, state}
-
-          {{:error, code, message}, state} ->
-            error = %{"code" => code, "message" => message, "data" => %{"params" => params}}
-            {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
-        end
-
-      _ ->
-        {:reply, {400, %{"error" => "bad request"}}, state}
-    end
   end
 
   defp http(state, "GET", "/oidc/.well-known/openid-configuration", _body) do
@@ -736,6 +899,7 @@ defmodule Troupe.FakeRemote do
   defp tokens do
     %{
       "access_token" => "access-" <> Base.encode16(:crypto.strong_rand_bytes(4), case: :lower),
+      "id_token" => @id_token,
       "refresh_token" => "refresh-token",
       "token_type" => "Bearer",
       "expires_in" => 3600
@@ -767,7 +931,7 @@ defmodule Troupe.FakeRemote do
         if websocket?(headers) do
           handshake(socket, path, headers, owner)
         else
-          {status, body} = GenServer.call(owner, {:http, method, path, body})
+          {status, body} = GenServer.call(owner, {:http, method, path, headers, body})
           respond(socket, status, Jason.encode!(body))
           :gen_tcp.close(socket)
         end

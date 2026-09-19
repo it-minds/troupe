@@ -138,6 +138,47 @@ defmodule Troupe.Remote.Auth do
     end
   end
 
+  @doc """
+  `POST <plane>/auth/exchange {id_token}`: the issuer's token for the plane's own.
+
+  `/rpc` verifies plane tokens and nothing else, so the issuer's token is shown
+  to `/auth/exchange` once and never to `/rpc`. A plane with no such door
+  answers 404 and is handed the issuer's access token, as the contract
+  describes (Decision 92).
+  """
+  @spec exchange(String.t(), String.t()) :: {:ok, tokens()} | {:error, term()}
+  def exchange(plane_url, id_token) do
+    case HTTP.post_json(plane_url <> "/auth/exchange", %{id_token: id_token}) do
+      {:ok, %{"token" => token} = body} when is_binary(token) ->
+        {:ok,
+         %{
+           access_token: token,
+           refresh_token: nil,
+           id_token: nil,
+           scope: nil,
+           expires_at: seconds_to_ms(body["expires_at"]) || expiry(token)
+         }}
+
+      {:ok, other} ->
+        {:error, {:malformed_exchange, other}}
+
+      {:error, {:http, 404, _body}} ->
+        {:error, :no_exchange}
+
+      {:error, {:http, 401, body}} ->
+        {:error, {:exchange_refused, refusal(body)}}
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp seconds_to_ms(seconds) when is_integer(seconds), do: seconds * 1000
+  defp seconds_to_ms(_other), do: nil
+
+  defp refusal(%{"reason" => reason}) when is_binary(reason), do: reason
+  defp refusal(other), do: inspect(other)
+
   defp tokens(body) do
     %{
       access_token: body["access_token"],

@@ -30,8 +30,10 @@ defmodule Troupe.Remote.Tokens do
   @type plane :: %{
           discovery: map(),
           refresh_token: String.t() | nil,
+          id_token: String.t() | nil,
           access_token: String.t() | nil,
           expires_at: integer() | nil,
+          exchanged?: boolean() | nil,
           identity: map() | nil
         }
 
@@ -108,22 +110,31 @@ defmodule Troupe.Remote.Tokens do
   end
 
   def handle_call({:put_login, plane_url, discovery, tokens}, _from, state) do
-    plane = %{
-      discovery: discovery,
-      refresh_token: tokens.refresh_token,
-      access_token: tokens.access_token,
-      expires_at: tokens.expires_at || Auth.expiry(tokens.access_token),
-      identity: nil
-    }
+    case credential(plane_url, tokens) do
+      {:ok, credential} ->
+        plane =
+          Map.merge(
+            %{
+              discovery: discovery,
+              refresh_token: tokens.refresh_token,
+              id_token: tokens.id_token,
+              identity: nil
+            },
+            credential
+          )
 
-    result =
-      Credentials.put(plane_url, %{
-        refresh_token: tokens.refresh_token,
-        issuer: discovery.issuer,
-        client_id: discovery.client_id
-      })
+        result =
+          Credentials.put(plane_url, %{
+            refresh_token: tokens.refresh_token,
+            issuer: discovery.issuer,
+            client_id: discovery.client_id
+          })
 
-    {:reply, result, put_plane(state, plane_url, plane)}
+        {:reply, result, put_plane(state, plane_url, plane)}
+
+      {:error, reason} ->
+        {:reply, {:error, reason}, state}
+    end
   end
 
   def handle_call({:access_token, plane_url}, _from, state) do
@@ -214,8 +225,10 @@ defmodule Troupe.Remote.Tokens do
        %{
          discovery: discovery,
          refresh_token: entry.refresh_token,
+         id_token: nil,
          access_token: nil,
          expires_at: nil,
+         exchanged?: nil,
          identity: nil
        }}
     end
@@ -233,30 +246,60 @@ defmodule Troupe.Remote.Tokens do
     do: {:reply, {:error, :logged_out}, state}
 
   defp do_refresh(state, plane_url, plane) do
-    case Auth.refresh(plane.discovery, plane.refresh_token) do
-      {:ok, tokens} ->
-        plane = %{
-          plane
-          | access_token: tokens.access_token,
+    with {:ok, tokens} <- Auth.refresh(plane.discovery, plane.refresh_token),
+         {:ok, credential} <- credential(plane_url, tokens) do
+      plane =
+        plane
+        |> Map.merge(credential)
+        |> Map.merge(%{refresh_token: tokens.refresh_token, id_token: tokens.id_token})
+
+      if tokens.refresh_token != nil do
+        _ =
+          Credentials.put(plane_url, %{
             refresh_token: tokens.refresh_token,
-            expires_at: tokens.expires_at || Auth.expiry(tokens.access_token)
-        }
+            issuer: plane.discovery.issuer,
+            client_id: plane.discovery.client_id
+          })
+      end
 
-        if tokens.refresh_token != nil do
-          _ =
-            Credentials.put(plane_url, %{
-              refresh_token: tokens.refresh_token,
-              issuer: plane.discovery.issuer,
-              client_id: plane.discovery.client_id
-            })
-        end
-
-        {:reply, {:ok, plane.access_token}, put_plane(state, plane_url, plane)}
-
+      {:reply, {:ok, plane.access_token}, put_plane(state, plane_url, plane)}
+    else
       {:error, reason} ->
         Logger.debug("token refresh for #{plane_url} failed: #{inspect(reason)}")
         {:reply, {:error, reason}, state}
     end
+  end
+
+  # What `/rpc` is shown. The issuer's id_token is exchanged for the plane's own
+  # token whenever the plane has that door, at login and again on every refresh
+  # (a plane token lives fifteen minutes); a plane that answers 404 takes the
+  # issuer's access token, as the contract describes (Decision 92).
+  defp credential(_plane_url, %{id_token: nil} = tokens), do: {:ok, issuers(tokens)}
+
+  defp credential(plane_url, tokens) do
+    case Auth.exchange(plane_url, tokens.id_token) do
+      {:ok, exchanged} ->
+        {:ok,
+         %{
+           access_token: exchanged.access_token,
+           expires_at: exchanged.expires_at,
+           exchanged?: true
+         }}
+
+      {:error, :no_exchange} ->
+        {:ok, issuers(tokens)}
+
+      {:error, reason} ->
+        {:error, {:exchange, reason}}
+    end
+  end
+
+  defp issuers(tokens) do
+    %{
+      access_token: tokens.access_token,
+      expires_at: tokens.expires_at || Auth.expiry(tokens.access_token),
+      exchanged?: false
+    }
   end
 
   defp fresh?(%{access_token: token, expires_at: exp}) when is_binary(token),

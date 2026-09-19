@@ -148,6 +148,14 @@ defmodule Troupe.CLI.Remote do
     1
   end
 
+  defp fail(say, {:exchange, reason}) do
+    say.(
+      "signed in at the identity provider, but the plane refused the sign-in: #{inspect(reason)}"
+    )
+
+    1
+  end
+
   defp fail(say, :logged_out) do
     say.("not signed in; run troupe login <plane-url>")
     1

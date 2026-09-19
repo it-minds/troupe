@@ -167,6 +167,8 @@ defmodule Troupe.RemoteHQTest do
 
       assert [params] = for({"session.create", p} <- FakeRemote.calls(remote), do: p)
       assert params["profile"] == "code"
+      # chosen by id in HQ, sent by name, which is what the plane matches on
+      assert params["team"] == "Core"
       assert params["visibility"] == "team"
       assert params["prompt"] == "ship it"
       assert params["source"] == %{"type" => "empty"}

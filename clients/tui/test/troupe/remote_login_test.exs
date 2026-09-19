@@ -44,6 +44,16 @@ defmodule Troupe.RemoteLoginTest do
       assert printed =~ "Ops"
     end
 
+    test "a plane with no /auth/exchange is handed the issuer's token" do
+      {remote, url} = start_remote!(exchange: false)
+      login!(remote, url)
+
+      refute Enum.any?(Troupe.FakeRemote.calls(remote), &match?({"auth.exchange", _}, &1))
+
+      {:ok, origin} = Troupe.Client.connect_plane(url)
+      assert {:ok, %{sub: "alice"}} = Troupe.Client.whoami(origin)
+    end
+
     test "the credential file is 0600 on unix" do
       {remote, url} = start_remote!()
       login!(remote, url)

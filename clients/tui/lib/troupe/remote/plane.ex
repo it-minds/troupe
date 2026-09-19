@@ -215,10 +215,19 @@ defmodule Troupe.Remote.Plane do
   # A plane whose `rpc` path turns out not to be a POST endpoint is tried as a
   # socket before giving up: the discovery document names a path, not a verb.
   def handle_info({:http_result, {:internal, :initialize}, {:error, reason}}, state) do
-    if websocket_worth_trying?(reason) do
-      {:noreply, do_connect(%{state | transport: :websocket, url: Discovery.ws_scheme(state.url)})}
-    else
-      {:noreply, state |> put_error(reason) |> schedule_reconnect()}
+    cond do
+      websocket_worth_trying?(reason) ->
+        {:noreply,
+         do_connect(%{state | transport: :websocket, url: Discovery.ws_scheme(state.url)})}
+
+      # The token the handshake carried was refused: refresh it before the next
+      # attempt, or the reconnect would present the same one again.
+      refused?(reason) ->
+        state = state |> put_error({:initialize, RPC.describe(reason)}) |> reauthorize()
+        {:noreply, schedule_reconnect(state)}
+
+      true ->
+        {:noreply, state |> put_error(reason) |> schedule_reconnect()}
     end
   end
 
@@ -271,11 +280,15 @@ defmodule Troupe.Remote.Plane do
     end
   end
 
+  # Over `POST` there is no session to initialise: the live plane has no
+  # `initialize` method at all, and every call carries its own token. The
+  # handshake is `me` — it proves the token and names the principal, which is
+  # what `initialize` would have answered with (Decision 93).
   defp do_connect(%{transport: :http} = state) do
     case Tokens.access_token(state.plane_url, name: state.tokens) do
       {:ok, _token} ->
         state = %{state | status: :handshaking, error: nil}
-        post_request(state, {:internal, :initialize}, "initialize", handshake_params())
+        post_request(state, {:internal, :initialize}, "me", %{})
 
       {:error, reason} ->
         state |> put_error(reason) |> schedule_reconnect()
@@ -320,7 +333,7 @@ defmodule Troupe.Remote.Plane do
 
   defp handshake_params do
     %{
-      protocol_version: Discovery.client_version(),
+      protocol_version: Discovery.wire_version(),
       client_info: %{name: "troupe", version: to_string(Application.spec(:troupe, :vsn))},
       capabilities: %{}
     }
@@ -453,7 +466,7 @@ defmodule Troupe.Remote.Plane do
         backoff: Backoff.reset(state.backoff),
         server_info: result["server_info"],
         capabilities: result["capabilities"] || %{},
-        principal: result["principal"],
+        principal: principal(result),
         scopes: result["scopes"] || [],
         protocol_version: result["protocol_version"]
     }
@@ -468,6 +481,19 @@ defmodule Troupe.Remote.Plane do
 
   defp initialized(state, _result),
     do: state |> put_error(:bad_handshake) |> drop_socket() |> schedule_reconnect()
+
+  # `initialize` answers with a `principal`; `me` *is* the principal — in the
+  # live plane's spelling (`subject`, `display_name`) or the contract's.
+  defp principal(%{"principal" => %{} = principal}), do: principal
+
+  defp principal(%{"subject" => subject} = me) when is_binary(subject),
+    do: %{"sub" => subject, "name" => me["display_name"], "teams" => me["teams"]}
+
+  defp principal(%{"sub" => _subject} = me), do: me
+  defp principal(_result), do: nil
+
+  defp refused?(%{code: _code} = error), do: RPC.reason(error) == :unauthorized
+  defp refused?(_reason), do: false
 
   # There is nothing to subscribe to over `POST`: a plane with no socket cannot
   # push, so HQ refreshes on demand instead.

@@ -716,8 +716,8 @@ touch the attached sessions, which keep streaming from their workers.
 |---|---|
 | discovery, OIDC, device flow | HTTPS through `Troupe.Remote.HTTP` (Req), TLS verified against the OS trust store plus `TROUPE_CA_FILE` |
 | plane, when discovery gives `plane_ws` | WebSocket (`mint_web_socket`), bearer token on the upgrade |
-| plane, when discovery gives `plane.rpc` | JSON-RPC over `POST`, bearer token in the header (Decision 80) |
-| worker | WebSocket, session token on the upgrade |
+| plane, when discovery gives `plane.rpc` | JSON-RPC over `POST`; the plane token from `/auth/exchange` in the header, `me` as the handshake (Decisions 80, 92, 93) |
+| worker | WebSocket at the endpoint's `/v1/socket` (Decision 94), session token on the upgrade |
 
 `Troupe.Remote.Socket` owns one WebSocket: the upgrade runs synchronously in
 passive mode, then the socket switches to active so frames arrive as messages

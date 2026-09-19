@@ -64,6 +64,19 @@ defmodule Troupe.Remote.HTTP do
     |> decode()
   end
 
+  @doc "POSTs a JSON body and decodes a JSON answer — how `/auth/exchange` is spoken."
+  @spec post_json(String.t(), map(), keyword()) :: {:ok, term()} | {:error, term()}
+  def post_json(url, body, headers \\ []) do
+    [
+      url: url,
+      headers: [{"content-type", "application/json"} | headers],
+      method: :post,
+      body: Jason.encode!(body)
+    ]
+    |> request()
+    |> decode()
+  end
+
   defp request(opts) do
     opts
     |> Keyword.merge(

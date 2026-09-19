@@ -12,6 +12,10 @@ defmodule Mix.Tasks.Troupe.Remote.Smoke do
 
       TROUPE_REMOTE_URL       the plane to talk to (required)
       TROUPE_REMOTE_SESSION   attach to this session instead of creating one
+      TROUPE_REMOTE_CREATE    set to 1 to create a session even when one is active
+      TROUPE_REMOTE_APPROVE   set to 1 to wait for an approval request, answer it, and
+                              see the tool run (pair it with a prompt that needs one)
+      TROUPE_REMOTE_DECISION  the answer: allow (default), allow_session or deny
       TROUPE_REMOTE_TEAM      the team to create in (default: the first one)
       TROUPE_REMOTE_PROFILE   the profile to create with (default: the first one)
       TROUPE_REMOTE_PROMPT    what to send (default: a harmless "say hello")
@@ -52,6 +56,7 @@ defmodule Mix.Tasks.Troupe.Remote.Smoke do
 
     sid = step("attach", fn -> attach(origin, sessions, team, profiles) end)
     step("input and reply", fn -> input(sid) end)
+    step("approval", fn -> approve(sid) end)
 
     Mix.shell().info("\ntroupe.remote.smoke: ok")
   end
@@ -114,35 +119,49 @@ defmodule Mix.Tasks.Troupe.Remote.Smoke do
   # Attaching to what is already there beats creating something: a smoke test
   # should leave as little behind as it can.
   defp attach(origin, sessions, team, profiles) do
-    named = System.get_env("TROUPE_REMOTE_SESSION")
+    named =
+      case System.get_env("TROUPE_REMOTE_SESSION") do
+        "" -> nil
+        value -> value
+      end
 
     cond do
       is_binary(named) ->
         {:ok, sid} = Client.open_session(origin, named, :read)
         sid
 
+      # A deployment's leftover "active" sessions are not always activatable — a pod
+      # that drained and came back lists them and cannot restore them — and a smoke
+      # that only ever joins one would never prove `session.create`.
+      System.get_env("TROUPE_REMOTE_CREATE") in ["1", "true"] ->
+        create(origin, team, profiles)
+
       session = Enum.find(sessions, &(&1.state == :active)) ->
         {:ok, sid} = Client.open_session(origin, session.id, :read)
         sid
 
       true ->
-        profile = System.get_env("TROUPE_REMOTE_PROFILE") || profile_name(profiles)
-
-        {:ok, sid} =
-          Client.create_session(origin, %{
-            team: team,
-            profile: profile,
-            source: %{type: "empty"},
-            visibility: "private",
-            prompt: prompt()
-          })
-
-        sid
+        create(origin, team, profiles)
     end
     |> tap(fn sid ->
       wait(fn -> Client.capability(sid).up? end, 60_000, "the worker connection never came up")
       Mix.shell().info("    attached to #{sid} on #{Worker.status(sid).endpoint}")
     end)
+  end
+
+  defp create(origin, team, profiles) do
+    profile = System.get_env("TROUPE_REMOTE_PROFILE") || profile_name(profiles)
+
+    {:ok, sid} =
+      Client.create_session(origin, %{
+        team: team,
+        profile: profile,
+        source: %{type: "empty"},
+        visibility: "private",
+        prompt: prompt()
+      })
+
+    sid
   end
 
   defp profile_name([%{name: name} | _]), do: name
@@ -174,6 +193,61 @@ defmodule Mix.Tasks.Troupe.Remote.Smoke do
     )
 
     "the session answered"
+  end
+
+  # The approval round trip, which is the one exchange a text-only prompt never
+  # exercises: the request arrives as an event, the answer goes back as a command,
+  # and the decision comes back as an event before the tool runs.
+  defp approve(sid) do
+    if System.get_env("TROUPE_REMOTE_APPROVE") in ["1", "true"] do
+      timeout = System.get_env("TROUPE_REMOTE_TIMEOUT", "120000") |> String.to_integer()
+
+      wait(
+        fn -> Enum.any?(Client.events(sid), &(&1.type == :approval_requested)) end,
+        timeout,
+        "no approval was requested"
+      )
+
+      %{data: %{call_id: call_id, name: name}} =
+        Enum.find(Client.events(sid), &(&1.type == :approval_requested))
+
+      decision =
+        case System.get_env("TROUPE_REMOTE_DECISION", "allow") do
+          "allow_session" -> :allow_session
+          "deny" -> :deny
+          _ -> :allow
+        end
+
+      Mix.shell().info("    answering #{name} (#{call_id}) with #{decision}")
+
+      case Client.approve(sid, call_id, decision) do
+        :ok -> :ok
+        {:error, reason} -> Mix.raise("approval.respond failed: #{inspect(reason)}")
+      end
+
+      wait(
+        fn ->
+          Enum.any?(
+            Client.events(sid),
+            &(&1.type == :approval_answered and &1.data.call_id == call_id)
+          )
+        end,
+        timeout,
+        "the decision never came back as an event"
+      )
+
+      wait(
+        fn -> Enum.any?(Client.events(sid), &(&1.type == :tool_call_completed)) end,
+        timeout,
+        "the tool never ran after the approval"
+      )
+
+      decided = Enum.find(Client.events(sid), &(&1.type == :approval_answered))
+
+      "answered #{decision}; the decision came back as #{inspect(decided.data.decision)} and the tool ran"
+    else
+      "skipped (set TROUPE_REMOTE_APPROVE=1 with a prompt that needs one)"
+    end
   end
 
   defp step(name, fun) do
