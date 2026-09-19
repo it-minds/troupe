@@ -32,6 +32,9 @@ curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | s
 irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex
 ```
 
+There is no Windows release yet: the harness's zstd NIF (`ezstd`) has no Windows build
+([DECISIONS.md](DECISIONS.md) 4). On Windows, run the Linux release under WSL for now.
+
 The release unpacks to `~/.local/lib/troupe-daemon` (`%LOCALAPPDATA%\Programs\troupe-daemon`)
 with `troupe-daemon` linked into `~/.local/bin` (a `.cmd` shim in
 `%LOCALAPPDATA%\Programs\troupe`, on the user `PATH`). Both installers verify `SHA256SUMS`,
@@ -91,9 +94,9 @@ triple into the release, and a daemon without it fails every `shell` call.
 version are the two constants at the top of `mix.exs`; bumping them is how the daemon
 picks up a core change. `VERSION` is the daemon's own.
 
-`.github/workflows/release.yml` builds all five targets on native runners for every push
-that touches `daemon/`, smokes each (unpack, `version`, `status`, `run`, `status`, `eval`;
-Windows: `version` and `status`), and on a `v*` tag attaches the tarballs and `SHA256SUMS`
+`.github/workflows/release.yml` builds the four Linux and macOS targets on native runners
+for every push that touches `daemon/`, smokes each (unpack, `version`, `status`, `run`,
+`status`, `eval`), and on a `v*` tag attaches the tarballs and `SHA256SUMS`
 to the GitHub release. It needs a `HARNESS_TOKEN` repository secret: a fine-grained token
 with read access to `it-minds/troupe-remote`'s contents.
 

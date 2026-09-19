@@ -196,8 +196,11 @@ eval-safe `runtime.exs`, no Erlang distribution, `install.sh` / `install.ps1`,
 daemon` hands off to the binary; the installers left). Proven on this machine: the
 unpacked Linux release answers `version`, `status`, an idempotent second `run`, `eval`,
 serves `@troupe/client` end to end (`initialize → session.create → input.send →
-agent_done`) and runs `shell` through its own reaper. Item 6's "release at a real URL" is
-proven the first time a `v*` tag is pushed here with the `HARNESS_TOKEN` secret set.
+agent_done`) and runs `shell` through its own reaper. The release workflow's first run
+built and smoked Linux x86_64/aarch64 and macOS x86_64/aarch64; **Windows is out of the
+matrix** because `ezstd`, the harness's zstd NIF, has no Windows build
+(`daemon/DECISIONS.md` 4) — a follow-up, not a phase 1 blocker. Item 6's "release at a
+real URL" is proven the first time a `v*` tag is pushed here.
 
 ### Phase 2 — the TUI becomes a client of the daemon
 
