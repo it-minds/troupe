@@ -69,23 +69,33 @@ defmodule Troupe.Session.Summary do
     session_id = Keyword.fetch!(opts, :session_id)
     Process.set_label("troupe summary #{session_id}")
 
+    # Subscribe *before* replaying, so nothing published in between is missed — and
+    # remember how far the replay got, so nothing published in between is counted twice.
+    # Both halves are needed and only the first was here: an event already in the log and
+    # also sitting in this process's mailbox was folded once from each, which doubled a
+    # session's cost whenever a turn happened to be in flight while the projection started.
     Events.subscribe(session_id)
 
     # Folded from the log first, so a restarted projection is immediately right rather
     # than right from the next event onwards.
-    snapshot =
-      session_id
-      |> Log.replay()
-      |> Enum.reduce(@empty, &fold(&2, &1))
+    events = Log.replay(session_id)
+    snapshot = Enum.reduce(events, @empty, &fold(&2, &1))
 
     {:ok,
      %{
        session_id: session_id,
        snapshot: snapshot,
        published: snapshot,
+       last_seq: last_seq(events),
        throttle_ms: Keyword.get(opts, :throttle_ms, @throttle_ms),
        timer: nil
      }}
+  end
+
+  # The highest sequence the replay covered. `0` for a log with nothing durable in it,
+  # which is what an unsealed session looks like and is below every real sequence.
+  defp last_seq(events) do
+    events |> Enum.map(& &1.seq) |> Enum.filter(&is_integer/1) |> Enum.max(fn -> 0 end)
   end
 
   @impl GenServer
@@ -93,7 +103,15 @@ defmodule Troupe.Session.Summary do
 
   @impl GenServer
   def handle_info({:troupe_event, _session_id, %Event{} = event}, state) do
-    {:noreply, state |> Map.put(:snapshot, fold(state.snapshot, event)) |> schedule()}
+    if folded?(state, event) do
+      {:noreply, state}
+    else
+      {:noreply,
+       state
+       |> Map.put(:snapshot, fold(state.snapshot, event))
+       |> Map.put(:last_seq, max(state.last_seq, event.seq || 0))
+       |> schedule()}
+    end
   end
 
   def handle_info(:publish, state) do
@@ -101,6 +119,12 @@ defmodule Troupe.Session.Summary do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # Whether the replay already accounted for this one. Sequences are the log's own order
+  # and are what makes "already seen" answerable at all — an ephemeral event has none,
+  # is in no log, and so can never be a repeat.
+  defp folded?(_state, %Event{seq: nil}), do: false
+  defp folded?(state, %Event{seq: seq}), do: seq <= state.last_seq
 
   # One timer at a time: the first change after a quiet period schedules the next
   # publish, and everything that happens before it fires is folded into the same diff.

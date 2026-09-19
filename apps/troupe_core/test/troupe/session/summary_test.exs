@@ -63,6 +63,42 @@ defmodule Troupe.Session.SummaryTest do
     end
   end
 
+  test "counts an event once when it is in the log and in the mailbox at the same time",
+       context do
+    # The race that made `UsageFlowTest` fail intermittently on CI with a cost of exactly
+    # double. A projection must subscribe *before* it replays, or it misses what happens in
+    # between — and an event that is then in both places was folded twice, once from each.
+    #
+    # Made deterministic here by doing to a fresh projection exactly what the race does:
+    # replaying a log that already holds a sealed event, and handing the same event to it
+    # again as a live message.
+    %{session: session} = start_session(context, steps: [{:text, "done"}])
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "hello")
+    await_state(session.id, [:idle, :done], 10_000)
+
+    # Whatever the turn cost, from the projection that folded it the ordinary way.
+    settled = await_snapshot(session.id, &(&1["cost_micros"] > 0))
+    cost = settled["cost_micros"]
+
+    # A second projection over the same log: same value, because the log is the same.
+    # Started unnamed: `start_link/1` registers under the session's own name, and what is
+    # wanted here is a second projection over the same log rather than a replacement.
+    {:ok, replayed} = GenServer.start_link(Summary, session_id: session.id)
+    assert :sys.get_state(replayed).snapshot["cost_micros"] == cost
+
+    # And now the race itself. Every durable event the log holds, delivered again as if it
+    # had arrived from the subscription during the replay.
+    for event <- Troupe.Session.Log.replay(session.id) do
+      send(replayed, {:troupe_event, session.id, event})
+    end
+
+    # Unchanged. A sequence the replay already covered is one this projection has already
+    # accounted for — which is the whole of the fix, and without it this is `2 * cost`.
+    assert :sys.get_state(replayed).snapshot["cost_micros"] == cost
+  end
+
   test "publishes diffs, and no more than four a second", context do
     %{session: session} = start_session(context, steps: [{:text, "one"}, {:text, "two"}])
 

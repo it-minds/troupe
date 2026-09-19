@@ -1,0 +1,6 @@
+{
+  "steps": [
+    {"text": "Hello from the daemon. Listing the workspace.", "tools": [{"name": "list_files", "input": {"path": "."}}]},
+    {"text": "Listed. Done.", "tools": [{"name": "finish", "input": {"summary": "spike ok"}}]}
+  ]
+}

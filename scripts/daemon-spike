@@ -1,0 +1,38 @@
+#!/usr/bin/env bash
+# Phase 0 of the daemon: boot the local daemon from this checkout with the fake provider
+# and drive it with the TypeScript client (`@troupe/client`) over the loopback WebSocket.
+#
+#     scripts/daemon-spike <path-to-troupe-gui/packages/client> [workspace-dir]
+#
+# The client package must be built (`pnpm --filter @troupe/client build`). Everything the
+# daemon writes goes under a scratch directory, never the developer's real state. Exit
+# status is the client's: 0 means `initialize → session.create → input.send` produced
+# `llm_response` and `agent_done` events at the client.
+set -euo pipefail
+
+CLIENT_DIR="${1:?usage: scripts/daemon-spike <client-package-dir> [workspace]}"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+BASE="$(mktemp -d "${TMPDIR:-/tmp}/troupe-spike-XXXXXX")"
+WORKSPACE="${2:-$BASE/workspace}"
+mkdir -p "$BASE/state" "$BASE/run" "$WORKSPACE"
+[ -e "$WORKSPACE/README.md" ] || echo "spike workspace" > "$WORKSPACE/README.md"
+
+export TROUPE_STATE_HOME="$BASE/state" XDG_RUNTIME_DIR="$BASE/run" LOCALAPPDATA="$BASE/run"
+export TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$ROOT/scripts/daemon-spike.json"
+
+cd "$ROOT"
+mix run --no-halt scripts/daemon-spike.exs > "$BASE/daemon.log" 2>&1 &
+DAEMON=$!
+trap 'kill $DAEMON 2>/dev/null || true; pkill -P $DAEMON 2>/dev/null || true' EXIT
+
+for _ in $(seq 1 240); do
+  grep -q '"ws"' "$XDG_RUNTIME_DIR/troupe/daemon.json" 2>/dev/null && break
+  kill -0 $DAEMON 2>/dev/null || { cat "$BASE/daemon.log"; echo "daemon exited"; exit 1; }
+  sleep 0.5
+done
+
+cat "$BASE/daemon.log"
+node "$ROOT/scripts/daemon-spike.mjs" "$CLIENT_DIR" "$WORKSPACE"
+STATUS=$?
+echo "daemon log: $BASE/daemon.log"
+exit $STATUS

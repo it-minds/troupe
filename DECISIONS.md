@@ -4243,3 +4243,36 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      is a report to a parent, and the parent is what a person talks to. The worker's
      lifecycle needs nothing new — `agent_state` already carries `done_reason`, and the
      woken agent's first `thinking` clears it on the plane's row.
+
+636. **The daemon is proven to boot from this umbrella before anything is packaged.**
+     `scripts/daemon-spike` starts `Troupe.Gateway.Daemon` on `troupe_core`,
+     `troupe_gateway` and `troupe_protocol` alone — no plane, no worker link, no object
+     store — and drives it with the GUI's `@troupe/client` over the loopback WebSocket:
+     `initialize`, `session.create`, `input.send`, and the `llm_response` and
+     `agent_done` events back. It is a `mix run` script and a Node script, not a release
+     and not a test, and it lives under `scripts/` rather than the suite because what it
+     proves — that a client written in another repository against `PROTOCOL.md` reaches a
+     daemon built here — is the one thing `daemon_test.exs` cannot, since that test is
+     this repository talking to itself. `docs/daemon.md` records what it found; Decision
+     319 still holds, and where the daemon's *binary* lives is decided there before a
+     release is added anywhere.
+
+633. **A projection must subscribe before it replays, and de-duplicate afterwards.** Only
+     the first half was here. `Session.Summary` subscribed and then folded the log, so an
+     event already written *and* sitting in the process's mailbox was folded twice — once
+     from each — and a session's cost came out at exactly double.
+
+     The sequence is what makes "already seen" answerable: the replay remembers how far it
+     got, and a live event at or below that is dropped. An ephemeral event has no sequence,
+     is in no log, and so can never be a repeat.
+
+     It is a defect rather than a test artefact. The window is a projection starting while a
+     turn is in flight, which is an ordinary restart, and what it corrupts is the number the
+     plane bills from.
+
+634. **The doubled cost was CI's oldest flake and was never a flake.** It failed
+     intermittently under `--runs 10` from R8 onward and passed every single run, which is
+     exactly what a race between two orderings looks like. Made deterministic by doing to a
+     fresh projection what the race does — replaying a log that holds a sealed event and
+     handing it the same event again — the test fails with `630` against `315`, the same two
+     numbers CI reported.
