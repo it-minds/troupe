@@ -4325,3 +4325,17 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      said `%LOCALAPPDATA%\troupe\run\daemon.json` where the code and the Tauri shell
      both read `%LOCALAPPDATA%\troupe\daemon.json`; the document moved to the code, since
      two implementations already agreed.
+
+643. **A JSON fake script may route answers per agent, and a workspace may name the
+     script.** `Troupe.LLM.Fake.load_script!/1` read a list of steps and nothing else, so
+     a scripted session with a subagent could not say which answer belonged to whom —
+     the in-VM `:routes` option existed for the core's own tests and had no spelling a
+     file could carry. It now returns `steps:` and `routes:` from an object, and
+     `Troupe.Session` starts the per-session fake with both. The occasion is the TUI
+     becoming a client of the daemon (phase 2): its suite drives sessions through the
+     protocol alone, and the daemon rightly refuses to let a client choose a provider
+     over the wire (`@client_settable` in `Gateway.Dispatch`), so the deterministic model
+     has to be arranged the way a machine arranges anything — `provider: fake` and
+     `fake_script:` in the workspace's own `.troupe/config.yaml`, which `Config.load/2`
+     already reads. `fake_script_test.exs` proves that path end to end without handing
+     the session a fake process.

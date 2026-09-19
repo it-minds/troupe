@@ -97,7 +97,7 @@ defmodule Troupe.Session do
   # packaged binary is smoke-tested with no model behind it.
   defp fake_child(session_id, config, opts) do
     if own_fake?(config, opts) do
-      [{Fake, name: Registry.fake(session_id), steps: fake_steps(config)}]
+      [{Fake, [name: Registry.fake(session_id)] ++ fake_script(config)}]
     else
       []
     end
@@ -115,9 +115,9 @@ defmodule Troupe.Session do
     config.provider in ["fake", :fake] and is_nil(Keyword.get(opts, :fake))
   end
 
-  defp fake_steps(%{fake_script: nil}), do: []
+  defp fake_script(%{fake_script: nil}), do: []
 
-  defp fake_steps(%{fake_script: path}) do
+  defp fake_script(%{fake_script: path}) do
     if File.regular?(path) do
       Fake.load_script!(path)
     else
