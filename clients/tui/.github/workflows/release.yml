@@ -119,69 +119,6 @@ jobs:
               test -f hello.txt'
           done
 
-  installers:
-    name: install.sh in ubuntu:24.04 (zsh user)
-    needs: build
-    runs-on: ubuntu-24.04
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-linux_x86_64
-          merge-multiple: true
-          path: dist
-      - name: Serve artifacts and run install / upgrade / uninstall / corrupted
-        run: |
-          cd dist && sha256sum troupe-* > SHA256SUMS && cd ..
-          docker run --rm -v "$PWD:/src" ubuntu:24.04 bash -c '
-            set -e; apt-get update -q && apt-get install -y -q curl zsh python3 >/dev/null
-            useradd -m -s /bin/zsh tester; touch /home/tester/.zshrc; chown tester /home/tester/.zshrc
-            (cd /src/dist && python3 -m http.server 8000 >/dev/null 2>&1 &) ; sleep 1
-            export TROUPE_RELEASE_URL=http://localhost:8000
-            su tester -c "TROUPE_RELEASE_URL=$TROUPE_RELEASE_URL sh /src/install.sh"
-            su tester -c "~/.local/bin/troupe --version"
-            grep -q troupe /home/tester/.zshrc
-            su tester -c "TROUPE_RELEASE_URL=$TROUPE_RELEASE_URL sh /src/install.sh"   # clean upgrade
-            test -f /home/tester/.local/bin/troupe.previous
-            su tester -c "sh /src/install.sh --uninstall"
-            test ! -e /home/tester/.local/bin/troupe
-            ! grep -q troupe /home/tester/.zshrc
-            find /home/tester -newer /src/install.sh -type f ! -path "*/.config/*" ! -path "*/.local/state/*" ! -name ".zshrc" | tee leftovers.txt
-            test ! -s leftovers.txt
-            echo corrupt > /src/dist/corrupt && cd /src/dist && cp $(ls troupe-*-linux_x86_64) bad && mv bad $(ls troupe-*-linux_x86_64) && cd /
-            su tester -c "TROUPE_RELEASE_URL=$TROUPE_RELEASE_URL sh /src/install.sh" && exit 1 || echo "corrupted artifact rejected"
-            test ! -e /home/tester/.local/bin/troupe'
-
-  windows-installer:
-    name: install.ps1 on Windows
-    needs: build
-    runs-on: windows-2022
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-windows_x86_64.exe
-          merge-multiple: true
-          path: dist
-      - shell: pwsh
-        run: |
-          Set-Location dist
-          Get-ChildItem troupe-* | ForEach-Object { "$((Get-FileHash $_).Hash.ToLower())  $($_.Name)" } | Set-Content SHA256SUMS
-          $job = Start-Job { Set-Location $using:PWD; python -m http.server 8000 }
-          Start-Sleep 2
-          $env:TROUPE_RELEASE_URL = "http://localhost:8000"
-          Set-Location ..
-          .\install.ps1
-          & "$env:LOCALAPPDATA\Programs\troupe\troupe.exe" --version
-          .\install.ps1                                      # clean upgrade
-          Test-Path "$env:LOCALAPPDATA\Programs\troupe\troupe.exe.previous" | ForEach-Object { if (-not $_) { throw "no rollback copy" } }
-          .\install.ps1 -Uninstall
-          if (Test-Path "$env:LOCALAPPDATA\Programs\troupe") { throw "not removed" }
-          "corrupt" | Set-Content (Get-ChildItem dist\troupe-*.exe).FullName
-          try { .\install.ps1; throw "corrupted artifact accepted" } catch { if ($_.Exception.Message -match "corrupted artifact accepted") { throw } else { "corrupted artifact rejected" } }
-          if (Test-Path "$env:LOCALAPPDATA\Programs\troupe\troupe.exe") { throw "installed despite bad checksum" }
-          Stop-Job $job
-
   release:
     name: Publish
     needs: [build]

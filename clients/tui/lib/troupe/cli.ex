@@ -14,6 +14,7 @@ defmodule Troupe.CLI do
       troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
       troupe config                show the resolved providers and models (keys masked)
       troupe models [--refresh]    list every model, its window and its price
+      troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
       troupe --version
   """
 
@@ -28,7 +29,8 @@ defmodule Troupe.CLI do
             | :models
             | :login
             | :logout
-            | :whoami,
+            | :whoami
+            | :daemon,
           agent: String.t(),
           task: String.t() | nil,
           headless: boolean(),
@@ -42,10 +44,17 @@ defmodule Troupe.CLI do
           refresh: boolean(),
           remote: boolean(),
           plane_url: String.t() | nil,
-          all: boolean()
+          all: boolean(),
+          daemon_args: [String.t()]
         }
 
   @spec parse([String.t()]) :: {:ok, args()} | {:error, String.t()}
+  # Before the option parser sees anything: everything after `daemon` is the daemon's
+  # own command line, flags included, and `--refresh` there is not ours to consume.
+  def parse(["daemon" | rest]) do
+    with {:ok, base} <- parse([]), do: {:ok, %{base | mode: :daemon, daemon_args: rest}}
+  end
+
   def parse(argv) do
     {opts, rest, invalid} =
       OptionParser.parse(argv,
@@ -81,7 +90,8 @@ defmodule Troupe.CLI do
       refresh: Keyword.get(opts, :refresh, false),
       remote: Keyword.get(opts, :remote, false),
       plane_url: nil,
-      all: Keyword.get(opts, :all, false)
+      all: Keyword.get(opts, :all, false),
+      daemon_args: []
     }
 
     cond do
