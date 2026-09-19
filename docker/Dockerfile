@@ -42,7 +42,12 @@ ENV MIX_ENV=prod
 RUN mix local.hex --force && mix local.rebar --force
 
 # Dependencies first, so a change to the source does not refetch them.
-COPY mix.exs mix.lock ./
+#
+# `VERSION` comes with them because every `mix.exs` here reads it — the umbrella's and each
+# app's — so a build without it fails at `deps.get` with a file error and not a version
+# problem. Found by deploying: the suite never builds an image, so nothing in it could have
+# noticed that the file the project now depends on was not in the context.
+COPY VERSION mix.exs mix.lock ./
 COPY apps/troupe_core/mix.exs apps/troupe_core/
 COPY apps/troupe_protocol/mix.exs apps/troupe_protocol/
 COPY apps/troupe_gateway/mix.exs apps/troupe_gateway/
