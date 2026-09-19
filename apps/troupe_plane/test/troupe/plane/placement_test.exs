@@ -149,6 +149,18 @@ defmodule Troupe.Plane.PlacementTest do
     end
   end
 
+  test "a draining pod is not a reader either: it is out of its Service's endpoints" do
+    [first, second] = profile("dev", 2, per_pod: 4)
+    {:ok, _} = Fleet.drain(second)
+
+    # Even when it is the pod with the session's cache.
+    assert {:ok, worker} = Placement.reader("dev", second.id)
+    assert worker.id == first.id
+
+    {:ok, _} = Fleet.drain(first)
+    assert {:error, :no_healthy_worker} = Placement.reader("dev", nil)
+  end
+
   test "a pod above the disk high watermark takes nothing new" do
     # A session that cannot write its workspace is worse than one that waited for room.
     [full, _room] = profile("dev", 2, per_pod: 4)

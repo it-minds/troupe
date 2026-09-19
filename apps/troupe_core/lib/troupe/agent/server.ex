@@ -13,8 +13,11 @@ defmodule Troupe.Agent.Server do
   **Input arriving while busy is postponed**, using `gen_statem`'s `:postpone`, not a
   hand-rolled queue. `gen_statem` re-queues postponed events on the next state change,
   so a message that arrives mid-turn is delivered at the turn boundary. `:done` is the
-  one busy-ish state that must *not* postpone: it never changes state again, so a
-  postponed event would sit in the mailbox forever.
+  one busy-ish state that must *not* postpone: nothing but a person changes it, so a
+  postponed event would sit in the mailbox forever. A root agent that *finished* is
+  woken by the next input and takes it as a new turn on the same conversation; one
+  whose budget ran out stays done, because the reason it stopped has not changed
+  (Decision 635).
 
   **Failure is supervision, not `try/rescue`.** The single deliberate exception is a
   tool that raises, times out or exits: that becomes an error `tool_result` and the
@@ -242,17 +245,23 @@ defmodule Troupe.Agent.Server do
       "compacted" ->
         %{state | conversation: Enum.map(data["conversation"], &Message.from_json/1)}
 
-      # Being finished is not visible in the conversation — a subagent's last message
-      # is the tool_results of its own `finish` call, which looks exactly like owing
-      # the model a turn. Without this, a restarted `:done` agent would resume, spend
-      # budget it has none of, and report to its parent a second time.
-      "agent_done" ->
-        %{state | done_reason: safe_reason(data["reason"])}
+      type when type in ["agent_done", "agent_woken"] ->
+        fold_done(state, type, data)
 
       _ ->
         state
     end
   end
+
+  # Being finished is not visible in the conversation — a subagent's last message is
+  # the tool_results of its own `finish` call, which looks exactly like owing the model
+  # a turn. Without folding `agent_done`, a restarted `:done` agent would resume, spend
+  # budget it has none of, and report to its parent a second time. Being woken again is
+  # not visible either: the turn that followed looks like any other, and without
+  # folding `agent_woken` a restarted agent would come back `:done` with a
+  # conversation that has moved on.
+  defp fold_done(state, "agent_done", data), do: %{state | done_reason: safe_reason(data["reason"])}
+  defp fold_done(state, "agent_woken", _data), do: %{state | done_reason: nil}
 
   # Reasons are a closed set this module writes, so an unknown one from a log written
   # by a newer version still marks the agent finished rather than crashing replay.
@@ -556,8 +565,21 @@ defmodule Troupe.Agent.Server do
   @doc false
   def done({:call, from}, :snapshot, state), do: reply_snapshot(from, :done, state)
 
-  # Deliberately not postponed: this state never changes again, so a postponed event
-  # would sit in the mailbox for the life of the process.
+  # The model said it was finished and the person has more to say. The `finish` call's
+  # result is already in the conversation, so the model owes nothing and the input is
+  # simply the next turn. Only the root: a subagent that finished has reported to its
+  # parent, and its parent is what the person talks to.
+  def done(
+        :info,
+        {:input, source, content, actor, meta},
+        %State{done_reason: :finished, parent: nil} = state
+      ) do
+    log(state, :agent_woken, %{"from" => "finished", "source" => Atom.to_string(source)})
+    start_turn(accept_input(%{state | done_reason: nil}, source, content, actor, meta))
+  end
+
+  # Deliberately not postponed: a budget that ran out is not changed by asking again,
+  # so a postponed event would sit in the mailbox for the life of the process.
   def done(:info, {:input, source, _content, _actor, _meta}, state) do
     log(state, :input_after_done, %{"source" => Atom.to_string(source)})
     {:keep_state_and_data, []}

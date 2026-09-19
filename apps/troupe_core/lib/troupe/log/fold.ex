@@ -59,7 +59,7 @@ defmodule Troupe.Log.Fold do
   @spec witnessed_types() :: [String.t()]
   def witnessed_types do
     ~w(
-      agent_started agent_done agent_restarted
+      agent_started agent_done agent_woken agent_restarted
       user_input llm_response llm_error
       tool_call_started tool_call_completed tool_results
       todo_updated profile_switched compacted
@@ -181,6 +181,10 @@ defmodule Troupe.Log.Fold do
 
   defp agent_fold(agent, %Event{type: "agent_done", data: data}) do
     %{agent | "done_reason" => data["reason"]}
+  end
+
+  defp agent_fold(agent, %Event{type: "agent_woken"}) do
+    %{agent | "done_reason" => nil}
   end
 
   defp agent_fold(agent, %Event{type: "approval_requested", data: data}) do

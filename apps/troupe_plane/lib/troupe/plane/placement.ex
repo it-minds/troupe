@@ -118,7 +118,10 @@ defmodule Troupe.Plane.Placement do
   end
 
   def handle_call({:reader, preferred}, _from, state) do
-    workers = state.profile |> Fleet.list_workers() |> Enum.filter(& &1.healthy)
+    # A draining pod is out of its Service's endpoints — its readiness probe says so on
+    # purpose — so an endpoint handed out for it is one nothing can connect to.
+    workers =
+      state.profile |> Fleet.list_workers() |> Enum.filter(&(&1.healthy and not &1.draining))
 
     # A pod with the session's cache already on disk can serve its history without
     # fetching a segment from object storage first.

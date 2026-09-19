@@ -4196,3 +4196,50 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      machine's does not rotate on its own. Two shapes rather than one with a special case —
      and the file is documented first because an environment variable is readable in `/proc`
      and in `ps` by anybody on that machine.
+
+633. **A drained pod that stays is a pod nothing can reach, and the plane now knows it.**
+     `troupe-w-dev-0` sat Not Ready for five days after an admin pressed *Drain*: the pod's
+     readiness probe answers 503 while draining — by design, so its Service drops it — and
+     `Troupe.Plane.Drain` deletes nothing, because removing the pod is the operator's business.
+     But the operator has no drain logic and `undrain/1` has no caller, so on a one-replica
+     profile the drain simply left the pod in place with the flag up. Meanwhile the plane kept
+     handing it out: `Placement.reader/2` filtered on `healthy` alone, so every `session.open`
+     returned an endpoint the Ingress answered with nginx's 503, and `profiles.list` counted
+     the pod as a healthy pod with four free slots. Three changes. The reader skips draining
+     pods, like placement always has. `profiles.list` lists a draining pod (a person should
+     see it) and counts it for nothing — no capacity, not a healthy pod. And the flag is now
+     the pod's own fact on the wire: the worker sends `draining` on `enrol` and `heartbeat`;
+     a heartbeat may only raise it (the plane raises it first when it orders a drain, and a
+     heartbeat from a moment before must not undo that); enrolment takes it as given, because
+     the one honest way the flag comes down is a pod that restarted and is therefore not
+     draining. Still owed: something that *removes or restarts* a drained pod nobody scaled
+     away, and an `undrain` an admin can press.
+
+634. **Runtime config names its atoms; it does not look them up.** `bin/troupe_plane eval
+     '…'` on the live plane died in `Config.Reader` with `binary_to_existing_atom("direct")`:
+     the `start` boot runs embedded, every module is loaded before the config provider runs
+     and `:direct` exists; `eval` boots `start_clean` interactively, nothing of the
+     application is loaded, and the same line raises. So the recipe the admin docs give for
+     rebuilding the index, reconciling, rolling back — and the one this session needed, to
+     lower a stale `draining` flag — could not run on this image, and the migration Job would
+     have met the same wall on its next run. `TROUPE_PROVISIONING_MODE` is now matched
+     against the two values `Troupe.Plane.Settings` allows and anything else is a named
+     error rather than a crash in the boot script. The rule for `runtime.exs` from here:
+     never `to_existing_atom` on a value read from the environment.
+
+635. **A root agent that finished is woken by the next input.** `:done` was terminal:
+     input to a finished agent wrote `input_after_done` and nothing happened, which on a
+     remote session meant a conversation ended the moment the model chose to call
+     `finish` — the person typed and the transcript did not move. The two reasons for
+     being done are not alike. Budget exhaustion is a limit the person set, and asking
+     again does not raise it, so that case keeps writing `input_after_done`. `finished` is
+     the model's own opinion that it was done, and the person's next message is exactly
+     the evidence that it was not. So a root agent in `:done` with `done_reason:
+     :finished` takes input as a new turn on the same conversation — the `finish` call
+     already has its `tool_results` there, so the model owes nothing and the turn is
+     well-formed — after writing `agent_woken {from, source}`, which the replay fold and
+     `Log.Fold` read to clear `done_reason`; without that, a restart would bring the agent
+     back `:done` with a conversation that had moved on. Subagents are not woken: theirs
+     is a report to a parent, and the parent is what a person talks to. The worker's
+     lifecycle needs nothing new — `agent_state` already carries `done_reason`, and the
+     woken agent's first `thinking` clears it on the plane's row.

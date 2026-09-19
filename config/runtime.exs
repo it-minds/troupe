@@ -356,8 +356,22 @@ if config_env() == :prod do
       scim_token: presence.(System.get_env("TROUPE_SCIM_TOKEN")),
       platform_admin_group: System.get_env("TROUPE_PLATFORM_ADMIN_GROUP"),
       audience: System.get_env("TROUPE_PLANE_AUDIENCE", "troupe-plane-api"),
+      # Spelled out rather than `String.to_existing_atom/1`: under `bin/troupe_plane eval`
+      # the release boots `start_clean` in interactive mode, no application module is
+      # loaded yet, and `:direct` is not an atom that exists — so every eval recipe in the
+      # admin docs died in this config provider (Decision 634).
       provisioning_mode:
-        String.to_existing_atom(System.get_env("TROUPE_PROVISIONING_MODE", "direct")),
+        (case System.get_env("TROUPE_PROVISIONING_MODE", "direct") do
+           "direct" ->
+             :direct
+
+           "gitops" ->
+             :gitops
+
+           other ->
+             raise ArgumentError,
+                   "TROUPE_PROVISIONING_MODE must be direct or gitops, got #{inspect(other)}"
+         end),
       oidc: [
         issuer: oidc_required.("TROUPE_OIDC_ISSUER"),
         client_id: oidc_required.("TROUPE_OIDC_CLIENT_ID"),

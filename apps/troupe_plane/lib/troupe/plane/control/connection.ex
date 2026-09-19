@@ -273,7 +273,11 @@ defmodule Troupe.Plane.Control.Connection do
       disk_used_bytes: params["disk_used_bytes"] || 0,
       disk_total_bytes: params["disk_total_bytes"] || state.worker.disk_total_bytes,
       bundle_hash: params["bundle_hash"],
-      version: params["version"]
+      version: params["version"],
+      # A heartbeat may raise the flag, never lower it: the plane raises it first when
+      # it orders a drain, and a heartbeat sent a moment before would otherwise undo
+      # that. Lowering is enrolment's job, because only a restarted pod is not draining.
+      draining: state.worker.draining or params["draining"] == true
     }
 
     case Fleet.heartbeat(state.worker, attrs) do

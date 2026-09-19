@@ -199,7 +199,11 @@ defmodule Troupe.Plane.Enrolment do
         capacity: Map.get(claims, "capacity", 0),
         disk_total_bytes: Map.get(claims, "disk_total_bytes", 0),
         bundle_hash: Map.get(claims, "bundle_hash"),
-        version: Map.get(claims, "version")
+        version: Map.get(claims, "version"),
+        # The pod's own word. A pod that drained and was then restarted rather than
+        # removed enrols as not draining, and that is the only way the flag comes down
+        # by itself (Decision 633).
+        draining: Map.get(claims, "draining") == true
       })
     end
   end

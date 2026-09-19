@@ -121,6 +121,23 @@ defmodule Troupe.Plane.ControlTest do
       assert recorded.disk_used_bytes == 300
     end
 
+    test "a pod says whether it is draining; only enrolling again lowers the flag", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      assert [%{draining: false}] = Fleet.list_workers("dev")
+
+      # The pod's own word raises the flag…
+      assert {:ok, _} = call(worker, "heartbeat", %{"capacity" => 4, "draining" => true})
+      assert [%{draining: true}] = Fleet.list_workers("dev")
+
+      # …a heartbeat cannot lower it, because the plane may have raised it first…
+      assert {:ok, _} = call(worker, "heartbeat", %{"capacity" => 4, "draining" => false})
+      assert [%{draining: true}] = Fleet.list_workers("dev")
+
+      # …and a pod that enrols not draining is a pod that restarted after the drain.
+      _fresh = enrolled(port, "dev-token", "troupe-w-dev-0")
+      assert [%{draining: false}] = Fleet.list_workers("dev")
+    end
+
     test "the plane can find a worker by pod and a profile's workers together", %{port: port} do
       enrolled(port, "dev-token", "troupe-w-dev-0")
       enrolled(port, "dev-token", "troupe-w-dev-1")
