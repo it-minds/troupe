@@ -50,6 +50,11 @@ defmodule Troupe.Gateway.Listener do
 
     case listen(endpoint) do
       {:ok, socket} ->
+        # A TCP endpoint asked for port 0 — the default on a platform without Unix
+        # sockets — is bound to a port only the kernel knows, and the one thing
+        # `daemon.json` exists to say is which. Published as bound, never as asked.
+        endpoint = bound(endpoint, socket)
+
         state = %__MODULE__{
           socket: socket,
           endpoint: endpoint,
@@ -121,6 +126,15 @@ defmodule Troupe.Gateway.Listener do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  defp bound(%Endpoint{kind: :tcp, port: 0} = endpoint, socket) do
+    case :inet.port(socket) do
+      {:ok, port} -> %{endpoint | port: port}
+      {:error, _reason} -> endpoint
+    end
+  end
+
+  defp bound(endpoint, _socket), do: endpoint
 
   defp spawn_acceptor(socket) do
     parent = self()

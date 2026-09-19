@@ -4257,7 +4257,7 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      319 still holds, and where the daemon's *binary* lives is decided there before a
      release is added anywhere.
 
-633. **A projection must subscribe before it replays, and de-duplicate afterwards.** Only
+637. **A projection must subscribe before it replays, and de-duplicate afterwards.** Only
      the first half was here. `Session.Summary` subscribed and then folded the log, so an
      event already written *and* sitting in the process's mailbox was folded twice — once
      from each — and a session's cost came out at exactly double.
@@ -4270,9 +4270,58 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      turn is in flight, which is an ordinary restart, and what it corrupts is the number the
      plane bills from.
 
-634. **The doubled cost was CI's oldest flake and was never a flake.** It failed
+638. **The doubled cost was CI's oldest flake and was never a flake.** It failed
      intermittently under `--runs 10` from R8 onward and passed every single run, which is
      exactly what a race between two orderings looks like. Made deterministic by doing to a
      fresh projection what the race does — replaying a log that holds a sealed event and
      handing it the same event again — the test fails with `630` against `315`, the same two
      numbers CI reported.
+
+639. **The three harness apps can be built outside this umbrella, and the daemon binary
+     is built there.** Decision 319 stands: this repository ships images and a chart and
+     no binary, because a five-target Burrito matrix is a pipeline of its own. The
+     daemon is `troupe_core + troupe_gateway + troupe_protocol` and nothing else, so
+     rather than a fifth release here it is packaged in the `troupe` repository — which
+     already holds the cross-repository documents and now holds the installers — from
+     these apps pinned as sparse git dependencies. Three things had assumed the umbrella
+     root and now do not: each app's `mix.exs` reads `../../VERSION` *or*
+     `TROUPE_VERSION`, and so does `Troupe.Version` (still never a plausible default: a
+     consumer says which version it pinned or the compile fails); sibling apps are
+     declared through `harness/1`, `in_umbrella: true` when the sibling is there and an
+     ordinary dependency the consumer overrides when it is not, which
+     `mix troupe.boundaries` reads as a declaration; and the reaper's Zig source moved
+     from `native/` at the root to `apps/troupe_core/native/`, so a checkout of that app
+     alone can build the helper every `shell` call needs. The Dockerfile copies one
+     directory fewer. (The two entries above this one were numbered 633 and 634 on a
+     branch that did not know 633–636 had been taken; they are 637 and 638.)
+
+640. **A laptop's providers live in the core's `Config`, because the daemon is what pays
+     for tokens now.** `Troupe.Config` was a pod's: one provider, one key, one model. A
+     person has a `providers:` block naming gateways with their own URL, key, auth scheme
+     and renamed models, an opencode installation whose providers Troupe reuses when it
+     has no key of its own, and a cached catalog of what each model's window and price
+     are. All three came over from the TUI — `Troupe.Config.OpenCode` and `JSONC`,
+     `Troupe.LLM.Catalog` and its `Store` — and `Config.target/2` is what turns a
+     `<provider>/<model>` id into the URL, key, scheme and wire id one request needs;
+     the agent aims every request through it, so a subagent whose definition names a
+     gateway model reaches that gateway. `Request` carries `auth` and the adapter, and
+     the Anthropic adapter sends a bearer token when asked. The window a model is
+     compacted against is the model's — declared, or the catalog's — and
+     `context_window` only when nothing says otherwise. A pod sees none of this: no
+     `providers:`, no opencode files, no `models.json`, and the same one provider and
+     key it always had.
+
+641. **`Protocol.Daemon` has a third answer for what to spawn: `troupe-daemon` on the
+     `PATH`.** The refusal to guess stays for the case it was written for — nothing is
+     installed — but the daemon now has a name and installers that put it on the `PATH`,
+     so a client that finds it there need not be told. `:command` and
+     `TROUPE_DAEMON_COMMAND` still win.
+
+642. **A TCP listener publishes the port it was given, not the port it asked for.** On a
+     platform without Unix sockets the daemon asks for port 0 and `daemon.json` said
+     `0`, which no client can dial. The `Listener` reads the bound port back before it
+     publishes, and `tcp_transport_test.exs` is the transport's first test: bound port in
+     the file, token admits, no token or the wrong one refused. `PROTOCOL.md` §1 also
+     said `%LOCALAPPDATA%\troupe\run\daemon.json` where the code and the Tauri shell
+     both read `%LOCALAPPDATA%\troupe\daemon.json`; the document moved to the code, since
+     two implementations already agreed.

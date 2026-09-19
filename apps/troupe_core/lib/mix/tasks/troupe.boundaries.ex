@@ -217,9 +217,16 @@ defmodule Mix.Tasks.Troupe.Boundaries do
 
     case File.read(path) do
       {:ok, source} ->
-        ~r/\{:(troupe_\w+),\s*in_umbrella:\s*true\}/
+        # Two spellings of the same declaration: the plain one, and `harness(:app)` —
+        # the helper the three harness apps use so that they resolve as siblings inside
+        # the umbrella and as ordinary dependencies when another project builds the
+        # daemon from them.
+        ~r/\{:(troupe_\w+),\s*in_umbrella:\s*true\}|harness\(:(troupe_\w+)\)/
         |> Regex.scan(source)
-        |> Enum.map(fn [_, name] -> String.to_atom(name) end)
+        |> Enum.map(fn
+          [_, name] -> String.to_atom(name)
+          [_, "", name] -> String.to_atom(name)
+        end)
 
       _ ->
         []

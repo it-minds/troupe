@@ -784,7 +784,7 @@ defmodule Troupe.Agent.Server do
           %{session_id: state.session_id, agent_path: state.agent_path, model: request.model}
         )
 
-        ref = Provider.start_stream(tasks(state), state.provider, request, self())
+        ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
         timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 
         state = %{
@@ -816,16 +816,40 @@ defmodule Troupe.Agent.Server do
     ctx = base_ctx(state, "")
 
     %Request{
-      model: definition.model || state.config.model,
+      model: nil,
       messages: state.conversation,
       system: system_prompt(state, definition),
       tools: Tools.specs(definition, ctx),
       max_tokens: state.config.max_tokens,
-      base_url: state.config.base_url,
-      api_key: state.config.api_key,
       attribution: attribution(state),
       extra: request_extra(state)
     }
+    |> aim(state, definition.model)
+  end
+
+  # Where the request goes. A model spelled `<provider>/<model>` names a provider of its
+  # own — its URL, its key, its auth scheme, the wire id it renamed the model to, and
+  # possibly an output cap smaller than the session's — and the adapter for it; a bare
+  # id goes to the session's provider with the session's key.
+  defp aim(%Request{} = request, %State{config: config} = state, model) do
+    target = Config.target(config, model)
+
+    %{
+      request
+      | model: target.model,
+        base_url: target.base_url,
+        api_key: target.api_key,
+        auth: target.auth,
+        max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
+        provider: adapter_for(target.provider, state)
+    }
+  end
+
+  defp adapter_for(name, %State{provider: default}) do
+    case Provider.adapter(name) do
+      {:ok, adapter} -> adapter
+      {:error, _reason} -> default
+    end
   end
 
   # What the gateway records against this call. Read from the config rather than from
@@ -1358,7 +1382,7 @@ defmodule Troupe.Agent.Server do
   # -- compaction -------------------------------------------------------------
 
   defp needs_compaction?(state) do
-    state.last_input_tokens >= Config.compact_threshold(state.config)
+    state.last_input_tokens >= Config.compact_threshold(state.config, state.definition.model)
   end
 
   defp enter_compaction(state, resume) do
@@ -1368,18 +1392,18 @@ defmodule Troupe.Agent.Server do
       # Nothing old enough to summarise: compacting would loop.
       if resume == :thinking, do: start_turn(state), else: to_idle_or_done(state)
     else
-      request = %Request{
-        model: state.config.small_model || state.config.model,
-        messages: drop ++ [Message.user(summarizer_instruction())],
-        system: summarizer_system(),
-        max_tokens: @summarizer_max_tokens,
-        base_url: state.config.base_url,
-        api_key: state.config.api_key,
-        attribution: attribution(state),
-        extra: request_extra(state)
-      }
+      request =
+        %Request{
+          model: nil,
+          messages: drop ++ [Message.user(summarizer_instruction())],
+          system: summarizer_system(),
+          max_tokens: @summarizer_max_tokens,
+          attribution: attribution(state),
+          extra: request_extra(state)
+        }
+        |> aim(state, state.config.small_model)
 
-      ref = Provider.start_stream(tasks(state), state.provider, request, self())
+      ref = Provider.start_stream(tasks(state), request.provider || state.provider, request, self())
       timer = Process.send_after(self(), {:llm_timeout, ref}, request.timeout_ms)
 
       state = %{

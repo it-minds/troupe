@@ -18,6 +18,12 @@ defmodule Troupe.LLM.Request do
     temperature: nil,
     base_url: nil,
     api_key: nil,
+    # How the key is presented: the provider's own scheme, or `Authorization: Bearer`
+    # for a gateway that fronts a provider's API but not its authentication.
+    auth: :api_key,
+    # The adapter this request goes through, when the model named a provider other
+    # than the session's. `nil` means the agent's own.
+    provider: nil,
     timeout_ms: 300_000,
     max_retries: 4,
     # Who this call is for, as the gateway is to record it. Every request a worker makes
@@ -41,6 +47,8 @@ defmodule Troupe.LLM.Request do
           temperature: float() | nil,
           base_url: String.t() | nil,
           api_key: String.t() | nil,
+          auth: :api_key | :bearer,
+          provider: module() | nil,
           timeout_ms: pos_integer(),
           max_retries: non_neg_integer(),
           attribution: map(),

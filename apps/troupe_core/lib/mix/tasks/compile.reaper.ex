@@ -2,9 +2,10 @@ defmodule Mix.Tasks.Compile.Reaper do
   @moduledoc """
   Cross-compiles the `reaper` helper into this app's `priv/reaper/`.
 
-  The Zig source lives at the umbrella root in `native/reaper/`, because it is one
-  program rather than one per app; the binaries belong to `troupe_core`, which is what
-  loads them at runtime.
+  The Zig source lives in this app, at `apps/troupe_core/native/reaper/`, beside the
+  module that loads the binaries at runtime — and so that a checkout of this app alone
+  (the daemon binary is built from it in another repository) carries everything the
+  `shell` tool needs.
 
   `reaper` is the process-tree supervisor every shell command runs under, and it is
   built with Zig because one toolchain cross-compiles every triple this project has a
@@ -66,13 +67,14 @@ defmodule Mix.Tasks.Compile.Reaper do
     end
   end
 
-  # Resolved against the umbrella root, and against the project root for a standalone
-  # checkout, so the task works either way.
+  # The app's own `native/`, whether the app is compiled inside the umbrella or as a
+  # dependency of another project; the umbrella-root spelling is kept for a checkout
+  # that predates the move.
   defp source_path do
     Enum.find(
       [
-        Path.join(["..", "..", "native", "reaper", "reaper.zig"]),
-        Path.join(["native", "reaper", "reaper.zig"])
+        Path.join(["native", "reaper", "reaper.zig"]),
+        Path.join(["..", "..", "native", "reaper", "reaper.zig"])
       ],
       &File.exists?/1
     ) || Path.join(["native", "reaper", "reaper.zig"])

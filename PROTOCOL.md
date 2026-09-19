@@ -31,8 +31,9 @@ owns it, and you get all scopes.
 
 ### Loopback TCP (Windows, and anywhere a Unix socket is unavailable)
 
-`127.0.0.1` on a port written to `%LOCALAPPDATA%\troupe\run\daemon.json`, together
-with a random 32-byte token:
+`127.0.0.1` on a port written to `%LOCALAPPDATA%\troupe\daemon.json` — the same
+`troupe/daemon.json` under `$XDG_RUNTIME_DIR` where that is what the platform has, and
+`~/.troupe/run` failing both — together with a random 32-byte token:
 
 ```json
 {"transport": "tcp", "port": 51837, "token": "b64url…"}

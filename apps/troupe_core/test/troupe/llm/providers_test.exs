@@ -241,6 +241,22 @@ defmodule Troupe.LLM.ProvidersTest do
     end
   end
 
+  describe "auth schemes" do
+    test "anthropic sends its own header by default and a bearer token when asked" do
+      chunks = anthropic_stream()
+
+      assert {:ok, %Response{}} = run(Anthropic, request(chunks: chunks))
+      [sent] = FakeTransport.drain_requests()
+      assert Req.Request.get_header(sent, "x-api-key") == ["test-key"]
+      assert Req.Request.get_header(sent, "authorization") == []
+
+      assert {:ok, %Response{}} = run(Anthropic, %{request(chunks: chunks) | auth: :bearer})
+      [sent] = FakeTransport.drain_requests()
+      assert Req.Request.get_header(sent, "authorization") == ["Bearer test-key"]
+      assert Req.Request.get_header(sent, "x-api-key") == []
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp run(adapter, request) do
