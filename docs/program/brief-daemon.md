@@ -184,6 +184,21 @@ Done when:
    `to_existing_atom` in `runtime.exs`).
 8. `troupe-remote/README.md` says what the repository now ships.
 
+**Phase 1 landed 2026-09-19** across three branches: `troupe-remote` PR #10
+(`daemon/phase-1-harness`: the apps build outside the umbrella, a laptop's providers in
+`Troupe.Config`, the TCP listener's bound port, `troupe-daemon` on the `PATH`; Decisions
+639–642 and `docs/daemon.md`'s phase 1 table), this repository's `daemon/phase-1-release`
+(`daemon/`: the `troupe_daemon` release — a plain Mix release per platform rather than a
+Burrito binary, `daemon/DECISIONS.md` 1 says why — with the reaper built in, the
+`troupe-daemon` wrapper for `run`/`status`/`config`/`models`/`version`, file logging, an
+eval-safe `runtime.exs`, no Erlang distribution, `install.sh` / `install.ps1`,
+`.github/workflows/release.yml`), and `troupe-tui`'s `daemon/phase-1-client` (`troupe
+daemon` hands off to the binary; the installers left). Proven on this machine: the
+unpacked Linux release answers `version`, `status`, an idempotent second `run`, `eval`,
+serves `@troupe/client` end to end (`initialize → session.create → input.send →
+agent_done`) and runs `shell` through its own reaper. Item 6's "release at a real URL" is
+proven the first time a `v*` tag is pushed here with the `HARNESS_TOKEN` secret set.
+
 ### Phase 2 — the TUI becomes a client of the daemon
 
 Goal: delete `Troupe.Client.Local` and the TUI's copy of the harness; the TUI is a
@@ -335,6 +350,25 @@ saved lives in WSL at `~/.config/troupe/credentials.json`.
 6. **Do the two Sep-13 `dev` sessions on the live plane get erased?** They are `active`
    in the index with erased workspaces (`not_a_directory` on activation) — a leftover
    of the drain incident, unrelated to this plan but on the way.
+
+**Answered 2026-09-19 (Martin):**
+
+1. Not a fifth release in `troupe-remote` (Decision 319 stands) and no new harness repo.
+   The three apps are consumed as sparse git dependencies pinned to a `troupe-remote`
+   commit; `troupe-remote` PR #10 is what made them consumable. The daemon-only binary,
+   `troupe-daemon`, is built in **this** repository under `daemon/`; the TUI embeds the same
+   apps in phase 2.
+2. No rename. This directory became the `it-minds/troupe` repository: cross-repository
+   documents, `daemon/`, the installers, and the releases at
+   `github.com/it-minds/troupe/releases` — which is where the installers always pointed.
+3. **(b).** The core already does it: `session.create` with `worktree: "auto"` gives a
+   second session in a busy repository its own worktree; the TUI groups by workspace.
+4. Yes as recommended: the daemon holds a plane token only for sealing private sessions
+   (`identity.link`, in memory); team sessions are the clients' own plane clients.
+5. No local key manager: the plane signs an assertion, the daemon logs into OpenBao with
+   it. Deployment item: the OpenBao address the plane returns must be reachable from off
+   the cluster.
+6. Archive, do not erase.
 
 ---
 

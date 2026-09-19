@@ -1,7 +1,9 @@
 # troupe
 
-The umbrella directory. Nothing is built here; two repositories are, and this is where
-the documents that span both of them live.
+The umbrella repository. The documents that span the other repositories live here, and
+one thing is built here: [`troupe-daemon`](daemon/README.md), the local harness binary,
+packaged from `troupe-remote`'s three harness apps and released from this repository's
+tags. `install.sh` and `install.ps1` install it.
 
 | | what it is | state |
 | --- | --- | --- |
@@ -16,7 +18,8 @@ the documents that span both of them live.
 | [`HANDOFF.md`](HANDOFF.md) | **Start here.** What was decided, the five spec revisions, the contract between the two repositories, what neither team may do without coming back, and the open questions that need a human. |
 | [`docs/brief-remote.md`](docs/brief-remote.md) | Nine work packages for `troupe-remote`, in order, with their done items. Written to be picked up cold. |
 | [`docs/brief-gui.md`](docs/brief-gui.md) | Six for `troupe-gui`. Three of them start today and depend on no server change. |
-| [`docs/brief-daemon.md`](docs/brief-daemon.md) | The daemon: one harness (`troupe_core` + gateway + protocol) as a laptop binary under the TUI, the GUI and the worker pod. Five phases, the repository question, and the prompt to start the session with. |
+| [`docs/brief-daemon.md`](docs/brief-daemon.md) | The daemon: one harness (`troupe_core` + gateway + protocol) as a laptop binary under the TUI, the GUI and the worker pod. Five phases, the repository question, and the prompt to start the session with. Section 7's decisions are answered in place. |
+| [`daemon/`](daemon/README.md) | **`troupe-daemon`, the binary.** A Mix project that pins the three harness apps from `troupe-remote` by commit and wraps them with Burrito, one binary per platform. Released from this repository's tags; `install.sh` / `install.ps1` at the root install it. |
 | [`RELEASE.md`](RELEASE.md) | What is left between where the two repositories stand and a 1.0, in seven workstreams, each with what it brings, what is already in place, what is missing with file and line, the design, and the done items that prove it. |
 | [`docs/orchestration-review.md`](docs/orchestration-review.md) | A review of the architecture against one admin's morning and one organisation's scale: why the StatefulSet is right and "pod" as an admin word is not, why scale-to-zero matters more than scale-up at eight profiles, and the seven capacity fields that should leave the admin surface. |
 | [`docs/client-ux.md`](docs/client-ux.md) | The client, in depth. What a *person* sees: one list of four kinds of session, what changes when they open it on another computer, the **Me** menu that is not an admin menu, and eight stretch goals the platform does not yet support. |

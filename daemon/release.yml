@@ -1,0 +1,154 @@
+name: Release troupe-daemon
+
+# One native runner per target: a Mix release carries the build host's ERTS, so a Linux
+# runner builds the Linux release and a macOS runner the macOS one. Every push and pull
+# request that touches the daemon builds and smokes all five; a `v*` tag also attaches the
+# tarballs and SHA256SUMS to the GitHub release.
+#
+# The harness comes from the private `it-minds/troupe-remote` repository as sparse git
+# dependencies, so `HARNESS_TOKEN` — a fine-grained token with read access to that
+# repository's contents — is what lets `mix deps.get` fetch them.
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths: ["daemon/**", ".github/workflows/release.yml", "install.sh", "install.ps1"]
+  pull_request:
+    paths: ["daemon/**", ".github/workflows/release.yml", "install.sh", "install.ps1"]
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+    working-directory: daemon
+
+jobs:
+  check:
+    name: compile, format, credo, test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.20.4"
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+      - name: Reach the harness repository
+        run: git config --global url."https://x-access-token:${{ secrets.HARNESS_TOKEN }}@github.com/".insteadOf "https://github.com/"
+      - run: mix deps.get
+      - run: mix check
+
+  build:
+    name: ${{ matrix.target }}
+    needs: check
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      MIX_ENV: prod
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-24.04
+            target: linux_x86_64
+          - os: ubuntu-24.04-arm
+            target: linux_aarch64
+          - os: macos-15-intel
+            target: macos_x86_64
+          - os: macos-14
+            target: macos_aarch64
+          - os: windows-2022
+            target: windows_x86_64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28.5"
+          elixir-version: "1.20.4"
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: 0.16.0
+
+      - name: Reach the harness repository
+        run: git config --global url."https://x-access-token:${{ secrets.HARNESS_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
+      - run: mix deps.get
+
+      - name: Build release
+        run: mix release troupe_daemon --overwrite
+
+      - name: Name artifact
+        id: art
+        run: |
+          VERSION=$(tr -d '[:space:]' < VERSION)
+          NAME="troupe-daemon-${VERSION}-${{ matrix.target }}.tar.gz"
+          mkdir -p dist
+          mv "_build/prod/troupe_daemon-${VERSION}.tar.gz" "dist/${NAME}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: Smoke test (unpack; version, status, run, status, eval)
+        if: runner.os != 'Windows'
+        env:
+          TROUPE_PROVIDER: fake
+          TROUPE_DAEMON_LOG: stderr
+          TROUPE_DAEMON_IDLE_MINUTES: "1"
+        run: |
+          INST=$(mktemp -d); tar -xzf "dist/${{ steps.art.outputs.name }}" -C "$INST"
+          BIN="$INST/bin/troupe-daemon"
+          ls "$INST"/lib/troupe_core-*/priv/reaper/
+          "$BIN" version
+          "$BIN" status && exit 1 || echo "not running, as expected"
+          "$BIN" run &
+          for i in $(seq 1 60); do "$BIN" status >/dev/null 2>&1 && break; sleep 1; done
+          "$BIN" status
+          "$BIN" run   # idempotent: names the running one and exits 0
+          "$INST/bin/troupe_daemon" eval 'IO.puts(Troupe.Version.version())'
+          kill %1 || true
+
+      - name: Smoke test (Windows: unpack, version, status)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TROUPE_PROVIDER: fake
+          TROUPE_DAEMON_LOG: stderr
+        run: |
+          $inst = Join-Path $env:RUNNER_TEMP "troupe-daemon"
+          New-Item -ItemType Directory -Force $inst | Out-Null
+          tar -xzf "dist/${{ steps.art.outputs.name }}" -C $inst
+          Get-ChildItem "$inst\lib\troupe_core-*\priv\reaper"
+          & "$inst\bin\troupe-daemon.cmd" version
+          & "$inst\bin\troupe-daemon.cmd" status
+          if ($LASTEXITCODE -ne 1) { throw "status should say not running (exit 1), got $LASTEXITCODE" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.name }}
+          path: daemon/dist/${{ steps.art.outputs.name }}
+
+  release:
+    name: Publish
+    needs: [build]
+    runs-on: ubuntu-24.04
+    if: startsWith(github.ref, 'refs/tags/v')
+    defaults:
+      run:
+        working-directory: .
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-daemon-*
+          merge-multiple: true
+          path: dist
+      - name: SHA256SUMS
+        run: cd dist && sha256sum troupe-daemon-* > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
