@@ -72,6 +72,7 @@ assertion failure mid-script leaves earlier files changed and later ones not.
 
 ## What is not verified locally
 
-CI on the non-Linux native runners, `install.ps1` on Windows, and the two
-acceptance items that need a real model (35, 36 in the spec). `feature/` in the
+CI on the non-Linux native runners, and the two acceptance items that need a real model
+(35, 36 in the spec). The installers live in the `troupe` repository now and install
+`troupe-daemon`, not this binary. `feature/` in the
 repo root is the user's own git worktree; leave it out of the index.

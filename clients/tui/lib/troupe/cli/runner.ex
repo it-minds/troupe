@@ -82,6 +82,9 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :whoami} = args} ->
         Troupe.CLI.Remote.whoami(args.plane_url)
 
+      {:ok, %{mode: :daemon} = args} ->
+        Troupe.CLI.Daemon.run(args.daemon_args)
+
       {:ok, %{mode: :tui} = args} ->
         # `--remote` opens on HQ. The local session still starts behind it, so
         # the page can list local sessions next to the plane's and Esc lands

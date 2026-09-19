@@ -15,24 +15,24 @@ harness is truly idle: zero LLM calls, zero tokens.
 
 ## Install
 
-Linux and macOS:
+The TUI binary is built by this repository's release workflow (one Burrito binary per
+platform, attached to the tag's GitHub release). Download the one for your platform and
+put it on your `PATH`.
+
+The **local daemon** it will stand on — `troupe-daemon`, from the
+[`troupe`](https://github.com/it-minds/troupe) repository — has installers of its own:
 
 ```sh
-curl -fsSL https://github.com/it-minds/troupe/releases/latest/download/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh
 ```
-
-Windows (PowerShell 5.1 or 7):
 
 ```powershell
-irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 | iex
+irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex
 ```
 
-Both installers verify the artifact against `SHA256SUMS` and abort on
-mismatch. Set `TROUPE_RELEASE_URL` to install from a Forgejo release or an
-S3-compatible bucket instead. Re-running upgrades in place and keeps the
-previous binary for rollback; `install.sh --uninstall [--purge]` /
-`install.ps1 -Uninstall [-Purge]` remove the binary, the PATH entry and
-Burrito's extracted payload cache (config and state are kept unless purged).
+`troupe daemon status` says whether one is running; `troupe daemon run` starts it.
+Today's `troupe` still runs sessions in-process; phase 2 of the daemon plan makes it a
+client of the daemon.
 
 ### Unsigned binaries
 
