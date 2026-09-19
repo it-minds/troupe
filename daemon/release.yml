@@ -63,6 +63,8 @@ jobs:
             target: macos_x86_64
           - os: macos-14
             target: macos_aarch64
+          - os: windows-2022
+            target: windows_x86_64
     steps:
       - uses: actions/checkout@v4
 
@@ -93,6 +95,7 @@ jobs:
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 
       - name: "Smoke test (unpack; version, status, run, status, eval)"
+        if: runner.os != 'Windows'
         env:
           TROUPE_PROVIDER: fake
           TROUPE_DAEMON_LOG: stderr
@@ -109,6 +112,24 @@ jobs:
           "$BIN" run   # idempotent: names the running one and exits 0
           "$INST/bin/troupe_daemon" eval 'IO.puts(Troupe.Version.version())'
           kill %1 || true
+
+      - name: "Smoke test (Windows: unpack, version, status, eval)"
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TROUPE_PROVIDER: fake
+          TROUPE_DAEMON_LOG: stderr
+        run: |
+          $inst = Join-Path $env:RUNNER_TEMP "troupe-daemon"
+          New-Item -ItemType Directory -Force $inst | Out-Null
+          tar -xzf "dist/${{ steps.art.outputs.name }}" -C $inst
+          Get-ChildItem "$inst\lib\troupe_core-*\priv\reaper"
+          Get-ChildItem "$inst\lib\ezstd-*\priv"
+          & "$inst\bin\troupe-daemon.cmd" version
+          & "$inst\bin\troupe-daemon.cmd" status
+          if ($LASTEXITCODE -ne 1) { throw "status should say not running (exit 1), got $LASTEXITCODE" }
+          & "$inst\bin\troupe_daemon.bat" eval "b = :binary.list_to_bin(List.duplicate(0, 1000)); true = :ezstd.decompress(:ezstd.compress(b)) == b; IO.puts(:zstd_ok)"
+          if ($LASTEXITCODE -ne 0) { throw "eval failed with $LASTEXITCODE" }
 
       - uses: actions/upload-artifact@v4
         with:
