@@ -361,11 +361,17 @@ if config_env() == :prod do
       # loaded yet, and `:direct` is not an atom that exists — so every eval recipe in the
       # admin docs died in this config provider (Decision 634).
       provisioning_mode:
-        case System.get_env("TROUPE_PROVISIONING_MODE", "direct") do
-          "direct" -> :direct
-          "gitops" -> :gitops
-          other -> raise ArgumentError, "TROUPE_PROVISIONING_MODE must be direct or gitops, got #{inspect(other)}"
-        end,
+        (case System.get_env("TROUPE_PROVISIONING_MODE", "direct") do
+           "direct" ->
+             :direct
+
+           "gitops" ->
+             :gitops
+
+           other ->
+             raise ArgumentError,
+                   "TROUPE_PROVISIONING_MODE must be direct or gitops, got #{inspect(other)}"
+         end),
       oidc: [
         issuer: oidc_required.("TROUPE_OIDC_ISSUER"),
         client_id: oidc_required.("TROUPE_OIDC_CLIENT_ID"),

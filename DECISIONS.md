@@ -4226,3 +4226,20 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      against the two values `Troupe.Plane.Settings` allows and anything else is a named
      error rather than a crash in the boot script. The rule for `runtime.exs` from here:
      never `to_existing_atom` on a value read from the environment.
+
+635. **A root agent that finished is woken by the next input.** `:done` was terminal:
+     input to a finished agent wrote `input_after_done` and nothing happened, which on a
+     remote session meant a conversation ended the moment the model chose to call
+     `finish` — the person typed and the transcript did not move. The two reasons for
+     being done are not alike. Budget exhaustion is a limit the person set, and asking
+     again does not raise it, so that case keeps writing `input_after_done`. `finished` is
+     the model's own opinion that it was done, and the person's next message is exactly
+     the evidence that it was not. So a root agent in `:done` with `done_reason:
+     :finished` takes input as a new turn on the same conversation — the `finish` call
+     already has its `tool_results` there, so the model owes nothing and the turn is
+     well-formed — after writing `agent_woken {from, source}`, which the replay fold and
+     `Log.Fold` read to clear `done_reason`; without that, a restart would bring the agent
+     back `:done` with a conversation that had moved on. Subagents are not woken: theirs
+     is a report to a parent, and the parent is what a person talks to. The worker's
+     lifecycle needs nothing new — `agent_state` already carries `done_reason`, and the
+     woken agent's first `thinking` clears it on the plane's row.

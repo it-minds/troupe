@@ -257,7 +257,8 @@ Durable:
 | `compacted` | `summary` |
 | `budget_exhausted` | `limit` |
 | `agent_done` | `reason`, `summary`, `limit` |
-| `input_after_done` | `source` |
+| `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
+| `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
@@ -463,7 +464,9 @@ runs on, and a client cannot move it.
 {"command_id": "c-1", "session_id": "s-9f", "text": "make the tests pass"}
 ```
 → `{"accepted": true}`. If the agent is busy this produces a durable `input_queued`;
-when taken it produces `input_accepted`.
+when taken it produces `input_accepted`. A root agent that has *finished* is woken by
+input: `agent_woken`, then the turn as usual. One whose budget is exhausted is not, and
+writes `input_after_done` instead.
 
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
 

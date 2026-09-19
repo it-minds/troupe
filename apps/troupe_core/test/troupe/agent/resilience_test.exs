@@ -157,6 +157,60 @@ defmodule Troupe.Agent.ResilienceTest do
     end
   end
 
+  describe "a finished agent is woken by input" do
+    test "a root agent that called finish takes the next input as a new turn", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          steps: [
+            {:tools, [{"finish", %{"summary" => "all done"}}]},
+            {:text, "and again"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "do the thing")
+      await_state(session.id, [:done], 10_000)
+      assert [%{data: %{"reason" => "finished"}}] = events_of_type(session.id, "agent_done")
+      calls_when_done = Fake.call_count(fake)
+
+      Troupe.send_input(session.id, "one more thing")
+      await_state(session.id, [:idle], 10_000)
+
+      # One more model call, on the same conversation, and the agent is idle rather
+      # than done: it can be asked again.
+      assert Fake.call_count(fake) == calls_when_done + 1
+      assert Troupe.snapshot(session.id).state == :idle
+      assert Troupe.snapshot(session.id).done_reason == nil
+
+      assert [%{data: %{"from" => "finished", "source" => "user"}}] =
+               events_of_type(session.id, "agent_woken")
+
+      assert events_of_type(session.id, "input_after_done") == []
+    end
+
+    test "a restarted agent that was woken comes back idle, not done", context do
+      %{session: session} =
+        start_session(context,
+          steps: [{:tools, [{"finish", %{"summary" => "all done"}}]}, {:text, "and again"}]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "do the thing")
+      await_state(session.id, [:done], 10_000)
+      Troupe.send_input(session.id, "one more thing")
+      await_state(session.id, [:idle], 10_000)
+
+      agent = Registry.agent_pid(session.id, ["root"])
+      ref = Process.monitor(agent)
+      Process.exit(agent, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+      _restarted = await_new_agent(session.id, ["root"], agent, 5_000)
+      assert Troupe.snapshot(session.id).state == :idle
+      assert Troupe.snapshot(session.id).done_reason == nil
+    end
+  end
+
   describe "cancellation" do
     test "cancel kills a shell command and its grandchild, verified by OS pid", context do
       pidfile = Path.join(context.workspace, "pids.txt")
