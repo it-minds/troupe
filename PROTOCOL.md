@@ -575,6 +575,16 @@ Needs `control`: putting a file into a workspace is steering the session. The wr
 recorded as an `fs_changed` event whose actor is the client that uploaded it, not the
 session.
 
+#### `agents.list`
+```json
+{"workspace": "/home/me/project"}
+```
+→ `{"agents": [{"name", "description", "source"}]}` — the primary agents a session in that
+workspace may be created with, resolved as `session.create` resolves them (built-ins, the
+machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `global`
+or `project`. A worker answers from its bundle instead, so a client offers exactly what
+`profile` may name wherever the session will run.
+
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
 ```json
@@ -663,7 +673,7 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `watch.set`, `identity.link`, `identity.unlink` |
 
