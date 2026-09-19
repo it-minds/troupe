@@ -4339,3 +4339,12 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `fake_script:` in the workspace's own `.troupe/config.yaml`, which `Config.load/2`
      already reads. `fake_script_test.exs` proves that path end to end without handing
      the session a fake process.
+
+644. **`agents.list` tells a client which agents a workspace offers.** A client creating a
+     session picks a `profile`, and until now had no way to ask the daemon what it could
+     pick: the plane has `profiles.list`, the daemon had nothing, and the TUI knew its
+     agents because it *was* the harness. It is a client now (phase 2), so the daemon
+     answers `agents.list {workspace}` with the primaries `session.create` would resolve
+     for that workspace — built-ins, the machine's `agents/`, the project's
+     `.troupe/agents/` — with a `source` for each. `observe` scope: reading the menu steers
+     nothing.

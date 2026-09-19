@@ -16,6 +16,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   alias Troupe.Gateway.{ClientTool, Commands, Plane, Presence, Private, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
+  alias Troupe.Agent.Definitions
   alias Troupe.Identity
   alias Troupe.Mounts
   alias Troupe.Protocol.Error
@@ -53,6 +54,7 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.read" => :observe,
     "fs.upload" => :control,
     "workspace.recent" => :observe,
+    "agents.list" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
     "input.send" => :control,
@@ -232,6 +234,23 @@ defmodule Troupe.Gateway.Dispatch do
     else
       {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "blob"})}
       other -> other
+    end
+  end
+
+  # The agents a session in this workspace could run: the built-ins, the machine's
+  # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
+  # resolve them, so a picker offers exactly what a `profile` may name.
+  defp handle("agents.list", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      agents =
+        workspace
+        |> Path.expand()
+        |> Definitions.load()
+        |> Definitions.primaries()
+        |> Enum.map(&%{"name" => &1.name, "description" => &1.description, "source" => Atom.to_string(&1.source)})
+        |> Enum.sort_by(& &1["name"])
+
+      {:ok, %{"agents" => agents}}
     end
   end
 

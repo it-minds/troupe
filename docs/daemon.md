@@ -138,7 +138,8 @@ Still open from the list above and deliberately not here: logging for a detached
 
 ## Phase 2 — what the harness needed
 
-One thing: a JSON fake script with per-agent `routes` (Decision 643), so a client
+Two things. `agents.list {workspace}` (Decision 644), so a client can offer the agents a
+session may be created with. And a JSON fake script with per-agent `routes` (Decision 643), so a client
 that speaks only the protocol can drive a deterministic multi-agent session by putting
 `provider: fake` and `fake_script:` in the workspace's `.troupe/config.yaml`. The
 daemon still refuses `provider` from a client; the machine chooses it.
