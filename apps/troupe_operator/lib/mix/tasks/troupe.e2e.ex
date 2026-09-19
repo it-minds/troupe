@@ -21,6 +21,14 @@ defmodule Mix.Tasks.Troupe.E2e do
   The check is on the *current* context as `kubectl` reports it, not on what this task
   was told, because what `kubectl` reports is what the suite will act on.
 
+  ## Which environment it runs in
+
+  `:test`, and that is declared in the umbrella's `cli/0` rather than here. A task used to
+  be able to ask for its own environment with `@preferred_cli_env`; Elixir stopped reading
+  the attribute, and one left behind here did nothing at all while looking exactly like it
+  worked — so this task ran in `dev`, called `mix test`, and Mix refused with a message
+  about the environment rather than anything to do with a cluster.
+
   ## What it does not do
 
   It never creates the cluster. `scripts/remote-up` does that, and a suite that could
@@ -32,7 +40,6 @@ defmodule Mix.Tasks.Troupe.E2e do
   @shortdoc "Run the cluster suite against a kind cluster brought up by scripts/remote-up"
 
   @default_context "kind-troupe-dev"
-  @preferred_cli_env :test
 
   @impl Mix.Task
   def run(args) do
@@ -73,7 +80,8 @@ defmodule Mix.Tasks.Troupe.E2e do
     if System.find_executable("kubectl") do
       :ok
     else
-      {:error, "mix troupe.e2e: kubectl is not on PATH. Bring a cluster up with scripts/remote-up."}
+      {:error,
+       "mix troupe.e2e: kubectl is not on PATH. Bring a cluster up with scripts/remote-up."}
     end
   end
 
@@ -111,7 +119,4 @@ defmodule Mix.Tasks.Troupe.E2e do
          "Naming a context is not the same as meaning it."}
     end
   end
-
-  @doc false
-  def preferred_cli_env, do: @preferred_cli_env
 end

@@ -22,7 +22,15 @@ defmodule Troupe.Umbrella.MixProject do
   # `check` runs the test suite, so the whole of it belongs in the test environment —
   # otherwise `compile --warnings-as-errors` checks a different set of files than the
   # one the tests then run against.
-  def cli, do: [preferred_envs: [check: :test]]
+  # `troupe.e2e` is here for the same reason and was not, which is why the cluster job had
+  # never run green: the task carries `@preferred_cli_env :test`, and Elixir stopped reading
+  # that attribute — the project's `cli/0` is the only thing that decides now. So the task
+  # ran in `dev`, called `mix test`, and Mix refused with "mix test is running in the dev
+  # environment" rather than anything about a cluster.
+  #
+  # It stayed hidden because this job only runs after the test job passes, and the test job
+  # had been red for a fortnight over two flakes.
+  def cli, do: [preferred_envs: [check: :test, "troupe.e2e": :test]]
 
   # Umbrella-wide dependencies. Each app declares the ones it actually uses; these
   # are the tools that run across all of them.
