@@ -4325,3 +4325,17 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      said `%LOCALAPPDATA%\troupe\run\daemon.json` where the code and the Tauri shell
      both read `%LOCALAPPDATA%\troupe\daemon.json`; the document moved to the code, since
      two implementations already agreed.
+
+643. **`ezstd` comes from the it-minds fork, because upstream does not build on Windows.**
+     The daemon is released per platform from `troupe` and its Windows job failed at
+     `mix deps.compile`: `ezstd` 1.2.4 declares its rebar compile hook for
+     `(linux|darwin)` only, so on Windows nothing built and rebar3 stopped at the missing
+     `priv/ezstd_nif.so`. The fork (`it-minds/ezstd`, branch `win32-zig`, one commit
+     meant for an upstream pull request) adds a `win32` hook that compiles zstd — at the commit upstream already
+     pins — and the NIF with `zig cc`/`zig c++` into `priv/ezstd_nif.dll`; Zig is the
+     one toolchain the release runners and this repository already carry, so a Windows
+     build needs no Visual Studio and no MSYS2. Linux and macOS build exactly as before,
+     through the unchanged `Makefile`, and the segment format is untouched: the same
+     zstd, the same frames. A git dependency pinned by commit instead of the Hex
+     package, until upstream takes the change — the harness's first git dependency,
+     which `docker/Dockerfile`'s builder stage can fetch because it already has `git`.
