@@ -9,6 +9,7 @@ defmodule Troupe.Session.SummaryTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.Session.Log
   alias Troupe.Session.Summary
 
   test "folds a session into a compact snapshot", context do
@@ -90,7 +91,7 @@ defmodule Troupe.Session.SummaryTest do
 
     # And now the race itself. Every durable event the log holds, delivered again as if it
     # had arrived from the subscription during the replay.
-    for event <- Troupe.Session.Log.replay(session.id) do
+    for event <- Log.replay(session.id) do
       send(replayed, {:troupe_event, session.id, event})
     end
 
