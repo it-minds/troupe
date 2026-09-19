@@ -94,7 +94,7 @@ jobs:
           mv "_build/prod/troupe_daemon-${VERSION}.tar.gz" "dist/${NAME}"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Smoke test (unpack; version, status, run, status, eval)
+      - name: "Smoke test (unpack; version, status, run, status, eval)"
         if: runner.os != 'Windows'
         env:
           TROUPE_PROVIDER: fake
@@ -113,7 +113,7 @@ jobs:
           "$INST/bin/troupe_daemon" eval 'IO.puts(Troupe.Version.version())'
           kill %1 || true
 
-      - name: Smoke test (Windows: unpack, version, status)
+      - name: "Smoke test (Windows: unpack, version, status)"
         if: runner.os == 'Windows'
         shell: pwsh
         env:
