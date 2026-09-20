@@ -60,6 +60,9 @@ defmodule Troupe.Session do
          auto_approve: config.auto_approve,
          mode: config.approvals,
          managed_rules_only: config.managed_permission_rules_only},
+        # The other half of the gate: what the agent asks a person, and the answers.
+        # Unattended in the same mode as approvals, since the same nobody is there.
+        {Troupe.Session.Questions, session_id: session_id, mode: config.approvals},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.

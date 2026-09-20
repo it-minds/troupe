@@ -1,0 +1,34 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/question_asked.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "agent_path": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "call_id": {
+      "type": "string"
+    },
+    "multiple": {
+      "type": "boolean"
+    },
+    "options": {
+      "type": "array"
+    },
+    "question": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "agent_path",
+    "call_id",
+    "multiple",
+    "options",
+    "question"
+  ],
+  "title": "question_asked",
+  "type": "object"
+}

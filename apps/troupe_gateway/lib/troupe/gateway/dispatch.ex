@@ -64,6 +64,7 @@ defmodule Troupe.Gateway.Dispatch do
     "turn.cancel" => :control,
     "profile.switch" => :control,
     "approval.respond" => :control,
+    "question.answer" => :control,
     "todo.edit" => :control,
     # Presence says who is here, which every attached client is entitled to say and to
     # hear. It changes nothing, so it needs no more than a seat.
@@ -398,6 +399,17 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, decision} <- parse_decision(decision),
          :ok <- activate(session_id) do
       Troupe.approve(session_id, call_id, decision, actor(context))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # The answer to an `ask_user`: text, from whoever is attached. Brings a dormant session
+  # back like an approval does, since the tool task is what is waiting for it.
+  defp handle("question.answer", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, call_id} <- fetch(params, "call_id"),
+         :ok <- activate(session_id) do
+      Troupe.answer(session_id, call_id, Map.get(params, "text") || "", actor(context))
       {:ok, %{"accepted" => true}}
     end
   end

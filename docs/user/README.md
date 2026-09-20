@@ -125,6 +125,7 @@ Every top-level feature and every user-reachable route, and where it is document
 | `presence.set` | observe | features.md § Presence |
 | `input.send`, `turn.cancel`, `profile.switch` | control | features.md § Sessions, § Plan and build |
 | `approval.respond` | control | features.md § Approvals |
+| `question.answer` | control | features.md § Approvals |
 | `todo.edit` | control | features.md § Task lists |
 | `fs.upload` | control | features.md § Files |
 | `tools.register`, `tools.unregister`; server request `tool.invoke` | control | features.md § Personal MCP connectors |

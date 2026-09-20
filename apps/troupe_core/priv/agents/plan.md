@@ -6,11 +6,15 @@ tools:
   - read_file
   - list_files
   - grep
+  - glob
+  - git_read
+  - web_fetch
   - read_output
   - read_branch
   - todo_read
   - todo_write
   - delegate
+  - ask_user
   - finish
 permissions:
   write_file: deny

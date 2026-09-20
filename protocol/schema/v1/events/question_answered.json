@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/question_answered.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "call_id": {
+      "type": "string"
+    },
+    "text": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "call_id",
+    "text"
+  ],
+  "title": "question_answered",
+  "type": "object"
+}

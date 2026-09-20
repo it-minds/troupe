@@ -265,6 +265,8 @@ Durable:
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
+| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer` |
+| `question_answered` | `call_id`, `text`, `actor` |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
 | `session_resumed` | `dormant_ms`, `moved` |
@@ -501,6 +503,14 @@ the next turn boundary.
 `decision` is `allow`, `deny`, or `allow_session`. **First response wins**; a later
 one receives an `approval_resolved` event naming who resolved it, and has no second
 effect.
+
+#### `question.answer`
+```json
+{"command_id": "c-5", "session_id": "s-9f", "call_id": "call_4", "text": "the blue one"}
+```
+The answer to a `question_asked` — the agent's `ask_user` tool, whose result is this
+text. A client offering the question's `options` sends the chosen labels, joined with
+`", "`; free text is always allowed. **First answer wins**; a later one changes nothing.
 
 #### `todo.edit`
 ```json
@@ -744,7 +754,7 @@ result for every call it made.
 | scope | grants |
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
-| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

@@ -34,7 +34,12 @@ defmodule Troupe.Tools do
     # The project brief (Decision 649): the one file a tool may write unasked.
     Troupe.Tools.Remember,
     # The rest of a cut shell or grep result (Decision 650).
-    Troupe.Tools.ReadOutput
+    Troupe.Tools.ReadOutput,
+    # The four the TUI's harness had and the core lacked (Decisions 651 and 652).
+    Troupe.Tools.AskUser,
+    Troupe.Tools.WebFetch,
+    Troupe.Tools.GitRead,
+    Troupe.Tools.Glob
   ]
 
   @doc """

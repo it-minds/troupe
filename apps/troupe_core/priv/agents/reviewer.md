@@ -6,6 +6,8 @@ tools:
   - read_file
   - list_files
   - grep
+  - glob
+  - git_read
   - read_output
   - shell
   - delegate

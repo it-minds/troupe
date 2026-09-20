@@ -16,7 +16,7 @@ defmodule Troupe do
   alias Troupe.Agent.Server, as: Agent
   alias Troupe.{Events, Mounts, Registry, Session, Sessions}
   alias Troupe.Protocol.Origin
-  alias Troupe.Session.{Approvals, Blobs, Log, Watcher}
+  alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
   alias Troupe.Sessions.Index
 
   @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
@@ -216,6 +216,12 @@ defmodule Troupe do
   @doc "Switch the root agent's primary profile, applied at the next turn boundary."
   @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
   def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
+
+  @doc "Answer a question an agent asked with `ask_user`. First answer wins."
+  @spec answer(String.t(), String.t(), String.t(), Troupe.Protocol.Event.Actor.t() | nil) :: :ok
+  def answer(session_id, call_id, text, actor \\ nil) do
+    Questions.answer(session_id, call_id, text, actor)
+  end
 
   @doc "Answer an outstanding approval. First response wins."
   @spec approve(

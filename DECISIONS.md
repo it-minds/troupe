@@ -4453,3 +4453,72 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      blob lives and dies with the session like the rest of its history. `read_file` is
      not kept: reading again with the next offset returns the same bytes, and a store for
      that would be a copy of the file.
+
+651. **A SCIM endpoint that only accepted whole resources did not work with the provider
+     this deployment uses.** Entra sends a change as a `PatchOp`, including the one that
+     matters: a deprovision is `active` set false, not a `DELETE`. Both patch bodies
+     raised — `Map.fetch!` on a key a patch does not carry — so the plane answered 500,
+     the provider retried, and the person stayed able to sign in. The endpoint existed
+     and the case it exists for was the case it could not serve.
+
+652. **An unreadable filter is refused, never ignored.** `GET /Users?filter=…` is how a
+     provider asks *have I already created this person*, and it acts on the answer. An
+     endpoint that dropped a filter it could not parse and replied with everybody would
+     have the provider read that as "yes, this one" about a stranger and then patch them.
+     400 `invalidFilter` is the safe failure; a 200 is not. The same reasoning one rung
+     down: a `remove` on `members` with a bracket expression nobody here can read removes
+     nothing, because a path we do not understand is not a licence to empty a group.
+
+653. **An attribute with no column is ignored; a body that is not a patch is refused.**
+     The difference is whether the push is *about* something this plane keeps. A refused
+     push is retried rather than superseded and would hold up the operations beside it —
+     which are the ones carrying access. A body with no operations in it is not a patch
+     at all, and saying so costs nothing.
+
+654. **A patch never moves the subject.** It is what a token carries, every record here
+     is keyed on it, and a provider that changes it is describing a different person —
+     one a create can make. Renaming somebody in place would silently re-point their
+     budget, their audit trail and their principals' sponsorship at somebody else.
+
+655. **Which claim is the person is now a setting, because on Entra `sub` is the wrong
+     one.** Entra's `sub` is pairwise: a different string for the same person in every
+     app registration, and not an attribute SCIM can push, while provisioning sends the
+     directory object id. Keyed on `sub`, a plane running both holds the same person
+     twice — and *deactivating the row SCIM created leaves the row they actually sign in
+     with untouched*, which is this deployment's standing requirement inverted.
+     `subject_claim` defaults to `sub` and is `oid` for Entra with SCIM. A token missing
+     the configured claim is refused rather than quietly keyed on another, since falling
+     back is exactly how the second row gets created.
+
+656. **`DELETE` on a group empties it and keeps it.** A team may draw its members from
+     that group and the audit trail names it; dropping the row takes both. Emptying
+     removes the access, which is the part that has to happen now, and leaves an
+     administrator a team they can see is empty rather than a team that silently changed
+     shape.
+
+651. **A question is the other half of an approval, and it travels the same way.** The
+     TUI's harness had `ask_user`: the agent hands a decision to a person and its tool
+     call waits for the answer, with optional numbered options the client draws as a
+     menu. The core had only approvals — a yes or no about a call the agent had already
+     decided on — so the tool's wait needed a home. `Troupe.Session.Questions` is
+     `Approvals` with text instead of a decision: the tool task blocks in a call that
+     never times out on its own (the agent's tool timeout is the one that matters, as for
+     an approval), `question_asked` and `question_answered` are durable so a question
+     outlives dormancy and a re-run tool finds its answer rather than asking twice, and
+     the unattended mode (`approvals: :deny`) answers at once that nobody is there, so the
+     model decides or finishes instead of waiting for a person who is not coming. On the
+     wire it is one method, `question.answer {session_id, call_id, text}` (`control`,
+     activating like `approval.respond`); a client with options sends the chosen labels
+     joined by `", "`, and free text is always an answer.
+
+652. **Three read-only tools the audit asked for, in the core's shape.** `glob` (files by
+     name, newest first — what `find` was being used for), `git_read` (status, diff,
+     log, show, branch, with `ref` and `path` refused when they start with `-`) and
+     `web_fetch` (GET, HTML reduced to text, `:ask` because it is egress and a pod's
+     policy may deny it) come over from the TUI's harness. Each resolves paths through
+     `Troupe.Workspace`, runs processes through the reaper, and caps output through
+     `Troupe.Tools.Output` with the full text kept for `read_output` (Decision 650) — so
+     they gain the mounts, the sandbox and the kept output the core has without a line
+     written for the purpose. The built-in profiles list what suits them: the read-only
+     ones get `glob` and `git_read`, the planner and the orchestrator `web_fetch` and
+     `ask_user`, `build` and `general` everything as before.

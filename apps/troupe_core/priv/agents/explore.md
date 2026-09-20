@@ -6,6 +6,8 @@ tools:
   - read_file
   - list_files
   - grep
+  - glob
+  - git_read
   - finish
 permissions:
   write_file: deny

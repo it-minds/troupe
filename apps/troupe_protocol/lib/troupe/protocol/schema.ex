@@ -160,6 +160,18 @@ defmodule Troupe.Protocol.Schema do
         "agent_path" => required({:array, :string}),
         "decision" => required(:string)
       },
+      # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
+      "question_asked" => %{
+        "call_id" => required(:string),
+        "agent_path" => required({:array, :string}),
+        "question" => required(:string),
+        "options" => required(:array),
+        "multiple" => required(:boolean)
+      },
+      "question_answered" => %{
+        "call_id" => required(:string),
+        "text" => required(:string)
+      },
       "approval_resolved" => %{
         "call_id" => required(:string),
         "resolved_by" => required(:string)
@@ -325,6 +337,12 @@ defmodule Troupe.Protocol.Schema do
       "session.archive" => %{
         "command_id" => required(:string),
         "session_id" => required(:string)
+      },
+      "question.answer" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "call_id" => required(:string),
+        "text" => required(:string)
       },
       "session.pin" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "session.unpin" => %{"command_id" => required(:string), "session_id" => required(:string)},

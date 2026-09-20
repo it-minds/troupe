@@ -227,6 +227,13 @@ Sources:
 
 ## Approvals
 
+**Questions.** An agent that cannot proceed without a decision calls `ask_user`; a
+`question_asked` event carries the question and up to nine `options` (`label`,
+`description`, `multiple`), the client answers with `question.answer` (chosen labels
+joined by `", "`, or free text), and the text is the tool's result. Durable like an
+approval: a question survives dormancy and is not asked twice after a restart. In the
+unattended mode (`approvals: deny`) the agent is told at once that nobody is there.
+
 Tools whose permission is `ask` stop and wait for a person before they run. By
 default that is `write_file`, `edit_file`, `shell`, `publish`, `import`, every
 personal-connector tool, and MCP tools unless the bundle marks a server `auto`.

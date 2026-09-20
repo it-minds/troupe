@@ -26,6 +26,10 @@ defmodule Troupe.Registry do
   @spec approvals(String.t()) :: GenServer.name()
   def approvals(session_id), do: via({:approvals, session_id})
 
+  @doc "Questions an agent asked a person, waiting for their answer (Decision 651)."
+  @spec questions(String.t()) :: GenServer.name()
+  def questions(session_id), do: via({:questions, session_id})
+
   @spec watcher(String.t()) :: GenServer.name()
   def watcher(session_id), do: via({:watcher, session_id})
 
