@@ -335,3 +335,19 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     `close`. Two small ones beside it: a reasoning block's text was concatenated into the
     answer (`textOf` knew `thinking` and not the daemon's `reasoning`), and a row whose
     time `Date.parse` could not read said `NaN d ago`.
+
+42. **The Teams tab opens on a table, a team can be deleted from it, and the three team
+    calls that never worked now name the team the way the plane does.** The plane grew
+    `admin.team.disable.preview` and `admin.team.disable` (troupe-remote #31, its Decision
+    662) — the first step of moving sign-in, SCIM and team mapping into the admin panel —
+    and this is their rendering: one row per team with its groups, member count, profiles
+    and administrators, *Delete* on the row, and the dialog's sentence built from the
+    plane's preview rather than from a guess, so the numbers a person types a name against
+    are the ones the deed will match. Sessions are named as *kept* in that sentence,
+    because "delete" reads as taking everything and the sessions are the one thing it does
+    not take. Found on the way: `updateTeam`, `grantTeam` and `revokeTeam` sent `team` and
+    the changes flat, where every team method on the plane takes `name` and `attrs`; the
+    plane answered `invalid_params` for a missing `name`, and nothing in the fake
+    deployment exercised them. They send what the plane asks for now, and the admin client
+    has a test that pins the wire shape of every team call, which is what would have caught
+    it.

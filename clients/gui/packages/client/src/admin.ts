@@ -71,6 +71,23 @@ export interface FleetOverview {
   sessions: { active: number; dormant: number; read_only: number };
 }
 
+/** A group a team draws its members from. Membership is the provider's; this is the link. */
+export interface AdminTeamGroup {
+  external_id: string;
+  display_name: string | null;
+  issuer?: string | null;
+  linked_by?: string | null;
+}
+
+/** A person in a team, with their own spend beside the team's. Read-only, always. */
+export interface AdminTeamMember {
+  subject: string;
+  display_name?: string | null;
+  budget_micros?: number | null;
+  spent_micros?: number;
+  reserved_micros?: number;
+}
+
 export interface AdminTeam extends TeamSpend {
   members_may_control: boolean | null;
   idle_timeout_seconds: number | null;
@@ -81,8 +98,27 @@ export interface AdminTeam extends TeamSpend {
   volume_size: string | null;
   admins: string[];
   grants: Array<{ profile: string; volume_mode: string | null }>;
-  members: string[];
+  groups: AdminTeamGroup[];
+  members: AdminTeamMember[];
   spend_by_model: Array<Record<string, unknown>>;
+}
+
+/**
+ * What removing a team takes with it, and what it leaves. `admin.team.disable.preview`
+ * answers with this and `admin.team.disable` returns the same shape once it is done, so
+ * the dialog and the deed are one list. Sessions are the one thing kept: their team is
+ * fixed at create and the column is nulled.
+ */
+export interface TeamDisableEffect {
+  team: string;
+  groups: string[];
+  members: number;
+  grants: string[];
+  admins: string[];
+  principals: string[];
+  triggers: string[];
+  sessions_kept: number;
+  confirm: string;
 }
 
 export interface BundleSummary {
@@ -216,16 +252,26 @@ export class AdminApi {
     return this.rpc<AdminTeam[]>("admin.teams.list", {});
   }
 
-  updateTeam(team: string, changes: Record<string, unknown>): Promise<AdminTeam> {
-    return this.rpc<AdminTeam>("admin.team.update", { team, ...changes });
+  updateTeam(name: string, changes: Record<string, unknown>): Promise<AdminTeam> {
+    return this.rpc<AdminTeam>("admin.team.update", { name, attrs: changes });
   }
 
-  grantTeam(team: string, profile: string, volumeMode?: string): Promise<unknown> {
-    return this.rpc("admin.team.grant", { team, profile, ...(volumeMode ? { volume_mode: volumeMode } : {}) });
+  grantTeam(name: string, profile: string, volumeMode?: string): Promise<unknown> {
+    return this.rpc("admin.team.grant", { name, profile, attrs: volumeMode ? { volume_mode: volumeMode } : {} });
   }
 
-  revokeTeam(team: string, profile: string): Promise<unknown> {
-    return this.rpc("admin.team.revoke", { team, profile });
+  revokeTeam(name: string, profile: string): Promise<unknown> {
+    return this.rpc("admin.team.revoke", { name, profile });
+  }
+
+  /** What deleting a team would take with it. Read this first; the dialog shows it. */
+  disableTeamPreview(name: string): Promise<TeamDisableEffect> {
+    return this.rpc<TeamDisableEffect>("admin.team.disable.preview", { name });
+  }
+
+  /** Delete a team. Destructive: confirmed in the dialog by typing its name. */
+  disableTeam(name: string): Promise<TeamDisableEffect> {
+    return this.rpc<TeamDisableEffect>("admin.team.disable", { name });
   }
 
   sessions(filter: AdminFilter = {}): Promise<AdminSessionRow[]> {

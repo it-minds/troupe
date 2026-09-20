@@ -9,19 +9,39 @@
 // administer answers `not_found` rather than `forbidden`: whether a team exists is
 // itself something they should not learn. So this screen renders what it was given and
 // never says "and others you cannot see".
+//
+// The tab opens on a table — one row per team, its groups, how many people, which
+// profiles — because that is the question somebody arriving here has; the card under
+// each row answers the next one. Delete is on the row and asks first, with what would go
+// and what would stay, in the plane's own numbers.
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
-import type { AdminApi, AdminProfile, AdminTeam } from "@troupe/client";
+import type { AdminApi, AdminProfile, AdminTeam, TeamDisableEffect } from "@troupe/client";
 import { useAdminQuery } from "../../hooks";
 import { Loading } from "../bits";
 import { AfterTheChange, Confirm, Failed, Money, Table } from "./bits";
+
+// The sentence in the dialog. Sessions are named as kept rather than left out, because
+// "delete" reads as taking everything and the one thing it does not take is the one
+// people would miss.
+export function consequenceOf(effect: TeamDisableEffect): string {
+  const count = (items: string[], noun: string): string => `${items.length} ${noun}${items.length === 1 ? "" : "s"}`;
+  return [
+    `Removes the team for ${effect.members} ${effect.members === 1 ? "person" : "people"}`,
+    `revokes ${count(effect.grants, "profile")}`,
+    `deletes ${count(effect.principals, "service principal")} and ${count(effect.triggers, "trigger")}`,
+    `unlinks ${count(effect.groups, "group")}.`,
+    `${effect.sessions_kept} session${effect.sessions_kept === 1 ? " is" : "s are"} kept, with no team and read-only.`,
+  ].join(" ");
+}
 
 export function AdminTeams({ api, platform }: { api: AdminApi; platform: boolean }): JSX.Element {
   const [wrote, setWrote] = useState(0);
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [revoking, setRevoking] = useState<{ team: string; profile: string } | null>(null);
+  const [disabling, setDisabling] = useState<{ team: string; effect: TeamDisableEffect } | null>(null);
 
   const loadTeams = useCallback(() => api.teams(), [api]);
   const { data: teams, loading, error: readError, reload } = useAdminQuery<AdminTeam[]>(loadTeams, [loadTeams, wrote]);
@@ -60,6 +80,34 @@ export function AdminTeams({ api, platform }: { api: AdminApi; platform: boolean
     }
   };
 
+  // The count before the deed: the dialog opens with the plane's answer, not a guess.
+  const askDisable = async (team: string): Promise<void> => {
+    setBusy(team);
+    setError(null);
+    try {
+      const effect = await api.disableTeamPreview(team);
+      setDisabling({ team, effect });
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const disable = async (team: string): Promise<void> => {
+    setBusy(team);
+    setError(null);
+    try {
+      await api.disableTeam(team);
+      setDisabling(null);
+      after();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const setBudget = async (team: AdminTeam, micros: number): Promise<void> => {
     setBusy(team.name);
     setError(null);
@@ -85,11 +133,45 @@ export function AdminTeams({ api, platform }: { api: AdminApi; platform: boolean
         </div>
       )}
 
+      {teams && teams.length > 0 && (
+        <section className="group">
+          <h3>Every team</h3>
+          <Table head={["Team", "Groups", "Members", "Profiles", "Administrators", ...(platform ? ["  "] : [])]}>
+            {teams.map((team) => (
+              <tr key={team.name}>
+                <th scope="row">
+                  <a href={`#team-${team.name}`}>{team.name}</a>
+                </th>
+                <td>
+                  {team.groups.length > 0 ? (
+                    team.groups.map((g) => g.display_name ?? g.external_id).join(", ")
+                  ) : (
+                    <span className="muted">none</span>
+                  )}
+                </td>
+                <td>{team.members.length}</td>
+                <td>
+                  {team.grants.length > 0 ? team.grants.map((g) => g.profile).join(", ") : <span className="muted">none</span>}
+                </td>
+                <td>{team.admins.length}</td>
+                {platform && (
+                  <td>
+                    <button className="link" disabled={busy !== null} onClick={() => void askDisable(team.name)}>
+                      Delete
+                    </button>
+                  </td>
+                )}
+              </tr>
+            ))}
+          </Table>
+        </section>
+      )}
+
       {(teams ?? []).map((team) => {
         const granted = new Set(team.grants.map((g) => g.profile));
         const ungranted = (profiles ?? []).map((p) => p.name).filter((n) => !granted.has(n));
         return (
-          <section className="group" key={team.name}>
+          <section className="group" key={team.name} id={`team-${team.name}`}>
             <h3>{team.name}</h3>
 
             <dl className="facts wide">
@@ -197,6 +279,17 @@ export function AdminTeams({ api, platform }: { api: AdminApi; platform: boolean
       })}
 
       <AfterTheChange api={api} nonce={wrote} />
+
+      {disabling && (
+        <Confirm
+          what="Delete this team"
+          identifier={disabling.team}
+          consequence={consequenceOf(disabling.effect)}
+          busy={busy !== null}
+          onCancel={() => setDisabling(null)}
+          onConfirm={() => void disable(disabling.team)}
+        />
+      )}
 
       {revoking && (
         <Confirm
