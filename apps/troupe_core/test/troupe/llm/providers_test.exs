@@ -11,7 +11,7 @@ defmodule Troupe.LLM.ProvidersTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.LLM.{Message, Request, Response, SSE, Text, ToolResult, ToolUse}
+  alias Troupe.LLM.{Message, Request, Response, SSE, Text, ToolResult, ToolUse, Usage}
   alias Troupe.LLM.Providers.{Anthropic, OpenAI}
   alias Troupe.Test.FakeTransport
 
@@ -68,6 +68,21 @@ defmodule Troupe.LLM.ProvidersTest do
       assert body["stream"] == true
       assert body["system"] =~ "You are a test"
       assert [%{"name" => "read_file", "input_schema" => _}] = body["tools"]
+    end
+
+    test "cache reads and writes are reported beside the billed input, and message_delta corrects" do
+      chunks = [
+        ~s(event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":12,"cache_read_input_tokens":180000,"cache_creation_input_tokens":2000,"output_tokens":1}}}\n\n),
+        ~s(event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}\n\n),
+        ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hi."}}\n\n),
+        ~s(event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":40}}\n\n)
+      ]
+
+      assert {:ok, %Response{usage: usage}} = run(Anthropic, request(chunks: chunks))
+
+      assert usage == %Usage{input_tokens: 12, output_tokens: 40, cache_read: 180_000, cache_write: 2_000}
+      assert Usage.billed_input(usage) == 2_012
+      assert Usage.total_input(usage) == 182_012
     end
 
     test "encodes tool results as content blocks on a user message" do
@@ -152,6 +167,17 @@ defmodule Troupe.LLM.ProvidersTest do
       [sent] = FakeTransport.drain_requests()
       assert to_string(sent.url) =~ "/v1/chat/completions"
       assert Req.Request.get_header(sent, "authorization") == ["Bearer test-key"]
+    end
+
+    test "cached prompt tokens come out of the billed input" do
+      chunk =
+        ~s(data: {"choices":[{"delta":{"content":"Hello."}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":150000,"completion_tokens":9,"prompt_tokens_details":{"cached_tokens":149000}}}\n\ndata: [DONE]\n\n)
+
+      assert {:ok, %Response{usage: usage}} = run(OpenAI, request(chunks: [chunk]))
+
+      # `prompt_tokens` counted the cached ones too; the three input figures are disjoint.
+      assert usage == %Usage{input_tokens: 1_000, output_tokens: 9, cache_read: 149_000, cache_write: 0}
+      assert Usage.total_input(usage) == 150_000
     end
 
     test "a base url that already ends in /v1 does not get a second one" do

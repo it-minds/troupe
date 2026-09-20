@@ -223,13 +223,13 @@ defmodule Troupe.Agent.Server do
 
       "llm_response" ->
         message = Message.from_json(data["message"])
-        usage = usage_from_json(data["usage"])
+        usage = Usage.from_json(data["usage"])
 
         %{
           state
           | conversation: state.conversation ++ [message],
             budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(usage),
-            last_input_tokens: usage.input_tokens
+            last_input_tokens: Usage.total_input(usage)
         }
 
       "tool_results" ->
@@ -272,15 +272,6 @@ defmodule Troupe.Agent.Server do
   end
 
   defp safe_reason(_reason), do: :finished
-
-  defp usage_from_json(nil), do: %Usage{}
-
-  defp usage_from_json(map) do
-    %Usage{
-      input_tokens: Map.get(map, "input_tokens", 0),
-      output_tokens: Map.get(map, "output_tokens", 0)
-    }
-  end
 
   # What to do after replay.
   #
@@ -913,10 +904,7 @@ defmodule Troupe.Agent.Server do
 
     log(state, :llm_response, %{
       "message" => Message.to_json(message),
-      "usage" => %{
-        "input_tokens" => response.usage.input_tokens,
-        "output_tokens" => response.usage.output_tokens
-      },
+      "usage" => Usage.to_json(response.usage),
       "stop_reason" => Atom.to_string(response.stop_reason),
       "model" => response.model || state.llm_model,
       "gateway" => gateway_json(response.gateway)
@@ -926,16 +914,20 @@ defmodule Troupe.Agent.Server do
       [:troupe, :llm, :stop],
       %{
         input_tokens: response.usage.input_tokens,
-        output_tokens: response.usage.output_tokens
+        output_tokens: response.usage.output_tokens,
+        cache_read: response.usage.cache_read,
+        cache_write: response.usage.cache_write
       },
       %{session_id: state.session_id, agent_path: state.agent_path}
     )
 
+    # The budget is charged what was billed; the prompt's whole length, cached or not,
+    # is what compaction and the context gauge read (Decision 657).
     %{
       state
       | conversation: state.conversation ++ [message],
         budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(response.usage),
-        last_input_tokens: response.usage.input_tokens
+        last_input_tokens: Usage.total_input(response.usage)
     }
     |> warn_headroom()
   end
@@ -1415,6 +1407,9 @@ defmodule Troupe.Agent.Server do
 
   # -- compaction -------------------------------------------------------------
 
+  # Against every token the last prompt contained, cached or not (Decision 657).
+  # Anthropic's own `input_tokens` excludes what its cache served, so a warm 200k
+  # conversation reads in the hundreds by that figure and compaction would never fire.
   defp needs_compaction?(state) do
     state.last_input_tokens >= Config.compact_threshold(state.config, state.definition.model)
   end

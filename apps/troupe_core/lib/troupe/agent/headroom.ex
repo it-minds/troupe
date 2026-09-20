@@ -22,9 +22,11 @@ defmodule Troupe.Agent.Headroom do
   def dimensions, do: @dimensions
 
   @doc """
-  The five fractions. `prompt_tokens` is the size of the last prompt the model saw and
-  `window` the model's context window; `0` for the first, before any response, reads as
-  an empty context rather than a full one.
+  The five fractions. `prompt_tokens` is the size of the last prompt the model saw —
+  every token it contained, cached or not, which is `Troupe.LLM.Usage.total_input/1` and
+  never the provider's own `input_tokens` (Decision 657) — and `window` the model's
+  context window; `0` for the first, before any response, reads as an empty context
+  rather than a full one.
   """
   @spec of(Budget.t(), non_neg_integer(), pos_integer()) :: t()
   def of(%Budget{} = b, prompt_tokens, window) do

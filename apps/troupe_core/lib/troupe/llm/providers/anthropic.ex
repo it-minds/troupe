@@ -18,8 +18,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
     SSE,
     Text,
     ToolResult,
-    ToolUse,
-    Usage
+    ToolUse
   }
 
   alias Troupe.LLM.Endpoint
@@ -138,7 +137,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # -- streaming events -------------------------------------------------------
 
   defp apply_event(acc, %{"type" => "message_start", "message" => message}, _collector) do
-    Collector.put_usage(acc, usage(message["usage"]))
+    Collector.merge_usage(acc, message["usage"])
   end
 
   defp apply_event(acc, %{"type" => "content_block_start"} = event, collector) do
@@ -175,11 +174,11 @@ defmodule Troupe.LLM.Providers.Anthropic do
   end
 
   defp apply_event(acc, %{"type" => "message_delta"} = event, _collector) do
-    # `message_delta` reports the running total for the message, not an increment, so
-    # the last one wins rather than being summed onto the count from `message_start`.
+    # `message_delta` reports running totals for the message, not increments, so each
+    # figure it carries replaces the one from `message_start` rather than adding to it.
     acc
     |> Collector.put_stop_reason(stop_reason(get_in(event, ["delta", "stop_reason"])))
-    |> Collector.put_output_tokens(usage(event["usage"]).output_tokens)
+    |> Collector.merge_usage(event["usage"])
   end
 
   defp apply_event(acc, %{"type" => "error", "error" => error}, _collector) do
@@ -240,15 +239,6 @@ defmodule Troupe.LLM.Providers.Anthropic do
 
   defp encode_block(%ToolResult{tool_use_id: id, content: content, error?: error?}) do
     %{type: "tool_result", tool_use_id: id, content: content, is_error: error?}
-  end
-
-  defp usage(nil), do: %Usage{}
-
-  defp usage(map) do
-    %Usage{
-      input_tokens: Map.get(map, "input_tokens", 0),
-      output_tokens: Map.get(map, "output_tokens", 0)
-    }
   end
 
   defp stop_reason("end_turn"), do: :end_turn
@@ -322,13 +312,31 @@ defmodule Troupe.LLM.Providers.Anthropic.Collector do
     %{acc | blocks: blocks}
   end
 
-  @spec put_usage(t(), Usage.t()) :: t()
-  def put_usage(acc, usage), do: %{acc | usage: usage}
+  @doc """
+  Fold what an event said about usage into the running record.
 
-  @doc "Replace the output token count with the latest running total."
-  @spec put_output_tokens(t(), non_neg_integer()) :: t()
-  def put_output_tokens(acc, 0), do: acc
-  def put_output_tokens(acc, count), do: %{acc | usage: %{acc.usage | output_tokens: count}}
+  Anthropic reports the cache figures beside `input_tokens` rather than inside it, which
+  is already the shape `Troupe.LLM.Usage` wants (Decision 657). They arrive on
+  `message_start`; `message_delta` carries the final output count and, on some models,
+  corrected input counts. Every figure is a running total, so a key that is present
+  replaces and a key that is absent leaves what was already counted alone.
+  """
+  @spec merge_usage(t(), map() | nil) :: t()
+  def merge_usage(acc, nil), do: acc
+
+  def merge_usage(acc, reported) when is_map(reported) do
+    usage = %Usage{
+      input_tokens: count(reported["input_tokens"], acc.usage.input_tokens),
+      output_tokens: count(reported["output_tokens"], acc.usage.output_tokens),
+      cache_read: count(reported["cache_read_input_tokens"], acc.usage.cache_read),
+      cache_write: count(reported["cache_creation_input_tokens"], acc.usage.cache_write)
+    }
+
+    %{acc | usage: usage}
+  end
+
+  defp count(n, _default) when is_integer(n) and n >= 0, do: n
+  defp count(_other, default), do: default
 
   @spec put_stop_reason(t(), atom()) :: t()
   def put_stop_reason(acc, reason), do: %{acc | stop_reason: reason}
