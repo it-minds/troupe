@@ -21,8 +21,15 @@ defmodule Troupe.Client.Daemon do
   parent's journal remembers which windows exist (`branch_spawned` with the branch's
   session id, `window_dismissed`), which is what re-opens them with the session.
 
-  What a daemon session does not have yet says so in words: the project brief and the
-  settings that changed a running agent (phase 3 of the daemon plan).
+  The **project brief** (`.troupe/memory.md`, troupe-remote Decision 649) is the
+  daemon's: it reads it into every prompt and `remember` writes it. What is the client's
+  is `/memory` — showing it, forgetting it, and asking the `librarian` to write it — and
+  the refresh a session starts with when the brief is missing or stale and the workspace
+  config asks for one (`memory_auto_refresh`): a `librarian` branch in the checkout
+  itself, since all it writes is the brief.
+
+  What a daemon session does not have yet says so in words: the settings that changed a
+  running agent (phase 3 of the daemon plan).
   """
 
   @behaviour Troupe.Client
@@ -33,6 +40,8 @@ defmodule Troupe.Client.Daemon do
   alias Troupe.Remote.{Branch, Capability, Journal, Worker}
 
   @scopes ["observe", "control", "admin"]
+  @refresh_prompt "The project brief is out of date. Revise it against the repository as it is now."
+  @first_prompt "There is no project brief yet. Survey this repository and write one."
   # The journal keys its directory by where the session lives; a daemon session lives here.
   @journal_key "daemon"
 
@@ -50,7 +59,11 @@ defmodule Troupe.Client.Daemon do
   def events(sid) do
     branches =
       Enum.flat_map(branches(sid), fn branch ->
-        Enum.map(Journal.all(branch.session_id), fn event ->
+        branch.session_id
+        |> Journal.all()
+        # This journal's own `branch_spawned` opened the window, with the right name.
+        |> Enum.reject(&(&1.type == :branch_spawned))
+        |> Enum.map(fn event ->
           %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, branch.window)}
         end)
       end)
@@ -248,8 +261,48 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def mcp_status(_sid), do: []
 
+  # `/memory` shows the brief, `/memory refresh` has the librarian rewrite it as a branch
+  # of this session, `/memory forget` deletes it.
   @impl true
-  def memory(_sid, _command), do: {:error, "the project brief arrives with phase 3"}
+  def memory(sid, "") do
+    case Link.call("memory.get", %{workspace: workspace(sid)}) do
+      {:ok, %{"status" => "absent"}} ->
+        {:ok, "no project brief yet; /memory refresh writes one"}
+
+      {:ok, %{"status" => "disabled"}} ->
+        {:ok, "the project brief is off (memory: false in the workspace config)"}
+
+      {:ok, %{"status" => status} = brief} ->
+        built = if brief["built_at"], do: String.slice(brief["built_at"], 0, 10), else: "never"
+        sections = Enum.join(brief["sections"] || [], ", ")
+        {:ok, "project brief (#{status}, built #{built}): #{sections}"}
+
+      {:ok, other} ->
+        {:error, "unexpected memory.get answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
+  def memory(sid, "refresh") do
+    case dispatch(sid, "librarian", @refresh_prompt) do
+      {:ok, window} -> {:ok, "refreshing the project brief in #{window}"}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def memory(sid, "forget") do
+    params = %{workspace: workspace(sid), command_id: Troupe.Remote.RPC.command_id()}
+
+    case Link.call("memory.forget", params) do
+      {:ok, _} -> {:ok, "project brief forgotten; /memory refresh writes a new one"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  def memory(_sid, other),
+    do: {:error, "unknown /memory #{other}; use /memory, /memory refresh or /memory forget"}
 
   @impl true
   def fs_list(sid, path) do
@@ -363,11 +416,15 @@ defmodule Troupe.Client.Daemon do
 
     case Link.call("session.create", body) do
       {:ok, %{"session_id" => sid} = result} ->
-        attach(origin, sid, %{
-          workspace: result["workspace"] || workspace,
-          profile: params[:profile],
-          title: params[:prompt]
-        })
+        with {:ok, ^sid} <-
+               attach(origin, sid, %{
+                 workspace: result["workspace"] || workspace,
+                 profile: params[:profile],
+                 title: params[:prompt]
+               }) do
+          refresh_brief_if_asked(sid, result["workspace"] || workspace)
+          {:ok, sid}
+        end
 
       {:ok, other} ->
         {:error, "unexpected session.create answer: #{inspect(other)}"}
@@ -564,6 +621,10 @@ defmodule Troupe.Client.Daemon do
   defp branch_profile(sid, "worktree"),
     do: {:ok, Config.load(workspace(sid)).default_agent, "always", :agent}
 
+  # The librarian writes one file, the brief at the repository's root; it works in the
+  # checkout itself rather than a worktree it would have to be merged out of.
+  defp branch_profile(_sid, "librarian"), do: {:ok, "librarian", "never", :agent}
+
   # A workflow's subagents write, so it always gets a worktree of its own; the daemon
   # renders the plan (troupe-remote Decision 648).
   defp branch_profile(_sid, "workflow"), do: {:ok, "workflow", "always", :workflow}
@@ -696,6 +757,27 @@ defmodule Troupe.Client.Daemon do
     end
 
     :ok
+  end
+
+  # A new session on a repository with no brief, or a stale one, starts the librarian
+  # as a branch when the workspace config asks for it (`memory_auto_refresh`, the
+  # default). Off in tests and for anyone who would rather run `/memory refresh`.
+  defp refresh_brief_if_asked(sid, workspace) do
+    config = Config.load(workspace)
+
+    if config.memory != false and config.memory_auto_refresh != false do
+      case Link.call("memory.get", %{workspace: workspace}) do
+        {:ok, %{"status" => status}} when status in ["absent", "stale"] ->
+          prompt = if status == "absent", do: @first_prompt, else: @refresh_prompt
+          _ = dispatch(sid, "librarian", prompt)
+          :ok
+
+        _ ->
+          :ok
+      end
+    else
+      :ok
+    end
   end
 
   defp close_branch(sid, branch) do
