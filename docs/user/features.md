@@ -227,6 +227,13 @@ Sources:
 
 ## Approvals
 
+**Questions.** An agent that cannot proceed without a decision calls `ask_user`; a
+`question_asked` event carries the question and up to nine `options` (`label`,
+`description`, `multiple`), the client answers with `question.answer` (chosen labels
+joined by `", "`, or free text), and the text is the tool's result. Durable like an
+approval: a question survives dormancy and is not asked twice after a restart. In the
+unattended mode (`approvals: deny`) the agent is told at once that nobody is there.
+
 Tools whose permission is `ask` stop and wait for a person before they run. By
 default that is `write_file`, `edit_file`, `shell`, `publish`, `import`, every
 personal-connector tool, and MCP tools unless the bundle marks a server `auto`.
@@ -429,8 +436,42 @@ working in a new worktree on troupe/k3m9x2ab: /home/me/project-k3m9x2ab
 Protocol: `session.create` takes `worktree`; `worktree.list` returns `{path, branch,
 session_id, dirty}` for a workspace; `worktree.remove` `{path, force}` removes one and
 **refuses a dirty tree** (uncommitted changes or untracked files) with `conflict`
-unless `force` is true. There is no CLI command for listing or removing worktrees;
-use `git worktree list` and `git worktree remove` or a script.
+unless `force` is true. `worktree.merge` `{workspace, path, message}` commits what the
+agent left in the worktree, merges its branch into the checkout with a merge commit and
+removes the worktree and branch — or answers `conflict` and leaves everything as it was
+when git cannot merge it. `worktree.discard` `{workspace, path}` removes the worktree
+and its branch, work and all. Both refuse while the session in the worktree is
+mid-turn. There is no CLI command for any of this; a client (the TUI's `/merge` and
+`/discard`) or a script speaks the protocol.
+
+**Workflows.** `session.create` with `workflow: <name>` runs the prompt as a named,
+multi-step workflow: the step list at `.troupe/workflows/<name>.json` (or the built-in
+`default` pipeline: understand, plan, implement, test, document, verify) is rendered
+around the prompt as the plan the `workflow` agent starts from. That agent is an
+orchestrator — it cannot write, edit or run commands — and delegates each step to the
+subagent that owns it: `explore` reads, `implementer` changes, `reviewer` verifies.
+`workflows.list {workspace}` names the workflows a workspace has. Run one in a worktree
+of its own (`worktree: "always"`), and merge or discard it afterwards.
+
+**Project brief.** `.troupe/memory.md` in the repository's main checkout is what
+earlier agents learned: `## Overview`, `## Layout`, `## Commands`, `## Conventions`, and
+`## Notes` (dated one-liners). Every agent's system prompt opens with it, after the
+profile's own words. Agents write it with the `remember` tool — `section: "note"`
+appends a line, the other sections are rewritten whole — and the `librarian` agent
+(primary, cheap model, read-only plus `remember`) surveys a repository once and writes
+the four curated sections. `memory.get {workspace}` reports `status` (`absent`, `stale`,
+`fresh`, `disabled`), the path, when it was built, its section titles and its text;
+`memory.forget` deletes it. Config: `memory: false` turns it off, `memory_max_chars`
+(6000) caps the prompt block, `memory_max_age_days` (7) is when it counts as stale,
+`memory_auto_refresh` (true) asks a client to start the librarian on a missing or stale
+brief. Hand edits survive: unknown headings and text before the first heading round-trip.
+
+**Branches.** A client may create a session as a branch of another: `session.create`
+with `parent` (the first session's id). The daemon records the link, lists it
+(`session.list` with `filter.parent`), and gives the parent's agent a `read_branch`
+tool that lists the branches and reads a finished one's prompt, summary and task list.
+A branch is otherwise an ordinary session — in its own worktree when the workspace is
+busy, which is what makes two agents on one repository safe.
 
 Worktrees are a local-daemon feature; pods report `worktrees: false`.
 
@@ -527,6 +568,38 @@ Sources:
 - ../../../troupe-gui/docs/AUDIT.md §1.2, §1.3
 
 ## Large outputs
+
+**Read roots.** `read_roots:` in the workspace or machine config is a list of
+directories outside the workspace that `read_file`, `list_files`, `grep` and `glob` may
+reach — a dependency checkout, the repository a worktree's symlink points at. Judged by
+where a path really lands, symlinks followed. Writes never leave the workspace.
+
+## Local MCP servers
+
+A workspace (or the machine) may name MCP servers of its own in `config.yaml`:
+
+```yaml
+mcp:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  wiki:
+    url: https://wiki.example/mcp
+    permission: auto
+```
+
+A `command` server runs on its standard streams for as long as the session lives, under
+the reaper; a `url` server is called over HTTP. Their tools are `mcp.<server>.<tool>`,
+`ask` unless the entry says `permission: auto`, and go through the same gate as every
+other tool. `mcp.status {session_id}` lists them with `state`, tool names and any error;
+the TUI's `/mcp` page reads it.
+
+**Kept tool output.** When `shell` or `grep` output is longer than `tool_output_limit`
+(60 000 bytes), the agent sees the tail (`shell`) or the head (`grep`) and a marker
+naming a `read_output(id: "sha256:…", offset: N, limit: 200)` call; the full text is
+kept as a blob of the session, so line 900 of a test run is read back rather than the
+suite run again. `read_file` output is not kept — reading again with an offset is the
+same bytes.
 
 A tool result larger than 16 KiB is not put in the event; the log carries `{"blob":
 "sha256:…", "preview": …}` with the first 4 KiB as preview, and the bytes are stored

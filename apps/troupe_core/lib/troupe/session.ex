@@ -60,11 +60,18 @@ defmodule Troupe.Session do
          auto_approve: config.auto_approve,
          mode: config.approvals,
          managed_rules_only: config.managed_permission_rules_only},
+        # The other half of the gate: what the agent asks a person, and the answers.
+        # Unattended in the same mode as approvals, since the same nobody is there.
+        {Troupe.Session.Questions, session_id: session_id, mode: config.approvals},
         # Above the agent on purpose: a client's registration must survive an agent
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
         {Troupe.Session.ClientTools,
-         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only}
+         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only},
+        # The workspace's own MCP servers (Decision 654), started with the session and
+        # gone with it. Above the agent, since their tools are in its list.
+        {Troupe.Session.MCP,
+         session_id: session_id, workspace: workspace.root_real, servers: config.mcp}
       ] ++
         fake_child(session_id, config, opts) ++
         [
@@ -178,7 +185,10 @@ defmodule Troupe.Session do
          origin: Keyword.get(opts, :origin),
          # A pod is told whose session this is; a daemon is not, and works it out from
          # whoever has linked their identity to it.
-         owner: Keyword.get(opts, :owner)
+         owner: Keyword.get(opts, :owner),
+         # The session this one branches from, when a client made it as a branch of
+         # another (Decision 646). Recorded, listed, filtered on; nothing else.
+         parent: Keyword.get(opts, :parent)
        ]}
     end
   end

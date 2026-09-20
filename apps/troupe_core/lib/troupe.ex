@@ -16,7 +16,7 @@ defmodule Troupe do
   alias Troupe.Agent.Server, as: Agent
   alias Troupe.{Events, Mounts, Registry, Session, Sessions}
   alias Troupe.Protocol.Origin
-  alias Troupe.Session.{Approvals, Blobs, Log, Watcher}
+  alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
   alias Troupe.Sessions.Index
 
   @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
@@ -26,7 +26,8 @@ defmodule Troupe do
 
   Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
   `:session_id`, `:config_overrides`, `:definitions`, `:fake`, `:mounts`, `:bundle`
-  (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`.
+  (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`,
+  `:parent` (the session id this one is a branch of).
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
@@ -41,7 +42,11 @@ defmodule Troupe do
       workspace = Keyword.fetch!(session_opts, :workspace)
       profile = Keyword.fetch!(session_opts, :profile)
 
-      Index.register(session_id, pid, %{workspace: workspace.root_real, profile: profile})
+      Index.register(session_id, pid, %{
+        workspace: workspace.root_real,
+        profile: profile,
+        parent: Keyword.get(session_opts, :parent)
+      })
 
       # The event that says what this session is, so a listing can be rebuilt from the
       # log alone — which is what makes a dormant session visible. Not the first event
@@ -177,6 +182,9 @@ defmodule Troupe do
     # daemon nobody has linked leaves the field out rather than writing a username that
     # means nothing anywhere else.
     |> put_present("owner", Keyword.get(session_opts, :owner) || linked_owner())
+    # The session this is a branch of. A client that groups a workspace's sessions into
+    # one view reads it back from the listing; the log is where it survives dormancy.
+    |> put_present("parent", Keyword.get(session_opts, :parent))
   end
 
   defp put_present(data, _key, nil), do: data
@@ -208,6 +216,12 @@ defmodule Troupe do
   @doc "Switch the root agent's primary profile, applied at the next turn boundary."
   @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
   def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
+
+  @doc "Answer a question an agent asked with `ask_user`. First answer wins."
+  @spec answer(String.t(), String.t(), String.t(), Troupe.Protocol.Event.Actor.t() | nil) :: :ok
+  def answer(session_id, call_id, text, actor \\ nil) do
+    Questions.answer(session_id, call_id, text, actor)
+  end
 
   @doc "Answer an outstanding approval. First response wins."
   @spec approve(

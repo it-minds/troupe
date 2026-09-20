@@ -1,0 +1,26 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/worktree.merge.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "message": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "path",
+    "workspace"
+  ],
+  "title": "worktree.merge",
+  "type": "object"
+}

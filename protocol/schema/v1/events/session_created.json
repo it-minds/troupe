@@ -18,6 +18,9 @@
     "owner": {
       "type": "string"
     },
+    "parent": {
+      "type": "string"
+    },
     "profile": {
       "type": "string"
     },

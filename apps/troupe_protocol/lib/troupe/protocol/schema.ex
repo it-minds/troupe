@@ -46,7 +46,9 @@ defmodule Troupe.Protocol.Schema do
         # restriction, which is what a local session and an unnarrowed grant both mean.
         "owner" => optional(:string),
         "entitlements" => optional(:object),
-        "origin" => optional(:object)
+        "origin" => optional(:object),
+        # The session this one was made as a branch of, when a client said so.
+        "parent" => optional(:string)
       },
       # The child's first event, and the only place the lineage is written down in the log.
       # `parent` carries the id, the seq forked at and the parent's head hash there, so a
@@ -157,6 +159,18 @@ defmodule Troupe.Protocol.Schema do
         "args" => required(:object),
         "agent_path" => required({:array, :string}),
         "decision" => required(:string)
+      },
+      # `ask_user` (Decision 651): the agent hands a decision to a person and waits.
+      "question_asked" => %{
+        "call_id" => required(:string),
+        "agent_path" => required({:array, :string}),
+        "question" => required(:string),
+        "options" => required(:array),
+        "multiple" => required(:boolean)
+      },
+      "question_answered" => %{
+        "call_id" => required(:string),
+        "text" => required(:string)
       },
       "approval_resolved" => %{
         "call_id" => required(:string),
@@ -316,11 +330,19 @@ defmodule Troupe.Protocol.Schema do
         "profile" => optional(:string),
         "prompt" => optional(:string),
         "worktree" => optional(:string),
-        "config" => optional(:object)
+        "config" => optional(:object),
+        "parent" => optional(:string),
+        "workflow" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),
         "session_id" => required(:string)
+      },
+      "question.answer" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "call_id" => required(:string),
+        "text" => required(:string)
       },
       "session.pin" => %{"command_id" => required(:string), "session_id" => required(:string)},
       "session.unpin" => %{"command_id" => required(:string), "session_id" => required(:string)},
@@ -377,11 +399,26 @@ defmodule Troupe.Protocol.Schema do
       "fleet.get" => %{},
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
+      "workflows.list" => %{"workspace" => required(:string)},
+      "memory.get" => %{"workspace" => required(:string)},
+      "mcp.status" => %{"session_id" => required(:string)},
+      "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
       "worktree.list" => %{"workspace" => optional(:string)},
       "worktree.remove" => %{
         "command_id" => required(:string),
         "path" => required(:string),
         "force" => optional(:boolean)
+      },
+      "worktree.merge" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "path" => required(:string),
+        "message" => optional(:string)
+      },
+      "worktree.discard" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "path" => required(:string)
       },
       "watch.set" => %{
         "command_id" => required(:string),

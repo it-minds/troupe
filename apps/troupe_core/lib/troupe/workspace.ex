@@ -108,6 +108,56 @@ defmodule Troupe.Workspace do
     end
   end
 
+  @doc """
+  `resolve/3` for a read, widened by the configured read roots (Decision 653).
+
+  A path outside the workspace is accepted when the place it really lands — symlinks
+  followed — is inside one of `read_roots`. The audit that motivated this found a
+  quarter of all read-only shell calls were the model routing around a refusal
+  (`cd deps/x && sed -n ...`) because the native read tools could not reach outside the
+  root. Only the read path widens: writes still go through `resolve/3`.
+  """
+  @spec resolve_readable(t(), String.t(), [Path.t()]) ::
+          {:ok, Path.t()} | {:error, {:outside_workspace, String.t()} | {:read_only_mount, String.t()}}
+  def resolve_readable(%__MODULE__{} = ws, path, read_roots) when is_binary(path) and is_list(read_roots) do
+    case resolve(ws, path, :read) do
+      {:ok, real} ->
+        {:ok, real}
+
+      {:error, {:outside_workspace, _}} = outside ->
+        candidate = if absolute?(path), do: Path.expand(path), else: Path.expand(path, ws.root_real)
+
+        with {:ok, real} <- real_path(candidate),
+             true <- Enum.any?(read_roots, &under?(real, &1)) do
+          {:ok, real}
+        else
+          _ -> outside
+        end
+
+      {:error, _} = error ->
+        error
+    end
+  end
+
+  # Judged by where both really are, so a root given as a symlink and a path that goes
+  # through one agree.
+  defp under?(real, read_root) do
+    case real_path(Path.expand(read_root)) do
+      {:ok, root_real} ->
+        key = compare_key(real)
+        root_key = compare_key(root_real)
+        key == root_key or String.starts_with?(key, root_key <> "/")
+
+      {:error, _} ->
+        false
+    end
+  end
+
+  @doc "The read roots a tool context allows, from its config."
+  @spec read_roots(map()) :: [Path.t()]
+  def read_roots(%{config: %{read_roots: roots}}) when is_list(roots), do: roots
+  def read_roots(_ctx), do: []
+
   @doc "The path as the model should see it: relative to the workspace root."
   @spec relative(t(), Path.t()) :: String.t()
   def relative(%__MODULE__{mounts: nil} = ws, path) do

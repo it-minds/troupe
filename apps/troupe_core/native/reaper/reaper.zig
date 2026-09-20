@@ -50,6 +50,11 @@ pub fn main(init: std.process.Init) !u8 {
         return 2;
     }
 
+    // `TROUPE_REAPER_STDIO`: the command speaks JSON-RPC over its standard streams (an
+    // MCP server), so our stdin is forwarded to it rather than being the death signal
+    // alone. Unix only; Windows runs such a command outside the reaper.
+    if (!is_windows and c.getenv("TROUPE_REAPER_STDIO") != null) return runPosixStdio(argv[1..]);
+
     return if (is_windows) runWindows() else runPosix(argv[1..]);
 }
 
@@ -103,6 +108,8 @@ const c = struct {
     extern "c" fn setsid() c_int;
     extern "c" fn _exit(code: c_int) noreturn;
     extern "c" fn nanosleep(req: *const timespec, rem: ?*timespec) c_int;
+    extern "c" fn pipe(fds: [*]c_int) c_int;
+    extern "c" fn getenv(name: [*:0]const u8) ?[*:0]u8;
 };
 
 /// Written by one thread and read by the other; atomics keep that honest.
@@ -199,6 +206,95 @@ fn posixWatchdog() void {
 
     // The main thread is blocked in waitpid; give it room to reap and return
     // normally, then force the exit so we can never outlive our own owner.
+    sleepMs(500);
+    c._exit(killed_exit_code);
+}
+
+// ---------------------------------------------------------------- stdio mode ----
+//
+// The command is an MCP server: it reads JSON-RPC lines on its stdin and answers on
+// its stdout, so the owner's bytes have to reach it. Our stdin is forwarded through a
+// pipe by a pump thread; stdout and stderr are inherited as in the plain mode, so the
+// owner reads the answers as usual. EOF on our stdin still means the owner is gone:
+// the pipe is closed — which is how an MCP server is told to exit — and the tree is
+// taken down after the grace if it has not left on its own.
+
+var stdio_pipe_write = std.atomic.Value(c_int).init(-1);
+
+fn runPosixStdio(args: []const [:0]const u8) u8 {
+    var argv_buf: [512]?[*:0]const u8 = undefined;
+    if (args.len + 1 > argv_buf.len) {
+        note("reaper: too many arguments\n");
+        return 2;
+    }
+    for (args, 0..) |arg, i| argv_buf[i] = arg.ptr;
+    argv_buf[args.len] = null;
+
+    var fds: [2]c_int = undefined;
+    if (c.pipe(&fds) != 0) {
+        note("reaper: cannot open a pipe\n");
+        return 2;
+    }
+
+    const pid = c.fork();
+    if (pid < 0) {
+        note("reaper: fork failed\n");
+        return 2;
+    }
+
+    if (pid == 0) {
+        _ = c.setsid();
+        _ = c.dup2(fds[0], stdin_fd);
+        _ = c.close(fds[0]);
+        _ = c.close(fds[1]);
+        const argv_z: [*:null]const ?[*:0]const u8 = @ptrCast(&argv_buf);
+        _ = c.execvp(argv_buf[0].?, argv_z);
+        note("reaper: exec failed\n");
+        c._exit(127);
+    }
+
+    _ = c.close(fds[0]);
+    stdio_pipe_write.store(fds[1], .release);
+    posix_pgid.store(pid, .release);
+
+    const pump = std.Thread.spawn(.{}, posixStdioPump, .{}) catch {
+        note("reaper: cannot spawn pump\n");
+        killPosixTree();
+        return 2;
+    };
+    pump.detach();
+
+    const status = waitPosix(pid);
+    posix_child_done.store(true, .release);
+    killGroup(sigterm);
+
+    return if (posix_killed.load(.acquire)) killed_exit_code else status;
+}
+
+fn posixStdioPump() void {
+    var buf: [4096]u8 = undefined;
+    const out = stdio_pipe_write.load(.acquire);
+
+    while (true) {
+        const n = c.read(stdin_fd, &buf, buf.len);
+        if (n <= 0) break; // EOF: the owner is gone.
+        const len: usize = @intCast(n);
+        var off: usize = 0;
+        while (off < len) {
+            const w = c.write(out, buf[off..].ptr, len - off);
+            if (w <= 0) break;
+            off += @intCast(w);
+        }
+    }
+
+    // Closing the server's stdin is its cue to exit; give it the grace to do so.
+    _ = c.close(out);
+    var waited: u64 = 0;
+    while (waited < grace_ms and !posix_child_done.load(.acquire)) : (waited += 50) sleepMs(50);
+    if (posix_child_done.load(.acquire)) return;
+
+    posix_killed.store(true, .release);
+    killPosixTree();
     sleepMs(500);
     c._exit(killed_exit_code);
 }

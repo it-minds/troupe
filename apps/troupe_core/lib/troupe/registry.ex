@@ -26,12 +26,24 @@ defmodule Troupe.Registry do
   @spec approvals(String.t()) :: GenServer.name()
   def approvals(session_id), do: via({:approvals, session_id})
 
+  @doc "Questions an agent asked a person, waiting for their answer (Decision 651)."
+  @spec questions(String.t()) :: GenServer.name()
+  def questions(session_id), do: via({:questions, session_id})
+
   @spec watcher(String.t()) :: GenServer.name()
   def watcher(session_id), do: via({:watcher, session_id})
 
   @doc "The process that turns filesystem changes into durable `fs_changed` events."
   @spec files(String.t()) :: GenServer.name()
   def files(session_id), do: via({:files, session_id})
+
+  @doc "The workspace's own MCP servers for a session (Decision 654)."
+  @spec session_mcp(String.t()) :: GenServer.name()
+  def session_mcp(session_id), do: via({:session_mcp, session_id})
+
+  @doc "One local MCP server on its standard streams."
+  @spec mcp_server(String.t(), String.t()) :: GenServer.name()
+  def mcp_server(session_id, name), do: via({:mcp_server, session_id, name})
 
   @doc "Tools an attached client hosts for this session, and who may invoke them."
   @spec client_tools(String.t()) :: GenServer.name()

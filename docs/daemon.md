@@ -143,3 +143,19 @@ session may be created with. And a JSON fake script with per-agent `routes` (Dec
 that speaks only the protocol can drive a deterministic multi-agent session by putting
 `provider: fake` and `fake_script:` in the workspace's `.troupe/config.yaml`. The
 daemon still refuses `provider` from a client; the machine chooses it.
+
+## Phase 3 — what the harness lacked, feature by feature
+
+Each row of the plan's phase 3 table is its own change here, behind a capability where a
+worker may not have it, and the TUI takes it up through the protocol in a PR of its own.
+
+| row | here | proof |
+|---|---|---|
+| branches | a branch is a session with `parent` (Decision 646): `session.create` records it, `session.list` filters on it, `read_branch` gives the parent's agent a finished branch's prompt, summary and task list; `branches: true` at `initialize` | `branches_test.exs`, `read_branch_test.exs` |
+| worktrees per branch | `worktree.merge` commits, merges with a merge commit, removes; a merge git cannot complete is aborted and answered `conflict`; `worktree.discard` removes tree and branch (Decision 647) | `branches_test.exs` |
+| project memory | `Troupe.Memory` and `Troupe.Session.Memory` (the brief, one per repository, read into every system prompt), the `remember` tool, the `librarian` definition, `memory.get` / `memory.forget` (Decision 649) | `memory_test.exs`, `remember_test.exs`, gateway `memory_test.exs` |
+| kept tool output | a cut `shell` or `grep` result keeps its full text as a blob of the session and the marker names the `read_output` call that pages it (Decision 650) | `read_output_test.exs` |
+| `ask_user`, `web_fetch`, `git_read`, `glob` | `Troupe.Session.Questions` with `question_asked` / `question_answered` and `question.answer` (Decision 651); the three read-only tools through the workspace, the reaper and kept output (Decision 652) | `ask_user_test.exs`, `web_fetch_test.exs`, `git_read_test.exs`, `glob_test.exs` |
+| `read_roots` | `Troupe.Workspace.resolve_readable/3` widens `read_file`, `list_files`, `grep` and `glob` to the configured roots; writes never widen (Decision 653) | `read_roots_test.exs` |
+| local MCP servers | `Troupe.Session.MCP` + `Troupe.MCP.Stdio` from `mcp:` in the workspace config; reaper stdio mode; `mcp.status` (Decision 654) | `mcp_local_test.exs` |
+| workflows | `Troupe.Workflow` (steps from `.troupe/workflows/<name>.json` or the default pipeline, rendered into the orchestrator's plan); the `workflow`, `implementer` and `reviewer` definitions; `session.create` with `workflow`, `workflows.list` (Decision 648) | `workflow_test.exs`, `workflows_test.exs` |

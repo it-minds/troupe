@@ -51,6 +51,41 @@ defmodule Troupe.Reaper do
   end
 
   @doc """
+  Start a command that speaks over its standard streams — an MCP server — under reaper's
+  stdio mode (Decision 654): what the owner writes to the port reaches the command's
+  stdin, its stdout comes back line by line, and its stderr stays out of the stream. The
+  owner closing the port closes the command's stdin, which is how such a server is told
+  to exit, and reaper takes the tree down after the grace if it has not.
+
+  Windows has no stdio mode in reaper yet: there the command is a plain port, and it
+  exits when its stdin closes, which is what the MCP contract asks of it.
+  """
+  @spec open_stdio(Path.t(), [String.t()], keyword()) :: {:ok, port()} | {:error, term()}
+  def open_stdio(cwd, [exe | _] = argv, opts \\ []) do
+    env = env(Keyword.update(opts, :env, [{"TROUPE_REAPER_STDIO", "1"}], &[{"TROUPE_REAPER_STDIO", "1"} | &1]))
+
+    common = [
+      :binary,
+      :exit_status,
+      :hide,
+      {:cd, String.to_charlist(cwd)},
+      {:env, env},
+      {:line, 65_536}
+    ]
+
+    case {:os.type(), path()} do
+      {{:win32, _}, _} ->
+        {:ok, Port.open({:spawn_executable, String.to_charlist(exe)}, [{:args, tl(argv)} | common])}
+
+      {_, {:ok, reaper}} ->
+        {:ok, Port.open({:spawn_executable, String.to_charlist(reaper)}, [{:args, argv} | common])}
+
+      {_, {:error, reason}} ->
+        {:error, reason}
+    end
+  end
+
+  @doc """
   Run a command to completion under reaper and return its combined output.
 
   The `System.cmd/3` of this codebase. Everything that starts an OS process goes

@@ -9,10 +9,16 @@
     "config": {
       "type": "object"
     },
+    "parent": {
+      "type": "string"
+    },
     "profile": {
       "type": "string"
     },
     "prompt": {
+      "type": "string"
+    },
+    "workflow": {
       "type": "string"
     },
     "workspace": {

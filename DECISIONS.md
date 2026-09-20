@@ -4362,3 +4362,195 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      for that workspace — built-ins, the machine's `agents/`, the project's
      `.troupe/agents/` — with a `source` for each. `observe` scope: reading the menu steers
      nothing.
+
+646. **A branch is a session with a `parent`, and nothing more.** The TUI's harness let one
+     session hold many root agents, each a window — `/code fix it` beside `/plan the rest`
+     in one transcript. Martin chose the other shape for the daemon (brief, question 7.3,
+     answer b): a branch is a session of its own, which the core already handled — the
+     second session in a busy workspace gets its own worktree — and the client groups them.
+     What the core lacked was any record of the grouping. So `session.create` takes
+     `parent`, the daemon refuses an id it does not know, `session_created` carries it,
+     the index folds it back from the log for a dormant session, and `session.list`
+     filters on it. Nothing about how the session runs changes: no shared log, no window
+     ledger, no locks between branches, because their worktrees keep them apart. The one
+     thing an agent needs from a branch is what it finished with, so `read_branch` lists
+     a session's family — its branches, or its siblings and the session they came from —
+     and reads a finished one's prompt, summary and task list off its log, never its
+     transcript. It reads only the family: a branch is not a way to open any log on the
+     machine by guessing an id. `branches: true` at `initialize` says a server does all of
+     this; a worker says false, since a pod has one session and no worktrees.
+
+647. **A worktree ends in a merge or a discard, and a merge that cannot complete leaves no
+     trace.** `worktree.remove` was the only exit, and it threw away the branch's work
+     unless somebody merged it by hand first. `worktree.merge` does what the TUI's `/merge`
+     did: commit whatever the agent left uncommitted (as the harness, `troupe
+     <troupe@localhost>`, so a machine where nobody told git who they are still works),
+     merge the branch into the checkout it came from with a merge commit — `--no-ff`, so
+     the branch stays visible in history as one piece of work — and remove the worktree
+     and the branch. When git cannot merge it, the merge is aborted before anything is
+     answered: the checkout is exactly as it was, the worktree is exactly as it was, and
+     the client gets `conflict` with git's own words, because a half-applied merge is the
+     one outcome worse than a refused one. `worktree.discard` removes the tree and deletes
+     the branch, uncommitted work included, which is what the word means. Both refuse
+     with `conflict` while the session in that worktree is mid-turn; an idle or finished
+     agent is not consulted, and its next turn, if any, fails loudly rather than editing
+     files nobody will look at. Both are `admin`: they change the user's own checkout.
+
+648. **A workflow is a prompt, and the daemon renders it.** The TUI's harness had
+     `Troupe.Workflow`: a named step list from `.troupe/workflows/<name>.json` (or a
+     built-in six-step pipeline), rendered around the task into the plan an orchestrating
+     `workflow` agent starts from — an agent that cannot write, edit or run, and delegates
+     each step to `explore`, `implementer` or `reviewer`. Nothing in that needs a harness
+     of its own; it needs the step list to be read where the workspace is and the three
+     agents to exist. So the module moves here unchanged in shape, the three definitions
+     join the built-ins (`workflow` a primary the daemon offers in `agents.list`, the other
+     two subagents `delegate` can name), and `session.create` takes `workflow`: the daemon
+     loads the steps from the workspace the client named — not the worktree the session
+     may get — renders the plan, and starts the `workflow` profile on it. `workflows.list`
+     says which names a workspace has, so a client can complete them. Running a workflow
+     is therefore starting a session, which is what makes worktrees, approvals, budgets
+     and dormancy apply to it without a line written for the purpose; a client that wants
+     the result reviewable asks for `worktree: "always"` and ends it with `worktree.merge`
+     or `worktree.discard`. The default steps no longer mention `remember`: the project
+     brief is a later row of the plan, and a plan should not name a tool the agent has
+     not got.
+
+649. **The project brief is a file the daemon reads into every prompt, and `remember` is
+     the one tool that writes unasked.** The TUI's harness kept `.troupe/memory.md` — a
+     YAML-fronted markdown brief with `Overview`, `Layout`, `Commands`, `Conventions` and
+     dated `Notes` — behind a per-session GenServer, prepended it to every system prompt,
+     had a `remember` tool append to it and a `librarian` profile write it, and refreshed
+     it when a session started on a stale one. All of that moves here with two changes of
+     shape. There is no process: the brief is a file, a daemon has many sessions on one
+     repository, and a function over a path serialised by a VM-wide transaction on that
+     path (`:global.trans`) is what both want — re-read before merging, replaced by
+     rename, so two agents in one daemon cannot lose each other's note and a hand edit
+     between two calls survives. And the path is the repository's *main checkout*, found
+     through `git rev-parse --git-common-dir`: a branch in a worktree writes the same
+     brief as the session it branched from, and its note does not vanish with the
+     worktree. `remember` stays `:auto` although it writes, for the reason it always did:
+     the only file it can reach is the brief, the model cannot name a path, and a brief
+     nobody approves is a brief nobody writes. The brief is read at every prompt, not once
+     at start, so a note made in a session reaches the next agent to start in it. What a
+     client shows and does about it is on the wire: `memory.get` (status, path, built
+     time, section titles, text) and `memory.forget`; the auto-refresh is the client's
+     because starting a session is — `memory_auto_refresh` is the config key that asks
+     for it, and the client starts a `librarian` session when the brief is `absent` or
+     `stale`. Flat config keys, like every other setting: `memory`, `memory_auto_refresh`,
+     `memory_max_chars`, `memory_max_age_days`.
+
+650. **What a tool had to cut is kept, and the marker says how to read the rest.** The
+     core capped `shell` and `grep` output and threw the rest away: the marker said how
+     many bytes were dropped and told the model to narrow the request, which for a test
+     run means running the suite again to see line 900 of it. The TUI's harness kept the
+     full text under a session-local id and paged it back with `read_output`. That comes
+     here on top of what already existed — `Troupe.Session.Blobs`, the content-addressed
+     per-session store every oversized event payload goes into — rather than as a second
+     store: a cut result's full text becomes a blob, its `sha256:` digest is the id, and
+     the marker names the `read_output` call with the line to resume from (after the kept
+     head for `grep`, line 1 for `shell`, whose kept part is the tail). The id is a digest
+     the store validates, so a path is never built from anything the model typed, and the
+     blob lives and dies with the session like the rest of its history. `read_file` is
+     not kept: reading again with the next offset returns the same bytes, and a store for
+     that would be a copy of the file.
+
+651. **A SCIM endpoint that only accepted whole resources did not work with the provider
+     this deployment uses.** Entra sends a change as a `PatchOp`, including the one that
+     matters: a deprovision is `active` set false, not a `DELETE`. Both patch bodies
+     raised — `Map.fetch!` on a key a patch does not carry — so the plane answered 500,
+     the provider retried, and the person stayed able to sign in. The endpoint existed
+     and the case it exists for was the case it could not serve.
+
+652. **An unreadable filter is refused, never ignored.** `GET /Users?filter=…` is how a
+     provider asks *have I already created this person*, and it acts on the answer. An
+     endpoint that dropped a filter it could not parse and replied with everybody would
+     have the provider read that as "yes, this one" about a stranger and then patch them.
+     400 `invalidFilter` is the safe failure; a 200 is not. The same reasoning one rung
+     down: a `remove` on `members` with a bracket expression nobody here can read removes
+     nothing, because a path we do not understand is not a licence to empty a group.
+
+653. **An attribute with no column is ignored; a body that is not a patch is refused.**
+     The difference is whether the push is *about* something this plane keeps. A refused
+     push is retried rather than superseded and would hold up the operations beside it —
+     which are the ones carrying access. A body with no operations in it is not a patch
+     at all, and saying so costs nothing.
+
+654. **A patch never moves the subject.** It is what a token carries, every record here
+     is keyed on it, and a provider that changes it is describing a different person —
+     one a create can make. Renaming somebody in place would silently re-point their
+     budget, their audit trail and their principals' sponsorship at somebody else.
+
+655. **Which claim is the person is now a setting, because on Entra `sub` is the wrong
+     one.** Entra's `sub` is pairwise: a different string for the same person in every
+     app registration, and not an attribute SCIM can push, while provisioning sends the
+     directory object id. Keyed on `sub`, a plane running both holds the same person
+     twice — and *deactivating the row SCIM created leaves the row they actually sign in
+     with untouched*, which is this deployment's standing requirement inverted.
+     `subject_claim` defaults to `sub` and is `oid` for Entra with SCIM. A token missing
+     the configured claim is refused rather than quietly keyed on another, since falling
+     back is exactly how the second row gets created.
+
+656. **`DELETE` on a group empties it and keeps it.** A team may draw its members from
+     that group and the audit trail names it; dropping the row takes both. Emptying
+     removes the access, which is the part that has to happen now, and leaves an
+     administrator a team they can see is empty rather than a team that silently changed
+     shape.
+
+651. **A question is the other half of an approval, and it travels the same way.** The
+     TUI's harness had `ask_user`: the agent hands a decision to a person and its tool
+     call waits for the answer, with optional numbered options the client draws as a
+     menu. The core had only approvals — a yes or no about a call the agent had already
+     decided on — so the tool's wait needed a home. `Troupe.Session.Questions` is
+     `Approvals` with text instead of a decision: the tool task blocks in a call that
+     never times out on its own (the agent's tool timeout is the one that matters, as for
+     an approval), `question_asked` and `question_answered` are durable so a question
+     outlives dormancy and a re-run tool finds its answer rather than asking twice, and
+     the unattended mode (`approvals: :deny`) answers at once that nobody is there, so the
+     model decides or finishes instead of waiting for a person who is not coming. On the
+     wire it is one method, `question.answer {session_id, call_id, text}` (`control`,
+     activating like `approval.respond`); a client with options sends the chosen labels
+     joined by `", "`, and free text is always an answer.
+
+652. **Three read-only tools the audit asked for, in the core's shape.** `glob` (files by
+     name, newest first — what `find` was being used for), `git_read` (status, diff,
+     log, show, branch, with `ref` and `path` refused when they start with `-`) and
+     `web_fetch` (GET, HTML reduced to text, `:ask` because it is egress and a pod's
+     policy may deny it) come over from the TUI's harness. Each resolves paths through
+     `Troupe.Workspace`, runs processes through the reaper, and caps output through
+     `Troupe.Tools.Output` with the full text kept for `read_output` (Decision 650) — so
+     they gain the mounts, the sandbox and the kept output the core has without a line
+     written for the purpose. The built-in profiles list what suits them: the read-only
+     ones get `glob` and `git_read`, the planner and the orchestrator `web_fetch` and
+     `ask_user`, `build` and `general` everything as before.
+
+653. **The read tools may reach outside the workspace where the config says, and only
+     the read tools.** The TUI's harness had `read_roots`: directories a `read_file`,
+     `list_files`, `grep` or `glob` may resolve into although they are outside the
+     workspace — a dependency checkout, the main repository a worktree's `deps` symlink
+     points at. The audit that asked for it found a quarter of all read-only shell calls
+     were the model routing around a refusal with `cd deps/x && sed -n`. It comes here as
+     `Troupe.Workspace.resolve_readable/3`: `resolve/3` first, and on `outside_workspace`
+     the path's real location — symlinks followed, both sides — checked against each root.
+     Writes go through `resolve/3` as before and never widen, which is the whole of the
+     safety argument: a read root cannot make a file writable, only visible. It is a
+     config key (`read_roots`, a list of directories, expanded), so a pod whose bundle
+     never sets it has none, and the mounts a pod has are untouched by it.
+
+654. **A workspace may name its own MCP servers, and a stdio one runs under the reaper
+     like everything else.** The core's MCP was a pod's: servers from the bundle, one
+     HTTP POST per call, discovered pod-wide. A laptop has no bundle, and the TUI's
+     harness let `.troupe/config.yaml` say `mcp: {name: {command, args, env, cd}}` or
+     `{url}`. That comes here as `Troupe.Session.MCP`, started with the session: a
+     `command` server is a subprocess speaking newline-delimited JSON-RPC on its
+     standard streams (`Troupe.MCP.Stdio`) for as long as the session lives, a `url`
+     server is the same one-shot client the pod uses, discovered once. Both kinds' tools
+     are `mcp.<server>.<tool>` — the core's spelling, not the harness's `mcp__` — and go
+     through the same allowlist, permission map and approval gate as a built-in; `ask`
+     unless the server's entry says `permission: auto`. The stdio subprocess needed the
+     reaper to do something it could not: forward the owner's bytes. So reaper gained a
+     mode (`TROUPE_REAPER_STDIO`), Unix only: stdin is pumped into the child through a
+     pipe, stdout and stderr are inherited as before, and EOF on the owner's side closes
+     the child's stdin — which is how an MCP server is told to exit — with the tree taken
+     down after the grace if it has not. On Windows the server runs as a plain port and
+     is trusted to honour that same contract, which is written down here rather than
+     pretended otherwise. `mcp.status {session_id}` is what a client's `/mcp` page shows.

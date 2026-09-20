@@ -47,7 +47,7 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
-  alias Troupe.Session.{Approvals, Blobs, Log}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory}
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Watch.Trigger
 
@@ -867,9 +867,14 @@ defmodule Troupe.Agent.Server do
   defp request_extra(%State{fake: nil} = state), do: %{agent_path: state.agent_path}
   defp request_extra(%State{fake: fake} = state), do: %{fake: fake, agent_path: state.agent_path}
 
+  # The project brief comes right after the profile's own words and before the
+  # environment: what earlier agents learned about this repository is the first thing
+  # a new one should read, and it is read fresh at every prompt so a `remember` made in
+  # this session reaches the next agent to start.
   defp system_prompt(state, definition) do
     [
       definition.prompt,
+      Memory.prompt_section(state.workspace.root_real, state.config),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition),
       todo_section(state)
