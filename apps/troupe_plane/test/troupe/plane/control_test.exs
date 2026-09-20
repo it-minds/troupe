@@ -373,6 +373,32 @@ defmodule Troupe.Plane.ControlTest do
       assert session.last_seq == 12
     end
 
+    test "a pod that cannot put a tree back parks the session read-only, fenced on the epoch", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      {:ok, _} = Sessions.create(%{id: "s-1", owner_subject: "idp|alice", profile: "dev", epoch: 2})
+
+      # A pod still on epoch 1 has nothing to say about it.
+      assert {:error, %{"message" => "conflict"}} =
+               call(worker, "session.unrestorable", %{"session_id" => "s-1", "epoch" => 1, "reason" => "workspace_gone"})
+
+      assert Sessions.get("s-1").state == "active"
+
+      assert {:ok, _} =
+               call(worker, "session.unrestorable", %{
+                 "session_id" => "s-1",
+                 "reason" => "workspace_gone",
+                 "detail" => "/var/lib/troupe/erased"
+               })
+
+      session = Sessions.get("s-1")
+      assert session.state == "read_only"
+      assert is_nil(session.worker_id)
+
+      # Saying it again is not an error, and neither is saying it about nothing.
+      assert {:ok, _} = call(worker, "session.unrestorable", %{"session_id" => "s-1", "reason" => "workspace_gone"})
+      assert {:ok, _} = call(worker, "session.unrestorable", %{"session_id" => "s-none", "reason" => "workspace_gone"})
+    end
+
     test "a status report lands on the row, and one from a stale epoch does not", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
 

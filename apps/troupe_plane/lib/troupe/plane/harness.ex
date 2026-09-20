@@ -1499,6 +1499,21 @@ defmodule Troupe.Plane.Harness do
       {:ok, result} ->
         {:ok, result}
 
+      # The pod could not put the tree back and says why: the directory the session was
+      # recorded in is gone, and nothing restores it. Not a blip worth another try, so the
+      # session is parked read-only — history readable, nothing activates it again —
+      # rather than every open meeting the same failure (Decision 661).
+      {:error, %Error{data: %{"reason" => "workspace_gone"}} = reason} ->
+        Placement.release(session.profile, session.id)
+        Sessions.read_only(session.id)
+
+        {:error,
+         Error.new(:forbidden, %{
+           reason: "this session's workspace is gone; it is read-only now",
+           session_id: session.id,
+           detail: inspect(reason)
+         })}
+
       {:error, reason} ->
         Placement.release(session.profile, session.id)
         Sessions.dormant(session.id)

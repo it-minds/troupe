@@ -344,6 +344,25 @@ defmodule Troupe.Plane.Control.Connection do
     {:ok, %{"ok" => true}, state}
   end
 
+  # A pod that could not put a session's tree back and says the directory it was
+  # recorded in is gone. Not a storage blip worth another try: the session is parked
+  # read-only — history readable, nothing activates it again — rather than every client
+  # that opens it meeting the same failure (Decision 661). Fenced on the epoch like a
+  # status report, and the slot and the budget slice go back as they do at dormancy.
+  defp dispatch("session.unrestorable", params, state) do
+    session_id = params["session_id"]
+
+    case Sessions.unrestorable(session_id, params["epoch"]) do
+      {:ok, _count} ->
+        Placement.release(state.worker.profile, session_id)
+        release_budget(session_id)
+        {:ok, %{"ok" => true}, state}
+
+      {:error, :stale_epoch} ->
+        {:error, Error.new(:conflict, %{reason: "stale epoch"}), state}
+    end
+  end
+
   # A pod confirming it has carried an erasure out on its own disk.
   defp dispatch("session.erased", params, state) do
     Erasure.applied(params["session_id"], state.worker.pod_name)

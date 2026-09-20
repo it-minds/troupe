@@ -4727,3 +4727,28 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      carried over: the TUI's `a` lifted every agent in the session; here it is the agent
      and its subtree, because a branch is a session now (7.3 b) and there is no second
      root to lift.
+
+661. **A session whose tree a pod cannot put back is parked read-only, once, rather than
+     left `active` for every client that opens it to fail on.** Two `dev` sessions from
+     September 13 sat in the live plane's index as `active` with erased workspaces — a
+     leftover of the drain incident — and every activation died with `not_a_directory`:
+     shown as a raw error to whoever clicked, logged by the pod each time, and never
+     reported to the plane, whose row went on saying `active` with a `worker_id` for a
+     tree that did not exist. The plane's `restore_on_pod` treated every refused push the
+     same way, `dormant` and try again next time, which for a directory that is gone is a
+     loop. Now the worker names the class: `Restore.start` failing with
+     `{:not_a_directory, path}` answers the plane's `session.activate` push as `not_found`
+     with `data.reason: "workspace_gone"` (`Commands.activation_error/1`), and — because
+     the client-driven path, a pod activating lazily when somebody attaches, never
+     answers a push — the manager also reports it as a `session.unrestorable`
+     notification (`Manager.unrestorable_report/2`, only for that class; a stale epoch or
+     storage that did not answer is still the plane's to retry or refuse). On the plane
+     both roads end in `Sessions.unrestorable/2`: the row goes `read_only`, off its
+     worker, fenced on the epoch like a status report so a pod on an older epoch cannot
+     park a session a newer one serves, and saying it about a session already parked,
+     erased or unknown changes nothing. The slot and the budget slice go back as they do
+     at dormancy. `read_only` is the honest state — history readable, nothing activates
+     it again — and it already refuses activation with `forbidden` before any pod is
+     asked, so the failure happens once and then never. The two rows themselves are being
+     erased along with the rest of the test-era team (Martin, 2026-09-20), which is item
+     7.6 of the daemon plan closed without a hand edit to the database.

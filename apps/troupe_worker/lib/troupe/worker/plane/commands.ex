@@ -76,7 +76,7 @@ defmodule Troupe.Worker.Plane.Commands do
           {:error, Error.new(:conflict, %{reason: "stale epoch", stored: stored, offered: ours})}
 
         {:error, reason} ->
-          {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
+          {:error, activation_error(reason)}
       end
     end
   end
@@ -522,6 +522,17 @@ defmodule Troupe.Worker.Plane.Commands do
         end
     end
   end
+
+  # A tree that cannot be put back because the directory the session was recorded in is
+  # gone is named as such, so the plane can park the session rather than retry it
+  # (Decision 661). Anything else is the opaque failure it always was.
+  @doc false
+  @spec activation_error(term()) :: Error.t()
+  def activation_error({:not_a_directory, path}) do
+    Error.new(:not_found, %{reason: "workspace_gone", detail: to_string(path)})
+  end
+
+  def activation_error(reason), do: Error.new(:internal_error, %{reason: inspect(reason)})
 
   # The session's terms, as config overrides. Seconds on the wire because that is how
   # a person writes a schedule; milliseconds inside because that is what the budget

@@ -235,6 +235,38 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  Park a session whose tree a pod could not put back (Decision 661): read-only, off its
+  worker. History stays readable and nothing activates it again, which is better than
+  every client that opens it meeting the same failure.
+
+  Fenced on the epoch like `put_status/2` when the pod names one, so a pod still running
+  an older epoch cannot park a session a newer one is serving. Saying it about a session
+  already parked, or erased, or unknown, changes nothing and is not an error.
+  """
+  @spec unrestorable(String.t(), integer() | nil) :: {:ok, non_neg_integer()} | {:error, :stale_epoch}
+  def unrestorable(session_id, epoch) do
+    now = DateTime.utc_now()
+
+    query =
+      from(s in Session,
+        where: s.id == ^session_id and s.state in ["pending", "active", "dormant"]
+      )
+
+    query = if is_integer(epoch), do: from(s in query, where: s.epoch <= ^epoch), else: query
+
+    case Repo.update_all(query, set: [state: "read_only", worker_id: nil, updated_at: now]) do
+      {0, _} ->
+        case Repo.get(Session, session_id) do
+          %Session{state: state} when state in ["pending", "active", "dormant"] -> {:error, :stale_epoch}
+          _parked_erased_or_unknown -> {:ok, 0}
+        end
+
+      {count, _} ->
+        {:ok, count}
+    end
+  end
+
+  @doc """
   Overwrite a row from a rebuild.
 
   Unlike `put_fields/2`, a nil here *is* the answer: a rebuild reconstructs the whole
