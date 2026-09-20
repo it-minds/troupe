@@ -24,15 +24,17 @@ import { AdminAudit } from "./admin/Audit";
 import { AdminAutomation } from "./admin/Automation";
 import { AdminBundles } from "./admin/Bundles";
 import { AdminFleet } from "./admin/Fleet";
+import { AdminIdentity } from "./admin/Identity";
 import { AdminSettings } from "./admin/Settings";
 import { AdminTeams } from "./admin/Teams";
 
-export type AdminTab = "fleet" | "bundles" | "teams" | "automation" | "audit" | "settings";
+export type AdminTab = "fleet" | "bundles" | "teams" | "identity" | "automation" | "audit" | "settings";
 
 const TABS: Array<{ id: AdminTab; label: string; platformOnly?: boolean }> = [
   { id: "fleet", label: "Fleet" },
   { id: "bundles", label: "Bundles" },
   { id: "teams", label: "Teams" },
+  { id: "identity", label: "Identity" },
   { id: "automation", label: "Automation" },
   { id: "audit", label: "Audit" },
   { id: "settings", label: "Settings", platformOnly: true },
@@ -73,6 +75,7 @@ export function Admin({
         {tab === "fleet" && <AdminFleet api={api} platform={platform} overview={overview} />}
         {tab === "bundles" && <AdminBundles api={api} platform={platform} />}
         {tab === "teams" && <AdminTeams api={api} platform={platform} />}
+        {tab === "identity" && <AdminIdentity api={api} platform={platform} />}
         {tab === "automation" && <AdminAutomation auth={auth} api={api} onOpen={onOpen} />}
         {tab === "audit" && <AdminAudit api={api} />}
         {tab === "settings" && platform && <AdminSettings api={api} />}

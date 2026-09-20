@@ -335,3 +335,36 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     `close`. Two small ones beside it: a reasoning block's text was concatenated into the
     answer (`textOf` knew `thinking` and not the daemon's `reasoning`), and a row whose
     time `Date.parse` could not read said `NaN d ago`.
+
+42. **The Teams tab opens on a table, a team can be deleted from it, and the three team
+    calls that never worked now name the team the way the plane does.** The plane grew
+    `admin.team.disable.preview` and `admin.team.disable` (troupe-remote #31, its Decision
+    662) — the first step of moving sign-in, SCIM and team mapping into the admin panel —
+    and this is their rendering: one row per team with its groups, member count, profiles
+    and administrators, *Delete* on the row, and the dialog's sentence built from the
+    plane's preview rather than from a guess, so the numbers a person types a name against
+    are the ones the deed will match. Sessions are named as *kept* in that sentence,
+    because "delete" reads as taking everything and the sessions are the one thing it does
+    not take. Found on the way: `updateTeam`, `grantTeam` and `revokeTeam` sent `team` and
+    the changes flat, where every team method on the plane takes `name` and `attrs`; the
+    plane answered `invalid_params` for a missing `name`, and nothing in the fake
+    deployment exercised them. They send what the plane asks for now, and the admin client
+    has a test that pins the wire shape of every team call, which is what would have caught
+    it.
+
+43. **An Identity tab renders the plane's provider and SCIM cards, and the Settings tab
+    reads what the plane actually sends.** troupe-remote #32 and #33 put the SCIM
+    connector and the identity provider on the console's *Identity provider* screen; this
+    is the same two cards over the same eight methods — `admin.provider.get / check / put /
+    reset`, `admin.scim.get / rotate / delete / update` — with the console's rules kept: a
+    blank field is a field nobody changed, the save runs the check and a refused save shows
+    the checks rather than a no, the token is rendered once in the notice it arrived in and
+    in no state after the next change, and deleting it is confirmed by typing the base URL
+    because that is the plane's own rule. Found on the way, again: the Settings tab read a
+    bare array from `admin.settings.list`, which answers with `{groups, settings, ladder,
+    laddered}`, and rendered a `description` the plane has never sent (it sends `summary`
+    and `consequence`); `identityCheck` likewise expected a list where the plane answers
+    `{checks, ok, group, redirect_uri}`. Both are corrected, the types now say what is on
+    the wire, and the sign-in group is left out of the Settings tab for the reason the
+    console leaves it off Policy — its save is gated and a second, ungated one would be a
+    gate somebody walks around.
