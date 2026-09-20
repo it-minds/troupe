@@ -61,11 +61,22 @@ user property mapping whose `externalId` is that same UUID. They then agree by
 construction rather than by luck. A UUID also survives a rename, which an email or a
 username does not.
 
-> **Verify, do not assume.** Whether Authentik's *default* SCIM user mapping sets
-> `externalId`, and to what, is the one thing in this document nobody has read. Check it
-> before the first sync, and add a mapping of your own if it is absent or is something
-> else. A single push into a plane that has people on it, with the wrong answer here, is
-> how a directory of duplicates is made.
+**Read on this instance, 2026-09-20: neither shipped SCIM mapping sets `externalId`.**
+`authentik default SCIM Mapping: User` returns `userName`, `name`, `displayName`,
+`photos`, `locale`, `active` and `emails`, and nothing else. The group one returns
+`displayName` alone. Both are blueprint-managed, so neither may be edited.
+
+That has two consequences and one of them is not a mismatch but a failure:
+
+* **For a user**, the plane falls back to `userName`, Authentik's username. Keyed on
+  that while the provider sends a UUID as `sub`, every person is two rows.
+* **For a group**, the plane falls back to `Map.fetch!(resource, "id")` — and an
+  outgoing SCIM *create* carries no `id`, because `id` is what the far side assigns.
+  The push does not merely key the wrong thing; it raises, and the sync fails.
+
+So two mappings are added **beside** the shipped ones, each returning only
+`externalId`. Authentik merges what its mappings return, so the defaults keep providing
+everything else. The first dry run is what proves the merge.
 
 ### Groups are the same problem again
 
@@ -83,6 +94,11 @@ same reason.
 Blanks marked `<…>` are for the person creating them. Never edit anything named
 `default-*` or `authentik *`: those are blueprint-managed and the edit is reverted
 silently. Create new objects beside them instead.
+
+`.local/authentik/sso.ps1` does everything in this section, resolving each identifier by
+name at runtime and stopping if one has moved. Run it with no `-Apply` first: it prints
+the exact payloads and sends nothing. It is not in this repository, for the reason
+section 6 gives.
 
 ### 1a. A scope mapping that emits groups
 
@@ -158,9 +174,21 @@ authorize endpoint.
 
 The CLI and the TUI use the device code grant, and this plane refuses to start without a
 device authorization endpoint (`config/runtime.exs`). The endpoint is routed on this
-instance, confirmed by a `405` on a `GET` where an unrouted path answers `404`. Whether
-it is *usable* depends on a device code flow being set on the brand. Verify it before
-cutover, because nothing in the console exercises it.
+instance, confirmed by a `405` on a `GET` where an unrouted path answers `404`.
+
+**It will not complete, and that is the one thing here nothing can script.** Read on
+2026-09-20: no flow of any designation has `device` in its slug, and neither brand —
+`authentik-default` nor `auth.it-minds.dk` — has `flow_device_code` set. Until one
+exists and is bound to the brand, the console's browser sign-in works and `troupe login`
+does not.
+
+Two things make this a person's job rather than a script's. A flow is built out of
+stages, and creating stages is the sort of change that belongs to whoever owns this
+Authentik. And `flow_device_code` sits on the **brand**, so setting it is a change to
+every application on the instance, not only this one.
+
+The provider created below lists the device code grant anyway, so nothing has to be
+revisited once the flow exists.
 
 ---
 
@@ -301,18 +329,25 @@ Each of these is a thing somebody watched happen, not a thing that ought to work
 
 Stated plainly, because the rest of this document reads like it has been.
 
-- **No login has been performed against Authentik, and no sync has been run.** Everything
-  above is read from this plane's source and from Authentik's public endpoints.
-- **Authentik's default SCIM property mappings have not been read.** Section 0 depends on
-  what they set `externalId` to. This is the highest-value unknown here.
-- **Whether Authentik's SCIM client needs pagination or `/Schemas`** against a first sync
-  of this size.
-- **Whether the device code flow is usable**, as opposed to routed.
+- **No login has been performed against Authentik, and no sync has been run.** The
+  objects in section 1 have not been created. Everything here is read from this plane's
+  source and from Authentik's API.
+- **Whether Authentik merges what several property mappings return** is assumed by
+  section 0's two extra mappings, and the first dry run is what settles it. If it does
+  not merge, the mappings have to carry the shipped payload as well.
+- **Whether Authentik's SCIM client needs pagination or `/Schemas`.** This endpoint
+  offers neither. Eleven users is small enough that it may never come up.
 - **The GUI's own redirect URI** is not in section 1b. The desktop and browser clients
   sign in for themselves, and whichever redirect they use has to be registered too.
 - **How many real people exist on the live plane today**, which is what makes the fresh
   start cheap or expensive. The decision was taken on the understanding that it is
   test-era data.
+
+What *was* read on 2026-09-20, against `auth.it-minds.dk`: version 2026.8.2, 11 users,
+14 groups, 4 applications, 2 OAuth2 providers, 0 SCIM providers, nothing with the slug
+`troupe`, one certificate keypair, and the two SCIM mappings quoted in section 0. The
+read script and the two apply scripts are in `.local/authentik/`, which is not in this
+repository because they carry this deployment's identifiers.
 
 ---
 
