@@ -109,6 +109,8 @@ defmodule Troupe.Plane.Admin.Console do
     team_link: {:screen, :teams},
     team_unlink: {:screen, :teams},
     team_unlink_preview: {:screen, :teams},
+    team_disable: {:screen, :teams},
+    team_disable_preview: {:screen, :teams},
     team_grant: {:screen, :teams},
     team_revoke: {:screen, :teams},
     team_admin_add: {:screen, :teams},

@@ -12,6 +12,11 @@ defmodule Troupe.Plane.Web.Live.Teams do
   them and its membership is the union, so linking a group is how a team gets people —
   and unlinking one is destructive enough to want the count first, which is the whole of
   the confirmation here.
+
+  The page opens on a table — one row per team, its groups, how many people, which
+  profiles — because that is the question somebody arriving here has, and the long card
+  under each row is the answer to the next one. *Delete* lives on the row and asks first,
+  with what would go and what would stay.
   """
 
   use Phoenix.LiveView, layout: false
@@ -24,7 +29,14 @@ defmodule Troupe.Plane.Web.Live.Teams do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(flash_message: nil, editing: nil, unlinking: nil, unlink_effect: nil)
+     |> assign(
+       flash_message: nil,
+       editing: nil,
+       unlinking: nil,
+       unlink_effect: nil,
+       disabling: nil,
+       disable_effect: nil
+     )
      |> load()}
   end
 
@@ -33,7 +45,15 @@ defmodule Troupe.Plane.Web.Live.Teams do
     do: {:noreply, assign(socket, editing: name)}
 
   def handle_event("cancel", _params, socket) do
-    {:noreply, assign(socket, editing: nil, unlinking: nil, unlink_effect: nil, confirming: nil)}
+    {:noreply,
+     assign(socket,
+       editing: nil,
+       unlinking: nil,
+       unlink_effect: nil,
+       disabling: nil,
+       disable_effect: nil,
+       confirming: nil
+     )}
   end
 
   def handle_event("save", %{"team" => name} = params, socket) do
@@ -112,6 +132,25 @@ defmodule Troupe.Plane.Web.Live.Teams do
       socket,
       Admin.team_unlink(socket.assigns.actor, name, group),
       "#{name} no longer draws its members from #{group}"
+    )
+  end
+
+  # What goes and what stays, before the row is gone. A team reads as a label and is not:
+  # it is what its triggers, principals and grants hang off, and the dialog lists them.
+  def handle_event("confirm-disable", %{"team" => name}, socket) do
+    case Admin.team_disable_preview(socket.assigns.actor, name) do
+      {:ok, effect} -> {:noreply, assign(socket, disabling: name, disable_effect: effect)}
+      {:error, error} -> {:noreply, assign(socket, flash_message: error.message)}
+    end
+  end
+
+  def handle_event("disable", %{"team" => name}, socket) do
+    socket = assign(socket, disabling: nil, disable_effect: nil)
+
+    respond(
+      socket,
+      Admin.team_disable(socket.assigns.actor, name),
+      "#{name} is no longer a team; its sessions are kept, with no team"
     )
   end
 
@@ -216,6 +255,28 @@ defmodule Troupe.Plane.Web.Live.Teams do
       "They lose #{effect.sessions_they_can_open} session(s) they can open now. " <>
       "The sessions stay with the team — only who may open them changes."
   end
+
+  # The sentence in front of the delete button. Sessions are named as *kept* rather than
+  # left out, because "delete" reads as taking everything and the one thing it does not
+  # take is the one people would miss.
+  defp disable_warning(nil), do: ""
+
+  defp disable_warning(effect) do
+    Enum.join(
+      [
+        "removes the team for #{effect.members} people",
+        "revokes #{plural(effect.grants, "profile")}",
+        "deletes #{plural(effect.principals, "service principal")}",
+        "deletes #{plural(effect.triggers, "trigger")}",
+        "unlinks #{plural(effect.groups, "group")}",
+        "#{effect.sessions_kept} session(s) are kept, with no team and read-only"
+      ],
+      "; "
+    ) <> "."
+  end
+
+  defp plural(items, noun) when length(items) == 1, do: "1 #{noun}"
+  defp plural(items, noun), do: "#{length(items)} #{noun}s"
 
   defp cap_note(nil), do: "no spend ceiling"
   defp cap_note(micros), do: "a ceiling of #{money(micros)}"
@@ -327,7 +388,69 @@ defmodule Troupe.Plane.Web.Live.Teams do
         </form>
       </section>
 
-      <div :for={team <- @teams} class="team">
+      <section class="panel">
+        <h2>Teams</h2>
+        <p class="hint">
+          Every team this plane has, with the groups it draws its members from and the
+          profiles it may run. <em>Edit</em> opens the form on the team's card below;
+          <em>delete</em> asks first, with what would go and what would stay.
+        </p>
+
+        <div class="scroller">
+          <table id="teams-table">
+            <thead>
+              <tr>
+                <th>team</th>
+                <th>groups</th>
+                <th>members</th>
+                <th>profiles</th>
+                <th>administrators</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr :for={team <- @teams} id={"team-row-#{team.name}"}>
+                <th scope="row"><a href={"#team-#{team.name}"}>{team.name}</a></th>
+                <td>
+                  {team.groups |> Enum.map(&(&1.display_name || &1.external_id)) |> Enum.join(", ")}
+                  <span :if={team.groups == []} class="none">none</span>
+                </td>
+                <td>{length(team.members)}</td>
+                <td>
+                  {team.grants |> Enum.map(& &1.profile) |> Enum.join(", ")}
+                  <span :if={team.grants == []} class="none">none</span>
+                </td>
+                <td>{length(team.admins)}</td>
+                <td>
+                  <button :if={@editing != team.name} phx-click="edit" phx-value-team={team.name}>
+                    edit
+                  </button>
+                  <button :if={@editing == team.name} phx-click="cancel">stop editing</button>
+                  <button
+                    :if={@actor.role == :platform_admin and @disabling != team.name}
+                    phx-click="confirm-disable"
+                    phx-value-team={team.name}
+                  >
+                    delete
+                  </button>
+                  <span :if={@disabling == team.name} class="confirm">
+                    {disable_warning(@disable_effect)}
+                    <button phx-click="disable" phx-value-team={team.name}>delete it</button>
+                    <button phx-click="cancel">no</button>
+                  </span>
+                </td>
+              </tr>
+              <tr :if={@teams == []}>
+                <td colspan="6" class="none">
+                  No team yet. Enable a group above, and it appears here.
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <div :for={team <- @teams} class="team" id={"team-#{team.name}"}>
         <h2>{team.name}</h2>
 
         <.title_block>
@@ -499,8 +622,6 @@ defmodule Troupe.Plane.Web.Live.Teams do
             <button type="button" phx-click="cancel">cancel</button>
           </div>
         </form>
-
-        <button :if={@editing != team.name} phx-click="edit" phx-value-team={team.name}>edit</button>
 
         <h3>Where each value comes from</h3>
         <p class="hint">
