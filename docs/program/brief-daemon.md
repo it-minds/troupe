@@ -226,6 +226,24 @@ Done when:
 5. `mix troupe.remote.smoke` against `https://troupe.itmindsinternal.dk` still passes
    end to end, including `TROUPE_REMOTE_APPROVE=1` (approval round trip).
 
+**Phase 2 landed 2026-09-20** across two branches: `troupe-remote` PR #14
+(`daemon/phase-2-harness-2`: a JSON fake script routes answers per agent and a workspace
+may name the script in its `.troupe/config.yaml`; `agents.list {workspace}` tells a
+client which agents it may create a session on; Decisions 644–645 and `docs/daemon.md`'s
+phase 2 note) and `troupe-tui` PR #10 (`daemon/phase-2-client`: the harness is gone from
+the TUI — `troupe_core`, `troupe_gateway`, `troupe_protocol` are sparse git dependencies
+pinned to one `troupe-remote` commit; `Troupe.Client.Daemon` and `Troupe.Client.Daemon.Link`
+find the machine's daemon or embed `Troupe.Gateway.Daemon` in the TUI's own VM; 32 test
+files dropped with a name-by-name list in `FINAL_REPORT.md`; Decisions 100–102). Two
+deliberate deviations from the list above, both in `troupe-tui` Decision 100: item 1's
+in-process `Gateway.Connection` path was not built — the embedded daemon is reached over
+its loopback WebSocket like any other, one code path instead of two — and item 3's
+`Troupe.Remote.Translate` stays, as the one adapter both a daemon session and a pod
+session pass through. Item 4's suite is 92 tests, not 420: what tested the harness now
+lives in `troupe_core`'s suite or is phase 3 work. Item 5 proven 2026-09-20 with
+`TROUPE_REMOTE_CREATE=1`, including the approval round trip. This repository's
+`daemon/mix.exs` pins `troupe-remote` `main` at `3ad89e2`, the merge of #14.
+
 ### Phase 3 — port what the TUI harness has and the core lacks
 
 Each item is its own PR in `troupe-remote`, behind a capability the daemon reports and
