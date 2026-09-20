@@ -4,7 +4,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { addPending, dropPending, emptyTranscript, fold, isBusy, openApprovals, rootState } from "../src/index.js";
+import { addPending, dropPending, emptyTranscript, fold, isBusy, needsYou, openApprovals, openQuestions, rootState } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
 
 let seq = 0;
@@ -129,5 +129,108 @@ describe("the transcript fold", () => {
     // Dropping duplicates is `SessionView`'s job, so the fold is free to be pure; what
     // it must not do is move the cursor backwards.
     assert.equal(fold(state, durable("user_input", { source: "user", text: "later" })).lastSeq, e.seq + 1);
+  });
+});
+
+describe("questions, and what the daemon says about limits (troupe-remote Decisions 658-660)", () => {
+  it("folds an ask_user into an open question, and the answer closes it", () => {
+    seq = 0;
+    const asked = foldAll([
+      durable("question_asked", {
+        call_id: "q1",
+        agent_path: ["root"],
+        question: "Which colour?",
+        options: [{ label: "red", description: null }, { label: "blue", description: "calm" }, "green"],
+        multiple: true,
+      }),
+    ]);
+
+    const [q] = openQuestions(asked);
+    assert.ok(q);
+    assert.equal(q.asked, "agent");
+    assert.equal(q.question, "Which colour?");
+    assert.equal(q.multiple, true);
+    assert.deepEqual(
+      q.options.map((o) => o.label),
+      ["red", "blue", "green"],
+    );
+    assert.equal(needsYou(asked), true);
+
+    const answered = fold(asked, durable("question_answered", { call_id: "q1", text: "blue, green" }));
+    assert.deepEqual(openQuestions(answered), []);
+    assert.equal((answered.entries[0] as Extract<Entry, { kind: "question" }>).answer, "blue, green");
+    assert.equal(needsYou(answered), false);
+  });
+
+  it("makes one budget question of the harness's own event and the question it rides on, whichever comes first", () => {
+    seq = 0;
+    const first = foldAll([
+      durable("budget_ask_started", { call_id: "budget-1", dimension: "turns", used: 40, limit: 40, detail: "turns 40/40 (100%)" }),
+      durable("question_asked", {
+        call_id: "budget-1",
+        agent_path: ["root"],
+        question: "turns 40/40 (100%) — continue?",
+        options: [{ label: "allow" }, { label: "always" }, { label: "deny" }],
+        multiple: false,
+      }),
+    ]);
+
+    assert.equal(openQuestions(first).length, 1, "one entry, not two");
+    const [q] = openQuestions(first);
+    assert.equal(q!.asked, "budget");
+    assert.equal(q!.question, "turns 40/40 (100%)");
+    assert.deepEqual(
+      q!.options.map((o) => o.label),
+      ["allow", "always", "deny"],
+    );
+
+    // The other order — a client that subscribed between the two — is the same entry.
+    seq = 0;
+    const other = foldAll([
+      durable("question_asked", { call_id: "budget-1", agent_path: ["root"], question: "turns 40/40 (100%) — continue?", options: [], multiple: false }),
+      durable("budget_ask_started", { call_id: "budget-1", dimension: "turns", used: 40, limit: 40, detail: "turns 40/40 (100%)" }),
+    ]);
+    assert.equal(openQuestions(other).length, 1);
+    assert.equal(openQuestions(other)[0]!.asked, "budget");
+
+    // Either answer event closes it; the second changes nothing.
+    const closed = foldAll(
+      [durable("budget_ask_answered", { call_id: "budget-1", decision: "allow", grant: { turns: 40 } }), durable("question_answered", { call_id: "budget-1", text: "allow" })],
+      first,
+    );
+    assert.deepEqual(openQuestions(closed), []);
+    assert.equal((closed.entries[0] as Extract<Entry, { kind: "question" }>).answer, "allow");
+  });
+
+  it("shows the harness's notes as notes, not as the person's words", () => {
+    seq = 0;
+    const state = foldAll([
+      durable("user_input", { source: "harness", text: "Your previous reply was cut off" }),
+      durable("truncated", { reason: "max_tokens", note: "…" }),
+      durable("truncated", { reason: "empty", final: true }),
+      durable("truncated", { reason: "max_tokens", calls: 2 }),
+      durable("compacted", { summary: "s", reason: "context_overflow" }),
+      durable("budget_warning", { dimension: "turns", used: 32, limit: 40, fraction: 0.8, detail: "turns 32/40 (80%)" }),
+    ]);
+
+    assert.deepEqual(
+      state.entries.map((e) => e.kind),
+      ["system", "system", "system", "system", "system", "system"],
+    );
+    const texts = state.entries.map((e) => (e as Extract<Entry, { kind: "system" }>).text);
+    assert.equal(texts[0], "the harness said: Your previous reply was cut off");
+    assert.equal(texts[1], "the reply was cut at the output cap; asking again");
+    assert.equal(texts[2], "the reply had no text and no tool call; giving up");
+    assert.match(texts[3]!, /2 tool call\(s\) answered with an error/);
+    assert.match(texts[4]!, /no longer fit/);
+    assert.equal(texts[5], "nearly out: turns 32/40 (80%)");
+  });
+
+  it("streams the daemon's reasoning into the thinking pane, and a waiting agent needs you", () => {
+    seq = 0;
+    const state = foldAll([ephemeral("llm_delta", { kind: "reasoning", text: "let me " }), ephemeral("llm_delta", { kind: "reasoning", text: "think" })]);
+    assert.equal(state.thinking, "let me think");
+    assert.equal(needsYou(fold(state, ephemeral("agent_state", { state: "waiting" }))), true);
+    assert.equal(isBusy(fold(state, ephemeral("agent_state", { state: "waiting" }))), false);
   });
 });

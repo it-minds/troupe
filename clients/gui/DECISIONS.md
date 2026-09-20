@@ -286,3 +286,29 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     changes and no screen does. The browser would keep a copy regardless: it is what
     makes the first paint after sign-in already correct instead of a flash of the wrong
     ground.
+
+40. **The daemon's questions are answered in the client, the harness's notes are shown as
+    the harness's, and the shell starts `troupe-daemon run`.** Phase 4 of the daemon plan
+    is done when a local session renders from the same events as a remote one — and
+    between stage 2 and now the daemon learned things a session says that the client had
+    never heard: an `ask_user` question with options (`question_asked`, troupe-remote
+    Decision 651), the budget question that rides on the same path under a `budget-<n>`
+    id with `budget_ask_started` beside it (Decision 660), the model's reasoning streamed
+    as `llm_delta` of kind `reasoning` (Decision 658), the note the harness gives a model
+    whose reply was cut or empty as a `user_input` from source `harness`, the `truncated`
+    event, and a root agent that reports `waiting` while a person is asked (Decision 659).
+    A client that drops a question on the floor leaves the agent waiting for an answer
+    that cannot come, which is worse than any rendering. So the fold has a `question`
+    entry — one per `call_id`, made from whichever of the two budget events arrives first
+    and filled in by the other — `openQuestions` beside `openApprovals`, and `needsYou`
+    for the header; the screen has a `QuestionPanel` where the approval panel sits, with
+    the harness's three answers in the reader's words ("spend one more slice", not
+    `allow`), and `SessionView.answerQuestion` sends `question.answer`. Reasoning joins
+    Anthropic's thinking in the same folded pane; the harness's notes are system lines,
+    never a bubble in the person's colour. The shell's `daemon_start` spawns
+    `troupe-daemon run` — the release the umbrella's installers put on the `PATH`, by
+    its `.cmd` shim on Windows and by its install directories when the shell's `PATH` is
+    older than the installer's change to it — and treats a published endpoint nothing
+    answers on as the file a dead daemon left behind, starting one over it, where before
+    it handed the stale port back and called that found. `troupe daemon`, the TUI's older
+    spelling, is the last thing tried.

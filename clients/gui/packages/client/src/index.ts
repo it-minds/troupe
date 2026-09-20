@@ -24,8 +24,20 @@ export { beginRedirect, completeRedirect, hasRedirectAnswer, scrubRedirect, idpM
 export type { BeginRedirectOptions, IdpMetadata, PkcePair, PendingRedirect, RedirectResult } from "./pkce.js";
 export { SessionAttachment, waitOn } from "./attach.js";
 export type { AttachOptions, AttachStatus } from "./attach.js";
-export { fold, addPending, dropPending, emptyTranscript, isBlobRef, isRoot, isBusy, rootState, openApprovals } from "./transcript.js";
-export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember } from "./transcript.js";
+export {
+  fold,
+  addPending,
+  dropPending,
+  emptyTranscript,
+  isBlobRef,
+  isRoot,
+  isBusy,
+  needsYou,
+  rootState,
+  openApprovals,
+  openQuestions,
+} from "./transcript.js";
+export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember, QuestionOption } from "./transcript.js";
 export { FleetStore, PlaneSource, rowFromPlane, filterRows, awaitingApproval, totalCostMicros } from "./fleet.js";
 export type { FleetRow, FleetSource, FleetFilter, FleetSnapshot, SessionKind, SyncState } from "./fleet.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";

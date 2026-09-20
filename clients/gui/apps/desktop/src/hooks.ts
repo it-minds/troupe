@@ -222,6 +222,8 @@ export interface SessionHandle {
   view: SessionView | null;
   send(text: string): Promise<void>;
   respond(callId: string, decision: "allow" | "deny" | "allow_session"): Promise<void>;
+  /** Answer a question — the agent's, or the harness's about the budget. */
+  answer(callId: string, text: string): Promise<void>;
   cancel(): Promise<void>;
   switchProfile(profile: string): Promise<void>;
   /** Fetch a blob's text. Called on expand and never on load. */
@@ -327,6 +329,10 @@ export function useSessionView(
     await ref.current?.respondApproval(callId, decision);
   }, []);
 
+  const answer = useCallback(async (callId: string, text: string) => {
+    await ref.current?.answerQuestion(callId, text);
+  }, []);
+
   const cancel = useCallback(async () => {
     await ref.current?.cancel();
   }, []);
@@ -341,7 +347,7 @@ export function useSessionView(
     return v.blobText(blob);
   }, []);
 
-  return { state, status, detail, view, send, respond, cancel, switchProfile, readBlob, error };
+  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, readBlob, error };
 }
 
 /**

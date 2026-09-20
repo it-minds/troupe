@@ -18,6 +18,8 @@ export interface SessionViewHooks {
   /** Streaming text from the model. Expect to lose some under load. */
   onDelta?: (d: LlmDeltaData, agent: string[]) => void;
   onApprovalRequested?: (data: DurableEvent["data"]) => void;
+  /** The agent's `ask_user`, or the harness's budget question (`call_id` `budget-<n>`). */
+  onQuestionAsked?: (data: DurableEvent["data"]) => void;
 }
 
 /**
@@ -93,6 +95,7 @@ export class SessionView {
       if (e.seq <= this.lastSeq) return true; // duplicate after a resubscribe
       this.lastSeq = e.seq;
       if (e.type === "approval_requested") this.hooks.onApprovalRequested?.(e.data);
+      if (e.type === "question_asked") this.hooks.onQuestionAsked?.(e.data);
     } else if (e.type === "llm_delta") {
       this.hooks.onDelta?.(e.data as LlmDeltaData, e.agent);
     }
@@ -206,6 +209,20 @@ export class SessionView {
       session_id: this.sessionId,
       call_id: callId,
       decision,
+    });
+  }
+
+  /**
+   * `question.answer`, for the agent's `ask_user` and the harness's budget question
+   * alike. Options are answered with their labels, joined with a comma when several were
+   * chosen; free text is always allowed. First answer wins.
+   */
+  async answerQuestion(callId: string, text: string): Promise<void> {
+    await this.conn.call("question.answer", {
+      command_id: this.conn.nextCommandId(),
+      session_id: this.sessionId,
+      call_id: callId,
+      text,
     });
   }
 

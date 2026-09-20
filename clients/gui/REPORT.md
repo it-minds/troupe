@@ -526,3 +526,36 @@ again is to rotate — which is a different secret.
   becomes a commit for review rather than a change. It deserves its own screen.
 - **Team membership and A2A runs.** Membership is read-only by design. A2A sessions appear
   in Review, but with no run behind them there is no event to show.
+
+## Phase 4 — local sessions against the daemon as it is now
+
+Stage 2 built the desktop shell's half of the daemon plan before the daemon existed as
+its own release: `daemon.json`, the loopback WebSocket, one socket for many sessions, the
+one list. Phase 4 (`troupe/docs/brief-daemon.md`) is done when a session on this computer
+renders from the same events as one on a worker. What was missing was not the shell but
+the vocabulary: troupe-remote's phase 3 and 3b (#15–#29) gave a session things to say
+that no client here knew — a question with options, the budget question, streamed
+reasoning, the harness's own notes, a `waiting` agent — and a client that drops a question
+leaves the agent waiting for an answer that cannot come. Decision 40.
+
+| | before | now |
+|---|---|---|
+| `question_asked` (`ask_user`) | ignored | an open question in the transcript; a panel where the approval panel sits; options as buttons, free text always; `question.answer` |
+| the budget question (`budget-<n>`, Decision 660) | ignored; the agent waited for ever | the same panel in the reader's words — spend one more slice, stop here, stop asking |
+| `llm_delta` kind `reasoning` | dropped | folded into the thinking pane with Anthropic's |
+| `user_input` from source `harness`, `truncated`, `budget_warning`, `compacted.reason` | a bubble in the person's colour, or nothing | system lines that say what happened |
+| agent state `waiting` | "Idle" | "Needs you" |
+| `daemon_start` | spawned `troupe daemon`; a stale `daemon.json` was returned as found | spawns `troupe-daemon run`, by shim and install directory too; a published port nothing answers on is started over |
+
+```
+▶ questions, and what the daemon says about limits (troupe-remote Decisions 658-660)
+  ✔ folds an ask_user into an open question, and the answer closes it
+  ✔ makes one budget question of the harness's own event and the question it rides on, whichever comes first
+  ✔ shows the harness's notes as notes, not as the person's words
+  ✔ streams the daemon's reasoning into the thinking pane, and a waiting agent needs you
+▶ phase 4: a question on a local session is answered where the daemon listens
+  ✔ sends question.answer with the session and call ids, and the answer comes back folded
+```
+
+Not done here: the shell has not been built and run on this machine (no Rust toolchain),
+so `daemon.rs` is reviewed rather than exercised; the umbrella's release job builds it.

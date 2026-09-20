@@ -278,3 +278,38 @@ function teamRow(id: string): FleetRow {
 function settle(ms = 60): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
+
+describe("phase 4: a question on a local session is answered where the daemon listens", () => {
+  let daemon: FakeDaemon;
+  let client: DaemonClient;
+
+  before(async () => {
+    daemon = new FakeDaemon();
+    await daemon.start();
+    client = new DaemonClient(endpointOf(daemon));
+  });
+
+  after(async () => {
+    client.disconnect();
+    await daemon.stop();
+  });
+
+  it("sends question.answer with the session and call ids, and the answer comes back folded", async () => {
+    const session = daemon.seed("/home/ada/project");
+    const view = await client.open(session.id);
+    daemon.ask(session.id, { call_id: "budget-1", question: "turns 40/40 (100%) — continue?", options: [{ label: "allow" }, { label: "always" }, { label: "deny" }] });
+
+    await view.waitFor((e) => "seq" in e && e.type === "question_asked", 5_000, "question_asked");
+    // The waiter first: the daemon writes the answer before it acknowledges the command.
+    const answered = view.waitFor((e) => "seq" in e && e.type === "question_answered", 5_000, "question_answered");
+    await view.answerQuestion("budget-1", "allow");
+
+    const sent = daemon.calls.find((c) => c.method === "question.answer");
+    assert.ok(sent, "the daemon heard question.answer");
+    assert.equal(sent!.params["session_id"], session.id);
+    assert.equal(sent!.params["call_id"], "budget-1");
+    assert.equal(sent!.params["text"], "allow");
+
+    assert.equal(((await answered) as { data: Record<string, unknown> }).data["text"], "allow");
+  });
+});
