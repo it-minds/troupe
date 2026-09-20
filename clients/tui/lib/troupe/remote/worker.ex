@@ -73,6 +73,10 @@ defmodule Troupe.Remote.Worker do
   @spec approve(String.t(), String.t(), :allow | :deny | :allow_session) :: :ok | {:error, term()}
   def approve(session_id, call_id, decision), do: call(session_id, {:approve, call_id, decision})
 
+  @doc "Answers a question the agent asked with `ask_user`."
+  @spec answer(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
+  def answer(session_id, call_id, text), do: call(session_id, {:answer, call_id, text})
+
   @spec edit_todo(String.t(), term()) :: :ok | {:error, term()}
   def edit_todo(session_id, change), do: call(session_id, {:todo, change})
 
@@ -245,6 +249,14 @@ defmodule Troupe.Remote.Worker do
     activating(state, from, "approval.respond", %{
       call_id: call_id,
       decision: to_string(decision),
+      command_id: RPC.command_id()
+    })
+  end
+
+  def handle_call({:answer, call_id, text}, from, state) do
+    activating(state, from, "question.answer", %{
+      call_id: call_id,
+      text: text,
       command_id: RPC.command_id()
     })
   end
@@ -839,13 +851,11 @@ defmodule Troupe.Remote.Worker do
     %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
   end
 
-  # An approval a branch asks for is answered through the parent's session id, so the
-  # client finds its way back to this session by the call id. The registration dies
-  # with this process, like the window it belongs to.
-  defp remember_call(%{as: {sid, _}} = state, %Troupe.Event{
-         type: :approval_requested,
-         data: %{call_id: call_id}
-       }) do
+  # An approval or a question a branch asks is answered through the parent's session
+  # id, so the client finds its way back to this session by the call id. The
+  # registration dies with this process, like the window it belongs to.
+  defp remember_call(%{as: {sid, _}} = state, %Troupe.Event{type: type, data: %{call_id: call_id}})
+       when type in [:approval_requested, :question_asked] do
     _ = Registry.register(Troupe.Client.Registry, {:call, sid, call_id}, state.session_id)
     :ok
   end

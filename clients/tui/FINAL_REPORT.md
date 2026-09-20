@@ -243,6 +243,7 @@ connection process bounded" (the 4 MB bound) fails about one run in five, here a
 | a reopened session brings its branch windows back | done | `branch_client_test.exs` "a session opened again…" |
 | `/workflow [name:] task` runs a named workflow as a branch in its own worktree, its plan rendered by the daemon | done (Decision 104; troupe-remote Decision 648) | `branch_client_test.exs` "/workflow…" |
 | `/memory`, `/memory refresh`, `/memory forget`; a new session on a missing or stale brief starts the librarian when the config asks | done (Decision 105; troupe-remote Decision 649) | `memory_client_test.exs` |
+| an `ask_user` question shows as a menu and the answer goes back as `question.answer` | done (Decision 106; troupe-remote Decision 651) | `question_client_test.exs`, `remote_translate_test.exs` "a question…" |
 
 ### Tests dropped, and why
 

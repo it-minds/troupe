@@ -130,7 +130,8 @@ defmodule Troupe.Client.Daemon do
     do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
 
   @impl true
-  def answer(sid, call_id, text), do: describe(Worker.input(call_target(sid, call_id), text))
+  def answer(sid, call_id, text),
+    do: describe(Worker.answer(call_target(sid, call_id), call_id, text))
 
   @impl true
   def edit_todo(sid, path, change), do: route(sid, path, &Worker.edit_todo(&1, change))

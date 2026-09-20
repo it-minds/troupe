@@ -240,4 +240,36 @@ defmodule Troupe.RemoteTranslateTest do
         memory
       )
   end
+
+  test "a question asked and answered: the menu the model draws, and what clears it" do
+    [asked] =
+      translate(
+        durable("question_asked", %{
+          "call_id" => "q1",
+          "agent_path" => ["root"],
+          "question" => "Which colour?",
+          "options" => [
+            %{"label" => "red", "description" => nil},
+            %{"label" => "blue", "description" => "calm"},
+            "green"
+          ],
+          "multiple" => true
+        })
+      )
+
+    assert asked.type == :question_asked
+    assert asked.data.call_id == "q1"
+    assert asked.data.question == "Which colour?"
+    assert asked.data.multiple == true
+
+    assert asked.data.options == [
+             %{label: "red", description: nil},
+             %{label: "blue", description: "calm"},
+             %{label: "green", description: nil}
+           ]
+
+    [answered] = translate(durable("question_answered", %{"call_id" => "q1", "text" => "blue"}))
+    assert answered.type == :question_answered
+    assert answered.data == %{call_id: "q1", text: "blue"}
+  end
 end
