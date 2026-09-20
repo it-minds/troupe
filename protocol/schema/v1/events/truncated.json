@@ -1,21 +1,24 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/compacted.json",
+  "$id": "https://troupe.dev/schema/v1/events/truncated.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
-    "conversation": {
-      "type": "array"
+    "calls": {
+      "type": "integer"
     },
-    "reason": {
+    "final": {
+      "type": "boolean"
+    },
+    "note": {
       "type": "string"
     },
-    "summary": {
+    "reason": {
       "type": "string"
     }
   },
   "required": [
-    "summary"
+    "reason"
   ],
-  "title": "compacted",
+  "title": "truncated",
   "type": "object"
 }

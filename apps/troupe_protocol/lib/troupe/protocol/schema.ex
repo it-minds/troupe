@@ -99,7 +99,18 @@ defmodule Troupe.Protocol.Schema do
         # one and not the other.
         "gateway" => optional(:object)
       },
+      # `reason` is a sentence a person can act on (Decision 659), not a term.
       "llm_error" => %{"reason" => required(:string)},
+      # A reply the output cap cut (`max_tokens`) or that said nothing (`empty`): `note`
+      # when the model was asked again, `calls` when tool calls cut mid-argument were
+      # answered with an error, `final` when it had been asked once already and the agent
+      # ends under `output_truncated` or `empty_reply` (Decision 659).
+      "truncated" => %{
+        "reason" => required(:string),
+        "note" => optional(:string),
+        "calls" => optional(:integer),
+        "final" => optional(:boolean)
+      },
       "tool_call_started" => %{
         "call_id" => required(:string),
         "name" => required(:string),
@@ -134,6 +145,9 @@ defmodule Troupe.Protocol.Schema do
       },
       "compacted" => %{
         "summary" => required(:string),
+        # `threshold`, or `context_overflow` when the provider refused the prompt and
+        # compacting is how the turn was sent again (Decision 659).
+        "reason" => optional(:string),
         "conversation" => optional(:array)
       },
       "budget_exhausted" => %{"limit" => required(:string)},

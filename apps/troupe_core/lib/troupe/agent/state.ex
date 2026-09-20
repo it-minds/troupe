@@ -69,6 +69,14 @@ defmodule Troupe.Agent.State do
     last_input_tokens: 0,
     # Dimensions already warned about (Decision 655): one `budget_warning` each.
     headroom_warned: MapSet.new(),
+    # At-most-once guards for the two recoveries a turn makes on its own (Decision 659):
+    # one more request after a reply the output cap cut or that said nothing, one
+    # compaction after a prompt the provider refused as too long. Not replayed — a
+    # restart forgets them and grants the retry again, which errs towards finishing.
+    truncation_retried: false,
+    overflow_retried: false,
+    # Why the compaction in flight was started, for the `compacted` event.
+    compact_reason: nil,
     compact_resume: :idle,
     finish_summary: nil,
     fake: nil,
@@ -107,6 +115,9 @@ defmodule Troupe.Agent.State do
           monitors: %{optional(reference()) => term()},
           child_seq: non_neg_integer(),
           last_input_tokens: non_neg_integer(),
+          truncation_retried: boolean(),
+          overflow_retried: boolean(),
+          compact_reason: String.t() | nil,
           compact_resume: :idle | :thinking,
           finish_summary: String.t() | nil,
           fake: pid() | atom() | nil,
