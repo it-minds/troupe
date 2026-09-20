@@ -16,11 +16,13 @@ defmodule Troupe.LLM.Fake do
 
   use GenServer
 
-  alias Troupe.LLM.{Gateway, Response, Text, ToolUse, Usage}
+  alias Troupe.LLM.{Gateway, Reasoning, Response, Text, ToolUse, Usage}
 
   @type step ::
           {:text, String.t()}
           | {:tools, [{String.t(), map()}]}
+          | {:text_and_tools, String.t(), [{String.t(), map()}]}
+          | {:reasoning, String.t(), step() | nil}
           | {:error, term()}
           | map()
 
@@ -91,6 +93,15 @@ defmodule Troupe.LLM.Fake do
 
   def normalize_script(steps) when is_list(steps),
     do: [steps: Enum.map(steps, &normalize_step/1), routes: %{}]
+
+  # `reasoning` wraps whatever else the step says: a model that thought and then answered,
+  # or one that only thought.
+  defp normalize_step(%{"reasoning" => reasoning} = step) do
+    case Map.delete(step, "reasoning") do
+      rest when map_size(rest) == 0 -> {:reasoning, reasoning, nil}
+      rest -> {:reasoning, reasoning, normalize_step(rest)}
+    end
+  end
 
   defp normalize_step(%{"text" => text} = step) when not is_map_key(step, "tools") do
     {:text, text}
@@ -195,6 +206,22 @@ defmodule Troupe.LLM.Fake do
 
   defp render({:error, reason}, _state), do: {:error, reason}
 
+  # Thinking in front of an answer, or on its own: the shape of a reasoning model's turn,
+  # so a test can watch it reach the log and stay out of the prose.
+  defp render({:reasoning, reasoning, nil}, state) do
+    respond([thought(reasoning)], :end_turn, usage(reasoning, state), state)
+  end
+
+  defp render({:reasoning, reasoning, step}, state) do
+    case render(step, state) do
+      {:ok, %Response{content: content} = response, delay} ->
+        {:ok, %{response | content: [thought(reasoning) | content]}, delay}
+
+      other ->
+        other
+    end
+  end
+
   defp render({:text, text}, state) do
     respond([%Text{text: text}], :end_turn, usage(text, state), state)
   end
@@ -216,6 +243,8 @@ defmodule Troupe.LLM.Fake do
        gateway: gateway(usage, state.cost_micros)
      }, state.delay_ms}
   end
+
+  defp thought(reasoning), do: %Reasoning{provider: :fake, text: reasoning}
 
   defp tool_blocks(calls) do
     Enum.map(calls, fn {name, input} ->
@@ -264,7 +293,7 @@ defmodule Troupe.LLM.Providers.Fake do
 
   @behaviour Troupe.LLM.Provider
 
-  alias Troupe.LLM.{Delta, Fake, Request, Text}
+  alias Troupe.LLM.{Delta, Fake, Reasoning, Request, Text}
 
   @impl Troupe.LLM.Provider
   def stream(%Request{} = request, reply_to, ref) do
@@ -294,6 +323,12 @@ defmodule Troupe.LLM.Providers.Fake do
     text
     |> chunk()
     |> Enum.each(&send(reply_to, {:llm_delta, ref, Delta.text(&1)}))
+  end
+
+  defp emit_delta(%Reasoning{text: text, redacted: false}, reply_to, ref) do
+    text
+    |> chunk()
+    |> Enum.each(&send(reply_to, {:llm_delta, ref, Delta.reasoning(&1)}))
   end
 
   defp emit_delta(%Troupe.LLM.ToolUse{id: id, name: name}, reply_to, ref) do

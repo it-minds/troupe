@@ -16,6 +16,10 @@ defmodule Troupe.LLM.Request do
     tools: [],
     max_tokens: 8192,
     temperature: nil,
+    # How hard a reasoning model should think, verbatim from the model's `models:` entry
+    # (Decision 658): an OpenAI-compatible provider takes the word, Anthropic a budget
+    # made from it. `nil` asks for no reasoning and gets the plain output cap.
+    reasoning_effort: nil,
     base_url: nil,
     api_key: nil,
     # How the key is presented: the provider's own scheme, or `Authorization: Bearer`
@@ -45,6 +49,7 @@ defmodule Troupe.LLM.Request do
           tools: [tool_spec()],
           max_tokens: pos_integer(),
           temperature: float() | nil,
+          reasoning_effort: String.t() | nil,
           base_url: String.t() | nil,
           api_key: String.t() | nil,
           auth: :api_key | :bearer,
@@ -60,14 +65,15 @@ defmodule Troupe.LLM.Delta do
   @moduledoc """
   One incremental chunk of a streamed response.
 
-  `:text` carries assistant prose as it arrives. `:tool_use_start` announces a tool
-  call so a UI can render it before its arguments finish streaming, and
-  `:tool_input` carries that argument JSON in pieces.
+  `:text` carries assistant prose as it arrives; `:reasoning` carries the model's
+  thinking the same way, under its own kind so a client can fold it rather than read it
+  as the answer. `:tool_use_start` announces a tool call so a UI can render it before its
+  arguments finish streaming, and `:tool_input` carries that argument JSON in pieces.
   """
   @enforce_keys [:kind]
   defstruct [:kind, :text, :id, :name, :fragment]
 
-  @type kind :: :text | :tool_use_start | :tool_input
+  @type kind :: :text | :reasoning | :tool_use_start | :tool_input
   @type t :: %__MODULE__{
           kind: kind(),
           text: String.t() | nil,
@@ -78,6 +84,9 @@ defmodule Troupe.LLM.Delta do
 
   @spec text(String.t()) :: t()
   def text(chunk), do: %__MODULE__{kind: :text, text: chunk}
+
+  @spec reasoning(String.t()) :: t()
+  def reasoning(chunk), do: %__MODULE__{kind: :reasoning, text: chunk}
 
   @doc """
   The delta as the JSON a subscriber receives.

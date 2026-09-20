@@ -4619,3 +4619,35 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      reads `input_tokens`, which from here is the uncached figure, because the cost it
      records comes from the gateway and not from the tokens; the cache figures ride in the
      event for the day the ledger wants them.
+
+658. **A model's reasoning is a block of its own — opaque, provider-bound, replayed
+     verbatim to the provider that made it and to no other — and a reasoning model gets
+     the output cap it asks for.** The core's adapters read `content` and `tool_calls` and
+     nothing else, so DeepSeek's `reasoning_content` was dropped on the floor: shown to
+     nobody, and — because DeepSeek's thinking mode is all-or-nothing, and once one
+     assistant message in the history carried reasoning one that omits it fails the whole
+     request with a 400 — the second request of every tool-using conversation was refused.
+     Anthropic's thinking blocks, which it signs and demands back on a tool-use turn, were
+     not read either. The TUI had learned all of this (its `a844ed0`, `9b122d4`) and phase
+     2 deleted it. `Troupe.LLM.Reasoning` is now a fourth content block (`provider`,
+     `text`, `signature`, `redacted`), captured off both streams — `reasoning_content` or
+     `reasoning` as a sibling of `content`; `thinking`, `signature_delta` and
+     `redacted_thinking` as blocks — logged in `llm_response.message` like any block, and
+     handed back only by the adapter whose provider produced it: OpenAI as
+     `reasoning_content` on the assistant message, Anthropic as `thinking` /
+     `redacted_thinking` blocks and only when the request has thinking enabled, since a
+     thinking block is illegal otherwise. `Message.text/1` and `tool_uses/1` never see it,
+     so a parent's summary and a client's prose do not fill with thinking; a `reasoning`
+     block from a provider this build has no adapter for replays as `:unknown` and is
+     carried, never sent. Live, it is `llm_delta` `kind: "reasoning"`, which the TUI already
+     folds and ACP takes as `agent_thought_chunk`. The cap: a model's `reasoning_effort`
+     (from its `models:` entry, through `Config.target/2` onto the request) makes the
+     OpenAI adapter send `max_completion_tokens` and `reasoning_effort` in place of
+     `max_tokens`, which a reasoning model rejects; a 400 that names the other field is
+     answered once by sending the request again with it, so nobody has to configure what
+     the provider will say. Anthropic takes a budget rather than a level, so the level
+     becomes `thinking.budget_tokens` (`minimal` 1k … `xhigh` 32k, or a number) and
+     `max_tokens` is raised to hold it rather than the request failing. Not carried over:
+     the TUI let an agent definition set the effort and the definition won; the core's
+     `Definition` has no such field, and it stays a per-model setting until a profile
+     wants to think harder than its model's default.

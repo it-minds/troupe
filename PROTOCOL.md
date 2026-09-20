@@ -232,8 +232,10 @@ No `seq`, never persisted, may be dropped under load. They carry `"ephemeral": t
  "data": {"kind": "text", "text": "Let me "}}
 ```
 
-Every completed model message also lands as a durable `llm_response`, so dropping
-deltas loses nothing but smoothness.
+`kind` is `text` (the answer as it arrives), `reasoning` (the model's thinking, shown
+apart from the answer and never part of `llm_response`'s prose), `tool_use_start` (`id`,
+`name`) or `tool_input` (`fragment`). Every completed model message also lands as a
+durable `llm_response`, so dropping deltas loses nothing but smoothness.
 
 ### Event types
 
@@ -248,7 +250,7 @@ Durable:
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
-| `llm_response` | `message`, `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
+| `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
 | `llm_error` | `reason` |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |

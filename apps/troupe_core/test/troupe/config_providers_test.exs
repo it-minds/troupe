@@ -112,7 +112,15 @@ defmodule Troupe.ConfigProvidersTest do
 
     test "a bare id goes to the session-wide provider with the session-wide key", %{config: config} do
       target = Config.target(config, "claude-sonnet-5")
-      assert target == %{provider: "anthropic", model: "claude-sonnet-5", base_url: nil, api_key: "session-key-1234567890", auth: :api_key, max_output: nil}
+      assert target == %{
+               provider: "anthropic",
+               model: "claude-sonnet-5",
+               base_url: nil,
+               api_key: "session-key-1234567890",
+               auth: :api_key,
+               max_output: nil,
+               reasoning_effort: nil
+             }
     end
 
     test "the models block sets the aliases and nil means the default", %{config: config} do

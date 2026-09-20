@@ -27,6 +27,7 @@ defmodule Troupe.Test.FakeTransport do
     * `:chunks` — the response body, in the pieces it should arrive in
     * `:fail_first` — fail this many attempts with `:fail_status` before succeeding
     * `:fail_status` — the status those failures carry (default 429)
+    * `:fail_body` — the error message those failures carry (default "slow down")
     * `:transport_error` — fail this many attempts with a transport error first
     * `:record` — a pid to send `{:request, %Req.Request{}}` to on each attempt
   """
@@ -54,7 +55,7 @@ defmodule Troupe.Test.FakeTransport do
         {request, %Req.TransportError{reason: :closed}}
 
       attempt < transport_errors + status_errors ->
-        {request, error_response(Map.get(config, :fail_status, 429))}
+        {request, error_response(Map.get(config, :fail_status, 429), Map.get(config, :fail_body, "slow down"))}
 
       true ->
         stream(request, Map.get(config, :chunks, []))
@@ -89,11 +90,11 @@ defmodule Troupe.Test.FakeTransport do
     end)
   end
 
-  defp error_response(status) do
+  defp error_response(status, message) do
     Req.Response.new(
       status: status,
       headers: %{"content-type" => ["application/json"]},
-      body: %{"error" => %{"message" => "slow down"}}
+      body: %{"error" => %{"message" => message}}
     )
   end
 end
