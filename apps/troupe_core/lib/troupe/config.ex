@@ -78,6 +78,11 @@ defmodule Troupe.Config do
             max_output_tokens: 400_000,
             wall_clock_ms: 30 * 60 * 1000,
             max_depth: 3,
+            # When a `budget_warning` is published: the fraction of any limit — turns,
+            # tokens, wall clock, context window — an agent has spent (Decision 655).
+            # `full_send` turns the warnings off for a session that wants no nagging.
+            budget_warn_at: 0.8,
+            full_send: false,
             shell_timeout_ms: 120_000,
             tool_output_limit: 60_000,
             watch: false,
@@ -661,6 +666,7 @@ defmodule Troupe.Config do
 
   defp coerce(:read_roots, _value), do: []
   defp coerce(:compact_at, value) when is_integer(value), do: value / 1
+  defp coerce(:budget_warn_at, value) when is_integer(value), do: value / 1
   defp coerce(:approvals, "deny"), do: :deny
   defp coerce(:approvals, _value), do: :wait
   defp coerce(_key, value), do: value
