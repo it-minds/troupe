@@ -574,6 +574,26 @@ directories outside the workspace that `read_file`, `list_files`, `grep` and `gl
 reach — a dependency checkout, the repository a worktree's symlink points at. Judged by
 where a path really lands, symlinks followed. Writes never leave the workspace.
 
+## Local MCP servers
+
+A workspace (or the machine) may name MCP servers of its own in `config.yaml`:
+
+```yaml
+mcp:
+  filesystem:
+    command: npx
+    args: ["-y", "@modelcontextprotocol/server-filesystem", "/tmp"]
+  wiki:
+    url: https://wiki.example/mcp
+    permission: auto
+```
+
+A `command` server runs on its standard streams for as long as the session lives, under
+the reaper; a `url` server is called over HTTP. Their tools are `mcp.<server>.<tool>`,
+`ask` unless the entry says `permission: auto`, and go through the same gate as every
+other tool. `mcp.status {session_id}` lists them with `state`, tool names and any error;
+the TUI's `/mcp` page reads it.
+
 **Kept tool output.** When `shell` or `grep` output is longer than `tool_output_limit`
 (60 000 bytes), the agent sees the tail (`shell`) or the head (`grep`) and a marker
 naming a `read_output(id: "sha256:…", offset: N, limit: 200)` call; the full text is

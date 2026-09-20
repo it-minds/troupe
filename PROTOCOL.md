@@ -632,6 +632,18 @@ One brief per repository: a worktree's is the main checkout's. A client that fin
 
 #### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
 
+#### `mcp.status`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"servers": [{"name": "filesystem", "state": "ready", "tools": ["read_file", "list_directory"],
+"error": null}]}`
+
+The MCP servers the session's own workspace configuration names (`mcp:` in
+`.troupe/config.yaml`), as distinct from a pod's bundle servers: `state` is
+`connecting`, `ready`, `error` or `stopped`. Their tools are `mcp.<server>.<tool>` like
+every other MCP tool.
+
 #### `workflows.list`
 ```json
 {"workspace": "/home/me/project"}
@@ -753,7 +765,7 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink` |
 

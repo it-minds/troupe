@@ -22,6 +22,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
+  alias Troupe.Session.MCP, as: LocalMCP
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -58,6 +59,7 @@ defmodule Troupe.Gateway.Dispatch do
     "agents.list" => :observe,
     "workflows.list" => :observe,
     "memory.get" => :observe,
+    "mcp.status" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
     "input.send" => :control,
@@ -273,6 +275,26 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, workspace} <- fetch(params, "workspace") do
       :ok = workspace |> Path.expand() |> Troupe.Session.Memory.forget()
       {:ok, %{"forgotten" => true}}
+    end
+  end
+
+  # The workspace's own MCP servers for a session: what a client's `/mcp` page shows.
+  defp handle("mcp.status", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      servers =
+        session_id
+        |> LocalMCP.status()
+        |> Enum.map(fn server ->
+          %{
+            "name" => server.name,
+            "state" => to_string(server.state),
+            "tools" => server.tools,
+            "error" => server.error
+          }
+        end)
+
+      {:ok, %{"servers" => servers}}
     end
   end
 

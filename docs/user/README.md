@@ -121,6 +121,7 @@ Every top-level feature and every user-reachable route, and where it is document
 | `worktree.list` | observe | features.md § Worktrees |
 | `workflows.list` | observe | features.md § Workflows |
 | `memory.get` | observe | features.md § Project brief |
+| `mcp.status` | observe | features.md § Local MCP servers |
 | `memory.forget` | admin | features.md § Project brief |
 | `presence.set` | observe | features.md § Presence |
 | `input.send`, `turn.cancel`, `profile.switch` | control | features.md § Sessions, § Plan and build |

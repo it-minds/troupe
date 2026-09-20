@@ -8,6 +8,7 @@
     "commands/fs.upload.json",
     "commands/initialize.json",
     "commands/input.send.json",
+    "commands/mcp.status.json",
     "commands/memory.forget.json",
     "commands/memory.get.json",
     "commands/presence.set.json",

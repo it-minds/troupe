@@ -54,10 +54,15 @@ defmodule Troupe.Tools do
   to one person on one session, and a pod-wide list would hand it to everybody.
   """
   @spec all(String.t() | nil) :: [Tool.handle()]
-  def all(session_id \\ nil), do: @builtins ++ extra() ++ remote() ++ hosted(session_id)
+  def all(session_id \\ nil),
+    do: @builtins ++ extra() ++ remote() ++ local(session_id) ++ hosted(session_id)
 
   defp hosted(nil), do: []
   defp hosted(session_id), do: ClientTools.list(session_id)
+
+  # The workspace's own MCP servers (Decision 654): per session, because the config is.
+  defp local(nil), do: []
+  defp local(session_id), do: Troupe.Session.MCP.tools(session_id)
 
   defp extra, do: Application.get_env(:troupe_core, :extra_tools, [])
 

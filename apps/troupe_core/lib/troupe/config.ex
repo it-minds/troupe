@@ -124,6 +124,10 @@ defmodule Troupe.Config do
             memory_auto_refresh: true,
             memory_max_chars: 6_000,
             memory_max_age_days: 7,
+            # The workspace's own MCP servers (Decision 654): `mcp:` in a config file,
+            # `%{name => %{command, args, env, cd}}` for one on its standard streams or
+            # `%{name => %{url}}` for one over HTTP, plus `permission` and `timeout_ms`.
+            mcp: %{},
             # Directories outside the workspace the *read* tools may reach (Decision 653):
             # a dependency checkout, a sibling repository. Writes never leave the workspace.
             read_roots: [],
@@ -575,8 +579,10 @@ defmodule Troupe.Config do
 
   defp apply_catalog(%__MODULE__{} = config), do: %{config | catalog: Store.load()}
 
-  # The two block-shaped keys a laptop config carries, then everything flat.
+  # The block-shaped keys a laptop config carries, then everything flat.
   defp put_string_key(config, "providers", value), do: %{config | providers: parse_providers(value)}
+  defp put_string_key(config, "mcp", value) when is_map(value), do: %{config | mcp: parse_mcp(value)}
+  defp put_string_key(config, "mcp", _value), do: %{config | mcp: %{}}
 
   defp put_string_key(config, "models", value) when is_map(value) do
     config
@@ -619,7 +625,30 @@ defmodule Troupe.Config do
   # because `nil && ...` on the left of `and` raises rather than being falsy — which
   # is what made an unrecognised config key crash the whole load.
   defp known?(_config, nil), do: false
-  defp known?(config, atom), do: Map.has_key?(config, atom) and atom not in [:extra, :providers, :catalog, :models_explicit?]
+  defp known?(config, atom),
+    do: Map.has_key?(config, atom) and atom not in [:extra, :providers, :catalog, :models_explicit?, :mcp]
+
+  # A server is a map; anything else under `mcp:` is ignored rather than fatal, since a
+  # typo in one server's entry should not take the whole config down.
+  defp parse_mcp(map) do
+    map
+    |> Enum.filter(fn {_name, entry} -> is_map(entry) end)
+    |> Map.new(fn {name, entry} ->
+      {to_string(name),
+       %{
+         command: string_or_nil(entry["command"]),
+         args: entry["args"] |> List.wrap() |> Enum.map(&to_string/1),
+         env: (entry["env"] || %{}) |> Enum.map(fn {k, v} -> {to_string(k), to_string(v)} end) |> Map.new(),
+         cd: string_or_nil(entry["cd"]),
+         url: string_or_nil(entry["url"]),
+         permission: if(entry["permission"] == "auto", do: :auto, else: :ask),
+         timeout_ms: if(is_integer(entry["timeout_ms"]) and entry["timeout_ms"] > 0, do: entry["timeout_ms"], else: 30_000)
+       }}
+    end)
+  end
+
+  defp string_or_nil(value) when is_binary(value) and value != "", do: value
+  defp string_or_nil(_value), do: nil
 
   defp safe_atom(key) do
     String.to_existing_atom(key)

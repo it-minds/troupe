@@ -4535,3 +4535,22 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      safety argument: a read root cannot make a file writable, only visible. It is a
      config key (`read_roots`, a list of directories, expanded), so a pod whose bundle
      never sets it has none, and the mounts a pod has are untouched by it.
+
+654. **A workspace may name its own MCP servers, and a stdio one runs under the reaper
+     like everything else.** The core's MCP was a pod's: servers from the bundle, one
+     HTTP POST per call, discovered pod-wide. A laptop has no bundle, and the TUI's
+     harness let `.troupe/config.yaml` say `mcp: {name: {command, args, env, cd}}` or
+     `{url}`. That comes here as `Troupe.Session.MCP`, started with the session: a
+     `command` server is a subprocess speaking newline-delimited JSON-RPC on its
+     standard streams (`Troupe.MCP.Stdio`) for as long as the session lives, a `url`
+     server is the same one-shot client the pod uses, discovered once. Both kinds' tools
+     are `mcp.<server>.<tool>` — the core's spelling, not the harness's `mcp__` — and go
+     through the same allowlist, permission map and approval gate as a built-in; `ask`
+     unless the server's entry says `permission: auto`. The stdio subprocess needed the
+     reaper to do something it could not: forward the owner's bytes. So reaper gained a
+     mode (`TROUPE_REAPER_STDIO`), Unix only: stdin is pumped into the child through a
+     pipe, stdout and stderr are inherited as before, and EOF on the owner's side closes
+     the child's stdin — which is how an MCP server is told to exit — with the tree taken
+     down after the grace if it has not. On Windows the server runs as a plain port and
+     is trusted to honour that same contract, which is written down here rather than
+     pretended otherwise. `mcp.status {session_id}` is what a client's `/mcp` page shows.

@@ -67,7 +67,11 @@ defmodule Troupe.Session do
         # restart, because the connection that made it has not gone anywhere and would
         # have no way of knowing it needed to offer its tools again.
         {Troupe.Session.ClientTools,
-         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only}
+         session_id: session_id, managed_servers_only: config.managed_mcp_servers_only},
+        # The workspace's own MCP servers (Decision 654), started with the session and
+        # gone with it. Above the agent, since their tools are in its list.
+        {Troupe.Session.MCP,
+         session_id: session_id, workspace: workspace.root_real, servers: config.mcp}
       ] ++
         fake_child(session_id, config, opts) ++
         [

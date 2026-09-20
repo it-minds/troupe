@@ -401,6 +401,7 @@ defmodule Troupe.Protocol.Schema do
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
       "memory.get" => %{"workspace" => required(:string)},
+      "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
       "worktree.list" => %{"workspace" => optional(:string)},
       "worktree.remove" => %{
