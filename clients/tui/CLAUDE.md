@@ -63,7 +63,7 @@ Read skills in the .skills repo
 - A remote session must be indistinguishable from a local one on screen: translate at the edge (`Troupe.Remote.Translate`), never branch on "is this remote?" in the model or the view.
 - The harness is not edited here. A missing method or event is a `troupe-remote` change (its `PROTOCOL.md`, `DECISIONS.md`), then a pin bump; the TUI's own deviations still go in this repo's `DECISIONS.md`.
 - Every OS process goes through `Troupe.OS.Process` (reaper). Never `System.cmd` in lib code.
-- A session has one agent, the window `"root"`; a line that does not start with `/` is input to it (Decision 101). Branches inside a session are phase 3.
+- A session has one agent, the window `"root"`; a line that does not start with `/` is input to it (Decision 101). `/<agent> prompt` opens a **branch**: a session of its own with `parent` set, shown as the window `<agent>-N`; its worker publishes under that name (`Troupe.Remote.Branch`), the parent's journal records the windows (Decision 103).
 - Tests: `assert_receive` on events, never `Process.sleep` to wait. A test arranges the fake through the workspace (`start_session!(script: …)`), never by handing the harness a process; a text-only step ends the turn, so helpers append `finish` to it.
 - Type checker is the gate: pattern-match structs (`%Config{} = cfg`) before struct updates, avoid `x && y` as a statement.
 

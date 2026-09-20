@@ -11,9 +11,18 @@ defmodule Troupe.Client.Daemon do
   Fleet-level calls — listing, creating and opening sessions, the agents a workspace
   offers, its worktrees — go through the link's own connection to the daemon.
 
-  What a daemon session does not have yet says so in words: branches inside one session
-  (a branch is its own session, decision 7.3), worktree merge and discard, the project
-  brief and the settings that changed a running agent (phase 3 of the daemon plan).
+  A **branch** — `/build fix the test` typed on this session's screen — is a session of
+  its own in the daemon (decision 7.3 b), created with `parent` set to this one and in
+  its own worktree when the checkout is busy, and shown here as a window named the way a
+  local branch always was: `build-1`. Its worker publishes under that name
+  (`Troupe.Remote.Branch`), its events are read back beside this session's, input typed
+  into the window goes to it, an approval it asks is answered through it, and `/merge`
+  and `/discard` end its worktree through `worktree.merge` and `worktree.discard`. The
+  parent's journal remembers which windows exist (`branch_spawned` with the branch's
+  session id, `window_dismissed`), which is what re-opens them with the session.
+
+  What a daemon session does not have yet says so in words: the project brief and the
+  settings that changed a running agent (phase 3 of the daemon plan).
   """
 
   @behaviour Troupe.Client
@@ -21,7 +30,7 @@ defmodule Troupe.Client.Daemon do
   alias Troupe.Client.Daemon.Link
   alias Troupe.Client.Events
   alias Troupe.{Config, Settings}
-  alias Troupe.Remote.{Capability, Journal, Worker}
+  alias Troupe.Remote.{Branch, Capability, Journal, Worker}
 
   @scopes ["observe", "control", "admin"]
   # The journal keys its directory by where the session lives; a daemon session lives here.
@@ -35,14 +44,27 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def unsubscribe(sid), do: Events.unsubscribe(sid)
 
+  # This session's transcript and its branches', the latter under their window names,
+  # in the order they happened.
   @impl true
-  def events(sid), do: Journal.all(sid)
+  def events(sid) do
+    branches =
+      Enum.flat_map(branches(sid), fn branch ->
+        Enum.map(Journal.all(branch.session_id), fn event ->
+          %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, branch.window)}
+        end)
+      end)
 
+    Enum.sort_by(Journal.all(sid) ++ branches, & &1.ts)
+  end
+
+  # The agents a slash command may start a branch on, plus `/worktree`: the default
+  # agent, always in a worktree of its own.
   @impl true
   def commands(sid) do
     case profiles({:local, workspace(sid)}, nil) do
-      {:ok, profiles} -> Enum.map(profiles, & &1.name)
-      _ -> []
+      {:ok, profiles} -> Enum.map(profiles, & &1.name) ++ ["worktree"]
+      _ -> ["worktree"]
     end
   end
 
@@ -72,44 +94,109 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
-  # A branch is a session of its own (decision 7.3): `troupe run <agent> "task"` or HQ
-  # creates one, with its own worktree when the workspace is busy.
+  # `/build fix the test` starts a branch: a session of its own in this workspace
+  # (decision 7.3 b), with `parent` set to this one and its own worktree when the
+  # checkout is busy — which it is, since this session works in it — shown here as the
+  # window `build-1`. `/worktree …` is the default agent, always in a worktree.
   @impl true
-  def dispatch(_sid, _name, _args),
-    do: {:error, "a daemon session runs one agent; start another session for a second"}
+  def dispatch(sid, name, args) do
+    with {:ok, profile, mode} <- branch_profile(sid, name),
+         prompt = prompt_of(args),
+         window = Branch.next_name(window_names(sid), name),
+         {:ok, child} <- create_branch(sid, profile, prompt, mode),
+         {:ok, _} <- open_branch(sid, child, window, profile, prompt) do
+      {:ok, window}
+    end
+  end
 
   @impl true
-  def send_input(sid, _path, text), do: describe(Worker.input(sid, text))
+  def send_input(sid, path, text), do: route(sid, path, &Worker.input(&1, text))
 
   @impl true
-  def approve(sid, call_id, decision), do: describe(Worker.approve(sid, call_id, decision))
+  def approve(sid, call_id, decision),
+    do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
 
   @impl true
-  def answer(sid, _call_id, text), do: describe(Worker.input(sid, text))
+  def answer(sid, call_id, text), do: describe(Worker.input(call_target(sid, call_id), text))
 
   @impl true
-  def edit_todo(sid, _path, change), do: describe(Worker.edit_todo(sid, change))
+  def edit_todo(sid, path, change), do: route(sid, path, &Worker.edit_todo(&1, change))
 
   @impl true
-  def switch_profile(sid, _path, name), do: describe(Worker.switch_profile(sid, name))
+  def switch_profile(sid, path, name), do: route(sid, path, &Worker.switch_profile(&1, name))
 
   @impl true
-  def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
+  def cancel_branch(sid, path), do: route(sid, path, &Worker.cancel/1)
 
   @impl true
   def compact(_sid, _path), do: {:error, "the daemon compacts a session on its own"}
 
+  # Dismissing this session's own window lets go of the session; dismissing a branch's
+  # closes the window for good and leaves the session to the daemon, where the picker
+  # still lists it.
   @impl true
-  def dismiss(sid, _path) do
-    Worker.detach(sid)
-    :ok
+  def dismiss(sid, path) do
+    case branch(sid, path) do
+      nil ->
+        Worker.detach(sid)
+        :ok
+
+      branch ->
+        close_branch(sid, branch)
+        :ok
+    end
   end
 
   @impl true
-  def merge(_sid, _path), do: {:error, "merging a session's worktree arrives with phase 3"}
+  def merge(sid, path) do
+    with {:ok, branch} <- worktree_branch(sid, path) do
+      params = %{
+        workspace: workspace(sid),
+        path: branch.worktree,
+        message: "troupe(#{branch.window}): #{first_line(branch.prompt)}",
+        command_id: Troupe.Remote.RPC.command_id()
+      }
+
+      case Link.call("worktree.merge", params) do
+        {:ok, %{} = result} ->
+          record(sid, branch.window, :worktree_merged, %{
+            output: result["output"] || "",
+            conflicts: false
+          })
+
+          close_branch(sid, branch)
+          {:ok, "merged #{branch.git_branch} into the checkout"}
+
+        {:error, "conflict" <> _ = reason} ->
+          record(sid, branch.window, :worktree_merged, %{output: reason, conflicts: true})
+          {:error, "merge conflicts; resolve in your checkout: #{reason}"}
+
+        {:error, reason} ->
+          {:error, message(reason)}
+      end
+    end
+  end
 
   @impl true
-  def discard(_sid, _path), do: {:error, "discarding a session's worktree arrives with phase 3"}
+  def discard(sid, path) do
+    with {:ok, branch} <- worktree_branch(sid, path) do
+      params = %{
+        workspace: workspace(sid),
+        path: branch.worktree,
+        command_id: Troupe.Remote.RPC.command_id()
+      }
+
+      case Link.call("worktree.discard", params) do
+        {:ok, _} ->
+          record(sid, branch.window, :worktree_discarded, %{})
+          close_branch(sid, branch)
+          {:ok, "discarded #{branch.git_branch}"}
+
+        {:error, reason} ->
+          {:error, message(reason)}
+      end
+    end
+  end
 
   # Settings live in the config files the daemon reads at session start. `watch` is the
   # one a running session can take, through the protocol.
@@ -187,8 +274,10 @@ defmodule Troupe.Client.Daemon do
   def fs_upload(sid, path, content), do: describe(Worker.fs_upload(sid, path, content))
 
   # Stopping means letting go: the daemon keeps the session and idles it on its own.
+  # Its branches' windows go with the screen they were on.
   @impl true
   def stop_session(sid) do
+    for branch <- branches(sid), do: Worker.detach(branch.session_id)
     Worker.detach(sid)
     :ok
   end
@@ -299,11 +388,15 @@ defmodule Troupe.Client.Daemon do
     else
       case Link.call("session.get", %{session_id: sid}) do
         {:ok, %{} = row} ->
-          attach(origin, sid, %{
-            workspace: row["workspace"] || workspace,
-            profile: row["profile"],
-            title: row["title"]
-          })
+          with {:ok, ^sid} <-
+                 attach(origin, sid, %{
+                   workspace: row["workspace"] || workspace,
+                   profile: row["profile"],
+                   title: row["title"]
+                 }) do
+            reopen_branches(sid)
+            {:ok, sid}
+          end
 
         {:error, reason} ->
           {:error, message(reason)}
@@ -394,12 +487,219 @@ defmodule Troupe.Client.Daemon do
                 state: :active,
                 workspace: meta[:workspace],
                 profile: meta[:profile],
-                title: meta[:title]
+                title: meta[:title],
+                as: meta[:as]
               ]}
            ) do
       {:ok, sid}
     else
       {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  ## Branches
+
+  # What this session's journal says its windows are: every branch opened here and not
+  # dismissed, with the session it is. The journal is the record because the daemon's
+  # listing knows the parent of a session but not what its parent's screen called it.
+  defp branches(sid) do
+    sid
+    |> Journal.all()
+    |> Enum.reduce(%{}, fn
+      %{type: :branch_spawned, agent_path: window, data: %{session_id: child} = data}, acc
+      when is_binary(child) ->
+        Map.put(acc, window, %{
+          window: window,
+          session_id: child,
+          profile: data[:name],
+          prompt: data[:prompt] || "",
+          worktree: data[:worktree],
+          git_branch: data[:git_branch]
+        })
+
+      %{type: :window_dismissed, agent_path: window}, acc ->
+        Map.delete(acc, window)
+
+      _event, acc ->
+        acc
+    end)
+    |> Map.values()
+    |> Enum.sort_by(& &1.window)
+  end
+
+  # Every window name this session ever had, dismissed ones included, so a name is not
+  # given twice.
+  defp window_names(sid) do
+    sid
+    |> Journal.all()
+    |> Enum.filter(&(&1.type == :branch_spawned))
+    |> Enum.map(& &1.agent_path)
+    |> Enum.uniq()
+  end
+
+  defp branch(sid, path) when is_binary(path) do
+    window = Branch.window_of(path)
+    Enum.find(branches(sid), &(&1.window == window))
+  end
+
+  defp branch(_sid, _path), do: nil
+
+  defp route(sid, path, fun) do
+    case {path, branch(sid, path)} do
+      {_, %{session_id: child}} -> describe(fun.(child))
+      {path, nil} when path in [nil, "root", "session", "session-1"] -> describe(fun.(sid))
+      {path, nil} -> {:error, "no window #{path}"}
+    end
+  end
+
+  # An approval asked by a branch was registered under this session and its call id by
+  # the branch's worker; anything else is this session's own.
+  defp call_target(sid, call_id) do
+    case Registry.lookup(Troupe.Client.Registry, {:call, sid, call_id}) do
+      [{_pid, child}] -> child
+      [] -> sid
+    end
+  end
+
+  defp branch_profile(sid, "worktree"),
+    do: {:ok, Config.load(workspace(sid)).default_agent, "always"}
+
+  defp branch_profile(sid, name) do
+    primaries =
+      case profiles({:local, workspace(sid)}, nil) do
+        {:ok, profiles} -> Enum.map(profiles, & &1.name)
+        _ -> []
+      end
+
+    if name in primaries do
+      {:ok, name, "auto"}
+    else
+      {:error,
+       "unknown command /#{name}; available: " <>
+         Enum.map_join(primaries ++ ["worktree"], ", ", &("/" <> &1))}
+    end
+  end
+
+  defp prompt_of(args) when is_binary(args), do: String.trim(args)
+  defp prompt_of(%{} = args), do: prompt_of(args[:prompt] || args["prompt"] || "")
+  defp prompt_of(_args), do: ""
+
+  defp create_branch(sid, profile, prompt, mode) do
+    body =
+      %{
+        workspace: workspace(sid),
+        profile: profile,
+        prompt: blank_to_nil(prompt),
+        worktree: mode,
+        parent: sid,
+        config: %{},
+        command_id: Troupe.Remote.RPC.command_id()
+      }
+      |> Enum.reject(fn {_k, v} -> is_nil(v) end)
+      |> Map.new()
+
+    case Link.call("session.create", body) do
+      {:ok, %{"session_id" => child} = result} ->
+        {:ok,
+         %{
+           id: child,
+           workspace: result["workspace"] || workspace(sid),
+           worktree: result["worktree"],
+           git_branch: result["branch"]
+         }}
+
+      {:ok, other} ->
+        {:error, "unexpected session.create answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
+  # The window opens in this session's journal — `branch_spawned` carrying the branch's
+  # session id, then `worktree_created` when it has one — and the branch's worker starts
+  # publishing under the window's name.
+  defp open_branch(sid, child, window, profile, prompt) do
+    isolation = if child.worktree, do: :worktree, else: :shared
+
+    record(sid, window, :branch_spawned, %{
+      name: profile,
+      isolation: isolation,
+      prompt: prompt,
+      session_id: child.id,
+      worktree: child.worktree,
+      git_branch: child.git_branch
+    })
+
+    if child.worktree do
+      record(sid, window, :worktree_created, %{
+        path: child.worktree,
+        git_branch: child.git_branch,
+        managed: true
+      })
+    end
+
+    attach({:local, child.workspace}, child.id, %{
+      workspace: child.workspace,
+      profile: profile,
+      title: prompt,
+      as: {sid, window}
+    })
+  end
+
+  # A session opened again brings its branches' windows back, as long as the daemon
+  # still has those sessions.
+  defp reopen_branches(sid) do
+    for branch <- branches(sid), Worker.whereis(branch.session_id) == nil do
+      case Link.call("session.get", %{session_id: branch.session_id}) do
+        {:ok, %{} = row} ->
+          attach({:local, row["workspace"]}, branch.session_id, %{
+            workspace: row["workspace"],
+            profile: branch.profile,
+            title: branch.prompt,
+            as: {sid, branch.window}
+          })
+
+        {:error, _reason} ->
+          record(sid, branch.window, :window_dismissed, %{})
+      end
+    end
+
+    :ok
+  end
+
+  defp close_branch(sid, branch) do
+    Worker.detach(branch.session_id)
+    record(sid, branch.window, :window_dismissed, %{})
+  end
+
+  defp worktree_branch(sid, path) do
+    case branch(sid, path) do
+      nil -> {:error, "no branch #{path}"}
+      %{worktree: nil} -> {:error, "#{path} shares this checkout; there is nothing to merge"}
+      branch -> {:ok, branch}
+    end
+  end
+
+  # A line this client writes into the session's journal, for the screen and for the
+  # next time the session is opened.
+  defp record(sid, window, type, data) do
+    event = %Troupe.Event{
+      session_id: sid,
+      agent_path: window,
+      type: type,
+      ts: System.system_time(:millisecond),
+      data: data
+    }
+
+    for kept <- Journal.append(sid, [event]), do: Events.publish(kept)
+    :ok
+  end
+
+  defp first_line(text) do
+    case text |> to_string() |> String.split("\n", parts: 2) do
+      ["" | _] -> "branch"
+      [line | _] -> String.slice(String.trim(line), 0, 72)
     end
   end
 
