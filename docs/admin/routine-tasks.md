@@ -368,6 +368,9 @@ A rollout, because the token is read at boot. Disable: set `secretName: ""`, upg
 
 ## 13. Enable SCIM
 
+For Authentik specifically, [authentik.md §4](authentik.md#4-scim-dry-run-first) is the
+same steps with the provider's own fields filled in, and §0 is the part to read first.
+
 From the console: **Identity provider → SCIM connector → create a token**. The token is
 shown once, in the notice at the top of the page. Paste it into the provider's
 provisioning as the secret token, with the base URL the card shows
