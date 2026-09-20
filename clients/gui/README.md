@@ -58,11 +58,52 @@ pnpm dev                         # then sign in to the plane URL `pnpm fake` pri
 ```
 
 `pnpm fake` starts the same identity provider, plane and worker the test suite runs
-against, seeded with three sessions, one of them stopped on an approval. The device code
-approves itself, because there is no browser at the other end to click anything. Three
+against, seeded with three sessions, one of them stopped on an approval. Signing in needs
+no clicking: a browser is sent to the provider and straight back as Alice, and a device
+code approves itself. Three
 prompt prefixes drive the scripted agent: `approve: <command>` asks for an approval,
 `big: <label>` returns a tool result too large to inline, and `quiet: …` answers without
 streaming.
+
+### Against the real daemon, with a fake model
+
+The fake deployment has no daemon. To see a session on this computer — questions, the
+budget question, streamed reasoning, the harness's notes — run the real `troupe-daemon`
+with its scripted model, which is how its own smoke tests and the TUI's client tests
+drive it:
+
+```sh
+# 1. the daemon: install it (github.com/it-minds/troupe, install.sh / install.ps1) or
+#    build it there with `MIX_ENV=prod mix release troupe_daemon`
+# 2. a workspace whose model is the script
+mkdir -p ~/demo/.troupe && cat > ~/demo/.troupe/config.yaml <<'YAML'
+provider: fake
+fake_script: /home/you/demo/.troupe/script.json   # absolute: resolved by the daemon, not the workspace
+model: fake-model
+auto_approve: true
+max_turns: 2          # so the budget question appears on the third turn
+YAML
+cat > ~/demo/.troupe/script.json <<'JSON'
+{"routes": {"root": [
+  {"reasoning": "Let me look first.", "text": "One question before I change anything.",
+   "tools": [{"name": "ask_user", "input": {"question": "Formal or casual?",
+             "options": [{"label": "formal"}, {"label": "casual"}]}}]},
+  {"text": "Noted."},
+  {"tools": [{"name": "finish", "input": {"summary": "done"}}]}
+]}}
+JSON
+# 3. run it, and read where it listens
+troupe-daemon run &
+cat "${XDG_RUNTIME_DIR:-$HOME/.troupe/run}/troupe/daemon.json"   # %LOCALAPPDATA%\troupe\daemon.json on Windows
+# 4. tell the browser build once, then the usual two
+echo 'VITE_TROUPE_DAEMON=<ws.port>:<ws.token>' > apps/desktop/.env.local
+pnpm fake && pnpm dev      # sign in to the fake plane; "This computer" is already connected
+```
+
+Then *New session* in `~/demo`. The desktop application skips step 4: it reads
+`daemon.json` itself and starts `troupe-daemon run` when nothing is listening. Steps are
+the daemon's `Troupe.LLM.Fake` script: `text`, `tools`, `reasoning`, `stop`
+(`max_tokens` / `refusal`) and `error`, one step per model call, per agent under `routes`.
 
 ### Against a real deployment
 

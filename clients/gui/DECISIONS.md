@@ -312,3 +312,26 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     answers on as the file a dead daemon left behind, starting one over it, where before
     it handed the stale port back and called that found. `troupe daemon`, the TUI's older
     spelling, is the last thing tried.
+
+41. **A browser build in development can be told where the daemon is by the environment,
+    and the recipe for a local session is the real daemon with its fake model.** The fake
+    deployment has no daemon, and writing one would be a second scripted agent that agrees
+    with the client by construction. The daemon already carries a scripted model
+    (`provider: fake`, `fake_script:`) for its own smoke tests and the TUI's client tests,
+    and against it the GUI exercises the real protocol — questions, the budget question,
+    reasoning, the harness's notes, branches — with nothing invented here. What stood in
+    the way was typing a port and a token into a form at every reload of `pnpm dev`, so
+    `VITE_TROUPE_DAEMON=<port>:<token>` (or `#daemon=` on the URL) fills the form once,
+    into memory for the tab and nowhere else, and only when no shell is present to find
+    the daemon itself. The README carries the recipe; the desktop application needs none
+    of it.
+
+    Running the recipe found what the fake daemon could not: `DaemonClient` unsubscribed
+    a session's view when the *first* of two openers closed it, and a second opener's
+    hooks were never installed, so a component mounted twice — which React does in
+    development, and which two panes on one session do everywhere — read a transcript
+    that stopped at nothing. `open` now counts holders and `close` lets go on the last;
+    the hook listens on the shared view instead of owning it, and pays exactly one
+    `close`. Two small ones beside it: a reasoning block's text was concatenated into the
+    answer (`textOf` knew `thinking` and not the daemon's `reasoning`), and a row whose
+    time `Date.parse` could not read said `NaN d ago`.

@@ -126,6 +126,8 @@ export function When({ iso }: { iso: string | null }): JSX.Element {
 }
 
 function relative(at: number): string {
+  // A time the server did not give, or gave in a shape `Date.parse` does not read, is not a number of days.
+  if (!Number.isFinite(at)) return "—";
   const seconds = Math.round((Date.now() - at) / 1000);
   if (seconds < 60) return "just now";
   const minutes = Math.round(seconds / 60);

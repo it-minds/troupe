@@ -49,7 +49,8 @@ console.log(`
 
   CORS allowlist     ${origins.join(", ")}
 
-Sign in to the plane URL above. The device code approves itself.
+Sign in to the plane URL above. A browser is sent to the provider and straight back as
+Alice; a device code approves itself.
 Prompts understand three prefixes: "approve: <cmd>" asks for an approval,
 "big: <label>" returns a tool result too large to inline, and "quiet: …"
 answers without streaming.

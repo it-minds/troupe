@@ -1,10 +1,14 @@
-// A fake identity provider: the device authorization grant, and nothing else.
+// A fake identity provider: the device authorization grant, and the authorization-code
+// redirect a browser build uses, with PKCE.
 //
 // It is deliberately awkward in the two ways a real one is — it makes the client wait
 // with `authorization_pending`, and it rotates the refresh token on every use — because
 // both are things a client gets wrong silently and only notices a day later when
-// somebody has to sign in again.
+// somebody has to sign in again. The redirect has no page: `/authorize` approves as
+// whoever `redirectSubject` names and sends the browser straight back, which is what
+// lets `pnpm fake` be signed into from a tab.
 
+import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 
@@ -35,8 +39,11 @@ export class FakeIdp {
    * provider calls this the public client's allowed web origins.
    */
   corsOrigins: string[] = [];
+  /** Who `/authorize` signs in as. There is no page to choose on. */
+  redirectSubject = { subject: "alice@example.com", displayName: "Alice" };
 
   private readonly grants = new Map<string, Grant>();
+  private readonly codes = new Map<string, { subject: string; displayName: string; challenge: string | null }>();
   private counter = 0;
   private url = "";
 
@@ -90,7 +97,7 @@ export class FakeIdp {
     if (origin && this.corsOrigins.includes(origin)) {
       headers["access-control-allow-origin"] = origin;
       headers["access-control-allow-headers"] = "content-type";
-      headers["access-control-allow-methods"] = "POST, OPTIONS";
+      headers["access-control-allow-methods"] = "GET, POST, OPTIONS";
     }
     if (req.method === "OPTIONS") {
       res.writeHead(204, headers);
@@ -101,6 +108,33 @@ export class FakeIdp {
       res.writeHead(status, headers);
       res.end(JSON.stringify(payload));
     };
+
+    // What a browser build reads to find the authorization endpoint the plane did not
+    // publish.
+    if (req.url?.startsWith("/.well-known/openid-configuration")) {
+      return json(200, {
+        issuer: this.issuer,
+        authorization_endpoint: `${this.url}/authorize`,
+        token_endpoint: this.tokenEndpoint,
+        device_authorization_endpoint: this.deviceAuthorizationEndpoint,
+      });
+    }
+
+    // The redirect, approved on the spot: the code carries the PKCE challenge, and the
+    // exchange below checks the verifier against it the way a real provider would.
+    if (req.url?.startsWith("/authorize")) {
+      const query = new URL(req.url, this.url).searchParams;
+      this.counter += 1;
+      const code = `ac-${this.counter}`;
+      this.codes.set(code, { ...this.redirectSubject, challenge: query.get("code_challenge") });
+      const back = new URL(query.get("redirect_uri") ?? this.url);
+      back.searchParams.set("code", code);
+      const state = query.get("state");
+      if (state) back.searchParams.set("state", state);
+      res.writeHead(302, { location: back.toString() });
+      res.end();
+      return;
+    }
 
     if (req.url?.startsWith("/device/code")) {
       this.counter += 1;
@@ -135,6 +169,18 @@ export class FakeIdp {
         if (!held) return json(400, { error: "invalid_grant" });
         // Rotation: the old one stops working the instant the new one is issued.
         this.refreshTokens.delete(old);
+        return json(200, this.mint(held.subject, held.displayName));
+      }
+
+      if (grantType === "authorization_code") {
+        const code = form.get("code") ?? "";
+        const held = this.codes.get(code);
+        if (!held) return json(400, { error: "invalid_grant" });
+        const verifier = form.get("code_verifier") ?? "";
+        if (held.challenge && createHash("sha256").update(verifier).digest("base64url") !== held.challenge) {
+          return json(400, { error: "invalid_grant", error_description: "the PKCE verifier does not match the challenge" });
+        }
+        this.codes.delete(code);
         return json(200, this.mint(held.subject, held.displayName));
       }
 

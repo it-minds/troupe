@@ -102,6 +102,12 @@ export class DaemonClient {
   // two views for one session would each claim the envelope first, and the one that
   // lost would never see an event — which is a transcript that silently stops.
   private readonly openingViews = new Map<string, Promise<SessionView>>();
+  // How many callers hold each open session. A screen and a file pane, or one screen
+  // mounted twice by a framework that does that, share one view — and the view goes
+  // when the last of them lets go, not when the first does. Without this the first
+  // `close` unsubscribed a view somebody else was still reading, and what they read
+  // from then on was nothing.
+  private readonly holders = new Map<string, number>();
   private readonly hooks: DaemonHooks;
   private opening: Promise<TroupeConnection> | null = null;
 
@@ -185,9 +191,13 @@ export class DaemonClient {
    * Open a session on this daemon, subscribing from the beginning.
    *
    * The view is registered before `subscribe` is sent, so an event that arrives while
-   * the subscription is being acknowledged is folded rather than dropped.
+   * the subscription is being acknowledged is folded rather than dropped. A second
+   * caller joins the same view — its `hooks` are not installed, since the view already
+   * has an owner; use `SessionView.listen` to watch alongside — and each caller owes one
+   * `close`.
    */
   async open(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2] = {}): Promise<SessionView> {
+    this.holders.set(sessionId, (this.holders.get(sessionId) ?? 0) + 1);
     const existing = this.views.get(sessionId);
     if (existing) return existing;
     const pending = this.openingViews.get(sessionId);
@@ -205,17 +215,32 @@ export class DaemonClient {
     return opening;
   }
 
-  /** Stop following a session. The socket stays: other sessions are on it. */
+  /**
+   * Let go of a session. The view is unsubscribed when the last holder does; the socket
+   * stays, because other sessions are on it.
+   */
   async close(sessionId: string): Promise<void> {
+    const left = (this.holders.get(sessionId) ?? 1) - 1;
+    if (left > 0) {
+      this.holders.set(sessionId, left);
+      return;
+    }
+    this.holders.delete(sessionId);
     const view = this.views.get(sessionId);
     if (!view) return;
     this.views.delete(sessionId);
     if (this.conn) await view.unsubscribe().catch(() => undefined);
   }
 
+  /** How many callers currently hold a session open. For tests. */
+  holdersOf(sessionId: string): number {
+    return this.holders.get(sessionId) ?? 0;
+  }
+
   /** Let the socket go. Called when the daemon is forgotten, not when a session closes. */
   disconnect(): void {
     this.views.clear();
+    this.holders.clear();
     this.conn?.close();
     this.conn = null;
   }

@@ -559,3 +559,29 @@ leaves the agent waiting for an answer that cannot come. Decision 40.
 
 Not done here: the shell has not been built and run on this machine (no Rust toolchain),
 so `daemon.rs` is reviewed rather than exercised; the umbrella's release job builds it.
+
+### Verified against the real daemon
+
+The recipe in the README, run here: `troupe-daemon` built from `it-minds/troupe` at
+harness `84edcb9`, a workspace whose model is the Fake with the script above, `pnpm fake`
+for the sign-in, `pnpm dev` told the port and token through `VITE_TROUPE_DAEMON`. In the
+browser: the session appears in the one list marked *On this computer*; the first turn
+streams its reasoning into the thinking pane and its answer beneath; the `ask_user`
+question arrives as a panel with three options and the header says *Needs you*;
+answering `casual` runs the tool, the second turn arrives, and the durable
+`budget_warning` shows as `nearly out: turns 2/2 (100%)`; a third prompt brings the
+budget question — *Out of budget. Carry on?* with *Spend one more slice* / *Stop asking
+for this session* / *Stop here*; one more slice, and the third turn arrives. Reopening
+the session from the list replays all of it.
+
+That reopening is what found the holder bug (Decision 41): before the fix the reopened
+session read "Reading the session" for ever, because the view had been unsubscribed by
+the first of React's two development mounts. The fake daemon's tests could not have shown
+it — a test opens once.
+
+Two things the run says about the daemon rather than the GUI, for troupe-remote:
+`fake_script` is resolved against the daemon's working directory, not the workspace, so a
+relative path in `.troupe/config.yaml` fails at `session.create`; and the fake provider's
+identity server here serves no `openid-configuration`, so a browser build's redirect
+sign-in against `pnpm fake` fails at discovery — the run used the device flow, which is
+what the shell asks for.

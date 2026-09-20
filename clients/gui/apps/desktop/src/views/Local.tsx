@@ -108,8 +108,10 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
         <>
           <p className="copy">
             A page cannot read the file the daemon publishes itself in, and cannot start a program. So it has to be told where the daemon
-            is. Run <code className="mono">troupe daemon</code> and read the port and token out of{" "}
-            <code className="mono">daemon.json</code> — the desktop application does this part for you.
+            is. Run <code className="mono">troupe-daemon run</code> and read the port and token out of{" "}
+            <code className="mono">daemon.json</code> — the desktop application does this part for you. In development,{" "}
+            <code className="mono">VITE_TROUPE_DAEMON=&lt;port&gt;:&lt;token&gt;</code> in <code className="mono">apps/desktop/.env.local</code>{" "}
+            fills this in.
           </p>
           <form
             className="inline-form"

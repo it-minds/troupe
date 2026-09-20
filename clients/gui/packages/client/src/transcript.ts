@@ -143,7 +143,8 @@ const pathKey = (agent: string[]): string => agent.slice(1).join("/");
 function textOf(message: unknown): string {
   const content = (message as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content ?? [];
   let out = "";
-  for (const block of content) if (typeof block.text === "string" && block.type !== "thinking") out += block.text;
+  // The model's thinking is not its answer, in either spelling (troupe-remote Decision 658).
+  for (const block of content) if (typeof block.text === "string" && block.type !== "thinking" && block.type !== "reasoning") out += block.text;
   return out;
 }
 
