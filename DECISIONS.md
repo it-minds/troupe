@@ -4561,12 +4561,14 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      tokens, wall clock, and the model's context window, which is the provider's ceiling
      rather than ours — and warned at eighty percent of any of them, once per dimension.
      That comes here as `Troupe.Agent.Headroom`, pure, read after every model response:
-     a dimension that crosses `budget_warn_at` publishes an ephemeral `budget_warning`
-     with the numbers and a sentence (`input tokens 4.9M/6.0M (82%)`), and is not warned
-     about again by that agent; `agent_state.budget.headroom` carries all five fractions
-     always, so a client draws a gauge without knowing how each limit is counted.
-     Ephemeral because the numbers are in `agent_state` for whoever asks later and a
-     warning is for now. `full_send: true` — the harness's `--full-send` — turns the
+     a dimension that crosses `budget_warn_at` writes a `budget_warning` with the numbers
+     and a sentence (`input tokens 4.9M/6.0M (82%)`), and is not warned about again by
+     that agent; `agent_state.budget.headroom` carries all five fractions always, so a
+     client draws a gauge without knowing how each limit is counted. The warning is
+     durable, not ephemeral, although the numbers are in `agent_state` for whoever asks
+     later: the contract lets an ephemeral be dropped under load, and the first client
+     built on this lost one exactly there — a warning that may not arrive is not one.
+     The agent's replay ignores it, so it moves no fixture. `full_send: true` — the harness's `--full-send` — turns the
      warnings off for a session that wants no nagging, and a client may set it at
      `session.create`. What the harness did next, asking the person at the ceiling
      whether to extend the budget, is not here: a budget is a limit, `budget_exhausted`

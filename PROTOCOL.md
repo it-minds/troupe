@@ -258,6 +258,7 @@ Durable:
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary` |
 | `budget_exhausted` | `limit` |
+| `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `agent_done` | `reason`, `summary`, `limit` |
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
@@ -274,12 +275,13 @@ Durable:
 | `fs_changed` | `path`, `hash`, `size` |
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
-Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`, `budget_warning`.
+Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
 
 `budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
-`limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is published once per
+`limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
 dimension per agent when it crosses `budget_warn_at` (0.8 by default), so a person hears
-a limit is near before `budget_exhausted` stops the agent. `agent_state.budget.headroom`
+a limit is near before `budget_exhausted` stops the agent. Durable, because an ephemeral
+may be dropped under load and a warning has to arrive. `agent_state.budget.headroom`
 carries all five fractions for a client that draws a gauge. `full_send: true` in the
 session's config turns the warnings off.
 
