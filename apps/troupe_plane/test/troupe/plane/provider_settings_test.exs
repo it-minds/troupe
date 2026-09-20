@@ -2,8 +2,20 @@
 defmodule Troupe.Plane.ProviderSettingsTest.FakeProvider do
   use Plug.Router
 
+  # The provider this stands in for is Django, and Django resolves `/a//b` as a path of
+  # its own and answers 404. Plug does not: it drops empty segments when it splits a
+  # path, so a router alone would answer the double slash happily and the test below
+  # would pass whether or not the code under it is right. `request_path` is the raw
+  # path, before that splitting, which is the only place the difference survives.
+  plug(:as_django_would)
   plug(:match)
   plug(:dispatch)
+
+  defp as_django_would(conn, _opts) do
+    if String.contains?(conn.request_path, "//"),
+      do: conn |> send_resp(404, "") |> halt(),
+      else: conn
+  end
 
   get "/.well-known/openid-configuration" do
     base = "http://#{conn.host}:#{conn.port}"
@@ -14,6 +26,20 @@ defmodule Troupe.Plane.ProviderSettingsTest.FakeProvider do
       "token_endpoint" => base <> "/token",
       "device_authorization_endpoint" => base <> "/device",
       "authorization_endpoint" => base <> "/authorize"
+    })
+  end
+
+  # What a per-application provider publishes, at a path under a slug, calling itself
+  # by a name that ends in a slash.
+  get "/application/o/troupe/.well-known/openid-configuration" do
+    base = "http://#{conn.host}:#{conn.port}"
+
+    json(conn, %{
+      "issuer" => base <> "/application/o/troupe/",
+      "jwks_uri" => base <> "/keys",
+      "token_endpoint" => base <> "/application/o/token/",
+      "device_authorization_endpoint" => base <> "/application/o/device/",
+      "authorization_endpoint" => base <> "/application/o/authorize/"
     })
   end
 
@@ -160,6 +186,38 @@ defmodule Troupe.Plane.ProviderSettingsTest do
 
       [event] = Enum.filter(Audit.list(), &(&1.action == "provider.reset"))
       assert event.actor == "root@example.test"
+    end
+  end
+
+  describe "an issuer that ends in a slash" do
+    test "is asked for its discovery document at the path the provider serves", context do
+      issuer = context.fake <> "/application/o/troupe/"
+
+      # Naively concatenated this is `<slug>//.well-known/openid-configuration`, which a
+      # provider is entitled to treat as a different path — and Django does, so every
+      # sign-in would fail with `no_provider_keys` against a configuration copied
+      # character for character from the provider's own page.
+      assert {:ok, %{ok: true, checks: checks}} =
+               Admin.provider_check(context.root, %{
+                 "issuer" => issuer,
+                 "token_endpoint" => context.fake <> "/application/o/token/",
+                 "device_authorization_endpoint" => context.fake <> "/application/o/device/"
+               })
+
+      assert %{ok: true, detail: detail} = Enum.find(checks, &(&1.name == "Discovery"))
+      assert detail =~ "calls itself the same thing"
+
+      # And the slash stays in the name: `iss` is compared exactly, so trimming it here
+      # would refuse every token the provider issues.
+      assert {:ok, _} =
+               Admin.provider_put(context.root, %{
+                 "issuer" => issuer,
+                 "token_endpoint" => context.fake <> "/application/o/token/",
+                 "device_authorization_endpoint" => context.fake <> "/application/o/device/"
+               })
+
+      assert OIDC.configured().issuer == issuer
+      assert discovery()["issuer"] == issuer
     end
   end
 

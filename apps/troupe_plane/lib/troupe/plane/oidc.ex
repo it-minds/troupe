@@ -203,8 +203,7 @@ defmodule Troupe.Plane.OIDC do
   end
 
   defp fetch_jwks(issuer) do
-    with {:ok, %{status: 200, body: discovery}} <-
-           get(issuer <> "/.well-known/openid-configuration"),
+    with {:ok, %{status: 200, body: discovery}} <- get(discovery_url(issuer)),
          uri when is_binary(uri) <- discovery["jwks_uri"],
          {:ok, %{status: 200, body: jwks}} <- get(uri) do
       :persistent_term.put({__MODULE__, :jwks, issuer}, jwks)
@@ -217,6 +216,24 @@ defmodule Troupe.Plane.OIDC do
   end
 
   defp get(url), do: Req.request(method: :get, url: url, decode_body: true, retry: false)
+
+  # The issuer without its trailing slash, then the well-known path.
+  #
+  # An issuer that ends in one is not unusual — it is what Authentik publishes for a
+  # per-application provider, `https://auth.example/application/o/<slug>/` — and the
+  # naive concatenation asks for `<slug>//.well-known/openid-configuration`. Whether
+  # that works is the provider's routing, and on Django it does not: the double slash
+  # is a different path and answers 404. What that failure looks like from here is
+  # `no_provider_keys` on every sign-in, with a configuration that is character for
+  # character what the provider's own page told you to paste.
+  #
+  # Only this URL is trimmed. The `iss` claim is compared exactly, by `Token.verify/3`
+  # and by the discovery check, and a trailing slash there is part of the name the
+  # provider calls itself — trimming it would refuse every token from a provider whose
+  # issuer genuinely ends in one.
+  defp discovery_url(issuer) do
+    String.trim_trailing(issuer, "/") <> "/.well-known/openid-configuration"
+  end
 
   # -- checking the configuration ---------------------------------------------
 
@@ -271,7 +288,7 @@ defmodule Troupe.Plane.OIDC do
   defp discovery(nil), do: {:error, :no_issuer}
 
   defp discovery(issuer) do
-    case get(issuer <> "/.well-known/openid-configuration") do
+    case get(discovery_url(issuer)) do
       {:ok, %{status: 200, body: body}} when is_map(body) -> {:ok, body}
       {:ok, %{status: status}} -> {:error, {:status, status}}
       {:error, reason} -> {:error, reason}
