@@ -15,7 +15,7 @@ defmodule Troupe.Daemon.MixProject do
   # (a sparse checkout has no repository root), so it is set here, before Mix evaluates them.
   # `TROUPE_HARNESS_GIT` points a local build at a checkout on disk instead of GitHub.
   @harness_git System.get_env("TROUPE_HARNESS_GIT", "https://github.com/it-minds/troupe-remote.git")
-  @harness_ref System.get_env("TROUPE_HARNESS_REF", "3ad89e2a01b28b2a1f9afcaf6357e5bf47db99d1")
+  @harness_ref System.get_env("TROUPE_HARNESS_REF", "800348376fae3cdbfeac49c736becb1b68b870eb")
   @harness_version "0.2.0"
 
   System.put_env("TROUPE_VERSION", @harness_version)
