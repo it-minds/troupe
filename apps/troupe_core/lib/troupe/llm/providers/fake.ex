@@ -23,6 +23,7 @@ defmodule Troupe.LLM.Fake do
           | {:tools, [{String.t(), map()}]}
           | {:text_and_tools, String.t(), [{String.t(), map()}]}
           | {:reasoning, String.t(), step() | nil}
+          | {:stop, atom(), step()}
           | {:error, term()}
           | map()
 
@@ -94,6 +95,12 @@ defmodule Troupe.LLM.Fake do
   def normalize_script(steps) when is_list(steps),
     do: [steps: Enum.map(steps, &normalize_step/1), routes: %{}]
 
+  # `stop` overrides how the step's answer ended: `max_tokens` for a reply the output cap
+  # cut, `refusal` for one the model declined to give.
+  defp normalize_step(%{"stop" => stop} = step) do
+    {:stop, stop_atom(stop), normalize_step(Map.delete(step, "stop"))}
+  end
+
   # `reasoning` wraps whatever else the step says: a model that thought and then answered,
   # or one that only thought.
   defp normalize_step(%{"reasoning" => reasoning} = step) do
@@ -117,6 +124,12 @@ defmodule Troupe.LLM.Fake do
   end
 
   defp normalize_step(%{"error" => reason}), do: {:error, reason}
+
+  defp stop_atom("max_tokens"), do: :max_tokens
+  defp stop_atom("refusal"), do: :refusal
+  defp stop_atom("end_turn"), do: :end_turn
+  defp stop_atom("tool_use"), do: :tool_use
+  defp stop_atom(_other), do: :other
 
   @doc "Take the next scripted step for a request, recording the request."
   @spec next(GenServer.server(), Troupe.LLM.Request.t()) ::
@@ -205,6 +218,13 @@ defmodule Troupe.LLM.Fake do
   end
 
   defp render({:error, reason}, _state), do: {:error, reason}
+
+  defp render({:stop, stop_reason, step}, state) do
+    case render(step, state) do
+      {:ok, response, delay} -> {:ok, %{response | stop_reason: stop_reason}, delay}
+      other -> other
+    end
+  end
 
   # Thinking in front of an answer, or on its own: the shape of a reasoning model's turn,
   # so a test can watch it reach the log and stay out of the prose.

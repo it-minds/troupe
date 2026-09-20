@@ -246,22 +246,23 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`harness` — the last is the note the harness gives a model whose reply was cut or empty), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
-| `llm_error` | `reason` |
+| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets |
+| `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
-| `compacted` | `summary` |
+| `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
-| `agent_done` | `reason`, `summary`, `limit` |
+| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`), `summary`, `limit` |
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |

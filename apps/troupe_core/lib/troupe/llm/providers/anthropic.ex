@@ -76,7 +76,12 @@ defmodule Troupe.LLM.Providers.Anthropic do
       {:ok, %Req.Response{status: 200} = response} ->
         finish(response)
 
-      {:ok, %Req.Response{status: status}} when status in [429] or status >= 500 ->
+      # A rate limit says how long to wait, when it says anything; the retry policy
+      # takes the hint (Decision 659).
+      {:ok, %Req.Response{status: 429} = response} ->
+        {:retry, {:http_status, 429}, Provider.retry_after_ms(response.headers)}
+
+      {:ok, %Req.Response{status: status}} when status >= 500 ->
         {:retry, {:http_status, status}}
 
       {:ok, %Req.Response{status: status, body: body}} ->
@@ -313,6 +318,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp stop_reason("tool_use"), do: :tool_use
   defp stop_reason("max_tokens"), do: :max_tokens
   defp stop_reason("stop_sequence"), do: :stop_sequence
+  defp stop_reason("refusal"), do: :refusal
   defp stop_reason(_), do: :other
 
   defp base_url(%Request{base_url: nil}), do: @default_base_url

@@ -130,7 +130,7 @@ defmodule Troupe.LLM.Response do
             model: nil,
             gateway: %Gateway{}
 
-  @type stop_reason :: :end_turn | :tool_use | :max_tokens | :stop_sequence | :other
+  @type stop_reason :: :end_turn | :tool_use | :max_tokens | :stop_sequence | :refusal | :other
   @type t :: %__MODULE__{
           content: [Message.block()],
           stop_reason: stop_reason(),

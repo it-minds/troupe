@@ -432,23 +432,16 @@ defmodule Troupe.Agent.Server do
 
   def thinking(:info, {:llm_done, ref, %Response{} = response}, %State{llm_ref: ref} = state) do
     state = state |> clear_llm() |> record_response(response)
-
-    case Response.tool_uses(response) do
-      [] -> finish_turn(state, response)
-      tool_uses -> dispatch_tools(state, tool_uses)
-    end
+    handle_response(state, response)
   end
 
   def thinking(:info, {:llm_error, ref, reason}, %State{llm_ref: ref} = state) do
     state = clear_llm(state)
-    log(state, :llm_error, %{"reason" => inspect(reason)})
 
-    # The failure goes into the conversation so the next turn can react to it, rather
-    # than vanishing into a log the model cannot read.
-    note = "The previous model request failed: #{inspect(reason)}. Try a different approach."
-    state = %{state | conversation: state.conversation ++ [Message.user(note)]}
-
-    to_idle_or_done(state)
+    case Provider.classify(reason) do
+      {:context_overflow, _detail} = overflow -> context_overflow(state, overflow)
+      classified -> llm_failed(state, Provider.describe_error(classified))
+    end
   end
 
   def thinking(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
@@ -928,7 +921,8 @@ defmodule Troupe.Agent.Server do
       state
       | conversation: state.conversation ++ [message],
         budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(response.usage),
-        last_input_tokens: Usage.total_input(response.usage)
+        last_input_tokens: Usage.total_input(response.usage),
+        overflow_retried: false
     }
     |> warn_headroom()
   end
@@ -976,6 +970,151 @@ defmodule Troupe.Agent.Server do
   # A turn that produced no tool calls ends the turn. A subagent that answered without
   # calling `finish` is treated as having finished: its parent is waiting, and losing
   # the answer to a missing tool call would be the worst possible outcome.
+  # What a reply *is*, before what it says (Decision 659). A refusal ends the agent as
+  # refused rather than as finished; a reply the output cap cut must never end a turn
+  # silently; a reply with neither text nor a tool call is not "finished with nothing";
+  # and only then the two ordinary cases.
+  defp handle_response(state, %Response{stop_reason: :refusal} = response) do
+    finish_short(state, :refused, refusal_summary(response))
+  end
+
+  defp handle_response(state, %Response{stop_reason: :max_tokens} = response) do
+    truncated(state, response)
+  end
+
+  defp handle_response(state, %Response{} = response) do
+    case Response.tool_uses(response) do
+      [] ->
+        if Message.text(Response.to_message(response)) == "",
+          do: empty_reply(state),
+          else: finish_turn(%{state | truncation_retried: false}, response)
+
+      tool_uses ->
+        dispatch_tools(%{state | truncation_retried: false}, tool_uses)
+    end
+  end
+
+  @truncated_note "Your previous reply was cut off because it reached the output token cap. " <>
+                    "Answer again in smaller steps: make one tool call at a time, and keep text short."
+
+  @truncated_call "This tool call was cut off mid-argument because the reply reached the output " <>
+                    "token cap, so its input could not be parsed and it was not run. Re-issue it on " <>
+                    "its own, with a shorter argument."
+
+  @empty_note "Your previous reply contained no text and no tool call, so there was nothing to " <>
+                "act on. Continue the task: make a tool call, or call `finish` with a summary of " <>
+                "what you did."
+
+  @empty_summary "The model ended its turn with no text and no tool call, twice in a row " <>
+                   "(reasoning only, or nothing at all). Nothing was finished."
+
+  # `stop_reason: :max_tokens` was parsed, logged and read by nothing, so a reply the
+  # provider cut in half became a finished turn — with half a sentence, or with nothing
+  # at all when thinking ate the whole allowance. With tool calls in the reply the turn
+  # goes on: every `tool_use` still owes a `tool_result`, and a call whose arguments did
+  # not survive is answered by `dispatch_tool/2` with an error naming the cause rather
+  # than run on a fragment of JSON. With no tool call there is nothing to carry the turn,
+  # so the model is told what happened and asked again — once, and then the agent ends
+  # visibly rather than claiming it finished.
+  defp truncated(state, %Response{} = response) do
+    case Response.tool_uses(response) do
+      [] when state.truncation_retried ->
+        log(state, :truncated, %{"reason" => "max_tokens", "final" => true})
+        text = Message.text(Response.to_message(response))
+        finish_short(state, :output_truncated, truncation_summary(text))
+
+      [] ->
+        log(state, :truncated, %{"reason" => "max_tokens", "note" => @truncated_note})
+        nudge(state, @truncated_note)
+
+      tool_uses ->
+        log(state, :truncated, %{"reason" => "max_tokens", "calls" => length(tool_uses)})
+        dispatch_tools(%{state | truncation_retried: false}, tool_uses)
+    end
+  end
+
+  # A reply with `stop_reason: :end_turn` but neither text nor a tool call — typically a
+  # reasoning model that spent its whole allowance thinking and then declared itself
+  # done. `Message.text/1` drops reasoning, so this is the "nothing to carry the turn"
+  # case above minus the stop reason, and it gets the same recovery: once.
+  defp empty_reply(%State{truncation_retried: true} = state) do
+    log(state, :truncated, %{"reason" => "empty", "final" => true})
+    finish_short(state, :empty_reply, @empty_summary)
+  end
+
+  defp empty_reply(state) do
+    log(state, :truncated, %{"reason" => "empty", "note" => @empty_note})
+    nudge(state, @empty_note)
+  end
+
+  # The note is a user message so the model reads it and so a replay rebuilds it: the
+  # log carries it as `user_input` from the harness, which is what it is.
+  defp nudge(state, note) do
+    log(state, :user_input, %{"source" => "harness", "text" => note})
+
+    %{state | conversation: state.conversation ++ [Message.user(note)], truncation_retried: true}
+    |> continue_after_results()
+  end
+
+  defp truncation_summary(""),
+    do:
+      "The model hit its output token cap before writing anything (thinking used the whole " <>
+        "allowance). Raise max_output for this model, or lower its reasoning effort."
+
+  defp truncation_summary(text),
+    do: "The reply was cut off at the output token cap and did not recover:\n\n" <> text
+
+  defp refusal_summary(%Response{} = response) do
+    case Message.text(Response.to_message(response)) do
+      "" -> "The model refused to answer."
+      text -> "The model refused to answer: " <> text
+    end
+  end
+
+  # A stop that was not the agent's choice ends it under its own reason, and a parent
+  # hears what there was — labelled partial, so it can act on it and see that it is
+  # partial — rather than nothing.
+  defp finish_short(state, reason, summary) do
+    if state.parent do
+      send(
+        state.parent,
+        {:child_result, state.parent_ref, {:partial, summary, Budget.usage(state.budget)}}
+      )
+    end
+
+    enter_done(state, reason, %{"summary" => summary})
+  end
+
+  # The prompt no longer fits. The conversation is not lost — it is all in the log — but
+  # the only recovery a client could offer was more input, which rebuilds the same
+  # oversized prompt and fails identically. So compact once and send the turn again; if
+  # that is not possible, or was already done, fail with a line that says what to do
+  # rather than the provider's raw 400 (Decision 659).
+  defp context_overflow(state, {:context_overflow, _detail} = overflow) do
+    {_keep, drop} = split_for_compaction(state.conversation)
+    described = Provider.describe_error(overflow)
+
+    cond do
+      state.overflow_retried ->
+        llm_failed(state, described <> " — already compacted once this turn; lower compact_at or start a new session")
+
+      drop == [] ->
+        llm_failed(state, described <> " — too few messages to compact; start a new session")
+
+      true ->
+        enter_compaction(%{state | overflow_retried: true, compact_reason: "context_overflow"}, :thinking)
+    end
+  end
+
+  defp llm_failed(state, message) do
+    log(state, :llm_error, %{"reason" => message})
+
+    # The failure goes into the conversation so the next turn can react to it, rather
+    # than vanishing into a log the model cannot read.
+    note = "The previous model request failed: #{message}. Try a different approach."
+    to_idle_or_done(%{state | conversation: state.conversation ++ [Message.user(note)]})
+  end
+
   defp finish_turn(state, %Response{} = response) do
     cond do
       State.subagent?(state) ->
@@ -1027,6 +1166,17 @@ defmodule Troupe.Agent.Server do
     data
     |> Map.put("identity", principal.subject)
     |> Map.put("principal", Principal.to_json(principal))
+  end
+
+  # Arguments the reply's output cap cut mid-JSON (Decision 659). Running a tool on a
+  # fragment is worse than saying so, and every `tool_use` still owes a `tool_result` or
+  # the next request is refused outright — so the call is answered, not run.
+  defp dispatch_tool(%ToolUse{input: %{"__malformed_arguments__" => _raw}} = tool_use, state) do
+    call = %Call{id: tool_use.id, name: tool_use.name, args: %{}}
+    state = %{state | pending: Map.put(state.pending, call.id, call)}
+    log(state, :tool_call_started, %{"call_id" => call.id, "name" => call.name, "args" => %{}})
+    send(self(), {:tool_result, call.id, Result.error(call.id, call.name, @truncated_call)})
+    state
   end
 
   defp dispatch_tool(%ToolUse{} = tool_use, state) do
@@ -1441,6 +1591,7 @@ defmodule Troupe.Agent.Server do
         | llm_ref: ref,
           llm_timer: timer,
           compact_resume: resume,
+          compact_reason: state.compact_reason || "threshold",
           conversation: keep,
           llm_text: ""
       }
@@ -1502,6 +1653,7 @@ defmodule Troupe.Agent.Server do
 
     log(state, :compacted, %{
       "summary" => summary,
+      "reason" => state.compact_reason || "threshold",
       "conversation" => Enum.map(conversation, &Message.to_json/1)
     })
 
@@ -1509,6 +1661,8 @@ defmodule Troupe.Agent.Server do
   end
 
   defp resume_after_compaction(state) do
+    state = %{state | compact_reason: nil}
+
     case state.compact_resume do
       :thinking -> start_turn(%{state | compact_resume: :idle})
       _ -> to_idle_or_done(state)

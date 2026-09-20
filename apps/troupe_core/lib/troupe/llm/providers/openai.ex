@@ -65,7 +65,12 @@ defmodule Troupe.LLM.Providers.OpenAI do
       {:ok, %Req.Response{status: 200} = response} ->
         finish(response)
 
-      {:ok, %Req.Response{status: status}} when status == 429 or status >= 500 ->
+      # A rate limit says how long to wait, when it says anything; the retry policy
+      # takes the hint (Decision 659).
+      {:ok, %Req.Response{status: 429} = response} ->
+        {:retry, {:http_status, 429}, Provider.retry_after_ms(response.headers)}
+
+      {:ok, %Req.Response{status: status}} when status >= 500 ->
         {:retry, {:http_status, status}}
 
       # A reasoning model refuses `max_tokens` and asks for `max_completion_tokens` by
@@ -392,6 +397,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp stop_reason("tool_calls"), do: :tool_use
   defp stop_reason("function_call"), do: :tool_use
   defp stop_reason("length"), do: :max_tokens
+  defp stop_reason("content_filter"), do: :refusal
   defp stop_reason(_), do: :other
 
   defp base_url(%Request{base_url: nil}), do: @default_base_url
