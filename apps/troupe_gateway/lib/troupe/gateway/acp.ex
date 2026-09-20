@@ -213,6 +213,15 @@ defmodule Troupe.Gateway.ACP do
   durable log is still the record and is still where they are.
   """
   @spec update_for(String.t(), Event.t()) :: map() | nil
+  # The model's thinking, under ACP's own name for it, so an editor folds it rather than
+  # reading it as the answer.
+  def update_for(session_id, %Event{type: "llm_delta", data: %{"kind" => "reasoning", "text" => text}}) do
+    notification(session_id, %{
+      "sessionUpdate" => "agent_thought_chunk",
+      "content" => %{"type" => "text", "text" => text}
+    })
+  end
+
   def update_for(session_id, %Event{type: "llm_delta", data: %{"text" => text}}) do
     notification(session_id, %{
       "sessionUpdate" => "agent_message_chunk",

@@ -19,6 +19,31 @@ defmodule Troupe.LLM.ToolResult do
   @type t :: %__MODULE__{tool_use_id: String.t(), content: String.t(), error?: boolean()}
 end
 
+defmodule Troupe.LLM.Reasoning do
+  @moduledoc """
+  The model's own thinking: opaque and provider-bound (Decision 658).
+
+  Anthropic signs a thinking block and rejects a later turn whose thinking it cannot
+  verify; DeepSeek rejects a thinking-mode turn that omits the `reasoning_content` an
+  earlier one carried. So a block is stored, replayed and handed back verbatim to the
+  provider that made it — `provider` says which — and dropped for any other. Nothing but
+  the adapters reads it: `Message.text/1` and `Message.tool_uses/1` do not see it, so a
+  summary, a parent agent or a client that wants prose never gets thinking mixed in.
+
+  `signature` is Anthropic's verification of the block; `redacted` marks thinking the
+  provider encrypted, whose `text` is its opaque payload rather than anything readable.
+  """
+  @enforce_keys [:provider, :text]
+  defstruct [:provider, :text, signature: nil, redacted: false]
+
+  @type t :: %__MODULE__{
+          provider: atom(),
+          text: String.t(),
+          signature: String.t() | nil,
+          redacted: boolean()
+        }
+end
+
 defmodule Troupe.LLM.Usage do
   @moduledoc """
   Token counts reported by a provider, or summed from a subagent, in one shape
@@ -210,19 +235,21 @@ defmodule Troupe.LLM.Message do
   @moduledoc """
   One provider-neutral conversation message.
 
-  Content is always a list of blocks — `Text`, `ToolUse`, `ToolResult` — so that
-  adapters translate at the boundary and the agent loop never learns a provider's
+  Content is always a list of blocks — `Text`, `ToolUse`, `ToolResult`, `Reasoning` — so
+  that adapters translate at the boundary and the agent loop never learns a provider's
   wire shape. Tool results ride on a `:user` message because that is what both the
-  Anthropic and OpenAI-compatible APIs expect from the caller's side.
+  Anthropic and OpenAI-compatible APIs expect from the caller's side. A `Reasoning`
+  block is the model's thinking and is the adapters' business alone: `text/1` and
+  `tool_uses/1` do not see it.
   """
 
-  alias Troupe.LLM.{Text, ToolResult, ToolUse}
+  alias Troupe.LLM.{Reasoning, Text, ToolResult, ToolUse}
 
   @enforce_keys [:role, :content]
   defstruct [:role, :content]
 
   @type role :: :system | :user | :assistant
-  @type block :: Text.t() | ToolUse.t() | ToolResult.t()
+  @type block :: Text.t() | ToolUse.t() | ToolResult.t() | Reasoning.t()
   @type t :: %__MODULE__{role: role(), content: [block()]}
 
   @doc "A user message carrying plain text."
@@ -247,6 +274,20 @@ defmodule Troupe.LLM.Message do
   @spec tool_uses(t()) :: [ToolUse.t()]
   def tool_uses(%__MODULE__{content: content}) do
     Enum.filter(content, &match?(%ToolUse{}, &1))
+  end
+
+  @doc "The reasoning blocks `provider` itself produced; another provider's are not replayable."
+  @spec reasoning_of(t() | [block()], atom()) :: [Reasoning.t()]
+  def reasoning_of(%__MODULE__{content: content}, provider), do: reasoning_of(content, provider)
+
+  def reasoning_of(blocks, provider) when is_list(blocks) and is_atom(provider) do
+    Enum.filter(blocks, &match?(%Reasoning{provider: ^provider}, &1))
+  end
+
+  @doc "The message with its reasoning blocks removed."
+  @spec without_reasoning(t()) :: t()
+  def without_reasoning(%__MODULE__{content: content} = message) do
+    %{message | content: Enum.reject(content, &match?(%Reasoning{}, &1))}
   end
 
   @doc "The message's text blocks joined, for summaries and transcripts."
@@ -282,6 +323,16 @@ defmodule Troupe.LLM.Message do
   defp block_to_json(%ToolResult{tool_use_id: id, content: c, error?: e}),
     do: %{"type" => "tool_result", "tool_use_id" => id, "content" => c, "error" => e}
 
+  defp block_to_json(%Reasoning{} = r) do
+    %{
+      "type" => "reasoning",
+      "provider" => Atom.to_string(r.provider),
+      "text" => r.text,
+      "signature" => r.signature,
+      "redacted" => r.redacted
+    }
+  end
+
   defp block_from_json(%{"type" => "text", "text" => t}), do: %Text{text: t}
 
   defp block_from_json(%{"type" => "tool_use", "id" => id, "name" => n, "input" => i}),
@@ -289,4 +340,22 @@ defmodule Troupe.LLM.Message do
 
   defp block_from_json(%{"type" => "tool_result", "tool_use_id" => id, "content" => c} = b),
     do: %ToolResult{tool_use_id: id, content: c, error?: Map.get(b, "error", false)}
+
+  defp block_from_json(%{"type" => "reasoning", "provider" => provider, "text" => t} = b) do
+    %Reasoning{
+      provider: provider_atom(provider),
+      text: t,
+      signature: Map.get(b, "signature"),
+      redacted: Map.get(b, "redacted", false)
+    }
+  end
+
+  # A provider this build has no adapter for — a log written by a newer one — replays as
+  # a block no adapter claims, so it is carried and never sent, rather than crashing the
+  # replay over thinking nobody can use.
+  defp provider_atom(provider) when is_binary(provider) do
+    String.to_existing_atom(provider)
+  rescue
+    ArgumentError -> :unknown
+  end
 end

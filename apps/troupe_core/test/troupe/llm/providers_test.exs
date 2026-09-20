@@ -11,7 +11,7 @@ defmodule Troupe.LLM.ProvidersTest do
 
   use ExUnit.Case, async: true
 
-  alias Troupe.LLM.{Message, Request, Response, SSE, Text, ToolResult, ToolUse, Usage}
+  alias Troupe.LLM.{Message, Reasoning, Request, Response, SSE, Text, ToolResult, ToolUse, Usage}
   alias Troupe.LLM.Providers.{Anthropic, OpenAI}
   alias Troupe.Test.FakeTransport
 
@@ -83,6 +83,73 @@ defmodule Troupe.LLM.ProvidersTest do
       assert usage == %Usage{input_tokens: 12, output_tokens: 40, cache_read: 180_000, cache_write: 2_000}
       assert Usage.billed_input(usage) == 2_012
       assert Usage.total_input(usage) == 182_012
+    end
+
+    test "captures thinking, its signature and redacted thinking, and replays them when thinking is on" do
+      assert {:ok, %Response{content: content} = response} =
+               run(Anthropic, request(chunks: anthropic_thinking_stream()))
+
+      assert [
+               %Reasoning{provider: :anthropic, text: "I should read the file.", signature: "sig123", redacted: false},
+               %Reasoning{provider: :anthropic, text: "ENCRYPTED", redacted: true},
+               %Text{text: "Let me look."},
+               %ToolUse{id: "toolu_1"}
+             ] = content
+
+      assert_received {:llm_delta, _ref, %{kind: :reasoning, text: "I should "}}
+      assert Message.text(Response.to_message(response)) == "Let me look."
+      FakeTransport.drain_requests()
+
+      # The second request of a tool-using conversation is where a dropped block fails.
+      messages = [
+        Message.user("read it"),
+        Response.to_message(response),
+        Message.tool_results([%ToolResult{tool_use_id: "toolu_1", content: "contents", error?: false}])
+      ]
+
+      assert {:ok, _} =
+               run(Anthropic, request(chunks: anthropic_text_only(), messages: messages, reasoning_effort: "medium"))
+
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      assert body["thinking"] == %{"type" => "enabled", "budget_tokens" => 8_192}
+      assert body["max_tokens"] == 8_192 + 4_096, "the cap grows to hold the thinking"
+
+      [_user, assistant, _results] = body["messages"]
+
+      assert [
+               %{"type" => "thinking", "thinking" => "I should read the file.", "signature" => "sig123"},
+               %{"type" => "redacted_thinking", "data" => "ENCRYPTED"},
+               %{"type" => "text"},
+               %{"type" => "tool_use"}
+             ] = assistant["content"]
+    end
+
+    test "with thinking off its own blocks are dropped, and another provider's always" do
+      thought = %Reasoning{provider: :anthropic, text: "I should read it.", signature: "sig123"}
+      foreign = %Reasoning{provider: :openai, text: "deepseek thought this"}
+
+      turn = fn block ->
+        [
+          Message.user("read it"),
+          Message.assistant([block, %Text{text: "on it"}, %ToolUse{id: "t1", name: "read_file", input: %{}}]),
+          Message.tool_results([%ToolResult{tool_use_id: "t1", content: "x", error?: false}])
+        ]
+      end
+
+      assert {:ok, _} = run(Anthropic, request(chunks: anthropic_text_only(), messages: turn.(thought)))
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      refute Map.has_key?(body, "thinking")
+      assert body["max_tokens"] == 8_192
+      assert Enum.map(Enum.at(body["messages"], 1)["content"], & &1["type"]) == ["text", "tool_use"]
+
+      assert {:ok, _} =
+               run(Anthropic, request(chunks: anthropic_text_only(), messages: turn.(foreign), reasoning_effort: "medium"))
+
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      assert Enum.map(Enum.at(body["messages"], 1)["content"], & &1["type"]) == ["text", "tool_use"]
     end
 
     test "encodes tool results as content blocks on a user message" do
@@ -178,6 +245,89 @@ defmodule Troupe.LLM.ProvidersTest do
       # `prompt_tokens` counted the cached ones too; the three input figures are disjoint.
       assert usage == %Usage{input_tokens: 1_000, output_tokens: 9, cache_read: 149_000, cache_write: 0}
       assert Usage.total_input(usage) == 150_000
+    end
+
+    test "accumulates reasoning_content beside a tool call and hands it back as a sibling of content" do
+      chunks = [
+        ~s(data: {"choices":[{"delta":{"role":"assistant","reasoning_content":"The user wants "}}]}\n\n),
+        ~s(data: {"choices":[{"delta":{"reasoning_content":"mix.exs."}}]}\n\n),
+        ~s(data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","type":"function","function":{"name":"read_file","arguments":"{\\"path\\":\\"mix.exs\\"}"}}]}}]}\n\n),
+        ~s(data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}],"usage":{"prompt_tokens":3,"completion_tokens":2}}\n\ndata: [DONE]\n\n)
+      ]
+
+      assert {:ok, %Response{content: content} = response} = run(OpenAI, request(chunks: chunks))
+      assert [%Reasoning{provider: :openai, text: "The user wants mix.exs."}, %ToolUse{id: "call_1"}] = content
+      assert_received {:llm_delta, _ref, %{kind: :reasoning, text: "The user wants "}}
+      FakeTransport.drain_requests()
+
+      messages = [
+        Message.user("read mix.exs"),
+        Response.to_message(response),
+        Message.tool_results([%ToolResult{tool_use_id: "call_1", content: "defmodule", error?: false}])
+      ]
+
+      assert {:ok, _} = run(OpenAI, request(chunks: [openai_text_only()], messages: messages))
+      [sent] = FakeTransport.drain_requests()
+      assistant = Enum.find(FakeTransport.body(sent)["messages"], &(&1["role"] == "assistant"))
+      assert assistant["reasoning_content"] == "The user wants mix.exs."
+      assert assistant["content"] == ""
+      assert [%{"id" => "call_1"}] = assistant["tool_calls"]
+    end
+
+    test "the `reasoning` spelling is accepted, and another provider's reasoning is not replayed" do
+      chunk =
+        ~s(data: {"choices":[{"delta":{"reasoning":"thought"}}]}\n\ndata: {"choices":[{"delta":{"content":"Hi."}}]}\n\ndata: {"choices":[{"delta":{},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n)
+
+      assert {:ok, %Response{content: [%Reasoning{text: "thought"}, %Text{text: "Hi."}]}} =
+               run(OpenAI, request(chunks: [chunk]))
+
+      FakeTransport.drain_requests()
+
+      foreign =
+        Message.assistant([
+          %Reasoning{provider: :anthropic, text: "claude thought this", signature: "sig"},
+          %Text{text: "plain"}
+        ])
+
+      messages = [Message.user("hi"), foreign, Message.user("go on")]
+      assert {:ok, _} = run(OpenAI, request(chunks: [openai_text_only()], messages: messages))
+      [sent] = FakeTransport.drain_requests()
+      assistant = Enum.find(FakeTransport.body(sent)["messages"], &(&1["role"] == "assistant"))
+      refute Map.has_key?(assistant, "reasoning_content")
+      assert assistant["content"] == "plain"
+    end
+
+    test "a reasoning effort asks for max_completion_tokens, and a plain server gets max_tokens" do
+      assert {:ok, _} = run(OpenAI, request(chunks: [openai_text_only()], reasoning_effort: "high"))
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      assert body["max_completion_tokens"] == 8_192
+      assert body["reasoning_effort"] == "high"
+      refute Map.has_key?(body, "max_tokens")
+
+      assert {:ok, _} = run(OpenAI, request(chunks: [openai_text_only()]))
+      [sent] = FakeTransport.drain_requests()
+      body = FakeTransport.body(sent)
+      assert body["max_tokens"] == 8_192
+      refute Map.has_key?(body, "max_completion_tokens")
+    end
+
+    test "a 400 that asks for max_completion_tokens by name is answered by asking again with it" do
+      refusal = "Unsupported parameter: 'max_tokens' is not supported with this model. Use 'max_completion_tokens' instead."
+
+      request =
+        request(chunks: [openai_text_only()], fail_first: 1, fail_status: 400, fail_body: refusal)
+
+      assert {:ok, %Response{}} = run(OpenAI, request)
+      [first, second] = FakeTransport.drain_requests()
+      assert Map.has_key?(FakeTransport.body(first), "max_tokens")
+      assert FakeTransport.body(second)["max_completion_tokens"] == 8_192
+      refute Map.has_key?(FakeTransport.body(second), "max_tokens")
+
+      # Any other 400 is still an error, asked once.
+      request = request(chunks: [], fail_first: 99, fail_status: 400, fail_body: "bad tool schema")
+      assert {:error, {:http_status, 400, "bad tool schema"}} = run(OpenAI, request)
+      assert length(FakeTransport.drain_requests()) == 1
     end
 
     test "a base url that already ends in /v1 does not get a second one" do
@@ -303,6 +453,7 @@ defmodule Troupe.LLM.ProvidersTest do
         chunks: Keyword.get(opts, :chunks, []),
         fail_first: Keyword.get(opts, :fail_first, 0),
         fail_status: Keyword.get(opts, :fail_status, 429),
+        fail_body: Keyword.get(opts, :fail_body, "slow down"),
         transport_error: Keyword.get(opts, :transport_error, 0),
         record: self()
       )
@@ -320,6 +471,7 @@ defmodule Troupe.LLM.ProvidersTest do
       ],
       base_url: Keyword.get(opts, :base_url),
       api_key: Keyword.get(opts, :api_key, "test-key"),
+      reasoning_effort: Keyword.get(opts, :reasoning_effort),
       max_retries: Keyword.get(opts, :max_retries, 0),
       timeout_ms: 10_000,
       extra: %{req_adapter: transport}
@@ -337,6 +489,22 @@ defmodule Troupe.LLM.ProvidersTest do
       ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":1,"delta":{"type":"input_json_delta","partial_json":"\\"lib/a.ex\\"}"}}\n\n),
       ~s(event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}\n\n),
       ~s(event: message_stop\ndata: {"type":"message_stop"}\n\n)
+    ]
+  end
+
+  defp anthropic_thinking_stream do
+    [
+      ~s(event: message_start\ndata: {"type":"message_start","message":{"usage":{"input_tokens":25,"output_tokens":1}}}\n\n),
+      ~s(event: content_block_start\ndata: {"type":"content_block_start","index":0,"content_block":{"type":"thinking","thinking":""}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"I should "}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"thinking_delta","thinking":"read the file."}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":0,"delta":{"type":"signature_delta","signature":"sig123"}}\n\n),
+      ~s(event: content_block_start\ndata: {"type":"content_block_start","index":1,"content_block":{"type":"redacted_thinking","data":"ENCRYPTED"}}\n\n),
+      ~s(event: content_block_start\ndata: {"type":"content_block_start","index":2,"content_block":{"type":"text","text":""}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":2,"delta":{"type":"text_delta","text":"Let me look."}}\n\n),
+      ~s(event: content_block_start\ndata: {"type":"content_block_start","index":3,"content_block":{"type":"tool_use","id":"toolu_1","name":"read_file"}}\n\n),
+      ~s(event: content_block_delta\ndata: {"type":"content_block_delta","index":3,"delta":{"type":"input_json_delta","partial_json":"{\\"path\\":\\"lib/a.ex\\"}"}}\n\n),
+      ~s(event: message_delta\ndata: {"type":"message_delta","delta":{"stop_reason":"tool_use"},"usage":{"output_tokens":7}}\n\n)
     ]
   end
 

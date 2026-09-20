@@ -14,6 +14,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
     Gateway,
     Message,
     Provider,
+    Reasoning,
     Request,
     SSE,
     Text,
@@ -151,6 +152,14 @@ defmodule Troupe.LLM.Providers.Anthropic do
         emit(collector, %Delta{kind: :tool_use_start, id: id, name: name})
         Collector.open_tool(acc, index, id, name)
 
+      %{"type" => "thinking"} = block ->
+        Collector.open_thinking(acc, index, block["thinking"] || "")
+
+      # Thinking the provider encrypted: nothing to stream, but it goes back verbatim on
+      # the next turn all the same.
+      %{"type" => "redacted_thinking"} = block ->
+        Collector.put_redacted(acc, index, block["data"] || "")
+
       _ ->
         acc
     end
@@ -167,6 +176,16 @@ defmodule Troupe.LLM.Providers.Anthropic do
       %{"type" => "input_json_delta", "partial_json" => fragment} ->
         emit(collector, %Delta{kind: :tool_input, fragment: fragment})
         Collector.append_tool_input(acc, index, fragment)
+
+      # Thinking is shown live under its own kind *and* kept: with thinking enabled,
+      # Anthropic rejects a tool-use turn whose thinking blocks are not handed back with
+      # the signature it issued for them (Decision 658).
+      %{"type" => "thinking_delta", "thinking" => text} ->
+        emit(collector, Delta.reasoning(text))
+        Collector.append_thinking(acc, index, text)
+
+      %{"type" => "signature_delta", "signature" => signature} ->
+        Collector.append_signature(acc, index, signature)
 
       _ ->
         acc
@@ -194,11 +213,13 @@ defmodule Troupe.LLM.Providers.Anthropic do
   # -- request shaping --------------------------------------------------------
 
   defp body(%Request{} = request) do
+    keep_thinking? = thinking_budget(request.reasoning_effort) != nil
+
     %{
       model: request.model,
       max_tokens: request.max_tokens,
       stream: true,
-      messages: Enum.map(request.messages, &encode_message/1)
+      messages: Enum.map(request.messages, &encode_message(&1, keep_thinking?))
     }
     |> maybe_put(:system, request.system)
     |> maybe_put(:temperature, request.temperature)
@@ -207,6 +228,37 @@ defmodule Troupe.LLM.Providers.Anthropic do
     # goes there. Everything else a gateway wants is carried by the OpenAI-compatible
     # adapter, which is what a LiteLLM deployment actually speaks.
     |> maybe_put(:metadata, metadata(request))
+    |> put_thinking(request.reasoning_effort)
+  end
+
+  # Anthropic takes a thinking budget in tokens where an OpenAI-compatible provider takes
+  # an effort level, so a configured effort becomes a budget. The budget has to fit inside
+  # `max_tokens`, so enabling thinking raises the output cap along with it rather than
+  # failing the request (Decision 658).
+  defp put_thinking(body, effort) do
+    case thinking_budget(effort) do
+      nil ->
+        body
+
+      budget ->
+        body
+        |> Map.put(:thinking, %{type: "enabled", budget_tokens: budget})
+        |> Map.put(:max_tokens, max(body.max_tokens, budget + 4_096))
+    end
+  end
+
+  defp thinking_budget(effort) when effort in [nil, "none", "off"], do: nil
+  defp thinking_budget("minimal"), do: 1_024
+  defp thinking_budget("low"), do: 4_096
+  defp thinking_budget("medium"), do: 8_192
+  defp thinking_budget("high"), do: 16_384
+  defp thinking_budget("xhigh"), do: 32_768
+
+  defp thinking_budget(other) when is_binary(other) do
+    case Integer.parse(other) do
+      {n, ""} when n >= 1_024 -> n
+      _ -> nil
+    end
   end
 
   defp metadata(%Request{attribution: %{owner: owner}}) when is_binary(owner) do
@@ -227,9 +279,25 @@ defmodule Troupe.LLM.Providers.Anthropic do
     end)
   end
 
-  defp encode_message(%Message{role: role, content: content}) do
-    %{role: Atom.to_string(role), content: Enum.map(content, &encode_block/1)}
+  defp encode_message(%Message{role: role, content: content}, keep_thinking?) do
+    blocks = Enum.reject(content, &drop_reasoning?(&1, keep_thinking?))
+    %{role: Atom.to_string(role), content: Enum.map(blocks, &encode_block/1)}
   end
+
+  # Which reasoning may go back out. Another provider's thinking carries no signature
+  # Anthropic can verify, and a thinking block is only legal on a request that has
+  # thinking enabled — so with thinking off, or for anything that came from an
+  # OpenAI-compatible provider, the block is dropped and the rest of the turn goes
+  # unchanged.
+  defp drop_reasoning?(%Reasoning{provider: :anthropic}, keep_thinking?), do: not keep_thinking?
+  defp drop_reasoning?(%Reasoning{}, _keep_thinking?), do: true
+  defp drop_reasoning?(_block, _keep_thinking?), do: false
+
+  defp encode_block(%Reasoning{redacted: true, text: data}),
+    do: %{type: "redacted_thinking", data: data}
+
+  defp encode_block(%Reasoning{text: text, signature: signature}),
+    do: %{type: "thinking", thinking: text, signature: signature}
 
   defp encode_block(%Text{text: text}), do: %{type: "text", text: text}
 
@@ -271,7 +339,7 @@ defmodule Troupe.LLM.Providers.Anthropic.Collector do
   they have to be reassembled in index order before the agent can act on them.
   """
 
-  alias Troupe.LLM.{Response, Text, ToolUse, Usage}
+  alias Troupe.LLM.{Reasoning, Response, Text, ToolUse, Usage}
 
   defstruct blocks: %{}, usage: %Usage{}, stop_reason: :end_turn, error: nil
 
@@ -299,6 +367,38 @@ defmodule Troupe.LLM.Providers.Anthropic.Collector do
       end)
 
     %{acc | blocks: blocks}
+  end
+
+  @spec open_thinking(t(), non_neg_integer(), String.t()) :: t()
+  def open_thinking(acc, index, text) do
+    %{acc | blocks: Map.put(acc.blocks, index, {:thinking, text, nil})}
+  end
+
+  @spec append_thinking(t(), non_neg_integer(), String.t()) :: t()
+  def append_thinking(acc, index, text) do
+    blocks =
+      Map.update(acc.blocks, index, {:thinking, text, nil}, fn
+        {:thinking, existing, signature} -> {:thinking, existing <> text, signature}
+        other -> other
+      end)
+
+    %{acc | blocks: blocks}
+  end
+
+  @spec append_signature(t(), non_neg_integer(), String.t()) :: t()
+  def append_signature(acc, index, signature) do
+    blocks =
+      Map.update(acc.blocks, index, {:thinking, "", signature}, fn
+        {:thinking, text, existing} -> {:thinking, text, (existing || "") <> signature}
+        other -> other
+      end)
+
+    %{acc | blocks: blocks}
+  end
+
+  @spec put_redacted(t(), non_neg_integer(), String.t()) :: t()
+  def put_redacted(acc, index, data) do
+    %{acc | blocks: Map.put(acc.blocks, index, {:redacted, data})}
   end
 
   @spec append_tool_input(t(), non_neg_integer(), String.t()) :: t()
@@ -356,6 +456,12 @@ defmodule Troupe.LLM.Providers.Anthropic.Collector do
 
   defp materialise({:text, ""}), do: []
   defp materialise({:text, text}), do: [%Text{text: text}]
+
+  defp materialise({:thinking, text, signature}),
+    do: [%Reasoning{provider: :anthropic, text: text, signature: signature}]
+
+  defp materialise({:redacted, data}),
+    do: [%Reasoning{provider: :anthropic, text: data, redacted: true}]
 
   defp materialise({:tool, id, name, raw}) when is_binary(id) and is_binary(name) do
     [%ToolUse{id: id, name: name, input: decode_input(raw)}]

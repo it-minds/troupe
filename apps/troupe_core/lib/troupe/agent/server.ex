@@ -819,9 +819,9 @@ defmodule Troupe.Agent.Server do
   end
 
   # Where the request goes. A model spelled `<provider>/<model>` names a provider of its
-  # own — its URL, its key, its auth scheme, the wire id it renamed the model to, and
-  # possibly an output cap smaller than the session's — and the adapter for it; a bare
-  # id goes to the session's provider with the session's key.
+  # own — its URL, its key, its auth scheme, the wire id it renamed the model to, possibly
+  # an output cap smaller than the session's and how hard it should think — and the
+  # adapter for it; a bare id goes to the session's provider with the session's key.
   defp aim(%Request{} = request, %State{config: config} = state, model) do
     target = Config.target(config, model)
 
@@ -832,6 +832,7 @@ defmodule Troupe.Agent.Server do
         api_key: target.api_key,
         auth: target.auth,
         max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
+        reasoning_effort: target.reasoning_effort,
         provider: adapter_for(target.provider, state)
     }
   end

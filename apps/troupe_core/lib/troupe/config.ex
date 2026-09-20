@@ -178,7 +178,8 @@ defmodule Troupe.Config do
           base_url: String.t() | nil,
           api_key: String.t() | nil,
           auth: auth(),
-          max_output: pos_integer() | nil
+          max_output: pos_integer() | nil,
+          reasoning_effort: String.t() | nil
         }
 
   @doc """
@@ -283,7 +284,8 @@ defmodule Troupe.Config do
           base_url: config.base_url,
           api_key: config.api_key,
           auth: config.auth,
-          max_output: nil
+          max_output: nil,
+          reasoning_effort: nil
         }
 
       {provider, bare} ->
@@ -295,7 +297,8 @@ defmodule Troupe.Config do
           base_url: provider.base_url,
           api_key: provider.api_key,
           auth: provider.auth,
-          max_output: spec && spec.max_output
+          max_output: spec && spec.max_output,
+          reasoning_effort: spec && spec.reasoning_effort
         }
     end
   end

@@ -20,6 +20,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
     Gateway,
     Message,
     Provider,
+    Reasoning,
     Request,
     SSE,
     Text,
@@ -45,11 +46,13 @@ defmodule Troupe.LLM.Providers.OpenAI do
     :ok
   end
 
-  defp attempt(request, reply_to, ref) do
+  defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, :first)
+
+  defp post(request, body, reply_to, ref, pass) do
     options = [
       url: Endpoint.build(base_url(request), "/v1/chat/completions"),
       method: :post,
-      json: body(request),
+      json: body,
       headers: headers(request),
       receive_timeout: request.timeout_ms,
       retry: false,
@@ -65,8 +68,16 @@ defmodule Troupe.LLM.Providers.OpenAI do
       {:ok, %Req.Response{status: status}} when status == 429 or status >= 500 ->
         {:retry, {:http_status, status}}
 
-      {:ok, %Req.Response{status: status, body: body}} ->
-        {:error, {:http_status, status, describe(body)}}
+      # A reasoning model refuses `max_tokens` and asks for `max_completion_tokens` by
+      # name; a plain compatible server knows only the first. Nothing in a model id says
+      # which, but the 400 says exactly which — so the request that found out goes again
+      # with the other field, once, instead of every user discovering this and
+      # configuring it (Decision 658).
+      {:ok, %Req.Response{status: 400, body: refused}} ->
+        refused(request, body, describe(refused), reply_to, ref, pass)
+
+      {:ok, %Req.Response{status: status, body: refused}} ->
+        {:error, {:http_status, status, describe(refused)}}
 
       {:error, %Req.TransportError{reason: reason}} ->
         {:retry, {:transport, reason}}
@@ -75,6 +86,35 @@ defmodule Troupe.LLM.Providers.OpenAI do
         {:error, reason}
     end
   end
+
+  defp refused(request, body, detail, reply_to, ref, :first) do
+    case output_cap_retry(body, detail) do
+      nil -> {:error, {:http_status, 400, detail}}
+      swapped -> post(request, swapped, reply_to, ref, :second)
+    end
+  end
+
+  defp refused(_request, _body, detail, _reply_to, _ref, :second),
+    do: {:error, {:http_status, 400, detail}}
+
+  @doc false
+  @spec output_cap_retry(map(), term()) :: map() | nil
+  def output_cap_retry(body, detail) when is_binary(detail) do
+    cond do
+      String.contains?(detail, "max_completion_tokens") and Map.has_key?(body, :max_tokens) ->
+        body |> Map.delete(:max_tokens) |> Map.put(:max_completion_tokens, body.max_tokens)
+
+      String.contains?(detail, "max_tokens") and Map.has_key?(body, :max_completion_tokens) ->
+        body
+        |> Map.delete(:max_completion_tokens)
+        |> Map.put(:max_tokens, body.max_completion_tokens)
+
+      true ->
+        nil
+    end
+  end
+
+  def output_cap_retry(_body, _detail), do: nil
 
   # A test supplies its own transport here rather than a socket, so the request goes
   # through Req's real pipeline while the bytes are scripted.
@@ -145,13 +185,30 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp apply_event(acc, %{"usage" => usage}, _sink), do: Collector.add_usage(acc, usage(usage))
   defp apply_event(acc, _event, _sink), do: acc
 
-  defp apply_delta(acc, %{"content" => content} = delta, sink) when is_binary(content) do
-    if content != "", do: emit(sink, Delta.text(content))
-    acc = Collector.append_text(acc, content)
-    apply_tool_calls(acc, delta["tool_calls"], sink)
+  defp apply_delta(acc, delta, sink) do
+    acc
+    |> apply_content(delta["content"], sink)
+    |> apply_reasoning(delta["reasoning_content"] || delta["reasoning"], sink)
+    |> apply_tool_calls(delta["tool_calls"], sink)
   end
 
-  defp apply_delta(acc, delta, sink), do: apply_tool_calls(acc, delta["tool_calls"], sink)
+  defp apply_content(acc, content, sink) when is_binary(content) and content != "" do
+    emit(sink, Delta.text(content))
+    Collector.append_text(acc, content)
+  end
+
+  defp apply_content(acc, _content, _sink), do: acc
+
+  # Reasoning arrives as a sibling of `content` (DeepSeek, vLLM, LiteLLM, Mistral, GLM…):
+  # shown live under its own kind so a client can fold it, and kept, because a thinking
+  # model that has made one tool call rejects every later turn that does not hand its
+  # reasoning back (Decision 658).
+  defp apply_reasoning(acc, reasoning, sink) when is_binary(reasoning) and reasoning != "" do
+    emit(sink, Delta.reasoning(reasoning))
+    Collector.append_reasoning(acc, reasoning)
+  end
+
+  defp apply_reasoning(acc, _reasoning, _sink), do: acc
 
   defp apply_tool_calls(acc, nil, _sink), do: acc
 
@@ -193,9 +250,9 @@ defmodule Troupe.LLM.Providers.OpenAI do
     %{
       model: request.model,
       stream: true,
-      max_tokens: request.max_tokens,
       messages: encode_messages(request)
     }
+    |> put_output_cap(request.max_tokens, request.reasoning_effort)
     |> maybe_put(:temperature, request.temperature)
     |> maybe_put(:tools, encode_tools(request.tools))
     # Usage is not reported in a stream unless it is asked for; providers that do not
@@ -222,6 +279,16 @@ defmodule Troupe.LLM.Providers.OpenAI do
   end
 
   defp stream_options(%Request{}), do: %{include_usage: true}
+
+  # A reasoning model rejects `max_tokens` and counts its reasoning against
+  # `max_completion_tokens`; a plain OpenAI-compatible server knows only `max_tokens`. A
+  # configured effort is what says which kind this is, and it goes out verbatim — "none"
+  # is as meaningful as "xhigh", and only the model knows which levels it has.
+  defp put_output_cap(body, max, nil), do: Map.put(body, :max_tokens, max)
+
+  defp put_output_cap(body, max, effort) do
+    body |> Map.put(:max_completion_tokens, max) |> Map.put(:reasoning_effort, effort)
+  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, _key, []), do: map
@@ -273,12 +340,23 @@ defmodule Troupe.LLM.Providers.OpenAI do
         }
       end)
 
-    message = %{role: "assistant", content: join_text(content)}
+    message = %{role: "assistant", content: join_text(content)} |> put_reasoning(content)
     [if(tool_calls == [], do: message, else: Map.put(message, :tool_calls, tool_calls))]
   end
 
   defp encode_message(%Message{role: role, content: content}) do
     [%{role: Atom.to_string(role), content: join_text(content)}]
+  end
+
+  # Reasoning goes back where it came from: a sibling of `content`, and only what this
+  # adapter's provider produced. DeepSeek's thinking mode is all-or-nothing — once one
+  # assistant message in the history carried `reasoning_content`, one that omits it fails
+  # the request with a 400 — and another provider's reasoning is not ours to replay.
+  defp put_reasoning(message, content) do
+    case Message.reasoning_of(content, :openai) do
+      [] -> message
+      reasoning -> Map.put(message, :reasoning_content, Enum.map_join(reasoning, & &1.text))
+    end
   end
 
   defp join_text(content) do
@@ -335,9 +413,9 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
   fragments in others — so they are reassembled by index and parsed once at the end.
   """
 
-  alias Troupe.LLM.{Response, Text, ToolUse, Usage}
+  alias Troupe.LLM.{Reasoning, Response, Text, ToolUse, Usage}
 
-  defstruct text: "", tools: %{}, usage: %Usage{}, stop_reason: :end_turn
+  defstruct text: "", reasoning: "", tools: %{}, usage: %Usage{}, stop_reason: :end_turn
 
   @type t :: %__MODULE__{}
 
@@ -346,6 +424,9 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
 
   @spec append_text(t(), String.t()) :: t()
   def append_text(acc, text), do: %{acc | text: acc.text <> text}
+
+  @spec append_reasoning(t(), String.t()) :: t()
+  def append_reasoning(acc, text), do: %{acc | reasoning: acc.reasoning <> text}
 
   @spec open_tool(t(), non_neg_integer(), String.t() | nil, String.t() | nil) :: t()
   def open_tool(acc, index, id, name) do
@@ -380,6 +461,11 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
   def to_response(%__MODULE__{} = acc) do
     text_blocks = if acc.text == "", do: [], else: [%Text{text: acc.text}]
 
+    reasoning_blocks =
+      if acc.reasoning == "",
+        do: [],
+        else: [%Reasoning{provider: :openai, text: acc.reasoning}]
+
     tool_blocks =
       acc.tools
       |> Enum.sort_by(fn {index, _} -> index end)
@@ -388,7 +474,7 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
     stop_reason = if tool_blocks == [], do: acc.stop_reason, else: :tool_use
 
     %Response{
-      content: text_blocks ++ tool_blocks,
+      content: reasoning_blocks ++ text_blocks ++ tool_blocks,
       stop_reason: stop_reason,
       usage: acc.usage
     }
