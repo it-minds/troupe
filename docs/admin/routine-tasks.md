@@ -368,11 +368,32 @@ A rollout, because the token is read at boot. Disable: set `secretName: ""`, upg
 
 ## 13. Enable SCIM
 
+From the console: **Identity provider → SCIM connector → create a token**. The token is
+shown once, in the notice at the top of the page. Paste it into the provider's
+provisioning as the secret token, with the base URL the card shows
+(`https://<plane>/scim/v2`), keying users on `externalId` = the token subject
+([integrations.md §8](integrations.md#8-scim)). The card's *last sync* moves on the
+provider's first request, which is its connection test.
+
+```bash
+troupe admin scim get                      # status, last sync, whether a token is set
+troupe admin scim rotate                   # a new token, shown once; the old one stops now
+troupe admin scim delete <base url>        # no token: every push answers 401
+troupe admin scim update '{"teams_from_groups": true}'   # pushed groups become teams
+```
+
+*Create teams from SCIM groups* is off until somebody turns it on. On, a pushed group
+becomes a team named from its display name with the platform's defaults, audited as
+`scim`; a group that is already a team or whose name another team holds is left for you.
+
+The deployment's own token still works if you would rather keep the credential in a
+secret (`plane-deployment.yaml:296-302`):
+
 ```bash
 kubectl -n troupe-system create secret generic troupe-plane-scim --from-literal=token="$(openssl rand -base64 48 | tr -d '\n')"
 ```
 
-Set `plane.scim.enabled: true` and upgrade (`plane-deployment.yaml:296-302`). Configure the provider to push to `https://<plane>/scim/v2` with that bearer token, keying users on `externalId` = the token `sub` ([integrations.md §8](integrations.md#8-scim)).
+Either token opens the door; deleting the console's leaves the deployment's where it is.
 
 ---
 

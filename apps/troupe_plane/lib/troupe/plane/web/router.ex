@@ -28,6 +28,7 @@ defmodule Troupe.Plane.Web.Router do
 
   alias Troupe.Plane.{Admin, Build, Harness, Identity, OIDC, Principals, SCIM, Tokens, Triggers}
   alias Troupe.Plane.Admin.API, as: AdminAPI
+  alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Web.{Docs, Index}
   alias Troupe.Protocol.{Error, JSONRPC, Token}
 
@@ -255,6 +256,9 @@ defmodule Troupe.Plane.Web.Router do
   # user token never reaches it.
   match "/scim/v2/*rest" do
     if scim_authorised?(conn) do
+      # After the door and never before it: "last sync" is when the provider was heard
+      # from, and somebody with the wrong token is not the provider.
+      Connector.seen(conn.method <> " /" <> Enum.join(rest, "/"))
       scim(conn, rest)
     else
       send_json(conn, 401, %{
@@ -534,11 +538,20 @@ defmodule Troupe.Plane.Web.Router do
     end
   end
 
+  # Two doors, either of which opens: the token rotated from the console, kept as a hash
+  # on the connector row, and the deployed `TROUPE_SCIM_TOKEN`, which stays the floor so
+  # a plane provisioned before the row existed keeps working with no row at all.
   defp scim_authorised?(conn) do
-    case {Application.get_env(:troupe_plane, :scim_token), bearer(conn)} do
-      {nil, _} -> false
-      {expected, {:ok, presented}} -> constant_time_equal?(expected, presented)
+    case bearer(conn) do
+      {:ok, presented} -> Connector.authorised?(presented) or deployed_scim_token?(presented)
       _ -> false
+    end
+  end
+
+  defp deployed_scim_token?(presented) do
+    case Application.get_env(:troupe_plane, :scim_token) do
+      nil -> false
+      expected -> constant_time_equal?(expected, presented)
     end
   end
 

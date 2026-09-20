@@ -222,6 +222,41 @@ defmodule Troupe.Plane.Identity do
     end
   end
 
+  @doc """
+  Enable a group as a team only if no team draws from it and its name is free.
+
+  What the SCIM connector calls when its switch is on. `enable_team/2` is keyed on the
+  name and *updates* a team that already has it — right for an administrator repeating
+  themselves, wrong for a push: a group whose display name happens to be an existing
+  team's would be linked into that team, and forty strangers would be in it by morning.
+  So this refuses both cases and says which, and the connector leaves those groups for
+  an administrator, who can see the collision.
+  """
+  @spec enable_team_if_new(Group.t(), map()) ::
+          {:ok, Team.t()} | {:error, :already_a_team | :name_taken | Ecto.Changeset.t()}
+  def enable_team_if_new(%Group{} = group, attrs \\ %{}) do
+    name = default_team_name(group)
+
+    cond do
+      teams_drawing_from(group) != [] -> {:error, :already_a_team}
+      Repo.get_by(Team, name: name) -> {:error, :name_taken}
+      true -> enable_team(group, Map.put(attrs, "name", name))
+    end
+  end
+
+  @doc "Every team that draws members from a group, through any link."
+  @spec teams_drawing_from(Group.t()) :: [Team.t()]
+  def teams_drawing_from(%Group{} = group) do
+    Repo.all(
+      from(t in Team,
+        join: l in TeamGroupLink,
+        on: l.team_id == type(t.id, :binary_id),
+        where: l.group_id == type(^group.id, :binary_id),
+        order_by: t.name
+      )
+    )
+  end
+
   # A name a person will type: the display name, lowercased, with anything that is not
   # a label character turned into a dash. Kubernetes has to accept it as part of a
   # claim name.

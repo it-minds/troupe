@@ -49,6 +49,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision}
   alias Troupe.Protocol.Bundle, as: Document
@@ -503,15 +504,9 @@ defmodule Troupe.Plane.Admin do
   # What a team starts with, from the platform's settings rather than from the schema's
   # defaults. The schema still has defaults — a team created by a migration or a test has
   # to be some shape — but a platform that has decided every new team gets a 500 kr ceiling
-  # should not have to remember to set it on each one.
-  defp team_defaults do
-    %{
-      "budget_micros" => Settings.get("default_budget_micros"),
-      "budget_period" => to_string(Settings.get("default_budget_period")),
-      "idle_timeout_seconds" => Settings.get("default_idle_timeout_seconds"),
-      "erase_after_days" => Settings.get("default_erase_after_days")
-    }
-  end
+  # should not have to remember to set it on each one. In `Settings` because the SCIM
+  # connector enables teams too, and a team should start the same way whoever made it.
+  defp team_defaults, do: Settings.team_defaults()
 
   @doc "Change a team's budget, retention or default visibility."
   @spec team_update(actor(), String.t(), map()) :: result()
@@ -1249,6 +1244,140 @@ defmodule Troupe.Plane.Admin do
     case Settings.get("base_url") do
       nil -> nil
       base -> String.trim_trailing(base, "/") <> "/admin/callback"
+    end
+  end
+
+  # -- the SCIM connector -----------------------------------------------------
+
+  @doc """
+  The SCIM connector as the card shows it: where the provider pushes, whether a token is
+  set and where, when it was rotated, when the provider was last heard from, and the
+  switch. Never the token.
+
+  Readable by a team admin, because "is provisioning connected" is a question they ask
+  when somebody who left is still in their team; changing any of it is a platform
+  admin's.
+  """
+  @spec scim_get(actor()) :: result()
+  def scim_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, scim_state()}
+  end
+
+  @doc """
+  Mint the connector's token and show it once.
+
+  The old token stops working the moment this returns, the same way a principal's does.
+  The answer carries `token` and is the only place it ever appears: not in the audit
+  entry, not in `scim_get/1`, not in a later page.
+  """
+  @spec scim_rotate(actor()) :: result()
+  def scim_rotate(actor) do
+    with :ok <- require_platform_admin(actor) do
+      {_connector, token} = Connector.rotate(actor.subject)
+      {:ok, _} = Audit.record(actor.subject, "scim.rotate", "connector", %{})
+      {:ok, Map.put(scim_state(), :token, token)}
+    end
+  end
+
+  @doc """
+  Forget the connector's token. Every push presenting it answers 401 from now on.
+
+  Destructive, and confirmed by typing this plane's SCIM base URL — a connector has no
+  name, and the URL is the one thing about it somebody has in front of them. The
+  deployment's own `TROUPE_SCIM_TOKEN`, if there is one, is not touched: that door
+  belongs to the deployment and is closed there.
+  """
+  @spec scim_delete(actor(), String.t()) :: result()
+  def scim_delete(actor, base_url) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- confirm_scim_base_url(base_url) do
+      :ok = Connector.delete()
+      {:ok, _} = Audit.record(actor.subject, "scim.delete", "connector", %{})
+      {:ok, scim_state()}
+    end
+  end
+
+  @doc """
+  Change the connector's switch: whether a group the provider pushes becomes a team.
+
+  Off by default and off for every plane upgrading into this, because a plane that has
+  been enabling teams by hand should not wake up with forty new ones. On, a pushed group
+  nobody has made a team of becomes one named from its display name, with the platform's
+  defaults, audited as `scim`. Turning it off creates no more and deletes none.
+  """
+  @spec scim_update(actor(), map()) :: result()
+  def scim_update(actor, attrs) do
+    with :ok <- require_platform_admin(actor) do
+      attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+      before = Connector.describe()
+
+      case Connector.update(attrs) do
+        {:ok, _connector} ->
+          now = Connector.describe()
+
+          changes =
+            Audit.diff(
+              %{"teams_from_groups" => before.teams_from_groups},
+              %{"teams_from_groups" => now.teams_from_groups}
+            )
+
+          {:ok, _} = Audit.record(actor.subject, "scim.update", "connector", changes)
+          {:ok, Map.put(scim_state(), :changes, changes)}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  defp scim_state do
+    described = Connector.describe()
+    deployed? = is_binary(Settings.get("scim_token"))
+
+    Map.merge(described, %{
+      base_url: scim_base_url(),
+      deployed_token_set: deployed?,
+      status: scim_status(described, deployed?)
+    })
+  end
+
+  defp scim_base_url do
+    case Settings.get("base_url") do
+      nil -> nil
+      base -> String.trim_trailing(base, "/") <> "/scim/v2"
+    end
+  end
+
+  # Four states, said apart: nothing could get in; something could and nothing has; the
+  # provider was heard from today; the provider has gone quiet. The last two are the same
+  # row read against the clock, and a day is the longest a provider that is configured
+  # goes between syncs.
+  defp scim_status(%{token_set: false}, false), do: :no_token
+  defp scim_status(%{last_seen_at: nil}, _deployed?), do: :never_pushed
+
+  defp scim_status(%{last_seen_at: at}, _deployed?) do
+    if DateTime.diff(DateTime.utc_now(), at, :second) < 86_400, do: :connected, else: :quiet
+  end
+
+  defp confirm_scim_base_url(base_url) do
+    expected = scim_base_url()
+
+    cond do
+      is_nil(expected) ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "base_url is not set on this plane, so there is nothing to confirm against"
+         })}
+
+      base_url == expected ->
+        :ok
+
+      true ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "the base URL to confirm with is #{expected}",
+           base_url: expected
+         })}
     end
   end
 

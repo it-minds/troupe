@@ -314,6 +314,24 @@ defmodule Troupe.Plane.Settings do
      "Read-only here on purpose: these are the values that decide who may sign in, and a console that could change them is a console that could shut itself. Change them in the deployment and roll it."}
   ]
 
+  @doc """
+  What a new team starts with, string-keyed for `Identity.enable_team/2`.
+
+  From the platform's settings rather than from the schema's defaults, and here rather
+  than in `Admin` because more than one thing enables teams now: an administrator on the
+  Teams screen, and the SCIM connector when its switch is on. A team should start the
+  same way whichever of them made it.
+  """
+  @spec team_defaults() :: %{String.t() => term()}
+  def team_defaults do
+    %{
+      "budget_micros" => get("default_budget_micros"),
+      "budget_period" => to_string(get("default_budget_period")),
+      "idle_timeout_seconds" => get("default_idle_timeout_seconds"),
+      "erase_after_days" => get("default_erase_after_days")
+    }
+  end
+
   @doc "The panels of the Settings page: a key, a heading and the sentence under it."
   @spec groups() :: [{atom(), String.t(), String.t()}]
   def groups, do: @groups

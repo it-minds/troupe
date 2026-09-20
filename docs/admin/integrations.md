@@ -152,7 +152,8 @@ The first does OAuth against the identity provider — the app registration must
 | Item | Detail | Source |
 |---|---|---|
 | Endpoints | `GET/POST /scim/v2/Users`, `GET/PUT/PATCH/DELETE /scim/v2/Users/:id`, `GET/POST /scim/v2/Groups`, `PUT/PATCH /scim/v2/Groups/:id` | `web/router.ex:168-177,342-408` |
-| Token | `TROUPE_SCIM_TOKEN` from Secret `troupe-plane-scim` key `token` when `plane.scim.enabled: true`; unset → every SCIM request is 401 | `plane-deployment.yaml:296-302`; `web/router.ex:410-416` |
+| Token | Rotated on the console's **Identity provider** card (`admin.scim.rotate`), kept as a salted hash on the `scim_connector` row and shown once; *or* `TROUPE_SCIM_TOKEN` from Secret `troupe-plane-scim` key `token` when `plane.scim.enabled: true`. Either opens the door; neither set → every SCIM request is 401 | `scim/connector.ex`; `web/router.ex` `scim_authorised?/1`; `plane-deployment.yaml:296-302` |
+| Status | `admin.scim.get`: `last_seen_at`/`last_seen_op` stamped on an authorised request at most once a minute; `teams_from_groups` makes a pushed group a team on arrival (off by default) | `scim/connector.ex`; `scim.ex` `maybe_enable_team/1` |
 | Semantics | the subject is `externalId`, else `userName` — it must be what later appears as `sub`; group membership is **replaced** per push; `DELETE` deactivates rather than deletes; list responses are unpaginated | `scim.ex:1-15,36-73,109-119` |
 | Without SCIM | `Login.from_claims/1` builds the same rows from the token's group claim at every sign-in; both paths end in `Identity` so the teams are the same | `login.ex:1-14` |
 

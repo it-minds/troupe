@@ -656,6 +656,53 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.scim.get",
+      function: :scim_get,
+      summary:
+        "The SCIM connector: the URL the provider pushes to, whether a token is set and where, when it was rotated, when the provider last pushed, and whether pushed groups become teams. Never the token.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.scim.rotate",
+      function: :scim_rotate,
+      summary:
+        "Mint the SCIM connector's token and return it, once. The previous token stops working immediately; paste the new one into the provider.",
+      risk: :write,
+      arguments: []
+    },
+    %Method{
+      name: "admin.scim.delete",
+      function: :scim_delete,
+      summary:
+        "Forget the SCIM connector's token. Every push presenting it answers 401 until a new one is made. A token in the deployment's own environment is not touched.",
+      risk: :destructive,
+      confirm: "base_url",
+      arguments: [
+        %Argument{
+          name: "base_url",
+          type: :string,
+          required: true,
+          description: "This plane's SCIM base URL, exactly as admin.scim.get reports it."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.scim.update",
+      function: :scim_update,
+      summary:
+        "Change the connector's switch. `teams_from_groups` true makes a pushed group a team on arrival, named from its display name with the platform's defaults; false leaves it a group until somebody enables it. Off creates no more teams and deletes none.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "attrs",
+          type: :object,
+          required: true,
+          description: "`{teams_from_groups: boolean}`."
+        }
+      ]
+    },
+    %Method{
       name: "admin.bundles.list",
       function: :bundles_list,
       summary: "Every version of a configuration channel, newest first.",
