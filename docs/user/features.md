@@ -484,6 +484,12 @@ Sources:
 
 ## Budgets and limits
 
+**Headroom.** `agent_state.budget.headroom` carries five fractions — `turns`, `input`,
+`output`, `wall` and `context` (the model's window against the last prompt) — and an
+ephemeral `budget_warning` is published once per dimension when one crosses
+`budget_warn_at` (0.8), with `detail` such as `input tokens 4.9M/6.0M (82%)`.
+`full_send: true` (config, or a client's `session.create`) turns the warnings off.
+
 **Per agent.** Every agent has four limits, checked immediately before each model
 request so an exhausted agent makes zero further calls:
 

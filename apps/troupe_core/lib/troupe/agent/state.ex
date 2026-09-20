@@ -32,6 +32,7 @@ defmodule Troupe.Agent.State do
   alias Troupe.LLM.Message
 
   @enforce_keys [:session_id, :agent_path, :workspace, :config, :definitions, :definition]
+  # credo:disable-for-next-line Credo.Check.Warning.StructFieldAmount
   defstruct [
     :session_id,
     :agent_path,
@@ -66,6 +67,8 @@ defmodule Troupe.Agent.State do
     monitors: %{},
     child_seq: 0,
     last_input_tokens: 0,
+    # Dimensions already warned about (Decision 655): one `budget_warning` each.
+    headroom_warned: MapSet.new(),
     compact_resume: :idle,
     finish_summary: nil,
     fake: nil,
