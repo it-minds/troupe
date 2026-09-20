@@ -496,6 +496,27 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.team.disable.preview",
+      function: :team_disable_preview,
+      summary:
+        "What removing a team would take with it: its grants, administrators, service principals, triggers and group links, and how many sessions stay behind with no team. Read this first.",
+      risk: :read,
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."}
+      ]
+    },
+    %Method{
+      name: "admin.team.disable",
+      function: :team_disable,
+      summary:
+        "Remove a team. Its grants are revoked, its sessions go read-only, and its administrators, service principals, triggers and group links go with it. The people and the groups stay; the sessions stay, with no team.",
+      risk: :destructive,
+      confirm: "name",
+      arguments: [
+        %Argument{name: "name", type: :string, required: true, description: "The team's name."}
+      ]
+    },
+    %Method{
       name: "admin.team.grant",
       function: :team_grant,
       summary: "Give a team access to a profile. Effective for sessions started after it.",

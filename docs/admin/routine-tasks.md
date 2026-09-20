@@ -188,6 +188,19 @@ troupe admin team update <team> team.json
 
 `budget_period` must be `monthly` or `never` (`identity/team.ex:69`).
 
+### Remove a team
+
+Ask first what goes with it — the grants, administrators, service principals, triggers
+and group links all hang off the team and are removed with it; the people, the groups and
+the sessions stay, the sessions with no team and read-only:
+
+```bash
+troupe admin team disable preview <team>
+troupe admin team disable <team>
+```
+
+The console's Teams table has the same two steps as *delete* on the team's row.
+
 ---
 
 ## 4. Grant a profile to a team
