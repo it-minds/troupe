@@ -167,6 +167,42 @@ defmodule Troupe.Settings do
       yaml: ["tool_output_limit"],
       effect: :next_run,
       help: "Bytes of a tool's output the model sees before the rest becomes a blob."
+    },
+    %{
+      key: "full_send",
+      label: "full send",
+      type: :bool,
+      path: :full_send,
+      yaml: ["full_send"],
+      effect: :next_run,
+      help: """
+      No budget warnings: an agent that nears a limit says nothing until the limit
+      stops it. `troupe --full-send` sets it for one run.
+      """
+    },
+    %{
+      key: "memory",
+      label: "project brief",
+      type: :bool,
+      path: :memory,
+      yaml: ["memory"],
+      effect: :next_run,
+      help: """
+      Read `.troupe/memory.md` into every agent's prompt and let `remember` write it.
+      `/memory` shows it; `/memory refresh` has the librarian rewrite it.
+      """
+    },
+    %{
+      key: "memory_auto_refresh",
+      label: "refresh the brief",
+      type: :bool,
+      path: :memory_auto_refresh,
+      yaml: ["memory_auto_refresh"],
+      effect: :next_run,
+      help: """
+      Start the librarian when a new session finds the brief missing or stale.
+      Off means only `/memory refresh` writes it.
+      """
     }
   ]
 

@@ -60,6 +60,19 @@ defmodule Troupe.Remote.Translate do
            transient(session_id, agent, :agent_state, %{to: state_atom(data["state"] || "working")})
          ], memory}
 
+      # A limit is near (troupe-remote Decision 655): ephemeral on the wire, shown once
+      # by the window, which already knew how.
+      "budget_warning" ->
+        {[
+           transient(session_id, agent, :budget_warning, %{
+             dimension: dimension(data["dimension"]),
+             used: data["used"],
+             limit: data["limit"],
+             fraction: data["fraction"],
+             detail: data["detail"] || to_string(data["dimension"])
+           })
+         ], memory}
+
       type when type in ["presence", "summary_diff", "watch_notice"] ->
         {[], memory}
 
@@ -386,6 +399,15 @@ defmodule Troupe.Remote.Translate do
 
   defp as(%{"profile" => profile}) when is_binary(profile), do: " as #{profile}"
   defp as(_data), do: ""
+
+  @dimensions %{
+    "turns" => :turns,
+    "input" => :input,
+    "output" => :output,
+    "wall" => :wall,
+    "context" => :context
+  }
+  defp dimension(name), do: Map.get(@dimensions, name, :other)
 
   defp limit(%{"limit" => limit}) when is_binary(limit), do: ": #{limit}"
 
