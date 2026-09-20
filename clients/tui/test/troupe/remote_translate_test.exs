@@ -274,36 +274,18 @@ defmodule Troupe.RemoteTranslateTest do
   end
 
   test "a budget warning names its dimension and carries the sentence" do
-    event = fn dimension, detail ->
-      %{
-        "ephemeral" => true,
-        "type" => "budget_warning",
-        "agent" => ["root"],
-        "data" => %{
-          "dimension" => dimension,
-          "used" => 4_900_000,
-          "limit" => 6_000_000,
-          "fraction" => 0.817,
-          "detail" => detail
-        }
-      }
-    end
+    data = %{"dimension" => "input", "used" => 4_900_000, "limit" => 6_000_000, "fraction" => 0.817}
 
-    {[warning], _} =
-      Translate.ephemeral(
-        "s-1",
-        event.("input", "input tokens 4.9M/6.0M (82%)"),
-        Translate.memory()
-      )
+    [warning] =
+      translate(durable("budget_warning", Map.put(data, "detail", "input tokens 4.9M/6.0M (82%)")))
 
     assert warning.type == :budget_warning
-    assert warning.transient?
     assert warning.agent_path == "root"
     assert warning.data.dimension == :input
     assert warning.data.detail == "input tokens 4.9M/6.0M (82%)"
     assert warning.data.fraction == 0.817
 
-    {[odd], _} = Translate.ephemeral("s-1", event.("moon", nil), Translate.memory())
+    [odd] = translate(durable("budget_warning", %{data | "dimension" => "moon"}))
     assert odd.data.dimension == :other
     assert odd.data.detail == "moon"
   end
