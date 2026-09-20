@@ -11,7 +11,7 @@ name: Release troupe-daemon
 
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
     paths: ["daemon/**", ".github/workflows/release.yml", "install.sh", "install.ps1"]
   pull_request:
