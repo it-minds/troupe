@@ -46,7 +46,9 @@ defmodule Troupe.Protocol.Schema do
         # restriction, which is what a local session and an unnarrowed grant both mean.
         "owner" => optional(:string),
         "entitlements" => optional(:object),
-        "origin" => optional(:object)
+        "origin" => optional(:object),
+        # The session this one was made as a branch of, when a client said so.
+        "parent" => optional(:string)
       },
       # The child's first event, and the only place the lineage is written down in the log.
       # `parent` carries the id, the seq forked at and the parent's head hash there, so a
@@ -316,7 +318,8 @@ defmodule Troupe.Protocol.Schema do
         "profile" => optional(:string),
         "prompt" => optional(:string),
         "worktree" => optional(:string),
-        "config" => optional(:object)
+        "config" => optional(:object),
+        "parent" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -382,6 +385,17 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "path" => required(:string),
         "force" => optional(:boolean)
+      },
+      "worktree.merge" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "path" => required(:string),
+        "message" => optional(:string)
+      },
+      "worktree.discard" => %{
+        "command_id" => required(:string),
+        "workspace" => required(:string),
+        "path" => required(:string)
       },
       "watch.set" => %{
         "command_id" => required(:string),

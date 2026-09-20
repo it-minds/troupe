@@ -75,6 +75,10 @@ defmodule Troupe.Gateway.Dispatch do
     "session.unpin" => :admin,
     "session.erase" => :admin,
     "worktree.remove" => :admin,
+    # Both change the user's own checkout — a merge lands a branch on it, a discard
+    # throws work away — so they take the scope everything else that does takes.
+    "worktree.merge" => :admin,
+    "worktree.discard" => :admin,
     "watch.set" => :admin,
     # Saying who this machine's user is changes the name on every subsequent event, so
     # it takes the scope that everything else which changes the daemon takes. Reading it
@@ -442,6 +446,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("session.create", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
+         {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
       private? = Map.get(params, "private", false) == true
 
@@ -449,6 +454,7 @@ defmodule Troupe.Gateway.Dispatch do
         [workspace: resolved.path, agent: Map.get(params, "profile")]
         |> maybe_put(:task, Map.get(params, "prompt"))
         |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
+        |> maybe_put(:parent, parent)
         |> maybe_private(private?)
 
       case Troupe.start_session(opts) do
@@ -459,6 +465,7 @@ defmodule Troupe.Gateway.Dispatch do
              "workspace" => resolved.path,
              "worktree" => resolved.worktree,
              "branch" => resolved.branch,
+             "parent" => parent,
              # Whether it is *actually* being sealed, not whether it was asked for. A
              # laptop that is offline, or one nobody has linked, creates the session and
              # says so — the alternative is refusing to work without a network, which is
@@ -499,6 +506,34 @@ defmodule Troupe.Gateway.Dispatch do
         :ok -> {:ok, %{"removed" => true}}
         {:error, :dirty} -> {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
         {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+      end
+    end
+  end
+
+  # A branch's work lands on the checkout it came from, or is thrown away. Either is
+  # refused while the branch's agent is still working — the tree would move under it.
+  defp handle("worktree.merge", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace"),
+         {:ok, path} <- fetch(params, "path") do
+      case Worktrees.merge(workspace, path, message: Map.get(params, "message")) do
+        {:ok, result} ->
+          {:ok, Map.put(result, "merged", true)}
+
+        {:error, {:conflicts, output}} ->
+          {:error, Error.new(:conflict, %{reason: "merge conflicts", output: output})}
+
+        {:error, reason} ->
+          worktree_error(reason)
+      end
+    end
+  end
+
+  defp handle("worktree.discard", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace"),
+         {:ok, path} <- fetch(params, "path") do
+      case Worktrees.discard(workspace, path) do
+        {:ok, result} -> {:ok, Map.put(result, "discarded", true)}
+        {:error, reason} -> worktree_error(reason)
       end
     end
   end
@@ -575,6 +610,38 @@ defmodule Troupe.Gateway.Dispatch do
 
   # A client cannot see this machine's filesystem, so "it did not work" is useless to
   # it — say which of the things it asked for was impossible.
+  # A branch names the session it forks from; the daemon must know that session, or the
+  # link would point at nothing the moment anybody read it back.
+  defp parent_of(params) do
+    case Map.get(params, "parent") do
+      nil ->
+        {:ok, nil}
+
+      parent when is_binary(parent) ->
+        if Troupe.get_session(parent),
+          do: {:ok, parent},
+          else: {:error, Error.new(:invalid_params, %{field: "parent", reason: "no such session"})}
+
+      _other ->
+        {:error, Error.new(:invalid_params, %{field: "parent", reason: "must be a session id"})}
+    end
+  end
+
+  defp worktree_error({:busy, session_id}),
+    do: {:error, Error.new(:conflict, %{reason: "session #{session_id} is still working there"})}
+
+  defp worktree_error(:not_found),
+    do: {:error, Error.new(:not_found, %{kind: "worktree"})}
+
+  defp worktree_error(:not_a_worktree),
+    do: {:error, Error.new(:invalid_params, %{field: "path", reason: "not a worktree"})}
+
+  defp worktree_error({:git, output}),
+    do: {:error, Error.new(:internal, %{reason: output})}
+
+  defp worktree_error(reason),
+    do: {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+
   defp start_error({:not_a_directory, path}), do: "#{path} is not a directory"
   defp start_error({:unknown_provider, name}), do: "unknown provider #{inspect(name)}"
   defp start_error(other), do: inspect(other)
@@ -793,6 +860,7 @@ defmodule Troupe.Gateway.Dispatch do
       "id" => session.id,
       "workspace" => session.workspace,
       "branch" => Map.get(session, :branch),
+      "parent" => Map.get(session, :parent),
       "profile" => Map.get(session, :profile),
       "state" => to_string(Map.get(session, :state, :active)),
       "status" => to_string(Map.get(session, :status, :idle)),

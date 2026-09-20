@@ -23,6 +23,7 @@ defmodule Troupe.Sessions.Index do
           id: String.t(),
           workspace: Path.t(),
           branch: String.t() | nil,
+          parent: String.t() | nil,
           profile: String.t(),
           state: :active | :dormant | :read_only | :erased,
           status: atom(),
@@ -72,7 +73,8 @@ defmodule Troupe.Sessions.Index do
   @doc """
   Every session this daemon knows about, newest first.
 
-  `filter` may carry `"state"` (a list of state strings) and `"workspace"`.
+  `filter` may carry `"state"` (a list of state strings), `"workspace"` and `"parent"`
+  (a session id: the sessions made as branches of that one).
   """
   @spec list(map()) :: [meta()]
   def list(filter \\ %{}), do: GenServer.call(__MODULE__, {:list, filter}, 15_000)
@@ -270,6 +272,9 @@ defmodule Troupe.Sessions.Index do
     |> filter_by(filter, "workspace", fn session, workspace ->
       session.workspace == workspace
     end)
+    |> filter_by(filter, "parent", fn session, parent ->
+      Map.get(session, :parent) == parent
+    end)
   end
 
   defp filter_by(sessions, filter, key, predicate) do
@@ -315,6 +320,7 @@ defmodule Troupe.Sessions.Index do
             id: Path.basename(Path.dirname(path)),
             workspace: get_data(created, "workspace", "(unknown)"),
             branch: get_data(created, "branch", nil),
+            parent: get_data(created, "parent", nil),
             profile: get_data(created, "profile", "build"),
             state: :dormant,
             status: status_from_log(events),

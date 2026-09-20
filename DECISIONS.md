@@ -4362,3 +4362,36 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      for that workspace — built-ins, the machine's `agents/`, the project's
      `.troupe/agents/` — with a `source` for each. `observe` scope: reading the menu steers
      nothing.
+
+646. **A branch is a session with a `parent`, and nothing more.** The TUI's harness let one
+     session hold many root agents, each a window — `/code fix it` beside `/plan the rest`
+     in one transcript. Martin chose the other shape for the daemon (brief, question 7.3,
+     answer b): a branch is a session of its own, which the core already handled — the
+     second session in a busy workspace gets its own worktree — and the client groups them.
+     What the core lacked was any record of the grouping. So `session.create` takes
+     `parent`, the daemon refuses an id it does not know, `session_created` carries it,
+     the index folds it back from the log for a dormant session, and `session.list`
+     filters on it. Nothing about how the session runs changes: no shared log, no window
+     ledger, no locks between branches, because their worktrees keep them apart. The one
+     thing an agent needs from a branch is what it finished with, so `read_branch` lists
+     a session's family — its branches, or its siblings and the session they came from —
+     and reads a finished one's prompt, summary and task list off its log, never its
+     transcript. It reads only the family: a branch is not a way to open any log on the
+     machine by guessing an id. `branches: true` at `initialize` says a server does all of
+     this; a worker says false, since a pod has one session and no worktrees.
+
+647. **A worktree ends in a merge or a discard, and a merge that cannot complete leaves no
+     trace.** `worktree.remove` was the only exit, and it threw away the branch's work
+     unless somebody merged it by hand first. `worktree.merge` does what the TUI's `/merge`
+     did: commit whatever the agent left uncommitted (as the harness, `troupe
+     <troupe@localhost>`, so a machine where nobody told git who they are still works),
+     merge the branch into the checkout it came from with a merge commit — `--no-ff`, so
+     the branch stays visible in history as one piece of work — and remove the worktree
+     and the branch. When git cannot merge it, the merge is aborted before anything is
+     answered: the checkout is exactly as it was, the worktree is exactly as it was, and
+     the client gets `conflict` with git's own words, because a half-applied merge is the
+     one outcome worse than a refused one. `worktree.discard` removes the tree and deletes
+     the branch, uncommitted work included, which is what the word means. Both refuse
+     with `conflict` while the session in that worktree is mid-turn; an idle or finished
+     agent is not consulted, and its next turn, if any, fails loudly rather than editing
+     files nobody will look at. Both are `admin`: they change the user's own checkout.

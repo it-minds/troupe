@@ -1,34 +1,23 @@
 {
-  "$id": "https://troupe.dev/schema/v1/commands/session.create.json",
+  "$id": "https://troupe.dev/schema/v1/commands/worktree.discard.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
     "command_id": {
       "type": "string"
     },
-    "config": {
-      "type": "object"
-    },
-    "parent": {
-      "type": "string"
-    },
-    "profile": {
-      "type": "string"
-    },
-    "prompt": {
+    "path": {
       "type": "string"
     },
     "workspace": {
-      "type": "string"
-    },
-    "worktree": {
       "type": "string"
     }
   },
   "required": [
     "command_id",
+    "path",
     "workspace"
   ],
-  "title": "session.create",
+  "title": "worktree.discard",
   "type": "object"
 }

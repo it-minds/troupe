@@ -26,7 +26,8 @@ defmodule Troupe do
 
   Options: `:workspace`, `:agent` (starting profile), `:task` (a first message),
   `:session_id`, `:config_overrides`, `:definitions`, `:fake`, `:mounts`, `:bundle`
-  (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`.
+  (`%{version, hash, channel, dir}`), `:kind` (`:local` or `:team`), `:origin`,
+  `:parent` (the session id this one is a branch of).
   """
   @spec start_session(keyword()) :: {:ok, session()} | {:error, term()}
   def start_session(opts \\ []) do
@@ -41,7 +42,11 @@ defmodule Troupe do
       workspace = Keyword.fetch!(session_opts, :workspace)
       profile = Keyword.fetch!(session_opts, :profile)
 
-      Index.register(session_id, pid, %{workspace: workspace.root_real, profile: profile})
+      Index.register(session_id, pid, %{
+        workspace: workspace.root_real,
+        profile: profile,
+        parent: Keyword.get(session_opts, :parent)
+      })
 
       # The event that says what this session is, so a listing can be rebuilt from the
       # log alone — which is what makes a dormant session visible. Not the first event
@@ -177,6 +182,9 @@ defmodule Troupe do
     # daemon nobody has linked leaves the field out rather than writing a username that
     # means nothing anywhere else.
     |> put_present("owner", Keyword.get(session_opts, :owner) || linked_owner())
+    # The session this is a branch of. A client that groups a workspace's sessions into
+    # one view reads it back from the listing; the log is where it survives dormancy.
+    |> put_present("parent", Keyword.get(session_opts, :parent))
   end
 
   defp put_present(data, _key, nil), do: data

@@ -178,7 +178,10 @@ defmodule Troupe.Session do
          origin: Keyword.get(opts, :origin),
          # A pod is told whose session this is; a daemon is not, and works it out from
          # whoever has linked their identity to it.
-         owner: Keyword.get(opts, :owner)
+         owner: Keyword.get(opts, :owner),
+         # The session this one branches from, when a client made it as a branch of
+         # another (Decision 646). Recorded, listed, filtered on; nothing else.
+         parent: Keyword.get(opts, :parent)
        ]}
     end
   end

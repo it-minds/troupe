@@ -127,7 +127,7 @@ Every top-level feature and every user-reachable route, and where it is document
 | `tools.register`, `tools.unregister`; server request `tool.invoke` | control | features.md § Personal MCP connectors |
 | `session.create`, `session.archive` | admin | features.md § Sessions, § Worktrees |
 | `session.pin`, `session.unpin`, `session.erase` | admin | features.md § Sessions |
-| `worktree.remove` | admin | features.md § Worktrees |
+| `worktree.remove`, `worktree.merge`, `worktree.discard` | admin | features.md § Worktrees |
 | `watch.set` | admin | features.md § Watch mode |
 | Notifications `event`, `resync_required`, `auth.expiring`, `auth.expired` | — | features.md § Remote sessions; troubleshooting.md |
 

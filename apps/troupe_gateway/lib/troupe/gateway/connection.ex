@@ -549,12 +549,22 @@ defmodule Troupe.Gateway.Connection do
   # involved in one — so this is `false` as a fact about the design rather than as a
   # setting somebody could turn on.
   defp capabilities(%{endpoint: %{kind: :remote}}) do
-    %{"worktrees" => false, "watch" => true, "remote" => true, "private_sessions" => false}
+    %{
+      "worktrees" => false,
+      "branches" => false,
+      "watch" => true,
+      "remote" => true,
+      "private_sessions" => false
+    }
   end
 
   defp capabilities(state) do
     %{
       "worktrees" => true,
+      # A session may be created as a branch of another (`session.create` with
+      # `parent`), listed by parent, merged or discarded through `worktree.*`, and read
+      # by its parent's agent with `read_branch`.
+      "branches" => true,
       "watch" => true,
       "remote" => false,
       "private_sessions" => private_sessions?(state)

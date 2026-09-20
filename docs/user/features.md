@@ -429,8 +429,20 @@ working in a new worktree on troupe/k3m9x2ab: /home/me/project-k3m9x2ab
 Protocol: `session.create` takes `worktree`; `worktree.list` returns `{path, branch,
 session_id, dirty}` for a workspace; `worktree.remove` `{path, force}` removes one and
 **refuses a dirty tree** (uncommitted changes or untracked files) with `conflict`
-unless `force` is true. There is no CLI command for listing or removing worktrees;
-use `git worktree list` and `git worktree remove` or a script.
+unless `force` is true. `worktree.merge` `{workspace, path, message}` commits what the
+agent left in the worktree, merges its branch into the checkout with a merge commit and
+removes the worktree and branch — or answers `conflict` and leaves everything as it was
+when git cannot merge it. `worktree.discard` `{workspace, path}` removes the worktree
+and its branch, work and all. Both refuse while the session in the worktree is
+mid-turn. There is no CLI command for any of this; a client (the TUI's `/merge` and
+`/discard`) or a script speaks the protocol.
+
+**Branches.** A client may create a session as a branch of another: `session.create`
+with `parent` (the first session's id). The daemon records the link, lists it
+(`session.list` with `filter.parent`), and gives the parent's agent a `read_branch`
+tool that lists the branches and reads a finished one's prompt, summary and task list.
+A branch is otherwise an ordinary session — in its own worktree when the workspace is
+busy, which is what makes two agents on one repository safe.
 
 Worktrees are a local-daemon feature; pods report `worktrees: false`.
 

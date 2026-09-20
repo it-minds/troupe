@@ -136,7 +136,7 @@ The response:
 {"jsonrpc": "2.0", "id": 1, "result": {
   "protocol_version": "1",
   "server_info": {"name": "troupe-daemon", "version": "0.2.0", "instance_id": "kP3u_2fQ8xA"},
-  "capabilities": {"worktrees": true, "watch": true, "remote": false,
+  "capabilities": {"worktrees": true, "branches": true, "watch": true, "remote": false,
                    "private_sessions": true},
   "principal": {"subject": "local:martin", "display_name": "martin", "kind": "user"},
   "scopes": ["observe", "control", "admin"],
@@ -149,6 +149,7 @@ The server's `capabilities`:
 | key | meaning |
 | --- | --- |
 | `worktrees` | this server can make a git worktree for a session |
+| `branches` | `session.create` takes `parent`, `session.list` filters on it, `worktree.merge` / `worktree.discard` end a branch's worktree, and an agent has `read_branch` |
 | `watch` | `watch.set` is served, and `fs_changed` events arrive |
 | `remote` | this is a worker pod rather than a local daemon |
 | `private_sessions` | this server can seal a session under the caller's own key, so a client may offer to make one |
@@ -240,7 +241,7 @@ Durable:
 
 | type | `data` |
 | --- | --- |
-| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin` |
+| `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
 | `user_input` | `source` (`user`/`watch`/`tui_todo_edit`), `text` |
@@ -430,13 +431,22 @@ This makes every command safe to retry after a disconnect.
 ```json
 {"command_id": "c-0", "workspace": "/home/me/project", "profile": "build",
  "prompt": "fix the test", "visibility": "private", "worktree": "auto",
- "config": {"auto_approve": false, "watch": true}}
+ "parent": "s-3a", "config": {"auto_approve": false, "watch": true}}
 ```
-→ `{"session_id": "s-9f", "workspace": "/home/me/project", "worktree": null, "branch": null}`
+→ `{"session_id": "s-9f", "workspace": "/home/me/project", "worktree": null, "branch": null,
+"parent": "s-3a"}`
 
 `worktree`: `"auto"` (default) creates a git worktree on `troupe/<slug>` when the
 workspace already has a live session; `"never"` reuses the directory; `"always"`
 always branches.
+
+`parent`: the session this one is a **branch** of — a second agent a person started
+from the first one's screen. The daemon records it in `session_created`, returns it in
+every listing, and refuses an id it does not know (`invalid_params`, field `parent`).
+It changes nothing about how the session runs: a branch is a session (Decision 646).
+A client that shows a workspace's branches together groups by `parent`; the parent's
+agent reads a finished branch's summary with the `read_branch` tool. Servers that do
+this say `branches: true` at `initialize`.
 
 `config` carries the session settings a client may choose, and only those:
 `auto_approve`, `watch`, `profile`. Everything else in the configuration — where state
@@ -445,10 +455,13 @@ runs on, and a client cannot move it.
 
 #### `session.list`
 ```json
-{"filter": {"state": ["active", "dormant"], "workspace": "/home/me/project"}}
+{"filter": {"state": ["active", "dormant"], "workspace": "/home/me/project",
+            "parent": "s-3a"}}
 ```
-→ `{"sessions": [{"id", "workspace", "branch", "profile", "state", "status",
+→ `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
 "tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
+
+`filter.parent` selects the branches of one session.
 
 #### `session.get` → one session object plus `head_seq`.
 
@@ -599,6 +612,30 @@ or `project`. A worker answers from its bundle instead, so a client offers exact
 ```
 Refuses a dirty tree with `conflict` unless `force` is true.
 
+#### `worktree.merge`
+```json
+{"command_id": "c-9", "workspace": "/home/me/project",
+ "path": "/home/me/project-troupe-abc", "message": "troupe: fix the test"}
+```
+→ `{"merged": true, "branch": "troupe/abc", "committed": true, "output": "..."}`
+
+Lands a branch's work on the checkout it came from: anything uncommitted in the
+worktree is committed first (as `message`, or a default naming the branch), the branch
+is merged into `workspace` with a merge commit (`--no-ff`), and the worktree and branch
+are removed. A merge git cannot complete is aborted and answered with `conflict`
+(`reason: "merge conflicts"`, `output`: git's words); the worktree is untouched, so the
+person can resolve it by hand. Refused with `conflict` while the session in that
+worktree is mid-turn (`reason` names the session).
+
+#### `worktree.discard`
+```json
+{"command_id": "c-10", "workspace": "/home/me/project", "path": "/home/me/project-troupe-abc"}
+```
+→ `{"discarded": true, "branch": "troupe/abc"}`
+
+Removes the worktree and deletes its branch, uncommitted work included. Same refusal
+while its session is working.
+
 ### Fleet
 
 #### `fleet.get` → the same shape `subscribe` to `fleet` would replay as a snapshot.
@@ -675,7 +712,7 @@ result for every call it made.
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `watch.set`, `identity.link`, `identity.unlink` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `watch.set`, `identity.link`, `identity.unlink` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

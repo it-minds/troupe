@@ -143,3 +143,13 @@ session may be created with. And a JSON fake script with per-agent `routes` (Dec
 that speaks only the protocol can drive a deterministic multi-agent session by putting
 `provider: fake` and `fake_script:` in the workspace's `.troupe/config.yaml`. The
 daemon still refuses `provider` from a client; the machine chooses it.
+
+## Phase 3 — what the harness lacked, feature by feature
+
+Each row of the plan's phase 3 table is its own change here, behind a capability where a
+worker may not have it, and the TUI takes it up through the protocol in a PR of its own.
+
+| row | here | proof |
+|---|---|---|
+| branches | a branch is a session with `parent` (Decision 646): `session.create` records it, `session.list` filters on it, `read_branch` gives the parent's agent a finished branch's prompt, summary and task list; `branches: true` at `initialize` | `branches_test.exs`, `read_branch_test.exs` |
+| worktrees per branch | `worktree.merge` commits, merges with a merge commit, removes; a merge git cannot complete is aborted and answered `conflict`; `worktree.discard` removes tree and branch (Decision 647) | `branches_test.exs` |

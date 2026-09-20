@@ -28,7 +28,9 @@ defmodule Troupe.Tools do
     Troupe.Tools.TodoWrite,
     Troupe.Tools.TodoRead,
     Troupe.Tools.Delegate,
-    Troupe.Tools.Finish
+    Troupe.Tools.Finish,
+    # What a branch of this session (Decision 646) said when it finished.
+    Troupe.Tools.ReadBranch
   ]
 
   @doc """
