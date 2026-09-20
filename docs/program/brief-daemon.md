@@ -276,7 +276,7 @@ open for the team's review: it takes every row up through the protocol, and a pi
 of it moves the harness from `c39e231` to `main`. Two rows landed differently from the table:
 watch markers stay driven by the session's root agent rather than a cheap branch per
 trigger (656), and the "usage log" of the catalog row was already the core's usage fold.
-This repository's `daemon/mix.exs` pins `main` at `8003483`. Item 7.6 (archive the stale
+This repository's `daemon/mix.exs` pins `main` at `84edcb9`, the merge of #29. Item 7.6 (archive the stale
 Sep-13 sessions) is still open.
 
 ### Phase 3b — the provider layer the TUI had and the core lacked
