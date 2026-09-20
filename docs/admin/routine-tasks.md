@@ -411,7 +411,21 @@ See [../a2a.md](../a2a.md).
 
 ## 15. Rotate the OIDC client secret
 
-Update the Secret, then restart the plane — the value is read into the environment at pod start (`plane-deployment.yaml:288-295`):
+From the console: **Identity provider → Single sign-on**, paste the new secret into the
+client secret field and *save*. It takes effect on the next sign-in, is never shown
+again, and overrides whatever the deployment holds until *back to the deployment* is
+pressed. The same card changes the issuer, client id, endpoints and scopes, behind a
+check against what the provider publishes:
+
+```bash
+troupe admin provider get
+troupe admin provider check '{"issuer": "https://login.microsoftonline.com/<tenant>/v2.0"}'
+troupe admin provider put '{"client_secret": "…"}'
+troupe admin provider reset                        # back to the deployment's values
+```
+
+Or in the deployment, which stays the floor: update the Secret, then restart the plane —
+the value is read into the environment at pod start (`plane-deployment.yaml:288-295`):
 
 ```bash
 kubectl -n troupe-system create secret generic troupe-plane-oidc --from-literal=client-secret=… --dry-run=client -o yaml | kubectl apply -f -

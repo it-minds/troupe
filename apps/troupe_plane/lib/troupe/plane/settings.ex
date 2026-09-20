@@ -18,12 +18,21 @@ defmodule Troupe.Plane.Settings do
   into the database and make the next deployment's change invisible. So the deployment
   stays the floor, and the worst a bad setting can do is be reset.
 
-  Some settings are deliberately **not** editable and are here to be read: the issuer, the
-  client id, the audience. Changing those from inside the console is how you lock every
-  administrator out at once, and they belong to the deployment for the same reason a lock's
-  keyhole is not adjustable from inside the house. They are listed anyway, with their
-  values, because "where is this plane's configuration" should have one answer and not
-  "some of it is here and the rest is in a values file somebody has".
+  Some settings are deliberately **not** editable and are here to be read: the audience,
+  the base URL, the deployment's own tokens. Changing those from inside the console is how
+  you lock every administrator out at once, and they belong to the deployment for the same
+  reason a lock's keyhole is not adjustable from inside the house. They are listed anyway,
+  with their values, because "where is this plane's configuration" should have one answer
+  and not "some of it is here and the rest is in a values file somebody has".
+
+  The identity provider — issuer, client id, secret, endpoints, scopes — used to be in
+  that list and is not any more (Decision 664). The argument for keeping it read-only was
+  the lock-out, and the lock-out has three answers that did not exist when the argument
+  was made: the break-glass door opens the console without the provider; `reset/2`
+  deletes the row and the deployed value is back; and `Admin.provider_put/3` refuses a
+  candidate the provider's own discovery does not stand behind unless told to save
+  anyway. What stays true is the ladder: the deployment is the floor, a stored value only
+  ever overrides it, and the worst a bad one can do is be reset.
 
   Secrets are listed too and never shown. What is reported is whether one is *set*, which
   is the only thing anybody debugging can act on and the only thing that is not a leak.
@@ -209,41 +218,88 @@ defmodule Troupe.Plane.Settings do
         "A profile with no channel of its own takes this one. Existing profiles keep what they were given.",
       effect: :next_session
     },
-    # -- read-only: what this plane was deployed with ---------------------------
+    # -- where people sign in: the provider, editable behind a check ------------
     %Setting{
       key: "issuer",
-      group: :deployment,
+      group: :sign_in,
       type: :string,
       app_key: [:oidc, :issuer],
-      editable: false,
-      summary: "The identity provider this plane trusts.",
+      summary: "The identity provider this plane trusts, as it names itself in its discovery document.",
       consequence:
-        "Deployment only. Changing the issuer from inside the console would invalidate every session including the one making the change.",
-      effect: :restart
+        "Every token is checked against this issuer's keys. Saving one the provider does not answer for is refused unless you say save anyway; a wrong one is undone with reset, and the break-glass door opens this console without any provider.",
+      effect: :immediate
     },
     %Setting{
       key: "client_id",
-      group: :deployment,
+      group: :sign_in,
       type: :string,
       app_key: [:oidc, :client_id],
-      editable: false,
       summary: "The application registration this plane signs people in as.",
       consequence:
-        "Deployment only. The provider will not issue tokens for a client it has no registration for.",
-      effect: :restart
+        "The provider will not issue tokens for a client it has no registration for, and a token for another registration is refused here on audience.",
+      effect: :immediate
     },
     %Setting{
       key: "client_secret",
-      group: :deployment,
+      group: :sign_in,
       type: :string,
       app_key: [:oidc, :client_secret],
-      editable: false,
       secret: true,
       summary: "The client secret used to redeem an authorization code for the console.",
       consequence:
-        "Deployment only, and never shown. Without it the console's own sign-in cannot complete, though the CLI's device flow still can.",
-      effect: :restart
+        "Never shown once saved. Without it the console's own sign-in cannot complete, though the CLI's device flow still can. Stored as it is — a secret the plane has to present cannot be hashed — so it is exactly as protected as the database.",
+      effect: :immediate
     },
+    %Setting{
+      key: "authorization_endpoint",
+      group: :sign_in,
+      type: :string,
+      app_key: [:oidc, :authorization_endpoint],
+      summary: "Where the console sends a browser to sign in.",
+      consequence: "Blank means <issuer>/authorize, which is right for most providers and wrong for Entra.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "device_authorization_endpoint",
+      group: :sign_in,
+      type: :string,
+      app_key: [:oidc, :device_authorization_endpoint],
+      summary: "Where the CLI starts the device grant. Published to every client at /.well-known/troupe.",
+      consequence:
+        "The check compares it with what the provider publishes: an Entra v2 issuer with a v1 endpoint fails every device login with a message about the audience.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "token_endpoint",
+      group: :sign_in,
+      type: :string,
+      app_key: [:oidc, :token_endpoint],
+      summary: "Where codes and device grants are exchanged for tokens. Published to every client.",
+      consequence: "Checked against the provider's discovery document before it is saved.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "scopes",
+      group: :sign_in,
+      type: :list,
+      app_key: [:oidc, :scopes],
+      fallback: ["openid", "profile", "email", "offline_access"],
+      summary: "What a client asks the provider for, separated by spaces or commas.",
+      consequence:
+        "Groups are not a scope — they are a claim the provider is configured to put in the token — and asking for one makes Entra refuse every sign-in before a password is typed. Leave the default unless the provider says otherwise.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "mcp_scope",
+      group: :sign_in,
+      type: :string,
+      app_key: [:oidc, :mcp_scope],
+      summary: "The scope an MCP client is told to ask for.",
+      consequence:
+        "Blank means <base_url>/mcp/admin, the resource's own name, which is the only name a client may send as RFC 8707's resource. Set it only where the registration exposes another.",
+      effect: :immediate
+    },
+    # -- read-only: what this plane was deployed with ---------------------------
     %Setting{
       key: "audience",
       group: :deployment,
@@ -310,8 +366,10 @@ defmodule Troupe.Plane.Settings do
      "Applied when a group is enabled as a team. Changing them leaves existing teams alone; each team's own values are on the Teams page."},
     {:sessions, "What a new session runs with",
      "Defaults for work started after the change. Running sessions keep what they were given."},
+    {:sign_in, "Where people sign in",
+     "The identity provider, on its own screen: saved behind a check against what the provider publishes, undone with reset, and never a lock-out because the break-glass door does not need a provider."},
     {:deployment, "What this plane was deployed with",
-     "Read-only here on purpose: these are the values that decide who may sign in, and a console that could change them is a console that could shut itself. Change them in the deployment and roll it."}
+     "Read-only here on purpose: the audience, the base URL and the deployment's own tokens. A console that could change them is a console that could shut itself. Change them in the deployment and roll it."}
   ]
 
   @doc """
@@ -556,6 +614,16 @@ defmodule Troupe.Plane.Settings do
     case Integer.parse(String.trim(value)) do
       {number, ""} -> {:ok, number}
       _other -> {:error, {:invalid, "must be a whole number"}}
+    end
+  end
+
+  # Words, however somebody separates them. Stored as typed and read as a list, so a
+  # form and a JSON-RPC caller both send a string and every reader gets the same shape
+  # the deployment's `TROUPE_OIDC_SCOPES` was parsed into.
+  defp parse(%Setting{type: :list}, value) do
+    case String.split(value, ~r/[,\s]+/, trim: true) do
+      [] -> {:error, {:invalid, "must name at least one"}}
+      words -> {:ok, words}
     end
   end
 

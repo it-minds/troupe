@@ -72,7 +72,7 @@ defmodule Troupe.Plane.SettingsTest do
 
   describe "what will not be changed from here" do
     test "a value the deployment owns is refused" do
-      assert {:error, :not_editable} = Settings.put("issuer", "https://evil.test", "root")
+      assert {:error, :not_editable} = Settings.put("audience", "somebody-else", "root")
     end
 
     test "a value that does not fit its type is refused" do

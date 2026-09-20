@@ -4,9 +4,19 @@ defmodule Troupe.Plane.Web.Live.Provider do
 
   Identity is about people — who administers, which groups have been seen, which
   credentials are not a person. This is about the connection those people arrive over,
-  in the shape every tool an operator has already configured this in uses: a connector
+  in the shape every tool an operator has already configured this in uses: a single
+  sign-on card with the provider's values and the URLs to register at it, and a connector
   card with the URL to paste into the provider, a token that is rotated and seen once,
   when it was rotated, when the provider last synced, and one switch.
+
+  ## The save is a check first
+
+  The sign-in form's *save* runs `admin.provider.check` against the values in the fields
+  and is refused when the provider does not stand behind them — discovery does not
+  answer, calls itself something else, publishes different endpoints. *Save anyway* is
+  a checkbox for the administrator who knows the provider is down. Either way a blank
+  field is a field nobody changed, which is what lets the secret be edited without
+  being retyped every time, and *back to the deployment* is the way everything is undone.
 
   ## What the card refuses to show
 
@@ -34,11 +44,78 @@ defmodule Troupe.Plane.Web.Live.Provider do
   def mount(_params, _session, socket) do
     {:ok,
      socket
-     |> assign(flash_message: nil, error: nil, deleting: false, scim: nil)
+     |> assign(
+       flash_message: nil,
+       error: nil,
+       deleting: false,
+       resetting: false,
+       scim: nil,
+       provider: nil,
+       drafts: %{},
+       check: nil
+     )
      |> load()}
   end
 
+  # -- single sign-on -------------------------------------------------------------
+
+  # The fields as typed, kept so a refused save does not empty the form.
   @impl Phoenix.LiveView
+  def handle_event("draft", params, socket), do: {:noreply, assign(socket, drafts: fields(params))}
+
+  # The button is not a submit, so it carries no fields of its own: the drafts the form
+  # has been sending on every change are what is checked, with anything the click brought.
+  def handle_event("check", params, socket) do
+    drafts = Map.merge(socket.assigns.drafts, fields(params))
+
+    case Admin.provider_check(socket.assigns.actor, drafts) do
+      {:ok, check} -> {:noreply, assign(socket, drafts: drafts, check: check, flash_message: nil)}
+      {:error, error} -> {:noreply, assign(socket, drafts: drafts, flash_message: describe(error))}
+    end
+  end
+
+  def handle_event("save", params, socket) do
+    drafts = fields(params)
+
+    case Admin.provider_put(socket.assigns.actor, drafts, params["force"] == "true") do
+      {:ok, %{changes: changes}} ->
+        message =
+          if map_size(changes) == 0,
+            do: "Nothing changed.",
+            else: "Saved: #{changes |> Map.keys() |> Enum.sort() |> Enum.join(", ")}. In force on the next sign-in."
+
+        {:noreply,
+         socket |> assign(flash_message: message, drafts: %{}, check: nil) |> load()}
+
+      {:error, %{data: %{checks: checks}} = error} ->
+        # The refusal carries the checks, so the page shows *why* rather than *no*.
+        check = %{checks: checks, ok: false, candidate: %{}}
+        {:noreply, assign(socket, drafts: drafts, check: check, flash_message: describe(error))}
+
+      {:error, error} ->
+        {:noreply, assign(socket, drafts: drafts, flash_message: describe(error))}
+    end
+  end
+
+  def handle_event("confirm-reset", _params, socket), do: {:noreply, assign(socket, resetting: true)}
+
+  def handle_event("reset", _params, socket) do
+    case Admin.provider_reset(socket.assigns.actor) do
+      {:ok, _provider} ->
+        message = "Every sign-in setting is back to what this plane was deployed with."
+
+        {:noreply,
+         socket
+         |> assign(flash_message: message, resetting: false, drafts: %{}, check: nil)
+         |> load()}
+
+      {:error, error} ->
+        {:noreply, assign(socket, flash_message: describe(error), resetting: false)}
+    end
+  end
+
+  # -- the SCIM connector ---------------------------------------------------------
+
   def handle_event("rotate-token", _params, socket) do
     case Admin.scim_rotate(socket.assigns.actor) do
       {:ok, %{token: token}} ->
@@ -55,7 +132,8 @@ defmodule Troupe.Plane.Web.Live.Provider do
   def handle_event("confirm-delete-token", _params, socket),
     do: {:noreply, assign(socket, deleting: true)}
 
-  def handle_event("cancel", _params, socket), do: {:noreply, assign(socket, deleting: false)}
+  def handle_event("cancel", _params, socket),
+    do: {:noreply, assign(socket, deleting: false, resetting: false)}
 
   def handle_event("delete-token", _params, socket) do
     case Admin.scim_delete(socket.assigns.actor, socket.assigns.scim.base_url) do
@@ -86,11 +164,41 @@ defmodule Troupe.Plane.Web.Live.Provider do
   end
 
   defp load(socket) do
-    case Admin.scim_get(socket.assigns.actor) do
-      {:ok, scim} -> assign(socket, scim: scim, error: nil)
-      {:error, error} -> assign(socket, scim: nil, error: describe(error))
+    with {:ok, provider} <- Admin.provider_get(socket.assigns.actor),
+         {:ok, scim} <- Admin.scim_get(socket.assigns.actor) do
+      assign(socket, provider: provider, scim: scim, error: nil)
+    else
+      {:error, error} -> assign(socket, provider: nil, scim: nil, error: describe(error))
     end
   end
+
+  @sign_in_fields ~w(issuer client_id client_secret authorization_endpoint device_authorization_endpoint token_endpoint scopes mcp_scope)
+
+  defp fields(params), do: Map.take(params, @sign_in_fields)
+
+  # What the field shows: the draft if there is one, the value otherwise, and for a secret
+  # nothing at all — the placeholder says whether one is set.
+  defp field_value(drafts, %{key: key} = setting) do
+    case Map.fetch(drafts, key) do
+      {:ok, typed} -> typed
+      :error -> shown_value(setting)
+    end
+  end
+
+  defp shown_value(%{secret: true}), do: ""
+  defp shown_value(%{value: nil}), do: ""
+  defp shown_value(%{value: list}) when is_list(list), do: Enum.join(list, " ")
+  defp shown_value(%{value: value}), do: to_string(value)
+
+  defp placeholder(%{secret: true, set: true}), do: "set — leave blank to keep it"
+  defp placeholder(%{secret: true}), do: "not set"
+  defp placeholder(_setting), do: "not set"
+
+  defp source_note(%{source: :stored}), do: "changed here"
+  defp source_note(%{source: :deployed}), do: "from the deployment"
+  defp source_note(%{source: :unset}), do: "not set"
+
+  defp any_stored?(provider), do: Enum.any?(provider.settings, &(&1.source == :stored))
 
   defp describe(%{message: message, data: %{reason: reason}}), do: "#{message}: #{reason}"
   defp describe(%{message: message}), do: message
@@ -139,6 +247,81 @@ defmodule Troupe.Plane.Web.Live.Provider do
 
       <p :if={@flash_message} class="banner" role="status">{@flash_message}</p>
       <p :if={@error} class="banner banner--breakglass" role="alert">{@error}</p>
+
+      <section :if={@provider} class="panel" id="sign-in">
+        <h2>Single sign-on</h2>
+        <p class="hint">
+          OpenID Connect: the authorization code flow for this console, the device grant for
+          the CLI, and the same provider for both. Not SAML — there is no ACS URL and no
+          metadata to upload; the three URLs below are what the provider's registration has
+          to know about this plane. {@provider.known_people} person/people have arrived
+          through it so far.
+        </p>
+
+        <.title_block>
+          <:field label="redirect URL">
+            <code>{@provider.urls.redirect || "unknown — base_url is not set"}</code>
+          </:field>
+          <:field label="client discovery"><code>{@provider.urls.discovery || "unknown"}</code></:field>
+          <:field label="signing keys"><code>{@provider.urls.jwks || "unknown"}</code></:field>
+          <:field label="MCP resource"><code>{@provider.urls.resource_metadata || "unknown"}</code></:field>
+        </.title_block>
+
+        <form
+          id="sign-in-form"
+          phx-change="draft"
+          phx-submit="save"
+          autocomplete="off"
+        >
+          <div :for={setting <- @provider.settings} class="setting">
+            <label for={"sign-in-#{setting.key}"} class="setting__label">
+              <code>{setting.key}</code>
+              <span class="setting__rung micro">{source_note(setting)}</span>
+            </label>
+            <input
+              id={"sign-in-#{setting.key}"}
+              name={setting.key}
+              type={if setting.secret, do: "password", else: "text"}
+              value={field_value(@drafts, setting)}
+              placeholder={placeholder(setting)}
+              disabled={@actor.role != :platform_admin}
+            />
+            <p class="field-help">{setting.summary} {setting.consequence}</p>
+          </div>
+
+          <div :if={@actor.role == :platform_admin} class="setting__actions">
+            <button type="button" phx-click="check">check</button>
+            <button type="submit">save</button>
+            <label class="toggle">
+              <input type="hidden" name="force" value="false" />
+              <input type="checkbox" name="force" value="true" /> save anyway, the provider is down
+            </label>
+          </div>
+        </form>
+
+        <ul :if={@check} class="checks" id="sign-in-checks">
+          <li :for={check <- @check.checks} class={if check.ok, do: "checks__ok", else: "checks__bad"}>
+            <span class="checks__name">{check.name}</span>
+            <span class="checks__detail">{check.detail}</span>
+            <span class="checks__took micro">{check.took_ms} ms</span>
+          </li>
+        </ul>
+
+        <p class="field-help">
+          A blank field is a field nobody changed. Saving runs the check first and is refused
+          when the provider does not stand behind the values; a wrong save is undone below,
+          and the break-glass door opens this console without any provider at all.
+        </p>
+
+        <div :if={@actor.role == :platform_admin and any_stored?(@provider)} class="setting__actions">
+          <button :if={not @resetting} phx-click="confirm-reset">back to the deployment</button>
+          <span :if={@resetting} class="confirm">
+            Every sign-in value changed here goes, and the deployment's are read again.
+            <button phx-click="reset">put them back</button>
+            <button phx-click="cancel">no</button>
+          </span>
+        </div>
+      </section>
 
       <section :if={@scim} class="panel" id="scim-connector">
         <h2>SCIM connector</h2>

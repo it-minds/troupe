@@ -1247,6 +1247,205 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  # -- the identity provider --------------------------------------------------
+
+  @sign_in_keys ~w(issuer client_id client_secret authorization_endpoint device_authorization_endpoint token_endpoint scopes mcp_scope)
+
+  @doc """
+  The identity provider as the card shows it: every sign-in setting with its value and
+  where it came from (a secret as set or not), the URLs this plane needs registered at the
+  provider, and how many people have arrived through it.
+
+  Readable by a team admin — "is sign-in pointed at the right tenant" is a question they
+  ask when somebody cannot get in — and changed only by a platform admin.
+  """
+  @spec provider_get(actor()) :: result()
+  def provider_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, provider_state()}
+  end
+
+  @doc """
+  Test a candidate provider before saving it.
+
+  The candidate is the current configuration with the given fields laid over it, so a
+  form can ask "what if I saved this" with exactly the values in its fields. Three checks
+  from `OIDC.check/1`: discovery answers and calls itself the same thing, it names keys
+  that can be read, and the endpoints in the candidate agree with the ones it publishes.
+  Nothing is written.
+  """
+  @spec provider_check(actor(), map()) :: result()
+  def provider_check(actor, attrs \\ %{}) do
+    with :ok <- require_admin(actor) do
+      candidate = candidate_provider(attrs)
+      checks = OIDC.check(candidate)
+
+      {:ok,
+       %{
+         checks: checks,
+         ok: Enum.all?(checks, & &1.ok),
+         candidate: Map.take(candidate, [:issuer, :token_endpoint, :device_authorization_endpoint])
+       }}
+    end
+  end
+
+  @doc """
+  Save the identity provider, behind the check.
+
+  Refused when the candidate fails `provider_check/2` — a provider that does not answer,
+  calls itself something else, or publishes different endpoints — unless `force` is set,
+  which is for the provider that is down right now and the administrator who knows it.
+  A blank field is a field nobody changed, so the secret is not cleared by a form that
+  did not retype it; `provider_reset/1` is how everything goes back to the deployment.
+
+  The audit entry carries the diff with the secret as *set* or not, never its value.
+  """
+  @spec provider_put(actor(), map(), boolean() | String.t() | nil) :: result()
+  def provider_put(actor, attrs, force \\ false) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, attrs} <- sign_in_attrs(attrs),
+         :ok <- provider_gate(attrs, force in [true, "true"]) do
+      before = comparable_sign_in()
+
+      case Enum.find_value(attrs, &refused_setting(&1, actor)) do
+        nil ->
+          changes = Audit.diff(before, comparable_sign_in())
+          detail = with_rotated(changes, attrs)
+          {:ok, _} = Audit.record(actor.subject, "provider.put", "sign-in", detail)
+          {:ok, Map.put(provider_state(), :changes, detail)}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  @doc """
+  Put every sign-in setting back to whatever this plane was deployed with.
+
+  The way back from a provider saved in error: the rows go, the deployment's values are
+  read again, and a plane deployed with none has the break-glass door and nothing else,
+  which the answer says.
+  """
+  @spec provider_reset(actor()) :: result()
+  def provider_reset(actor) do
+    with :ok <- require_platform_admin(actor) do
+      before = comparable_sign_in()
+      Enum.each(@sign_in_keys, &Settings.reset(&1, actor.subject))
+      changes = Audit.diff(before, comparable_sign_in())
+      {:ok, _} = Audit.record(actor.subject, "provider.reset", "sign-in", changes)
+      {:ok, Map.put(provider_state(), :changes, changes)}
+    end
+  end
+
+  defp provider_state do
+    base = Settings.get("base_url")
+
+    %{
+      settings: Enum.filter(Settings.all(), &(&1.group == :sign_in)),
+      # What the provider's registration has to know about this plane. Reported rather
+      # than checked, because the provider is the only thing that knows what is registered.
+      urls: %{
+        redirect: at(base, "/admin/callback"),
+        discovery: at(base, "/.well-known/troupe"),
+        jwks: at(base, "/.well-known/jwks.json"),
+        resource_metadata: at(base, "/.well-known/oauth-protected-resource")
+      },
+      # OpenID Connect, and not SAML: said in the answer so a card can say it where a
+      # SAML tool would have an ACS URL and a metadata upload.
+      protocol: "oidc",
+      known_people: length(Identity.list_users())
+    }
+  end
+
+  defp at(nil, _path), do: nil
+  defp at(base, path), do: String.trim_trailing(base, "/") <> path
+
+  # The current configuration with the candidate laid over it, blank fields ignored.
+  defp candidate_provider(attrs) do
+    attrs
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> Map.take(@sign_in_keys -- ["client_secret", "scopes", "mcp_scope"])
+    |> Enum.reduce(OIDC.configured(), fn {key, value}, config ->
+      case presence(value) do
+        nil -> config
+        value -> Map.put(config, String.to_existing_atom(key), value)
+      end
+    end)
+  end
+
+  # Blank fields and fields that still say what the plane already reads are not changes:
+  # a form submits every field it has, and a row stored for a value equal to the
+  # deployment's would show as "changed here" for nothing.
+  defp sign_in_attrs(attrs) when is_map(attrs) do
+    attrs =
+      attrs
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      |> Map.take(@sign_in_keys)
+      |> Enum.reject(fn {key, value} -> is_nil(presence(value)) or unchanged?(key, value) end)
+      |> Map.new()
+
+    if map_size(attrs) == 0,
+      do: {:error, Error.new(:invalid_params, %{missing: "attrs", reason: "nothing to save"})},
+      else: {:ok, attrs}
+  end
+
+  defp sign_in_attrs(_attrs), do: {:error, Error.new(:invalid_params, %{missing: "attrs"})}
+
+  # A secret replaced by another is "set" before and after, which a diff drops, so the
+  # entry names which secrets were given — that they changed, never to what.
+  defp with_rotated(changes, attrs) do
+    case Map.keys(attrs) |> Enum.filter(&(&1 == "client_secret")) do
+      [] -> changes
+      rotated -> Map.put(changes, "rotated", rotated)
+    end
+  end
+
+  # A secret cannot be compared, so a typed one is always a change.
+  defp unchanged?("client_secret", _value), do: false
+
+  defp unchanged?(key, value) do
+    case Settings.get(key) do
+      nil -> false
+      list when is_list(list) -> String.split(to_string(value), ~r/[,\s]+/, trim: true) == list
+      current -> to_string(value) == to_string(current)
+    end
+  end
+
+  defp provider_gate(_attrs, true), do: :ok
+
+  defp provider_gate(attrs, false) do
+    checks = OIDC.check(candidate_provider(attrs))
+
+    if Enum.all?(checks, & &1.ok) do
+      :ok
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         reason:
+           "the provider did not stand behind these values; fix them, or save anyway with force if you know the provider is down",
+         checks: checks
+       })}
+    end
+  end
+
+  defp refused_setting({key, value}, actor) do
+    case Settings.put(key, value, actor.subject) do
+      {:ok, _applied} -> nil
+      {:error, reason} -> {:error, setting_error(key, reason)}
+    end
+  end
+
+  # The sign-in settings as a diff can hold them: a secret is `"set"` or `nil`, never its
+  # value, so an audit entry about the provider is never an audit entry with a credential.
+  defp comparable_sign_in do
+    Settings.all()
+    |> Enum.filter(&(&1.group == :sign_in))
+    |> Map.new(fn
+      %{secret: true, key: key, set: set?} -> {key, if(set?, do: "set", else: nil)}
+      %{key: key, value: value} -> {key, value}
+    end)
+  end
+
   # -- the SCIM connector -----------------------------------------------------
 
   @doc """

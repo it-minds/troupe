@@ -14,7 +14,7 @@ defmodule Troupe.Plane.OIDC do
   well-known JWKS endpoint works.
   """
 
-  alias Troupe.Plane.{Identity, Login, Tokens}
+  alias Troupe.Plane.{Identity, Login, Settings, Tokens}
   alias Troupe.Protocol.Token
 
   require Logger
@@ -148,7 +148,7 @@ defmodule Troupe.Plane.OIDC do
   # than @refetch_floor_ms, which is what stops the retry becoming the load generator the
   # cache exists to prevent.
   defp default_verifier(opts) do
-    case Application.get_env(:troupe_plane, :oidc, [])[:issuer] do
+    case Settings.get("issuer") do
       nil -> nil
       issuer -> &verify_against_provider(&1, issuer, opts)
     end
@@ -234,12 +234,38 @@ defmodule Troupe.Plane.OIDC do
   they cannot catch is a redirect URI the registration does not have, which is why the
   console prints the URI it would send rather than claiming it is registered.
   """
-  @spec check() :: [map()]
-  def check do
-    issuer = Application.get_env(:troupe_plane, :oidc, [])[:issuer]
+  @spec check(map()) :: [map()]
+  def check(config \\ configured()) do
+    issuer = config[:issuer]
     document = timed(fn -> discovery(issuer) end)
 
-    [discovery_check(issuer, document), keys_check(document), endpoints_check(document)]
+    [
+      discovery_check(issuer, document),
+      keys_check(document),
+      endpoints_check(document, config)
+    ]
+  end
+
+  @doc """
+  The provider as this plane currently sees it: the stored value where there is one, the
+  deployment's otherwise.
+
+  One map rather than eight `Settings.get/1` calls at eight sites, so the console's
+  authorize request, the code redemption, the discovery document at `/.well-known/troupe`
+  and the check are reading one description of the provider. `check/1` takes a candidate
+  of the same shape, which is how a value is tested before it is saved.
+  """
+  @spec configured() :: map()
+  def configured do
+    %{
+      issuer: Settings.get("issuer"),
+      client_id: Settings.get("client_id"),
+      authorization_endpoint: Settings.get("authorization_endpoint"),
+      device_authorization_endpoint: Settings.get("device_authorization_endpoint"),
+      token_endpoint: Settings.get("token_endpoint"),
+      scopes: Settings.get("scopes"),
+      mcp_scope: Settings.get("mcp_scope")
+    }
   end
 
   defp discovery(nil), do: {:error, :no_issuer}
@@ -303,9 +329,7 @@ defmodule Troupe.Plane.OIDC do
   # The mistake this one exists for: an Entra tenant configured with a v2 issuer and a v1
   # token endpoint. Everything looks right, discovery answers, and every device login fails
   # with a message about the audience.
-  defp endpoints_check({{:ok, document}, _took}) do
-    config = Application.get_env(:troupe_plane, :oidc, [])
-
+  defp endpoints_check({{:ok, document}, _took}, config) do
     mismatched =
       for {name, key, published} <- [
             {"token endpoint", :token_endpoint, "token_endpoint"},
@@ -328,7 +352,7 @@ defmodule Troupe.Plane.OIDC do
     end
   end
 
-  defp endpoints_check({{:error, _reason}, _took}) do
+  defp endpoints_check({{:error, _reason}, _took}, _config) do
     check_result("Endpoints", false, "Not attempted: discovery did not answer.", 0)
   end
 
@@ -344,7 +368,7 @@ defmodule Troupe.Plane.OIDC do
     {result, System.monotonic_time(:millisecond) - started}
   end
 
-  defp client_id, do: Application.get_env(:troupe_plane, :oidc, [])[:client_id]
+  defp client_id, do: Settings.get("client_id")
 
   @doc "The audience a plane token carries, as opposed to a pod's worker id."
   @spec audience() :: String.t()

@@ -26,7 +26,19 @@ defmodule Troupe.Plane.Web.Router do
 
   use Plug.Router
 
-  alias Troupe.Plane.{Admin, Build, Harness, Identity, OIDC, Principals, SCIM, Tokens, Triggers}
+  alias Troupe.Plane.{
+    Admin,
+    Build,
+    Harness,
+    Identity,
+    OIDC,
+    Principals,
+    SCIM,
+    Settings,
+    Tokens,
+    Triggers
+  }
+
   alias Troupe.Plane.Admin.API, as: AdminAPI
   alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Web.{Docs, Index}
@@ -567,9 +579,18 @@ defmodule Troupe.Plane.Web.Router do
   @spec plane_audience() :: String.t()
   def plane_audience, do: OIDC.audience()
 
-  defp config(key, default \\ nil) do
-    Application.get_env(:troupe_plane, :oidc, [])[key] || default
-  end
+  # The provider's values are settings now — stored override, deployment as the floor —
+  # so what this document publishes is what the console shows and what the check tested.
+  # `:plane_name` is the one key here that was never about the provider and stays where
+  # the deployment put it.
+  @provider_settings ~w(issuer client_id authorization_endpoint device_authorization_endpoint token_endpoint scopes mcp_scope)a
+
+  defp config(key, default \\ nil)
+
+  defp config(key, default) when key in @provider_settings,
+    do: Settings.get(Atom.to_string(key)) || default
+
+  defp config(key, default), do: Application.get_env(:troupe_plane, :oidc, [])[key] || default
 
   # -- the trigger ingress ----------------------------------------------------
 

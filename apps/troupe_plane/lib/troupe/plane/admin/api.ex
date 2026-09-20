@@ -656,6 +656,58 @@ defmodule Troupe.Plane.Admin.API do
       ]
     },
     %Method{
+      name: "admin.provider.get",
+      function: :provider_get,
+      summary:
+        "The identity provider: every sign-in setting with its value and where it came from (a secret as set or not), the URLs to register at the provider, and how many people have arrived through it.",
+      risk: :read,
+      arguments: []
+    },
+    %Method{
+      name: "admin.provider.check",
+      function: :provider_check,
+      summary:
+        "Test a candidate provider without saving it: discovery answers and names itself the same, its keys can be read, and the endpoints given agree with the ones it publishes. Fields left out are today's values.",
+      risk: :read,
+      arguments: [
+        %Argument{
+          name: "attrs",
+          type: :object,
+          description:
+            "Any of issuer, client_id, authorization_endpoint, device_authorization_endpoint, token_endpoint, laid over the current configuration."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.provider.put",
+      function: :provider_put,
+      summary:
+        "Save the identity provider. Refused unless admin.provider.check passes for these values, or force is true. A blank field is left as it was; the secret is never returned or written to the audit trail.",
+      risk: :write,
+      arguments: [
+        %Argument{
+          name: "attrs",
+          type: :object,
+          required: true,
+          description:
+            "Any of issuer, client_id, client_secret, authorization_endpoint, device_authorization_endpoint, token_endpoint, scopes (space- or comma-separated), mcp_scope."
+        },
+        %Argument{
+          name: "force",
+          type: :boolean,
+          description: "Save although the check failed. For a provider that is down right now."
+        }
+      ]
+    },
+    %Method{
+      name: "admin.provider.reset",
+      function: :provider_reset,
+      summary:
+        "Put every sign-in setting back to what this plane was deployed with. The way back from a provider saved in error.",
+      risk: :write,
+      arguments: []
+    },
+    %Method{
       name: "admin.scim.get",
       function: :scim_get,
       summary:
