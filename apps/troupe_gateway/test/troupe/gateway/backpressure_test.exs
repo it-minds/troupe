@@ -85,14 +85,15 @@ defmodule Troupe.Gateway.BackpressureTest do
     assert memory < 16 * 1024 * 1024, "the connection grew to #{memory} bytes"
     assert queued < 5_000, "the connection's mailbox grew to #{queued}"
 
-    # Latency: within 10% of baseline. The agent never waits on a subscriber, so the
-    # only thing that could couple them is a mistake in the delivery path — and a
-    # mistake like that costs a turn the whole time a stalled socket takes, which is
-    # unbounded, not tens of milliseconds. The absolute floor is what a turn of a few
-    # milliseconds needs to survive a runner that is also running a flood process on a
-    # core it does not have; 25ms of it was not enough, and the failure it produced was
-    # 34ms against 7ms.
-    allowed = max(baseline * 1.10, baseline + 50)
+    # Latency: the agent never waits on a subscriber, so the only thing that could
+    # couple them is a mistake in the delivery path — and a mistake like that costs a
+    # turn the whole time a stalled socket takes, which is unbounded, not tens of
+    # milliseconds. So the bound is generous on purpose: a turn of ten milliseconds on
+    # a shared runner that is also running a flood process on a core it does not have
+    # has come in at 34, 62, 69 and 72ms, none of them coupling and all of them failures
+    # against a 50ms floor. A quarter of a second is still three orders of magnitude
+    # under what a stalled socket would cost.
+    allowed = max(baseline * 2, baseline + 250)
 
     assert stalled <= allowed,
            "a turn took #{stalled}ms with a stalled subscriber against #{baseline}ms idle"

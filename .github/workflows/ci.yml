@@ -7,17 +7,19 @@
 # its own configured registry.
 name: ci
 
+# A push to a branch runs nothing: the pull request for that branch runs the gate, and
+# running it twice for every push measured the same thing twice. `main` and release tags
+# run on push, because those runs publish images and soak the suite.
 on:
   push:
-    branches: ["**"]
+    branches: [main]
     tags: ["v*"]
   pull_request:
 
-# A branch under active work can have three full pipelines in flight at once, each of
-# them ten suite runs and four image builds, all measuring the same thing and only the
-# last of them answering a question anyone still has. Superseded runs on a branch are
-# cancelled; `main` and release tags are not, because their runs publish images somebody
-# may already be waiting on.
+# A pull request under active work can have several pipelines in flight at once, all
+# measuring the same thing and only the last of them answering a question anyone still
+# has. Superseded runs are cancelled; `main` and release tags are not, because their runs
+# publish images somebody may already be waiting on.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
@@ -105,10 +107,16 @@ jobs:
       - name: Migrate the plane's test database
         run: MIX_ENV=test mix ecto.create --quiet && MIX_ENV=test mix ecto.migrate --quiet
 
-      # Ten runs, because the suite is concurrent and a race that shows up one time
-      # in five is a bug this project cares about.
-      - name: Test (10 consecutive runs)
-        run: for i in $(seq 10); do mix test || exit 1; done
+      - name: Test
+        run: mix test
+
+      # Nine more on `main` and release tags, because the suite is concurrent and a race
+      # that shows up one time in five is a bug this project cares about. A pull request
+      # gets one run: the soak is what `main` owes the people downstream of it, not what
+      # every push owes a reviewer twenty-five minutes later.
+      - name: Test (nine more runs, for the race that shows one time in five)
+        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
+        run: for i in $(seq 9); do mix test || exit 1; done
 
   chart:
     name: helm lint, render, kubeconform
