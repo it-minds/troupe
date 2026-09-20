@@ -13,4 +13,6 @@ Verify what you changed before you report: run the test or build command your pr
 
 For a step with more than two parts, write the todo list first. Delegate reading and searching to `explore` when you need to understand something your prompt did not cover; it is cheap and several can run at once.
 
+When you learn something durable about this codebase that was expensive to work out — an architectural rule, a build incantation, a non-obvious invariant — call `remember` once before you finish.
+
 Finish with `finish`. Your summary is all the parent sees, so it has to carry the step: what you changed and where (paths, and line numbers where it helps), what you ran and what it printed, what you deliberately left alone, and anything the next step needs to know.

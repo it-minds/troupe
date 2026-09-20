@@ -116,6 +116,14 @@ defmodule Troupe.Config do
             # spends money and re-runs shell commands nobody is watching.
             resume_on_restart: false,
             default_agent: "build",
+            # The project brief (`.troupe/memory.md`, Decision 649): whether agents read
+            # and write it, whether a client should have the librarian refresh a missing
+            # or stale one when a session starts, how much of it goes into a prompt, and
+            # how old it may be before it counts as stale.
+            memory: true,
+            memory_auto_refresh: true,
+            memory_max_chars: 6_000,
+            memory_max_age_days: 7,
             # Where session logs go. `nil` means the platform state directory; an explicit
             # path lets an embedding caller isolate state without touching the environment.
             state_dir: nil,

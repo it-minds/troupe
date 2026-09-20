@@ -382,6 +382,8 @@ defmodule Troupe.Protocol.Schema do
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
+      "memory.get" => %{"workspace" => required(:string)},
+      "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
       "worktree.list" => %{"workspace" => optional(:string)},
       "worktree.remove" => %{
         "command_id" => required(:string),

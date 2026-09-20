@@ -57,6 +57,7 @@ defmodule Troupe.Gateway.Dispatch do
     "workspace.recent" => :observe,
     "agents.list" => :observe,
     "workflows.list" => :observe,
+    "memory.get" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
     "input.send" => :control,
@@ -81,6 +82,8 @@ defmodule Troupe.Gateway.Dispatch do
     # throws work away — so they take the scope everything else that does takes.
     "worktree.merge" => :admin,
     "worktree.discard" => :admin,
+    # Deleting what every agent on the repository starts from.
+    "memory.forget" => :admin,
     "watch.set" => :admin,
     # Saying who this machine's user is changes the name on every subsequent event, so
     # it takes the scope that everything else which changes the daemon takes. Reading it
@@ -246,6 +249,32 @@ defmodule Troupe.Gateway.Dispatch do
   # The agents a session in this workspace could run: the built-ins, the machine's
   # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
   # resolve them, so a picker offers exactly what a `profile` may name.
+  # The project brief, as a client shows it: status, where it is, when it was built and
+  # what it covers, and the text itself for a client that renders it.
+  defp handle("memory.get", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      workspace = Path.expand(workspace)
+      config = Troupe.Config.load(workspace)
+      brief = Troupe.Session.Memory.brief(workspace)
+
+      {:ok,
+       %{
+         "status" => workspace |> Troupe.Session.Memory.status(config) |> to_string(),
+         "path" => Troupe.Session.Memory.path(workspace),
+         "built_at" => brief && brief.built_at && DateTime.to_iso8601(brief.built_at),
+         "sections" => if(brief, do: Troupe.Memory.titles(brief), else: []),
+         "text" => brief && Troupe.Memory.render(brief)
+       }}
+    end
+  end
+
+  defp handle("memory.forget", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      :ok = workspace |> Path.expand() |> Troupe.Session.Memory.forget()
+      {:ok, %{"forgotten" => true}}
+    end
+  end
+
   defp handle("workflows.list", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       {:ok, %{"workflows" => workspace |> Path.expand() |> Workflow.available()}}

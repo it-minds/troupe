@@ -446,6 +446,19 @@ subagent that owns it: `explore` reads, `implementer` changes, `reviewer` verifi
 `workflows.list {workspace}` names the workflows a workspace has. Run one in a worktree
 of its own (`worktree: "always"`), and merge or discard it afterwards.
 
+**Project brief.** `.troupe/memory.md` in the repository's main checkout is what
+earlier agents learned: `## Overview`, `## Layout`, `## Commands`, `## Conventions`, and
+`## Notes` (dated one-liners). Every agent's system prompt opens with it, after the
+profile's own words. Agents write it with the `remember` tool — `section: "note"`
+appends a line, the other sections are rewritten whole — and the `librarian` agent
+(primary, cheap model, read-only plus `remember`) surveys a repository once and writes
+the four curated sections. `memory.get {workspace}` reports `status` (`absent`, `stale`,
+`fresh`, `disabled`), the path, when it was built, its section titles and its text;
+`memory.forget` deletes it. Config: `memory: false` turns it off, `memory_max_chars`
+(6000) caps the prompt block, `memory_max_age_days` (7) is when it counts as stale,
+`memory_auto_refresh` (true) asks a client to start the librarian on a missing or stale
+brief. Hand edits survive: unknown headings and text before the first heading round-trip.
+
 **Branches.** A client may create a session as a branch of another: `session.create`
 with `parent` (the first session's id). The daemon records the link, lists it
 (`session.list` with `filter.parent`), and gives the parent's agent a `read_branch`

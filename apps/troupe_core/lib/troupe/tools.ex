@@ -30,7 +30,9 @@ defmodule Troupe.Tools do
     Troupe.Tools.Delegate,
     Troupe.Tools.Finish,
     # What a branch of this session (Decision 646) said when it finished.
-    Troupe.Tools.ReadBranch
+    Troupe.Tools.ReadBranch,
+    # The project brief (Decision 649): the one file a tool may write unasked.
+    Troupe.Tools.Remember
   ]
 
   @doc """

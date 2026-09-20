@@ -604,6 +604,24 @@ machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `g
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
 `profile` may name wherever the session will run.
 
+#### `memory.get`
+```json
+{"workspace": "/home/me/project"}
+```
+→ `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
+"built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
+"Conventions", "Notes"], "text": "..."}`
+
+The **project brief**: what earlier agents learned about the repository, read into
+every agent's system prompt and written by the `remember` tool and the `librarian`
+agent. `status` is `absent`, `stale` (older than `memory_max_age_days`, or the tracked
+file count drifted), `fresh` or `disabled` (`memory: false` in the workspace config).
+One brief per repository: a worktree's is the main checkout's. A client that finds it
+`absent` or `stale` may start a `librarian` session on the workspace, which is what
+`memory_auto_refresh` asks of it.
+
+#### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
+
 #### `workflows.list`
 ```json
 {"workspace": "/home/me/project"}
@@ -725,9 +743,9 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `watch.set`, `identity.link`, `identity.unlink` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

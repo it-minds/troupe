@@ -120,6 +120,8 @@ Every top-level feature and every user-reachable route, and where it is document
 | `workspace.recent`, `workspace.search` | observe | **not covered** (used by no shipped client; see PROTOCOL.md §6) |
 | `worktree.list` | observe | features.md § Worktrees |
 | `workflows.list` | observe | features.md § Workflows |
+| `memory.get` | observe | features.md § Project brief |
+| `memory.forget` | admin | features.md § Project brief |
 | `presence.set` | observe | features.md § Presence |
 | `input.send`, `turn.cancel`, `profile.switch` | control | features.md § Sessions, § Plan and build |
 | `approval.respond` | control | features.md § Approvals |

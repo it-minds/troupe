@@ -80,7 +80,8 @@ defmodule Troupe.Workflow do
         "document",
         "implementer",
         "Update the documentation the change affects: the README, the docs the project " <>
-          "keeps, the comments that now say something false."
+          "keeps, the comments that now say something false. Record anything non-obvious " <>
+          "and durable with `remember`."
       ),
       step(
         "verify",

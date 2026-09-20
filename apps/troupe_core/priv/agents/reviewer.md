@@ -8,6 +8,7 @@ tools:
   - grep
   - shell
   - delegate
+  - remember
   - finish
 permissions:
   write_file: deny

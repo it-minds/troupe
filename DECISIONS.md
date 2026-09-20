@@ -4414,3 +4414,27 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      or `worktree.discard`. The default steps no longer mention `remember`: the project
      brief is a later row of the plan, and a plan should not name a tool the agent has
      not got.
+
+649. **The project brief is a file the daemon reads into every prompt, and `remember` is
+     the one tool that writes unasked.** The TUI's harness kept `.troupe/memory.md` — a
+     YAML-fronted markdown brief with `Overview`, `Layout`, `Commands`, `Conventions` and
+     dated `Notes` — behind a per-session GenServer, prepended it to every system prompt,
+     had a `remember` tool append to it and a `librarian` profile write it, and refreshed
+     it when a session started on a stale one. All of that moves here with two changes of
+     shape. There is no process: the brief is a file, a daemon has many sessions on one
+     repository, and a function over a path serialised by a VM-wide transaction on that
+     path (`:global.trans`) is what both want — re-read before merging, replaced by
+     rename, so two agents in one daemon cannot lose each other's note and a hand edit
+     between two calls survives. And the path is the repository's *main checkout*, found
+     through `git rev-parse --git-common-dir`: a branch in a worktree writes the same
+     brief as the session it branched from, and its note does not vanish with the
+     worktree. `remember` stays `:auto` although it writes, for the reason it always did:
+     the only file it can reach is the brief, the model cannot name a path, and a brief
+     nobody approves is a brief nobody writes. The brief is read at every prompt, not once
+     at start, so a note made in a session reaches the next agent to start in it. What a
+     client shows and does about it is on the wire: `memory.get` (status, path, built
+     time, section titles, text) and `memory.forget`; the auto-refresh is the client's
+     because starting a session is — `memory_auto_refresh` is the config key that asks
+     for it, and the client starts a `librarian` session when the brief is `absent` or
+     `stale`. Flat config keys, like every other setting: `memory`, `memory_auto_refresh`,
+     `memory_max_chars`, `memory_max_age_days`.

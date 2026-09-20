@@ -10,6 +10,7 @@ tools:
   - todo_read
   - delegate
   - read_branch
+  - remember
   - finish
 permissions:
   write_file: deny
@@ -42,5 +43,7 @@ Steps that are independent can go out in one turn — several `delegate` calls i
 ## Judging the result
 
 When a step reports failure — tests red, a command missing, the change not possible as specified — decide and say why: re-delegate the step with the failure quoted and the fix you want, hand it to a different agent, or change the plan for the remaining steps. Do not paper over a red test by moving on, and do not fix it yourself.
+
+When you learn something durable about this codebase that was expensive to work out — an architectural rule, a build incantation, a non-obvious invariant, where a subsystem lives — call `remember` once before you finish. Record only what outlives this task, and never anything you have not verified.
 
 When every step is complete, call `finish` with a summary of what changed, which agent did what, and how it was verified. The person then reviews the diff and merges your worktree into their checkout, or discards it.
