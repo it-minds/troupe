@@ -20,18 +20,86 @@ defmodule Troupe.LLM.ToolResult do
 end
 
 defmodule Troupe.LLM.Usage do
-  @moduledoc "Token counts reported by a provider, or summed from a subagent."
-  defstruct input_tokens: 0, output_tokens: 0
-  @type t :: %__MODULE__{input_tokens: non_neg_integer(), output_tokens: non_neg_integer()}
+  @moduledoc """
+  Token counts reported by a provider, or summed from a subagent, in one shape
+  (Decision 657).
+
+  Four disjoint figures. `input_tokens` is input the provider charged in full;
+  `cache_read` is input it served from its prompt cache at a fraction of the price and
+  `cache_write` input it charged a premium to cache; `output_tokens` is what it
+  generated, reasoning included where the model reasons. The prompt was
+  `input_tokens + cache_read + cache_write` tokens long — `total_input/1` — and what it
+  cost at close to full price is `billed_input/1`.
+
+  The providers disagree about the shape, which is the bug this module keeps out of the
+  agent: Anthropic's `input_tokens` already excludes both cache figures, OpenAI's
+  `prompt_tokens` includes the cached ones. Each adapter converts at the boundary, so
+  the budget, the compaction threshold and a client's gauge read the same numbers
+  whoever answered.
+  """
+
+  defstruct input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0
+
+  @type t :: %__MODULE__{
+          input_tokens: non_neg_integer(),
+          output_tokens: non_neg_integer(),
+          cache_read: non_neg_integer(),
+          cache_write: non_neg_integer()
+        }
 
   @doc "Sum two usage records."
   @spec add(t(), t()) :: t()
   def add(%__MODULE__{} = a, %__MODULE__{} = b) do
     %__MODULE__{
       input_tokens: a.input_tokens + b.input_tokens,
-      output_tokens: a.output_tokens + b.output_tokens
+      output_tokens: a.output_tokens + b.output_tokens,
+      cache_read: a.cache_read + b.cache_read,
+      cache_write: a.cache_write + b.cache_write
     }
   end
+
+  @doc """
+  What the prompt cost at close to full price: fresh input plus what the provider
+  charged a premium to cache. Cache reads are deliberately not in it — a long
+  conversation re-reads its whole prompt every turn, and a budget that counted those
+  would exhaust on work the user is barely paying for.
+  """
+  @spec billed_input(t()) :: non_neg_integer()
+  def billed_input(%__MODULE__{} = u), do: u.input_tokens + u.cache_write
+
+  @doc "Every input token the prompt contained, cached or not: its length."
+  @spec total_input(t()) :: non_neg_integer()
+  def total_input(%__MODULE__{} = u), do: u.input_tokens + u.cache_read + u.cache_write
+
+  @doc "The four figures as an `llm_response` carries them."
+  @spec to_json(t()) :: map()
+  def to_json(%__MODULE__{} = u) do
+    %{
+      "input_tokens" => u.input_tokens,
+      "output_tokens" => u.output_tokens,
+      "cache_read" => u.cache_read,
+      "cache_write" => u.cache_write
+    }
+  end
+
+  @doc """
+  Back from the log. An event written before there were cache figures has two keys,
+  and folds as a prompt nothing was cached of, which is what it was.
+  """
+  @spec from_json(map() | nil) :: t()
+  def from_json(nil), do: %__MODULE__{}
+
+  def from_json(map) when is_map(map) do
+    %__MODULE__{
+      input_tokens: count(map["input_tokens"]),
+      output_tokens: count(map["output_tokens"]),
+      cache_read: count(map["cache_read"]),
+      cache_write: count(map["cache_write"])
+    }
+  end
+
+  defp count(n) when is_integer(n) and n >= 0, do: n
+  defp count(_other), do: 0
 end
 
 defmodule Troupe.LLM.Gateway do

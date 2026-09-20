@@ -54,7 +54,8 @@ defmodule Troupe.SessionCase do
          steps: Keyword.get(opts, :steps, []),
          routes: Keyword.get(opts, :routes, %{}),
          default: Keyword.get(opts, :default, {:text, "done"}),
-         delay_ms: Keyword.get(opts, :delay_ms, 0)},
+         delay_ms: Keyword.get(opts, :delay_ms, 0),
+         cache_read: Keyword.get(opts, :cache_read, 0)},
         id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
       )
 

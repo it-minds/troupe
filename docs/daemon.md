@@ -162,3 +162,14 @@ worker may not have it, and the TUI takes it up through the protocol in a PR of 
 | watch markers | already here (`Troupe.Watch.Marker`, the watcher, `watch.set`, `fs_changed`); the watcher drives the root agent rather than a cheap branch, and `quick` / `answer` exist for a client that wants one (Decision 656) | `watch_session_test.exs`, `watcher_test.exs` |
 | the twelve agent definitions | eleven built in: `build`, `plan`, `workflow`, `librarian`, `answer`, `ask`, `quick` (primaries), `explore`, `general`, `implementer`, `reviewer` (subagents); `code` is `build`, `worktree` is a session option (Decision 656) | `definition_test.exs` "primaries and subagents are partitioned" |
 | workflows | `Troupe.Workflow` (steps from `.troupe/workflows/<name>.json` or the default pipeline, rendered into the orchestrator's plan); the `workflow`, `implementer` and `reviewer` definitions; `session.create` with `workflow`, `workflows.list` (Decision 648) | `workflow_test.exs`, `workflows_test.exs` |
+
+## Phase 3b — the provider layer the TUI had and the core lacked
+
+The phase 3 table's "catalog, usage, headroom" row undersold what phase 2 deleted with the
+TUI's harness: its provider layer had learned things about limits, budgets and reasoning
+models that the core's never had to. Each comes over as its own change, in the order the
+damage runs.
+
+| what | here | proof |
+|---|---|---|
+| the usage shape | `Troupe.LLM.Usage` is four disjoint figures and the adapters convert at the boundary; the budget charges `billed_input/1`, compaction and the context gauge read `total_input/1`; `llm_response.usage` carries all four (Decision 657) | `usage_test.exs`, `usage_shape_test.exs`, `providers_test.exs` "cache reads and writes are reported beside the billed input", "cached prompt tokens come out of the billed input" |

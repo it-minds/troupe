@@ -8,6 +8,8 @@ defmodule Troupe.Budget do
   keeps it correct when a subagent subtree dies.
   """
 
+  alias Troupe.LLM.Usage
+
   defstruct max_turns: 40,
             max_input_tokens: 2_000_000,
             max_output_tokens: 400_000,
@@ -59,12 +61,22 @@ defmodule Troupe.Budget do
   @spec charge_turn(t()) :: t()
   def charge_turn(%__MODULE__{} = b), do: %{b | turns: b.turns + 1}
 
-  @doc "Add token usage, from this agent's own response or a child's report."
-  @spec charge_usage(t(), Troupe.LLM.Usage.t()) :: t()
-  def charge_usage(%__MODULE__{} = b, %Troupe.LLM.Usage{} = usage) do
+  @doc """
+  Add token usage, from this agent's own response or a child's report.
+
+  Input is charged at what the provider billed at close to full price
+  (`Usage.billed_input/1`): fresh tokens and cache writes, not cache reads.
+  A long conversation re-reads its whole prompt every turn, and on an OpenAI-compatible
+  provider nearly all of that is served from the cache at a tenth of the price; a
+  budget that counted it exhausted `max_input_tokens` roughly ten times early, on work
+  the user was barely paying for (Decision 657). The prompt's length is
+  `Usage.total_input/1`, and that is what compaction measures.
+  """
+  @spec charge_usage(t(), Usage.t()) :: t()
+  def charge_usage(%__MODULE__{} = b, %Usage{} = usage) do
     %{
       b
-      | input_tokens: b.input_tokens + usage.input_tokens,
+      | input_tokens: b.input_tokens + Usage.billed_input(usage),
         output_tokens: b.output_tokens + usage.output_tokens
     }
   end
@@ -88,10 +100,13 @@ defmodule Troupe.Budget do
     }
   end
 
-  @doc "Usage consumed so far, for reporting back to a parent."
-  @spec usage(t()) :: Troupe.LLM.Usage.t()
+  @doc """
+  Usage consumed so far, for reporting back to a parent. `input_tokens` is what was
+  billed, so a parent charging it counts nothing twice.
+  """
+  @spec usage(t()) :: Usage.t()
   def usage(%__MODULE__{} = b) do
-    %Troupe.LLM.Usage{input_tokens: b.input_tokens, output_tokens: b.output_tokens}
+    %Usage{input_tokens: b.input_tokens, output_tokens: b.output_tokens}
   end
 
   defp elapsed(%__MODULE__{started_at: nil}), do: 0

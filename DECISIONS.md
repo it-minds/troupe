@@ -4591,3 +4591,31 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      workspace with the marker's text as the prompt — and for a person who runs them by
      hand; the marker grammar, the debounce, the self-write filter and `watch.set` were
      already here and are unchanged.
+
+657. **Token usage is four disjoint figures — `input_tokens`, `cache_read`, `cache_write`,
+     `output_tokens` — the budget charges what was billed, and compaction and the context
+     gauge measure the prompt's whole length.** The core's `Usage` had two fields and each
+     adapter filled them from a different fact: Anthropic's `input_tokens` excludes what
+     its prompt cache served, OpenAI's `prompt_tokens` includes it, so the same
+     conversation counted differently depending on who answered, and each was wrong in
+     the direction that hurts. On an OpenAI-compatible provider a long conversation
+     re-reads its whole prompt every turn and nearly all of it is a cache read billed at a
+     tenth, so `max_input_tokens` exhausted roughly ten times early, on work the user was
+     barely paying for; on Anthropic a warm 200k conversation reads as a few hundred input
+     tokens once the cache hits, so the compaction threshold was measured against a number
+     that never grows and compaction never fired. The TUI had fixed both (its Decision 59)
+     and phase 2 deleted the fix with the rest of its harness. Each adapter now converts
+     at the boundary — OpenAI's `prompt_tokens_details.cached_tokens` comes back out of
+     `prompt_tokens`; Anthropic's `cache_read_input_tokens` and
+     `cache_creation_input_tokens` are read beside `input_tokens`, and every figure a
+     `message_delta` reports replaces the running total — so `input_tokens + cache_read +
+     cache_write` is the prompt's length whoever answered. `Budget.charge_usage/2` spends
+     `Usage.billed_input/1` (fresh input plus cache writes), and the agent's
+     `last_input_tokens`, which `needs_compaction?` and `Headroom`'s `context` read, is
+     `Usage.total_input/1`. The `llm_response` event carries all four keys — the TUI's
+     translator already reads them, which is what puts its `⟳ from cache` line back — and
+     `Usage.from_json/1` folds an event written before this as a prompt nothing was cached
+     of, which is what it was. `Troupe.Session.Usage`, the ledger, is unchanged: it still
+     reads `input_tokens`, which from here is the uncached figure, because the cost it
+     records comes from the gateway and not from the tokens; the cache figures ride in the
+     event for the day the ledger wants them.
