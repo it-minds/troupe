@@ -49,6 +49,13 @@ defmodule Troupe.Agent.Headroom do
   defp elapsed(%Budget{started_at: nil}), do: 0
   defp elapsed(%Budget{started_at: at}), do: max(System.monotonic_time(:millisecond) - at, 0)
 
+  @doc "The dimension a `Budget.exhaustion/0` names, so the question can say `turns 40/40`."
+  @spec dimension(Budget.exhaustion()) :: atom()
+  def dimension(:max_turns), do: :turns
+  def dimension(:max_input_tokens), do: :input
+  def dimension(:max_output_tokens), do: :output
+  def dimension(:wall_clock), do: :wall
+
   @doc "The dimension closest to its ceiling."
   @spec tightest(t()) :: {atom(), entry()}
   def tightest(headroom) do

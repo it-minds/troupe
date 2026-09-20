@@ -151,6 +151,22 @@ defmodule Troupe.Protocol.Schema do
         "conversation" => optional(:array)
       },
       "budget_exhausted" => %{"limit" => required(:string)},
+      # The budget is spent and the agent asks before the next model call (Decision 660).
+      # The question itself is a `question_asked` under the same `call_id`.
+      "budget_ask_started" => %{
+        "call_id" => required(:string),
+        "dimension" => required(:string),
+        "used" => required(:integer),
+        "limit" => required(:integer),
+        "detail" => required(:string)
+      },
+      # `allow` (one more slice, `grant` says how much), `always` (this agent and its
+      # subagents stop asking) or `deny` (`budget_exhausted` follows).
+      "budget_ask_answered" => %{
+        "call_id" => required(:string),
+        "decision" => required(:string),
+        "grant" => optional(:object)
+      },
       # A limit is near (Decision 655): once per dimension per agent.
       "budget_warning" => %{
         "dimension" => required(:string),

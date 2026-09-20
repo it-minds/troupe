@@ -261,8 +261,18 @@ Durable:
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
+| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
+| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: this agent and its subagents stop asking; `deny`: `budget_exhausted` follows) |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`), `summary`, `limit` |
+
+A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
+`waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
+first given again — a checkpoint every slice. It is a stop where the budget is a contract
+(`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
+session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
+never asks: it hands its parent what it found, labelled partial, and the parent may
+delegate again.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |

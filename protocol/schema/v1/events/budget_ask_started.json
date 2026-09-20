@@ -1,0 +1,31 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/budget_ask_started.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "call_id": {
+      "type": "string"
+    },
+    "detail": {
+      "type": "string"
+    },
+    "dimension": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "integer"
+    },
+    "used": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "call_id",
+    "detail",
+    "dimension",
+    "limit",
+    "used"
+  ],
+  "title": "budget_ask_started",
+  "type": "object"
+}
