@@ -45,6 +45,8 @@
     "events/approval_decided.json",
     "events/approval_requested.json",
     "events/approval_resolved.json",
+    "events/budget_ask_answered.json",
+    "events/budget_ask_started.json",
     "events/budget_exhausted.json",
     "events/budget_warning.json",
     "events/cancelled.json",

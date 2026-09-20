@@ -83,6 +83,9 @@ defmodule Troupe.Config do
             # `full_send` turns the warnings off for a session that wants no nagging.
             budget_warn_at: 0.8,
             full_send: false,
+            # Whether a spent budget is a question for the person attached (Decision 660) or
+            # a stop. `false` where the budget is a contract — the plane's terms set it so.
+            budget_asks: true,
             shell_timeout_ms: 120_000,
             tool_output_limit: 60_000,
             watch: false,

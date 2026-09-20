@@ -17,7 +17,10 @@ defmodule Troupe.Budget do
             turns: 0,
             input_tokens: 0,
             output_tokens: 0,
-            started_at: nil
+            started_at: nil,
+            # The allowance as first given, once a grant has enlarged it: what `allow` on the
+            # budget question buys again (Decision 660). `nil` until then.
+            original: nil
 
   @type t :: %__MODULE__{
           max_turns: pos_integer(),
@@ -27,10 +30,19 @@ defmodule Troupe.Budget do
           turns: non_neg_integer(),
           input_tokens: non_neg_integer(),
           output_tokens: non_neg_integer(),
-          started_at: integer() | nil
+          started_at: integer() | nil,
+          original: slice() | nil
         }
 
   @type exhaustion :: :max_turns | :max_input_tokens | :max_output_tokens | :wall_clock
+
+  @typedoc "One allowance, the size the agent was given in the first place."
+  @type slice :: %{
+          turns: pos_integer(),
+          input_tokens: pos_integer(),
+          output_tokens: pos_integer(),
+          wall_clock_ms: pos_integer()
+        }
 
   @doc "Start the wall clock. Called when an agent begins, and on replay."
   @spec start(t()) :: t()
@@ -97,6 +109,38 @@ defmodule Troupe.Budget do
       max_input_tokens: max(trunc(remaining_input(parent) * share), 1),
       max_output_tokens: max(trunc(remaining_output(parent) * share), 1),
       wall_clock_ms: max(trunc(remaining_ms(parent) * share), 1_000)
+    }
+  end
+
+  @doc """
+  One more slice of the same size (Decision 660): `allow` on the budget question buys the
+  agent the budget it was given in the first place, again. It asks again at the end of
+  that — a checkpoint every slice rather than one irreversible yes.
+  """
+  @spec grant(t()) :: t()
+  def grant(%__MODULE__{} = b) do
+    slice = original(b)
+
+    %{
+      b
+      | max_turns: b.max_turns + slice.turns,
+        max_input_tokens: b.max_input_tokens + slice.input_tokens,
+        max_output_tokens: b.max_output_tokens + slice.output_tokens,
+        wall_clock_ms: b.wall_clock_ms + slice.wall_clock_ms,
+        original: slice
+    }
+  end
+
+  @doc "The allowance as first given: what a grant adds."
+  @spec original(t()) :: slice()
+  def original(%__MODULE__{original: %{} = slice}), do: slice
+
+  def original(%__MODULE__{} = b) do
+    %{
+      turns: b.max_turns,
+      input_tokens: b.max_input_tokens,
+      output_tokens: b.max_output_tokens,
+      wall_clock_ms: b.wall_clock_ms
     }
   end
 

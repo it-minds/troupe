@@ -226,7 +226,9 @@ defmodule Troupe.Worker.Session.Restore do
   `:prompt` becomes the session's first input, and only on the activation that finds
   the root agent's log empty; a later activation with the same prompt replays the input
   it already took. `:terms` are config overrides the plane set for this session —
-  `max_turns`, `wall_clock_ms`, `approvals` — and win over the pod's own.
+  `max_turns`, `wall_clock_ms`, `approvals` — and win over the pod's own. A budget the
+  terms set is a contract, not a question (Decision 660): the agent stops at it rather
+  than asking whoever is attached for more, unless the terms themselves say otherwise.
   """
   @spec start(Context.t(), Path.t(), keyword()) :: {:ok, map()} | {:error, term()}
   def start(%Context{} = context, root, opts \\ []) do
@@ -245,7 +247,7 @@ defmodule Troupe.Worker.Session.Restore do
       # A client attached to a remote session has no other way to know that `shell` wrote
       # something, so this is not optional here.
       |> Keyword.put_new(:fs_events, true)
-      |> Keyword.merge(Keyword.get(opts, :terms, []))
+      |> Keyword.merge(contract(Keyword.get(opts, :terms, [])))
 
     Troupe.resume(context.session_id,
       workspace: root,
@@ -261,6 +263,9 @@ defmodule Troupe.Worker.Session.Restore do
       config_overrides: overrides
     )
   end
+
+  defp contract([]), do: []
+  defp contract(terms), do: Keyword.put_new(terms, :budget_asks, false)
 
   defp default_workspace(context) do
     Path.join([Paths.state_dir(context.state_dir), "workspaces", context.session_id])

@@ -4689,3 +4689,41 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      not replayed: a restart forgets them and grants the retry again, which errs towards
      finishing. Not carried over: `/compact` on demand, which is a client command the
      protocol has no method for yet.
+
+660. **A spent budget is a question for the person attached, not a stop: `allow` buys the
+     same slice again, `always` lifts it for the agent and its subagents, `deny` ends the
+     agent; a budget the plane's terms set is a contract and stops; `full_send` never
+     asks; an unattended session answers no itself.** An exhausted budget ended the
+     agent `budget_exhausted`, and the only way on was a new session — which is what a
+     limit is for on a pod running the plane's terms, and exactly wrong on a laptop where
+     the person watching would gladly buy another forty turns to see the branch finish.
+     The TUI had the question (its Decisions 62–66: `y` this agent, `a` the session, `n`
+     stop) and phase 2 deleted it. The core's version rides on what the harness already
+     has rather than on a mechanism of its own: the agent hands a question to
+     `Troupe.Session.Questions` — the `ask_user` path — with `call_id` `budget-<n>`,
+     `detail` (`turns 40/40 (100%)`) as the text and `allow` / `always` / `deny` as the
+     options, so a client that can answer an `ask_user` can answer this and no method was
+     added; a task waits on the answer, since the agent must not block; the agent sits in
+     a new state, `waiting`, where input queues as it does mid-turn. `allow` adds the
+     allowance the agent was first given (`Budget.grant/1`, so grants do not compound) and
+     forgets which limits were warned about, because a fresh slice is a fresh warning;
+     the question comes back at the end of that slice, a checkpoint each time rather than
+     one irreversible yes. `always` sets `budget_overridden`, which a delegation inherits:
+     a person who lifted the root's budget did not mean to be asked by each of its
+     children. The events are `budget_ask_started` and `budget_ask_answered` (with the
+     `grant`), both folded: the grant survives a restart, and a `budget_ask_started`
+     without its answer leaves the question owed, asked again under the same id, where
+     the questions server hands back an answer given meanwhile rather than asking twice.
+     The budget is checked when a model call is about to be made and nowhere else now —
+     an agent whose turn ended with the budget spent rests idle and asks when next given
+     something to do — except where the budget is a contract: `budget_asks: false`, which
+     the worker sets whenever the plane's terms set anything at all, keeps the old stop,
+     because a limit somebody wrote into a session's terms is not a suggestion. A subagent
+     never asks either: its budget is a slice its parent gave it, and what it found goes
+     back to the parent labelled partial, as it already did, for the parent to delegate
+     again if it wants more — a subtree waiting on a person while its parent's tool call
+     hangs would be the worse shape. `full_send` passes the gate without asking; a session running
+     `approvals: deny` gets the questions server's unattended answer, which is no. Not
+     carried over: the TUI's `a` lifted every agent in the session; here it is the agent
+     and its subtree, because a branch is a session now (7.3 b) and there is no second
+     root to lift.

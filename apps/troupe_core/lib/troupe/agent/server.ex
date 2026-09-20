@@ -47,7 +47,7 @@ defmodule Troupe.Agent.Server do
 
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
-  alias Troupe.Session.{Approvals, Blobs, Log, Memory}
+  alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions}
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Watch.Trigger
 
@@ -141,6 +141,7 @@ defmodule Troupe.Agent.Server do
       watcher: Keyword.get(opts, :watcher),
       bundle: Keyword.get(opts, :bundle),
       budget: opts |> Keyword.get(:budget, Config.budget(config)) |> Budget.start(),
+      budget_overridden: Keyword.get(opts, :budget_overridden, false),
       fake: Keyword.get(opts, :fake)
     }
 
@@ -242,8 +243,8 @@ defmodule Troupe.Agent.Server do
       "profile_switched" ->
         switch_definition(state, data["to"])
 
-      "compacted" ->
-        %{state | conversation: Enum.map(data["conversation"], &Message.from_json/1)}
+      type when type in ["compacted", "budget_ask_started", "budget_ask_answered"] ->
+        fold_limits(state, type, data)
 
       type when type in ["agent_done", "agent_woken"] ->
         fold_done(state, type, data)
@@ -260,6 +261,22 @@ defmodule Troupe.Agent.Server do
   # not visible either: the turn that followed looks like any other, and without
   # folding `agent_woken` a restarted agent would come back `:done` with a
   # conversation that has moved on.
+  # What the conversation was compacted to, and the budget's own history (Decision 660):
+  # a grant survives a restart, and a question without its answer is still owed.
+  defp fold_limits(state, "compacted", data) do
+    %{state | conversation: Enum.map(data["conversation"], &Message.from_json/1)}
+  end
+
+  defp fold_limits(state, "budget_ask_started", data) do
+    %{state | budget_ask_pending: data["call_id"], budget_asks: state.budget_asks + 1}
+  end
+
+  defp fold_limits(state, "budget_ask_answered", data) do
+    state
+    |> apply_budget_decision(budget_decision_atom(data["decision"]))
+    |> Map.put(:budget_ask_pending, nil)
+  end
+
   defp fold_done(state, "agent_done", data), do: %{state | done_reason: safe_reason(data["reason"])}
   defp fold_done(state, "agent_woken", _data), do: %{state | done_reason: nil}
 
@@ -509,6 +526,28 @@ defmodule Troupe.Agent.Server do
 
   def acting(event_type, event, state), do: common(event_type, event, :acting, state)
 
+  # -- :waiting ---------------------------------------------------------------
+  #
+  # The budget is spent and the person attached has been asked (Decision 660). Nothing
+  # runs; input queues as it does mid-turn; the answer comes back from the task that
+  # waited on `Troupe.Session.Questions`.
+
+  @doc false
+  def waiting({:call, from}, :snapshot, state), do: reply_snapshot(from, :waiting, state)
+
+  def waiting(:info, {:budget_answer, call_id, answer}, %State{budget_ask_pending: call_id} = state) do
+    budget_answered(%{state | budget_ask_task: nil}, budget_decision(answer))
+  end
+
+  def waiting(:info, :cancel, state), do: cancel_everything(state)
+
+  def waiting(:info, {:input, _source, _content, _actor, _meta} = event, state),
+    do: queue_input(state, event)
+
+  def waiting(:info, {:switch_profile, _name}, _state), do: {:keep_state_and_data, :postpone}
+
+  def waiting(event_type, event, state), do: common(event_type, event, :waiting, state)
+
   # -- :compacting ------------------------------------------------------------
 
   @doc false
@@ -744,9 +783,9 @@ defmodule Troupe.Agent.Server do
   # -- turns ------------------------------------------------------------------
 
   defp start_turn(state) do
-    case Budget.check(state.budget) do
-      {:exhausted, limit} ->
-        enter_done(state, :budget_exhausted, %{"limit" => Atom.to_string(limit)})
+    case budget_gate(state) do
+      halt when halt != :ok ->
+        budget_halt(halt)
 
       :ok ->
         definition = effective_definition(state)
@@ -1128,16 +1167,23 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  defp to_idle_or_done(state) do
+  # Resting is free: the budget is a question about the *next* model call, asked when that
+  # call is about to be made (Decision 660), so an agent whose turn ended with the budget
+  # spent rests idle and asks when it is next given something to do. Where the budget is
+  # a contract rather than a question it stops here, as it always did.
+  defp to_idle_or_done(%State{config: %{budget_asks: false}} = state) do
     case Budget.check(state.budget) do
-      {:exhausted, limit} ->
-        enter_done(state, :budget_exhausted, %{"limit" => Atom.to_string(limit)})
-
-      :ok ->
-        state = %{state | turn_mode: nil}
-        publish_state(state, :idle)
-        {:next_state, :idle, state}
+      {:exhausted, limit} -> enter_done(state, :budget_exhausted, %{"limit" => Atom.to_string(limit)})
+      :ok -> rest(state)
     end
+  end
+
+  defp to_idle_or_done(state), do: rest(state)
+
+  defp rest(state) do
+    state = %{state | turn_mode: nil}
+    publish_state(state, :idle)
+    {:next_state, :idle, state}
   end
 
   # -- tools ------------------------------------------------------------------
@@ -1320,6 +1366,15 @@ defmodule Troupe.Agent.Server do
     if call.monitor, do: State.unwatch(state, call.monitor), else: state
   end
 
+  # The question stays owed — `budget_ask_pending` and the log both say so — and is asked
+  # again under the same id at the next turn; only the task waiting on it goes.
+  defp kill_budget_ask(%State{budget_ask_task: nil} = state), do: state
+
+  defp kill_budget_ask(%State{budget_ask_task: pid} = state) do
+    Task.Supervisor.terminate_child(tasks(state), pid)
+    %{state | budget_ask_task: nil}
+  end
+
   defp kill_task(state, %Call{task_pid: nil}), do: state
 
   defp kill_task(state, %Call{task_pid: pid}) do
@@ -1343,15 +1398,163 @@ defmodule Troupe.Agent.Server do
   end
 
   defp continue_after_results(state) do
-    case Budget.check(state.budget) do
-      {:exhausted, limit} ->
-        enter_done(state, :budget_exhausted, %{"limit" => Atom.to_string(limit)})
-
+    case budget_gate(state) do
       :ok ->
         if needs_compaction?(state),
           do: enter_compaction(state, :thinking),
           else: start_turn(state)
+
+      halt ->
+        budget_halt(halt)
     end
+  end
+
+  # Whether another model call may start (Decision 660). A spent budget is a question,
+  # not a stop: the person attached is asked, once per slice, and `allow` buys the same
+  # slice again. `full_send` and an earlier `always` pass without asking; a session whose
+  # budget is a contract (`budget_asks: false` — the plane's terms) stops as it always
+  # did; an unattended session answers no itself, through the questions' deny mode.
+  defp budget_gate(%State{config: %{full_send: true}}), do: :ok
+  defp budget_gate(%State{budget_overridden: true}), do: :ok
+
+  defp budget_gate(%State{config: %{budget_asks: false}} = state), do: check_or_stop(state)
+
+  # A subagent does not ask: its budget is a slice its parent gave it, and what it found
+  # goes back to the parent labelled partial, which may delegate again if it wants more.
+  # The person's question is the root's.
+  defp budget_gate(%State{parent: parent} = state) when is_pid(parent), do: check_or_stop(state)
+
+  defp budget_gate(state) do
+    case Budget.check(state.budget) do
+      :ok -> :ok
+      {:exhausted, limit} -> {:ask, ask_budget(state, limit)}
+    end
+  end
+
+  defp check_or_stop(state) do
+    case Budget.check(state.budget) do
+      :ok -> :ok
+      {:exhausted, limit} -> {:stop, state, limit}
+    end
+  end
+
+  defp budget_halt({:stop, state, limit}) do
+    enter_done(state, :budget_exhausted, %{"limit" => Atom.to_string(limit)})
+  end
+
+  defp budget_halt({:ask, state}) do
+    publish_state(state, :waiting)
+    {:next_state, :waiting, state}
+  end
+
+  @budget_options [
+    %{label: "allow", description: "one more slice: the same budget again, then ask again"},
+    %{label: "always", description: "lift this agent's budget for the rest of the session"},
+    %{label: "deny", description: "stop here"}
+  ]
+
+  # The question rides on `Troupe.Session.Questions`, exactly as an `ask_user` does, so a
+  # client that can answer a question can answer this one and no new method is needed.
+  # A task waits on the answer, because the agent itself must not block. The id is the
+  # count of asks, so a replay that finds a `budget_ask_started` without its answer asks
+  # again under the same id — and the questions server, which remembers answers by id,
+  # hands back one given while the agent was away rather than asking twice.
+  defp ask_budget(state, limit) do
+    dim = Headroom.dimension(limit)
+    entry = headroom(state)[dim]
+    detail = Headroom.describe(dim, entry)
+
+    {call_id, state} =
+      case state.budget_ask_pending do
+        id when is_binary(id) ->
+          {id, state}
+
+        nil ->
+          id = "budget-#{state.budget_asks + 1}"
+
+          log(state, :budget_ask_started, %{
+            "call_id" => id,
+            "dimension" => to_string(dim),
+            "used" => entry.used,
+            "limit" => entry.limit,
+            "detail" => detail
+          })
+
+          {id, %{state | budget_asks: state.budget_asks + 1}}
+      end
+
+    question = %{
+      call_id: call_id,
+      agent_path: state.agent_path,
+      question: detail <> " — continue?",
+      options: @budget_options,
+      multiple: false
+    }
+
+    agent = self()
+    session_id = state.session_id
+
+    {:ok, pid} =
+      Task.Supervisor.start_child(tasks(state), fn ->
+        send(agent, {:budget_answer, call_id, Questions.ask(session_id, question)})
+      end)
+
+    %{state | budget_ask_pending: call_id, budget_ask_task: pid}
+  end
+
+  defp budget_decision({:ok, text}) when is_binary(text) do
+    case text |> String.trim() |> String.downcase() do
+      always when always in ["always", "a"] -> :always
+      allow when allow in ["allow", "yes", "y", "continue", "more"] -> :allow
+      _other -> :deny
+    end
+  end
+
+  defp budget_decision(_unattended_or_odd), do: :deny
+
+  defp budget_decision_atom("allow"), do: :allow
+  defp budget_decision_atom("always"), do: :always
+  defp budget_decision_atom(_other), do: :deny
+
+  # `allow` also forgets which limits were warned about: a fresh slice is a fresh warning.
+  defp apply_budget_decision(state, :allow) do
+    %{state | budget: Budget.grant(state.budget), headroom_warned: MapSet.new()}
+  end
+
+  defp apply_budget_decision(state, :always), do: %{state | budget_overridden: true}
+  defp apply_budget_decision(state, :deny), do: state
+
+  defp budget_answered(state, decision) do
+    data = %{"call_id" => state.budget_ask_pending, "decision" => Atom.to_string(decision)}
+
+    data =
+      if decision == :allow,
+        do: Map.put(data, "grant", grant_json(Budget.original(state.budget))),
+        else: data
+
+    log(state, :budget_ask_answered, data)
+    state = state |> apply_budget_decision(decision) |> Map.put(:budget_ask_pending, nil)
+
+    if decision == :deny do
+      limit =
+        case Budget.check(state.budget) do
+          {:exhausted, limit} -> Atom.to_string(limit)
+          :ok -> "budget"
+        end
+
+      enter_done(state, :budget_exhausted, %{"limit" => limit})
+    else
+      start_turn(state)
+    end
+  end
+
+  defp grant_json(slice) do
+    %{
+      "turns" => slice.turns,
+      "input_tokens" => slice.input_tokens,
+      "output_tokens" => slice.output_tokens,
+      "wall_clock_ms" => slice.wall_clock_ms
+    }
   end
 
   defp fold_results(state, results) do
@@ -1431,6 +1634,9 @@ defmodule Troupe.Agent.Server do
       parent_ref: child_ref,
       task: task,
       budget: Budget.slice(state.budget, definition.budget_share),
+      # `always` reaches the subtree: a person who lifted the root's budget did not mean
+      # to be asked again by each of its delegates.
+      budget_overridden: state.budget_overridden,
       watcher: state.watcher,
       bundle: state.bundle,
       fake: state.fake
@@ -1675,6 +1881,7 @@ defmodule Troupe.Agent.Server do
     kill_llm(state)
     Enum.each(Map.values(state.pending), &kill_task(state, &1))
     terminate_children(state)
+    state = kill_budget_ask(state)
 
     log(state, :cancelled, %{})
 

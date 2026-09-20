@@ -128,7 +128,7 @@ defmodule Troupe.Agent.ResilienceTest do
     test "restarting a :done agent does not start it working again", context do
       %{session: session, fake: fake} =
         start_session(context,
-          config_overrides: [max_turns: 3],
+          config_overrides: [max_turns: 3, budget_asks: false],
           steps: [{:tools, [{"todo_read", %{}}]}, {:tools, [{"todo_read", %{}}]}, {:text, "x"}]
         )
 
@@ -259,9 +259,11 @@ defmodule Troupe.Agent.ResilienceTest do
   describe "budgets" do
     test "max_turns stops the agent with :budget_exhausted after exactly that many calls",
          context do
+      # A budget that is a contract rather than a question (Decision 660): the plane's
+      # terms set this, and `budget_question_test.exs` covers the question.
       %{session: session, fake: fake} =
         start_session(context,
-          config_overrides: [max_turns: 2],
+          config_overrides: [max_turns: 2, budget_asks: false],
           steps: [
             {:tools, [{"todo_read", %{}}]},
             {:tools, [{"todo_read", %{}}]},

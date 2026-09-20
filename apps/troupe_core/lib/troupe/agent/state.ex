@@ -77,6 +77,14 @@ defmodule Troupe.Agent.State do
     overflow_retried: false,
     # Why the compaction in flight was started, for the `compacted` event.
     compact_reason: nil,
+    # The budget question (Decision 660): the `call_id` of the one outstanding, the task
+    # waiting on its answer, how many have been asked (the id is that count, so a replay
+    # asks again under the same id), and whether `always` was answered — which is folded,
+    # so it survives a restart.
+    budget_ask_pending: nil,
+    budget_ask_task: nil,
+    budget_asks: 0,
+    budget_overridden: false,
     compact_resume: :idle,
     finish_summary: nil,
     fake: nil,
@@ -118,6 +126,10 @@ defmodule Troupe.Agent.State do
           truncation_retried: boolean(),
           overflow_retried: boolean(),
           compact_reason: String.t() | nil,
+          budget_ask_pending: String.t() | nil,
+          budget_ask_task: pid() | nil,
+          budget_asks: non_neg_integer(),
+          budget_overridden: boolean(),
           compact_resume: :idle | :thinking,
           finish_summary: String.t() | nil,
           fake: pid() | atom() | nil,
