@@ -52,17 +52,18 @@ defmodule Troupe.Phase3ClientTest do
 
     {sid, _, _} = start_session!(script: script, config: %{"max_turns" => 6})
     say!(sid, "go")
+    await_done(15_000)
 
-    warning = await_warning(sid)
+    # Durable, so the journal has it whatever order the mailbox saw things in; and
+    # once, whatever the model did after.
+    [warning] = warnings(sid)
     assert warning.data.dimension == :turns
     assert warning.data.detail =~ "turns 5/6"
-    await_done(15_000)
-    refute_receive {:troupe_event, %{type: :budget_warning, agent_path: "root"}}, 200
 
     {quiet, _, _} = start_session!(script: script, config: %{"max_turns" => 6, "full_send" => true})
     say!(quiet, "go")
     await_done(15_000)
-    refute_received {:troupe_event, %{session_id: ^quiet, type: :budget_warning}}
+    assert warnings(quiet) == []
   end
 
   test "the settings page knows full send and the brief" do
@@ -70,28 +71,39 @@ defmodule Troupe.Phase3ClientTest do
       assert {:ok, %{type: :bool, effect: :next_run}} = Troupe.Settings.fetch(key)
     end
 
-    ws = tmp_workspace()
+    # A workspace with a config of its own, so the setting lands there and not in the
+    # machine config every other session of this run reads.
+    ws = tmp_workspace(%{".troupe/config.yaml" => "auto_approve: true\n"})
     assert {:ok, path} = Troupe.Settings.persist(ws, "full_send", true)
+    assert path == Path.join(ws, ".troupe/config.yaml")
     assert File.read!(path) =~ "full_send: true"
     assert Troupe.Config.load(ws).full_send == true
   end
 
-  # What arrived instead, when the warning did not: the mailbox, the journal, the session.
-  defp await_warning(sid) do
-    receive do
-      {:troupe_event, %{type: :budget_warning, agent_path: "root"} = event} -> event
-    after
-      15_000 ->
-        mailbox = drain([])
-        journal = sid |> Client.events() |> Enum.map(&{&1.agent_path, &1.type})
+  # The warnings a session's journal holds, with what arrived when there are none where
+  # one was expected: the mailbox, the journal, the session.
+  defp warnings(sid) do
+    found =
+      Enum.filter(Client.events(sid), &(&1.type == :budget_warning and &1.agent_path == "root"))
 
-        flunk("""
-        no budget_warning within 15s
-        mailbox: #{inspect(mailbox, limit: :infinity)}
-        journal: #{inspect(journal, limit: :infinity)}
-        capability: #{inspect(Client.capability(sid))}
-        """)
-    end
+    if found == [] and not full_send?(sid), do: flunk(no_warning(sid)), else: found
+  end
+
+  defp full_send?(sid) do
+    {_workspace, config} = Client.context(sid)
+    config.full_send == true
+  end
+
+  defp no_warning(sid) do
+    mailbox = drain([])
+    journal = sid |> Client.events() |> Enum.map(&{&1.agent_path, &1.type})
+
+    """
+    no budget_warning in the journal
+    mailbox: #{inspect(mailbox, limit: :infinity)}
+    journal: #{inspect(journal, limit: :infinity)}
+    capability: #{inspect(Client.capability(sid))}
+    """
   end
 
   defp drain(acc) do
