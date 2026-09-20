@@ -27,6 +27,12 @@ export interface TodoItem {
   status: string;
 }
 
+/** One thing a person may answer a question with. */
+export interface QuestionOption {
+  label: string;
+  description: string | null;
+}
+
 export type Entry =
   /** Something a person (or watch mode) said. `author` is the subject where there is one. */
   | { kind: "user"; seq: number; agent: string[]; text: string; author: string | undefined; source: string }
@@ -56,6 +62,23 @@ export type Entry =
       resolvedBy: string | undefined;
     }
   | { kind: "delegation"; seq: number; agent: string[]; callId: string; child: string; task: string }
+  /**
+   * A question for a person: the agent's `ask_user`, or the harness asking whether to
+   * spend more once a budget is gone (`asked: "budget"`, troupe-remote Decision 660).
+   * Options to pick from, free text always allowed, first answer wins.
+   */
+  | {
+      kind: "question";
+      seq: number;
+      agent: string[];
+      callId: string;
+      question: string;
+      options: QuestionOption[];
+      multiple: boolean;
+      asked: "agent" | "budget";
+      /** The answer's text — for the budget question `allow`, `always` or `deny` — once given. */
+      answer: string | undefined;
+    }
   | { kind: "todo"; seq: number; agent: string[]; items: TodoItem[]; source: string }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string };
@@ -146,7 +169,11 @@ function systemText(d: DurableEvent): string {
     case "profile_switched":
       return `profile ${str(d.data["from"], "?")} → ${str(d.data["to"], "?")}`;
     case "compacted":
-      return "conversation compacted";
+      return d.data["reason"] === "context_overflow"
+        ? "conversation compacted, because the prompt no longer fit the model"
+        : "conversation compacted";
+    case "budget_warning":
+      return `nearly out: ${str(d.data["detail"], str(d.data["dimension"], "a limit"))}`;
     case "agent_done":
       return `done: ${str(d.data["reason"], "finished")}`;
     case "input_after_done":
@@ -177,6 +204,7 @@ function systemText(d: DurableEvent): string {
 }
 
 const SYSTEM_TYPES = new Set([
+  "budget_warning",
   "session_created",
   "agent_started",
   "agent_restarted",
@@ -236,6 +264,14 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     }
 
     case "user_input":
+      // The note the harness gives a model whose reply was cut or empty (troupe-remote
+      // Decision 659) is not something a person typed, and is shown as what it is.
+      if (str(d.data["source"]) === "harness") {
+        return {
+          ...next,
+          entries: [...state.entries, { kind: "system", ...base, type: "harness_note", text: `the harness said: ${str(d.data["text"])}` }],
+        };
+      }
       return {
         ...next,
         entries: [
@@ -306,6 +342,53 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
           },
         ],
       };
+
+    // A question for a person. The harness's budget question rides on the same path under
+    // a `budget-<n>` id with an event of its own beside it, so the entry is made from
+    // whichever arrives first and the other only fills it in.
+    case "budget_ask_started": {
+      const callId = str(d.data["call_id"]);
+      if (hasQuestion(state, callId)) return next;
+      return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"))] };
+    }
+
+    case "question_asked": {
+      const callId = str(d.data["call_id"]);
+      if (hasQuestion(state, callId)) return next;
+      if (callId.startsWith("budget-")) {
+        return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["question"], "budget exhausted"))] };
+      }
+      return {
+        ...next,
+        entries: [
+          ...state.entries,
+          {
+            kind: "question",
+            ...base,
+            callId,
+            question: str(d.data["question"]),
+            options: optionsOf(d.data["options"]),
+            multiple: d.data["multiple"] === true,
+            asked: "agent",
+            answer: undefined,
+          },
+        ],
+      };
+    }
+
+    case "question_answered":
+    case "budget_ask_answered": {
+      const callId = str(d.data["call_id"]);
+      const answer = str(d.data["text"] ?? d.data["decision"]);
+      return {
+        ...next,
+        entries: state.entries.map((en) => (en.kind === "question" && en.callId === callId && en.answer === undefined ? { ...en, answer } : en)),
+      };
+    }
+
+    // A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
+    case "truncated":
+      return { ...next, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: truncatedText(d) }] };
 
     case "approval_requested":
       return {
@@ -404,7 +487,9 @@ function foldEphemeral(state: TranscriptState, e: TroupeEvent): TranscriptState 
       if (!isRoot(e.agent)) return state; // a subagent's stream is not what is on screen
       const d = e.data as LlmDeltaData;
       const text = str(d.text ?? d.fragment);
-      if (d.kind === "thinking") return { ...state, thinking: state.thinking + text };
+      // Two spellings of the model's thinking: Anthropic's, and the daemon's own
+      // (`reasoning`, troupe-remote Decision 658).
+      if (d.kind === "thinking" || d.kind === "reasoning") return { ...state, thinking: state.thinking + text };
       if (d.kind === "text") return { ...state, streaming: state.streaming + text };
       return state;
     }
@@ -430,4 +515,51 @@ export function isBusy(state: TranscriptState): boolean {
 /** Approvals in this transcript nobody has answered yet. */
 export function openApprovals(state: TranscriptState): Extract<Entry, { kind: "approval" }>[] {
   return state.entries.filter((e): e is Extract<Entry, { kind: "approval" }> => e.kind === "approval" && e.decision === undefined);
+}
+
+/** Questions in this transcript nobody has answered yet — the agent's and the harness's. */
+export function openQuestions(state: TranscriptState): Extract<Entry, { kind: "question" }>[] {
+  return state.entries.filter((e): e is Extract<Entry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
+}
+
+/**
+ * Whether a person is being waited on: an open approval or question, or a root agent
+ * that says it is `waiting` — which is the daemon's word for the budget question.
+ */
+export function needsYou(state: TranscriptState): boolean {
+  return rootState(state) === "waiting" || openApprovals(state).length > 0 || openQuestions(state).length > 0;
+}
+
+const BUDGET_OPTIONS: QuestionOption[] = [
+  { label: "allow", description: "one more slice: the same budget again, then ask again" },
+  { label: "always", description: "lift this agent's budget for the rest of the session" },
+  { label: "deny", description: "stop here" },
+];
+
+function hasQuestion(state: TranscriptState, callId: string): boolean {
+  return state.entries.some((en) => en.kind === "question" && en.callId === callId);
+}
+
+function budgetQuestion(base: { seq: number; agent: string[] }, callId: string, detail: string): Entry {
+  return { kind: "question", ...base, callId, question: detail, options: BUDGET_OPTIONS, multiple: false, asked: "budget", answer: undefined };
+}
+
+function optionsOf(v: unknown): QuestionOption[] {
+  if (!Array.isArray(v)) return [];
+  return v.flatMap((o): QuestionOption[] => {
+    if (typeof o === "string") return [{ label: o, description: null }];
+    if (typeof o === "object" && o !== null && typeof (o as { label?: unknown }).label === "string") {
+      const description = (o as { description?: unknown }).description;
+      return [{ label: (o as { label: string }).label, description: typeof description === "string" ? description : null }];
+    }
+    return [];
+  });
+}
+
+function truncatedText(d: DurableEvent): string {
+  const what = d.data["reason"] === "empty" ? "the reply had no text and no tool call" : "the reply was cut at the output cap";
+  if (d.data["final"] === true) return `${what}; giving up`;
+  if (typeof d.data["calls"] === "number") return `${what}; ${d.data["calls"]} tool call(s) answered with an error`;
+  if (typeof d.data["note"] === "string") return `${what}; asking again`;
+  return what;
 }

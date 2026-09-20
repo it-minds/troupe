@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { isBlobRef, isBusy, openApprovals, rootState } from "@troupe/client";
+import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState } from "@troupe/client";
 import type {
   AttachStatus,
   AuthSession,
@@ -26,6 +26,7 @@ import type {
 import { useProfiles, useSessionView } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
+import { AnswerRecord, QuestionPanel } from "./Question";
 import { Files } from "./Files";
 import { LocalControls } from "./LocalControls";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
@@ -86,6 +87,11 @@ export function Session({
             />
           ))}
 
+          {/* The agent's questions and the harness's budget question, in the same place. */}
+          {openQuestions(view.state).map((entry) => (
+            <QuestionPanel key={entry.callId} entry={entry} canAnswer={!readOnly} onAnswer={(text) => view.answer(entry.callId, text)} />
+          ))}
+
           {readOnly ? (
             <ReadOnly />
           ) : (
@@ -142,6 +148,8 @@ function Header({
 
       {state.doneReason ? (
         <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
+      ) : needsYou(state) ? (
+        <Pill status="waiting">Needs you</Pill>
       ) : isBusy(state) ? (
         <Pill status="running">{working === "compacting" ? "Tidying up" : "Working"}</Pill>
       ) : (
@@ -326,6 +334,9 @@ function StreamEntry({
 
     case "approval":
       return entry.decision ? <DecisionRecord entry={entry} self={self} /> : null;
+
+    case "question":
+      return entry.answer === undefined ? null : <AnswerRecord entry={entry} />;
 
     case "system":
       return <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" ? "error" : ""}`}>{entry.text}</p>;

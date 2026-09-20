@@ -127,6 +127,12 @@ export class FakeDaemon {
     return session;
   }
 
+  /** Make a session ask something — the agent's `ask_user`, or the harness's budget question under a `budget-<n>` id. */
+  ask(sessionId: string, question: Record<string, unknown>): LoggedEvent {
+    const session = this.sessions.get(sessionId)!;
+    return session.log.append("question_asked", { agent_path: ["root"], options: [], multiple: false, ...question });
+  }
+
   /** Make a session say something, so a test can watch it arrive on the right view. */
   say(sessionId: string, text: string): LoggedEvent {
     const session = this.sessions.get(sessionId)!;
@@ -251,6 +257,13 @@ export class FakeDaemon {
         const actor = { kind: "user", subject: this.principal.subject };
         session.log.append("input_queued", { command_id: commandId, author: this.principal.subject, text: params["text"] }, actor);
         session.log.append("input_accepted", { command_id: commandId, author: this.principal.subject }, actor);
+        return reply(ws, id, { accepted: true });
+      }
+
+      case "question.answer": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const actor = { kind: "user", subject: this.principal.subject };
+        session.log.append("question_answered", { call_id: params["call_id"], text: params["text"] ?? "" }, actor);
         return reply(ws, id, { accepted: true });
       }
 
