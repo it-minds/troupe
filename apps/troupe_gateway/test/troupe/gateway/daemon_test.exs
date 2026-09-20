@@ -135,6 +135,33 @@ defmodule Troupe.Gateway.DaemonTest do
     end
   end
 
+  describe "agents.list" do
+    test "offers the primaries a session in the workspace could run, with their source", context do
+      client = connect(context)
+
+      File.mkdir_p!(Path.join(context.workspace, ".troupe/agents"))
+
+      File.write!(Path.join(context.workspace, ".troupe/agents/reviewer.md"), """
+      ---
+      description: Reads a change and says what is wrong with it.
+      mode: primary
+      ---
+      You review code.
+      """)
+
+      {:ok, %{"agents" => agents}} = Client.call(client, "agents.list", %{"workspace" => context.workspace})
+      by_name = Map.new(agents, &{&1["name"], &1})
+
+      assert by_name["build"]["source"] == "builtin"
+      assert by_name["reviewer"]["source"] == "project"
+      assert by_name["reviewer"]["description"] =~ "Reads a change"
+      # Subagents are not offered: `explore` is a built-in nobody creates a session on.
+      refute Map.has_key?(by_name, "explore")
+
+      assert {:error, %Error{}} = Client.call(client, "agents.list", %{})
+    end
+  end
+
   describe "commands" do
     test "an unknown method is reported, not fatal", context do
       client = connect(context)

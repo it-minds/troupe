@@ -135,3 +135,11 @@ brief, as answered). What this repository had to change for that, and what prove
 Still open from the list above and deliberately not here: logging for a detached daemon
 (the release's `runtime.exs`), the twelve agent definitions and the TUI-only tools
 (phase 3), `private_sessions` needing an off-cluster OpenBao address (deployment).
+
+## Phase 2 — what the harness needed
+
+Two things. `agents.list {workspace}` (Decision 645), so a client can offer the agents a
+session may be created with. And a JSON fake script with per-agent `routes` (Decision 644), so a client
+that speaks only the protocol can drive a deterministic multi-agent session by putting
+`provider: fake` and `fake_script:` in the workspace's `.troupe/config.yaml`. The
+daemon still refuses `provider` from a client; the machine chooses it.

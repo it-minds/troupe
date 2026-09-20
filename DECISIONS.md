@@ -4339,3 +4339,26 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      zstd, the same frames. A git dependency pinned by commit instead of the Hex
      package, until upstream takes the change — the harness's first git dependency,
      which `docker/Dockerfile`'s builder stage can fetch because it already has `git`.
+
+644. **A JSON fake script may route answers per agent, and a workspace may name the
+     script.** `Troupe.LLM.Fake.load_script!/1` read a list of steps and nothing else, so
+     a scripted session with a subagent could not say which answer belonged to whom —
+     the in-VM `:routes` option existed for the core's own tests and had no spelling a
+     file could carry. It now returns `steps:` and `routes:` from an object, and
+     `Troupe.Session` starts the per-session fake with both. The occasion is the TUI
+     becoming a client of the daemon (phase 2): its suite drives sessions through the
+     protocol alone, and the daemon rightly refuses to let a client choose a provider
+     over the wire (`@client_settable` in `Gateway.Dispatch`), so the deterministic model
+     has to be arranged the way a machine arranges anything — `provider: fake` and
+     `fake_script:` in the workspace's own `.troupe/config.yaml`, which `Config.load/2`
+     already reads. `fake_script_test.exs` proves that path end to end without handing
+     the session a fake process.
+
+645. **`agents.list` tells a client which agents a workspace offers.** A client creating a
+     session picks a `profile`, and until now had no way to ask the daemon what it could
+     pick: the plane has `profiles.list`, the daemon had nothing, and the TUI knew its
+     agents because it *was* the harness. It is a client now (phase 2), so the daemon
+     answers `agents.list {workspace}` with the primaries `session.create` would resolve
+     for that workspace — built-ins, the machine's `agents/`, the project's
+     `.troupe/agents/` — with a `source` for each. `observe` scope: reading the menu steers
+     nothing.
