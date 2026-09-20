@@ -12,7 +12,7 @@
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
-import type { AdminApi, IdentityCheck, PlatformSetting } from "@troupe/client";
+import type { AdminApi, IdentityCheckResult, PlatformSetting, SettingsList } from "@troupe/client";
 import { useAdminQuery } from "../../hooks";
 import { Loading, Pill } from "../bits";
 import { AfterTheChange, Failed, Table } from "./bits";
@@ -26,7 +26,10 @@ export function AdminSettings({ api }: { api: AdminApi }): JSX.Element {
   const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(() => api.settings(), [api]);
-  const { data, loading, error: readError } = useAdminQuery<PlatformSetting[]>(load, [load, round]);
+  const { data: listed, loading, error: readError } = useAdminQuery<SettingsList>(load, [load, round]);
+  // The provider's own settings have a tab of their own, where the save is gated on the
+  // check; rendering them here too would be a second save nobody gated.
+  const data = listed ? listed.settings.filter((s) => s.group !== "sign_in") : null;
 
   const after = (): void => {
     setRound((n) => n + 1);
@@ -89,8 +92,8 @@ export function AdminSettings({ api }: { api: AdminApi }): JSX.Element {
                     <Source source={s.source} />
                   </td>
                   <td className="micro">
-                    {s.description ?? "—"}
-                    {s.effect ? <span className="muted"> Takes effect: {s.effect}.</span> : null}
+                    {s.summary ?? s.description ?? "—"}
+                    {s.effect_description ? <span className="muted"> {s.effect_description}</span> : null}
                   </td>
                   <td>
                     {owned ? (
@@ -136,7 +139,7 @@ export function AdminSettings({ api }: { api: AdminApi }): JSX.Element {
 }
 
 function Value({ setting }: { setting: PlatformSetting }): JSX.Element {
-  if (setting.secret) return <span className="when">{setting.value ? "set" : "not set"}</span>;
+  if (setting.secret) return <span className="when">{setting.set ? "set" : "not set"}</span>;
   if (setting.value === null || setting.value === undefined) return <span className="when">unset</span>;
   return <span className="mono micro">{stringify(setting.value)}</span>;
 }
@@ -173,7 +176,8 @@ function coerce(text: string, type: string | undefined): unknown {
 function Identity({ api }: { api: AdminApi }): JSX.Element {
   const [round, setRound] = useState(0);
   const load = useCallback(() => api.identityCheck(), [api]);
-  const { data, loading, error } = useAdminQuery<IdentityCheck[]>(load, [load, round]);
+  const { data: result, loading, error } = useAdminQuery<IdentityCheckResult>(load, [load, round]);
+  const data = result?.checks ?? null;
 
   return (
     <section className="group">

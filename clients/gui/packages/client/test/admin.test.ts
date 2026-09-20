@@ -49,6 +49,34 @@ describe("the team methods", () => {
     ]);
   });
 
+  it("name the provider's and the connector's arguments the way the plane does", async () => {
+    const { api, calls } = recording();
+
+    await api.providerCheck({ issuer: "https://idp.example.test" });
+    await api.providerPut({ issuer: "https://idp.example.test" });
+    await api.providerPut({ client_secret: "s" }, true);
+    await api.providerReset();
+    await api.scim();
+    await api.scimRotate();
+    await api.scimDelete("https://plane.example.test/scim/v2");
+    await api.scimUpdate({ teams_from_groups: true });
+    await api.settings();
+    await api.identityCheck("platform");
+
+    assert.deepEqual(calls, [
+      { method: "admin.provider.check", params: { attrs: { issuer: "https://idp.example.test" } } },
+      { method: "admin.provider.put", params: { attrs: { issuer: "https://idp.example.test" } } },
+      { method: "admin.provider.put", params: { attrs: { client_secret: "s" }, force: true } },
+      { method: "admin.provider.reset", params: {} },
+      { method: "admin.scim.get", params: {} },
+      { method: "admin.scim.rotate", params: {} },
+      { method: "admin.scim.delete", params: { base_url: "https://plane.example.test/scim/v2" } },
+      { method: "admin.scim.update", params: { attrs: { teams_from_groups: true } } },
+      { method: "admin.settings.list", params: {} },
+      { method: "admin.identity.check", params: { group: "platform" } },
+    ]);
+  });
+
   it("carry the preview's shape through untouched", async () => {
     const effect: TeamDisableEffect = {
       team: "engineering",

@@ -200,13 +200,30 @@ export interface TriggerRun {
 
 export interface PlatformSetting {
   key: string;
-  value: unknown;
+  /** Absent for a secret: the plane says `set` and nothing more. */
+  value?: unknown;
   source: "stored" | "deployed" | "unset" | string;
+  group?: string;
   type?: string;
+  summary?: string;
+  consequence?: string;
+  /** Older name for `summary`; the plane has never sent it. */
   description?: string;
   effect?: string;
+  effect_description?: string;
+  editable?: boolean;
   secret?: boolean;
+  set?: boolean;
+  deployed?: unknown;
   [k: string]: unknown;
+}
+
+/** What `admin.settings.list` answers with: the settings, their panels, and the ladder. */
+export interface SettingsList {
+  groups: Array<{ key: string; title: string; blurb: string }>;
+  settings: PlatformSetting[];
+  ladder: unknown;
+  laddered: string[];
 }
 
 export interface IdentityCheck {
@@ -215,6 +232,54 @@ export interface IdentityCheck {
   detail?: string;
   took_ms?: number;
   [k: string]: unknown;
+}
+
+/** What `admin.identity.check` answers with: the checks, and the group they were about. */
+export interface IdentityCheckResult {
+  checks: IdentityCheck[];
+  ok: boolean;
+  group: string | null;
+  redirect_uri: string | null;
+}
+
+/**
+ * The identity provider as the plane sees it: every sign-in setting with where its value
+ * came from (a secret as `set`, never its value), the URLs the provider's registration
+ * has to know about this plane, and how many people have arrived through it.
+ */
+export interface ProviderState {
+  settings: PlatformSetting[];
+  urls: {
+    redirect: string | null;
+    discovery: string | null;
+    jwks: string | null;
+    resource_metadata: string | null;
+  };
+  protocol: string;
+  known_people: number;
+  /** On a put or reset: what changed, a secret as `set`, plus `rotated` naming any secret given. */
+  changes?: Record<string, unknown>;
+}
+
+export interface ProviderCheck {
+  checks: IdentityCheck[];
+  ok: boolean;
+  candidate: Record<string, string>;
+}
+
+/** The SCIM connector as the card shows it. `token` is present once, on a rotate. */
+export interface ScimConnector {
+  base_url: string | null;
+  token_set: boolean;
+  deployed_token_set: boolean;
+  status: "connected" | "quiet" | "never_pushed" | "no_token" | string;
+  rotated_at: string | null;
+  rotated_by: string | null;
+  last_seen_at: string | null;
+  last_seen_op: string | null;
+  teams_from_groups: boolean;
+  token?: string;
+  changes?: Record<string, unknown>;
 }
 
 export interface AdminFilter {
@@ -311,8 +376,8 @@ export class AdminApi {
     return this.rpc("admin.provisioning.mode", {});
   }
 
-  settings(): Promise<PlatformSetting[]> {
-    return this.rpc<PlatformSetting[]>("admin.settings.list", {});
+  settings(): Promise<SettingsList> {
+    return this.rpc<SettingsList>("admin.settings.list", {});
   }
 
   putSetting(key: string, value: unknown): Promise<PlatformSetting> {
@@ -323,8 +388,45 @@ export class AdminApi {
     return this.rpc<PlatformSetting>("admin.setting.reset", { key });
   }
 
-  identityCheck(group?: string): Promise<IdentityCheck[]> {
-    return this.rpc<IdentityCheck[]>("admin.identity.check", group ? { group } : {});
+  identityCheck(group?: string): Promise<IdentityCheckResult> {
+    return this.rpc<IdentityCheckResult>("admin.identity.check", group ? { group } : {});
+  }
+
+  /** The identity provider: settings with their sources, the URLs to register, how many arrived. */
+  provider(): Promise<ProviderState> {
+    return this.rpc<ProviderState>("admin.provider.get", {});
+  }
+
+  /** Test a candidate laid over today's values. Writes nothing. */
+  providerCheck(attrs: Record<string, string>): Promise<ProviderCheck> {
+    return this.rpc<ProviderCheck>("admin.provider.check", { attrs });
+  }
+
+  /** Save the provider, behind the check; `force` saves although it failed. */
+  providerPut(attrs: Record<string, string>, force = false): Promise<ProviderState> {
+    return this.rpc<ProviderState>("admin.provider.put", force ? { attrs, force: true } : { attrs });
+  }
+
+  providerReset(): Promise<ProviderState> {
+    return this.rpc<ProviderState>("admin.provider.reset", {});
+  }
+
+  scim(): Promise<ScimConnector> {
+    return this.rpc<ScimConnector>("admin.scim.get", {});
+  }
+
+  /** Mint the connector's token. The answer carries it, once. */
+  scimRotate(): Promise<ScimConnector> {
+    return this.rpc<ScimConnector>("admin.scim.rotate", {});
+  }
+
+  /** Forget the token. Confirmed by the base URL, which is the plane's own rule. */
+  scimDelete(baseUrl: string): Promise<ScimConnector> {
+    return this.rpc<ScimConnector>("admin.scim.delete", { base_url: baseUrl });
+  }
+
+  scimUpdate(attrs: { teams_from_groups: boolean }): Promise<ScimConnector> {
+    return this.rpc<ScimConnector>("admin.scim.update", { attrs });
   }
 
   principals(team: string): Promise<ServicePrincipal[]> {
