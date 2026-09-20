@@ -727,7 +727,7 @@ while its session is working.
 | `pending` | not started | read it; wait. The session exists and has no worker yet |
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
-| `read_only` | stopped | read it; activating commands return `forbidden` |
+| `read_only` | stopped | read it; activating commands return `forbidden`. A session is parked here when its team lost the grant or its profile is gone, and when a pod could not put its tree back because the directory it was recorded in is gone (Decision 661) |
 | `erased` | gone | `not_found` |
 
 `pending` is a remote state and a short one. A `session.create` on a profile that is full

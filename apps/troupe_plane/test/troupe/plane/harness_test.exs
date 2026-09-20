@@ -11,7 +11,7 @@ defmodule Troupe.Plane.HarnessTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Audit, Bundles, Fleet, Harness, Identity, Principals, Sessions, TeamBudget}
+  alias Troupe.Plane.{Audit, Bundles, FakePod, Fleet, Harness, Identity, Principals, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -338,6 +338,38 @@ defmodule Troupe.Plane.HarnessTest do
       assert Enum.all?(results, &match?({:ok, _}, &1))
       assert Sessions.get(session.id).epoch == 2
       assert results |> Enum.map(fn {:ok, r} -> r["epoch"] end) |> Enum.uniq() == [2]
+    end
+
+    test "a pod that cannot put the tree back parks the session read-only, and the next open says so",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      user = person("ada@example.test", ["engineering"])
+
+      gone = %{
+        "code" => -32_005,
+        "message" => "not_found",
+        "data" => %{"reason" => "workspace_gone", "detail" => "/var/lib/troupe/erased"}
+      }
+
+      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0", refuse: %{"session.activate" => gone})
+      session = session!("s-erased", user, team, state: "dormant")
+
+      assert {:error, error} =
+               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+
+      assert error.message == "forbidden"
+      assert error.data.reason =~ "workspace is gone"
+      assert_receive {:pushed, "session.activate", _}, 5_000
+
+      parked = Sessions.get(session.id)
+      assert parked.state == "read_only"
+      assert is_nil(parked.worker_id)
+
+      # The next open is refused before any pod is asked.
+      assert {:error, %{message: "forbidden"}} =
+               Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
+
+      refute_receive {:pushed, "session.activate", _}, 200
     end
 
     test "a read-only session cannot be activated", context do

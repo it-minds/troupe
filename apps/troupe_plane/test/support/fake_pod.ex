@@ -3,8 +3,9 @@ defmodule Troupe.Plane.FakePod do
   A worker that enrols for real over the control channel and forwards every push to a
   test process, so assertions are about what actually crossed the wire.
 
-  Every request the plane pushes is answered `{"ok": true}`; notifications are forwarded
-  and not answered. The test receives `{:pushed, method, params}` for both.
+  Every request the plane pushes is answered `{"ok": true}` — or, for a method named in
+  `refuse:`, with the error object given for it; notifications are forwarded and not
+  answered. The test receives `{:pushed, method, params}` for both.
   """
 
   @doc "Enrol a pod on a listener port with a token the test's verifier accepts."
@@ -12,6 +13,7 @@ defmodule Troupe.Plane.FakePod do
           %{worker_id: String.t(), socket: port()}
   def enrol(port, token, pod_name, opts \\ []) do
     test = Keyword.get(opts, :notify, self())
+    refuse = Keyword.get(opts, :refuse, %{})
     {:ok, socket} = :gen_tcp.connect(~c"127.0.0.1", port, [:binary, active: false, packet: :raw])
 
     request =
@@ -36,7 +38,7 @@ defmodule Troupe.Plane.FakePod do
     pid =
       spawn_link(fn ->
         :inet.setopts(socket, active: true)
-        serve(socket, test)
+        serve(socket, test, refuse)
       end)
 
     :ok = :gen_tcp.controlling_process(socket, pid)
@@ -63,7 +65,14 @@ defmodule Troupe.Plane.FakePod do
     end
   end
 
-  defp serve(socket, test) do
+  defp answer(id, method, refuse) do
+    case Map.get(refuse, method) do
+      nil -> Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"ok" => true}})
+      error -> Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "error" => error})
+    end
+  end
+
+  defp serve(socket, test, refuse) do
     receive do
       {:tcp, ^socket, data} ->
         for line <- String.split(data, "\n", trim: true) do
@@ -71,10 +80,7 @@ defmodule Troupe.Plane.FakePod do
             {:ok, %{"id" => id, "method" => method, "params" => params}} ->
               send(test, {:pushed, method, params})
 
-              answer =
-                Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => %{"ok" => true}})
-
-              :gen_tcp.send(socket, [answer, ?\n])
+              :gen_tcp.send(socket, [answer(id, method, refuse), ?\n])
 
             {:ok, %{"method" => method, "params" => params}} ->
               send(test, {:pushed, method, params})
@@ -84,7 +90,7 @@ defmodule Troupe.Plane.FakePod do
           end
         end
 
-        serve(socket, test)
+        serve(socket, test, refuse)
 
       {:tcp_closed, ^socket} ->
         :ok

@@ -115,6 +115,28 @@ defmodule Troupe.Worker.Session.Manager do
   @spec fence(pid(), pos_integer()) :: :ok
   def fence(pid, epoch), do: GenServer.call(pid, {:fence, epoch}, 60_000)
 
+  @doc """
+  What to tell the plane about an activation that failed, or `nil` for one it should
+  simply try again (Decision 661).
+
+  A tree that cannot be put back because the directory the session was recorded in is
+  gone is not a storage blip: said once, so the plane parks the session read-only rather
+  than every client that opens it meeting the same failure. Every other failure — a
+  stale epoch, storage that did not answer — is the plane's to retry or refuse as it
+  already does, and gets no report.
+  """
+  @spec unrestorable_report(String.t(), term()) :: map() | nil
+  def unrestorable_report(session_id, {:not_a_directory, path}) do
+    %{
+      "type" => "session.unrestorable",
+      "session_id" => session_id,
+      "reason" => "workspace_gone",
+      "detail" => to_string(path)
+    }
+  end
+
+  def unrestorable_report(_session_id, _reason), do: nil
+
   # -- server -----------------------------------------------------------------
 
   @impl GenServer
@@ -149,6 +171,7 @@ defmodule Troupe.Worker.Session.Manager do
 
       {:error, reason} ->
         Logger.error("troupe worker: could not activate #{state.session_id}: #{inspect(reason)}")
+        if report = unrestorable_report(state.session_id, reason), do: state.report.(report)
         {:stop, :normal, {:error, reason}, %{state | status: :failed, error: reason}}
     end
   end
