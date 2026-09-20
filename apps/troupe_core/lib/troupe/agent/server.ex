@@ -941,8 +941,8 @@ defmodule Troupe.Agent.Server do
   end
 
   # One `budget_warning` per dimension that has crossed `budget_warn_at`, so a person
-  # hears that a limit is near before it stops the agent — and hears it once. Ephemeral:
-  # the numbers are in `agent_state` for whoever asks later, and a warning is for now.
+  # hears that a limit is near before it stops the agent — and hears it once. Durable:
+  # an ephemeral may be dropped under load, and a warning that may not arrive is not one.
   defp warn_headroom(%State{config: %{full_send: true}} = state), do: state
 
   defp warn_headroom(%State{} = state) do
@@ -951,15 +951,12 @@ defmodule Troupe.Agent.Server do
     headroom
     |> Headroom.crossed(state.config.budget_warn_at, state.headroom_warned)
     |> Enum.reduce(state, fn {dim, entry}, acc ->
-      publish(acc, %{
-        type: :budget_warning,
-        data: %{
-          "dimension" => to_string(dim),
-          "used" => entry.used,
-          "limit" => entry.limit,
-          "fraction" => Float.round(entry.fraction, 3),
-          "detail" => Headroom.describe(dim, entry)
-        }
+      log(acc, :budget_warning, %{
+        "dimension" => to_string(dim),
+        "used" => entry.used,
+        "limit" => entry.limit,
+        "fraction" => Float.round(entry.fraction, 3),
+        "detail" => Headroom.describe(dim, entry)
       })
 
       %{acc | headroom_warned: MapSet.put(acc.headroom_warned, dim)}
