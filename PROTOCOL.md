@@ -440,6 +440,12 @@ This makes every command safe to retry after a disconnect.
 workspace already has a live session; `"never"` reuses the directory; `"always"`
 always branches.
 
+`workflow`: run the prompt as a named **workflow**: the step list at
+`<workspace>/.troupe/workflows/<name>.json` (or the built-in `default` pipeline) is
+rendered around the prompt as the plan the `workflow` agent starts from, and `profile`
+defaults to `workflow`. `workflows.list {workspace}` says which names exist. A workflow
+is meant for a worktree of its own (`worktree: "always"`), since its subagents write.
+
 `parent`: the session this one is a **branch** of — a second agent a person started
 from the first one's screen. The daemon records it in `session_created`, returns it in
 every listing, and refuses an id it does not know (`invalid_params`, field `parent`).
@@ -598,6 +604,15 @@ machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `g
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
 `profile` may name wherever the session will run.
 
+#### `workflows.list`
+```json
+{"workspace": "/home/me/project"}
+```
+→ `{"workflows": ["default", "release"]}` — `default` is the built-in pipeline
+(understand → plan → implement → test → document → verify); the rest are the
+`.troupe/workflows/<name>.json` files in the workspace, each a JSON array of
+`{"name", "prompt", "agent"?, "parallel"?}` steps.
+
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
 ```json
@@ -710,7 +725,7 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `watch.set`, `identity.link`, `identity.unlink` |
 

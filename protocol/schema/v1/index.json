@@ -25,6 +25,7 @@
     "commands/turn.cancel.json",
     "commands/unsubscribe.json",
     "commands/watch.set.json",
+    "commands/workflows.list.json",
     "commands/workspace.recent.json",
     "commands/workspace.search.json",
     "commands/worktree.discard.json",

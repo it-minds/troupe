@@ -24,6 +24,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
+  alias Troupe.Workflow
   alias Troupe.Workspace
 
   require Logger
@@ -55,6 +56,7 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.upload" => :control,
     "workspace.recent" => :observe,
     "agents.list" => :observe,
+    "workflows.list" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
     "input.send" => :control,
@@ -244,6 +246,12 @@ defmodule Troupe.Gateway.Dispatch do
   # The agents a session in this workspace could run: the built-ins, the machine's
   # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
   # resolve them, so a picker offers exactly what a `profile` may name.
+  defp handle("workflows.list", params, _context) do
+    with {:ok, workspace} <- fetch(params, "workspace") do
+      {:ok, %{"workflows" => workspace |> Path.expand() |> Workflow.available()}}
+    end
+  end
+
   defp handle("agents.list", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       agents =
@@ -449,10 +457,11 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, parent} <- parent_of(params),
          {:ok, resolved} <- Worktrees.resolve(workspace, Map.get(params, "worktree", "auto")) do
       private? = Map.get(params, "private", false) == true
+      {profile, task} = workflow_of(params, workspace)
 
       opts =
-        [workspace: resolved.path, agent: Map.get(params, "profile")]
-        |> maybe_put(:task, Map.get(params, "prompt"))
+        [workspace: resolved.path, agent: profile]
+        |> maybe_put(:task, task)
         |> maybe_put(:config_overrides, overrides(Map.get(params, "config")))
         |> maybe_put(:parent, parent)
         |> maybe_private(private?)
@@ -610,6 +619,22 @@ defmodule Troupe.Gateway.Dispatch do
 
   # A client cannot see this machine's filesystem, so "it did not work" is useless to
   # it — say which of the things it asked for was impossible.
+  # A workflow is a plan the `workflow` agent starts from: the named step list rendered
+  # around the prompt. Loaded from the workspace a client named, not the worktree the
+  # session may get, since that is where `.troupe/workflows/` lives.
+  defp workflow_of(params, workspace) do
+    case Map.get(params, "workflow") do
+      name when is_binary(name) and name != "" ->
+        steps = workspace |> Path.expand() |> Workflow.load(name)
+
+        {Map.get(params, "profile") || "workflow",
+         Workflow.plan(steps, Map.get(params, "prompt") || "")}
+
+      _ ->
+        {Map.get(params, "profile"), Map.get(params, "prompt")}
+    end
+  end
+
   # A branch names the session it forks from; the daemon must know that session, or the
   # link would point at nothing the moment anybody read it back.
   defp parent_of(params) do

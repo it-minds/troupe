@@ -319,7 +319,8 @@ defmodule Troupe.Protocol.Schema do
         "prompt" => optional(:string),
         "worktree" => optional(:string),
         "config" => optional(:object),
-        "parent" => optional(:string)
+        "parent" => optional(:string),
+        "workflow" => optional(:string)
       },
       "session.archive" => %{
         "command_id" => required(:string),
@@ -380,6 +381,7 @@ defmodule Troupe.Protocol.Schema do
       "fleet.get" => %{},
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
+      "workflows.list" => %{"workspace" => required(:string)},
       "worktree.list" => %{"workspace" => optional(:string)},
       "worktree.remove" => %{
         "command_id" => required(:string),

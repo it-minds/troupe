@@ -18,6 +18,9 @@
     "prompt": {
       "type": "string"
     },
+    "workflow": {
+      "type": "string"
+    },
     "workspace": {
       "type": "string"
     },

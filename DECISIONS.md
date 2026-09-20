@@ -4395,3 +4395,22 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      with `conflict` while the session in that worktree is mid-turn; an idle or finished
      agent is not consulted, and its next turn, if any, fails loudly rather than editing
      files nobody will look at. Both are `admin`: they change the user's own checkout.
+
+648. **A workflow is a prompt, and the daemon renders it.** The TUI's harness had
+     `Troupe.Workflow`: a named step list from `.troupe/workflows/<name>.json` (or a
+     built-in six-step pipeline), rendered around the task into the plan an orchestrating
+     `workflow` agent starts from — an agent that cannot write, edit or run, and delegates
+     each step to `explore`, `implementer` or `reviewer`. Nothing in that needs a harness
+     of its own; it needs the step list to be read where the workspace is and the three
+     agents to exist. So the module moves here unchanged in shape, the three definitions
+     join the built-ins (`workflow` a primary the daemon offers in `agents.list`, the other
+     two subagents `delegate` can name), and `session.create` takes `workflow`: the daemon
+     loads the steps from the workspace the client named — not the worktree the session
+     may get — renders the plan, and starts the `workflow` profile on it. `workflows.list`
+     says which names a workspace has, so a client can complete them. Running a workflow
+     is therefore starting a session, which is what makes worktrees, approvals, budgets
+     and dormancy apply to it without a line written for the purpose; a client that wants
+     the result reviewable asks for `worktree: "always"` and ends it with `worktree.merge`
+     or `worktree.discard`. The default steps no longer mention `remember`: the project
+     brief is a later row of the plan, and a plan should not name a tool the agent has
+     not got.

@@ -437,6 +437,15 @@ and its branch, work and all. Both refuse while the session in the worktree is
 mid-turn. There is no CLI command for any of this; a client (the TUI's `/merge` and
 `/discard`) or a script speaks the protocol.
 
+**Workflows.** `session.create` with `workflow: <name>` runs the prompt as a named,
+multi-step workflow: the step list at `.troupe/workflows/<name>.json` (or the built-in
+`default` pipeline: understand, plan, implement, test, document, verify) is rendered
+around the prompt as the plan the `workflow` agent starts from. That agent is an
+orchestrator — it cannot write, edit or run commands — and delegates each step to the
+subagent that owns it: `explore` reads, `implementer` changes, `reviewer` verifies.
+`workflows.list {workspace}` names the workflows a workspace has. Run one in a worktree
+of its own (`worktree: "always"`), and merge or discard it afterwards.
+
 **Branches.** A client may create a session as a branch of another: `session.create`
 with `parent` (the first session's id). The daemon records the link, lists it
 (`session.list` with `filter.parent`), and gives the parent's agent a `read_branch`

@@ -153,3 +153,4 @@ worker may not have it, and the TUI takes it up through the protocol in a PR of 
 |---|---|---|
 | branches | a branch is a session with `parent` (Decision 646): `session.create` records it, `session.list` filters on it, `read_branch` gives the parent's agent a finished branch's prompt, summary and task list; `branches: true` at `initialize` | `branches_test.exs`, `read_branch_test.exs` |
 | worktrees per branch | `worktree.merge` commits, merges with a merge commit, removes; a merge git cannot complete is aborted and answered `conflict`; `worktree.discard` removes tree and branch (Decision 647) | `branches_test.exs` |
+| workflows | `Troupe.Workflow` (steps from `.troupe/workflows/<name>.json` or the default pipeline, rendered into the orchestrator's plan); the `workflow`, `implementer` and `reviewer` definitions; `session.create` with `workflow`, `workflows.list` (Decision 648) | `workflow_test.exs`, `workflows_test.exs` |

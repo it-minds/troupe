@@ -92,8 +92,10 @@ defmodule Troupe.Agent.DefinitionTest do
     end
 
     test "primaries and subagents are partitioned", %{defs: defs} do
-      assert Enum.map(Definitions.primaries(defs), & &1.name) == ["build", "plan"]
-      assert Enum.map(Definitions.subagents(defs), & &1.name) == ["explore", "general"]
+      assert Enum.map(Definitions.primaries(defs), & &1.name) == ["build", "plan", "workflow"]
+
+      assert Enum.map(Definitions.subagents(defs), & &1.name) ==
+               ["explore", "general", "implementer", "reviewer"]
     end
   end
 
