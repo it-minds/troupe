@@ -15,8 +15,7 @@ import { useCallback, useState } from "react";
 import type { JSX } from "react";
 import type { DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
-import { Loading, Pill, When } from "./bits";
-import { Confirm, Failed, Table } from "./admin/bits";
+import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
 
 export interface DaemonState {
   client: DaemonClient | null;

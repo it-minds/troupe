@@ -6,7 +6,6 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   addPending,
   AdminApi,
-  ErrorCodes,
   dropPending,
   emptyTranscript,
   fold,
@@ -15,7 +14,6 @@ import {
   FleetStore,
   PlaneSource,
   SessionAttachment,
-  TroupeRpcError,
 } from "@troupe/client";
 import { daemonHint, shell } from "./shell";
 import type {
@@ -23,7 +21,6 @@ import type {
   AuthSession,
   DaemonEndpoint,
   DaemonIdentity,
-  FleetOverview,
   FleetSnapshot,
   ProfileOffering,
   SessionKind,
@@ -380,54 +377,20 @@ export function useSessionView(
  * is scoped to whatever the caller administers, and a person who administers nothing is
  * refused — which is exactly the question the navigation is asking.
  */
-export function useAdmin(auth: AuthSession | null): {
-  api: AdminApi | null;
-  available: boolean;
-  platform: boolean;
-  overview: FleetOverview | null;
-  checking: boolean;
-  error: string | null;
-  refresh: () => void;
-} {
-  const api = useMemo(() => (auth ? new AdminApi((m, p) => auth.rpc(m, p)) : null), [auth]);
-  const [available, setAvailable] = useState(false);
-  const [platform, setPlatform] = useState(false);
-  const [overview, setOverview] = useState<FleetOverview | null>(null);
-  const [checking, setChecking] = useState(Boolean(auth));
-  const [error, setError] = useState<string | null>(null);
-  const [round, setRound] = useState(0);
-
-  useEffect(() => {
-    if (!api || !auth) return;
-    let live = true;
-    setChecking(true);
-    void (async () => {
-      try {
-        const [me, over] = await Promise.all([
-          auth.rpc<{ platform_admin?: boolean }>("me", {}).catch(() => ({}) as { platform_admin?: boolean }),
-          api.overview(),
-        ]);
-        if (!live) return;
-        setPlatform(Boolean(me.platform_admin));
-        setOverview(over);
-        setAvailable(true);
-        setError(null);
-      } catch (e) {
-        if (!live) return;
-        // Refused is an answer, not a failure: it means this person administers
-        // nothing, and the navigation should not offer what every call would refuse.
-        setAvailable(false);
-        setError(e instanceof TroupeRpcError && e.code === ErrorCodes.forbidden ? null : e instanceof Error ? e.message : String(e));
-      } finally {
-        if (live) setChecking(false);
-      }
-    })();
-    return () => {
-      live = false;
-    };
-  }, [api, auth, round]);
-
-  return { api, available, platform, overview, checking, error, refresh: useCallback(() => setRound((n) => n + 1), []) };
+/**
+ * The plane's administrative client, for the one screen that still needs it.
+ *
+ * Administration is the console's, at `/admin`. This app used to carry a panel of its
+ * own over the same methods, and it is gone: two renderings of one surface is two
+ * things to keep in step, and the console is the one with the coverage test behind it.
+ *
+ * What remains is Review, which reads `admin.runs.list` to find the runs nobody has
+ * looked at. There is no probe any more either — the panel needed to know whether to
+ * offer itself, and Review is offered to everybody and reports a refusal like any
+ * other read.
+ */
+export function useAdmin(auth: AuthSession | null): AdminApi | null {
+  return useMemo(() => (auth ? new AdminApi((m, p) => auth.rpc(m, p)) : null), [auth]);
 }
 
 /**
