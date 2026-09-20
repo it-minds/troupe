@@ -6,6 +6,7 @@ tools:
   - read_file
   - list_files
   - grep
+  - read_output
   - shell
   - delegate
   - remember

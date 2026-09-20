@@ -562,6 +562,13 @@ Sources:
 
 ## Large outputs
 
+**Kept tool output.** When `shell` or `grep` output is longer than `tool_output_limit`
+(60 000 bytes), the agent sees the tail (`shell`) or the head (`grep`) and a marker
+naming a `read_output(id: "sha256:…", offset: N, limit: 200)` call; the full text is
+kept as a blob of the session, so line 900 of a test run is read back rather than the
+suite run again. `read_file` output is not kept — reading again with an offset is the
+same bytes.
+
 A tool result larger than 16 KiB is not put in the event; the log carries `{"blob":
 "sha256:…", "preview": …}` with the first 4 KiB as preview, and the bytes are stored
 under the session, content-addressed. A client fetches them with `blob.get`

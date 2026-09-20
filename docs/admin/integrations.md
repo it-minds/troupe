@@ -24,6 +24,8 @@ Troupe is a plain relying party. Four things are required of the provider (`valu
 
 Default scopes are `openid profile email offline_access` (`web/router.ex:59`); the console asks for `openid profile email` unless `TROUPE_OIDC_SCOPES` says otherwise (`web/admin_auth.ex:321`). `offline_access` is what gets the CLI a refresh token (`web/router.ex:327-329`).
 
+**Which claim is the person** (`subject_claim`, `plane.subjectClaim`, default `sub`; `login.ex:41-52`): every record here is keyed on it. Entra's `sub` is pairwise — a different string for the same person in every app registration, and not an attribute SCIM can push — so a deployment running both must use `oid`, which is what SCIM sends as `externalId`. Keyed on `sub`, SCIM's person and the person who signs in are two rows and the deprovision lands on the wrong one. It cannot be corrected afterwards: rows keep the name they were created with. [entra.md §0](entra.md).
+
 **Entra specifics visible in the repository**: the values placeholders use `/oauth2/v2.0/{authorize,devicecode,token}` (`values.small.yaml:101-105`); `admin.identity.check` exists partly for "an Entra tenant configured with a v2 issuer and a v1 token endpoint" (`oidc.ex:303-305`); for MCP the app registration needs an App ID URI, one delegated scope, access tokens at version 2, the `groups` claim on access tokens as well as id tokens, and the client's loopback redirect — scripted for the IT Minds tenant in the gitignored `.local/scaleway/entra-expose-mcp-api.sh` (`docs/plans/admin-surface.md:87-90`). `groups_claim` is `groups` on Entra; some providers use `roles` (`settings.ex:66-68`).
 
 **Check it**:
@@ -151,10 +153,16 @@ The first does OAuth against the identity provider — the app registration must
 
 | Item | Detail | Source |
 |---|---|---|
-| Endpoints | `GET/POST /scim/v2/Users`, `GET/PUT/PATCH/DELETE /scim/v2/Users/:id`, `GET/POST /scim/v2/Groups`, `PUT/PATCH /scim/v2/Groups/:id` | `web/router.ex:168-177,342-408` |
-| Token | `TROUPE_SCIM_TOKEN` from Secret `troupe-plane-scim` key `token` when `plane.scim.enabled: true`; unset → every SCIM request is 401 | `plane-deployment.yaml:296-302`; `web/router.ex:410-416` |
-| Semantics | the subject is `externalId`, else `userName` — it must be what later appears as `sub`; group membership is **replaced** per push; `DELETE` deactivates rather than deletes; list responses are unpaginated | `scim.ex:1-15,36-73,109-119` |
+| Endpoints | `GET /scim/v2/ServiceProviderConfig`; `GET/POST /scim/v2/Users`, `GET/PUT/PATCH/DELETE /scim/v2/Users/:id`; `GET/POST /scim/v2/Groups`, `GET/PUT/PATCH/DELETE /scim/v2/Groups/:id` | `web/router.ex` (`scim/2`) |
+| Token | `TROUPE_SCIM_TOKEN` from Secret `troupe-plane-scim` key `token` when `plane.scim.enabled: true`; unset → every SCIM request is 401, including the capability document | `plane-deployment.yaml:333-338`; `web/router.ex` (`scim_authorised?/1`) |
+| The subject | `externalId`, else `userName`, and it must be the string the token's `subject_claim` carries — `oid` on Entra (§1). A `PATCH` never moves it | `scim.ex` (`subject_of/1`, `patch_user/2`) |
+| Patching | `PatchOp` on `active`, `displayName`, `emails`, and group `members` (`add`, `replace`, `remove`, including `members[value eq "…"]`); `op` is read case-insensitively and a pathless operation carrying a map of attributes is read too. An attribute with no column is ignored rather than refused | `scim.ex` (`patch_user/2`, `patch_group/2`) |
+| Filtering | one `<attribute> eq "<value>"`, on `userName`, `externalId` and `id`, and on a group's `displayName`. Anything else is **400 `invalidFilter`** — never an unfiltered list, which a provider reads as "yes, this person exists" about a stranger | `scim.ex` (`users_matching/1`, `groups_matching/1`) |
+| Deleting | `DELETE` on a user deactivates and keeps the row, and stops the service principals they sponsored; `DELETE` on a group empties it and keeps it, because a team may be drawn from it | `scim.ex` (`deactivate_user/1`, `clear_group/1`) |
+| Not implemented | pagination, sort, bulk, ETag, `/Schemas`, `/ResourceTypes`, and every filter beyond one equality | |
+| A full push | membership is **replaced**, not merged: the push carries the whole list, so an absent member has been removed | `scim.ex` (`put_group/2`) |
 | Without SCIM | `Login.from_claims/1` builds the same rows from the token's group claim at every sign-in; both paths end in `Identity` so the teams are the same | `login.ex:1-14` |
+| Entra, end to end | [entra.md](entra.md) | |
 
 ---
 

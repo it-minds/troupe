@@ -4438,3 +4438,18 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      for it, and the client starts a `librarian` session when the brief is `absent` or
      `stale`. Flat config keys, like every other setting: `memory`, `memory_auto_refresh`,
      `memory_max_chars`, `memory_max_age_days`.
+
+650. **What a tool had to cut is kept, and the marker says how to read the rest.** The
+     core capped `shell` and `grep` output and threw the rest away: the marker said how
+     many bytes were dropped and told the model to narrow the request, which for a test
+     run means running the suite again to see line 900 of it. The TUI's harness kept the
+     full text under a session-local id and paged it back with `read_output`. That comes
+     here on top of what already existed — `Troupe.Session.Blobs`, the content-addressed
+     per-session store every oversized event payload goes into — rather than as a second
+     store: a cut result's full text becomes a blob, its `sha256:` digest is the id, and
+     the marker names the `read_output` call with the line to resume from (after the kept
+     head for `grep`, line 1 for `shell`, whose kept part is the tail). The id is a digest
+     the store validates, so a path is never built from anything the model typed, and the
+     blob lives and dies with the session like the rest of its history. `read_file` is
+     not kept: reading again with the next offset returns the same bytes, and a store for
+     that would be a copy of the file.

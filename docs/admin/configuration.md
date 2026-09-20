@@ -87,6 +87,7 @@ The module paths above are `apps/troupe_operator/lib/troupe/operator/`. `Troupe.
 | `POD_IP`, `RELEASE_NODE` | set by chart | — | `troupe-plane@<pod ip>`; read by the release scripts, not by Troupe | `plane-deployment.yaml:267-273` | — |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | no | the `gen_tcp` control listener workers dial | `plane.controlPort`, `plane-deployment.yaml:211-212` | `runtime.exs:316` |
 | `TROUPE_GROUPS_CLAIM` | `groups` | no | deployed value of the `groups_claim` setting | `plane.groupsClaim`, `plane-deployment.yaml:227-228` | `runtime.exs:317`; `settings.ex:60-70` |
+| `TROUPE_SUBJECT_CLAIM` | `sub` | no | deployed value of the `subject_claim` setting — which claim **is** the person. `oid` on Entra wherever SCIM also runs, or the same person arrives as two rows ([entra.md §0](entra.md)) | `plane.subjectClaim` | `runtime.exs`; `login.ex:41-52`; `settings.ex` |
 | `TROUPE_SCIM_TOKEN` | unset (SCIM answers 401) | no | static bearer the IdP presents on `/scim/v2/*` | `plane.scim.secretName` / `secretKey` when `plane.scim.enabled`, `plane-deployment.yaml:296-302` | `runtime.exs:318`; `web/router.ex:410-416` |
 | `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody is platform admin) | no | deployed value of the `platform_admin_group` setting | `plane.platformAdminGroup`, `plane-deployment.yaml:225-226` | `runtime.exs:319`; `settings.ex:50-59` |
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | no | `aud` of plane tokens; `/rpc` and `/mcp` verify against it | **no Helm value** | `runtime.exs:320`; `oidc.ex:351`; `web/router.ex:230,428` |
@@ -261,6 +262,7 @@ Chart `troupe` version `0.2.0`, `appVersion "0.2.0"` (`charts/troupe/Chart.yaml:
 | `plane.provisioningMode` (115) | `direct` | `plane-deployment.yaml:223-224` | `TROUPE_PROVISIONING_MODE` |
 | `plane.platformAdminGroup` (118) | `troupe-platform-admins` | `plane-deployment.yaml:225-226` | `TROUPE_PLATFORM_ADMIN_GROUP` |
 | `plane.groupsClaim` (119) | `groups` | `plane-deployment.yaml:227-228` | `TROUPE_GROUPS_CLAIM` |
+| `plane.subjectClaim` | `sub` | `plane-deployment.yaml` | `TROUPE_SUBJECT_CLAIM` |
 | `plane.distribution` (125) | `name` | `plane-deployment.yaml:131,171-176,202-206,261-276`; `network-policy.yaml:49-60`; `_helpers.tpl:31-35` | `RELEASE_DISTRIBUTION`; epmd and dist ports; `POD_IP`, `RELEASE_NODE`, `TROUPE_NODE_BASENAME`, `TROUPE_PLANE_SELECTOR`; dist NetworkPolicy rule; `Recreate` strategy when not `name` |
 | `plane.database.secretName` / `secretKey` (129-130) | `troupe-plane-database` / `url` | `plane-deployment.yaml:87-91,278-282` | `DATABASE_URL` via `secretKeyRef` |
 | `plane.secretKeyBase.secretName` / `secretKey` (134-135) | `troupe-plane-secret-key-base` / `value` | `plane-deployment.yaml:283-287` | `TROUPE_SECRET_KEY_BASE` |
@@ -366,6 +368,7 @@ Three notes on the overlays:
 |---|---|---|---|---|---|---|---|
 | `platform_admin_group` | administration | string | yes | `TROUPE_PLATFORM_ADMIN_GROUP` | none | immediate | 50-59 |
 | `groups_claim` | administration | string | yes | `TROUPE_GROUPS_CLAIM` | `groups` | immediate | 60-70 |
+| `subject_claim` | administration | string | yes | `TROUPE_SUBJECT_CLAIM` | `sub` | immediate | — |
 | `provisioning_mode` | provisioning | enum `direct`, `gitops` | yes | `TROUPE_PROVISIONING_MODE` | `direct` | immediate | 71-82 |
 | `default_budget_micros` | team_defaults | integer | yes | — | `0` (unlimited) | next team enabled | 83-92 |
 | `default_budget_period` | team_defaults | enum `monthly`, `daily` | yes | — | `monthly` | next team enabled | 93-104 |
@@ -386,6 +389,7 @@ Discrepancies and caveats:
 
 - `default_budget_period` offers `monthly` or `daily` (`settings.ex:97`), the API describes "monthly or daily" (`admin/api.ex:107`) and the Teams page offers both (`web/live/teams.ex:207-208`), but `Identity.Team` accepts only `monthly` or `never` (`identity/team.ex:69`) and the ledger never windows spend by period (`ledger.ex:69-78`). Enabling a team while the default is `daily` will fail the changeset. [AUDIT.md §2, §4.9](../AUDIT.md).
 - `default_bundle_channel` has no reader beyond the registry ([AUDIT.md §4.10](../AUDIT.md)); a profile's channel is `configBundleChannel` on the CR (default `stable`, `charts/troupe/crds/workerprofile.yaml:99`).
+- `subject_claim` is the name every other record here is keyed on, and is the one setting that cannot be corrected afterwards: rows keep the name they were created with, so changing it turns everybody who has already signed in into strangers ([entra.md §0](entra.md)).
 - `platform_admin_group` and `groups_claim` are what `Admin.actor_for/1` and `Login.from_claims/1` read (`login.ex:63-71`), so a wrong value locks everyone out at their next request; the console will not save `platform_admin_group` until `admin.identity.check` has passed for the value in the field (`web/live/settings.ex:38,90`).
 
 **How to change one** (all four surfaces reach the same `Settings.put/3`):

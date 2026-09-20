@@ -372,7 +372,15 @@ A rollout, because the token is read at boot. Disable: set `secretName: ""`, upg
 kubectl -n troupe-system create secret generic troupe-plane-scim --from-literal=token="$(openssl rand -base64 48 | tr -d '\n')"
 ```
 
-Set `plane.scim.enabled: true` and upgrade (`plane-deployment.yaml:296-302`). Configure the provider to push to `https://<plane>/scim/v2` with that bearer token, keying users on `externalId` = the token `sub` ([integrations.md §8](integrations.md#8-scim)).
+Set `plane.scim.enabled: true` and upgrade (`plane-deployment.yaml:296-302`). Configure the provider to push to `https://<plane>/scim/v2` with that bearer token, keying users on `externalId` — which has to be the same string the token's subject claim carries. On Entra that means mapping it from `objectId` and setting `plane.subjectClaim: oid`, because Entra's `sub` is a different string in every app registration and is not something SCIM can send.
+
+What the endpoint supports is a request away, and is the fastest way to tell a plane that has this build from one that does not:
+
+```bash
+curl -s https://<plane>/scim/v2/ServiceProviderConfig -H "authorization: Bearer $TROUPE_SCIM_TOKEN"
+```
+
+[entra.md](entra.md) is the whole procedure for Entra — the app registration, the group, the provisioning app's attribute mappings, and exactly what a deprovision does. [integrations.md §8](integrations.md#8-scim) is the endpoint table.
 
 ---
 

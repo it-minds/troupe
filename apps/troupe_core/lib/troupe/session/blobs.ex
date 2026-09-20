@@ -48,6 +48,20 @@ defmodule Troupe.Session.Blobs do
     }
   end
 
+  @doc "Store `content` whatever its size and return its digest: a kept tool output."
+  @spec store(String.t(), Path.t(), binary()) :: String.t()
+  def store(session_id, workspace_root, content) when is_binary(content) do
+    digest = digest(content)
+    path = blob_path(session_id, workspace_root, digest)
+
+    unless File.exists?(path) do
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, content)
+    end
+
+    digest
+  end
+
   @doc """
   Turn a stored payload back into its bytes, or pass a plain one through.
 

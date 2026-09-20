@@ -61,7 +61,7 @@ defmodule Troupe.Tools.Grep do
 
       case matches do
         {:error, _} = error -> error
-        lines -> {:ok, render(lines, cap(ctx))}
+        lines -> {:ok, render(lines, ctx)}
       end
     end
   end
@@ -159,8 +159,8 @@ defmodule Troupe.Tools.Grep do
     :binary.match(head, <<0>>) != :nomatch
   end
 
-  defp render([], _cap), do: "No matches."
-  defp render(lines, cap), do: lines |> Enum.join("\n") |> Output.cap(cap)
+  defp render([], _ctx), do: "No matches."
+  defp render(lines, ctx), do: lines |> Enum.join("\n") |> Output.cap(cap(ctx), ctx)
 
   defp cap(%{config: nil}), do: 60_000
   defp cap(%{config: config}), do: config.tool_output_limit

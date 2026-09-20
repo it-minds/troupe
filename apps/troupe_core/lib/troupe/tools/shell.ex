@@ -78,7 +78,7 @@ defmodule Troupe.Tools.Shell do
         Sandbox.wrap([shell, flag, command], ctx.workspace.mounts, cwd: ctx.workspace.root_real)
 
       case Reaper.open(ctx.workspace.root_real, argv) do
-        {:ok, port} -> collect(port, timeout, cap(ctx))
+        {:ok, port} -> collect(port, timeout, ctx)
         {:error, :reaper_missing} -> {:error, reaper_missing_message()}
       end
     end
@@ -86,34 +86,34 @@ defmodule Troupe.Tools.Shell do
 
   # Reading the port to completion is the only thing this function does; the timeout
   # simply stops reading and closes the port, which reaps the tree.
-  defp collect(port, timeout, cap) do
+  defp collect(port, timeout, ctx) do
     deadline = System.monotonic_time(:millisecond) + timeout
-    do_collect(port, deadline, [], cap)
+    do_collect(port, deadline, [], ctx)
   end
 
-  defp do_collect(port, deadline, acc, cap) do
+  defp do_collect(port, deadline, acc, ctx) do
     remaining = deadline - System.monotonic_time(:millisecond)
 
     if remaining <= 0 do
       close(port)
-      {:ok, render(acc, :timeout, cap)}
+      {:ok, render(acc, :timeout, ctx)}
     else
       receive do
         {^port, {:data, {:eol, line}}} ->
-          do_collect(port, deadline, [line, "\n" | acc], cap)
+          do_collect(port, deadline, ["\n", line | acc], ctx)
 
         {^port, {:data, {:noeol, chunk}}} ->
-          do_collect(port, deadline, [chunk | acc], cap)
+          do_collect(port, deadline, [chunk | acc], ctx)
 
         {^port, {:data, data}} when is_binary(data) ->
-          do_collect(port, deadline, [data | acc], cap)
+          do_collect(port, deadline, [data | acc], ctx)
 
         {^port, {:exit_status, status}} ->
-          {:ok, render(acc, status, cap)}
+          {:ok, render(acc, status, ctx)}
       after
         remaining ->
           close(port)
-          {:ok, render(acc, :timeout, cap)}
+          {:ok, render(acc, :timeout, ctx)}
       end
     end
   end
@@ -125,8 +125,10 @@ defmodule Troupe.Tools.Shell do
     :error, :badarg -> :ok
   end
 
-  defp render(acc, status, cap) do
-    output = acc |> Enum.reverse() |> IO.iodata_to_binary() |> Output.cap_tail(cap)
+  # The tail is what a person reads first — the failure is at the end — and the whole
+  # run is kept for `read_output`, because running it again is the expensive thing.
+  defp render(acc, status, ctx) do
+    output = acc |> Enum.reverse() |> IO.iodata_to_binary() |> Output.cap_tail(cap(ctx), ctx)
     body = if String.trim(output) == "", do: "(no output)", else: output
 
     case status do
