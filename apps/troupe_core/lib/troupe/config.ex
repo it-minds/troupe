@@ -124,6 +124,9 @@ defmodule Troupe.Config do
             memory_auto_refresh: true,
             memory_max_chars: 6_000,
             memory_max_age_days: 7,
+            # Directories outside the workspace the *read* tools may reach (Decision 653):
+            # a dependency checkout, a sibling repository. Writes never leave the workspace.
+            read_roots: [],
             # Where session logs go. `nil` means the platform state directory; an explicit
             # path lets an embedding caller isolate state without touching the environment.
             state_dir: nil,
@@ -624,6 +627,10 @@ defmodule Troupe.Config do
     ArgumentError -> nil
   end
 
+  defp coerce(:read_roots, value) when is_list(value),
+    do: value |> Enum.filter(&is_binary/1) |> Enum.map(&Path.expand/1)
+
+  defp coerce(:read_roots, _value), do: []
   defp coerce(:compact_at, value) when is_integer(value), do: value / 1
   defp coerce(:approvals, "deny"), do: :deny
   defp coerce(:approvals, _value), do: :wait

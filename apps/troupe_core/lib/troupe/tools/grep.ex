@@ -47,7 +47,8 @@ defmodule Troupe.Tools.Grep do
   @impl Troupe.Tool
   def run(args, ctx) do
     with {:ok, pattern} <- Tool.fetch_string(args, "pattern"),
-         {:ok, root} <- Workspace.resolve(ctx.workspace, Map.get(args, "path") || ".") do
+         {:ok, root} <-
+           Workspace.resolve_readable(ctx.workspace, Map.get(args, "path") || ".", Workspace.read_roots(ctx)) do
       opts = %{
         glob: Map.get(args, "glob"),
         case_sensitive: Map.get(args, "case_sensitive", false)

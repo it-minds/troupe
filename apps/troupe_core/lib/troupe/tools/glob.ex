@@ -45,7 +45,8 @@ defmodule Troupe.Tools.Glob do
   @impl Troupe.Tool
   def run(args, ctx) do
     with {:ok, pattern} <- Tool.fetch_string(args, "pattern"),
-         {:ok, dir} <- Workspace.resolve(ctx.workspace, Map.get(args, "path") || ".", :read) do
+         {:ok, dir} <-
+           Workspace.resolve_readable(ctx.workspace, Map.get(args, "path") || ".", Workspace.read_roots(ctx)) do
       offset = max(Tool.fetch_int(args, "offset", 1) || 1, 1)
       limit = max(Tool.fetch_int(args, "limit", @default_limit) || @default_limit, 1)
 

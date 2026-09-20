@@ -569,6 +569,11 @@ Sources:
 
 ## Large outputs
 
+**Read roots.** `read_roots:` in the workspace or machine config is a list of
+directories outside the workspace that `read_file`, `list_files`, `grep` and `glob` may
+reach — a dependency checkout, the repository a worktree's symlink points at. Judged by
+where a path really lands, symlinks followed. Writes never leave the workspace.
+
 **Kept tool output.** When `shell` or `grep` output is longer than `tool_output_limit`
 (60 000 bytes), the agent sees the tail (`shell`) or the head (`grep`) and a marker
 naming a `read_output(id: "sha256:…", offset: N, limit: 200)` call; the full text is

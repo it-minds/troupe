@@ -38,7 +38,7 @@ defmodule Troupe.Tools.ReadFile do
   @impl Troupe.Tool
   def run(args, ctx) do
     with {:ok, path} <- Tool.fetch_string(args, "path"),
-         {:ok, resolved} <- Workspace.resolve(ctx.workspace, path),
+         {:ok, resolved} <- Workspace.resolve_readable(ctx.workspace, path, Workspace.read_roots(ctx)),
          {:ok, contents} <- read(resolved) do
       offset = max(Tool.fetch_int(args, "offset", 1), 1)
       limit = max(Tool.fetch_int(args, "limit", @default_limit), 1)

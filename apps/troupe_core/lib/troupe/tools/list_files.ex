@@ -39,7 +39,7 @@ defmodule Troupe.Tools.ListFiles do
     pattern = Map.get(args, "pattern") || "**/*"
     base = Map.get(args, "path") || "."
 
-    with {:ok, root} <- Workspace.resolve(ctx.workspace, base) do
+    with {:ok, root} <- Workspace.resolve_readable(ctx.workspace, base, Workspace.read_roots(ctx)) do
       ignore = Gitignore.load(ctx.workspace.root_real)
 
       matches =
