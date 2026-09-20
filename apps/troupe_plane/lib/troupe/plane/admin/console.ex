@@ -46,7 +46,7 @@ defmodule Troupe.Plane.Admin.Console do
   # The names in the navigation, grouped as the console groups them: what is happening, what
   # the product is, what it runs on.
   @watch ~w(overview sessions review audit)a
-  @configure ~w(policy bundles profiles triggers teams identity integrations)a
+  @configure ~w(policy bundles profiles triggers teams identity provider integrations)a
   @operate ~w(fleet provisioners budgets connections)a
 
   @doc "Every screen name the console has, in the order the navigation shows them."
@@ -115,6 +115,14 @@ defmodule Troupe.Plane.Admin.Console do
     team_revoke: {:screen, :teams},
     team_admin_add: {:screen, :teams},
     team_admin_remove: {:screen, :teams},
+    provider_get: {:screen, :provider},
+    provider_check: {:screen, :provider},
+    provider_put: {:screen, :provider},
+    provider_reset: {:screen, :provider},
+    scim_get: {:screen, :provider},
+    scim_rotate: {:screen, :provider},
+    scim_delete: {:screen, :provider},
+    scim_update: {:screen, :provider},
 
     # `identity_check` is placed on Policy because that is where the value it gates is
     # saved, and a save gated on a check somewhere else is a gate somebody walks around.

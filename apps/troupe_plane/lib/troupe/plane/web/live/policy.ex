@@ -148,7 +148,9 @@ defmodule Troupe.Plane.Web.Live.Policy do
       {:ok, answer} ->
         socket
         |> assign(
-          groups: answer.groups,
+          # The provider has a screen of its own, where the save is gated on the check;
+          # rendering its fields here too would be a second save nobody gated.
+          groups: Enum.reject(answer.groups, &(&1.key == :sign_in)),
           settings: answer.settings,
           rungs: answer.ladder,
           laddered: answer.laddered

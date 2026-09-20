@@ -381,11 +381,35 @@ A rollout, because the token is read at boot. Disable: set `secretName: ""`, upg
 
 ## 13. Enable SCIM
 
+For Authentik specifically, [authentik.md §4](authentik.md#4-scim-dry-run-first) is the
+same steps with the provider's own fields filled in, and §0 is the part to read first.
+
+From the console: **Identity provider → SCIM connector → create a token**. The token is
+shown once, in the notice at the top of the page. Paste it into the provider's
+provisioning as the secret token, with the base URL the card shows
+(`https://<plane>/scim/v2`), keying users on `externalId` = the token subject
+([integrations.md §8](integrations.md#8-scim)). The card's *last sync* moves on the
+provider's first request, which is its connection test.
+
+```bash
+troupe admin scim get                      # status, last sync, whether a token is set
+troupe admin scim rotate                   # a new token, shown once; the old one stops now
+troupe admin scim delete <base url>        # no token: every push answers 401
+troupe admin scim update '{"teams_from_groups": true}'   # pushed groups become teams
+```
+
+*Create teams from SCIM groups* is off until somebody turns it on. On, a pushed group
+becomes a team named from its display name with the platform's defaults, audited as
+`scim`; a group that is already a team or whose name another team holds is left for you.
+
+The deployment's own token still works if you would rather keep the credential in a
+secret (`plane-deployment.yaml:296-302`):
+
 ```bash
 kubectl -n troupe-system create secret generic troupe-plane-scim --from-literal=token="$(openssl rand -base64 48 | tr -d '\n')"
 ```
 
-Set `plane.scim.enabled: true` and upgrade (`plane-deployment.yaml:296-302`). Configure the provider to push to `https://<plane>/scim/v2` with that bearer token, keying users on `externalId` = the token `sub` ([integrations.md §8](integrations.md#8-scim)).
+Either token opens the door; deleting the console's leaves the deployment's where it is.
 
 ---
 
@@ -403,7 +427,21 @@ See [../a2a.md](../a2a.md).
 
 ## 15. Rotate the OIDC client secret
 
-Update the Secret, then restart the plane — the value is read into the environment at pod start (`plane-deployment.yaml:288-295`):
+From the console: **Identity provider → Single sign-on**, paste the new secret into the
+client secret field and *save*. It takes effect on the next sign-in, is never shown
+again, and overrides whatever the deployment holds until *back to the deployment* is
+pressed. The same card changes the issuer, client id, endpoints and scopes, behind a
+check against what the provider publishes:
+
+```bash
+troupe admin provider get
+troupe admin provider check '{"issuer": "https://login.microsoftonline.com/<tenant>/v2.0"}'
+troupe admin provider put '{"client_secret": "…"}'
+troupe admin provider reset                        # back to the deployment's values
+```
+
+Or in the deployment, which stays the floor: update the Secret, then restart the plane —
+the value is read into the environment at pod start (`plane-deployment.yaml:288-295`):
 
 ```bash
 kubectl -n troupe-system create secret generic troupe-plane-oidc --from-literal=client-secret=… --dry-run=client -o yaml | kubectl apply -f -

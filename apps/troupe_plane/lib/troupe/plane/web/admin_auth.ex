@@ -126,7 +126,7 @@ defmodule Troupe.Plane.Web.AdminAuth do
   end
 
   defp redeem(code) do
-    config = Application.get_env(:troupe_plane, :oidc, [])
+    config = OIDC.configured()
 
     options = [
       method: :post,
@@ -135,7 +135,7 @@ defmodule Troupe.Plane.Web.AdminAuth do
         "grant_type" => "authorization_code",
         "code" => code,
         "client_id" => config[:client_id],
-        "client_secret" => config[:client_secret],
+        "client_secret" => Settings.get("client_secret"),
         "redirect_uri" => redirect_uri()
       },
       decode_body: true,
@@ -306,7 +306,7 @@ defmodule Troupe.Plane.Web.AdminAuth do
   end
 
   defp authorize_url(state) do
-    config = Application.get_env(:troupe_plane, :oidc, [])
+    config = OIDC.configured()
 
     query =
       URI.encode_query(%{
@@ -318,6 +318,7 @@ defmodule Troupe.Plane.Web.AdminAuth do
         # provider: group claims come from how the token is configured, not from what the
         # request asks for. Sending it made Entra refuse the whole authorization with
         # `invalid_scope`, and the callback then blamed the user for not being an admin.
+        # The list is the `scopes` setting, the same one `/.well-known/troupe` publishes.
         "scope" => Enum.join(config[:scopes] || ~w(openid profile email), " "),
         "state" => state
       })
@@ -336,8 +337,8 @@ defmodule Troupe.Plane.Web.AdminAuth do
   defp describe(body), do: body |> inspect() |> String.slice(0, 300)
 
   defp redirect_uri do
-    base = Application.get_env(:troupe_plane, :base_url, "http://localhost:4000")
-    base <> "/admin/callback"
+    base = Settings.get("base_url") || "http://localhost:4000"
+    String.trim_trailing(base, "/") <> "/admin/callback"
   end
 
   @doc false

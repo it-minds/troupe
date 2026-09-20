@@ -14,9 +14,9 @@ defmodule Troupe.Plane.SCIM do
   in `Troupe.Plane.Identity` rather than in two parallel implementations.
   """
 
-  alias Troupe.Plane.Identity
+  alias Troupe.Plane.{Audit, Identity, Principals, Settings}
   alias Troupe.Plane.Identity.{Group, User}
-  alias Troupe.Plane.Principals
+  alias Troupe.Plane.SCIM.Connector
 
   @user_schema "urn:ietf:params:scim:schemas:core:2.0:User"
   @group_schema "urn:ietf:params:scim:schemas:core:2.0:Group"
@@ -48,8 +48,33 @@ defmodule Troupe.Plane.SCIM do
              display_name: Map.get(resource, "displayName") || Map.fetch!(resource, "id")
            }) do
       replace_members(group, Map.get(resource, "members", []))
+      maybe_enable_team(group)
       {:ok, group}
     end
+  end
+
+  # The connector's switch. A group nobody has made a team of becomes one, named from its
+  # display name with the platform's defaults, and the audit trail says `scim` did it. A
+  # group that is already a team, or whose name another team holds, is left alone: the
+  # first is done, the second is a collision an administrator can see and this cannot.
+  defp maybe_enable_team(group) do
+    if Connector.teams_from_groups?() do
+      attrs = Map.put(Settings.team_defaults(), "enabled_by", "scim")
+
+      case Identity.enable_team_if_new(group, attrs) do
+        {:ok, team} ->
+          {:ok, _} =
+            Audit.record("scim", "team.enable", team.name, %{
+              "group" => group.external_id,
+              "by" => "scim"
+            })
+
+        {:error, _reason} ->
+          :ok
+      end
+    end
+
+    :ok
   end
 
   # SCIM members reference users by the id this plane gave them.

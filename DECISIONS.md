@@ -4772,3 +4772,55 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      row: the first step of the identity work in `docs/plans/admin-identity.md`, borrowed
      in shape from the Members → Teams table every SSO-capable tool has. Proof:
      `Troupe.Plane.TeamDisableTest`.
+663. **The SCIM connector is a row with a card, its token is rotated from the console and
+     seen once, and a pushed group can become a team on arrival — behind a switch that is
+     off.** SCIM had a credential and no object: `TROUPE_SCIM_TOKEN`, compared in the
+     router, set in a Kubernetes secret and changed with a rollout, with nothing anywhere
+     saying when the provider last pushed. Every tool an operator has configured this in
+     shows a connector card — base URL, a token you rotate and see once, when it was
+     rotated, when the provider last synced, a switch for whether its groups become teams
+     — and `Troupe.Plane.SCIM.Connector` is the row behind that card: one, because a
+     plane has one directory, holding the token as a salted SHA-256 the way a service
+     principal's secret is held. The environment stays the floor: `scim_authorised?/1`
+     asks the stored hash *and* the deployed token, so a plane provisioned before the row
+     existed keeps working with no row, and deleting the console's token leaves the
+     deployment's where it is — the card says which door is open. *Last sync* is stamped
+     after the door and never before it, at most once a minute, with the operation, because
+     the provider's connection test is a filtered `GET` and a deprovision is a `PATCH` and
+     somebody debugging wants to know which they are looking at. The switch is off for
+     every plane upgrading into this: a plane that has been enabling teams by hand should
+     not wake up with forty new ones. On, `SCIM.put_group/1` enables a pushed group through
+     `Identity.enable_team_if_new/2`, which refuses a group already drawn from and a name
+     another team holds — `enable_team/2` is keyed on the name and would have *merged*
+     strangers into an existing team — and the audit entry names `scim`. Deleting the token
+     is confirmed by typing the base URL, since a connector has no name and the URL is the
+     one thing about it somebody has in front of them. New screen *Identity provider*
+     (`/admin/provider`); the SSO card joins it next. Proof:
+     `Troupe.Plane.ScimConnectorTest`.
+
+664. **The identity provider is configured from the console — issuer, client id, secret,
+     endpoints, scopes — behind a check, with reset as the way back and break-glass as the
+     reason it is safe.** The settings module's own argument for keeping these read-only
+     was the lock-out: a wrong issuer refuses every administrator including the one who
+     typed it, so the keyhole should not be adjustable from inside the house. Three things
+     answer it now that did not when it was written. The break-glass door opens the console
+     without any provider. `Settings.reset/2` deletes the row and the deployed value is
+     read again, so the deployment is still the floor and a stored value only ever
+     overrides it. And `admin.provider.put` is refused unless `admin.provider.check` passes
+     for the candidate — discovery answers and calls itself the same thing, its keys can be
+     read, the endpoints given agree with the ones it publishes — with `force` for the
+     administrator who knows the provider is down. Every reader moved to one description,
+     `OIDC.configured/0`: the console's authorize request and code redemption, the
+     verifier, the discovery document at `/.well-known/troupe` and the RFC 9728 metadata,
+     so a stored value wins everywhere or nowhere. The client secret is stored plain in
+     `platform_settings`, flagged secret so no rendering ever returns it and the audit diff
+     says *set*; a secret the plane has to present cannot be hashed, and an envelope key in
+     the environment would be one more thing to deploy and rotate — the trade is named here
+     so it is a choice, and the key is the upgrade path (Martin, 2026-09-20, agreed both).
+     Two small consequences: the console's authorize request now asks for the same scopes
+     the discovery document publishes (`offline_access` included, where it asked for three
+     before), and `scopes` is a `:list` setting. The Policy screen no longer renders the
+     group; the *Identity provider* screen does, as a single-sign-on card with the
+     redirect, discovery, JWKS and resource-metadata URLs the registration has to know,
+     and the sentence that this is OpenID Connect and not SAML where a SAML tool would put
+     an ACS URL. Proof: `Troupe.Plane.ProviderSettingsTest`.

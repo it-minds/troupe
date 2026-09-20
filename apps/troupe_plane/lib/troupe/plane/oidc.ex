@@ -14,7 +14,7 @@ defmodule Troupe.Plane.OIDC do
   well-known JWKS endpoint works.
   """
 
-  alias Troupe.Plane.{Identity, Login, Tokens}
+  alias Troupe.Plane.{Identity, Login, Settings, Tokens}
   alias Troupe.Protocol.Token
 
   require Logger
@@ -148,7 +148,7 @@ defmodule Troupe.Plane.OIDC do
   # than @refetch_floor_ms, which is what stops the retry becoming the load generator the
   # cache exists to prevent.
   defp default_verifier(opts) do
-    case Application.get_env(:troupe_plane, :oidc, [])[:issuer] do
+    case Settings.get("issuer") do
       nil -> nil
       issuer -> &verify_against_provider(&1, issuer, opts)
     end
@@ -203,8 +203,7 @@ defmodule Troupe.Plane.OIDC do
   end
 
   defp fetch_jwks(issuer) do
-    with {:ok, %{status: 200, body: discovery}} <-
-           get(issuer <> "/.well-known/openid-configuration"),
+    with {:ok, %{status: 200, body: discovery}} <- get(discovery_url(issuer)),
          uri when is_binary(uri) <- discovery["jwks_uri"],
          {:ok, %{status: 200, body: jwks}} <- get(uri) do
       :persistent_term.put({__MODULE__, :jwks, issuer}, jwks)
@@ -217,6 +216,24 @@ defmodule Troupe.Plane.OIDC do
   end
 
   defp get(url), do: Req.request(method: :get, url: url, decode_body: true, retry: false)
+
+  # The issuer without its trailing slash, then the well-known path.
+  #
+  # An issuer that ends in one is not unusual — it is what Authentik publishes for a
+  # per-application provider, `https://auth.example/application/o/<slug>/` — and the
+  # naive concatenation asks for `<slug>//.well-known/openid-configuration`. Whether
+  # that works is the provider's routing, and on Django it does not: the double slash
+  # is a different path and answers 404. What that failure looks like from here is
+  # `no_provider_keys` on every sign-in, with a configuration that is character for
+  # character what the provider's own page told you to paste.
+  #
+  # Only this URL is trimmed. The `iss` claim is compared exactly, by `Token.verify/3`
+  # and by the discovery check, and a trailing slash there is part of the name the
+  # provider calls itself — trimming it would refuse every token from a provider whose
+  # issuer genuinely ends in one.
+  defp discovery_url(issuer) do
+    String.trim_trailing(issuer, "/") <> "/.well-known/openid-configuration"
+  end
 
   # -- checking the configuration ---------------------------------------------
 
@@ -234,18 +251,44 @@ defmodule Troupe.Plane.OIDC do
   they cannot catch is a redirect URI the registration does not have, which is why the
   console prints the URI it would send rather than claiming it is registered.
   """
-  @spec check() :: [map()]
-  def check do
-    issuer = Application.get_env(:troupe_plane, :oidc, [])[:issuer]
+  @spec check(map()) :: [map()]
+  def check(config \\ configured()) do
+    issuer = config[:issuer]
     document = timed(fn -> discovery(issuer) end)
 
-    [discovery_check(issuer, document), keys_check(document), endpoints_check(document)]
+    [
+      discovery_check(issuer, document),
+      keys_check(document),
+      endpoints_check(document, config)
+    ]
+  end
+
+  @doc """
+  The provider as this plane currently sees it: the stored value where there is one, the
+  deployment's otherwise.
+
+  One map rather than eight `Settings.get/1` calls at eight sites, so the console's
+  authorize request, the code redemption, the discovery document at `/.well-known/troupe`
+  and the check are reading one description of the provider. `check/1` takes a candidate
+  of the same shape, which is how a value is tested before it is saved.
+  """
+  @spec configured() :: map()
+  def configured do
+    %{
+      issuer: Settings.get("issuer"),
+      client_id: Settings.get("client_id"),
+      authorization_endpoint: Settings.get("authorization_endpoint"),
+      device_authorization_endpoint: Settings.get("device_authorization_endpoint"),
+      token_endpoint: Settings.get("token_endpoint"),
+      scopes: Settings.get("scopes"),
+      mcp_scope: Settings.get("mcp_scope")
+    }
   end
 
   defp discovery(nil), do: {:error, :no_issuer}
 
   defp discovery(issuer) do
-    case get(issuer <> "/.well-known/openid-configuration") do
+    case get(discovery_url(issuer)) do
       {:ok, %{status: 200, body: body}} when is_map(body) -> {:ok, body}
       {:ok, %{status: status}} -> {:error, {:status, status}}
       {:error, reason} -> {:error, reason}
@@ -303,9 +346,7 @@ defmodule Troupe.Plane.OIDC do
   # The mistake this one exists for: an Entra tenant configured with a v2 issuer and a v1
   # token endpoint. Everything looks right, discovery answers, and every device login fails
   # with a message about the audience.
-  defp endpoints_check({{:ok, document}, _took}) do
-    config = Application.get_env(:troupe_plane, :oidc, [])
-
+  defp endpoints_check({{:ok, document}, _took}, config) do
     mismatched =
       for {name, key, published} <- [
             {"token endpoint", :token_endpoint, "token_endpoint"},
@@ -328,7 +369,7 @@ defmodule Troupe.Plane.OIDC do
     end
   end
 
-  defp endpoints_check({{:error, _reason}, _took}) do
+  defp endpoints_check({{:error, _reason}, _took}, _config) do
     check_result("Endpoints", false, "Not attempted: discovery did not answer.", 0)
   end
 
@@ -344,7 +385,7 @@ defmodule Troupe.Plane.OIDC do
     {result, System.monotonic_time(:millisecond) - started}
   end
 
-  defp client_id, do: Application.get_env(:troupe_plane, :oidc, [])[:client_id]
+  defp client_id, do: Settings.get("client_id")
 
   @doc "The audience a plane token carries, as opposed to a pod's worker id."
   @spec audience() :: String.t()

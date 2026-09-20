@@ -49,6 +49,7 @@ defmodule Troupe.Plane.Admin do
   alias Troupe.Plane.Fleet.{Bundle, Provisioner, SizeClass, Worker}
   alias Troupe.Plane.Identity.ServicePrincipal
   alias Troupe.Plane.{OIDC, Principals, Provision, Sessions, Settings, Triggers}
+  alias Troupe.Plane.SCIM.Connector
   alias Troupe.Plane.Settings.Ladder
   alias Troupe.Plane.Triggers.{Notify, Revision}
   alias Troupe.Protocol.Bundle, as: Document
@@ -503,15 +504,9 @@ defmodule Troupe.Plane.Admin do
   # What a team starts with, from the platform's settings rather than from the schema's
   # defaults. The schema still has defaults — a team created by a migration or a test has
   # to be some shape — but a platform that has decided every new team gets a 500 kr ceiling
-  # should not have to remember to set it on each one.
-  defp team_defaults do
-    %{
-      "budget_micros" => Settings.get("default_budget_micros"),
-      "budget_period" => to_string(Settings.get("default_budget_period")),
-      "idle_timeout_seconds" => Settings.get("default_idle_timeout_seconds"),
-      "erase_after_days" => Settings.get("default_erase_after_days")
-    }
-  end
+  # should not have to remember to set it on each one. In `Settings` because the SCIM
+  # connector enables teams too, and a team should start the same way whoever made it.
+  defp team_defaults, do: Settings.team_defaults()
 
   @doc "Change a team's budget, retention or default visibility."
   @spec team_update(actor(), String.t(), map()) :: result()
@@ -1322,6 +1317,339 @@ defmodule Troupe.Plane.Admin do
     case Settings.get("base_url") do
       nil -> nil
       base -> String.trim_trailing(base, "/") <> "/admin/callback"
+    end
+  end
+
+  # -- the identity provider --------------------------------------------------
+
+  @sign_in_keys ~w(issuer client_id client_secret authorization_endpoint device_authorization_endpoint token_endpoint scopes mcp_scope)
+
+  @doc """
+  The identity provider as the card shows it: every sign-in setting with its value and
+  where it came from (a secret as set or not), the URLs this plane needs registered at the
+  provider, and how many people have arrived through it.
+
+  Readable by a team admin — "is sign-in pointed at the right tenant" is a question they
+  ask when somebody cannot get in — and changed only by a platform admin.
+  """
+  @spec provider_get(actor()) :: result()
+  def provider_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, provider_state()}
+  end
+
+  @doc """
+  Test a candidate provider before saving it.
+
+  The candidate is the current configuration with the given fields laid over it, so a
+  form can ask "what if I saved this" with exactly the values in its fields. Three checks
+  from `OIDC.check/1`: discovery answers and calls itself the same thing, it names keys
+  that can be read, and the endpoints in the candidate agree with the ones it publishes.
+  Nothing is written.
+  """
+  @spec provider_check(actor(), map()) :: result()
+  def provider_check(actor, attrs \\ %{}) do
+    with :ok <- require_admin(actor) do
+      candidate = candidate_provider(attrs)
+      checks = OIDC.check(candidate)
+
+      {:ok,
+       %{
+         checks: checks,
+         ok: Enum.all?(checks, & &1.ok),
+         candidate: Map.take(candidate, [:issuer, :token_endpoint, :device_authorization_endpoint])
+       }}
+    end
+  end
+
+  @doc """
+  Save the identity provider, behind the check.
+
+  Refused when the candidate fails `provider_check/2` — a provider that does not answer,
+  calls itself something else, or publishes different endpoints — unless `force` is set,
+  which is for the provider that is down right now and the administrator who knows it.
+  A blank field is a field nobody changed, so the secret is not cleared by a form that
+  did not retype it; `provider_reset/1` is how everything goes back to the deployment.
+
+  The audit entry carries the diff with the secret as *set* or not, never its value.
+  """
+  @spec provider_put(actor(), map(), boolean() | String.t() | nil) :: result()
+  def provider_put(actor, attrs, force \\ false) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, attrs} <- sign_in_attrs(attrs),
+         :ok <- provider_gate(attrs, force in [true, "true"]) do
+      before = comparable_sign_in()
+
+      case Enum.find_value(attrs, &refused_setting(&1, actor)) do
+        nil ->
+          changes = Audit.diff(before, comparable_sign_in())
+          detail = with_rotated(changes, attrs)
+          {:ok, _} = Audit.record(actor.subject, "provider.put", "sign-in", detail)
+          {:ok, Map.put(provider_state(), :changes, detail)}
+
+        error ->
+          error
+      end
+    end
+  end
+
+  @doc """
+  Put every sign-in setting back to whatever this plane was deployed with.
+
+  The way back from a provider saved in error: the rows go, the deployment's values are
+  read again, and a plane deployed with none has the break-glass door and nothing else,
+  which the answer says.
+  """
+  @spec provider_reset(actor()) :: result()
+  def provider_reset(actor) do
+    with :ok <- require_platform_admin(actor) do
+      before = comparable_sign_in()
+      Enum.each(@sign_in_keys, &Settings.reset(&1, actor.subject))
+      changes = Audit.diff(before, comparable_sign_in())
+      {:ok, _} = Audit.record(actor.subject, "provider.reset", "sign-in", changes)
+      {:ok, Map.put(provider_state(), :changes, changes)}
+    end
+  end
+
+  defp provider_state do
+    base = Settings.get("base_url")
+
+    %{
+      settings: Enum.filter(Settings.all(), &(&1.group == :sign_in)),
+      # What the provider's registration has to know about this plane. Reported rather
+      # than checked, because the provider is the only thing that knows what is registered.
+      urls: %{
+        redirect: at(base, "/admin/callback"),
+        discovery: at(base, "/.well-known/troupe"),
+        jwks: at(base, "/.well-known/jwks.json"),
+        resource_metadata: at(base, "/.well-known/oauth-protected-resource")
+      },
+      # OpenID Connect, and not SAML: said in the answer so a card can say it where a
+      # SAML tool would have an ACS URL and a metadata upload.
+      protocol: "oidc",
+      known_people: length(Identity.list_users())
+    }
+  end
+
+  defp at(nil, _path), do: nil
+  defp at(base, path), do: String.trim_trailing(base, "/") <> path
+
+  # The current configuration with the candidate laid over it, blank fields ignored.
+  defp candidate_provider(attrs) do
+    attrs
+    |> Map.new(fn {key, value} -> {to_string(key), value} end)
+    |> Map.take(@sign_in_keys -- ["client_secret", "scopes", "mcp_scope"])
+    |> Enum.reduce(OIDC.configured(), fn {key, value}, config ->
+      case presence(value) do
+        nil -> config
+        value -> Map.put(config, String.to_existing_atom(key), value)
+      end
+    end)
+  end
+
+  # Blank fields and fields that still say what the plane already reads are not changes:
+  # a form submits every field it has, and a row stored for a value equal to the
+  # deployment's would show as "changed here" for nothing.
+  defp sign_in_attrs(attrs) when is_map(attrs) do
+    attrs =
+      attrs
+      |> Map.new(fn {key, value} -> {to_string(key), value} end)
+      |> Map.take(@sign_in_keys)
+      |> Enum.reject(fn {key, value} -> is_nil(presence(value)) or unchanged?(key, value) end)
+      |> Map.new()
+
+    if map_size(attrs) == 0,
+      do: {:error, Error.new(:invalid_params, %{missing: "attrs", reason: "nothing to save"})},
+      else: {:ok, attrs}
+  end
+
+  defp sign_in_attrs(_attrs), do: {:error, Error.new(:invalid_params, %{missing: "attrs"})}
+
+  # A secret replaced by another is "set" before and after, which a diff drops, so the
+  # entry names which secrets were given — that they changed, never to what.
+  defp with_rotated(changes, attrs) do
+    case Map.keys(attrs) |> Enum.filter(&(&1 == "client_secret")) do
+      [] -> changes
+      rotated -> Map.put(changes, "rotated", rotated)
+    end
+  end
+
+  # A secret cannot be compared, so a typed one is always a change.
+  defp unchanged?("client_secret", _value), do: false
+
+  defp unchanged?(key, value) do
+    case Settings.get(key) do
+      nil -> false
+      list when is_list(list) -> String.split(to_string(value), ~r/[,\s]+/, trim: true) == list
+      current -> to_string(value) == to_string(current)
+    end
+  end
+
+  defp provider_gate(_attrs, true), do: :ok
+
+  defp provider_gate(attrs, false) do
+    checks = OIDC.check(candidate_provider(attrs))
+
+    if Enum.all?(checks, & &1.ok) do
+      :ok
+    else
+      {:error,
+       Error.new(:invalid_params, %{
+         reason:
+           "the provider did not stand behind these values; fix them, or save anyway with force if you know the provider is down",
+         checks: checks
+       })}
+    end
+  end
+
+  defp refused_setting({key, value}, actor) do
+    case Settings.put(key, value, actor.subject) do
+      {:ok, _applied} -> nil
+      {:error, reason} -> {:error, setting_error(key, reason)}
+    end
+  end
+
+  # The sign-in settings as a diff can hold them: a secret is `"set"` or `nil`, never its
+  # value, so an audit entry about the provider is never an audit entry with a credential.
+  defp comparable_sign_in do
+    Settings.all()
+    |> Enum.filter(&(&1.group == :sign_in))
+    |> Map.new(fn
+      %{secret: true, key: key, set: set?} -> {key, if(set?, do: "set", else: nil)}
+      %{key: key, value: value} -> {key, value}
+    end)
+  end
+
+  # -- the SCIM connector -----------------------------------------------------
+
+  @doc """
+  The SCIM connector as the card shows it: where the provider pushes, whether a token is
+  set and where, when it was rotated, when the provider was last heard from, and the
+  switch. Never the token.
+
+  Readable by a team admin, because "is provisioning connected" is a question they ask
+  when somebody who left is still in their team; changing any of it is a platform
+  admin's.
+  """
+  @spec scim_get(actor()) :: result()
+  def scim_get(actor) do
+    with :ok <- require_admin(actor), do: {:ok, scim_state()}
+  end
+
+  @doc """
+  Mint the connector's token and show it once.
+
+  The old token stops working the moment this returns, the same way a principal's does.
+  The answer carries `token` and is the only place it ever appears: not in the audit
+  entry, not in `scim_get/1`, not in a later page.
+  """
+  @spec scim_rotate(actor()) :: result()
+  def scim_rotate(actor) do
+    with :ok <- require_platform_admin(actor) do
+      {_connector, token} = Connector.rotate(actor.subject)
+      {:ok, _} = Audit.record(actor.subject, "scim.rotate", "connector", %{})
+      {:ok, Map.put(scim_state(), :token, token)}
+    end
+  end
+
+  @doc """
+  Forget the connector's token. Every push presenting it answers 401 from now on.
+
+  Destructive, and confirmed by typing this plane's SCIM base URL — a connector has no
+  name, and the URL is the one thing about it somebody has in front of them. The
+  deployment's own `TROUPE_SCIM_TOKEN`, if there is one, is not touched: that door
+  belongs to the deployment and is closed there.
+  """
+  @spec scim_delete(actor(), String.t()) :: result()
+  def scim_delete(actor, base_url) do
+    with :ok <- require_platform_admin(actor),
+         :ok <- confirm_scim_base_url(base_url) do
+      :ok = Connector.delete()
+      {:ok, _} = Audit.record(actor.subject, "scim.delete", "connector", %{})
+      {:ok, scim_state()}
+    end
+  end
+
+  @doc """
+  Change the connector's switch: whether a group the provider pushes becomes a team.
+
+  Off by default and off for every plane upgrading into this, because a plane that has
+  been enabling teams by hand should not wake up with forty new ones. On, a pushed group
+  nobody has made a team of becomes one named from its display name, with the platform's
+  defaults, audited as `scim`. Turning it off creates no more and deletes none.
+  """
+  @spec scim_update(actor(), map()) :: result()
+  def scim_update(actor, attrs) do
+    with :ok <- require_platform_admin(actor) do
+      attrs = Map.new(attrs, fn {key, value} -> {to_string(key), value} end)
+      before = Connector.describe()
+
+      case Connector.update(attrs) do
+        {:ok, _connector} ->
+          now = Connector.describe()
+
+          changes =
+            Audit.diff(
+              %{"teams_from_groups" => before.teams_from_groups},
+              %{"teams_from_groups" => now.teams_from_groups}
+            )
+
+          {:ok, _} = Audit.record(actor.subject, "scim.update", "connector", changes)
+          {:ok, Map.put(scim_state(), :changes, changes)}
+
+        {:error, changeset} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  defp scim_state do
+    described = Connector.describe()
+    deployed? = is_binary(Settings.get("scim_token"))
+
+    Map.merge(described, %{
+      base_url: scim_base_url(),
+      deployed_token_set: deployed?,
+      status: scim_status(described, deployed?)
+    })
+  end
+
+  defp scim_base_url do
+    case Settings.get("base_url") do
+      nil -> nil
+      base -> String.trim_trailing(base, "/") <> "/scim/v2"
+    end
+  end
+
+  # Four states, said apart: nothing could get in; something could and nothing has; the
+  # provider was heard from today; the provider has gone quiet. The last two are the same
+  # row read against the clock, and a day is the longest a provider that is configured
+  # goes between syncs.
+  defp scim_status(%{token_set: false}, false), do: :no_token
+  defp scim_status(%{last_seen_at: nil}, _deployed?), do: :never_pushed
+
+  defp scim_status(%{last_seen_at: at}, _deployed?) do
+    if DateTime.diff(DateTime.utc_now(), at, :second) < 86_400, do: :connected, else: :quiet
+  end
+
+  defp confirm_scim_base_url(base_url) do
+    expected = scim_base_url()
+
+    cond do
+      is_nil(expected) ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "base_url is not set on this plane, so there is nothing to confirm against"
+         })}
+
+      base_url == expected ->
+        :ok
+
+      true ->
+        {:error,
+         Error.new(:invalid_params, %{
+           reason: "the base URL to confirm with is #{expected}",
+           base_url: expected
+         })}
     end
   end
 
