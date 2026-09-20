@@ -266,6 +266,37 @@ a worker may or may not. Order by how much the TUI's own product depends on it.
 Done when each row has: the core feature, a PROTOCOL.md change if any, a capability
 flag, tests in the core, and the TUI using it through the protocol.
 
+**Phase 3 landed 2026-09-20** in `troupe-remote` as a stack of nine PRs merged into
+`main` at `8003483` — #15 branches (Decisions 646–647), #16 workflows (648), #17 memory
+(649), #18 kept output (650), #19 `ask_user` / `web_fetch` / `git_read` / `glob` (651–652),
+#20 `read_roots` (653), #21 local MCP (654), #23 headroom and `full_send` (655), #24 the
+last three definitions (656) — with `docs/daemon.md`'s phase 3 table naming the proof per
+row. The TUI side is the stack `troupe-tui` #11, #13–#16 (Decisions 103–107) on top of #10,
+open for the team's review: it takes every row up through the protocol, and a pin PR on top
+of it moves the harness from `c39e231` to `main`. Two rows landed differently from the table:
+watch markers stay driven by the session's root agent rather than a cheap branch per
+trigger (656), and the "usage log" of the catalog row was already the core's usage fold.
+This repository's `daemon/mix.exs` pins `main` at `8003483`. Item 7.6 (archive the stale
+Sep-13 sessions) is still open.
+
+### Phase 3b — the provider layer the TUI had and the core lacked
+
+Found 2026-09-20 when a teammate asked whether the TUI's limit and budget work — DeepSeek
+mixing reasoning and output in one bucket, output caps, cache-aware counting — now lives in
+the harness. It did not: phase 2 deleted `lib/troupe/llm` and `lib/troupe/agent` (18 files),
+and the phase 3 table's "catalog, usage, headroom" row undersold what the core lacked. Each
+comes over as its own PR in `troupe-remote`, in the order the damage runs, with the TUI's
+tests for it (`limits_test.exs`, 26 of them; `reasoning_test.exs`, 12) ported alongside.
+
+| what | the TUI had (its `main`) | lands in core as | PR |
+|---|---|---|---|
+| Usage shape: four disjoint figures; the budget charges billed input; compaction and the context gauge read the prompt's length | Decision 59, `llm/provider.ex` | `Troupe.LLM.Usage` (Decision 657) | #26 |
+| Reasoning round-trip: `reasoning_content` accumulated, kept as a provider-bound block, replayed verbatim (DeepSeek 400s without it); Anthropic thinking blocks, signatures, redacted thinking; reasoning deltas shown live | `llm/message.ex`, `llm/openai.ex`, `llm/anthropic.ex` | a `Reasoning` block, `Delta` kind `reasoning` | — |
+| Output caps for reasoning models: `max_completion_tokens` and `reasoning_effort` on the wire, the 400 retry that swaps the field, Anthropic effort → `thinking.budget_tokens` with `max_tokens` raised to fit | Decision 61 | the adapters read the target's effort and cap | — |
+| Truncation recovery: a `max_tokens` stop retried once with a note, a call cut mid-argument answered with an error rather than run, a reasoning-only reply nudged once, `refusal` ends as `:refused` | `agent/server.ex` (`d6b3a0f`) | a `truncated` event; `output_truncated`, `empty_reply`, `refused` done reasons | — |
+| Context-overflow 400: classify, compact once, re-send the turn; actionable `llm_error` text; the error classes (auth, unknown model, rate limit with `retry-after`) | `llm/provider.ex` `classify/1`, `describe_error/1` | `Provider.classify/1` and the agent's overflow path | — |
+| Budget question: `y` / `n` / `a` with grants, one more slice each time | Decisions 62–66, `agent/budget.ex` grants | `budget_ask_started` / `budget_ask_answered`, a `budget.answer` method | — |
+
 ### Phase 4 — the GUI gets local sessions
 
 Done when `shell.ts` stage 2 is real: the Tauri shell starts `troupe daemon` as a
