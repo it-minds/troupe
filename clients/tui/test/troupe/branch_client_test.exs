@@ -136,4 +136,36 @@ defmodule Troupe.BranchClientTest do
     press(pid, "2")
     eventually(fn -> screen_text(pid, session) =~ "hello from the branch" end)
   end
+
+  test "/workflow runs a named workflow as a branch in its own worktree, its plan rendered by the daemon" do
+    ws = git_init!(tmp_workspace())
+    File.mkdir_p!(Path.join(ws, ".troupe/workflows"))
+
+    File.write!(
+      Path.join(ws, ".troupe/workflows/greet.json"),
+      ~s|[{"name":"write","agent":"implementer","prompt":"write hello.txt"}]|
+    )
+
+    {sid, _, ^ws} = start_session!(workspace: ws, script: [{:text, "planned"}, {:finish, "ok"}])
+    run_git!(ws, ["add", "-A"])
+    run_git!(ws, ["commit", "-q", "-m", "fake model and a workflow"])
+
+    assert "workflow" in Client.commands(sid)
+    assert {:ok, "workflow-1"} = Client.dispatch(sid, "workflow", "greet: greet the world")
+
+    spawned = await_event("workflow-1", :branch_spawned)
+    assert spawned.data.name == "workflow"
+    assert spawned.data.isolation == :worktree
+
+    input = await_event("workflow-1", :input)
+    assert input.data.content =~ "Task: greet the world"
+    assert input.data.content =~ "1. [`implementer`] **write:** write hello.txt"
+    await_state("workflow-1", :done, 10_000)
+
+    # A leading word that names no workflow is part of the task, on the default pipeline.
+    assert {:ok, "workflow-2"} = Client.dispatch(sid, "workflow", "just do it")
+    input = await_event("workflow-2", :input)
+    assert input.data.content =~ "Task: just do it"
+    assert input.data.content =~ "1. [`explore`] **understand:**"
+  end
 end
