@@ -109,6 +109,12 @@ defmodule Troupe.Plane.Admin.Console do
     team_link: {:screen, :teams},
     team_unlink: {:screen, :teams},
     team_unlink_preview: {:screen, :teams},
+    team_disable: {:screen, :teams},
+    team_disable_preview: {:screen, :teams},
+    team_grant: {:screen, :teams},
+    team_revoke: {:screen, :teams},
+    team_admin_add: {:screen, :teams},
+    team_admin_remove: {:screen, :teams},
     provider_get: {:screen, :provider},
     provider_check: {:screen, :provider},
     provider_put: {:screen, :provider},
@@ -117,10 +123,6 @@ defmodule Troupe.Plane.Admin.Console do
     scim_rotate: {:screen, :provider},
     scim_delete: {:screen, :provider},
     scim_update: {:screen, :provider},
-    team_grant: {:screen, :teams},
-    team_revoke: {:screen, :teams},
-    team_admin_add: {:screen, :teams},
-    team_admin_remove: {:screen, :teams},
 
     # `identity_check` is placed on Policy because that is where the value it gates is
     # saved, and a save gated on a check somewhere else is a gate somebody walks around.

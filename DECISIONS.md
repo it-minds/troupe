@@ -4753,6 +4753,25 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      erased along with the rest of the test-era team (Martin, 2026-09-20), which is item
      7.6 of the daemon plan closed without a hand edit to the database.
 
+662. **A team can be removed from the console, and the removal names what goes and what
+     stays before it happens.** `Identity.disable_team/1` existed and nothing in `Admin`
+     called it, so the console had *enable a team* and no way back: an administrator who
+     enabled the wrong group kept it for ever or asked for a database write. The way back
+     is more destructive than "delete team" sounds — the team is what its grants,
+     administrators, service principals, triggers and group links hang off, and the
+     database removes all of them with the row — so `admin.team.disable.preview` lists
+     each of those by name and count, and `admin.team.disable` is confirmed by typing the
+     team's name and does exactly what the preview said. Every grant is revoked first,
+     the way `team.revoke` does it, so the team's sessions go read-only and each profile's
+     projection of who may use it is re-rendered rather than left naming a team that is
+     gone. Sessions are the one thing that survives — a session's team is fixed at create
+     and the column is nulled — and the preview says so as *kept* rather than leaving them
+     out, because "delete" reads as taking everything and the sessions are the one thing
+     people would miss. The Teams screen opens on a table now, one row per team with its
+     groups, member count, profiles and administrators, with *edit* and *delete* on the
+     row: the first step of the identity work in `docs/plans/admin-identity.md`, borrowed
+     in shape from the Members → Teams table every SSO-capable tool has. Proof:
+     `Troupe.Plane.TeamDisableTest`.
 663. **The SCIM connector is a row with a card, its token is rotated from the console and
      seen once, and a pushed group can become a team on arrival — behind a switch that is
      off.** SCIM had a credential and no object: `TROUPE_SCIM_TOKEN`, compared in the
