@@ -4554,3 +4554,40 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      down after the grace if it has not. On Windows the server runs as a plain port and
      is trusted to honour that same contract, which is written down here rather than
      pretended otherwise. `mcp.status {session_id}` is what a client's `/mcp` page shows.
+
+655. **A limit is announced before it stops the agent, once, and a client can draw the
+     gauge.** The core stopped an agent with `budget_exhausted` and said nothing before.
+     The TUI's harness computed a headroom — five fractions: turns, input tokens, output
+     tokens, wall clock, and the model's context window, which is the provider's ceiling
+     rather than ours — and warned at eighty percent of any of them, once per dimension.
+     That comes here as `Troupe.Agent.Headroom`, pure, read after every model response:
+     a dimension that crosses `budget_warn_at` writes a `budget_warning` with the numbers
+     and a sentence (`input tokens 4.9M/6.0M (82%)`), and is not warned about again by
+     that agent; `agent_state.budget.headroom` carries all five fractions always, so a
+     client draws a gauge without knowing how each limit is counted. The warning is
+     durable, not ephemeral, although the numbers are in `agent_state` for whoever asks
+     later: the contract lets an ephemeral be dropped under load, and the first client
+     built on this lost one exactly there — a warning that may not arrive is not one.
+     The agent's replay ignores it, so it moves no fixture. `full_send: true` — the harness's `--full-send` — turns the
+     warnings off for a session that wants no nagging, and a client may set it at
+     `session.create`. What the harness did next, asking the person at the ceiling
+     whether to extend the budget, is not here: a budget is a limit, `budget_exhausted`
+     is honest about it, and the person who wants more starts a session with more.
+
+656. **The harness's twelve agents are the core's eleven, and the watcher keeps driving
+     the root agent.** The TUI shipped twelve definitions; the core had four. Eight came
+     over across phase 3 as the features they needed did — `workflow`, `implementer`,
+     `reviewer` with workflows, `librarian` with the brief — and the last three come
+     here: `answer` (an `AI?` question, cheap and read-only, six turns), `quick` (an `AI!`
+     change, cheap, no task list, never asks), `ask` (a question across this session's
+     branches through `read_branch`). Two of the twelve are not agents any more: `code`
+     is `build`, and `worktree` was `code` in a worktree, which is a way of creating a
+     session (`worktree: "always"`) rather than a profile. Watch mode is where the two
+     harnesses differed most and the core's shape stands: the watcher hands an `AI!` or
+     `AI?` trigger to the session's own root agent — a question under the read-only plan
+     permissions for that turn — instead of starting a cheap branch per trigger, because a
+     branch is a session now (7.3 b) and a watcher that creates sessions would be a client.
+     `quick` and `answer` exist for the client that wants that — a `session.create` on the
+     workspace with the marker's text as the prompt — and for a person who runs them by
+     hand; the marker grammar, the debounce, the self-write filter and `watch.set` were
+     already here and are unchanged.

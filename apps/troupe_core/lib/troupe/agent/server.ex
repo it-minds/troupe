@@ -30,7 +30,7 @@ defmodule Troupe.Agent.Server do
 
   @behaviour :gen_statem
 
-  alias Troupe.Agent.{Call, Definition, Definitions, State}
+  alias Troupe.Agent.{Call, Definition, Definitions, Headroom, State}
   alias Troupe.{Budget, Config, Events, Registry, Skills, Todo, Tools}
 
   alias Troupe.LLM.{
@@ -937,6 +937,35 @@ defmodule Troupe.Agent.Server do
         budget: state.budget |> Budget.charge_turn() |> Budget.charge_usage(response.usage),
         last_input_tokens: response.usage.input_tokens
     }
+    |> warn_headroom()
+  end
+
+  # One `budget_warning` per dimension that has crossed `budget_warn_at`, so a person
+  # hears that a limit is near before it stops the agent — and hears it once. Durable:
+  # an ephemeral may be dropped under load, and a warning that may not arrive is not one.
+  defp warn_headroom(%State{config: %{full_send: true}} = state), do: state
+
+  defp warn_headroom(%State{} = state) do
+    headroom = headroom(state)
+
+    headroom
+    |> Headroom.crossed(state.config.budget_warn_at, state.headroom_warned)
+    |> Enum.reduce(state, fn {dim, entry}, acc ->
+      log(acc, :budget_warning, %{
+        "dimension" => to_string(dim),
+        "used" => entry.used,
+        "limit" => entry.limit,
+        "fraction" => Float.round(entry.fraction, 3),
+        "detail" => Headroom.describe(dim, entry)
+      })
+
+      %{acc | headroom_warned: MapSet.put(acc.headroom_warned, dim)}
+    end)
+  end
+
+  defp headroom(%State{} = state) do
+    window = Config.context_window(state.config, state.definition.model || state.config.model)
+    Headroom.of(state.budget, state.last_input_tokens, window)
   end
 
   # What the gateway said about the call it just billed, or nothing. Written as a nested
@@ -1653,7 +1682,10 @@ defmodule Troupe.Agent.Server do
         "turns" => state.budget.turns,
         "max_turns" => state.budget.max_turns,
         "input_tokens" => state.budget.input_tokens,
-        "output_tokens" => state.budget.output_tokens
+        "output_tokens" => state.budget.output_tokens,
+        # Every ceiling as a fraction (Decision 655), so a client can draw a gauge
+        # without knowing how a limit is counted.
+        "headroom" => state |> headroom() |> Headroom.to_json()
       },
       "done_reason" => state.done_reason && Atom.to_string(state.done_reason)
     }

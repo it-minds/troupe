@@ -967,7 +967,7 @@ defmodule Troupe.Gateway.Dispatch do
   # configuration — where state is written, which provider is used, what a key is —
   # belongs to the machine the daemon runs on, and a client must not be able to move
   # it.
-  @client_settable ~w(watch auto_approve profile)a
+  @client_settable ~w(watch auto_approve profile full_send)a
 
   defp overrides(config) when is_map(config) do
     case Enum.flat_map(@client_settable, &setting(config, &1)) do

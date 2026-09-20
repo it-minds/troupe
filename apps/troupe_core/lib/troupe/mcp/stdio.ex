@@ -51,12 +51,23 @@ defmodule Troupe.MCP.Stdio do
   @doc "What a client shows: `%{name, state, tools, error}`."
   @spec status(String.t(), String.t()) :: map()
   def status(session_id, name),
-    do: call(session_id, name, :status, %{name: name, state: :stopped, tools: [], error: "not running"})
+    do:
+      call(session_id, name, :status, %{
+        name: name,
+        state: :stopped,
+        tools: [],
+        error: "not running"
+      })
 
   @doc "Call one of the server's tools; the text of its content blocks, or the error."
-  @spec call_tool(String.t(), String.t(), String.t(), map()) :: {:ok, String.t()} | {:error, String.t()}
+  @spec call_tool(String.t(), String.t(), String.t(), map()) ::
+          {:ok, String.t()} | {:error, String.t()}
   def call_tool(session_id, name, tool, args) do
-    GenServer.call(Troupe.Registry.mcp_server(session_id, name), {:call_tool, tool, args}, @call_timeout)
+    GenServer.call(
+      Troupe.Registry.mcp_server(session_id, name),
+      {:call_tool, tool, args},
+      @call_timeout
+    )
   catch
     :exit, {:timeout, _} -> {:error, "the MCP server #{name} did not answer in time"}
     :exit, _ -> {:error, "the MCP server #{name} is not running"}
@@ -104,8 +115,12 @@ defmodule Troupe.MCP.Stdio do
 
   def handle_call(:status, _from, state) do
     {:reply,
-     %{name: state.name, state: state.state, tools: Enum.map(state.tools, & &1.remote_name), error: state.error},
-     state}
+     %{
+       name: state.name,
+       state: state.state,
+       tools: Enum.map(state.tools, & &1.remote_name),
+       error: state.error
+     }, state}
   end
 
   def handle_call({:call_tool, tool, args}, from, %{state: :ready} = state) do
@@ -115,7 +130,10 @@ defmodule Troupe.MCP.Stdio do
   end
 
   def handle_call({:call_tool, _tool, _args}, _from, state) do
-    {:reply, {:error, "the MCP server #{state.name} is #{state.state}: #{state.error || "still connecting"}"}, state}
+    {:reply,
+     {:error,
+      "the MCP server #{state.name} is #{state.state}: #{state.error || "still connecting"}"},
+     state}
   end
 
   @impl GenServer
@@ -128,8 +146,14 @@ defmodule Troupe.MCP.Stdio do
   end
 
   def handle_info({port, {:exit_status, code}}, %{port: port} = state) do
-    for {_id, from} <- state.pending, do: GenServer.reply(from, {:error, "the MCP server #{state.name} exited"})
-    {:noreply, %{state | state: :stopped, error: "exited with status #{code}", pending: %{}, port: nil}}
+    # Only callers are answered; the lifecycle requests (`:initialize`, `:tools_list`)
+    # have nobody waiting.
+    for {_id, from} <- state.pending,
+        is_tuple(from),
+        do: GenServer.reply(from, {:error, "the MCP server #{state.name} exited"})
+
+    {:noreply,
+     %{state | state: :stopped, error: "exited with status #{code}", pending: %{}, port: nil}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -160,7 +184,8 @@ defmodule Troupe.MCP.Stdio do
     |> request("tools/list", %{})
   end
 
-  defp after_initialize(%{"error" => error}, state), do: fail(state, "initialize refused: #{describe(error)}")
+  defp after_initialize(%{"error" => error}, state),
+    do: fail(state, "initialize refused: #{describe(error)}")
 
   defp after_tools_list(%{"result" => %{"tools" => listed}}, state) when is_list(listed) do
     tools = Enum.map(listed, &tool(state, &1))
@@ -168,7 +193,9 @@ defmodule Troupe.MCP.Stdio do
     %{state | tools: tools, state: :ready, error: nil}
   end
 
-  defp after_tools_list(%{"error" => error}, state), do: fail(state, "tools/list refused: #{describe(error)}")
+  defp after_tools_list(%{"error" => error}, state),
+    do: fail(state, "tools/list refused: #{describe(error)}")
+
   defp after_tools_list(_other, state), do: fail(state, "tools/list answered without tools")
 
   defp reply_tool(from, %{"result" => %{"isError" => true} = result}, state) do
@@ -195,7 +222,9 @@ defmodule Troupe.MCP.Stdio do
       name: MCP.tool_name(name, remote),
       remote_name: remote,
       server: name,
-      description: String.trim(listed["description"] || "A tool of the #{name} MCP server.") <> "\n\nProvided by the #{name} MCP server.",
+      description:
+        String.trim(listed["description"] || "A tool of the #{name} MCP server.") <>
+          "\n\nProvided by the #{name} MCP server.",
       schema: listed["inputSchema"] || %{"type" => "object", "properties" => %{}},
       default_permission: Map.get(state.config, :permission, :ask),
       run: fn args, _ctx -> call_tool(session_id, name, remote, args) end
@@ -230,7 +259,13 @@ defmodule Troupe.MCP.Stdio do
 
   defp request(state, method, params) do
     id = state.next_id
-    send_json(state.port, %{"jsonrpc" => "2.0", "id" => id, "method" => method, "params" => params})
+
+    send_json(state.port, %{
+      "jsonrpc" => "2.0",
+      "id" => id,
+      "method" => method,
+      "params" => params
+    })
 
     pending =
       case method do

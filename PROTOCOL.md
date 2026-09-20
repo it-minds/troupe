@@ -258,6 +258,7 @@ Durable:
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary` |
 | `budget_exhausted` | `limit` |
+| `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `agent_done` | `reason`, `summary`, `limit` |
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
@@ -275,6 +276,14 @@ Durable:
 | `acl_granted` / `acl_revoked` | `subject`, `role` |
 
 Ephemeral: `llm_delta`, `progress`, `presence`, `summary_diff`.
+
+`budget_warning` — `dimension` (`turns`, `input`, `output`, `wall`, `context`), `used`,
+`limit`, `fraction`, `detail` (`input tokens 4.9M/6.0M (82%)`) — is written once per
+dimension per agent when it crosses `budget_warn_at` (0.8 by default), so a person hears
+a limit is near before `budget_exhausted` stops the agent. Durable, because an ephemeral
+may be dropped under load and a warning has to arrive. `agent_state.budget.headroom`
+carries all five fractions for a client that draws a gauge. `full_send: true` in the
+session's config turns the warnings off.
 
 `trigger_fired` is written once, at creation, for a session started by something other
 than a person at a keyboard, and never again however many times that session is woken.
@@ -457,7 +466,7 @@ agent reads a finished branch's summary with the `read_branch` tool. Servers tha
 this say `branches: true` at `initialize`.
 
 `config` carries the session settings a client may choose, and only those:
-`auto_approve`, `watch`, `profile`. Everything else in the configuration — where state
+`auto_approve`, `watch`, `profile`, `full_send` (no `budget_warning`s). Everything else in the configuration — where state
 is written, which provider is used, what a key is — belongs to the machine the daemon
 runs on, and a client cannot move it.
 

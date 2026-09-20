@@ -137,6 +137,14 @@ defmodule Troupe.Protocol.Schema do
         "conversation" => optional(:array)
       },
       "budget_exhausted" => %{"limit" => required(:string)},
+      # A limit is near (Decision 655): once per dimension per agent.
+      "budget_warning" => %{
+        "dimension" => required(:string),
+        "used" => required(:integer),
+        "limit" => required(:integer),
+        "fraction" => required(:number),
+        "detail" => required(:string)
+      },
       "agent_done" => %{
         "reason" => required(:string),
         "summary" => optional(:string),
