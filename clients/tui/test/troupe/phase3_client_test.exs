@@ -53,7 +53,7 @@ defmodule Troupe.Phase3ClientTest do
     {sid, _, _} = start_session!(script: script, config: %{"max_turns" => 6})
     say!(sid, "go")
 
-    warning = await_event("root", :budget_warning, 15_000)
+    warning = await_warning(sid)
     assert warning.data.dimension == :turns
     assert warning.data.detail =~ "turns 5/6"
     await_done(15_000)
@@ -74,5 +74,32 @@ defmodule Troupe.Phase3ClientTest do
     assert {:ok, path} = Troupe.Settings.persist(ws, "full_send", true)
     assert File.read!(path) =~ "full_send: true"
     assert Troupe.Config.load(ws).full_send == true
+  end
+
+  # What arrived instead, when the warning did not: the mailbox, the journal, the session.
+  defp await_warning(sid) do
+    receive do
+      {:troupe_event, %{type: :budget_warning, agent_path: "root"} = event} -> event
+    after
+      15_000 ->
+        mailbox = drain([])
+        journal = sid |> Client.events() |> Enum.map(&{&1.agent_path, &1.type})
+
+        flunk("""
+        no budget_warning within 15s
+        mailbox: #{inspect(mailbox, limit: :infinity)}
+        journal: #{inspect(journal, limit: :infinity)}
+        capability: #{inspect(Client.capability(sid))}
+        """)
+    end
+  end
+
+  defp drain(acc) do
+    receive do
+      {:troupe_event, %{type: t, agent_path: p, data: d}} ->
+        drain([{p, t, Map.take(d, [:to, :content, :text])} | acc])
+    after
+      0 -> Enum.reverse(acc)
+    end
   end
 end
