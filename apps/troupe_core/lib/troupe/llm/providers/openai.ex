@@ -292,12 +292,23 @@ defmodule Troupe.LLM.Providers.OpenAI do
 
   defp usage(nil), do: %Usage{}
 
+  # `prompt_tokens` counts the cached tokens too, so they come back out of it and the
+  # three input figures stay disjoint (Decision 657). `completion_tokens` includes the
+  # reasoning tokens of a model that reasons — DeepSeek and the OpenAI reasoning models
+  # bill them as output, and so does the budget.
   defp usage(map) do
+    prompt = count(map["prompt_tokens"])
+    cached = count(get_in(map, ["prompt_tokens_details", "cached_tokens"]))
+
     %Usage{
-      input_tokens: Map.get(map, "prompt_tokens", 0),
-      output_tokens: Map.get(map, "completion_tokens", 0)
+      input_tokens: max(prompt - cached, 0),
+      output_tokens: count(map["completion_tokens"]),
+      cache_read: cached
     }
   end
+
+  defp count(n) when is_integer(n) and n >= 0, do: n
+  defp count(_other), do: 0
 
   defp stop_reason("stop"), do: :end_turn
   defp stop_reason("tool_calls"), do: :tool_use
@@ -357,7 +368,9 @@ defmodule Troupe.LLM.Providers.OpenAI.Collector do
   end
 
   @spec add_usage(t(), Usage.t()) :: t()
-  def add_usage(acc, %Usage{input_tokens: 0, output_tokens: 0}), do: acc
+  def add_usage(acc, %Usage{input_tokens: 0, output_tokens: 0, cache_read: 0, cache_write: 0}),
+    do: acc
+
   def add_usage(acc, usage), do: %{acc | usage: usage}
 
   @spec put_stop_reason(t(), atom()) :: t()

@@ -24,7 +24,13 @@ defmodule Troupe.LLM.Fake do
           | {:error, term()}
           | map()
 
-  defstruct steps: [], routes: %{}, requests: [], default: nil, delay_ms: 0, cost_micros: :derived
+  defstruct steps: [],
+            routes: %{},
+            requests: [],
+            default: nil,
+            delay_ms: 0,
+            cost_micros: :derived,
+            cache_read: 0
 
   # -- client -----------------------------------------------------------------
 
@@ -44,6 +50,9 @@ defmodule Troupe.LLM.Fake do
       integer for a fixed price per call, `:derived` (the default) for a deterministic
       function of the tokens, or `nil` for a gateway that reports no cost at all, which
       is what the accounting path has to survive
+    * `:cache_read` — prompt tokens every answer reports as served from the cache
+      (default 0), for a test of what a budget counts: a real long conversation is
+      mostly that
     * `:name` — registered name (tests usually pass one)
   """
   @spec start_link(keyword()) :: GenServer.on_start()
@@ -131,7 +140,8 @@ defmodule Troupe.LLM.Fake do
        routes: opts |> Keyword.get(:routes, %{}) |> Map.new(fn {k, v} -> {to_string(k), v} end),
        default: Keyword.get(opts, :default, {:text, "done"}),
        delay_ms: Keyword.get(opts, :delay_ms, 0),
-       cost_micros: Keyword.get(opts, :cost_micros, :derived)
+       cost_micros: Keyword.get(opts, :cost_micros, :derived),
+       cache_read: Keyword.get(opts, :cache_read, 0)
      }}
   end
 
@@ -139,7 +149,7 @@ defmodule Troupe.LLM.Fake do
   def handle_call({:next, request}, _from, state) do
     state = %{state | requests: [request | state.requests]}
     {step, state} = take_step(state, agent_name(request))
-    {:reply, render(step, state.delay_ms, state.cost_micros), state}
+    {:reply, render(step, state), state}
   end
 
   def handle_call(:requests, _from, state), do: {:reply, Enum.reverse(state.requests), state}
@@ -183,38 +193,28 @@ defmodule Troupe.LLM.Fake do
     end
   end
 
-  defp render({:error, reason}, _delay, _cost), do: {:error, reason}
+  defp render({:error, reason}, _state), do: {:error, reason}
 
-  defp render({:text, text}, delay, cost) do
-    {:ok,
-     %Response{
-       content: [%Text{text: text}],
-       stop_reason: :end_turn,
-       usage: usage(text),
-       gateway: gateway(usage(text), cost)
-     }, delay}
+  defp render({:text, text}, state) do
+    respond([%Text{text: text}], :end_turn, usage(text, state), state)
   end
 
-  defp render({:tools, calls}, delay, cost) do
-    usage = usage(inspect(calls))
+  defp render({:tools, calls}, state) do
+    respond(tool_blocks(calls), :tool_use, usage(inspect(calls), state), state)
+  end
 
+  defp render({:text_and_tools, text, calls}, state) do
+    respond([%Text{text: text} | tool_blocks(calls)], :tool_use, usage(text, state), state)
+  end
+
+  defp respond(content, stop_reason, usage, state) do
     {:ok,
      %Response{
-       content: tool_blocks(calls),
-       stop_reason: :tool_use,
+       content: content,
+       stop_reason: stop_reason,
        usage: usage,
-       gateway: gateway(usage, cost)
-     }, delay}
-  end
-
-  defp render({:text_and_tools, text, calls}, delay, cost) do
-    {:ok,
-     %Response{
-       content: [%Text{text: text} | tool_blocks(calls)],
-       stop_reason: :tool_use,
-       usage: usage(text),
-       gateway: gateway(usage(text), cost)
-     }, delay}
+       gateway: gateway(usage, state.cost_micros)
+     }, state.delay_ms}
   end
 
   defp tool_blocks(calls) do
@@ -226,9 +226,14 @@ defmodule Troupe.LLM.Fake do
   defp unique, do: Integer.to_string(System.unique_integer([:positive, :monotonic]))
 
   # A rough but deterministic stand-in for tokenisation, so budget tests have
-  # numbers that grow with content without depending on a real tokeniser.
-  defp usage(text) do
-    %Usage{input_tokens: 100, output_tokens: max(div(byte_size(text), 4), 1)}
+  # numbers that grow with content without depending on a real tokeniser. The cache
+  # figure is whatever the script asked for.
+  defp usage(text, %__MODULE__{cache_read: cache_read}) do
+    %Usage{
+      input_tokens: 100,
+      output_tokens: max(div(byte_size(text), 4), 1),
+      cache_read: cache_read
+    }
   end
 
   # A request id always, because a real gateway always gives one and the ledger's
