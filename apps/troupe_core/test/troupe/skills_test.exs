@@ -23,7 +23,7 @@ defmodule Troupe.SkillsTest do
     File.mkdir_p!(Path.join(dir, "agents"))
 
     File.write!(
-      Path.join(dir, "agents/reviewer.md"),
+      Path.join(dir, "agents/auditor.md"),
       """
       ---
       description: reviews a pull request
@@ -60,12 +60,12 @@ defmodule Troupe.SkillsTest do
   describe "definitions from a bundle" do
     test "load between the built-ins and the config directories", context do
       defs = Definitions.load(context.workspace, bundle_dir: context.dir)
-      reviewer = Definitions.fetch!(defs, "reviewer")
+      auditor = Definitions.fetch!(defs, "auditor")
 
-      assert reviewer.source == :bundle
-      assert reviewer.mode == :primary
-      assert reviewer.skills == ["review-checklist"]
-      assert reviewer.prompt == "You review code."
+      assert auditor.source == :bundle
+      assert auditor.mode == :primary
+      assert auditor.skills == ["review-checklist"]
+      assert auditor.prompt == "You review code."
 
       # The built-ins are still there underneath.
       assert Definitions.fetch!(defs, "build").source == :builtin
@@ -83,13 +83,13 @@ defmodule Troupe.SkillsTest do
 
     test "without a bundle nothing changes", context do
       defs = Definitions.load(context.workspace)
-      assert {:error, {:unknown_agent, "reviewer"}} = Definitions.fetch(defs, "reviewer")
+      assert {:error, {:unknown_agent, "auditor"}} = Definitions.fetch(defs, "auditor")
     end
   end
 
   describe "the skill tool" do
     test "returns the SKILL.md body and the files beside it", context do
-      definition = reviewer(context)
+      definition = auditor(context)
       assert [tool] = Skills.tools(context.bundle, definition)
       assert Tool.name(tool) == "skill"
       assert Tool.default_permission(tool) == :auto
@@ -100,7 +100,7 @@ defmodule Troupe.SkillsTest do
     end
 
     test "a skill the profile does not list is not found, not denied", context do
-      [tool] = Skills.tools(context.bundle, reviewer(context))
+      [tool] = Skills.tools(context.bundle, auditor(context))
 
       assert {:error, {:unknown_skill, "deploy"}} =
                Tool.invoke(tool, %{"name" => "deploy"}, ctx(context))
@@ -114,13 +114,13 @@ defmodule Troupe.SkillsTest do
       assert Skills.prompt_section(context.bundle, plain) == ""
 
       # And not at all without a bundle, whatever the profile says.
-      assert Skills.tools(nil, reviewer(context)) == []
-      offered = reviewer(context) |> Tools.available(ctx(context, nil)) |> Enum.map(&Tool.name/1)
+      assert Skills.tools(nil, auditor(context)) == []
+      offered = auditor(context) |> Tools.available(ctx(context, nil)) |> Enum.map(&Tool.name/1)
       refute "skill" in offered
     end
 
     test "goes through the tool gate like any other", context do
-      definition = reviewer(context)
+      definition = auditor(context)
       assert {:run, tool, :task} = Tools.authorize("skill", definition, ctx(context))
       assert Tool.name(tool) == "skill"
 
@@ -134,7 +134,7 @@ defmodule Troupe.SkillsTest do
   describe "the team's entitlement set" do
     test "narrows the skills a profile may consult, and the prompt says so", context do
       definition = %Definition{
-        name: "reviewer",
+        name: "auditor",
         mode: :primary,
         prompt: "",
         skills: :all
@@ -155,7 +155,7 @@ defmodule Troupe.SkillsTest do
 
     test "a skill outside the set is not found, exactly as one the profile omits",
          context do
-      definition = %Definition{name: "reviewer", mode: :primary, prompt: "", skills: :all}
+      definition = %Definition{name: "auditor", mode: :primary, prompt: "", skills: :all}
       narrowed = entitled(context.bundle, %{"skills" => ["review-checklist"]})
 
       assert [tool] = Skills.tools(narrowed, definition)
@@ -178,13 +178,13 @@ defmodule Troupe.SkillsTest do
       )
 
       all = Definitions.load(context.workspace, bundle_dir: context.dir)
-      assert Enum.map(Definitions.primaries(all), & &1.name) == ["build", "plan", "reviewer"]
+      assert Enum.map(Definitions.primaries(all), & &1.name) == ["auditor", "build", "plan", "workflow"]
 
       narrowed =
         Definitions.load(context.workspace, bundle_dir: context.dir, entitled: ["build"])
 
       assert Enum.map(Definitions.primaries(narrowed), & &1.name) == ["build"]
-      assert {:error, {:unknown_agent, "reviewer"}} = Definitions.fetch(narrowed, "reviewer")
+      assert {:error, {:unknown_agent, "auditor"}} = Definitions.fetch(narrowed, "auditor")
 
       # A subagent is reached only by an agent the team *is* entitled to, and narrowing
       # it here would break a bundle's own delegation for a team that had simply not
@@ -269,7 +269,7 @@ defmodule Troupe.SkillsTest do
     test "the prompt lists the skills, the log names the bundle, the model reads one", context do
       %{session: session, fake: fake} =
         start_session(context,
-          agent: "reviewer",
+          agent: "auditor",
           bundle: context.bundle,
           definitions: Definitions.load(context.workspace, bundle_dir: context.dir),
           steps: [
@@ -291,7 +291,7 @@ defmodule Troupe.SkillsTest do
       assert "skill" in Enum.map(request.tools, & &1.name)
 
       [started] = events_of_type(session.id, "agent_started")
-      assert started.data["profile"] == "reviewer"
+      assert started.data["profile"] == "auditor"
       assert started.data["bundle_version"] == "3"
 
       [created] = events_of_type(session.id, "session_created")
@@ -315,10 +315,10 @@ defmodule Troupe.SkillsTest do
     end
   end
 
-  defp reviewer(context) do
+  defp auditor(context) do
     context.workspace
     |> Definitions.load(bundle_dir: context.dir)
-    |> Definitions.fetch!("reviewer")
+    |> Definitions.fetch!("auditor")
   end
 
   defp ctx(context, bundle \\ :pinned) do
