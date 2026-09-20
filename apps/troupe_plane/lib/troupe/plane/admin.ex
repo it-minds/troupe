@@ -714,6 +714,79 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  What removing a team would take with it, before anybody does it.
+
+  A team is the thing its grants, administrators, service principals, triggers and group
+  links hang off, and every one of them goes with the row. Its sessions are the one thing
+  that stays: a session's team is recorded at create and the column is nulled, so the
+  transcripts survive as sessions with no team, listed on the Sessions screen as what they
+  are. The preview says all of that in numbers, because "delete team" reads as tidying up
+  and three triggers that fire nightly is not tidy.
+  """
+  @spec team_disable_preview(actor(), String.t()) :: result()
+  def team_disable_preview(actor, name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name) do
+      {:ok, disable_effect(team)}
+    end
+  end
+
+  @doc """
+  Stop a group of people being a team.
+
+  Destructive, confirmed by typing the team's name. Every grant is revoked first, the way
+  `team_revoke/3` does it — the team's sessions on each profile go read-only and the
+  profile's projection of who may use it is re-rendered — and then the row goes, taking
+  the administrators, principals, triggers and group links with it. The people stay
+  people, the groups stay groups, and the sessions stay sessions with no team.
+  `team_disable_preview/2` says how many of each and is meant to be shown first.
+  """
+  @spec team_disable(actor(), String.t()) :: result()
+  def team_disable(actor, name) do
+    with :ok <- require_platform_admin(actor),
+         {:ok, team} <- fetch_team(actor, name) do
+      effect = disable_effect(team)
+
+      for profile <- effect.grants do
+        :ok = Identity.revoke(team, profile)
+        project(profile, actor)
+      end
+
+      # Triggers before the row. A principal cannot go while a trigger revision names it
+      # — that restriction is deliberate and this is not the place to lift it — and the
+      # team's principals go with the team, so the triggers have to be gone first.
+      Enum.each(Triggers.list(team), &Triggers.delete/1)
+
+      case Identity.disable_team(team) do
+        {:ok, _team} ->
+          {:ok, _} = Audit.record(actor.subject, "team.disable", name, Map.delete(effect, :confirm))
+          {:ok, effect}
+
+        {:error, changeset} ->
+          {:error, Error.new(:internal_error, %{reason: inspect(changeset.errors)})}
+      end
+    end
+  end
+
+  defp disable_effect(team) do
+    %{
+      team: team.name,
+      groups: Enum.map(Identity.links_of(team), & &1.group.external_id),
+      members: length(Identity.members_of_team(team)),
+      grants: Enum.map(Identity.grants_for_team(team), & &1.profile),
+      admins: Identity.admins_of(team),
+      principals: Enum.map(Principals.list(team), & &1.subject),
+      triggers: Enum.map(Triggers.list(team), & &1.name),
+      # Not removed. A session's team is fixed at create and the column is nulled, so
+      # these stay readable with no team rather than going with it.
+      sessions_kept: Sessions.count_for_team(team),
+      # What the typed confirmation has to match, in the answer rather than assumed by
+      # the surface: the MCP tool and the dialog are one rule in two renderings.
+      confirm: team.name
+    }
+  end
+
   @doc "Give a team access to a profile."
   @spec team_grant(actor(), String.t(), String.t(), map()) :: result()
   def team_grant(actor, name, profile, attrs \\ %{}) do

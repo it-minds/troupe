@@ -855,6 +855,21 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  How many sessions a team has that are not erased.
+
+  What `Admin.team_disable_preview/2` reports as *kept*: a session's team is recorded at
+  create and the column is nulled when the team goes, so these outlive it as sessions
+  with no team rather than going with it.
+  """
+  @spec count_for_team(Team.t()) :: non_neg_integer()
+  def count_for_team(%Team{id: team_id}) do
+    Repo.aggregate(
+      from(s in Session, where: s.team_id == ^team_id and s.state != "erased"),
+      :count
+    )
+  end
+
+  @doc """
   What a user may do with one session, or `nil` when they may not see it.
 
   Owner administers, collaborator steers, viewer watches. Team visibility gives observe,
