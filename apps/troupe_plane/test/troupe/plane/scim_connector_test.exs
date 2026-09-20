@@ -226,18 +226,31 @@ defmodule Troupe.Plane.ScimConnectorTest do
       assert html =~ "off — no token anywhere"
 
       html = view |> element(~s(button[phx-click="rotate-token"])) |> render_click()
-      assert html =~ "shown once"
+      assert html =~ "Shown once"
       assert html =~ "waiting — a token exists"
       assert %{token_set: true} = Connector.describe()
 
-      [_, token] = Regex.run(~r/paste it into the provider now: ([A-Za-z0-9_-]+)/, html)
+      # In the card beside the button that minted it, not in the banner at the top of a
+      # page the SCIM connector sits a screen and a half below.
+      token =
+        view
+        |> element("#minted-token code")
+        |> render()
+        |> String.replace(~r/<[^>]*>/, "")
+        |> String.trim()
+
       assert Connector.authorised?(token)
 
-      # The switch, both ways, from the form — and the token is in no page after the
-      # next event.
+      # It survives an unrelated click. Losing it costs another rotation, which
+      # invalidates whatever the provider has already been given.
       html = view |> form("#teams-from-groups") |> render_change(%{"teams_from_groups" => "true"})
       assert Connector.teams_from_groups?()
+      assert html =~ token
+
+      # And goes when it is dismissed, which is the only thing that takes it away.
+      html = view |> element(~s(button[phx-click="forget-token"])) |> render_click()
       refute html =~ token
+
       view |> form("#teams-from-groups") |> render_change(%{"teams_from_groups" => "false"})
       refute Connector.teams_from_groups?()
 

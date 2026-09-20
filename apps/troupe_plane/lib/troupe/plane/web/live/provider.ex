@@ -20,10 +20,19 @@ defmodule Troupe.Plane.Web.Live.Provider do
 
   ## What the card refuses to show
 
-  The token, ever again after the notice it was minted in. `admin.scim.get` says whether
+  The token, ever again after the block it was minted in. `admin.scim.get` says whether
   one is set and nothing else about it, and the page renders exactly that answer, so a
   screenshot of this screen and a model reading it over MCP are looking at the same
   thing and neither is looking at a credential.
+
+  That block sits beside the button that minted it rather than in the banner at the top
+  of the page, and it stays until somebody dismisses it. Both of those are repairs. The
+  banner is a screen and a half above the SCIM card, so a rotation looked like nothing
+  had happened at all and the one copy of the token scrolled past unread; and a flash
+  that clears on the next event meant the switch beside it could take the token away
+  before it had been pasted anywhere. Losing it is not free — what is kept is a salted
+  hash, so the only way back is another rotation, and that invalidates whatever the
+  provider was already given.
 
   ## The switch is off until somebody turns it on
 
@@ -52,7 +61,8 @@ defmodule Troupe.Plane.Web.Live.Provider do
        scim: nil,
        provider: nil,
        drafts: %{},
-       check: nil
+       check: nil,
+       minted_token: nil
      )
      |> load()}
   end
@@ -119,15 +129,23 @@ defmodule Troupe.Plane.Web.Live.Provider do
   def handle_event("rotate-token", _params, socket) do
     case Admin.scim_rotate(socket.assigns.actor) do
       {:ok, %{token: token}} ->
-        # The token crosses once, in the notice, and is in no page after the next event,
-        # in no process state and in no table.
-        message = "The connector's token, shown once — paste it into the provider now: #{token}"
-        {:noreply, socket |> assign(flash_message: message, deleting: false) |> load()}
+        # Into the card, beside the button, and it stays there until it is dismissed.
+        # It is in this process and in this page and in no table: what the connector
+        # keeps is a salted hash.
+        {:noreply,
+         socket
+         |> assign(minted_token: token, flash_message: nil, deleting: false)
+         |> load()}
 
       {:error, error} ->
         {:noreply, assign(socket, flash_message: describe(error))}
     end
   end
+
+  # Said explicitly, because the alternative was it going when somebody clicked the
+  # switch next to it.
+  def handle_event("forget-token", _params, socket),
+    do: {:noreply, assign(socket, minted_token: nil)}
 
   def handle_event("confirm-delete-token", _params, socket),
     do: {:noreply, assign(socket, deleting: true)}
@@ -139,7 +157,13 @@ defmodule Troupe.Plane.Web.Live.Provider do
     case Admin.scim_delete(socket.assigns.actor, socket.assigns.scim.base_url) do
       {:ok, _scim} ->
         message = "The token is gone. Every push from the provider answers 401 until a new one is made."
-        {:noreply, socket |> assign(flash_message: message, deleting: false) |> load()}
+
+        # Whatever was minted a moment ago opens nothing now, so showing it would be
+        # showing a dead credential as though it were live.
+        {:noreply,
+         socket
+         |> assign(flash_message: message, deleting: false, minted_token: nil)
+         |> load()}
 
       {:error, error} ->
         {:noreply, assign(socket, flash_message: describe(error), deleting: false)}
@@ -365,9 +389,21 @@ defmodule Troupe.Plane.Web.Live.Provider do
           </span>
         </div>
 
-        <p :if={@actor.role == :platform_admin} class="field-help">
-          A rotated token is shown once, in the notice at the top of this page, and never
-          again. Paste it into the provider before you do anything else here.
+        <div :if={@minted_token} class="checks-block" id="minted-token">
+          <h3>The connector's token</h3>
+          <p>
+            Shown once. Nothing here can show it again — what is kept is a salted hash —
+            so losing it costs another rotation, and that invalidates whatever the
+            provider has already been given. Paste it into the provider's provisioning
+            now, then dismiss this.
+          </p>
+          <p><code class="mono">{@minted_token}</code></p>
+          <button phx-click="forget-token">done, hide it</button>
+        </div>
+
+        <p :if={@actor.role == :platform_admin and is_nil(@minted_token)} class="field-help">
+          A rotated token is shown once, here beside this button, and never again. Paste
+          it into the provider before you do anything else.
         </p>
 
         <form
