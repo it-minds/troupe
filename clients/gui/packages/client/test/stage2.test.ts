@@ -147,6 +147,36 @@ describe("stage 2: several sessions on one socket", () => {
     assert.deepEqual(heard, ["session_created", "llm_response"]);
   });
 
+  it("a session two callers hold is let go by the last of them, and a joiner hears the replay", async () => {
+    const session = daemon.seed("/home/ada/shared");
+    daemon.say(session.id, "already said");
+
+    const first = await client.open(session.id);
+    const second = await client.open(session.id);
+    assert.equal(first, second, "one view for one session");
+    assert.equal(client.holdersOf(session.id), 2);
+
+    // The first opener leaves. The second is still reading.
+    await client.close(session.id);
+    assert.equal(client.holdersOf(session.id), 1);
+
+    const heard: string[] = [];
+    const stop = second.listen((e) => {
+      if ("seq" in e && e.type === "llm_response") heard.push(String(e.seq));
+    });
+    const said = daemon.say(session.id, "still here");
+    await second.waitFor((e) => "seq" in e && e.seq === said.seq, 5_000, "the second opener's event");
+    assert.equal(heard.length, 1, "the surviving holder still receives events");
+    stop();
+
+    await client.close(session.id);
+    assert.equal(client.holdersOf(session.id), 0);
+    // A fresh open after the last close starts a new subscription from the beginning.
+    const again = await client.open(session.id);
+    assert.notEqual(again, first);
+    await client.close(session.id);
+  });
+
   it("closing one session leaves the other's socket alone", async () => {
     const third = daemon.seed("/home/ada/three");
     const view = await client.open(third.id, {});

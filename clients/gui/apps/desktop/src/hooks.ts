@@ -17,7 +17,7 @@ import {
   SessionAttachment,
   TroupeRpcError,
 } from "@troupe/client";
-import { shell } from "./shell";
+import { daemonHint, shell } from "./shell";
 import type {
   AttachStatus,
   AuthSession,
@@ -129,6 +129,14 @@ export function useDaemon(): {
       live = false;
     };
   }, [round]);
+
+  // A browser build in development can be told by the environment instead of by hand.
+  // Once, at start: `forget` must stay forgotten.
+  useEffect(() => {
+    if (shell()?.findDaemon) return;
+    const hint = daemonHint();
+    if (hint) setEndpoint(hint);
+  }, []);
 
   useEffect(() => {
     if (!endpoint) return;
@@ -260,6 +268,11 @@ export function useSessionView(
     if (!sessionId) return;
     if (local ? !daemon : !auth) return;
     let live = true;
+    // Whether this mount's `open` resolved while it was still mounted, so the cleanup
+    // knows whether it owes the daemon a `close` — the one it would otherwise pay twice
+    // when the open resolves after the unmount and that path closes too.
+    let held = false;
+    let stopListening: (() => void) | null = null;
     setState(emptyTranscript);
     setError(null);
     setStatus("connecting");
@@ -268,11 +281,18 @@ export function useSessionView(
     // the daemon already has — there is no token to expire and nothing to reconnect
     // around — and a session on a worker is reached through an attachment that swaps
     // the socket underneath the view when the plane mints a new token.
+    //
+    // The local view is *listened to* rather than given this mount's hook: a view may
+    // already be open for somebody else — another pane, or this same component mounted
+    // twice by React in development — and a hook installed by the first opener would
+    // keep folding into a state nobody renders.
     const opened = local
       ? daemon!
-          .open(sessionId, { onEvent: (e) => live && setState((s) => fold(s, e)) })
+          .open(sessionId)
           .then((v) => {
             if (!live) return void daemon!.close(sessionId);
+            held = true;
+            stopListening = v.listen((e) => live && setState((s) => fold(s, e)));
             ref.current = v;
             setView(v);
             setStatus("live");
@@ -303,12 +323,13 @@ export function useSessionView(
 
     return () => {
       live = false;
+      stopListening?.();
       const a = attachment.current;
       attachment.current = null;
       ref.current = null;
       setView(null);
       if (a) void a.close();
-      else if (local && daemon) void daemon.close(sessionId);
+      else if (local && daemon && held) void daemon.close(sessionId);
     };
   }, [auth, daemon, sessionId, mode, local]);
 

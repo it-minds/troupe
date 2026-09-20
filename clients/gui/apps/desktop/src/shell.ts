@@ -80,7 +80,9 @@ export function capabilities(): Capabilities {
   })();
   return {
     secrets: s?.secretStore ? "os-keychain" : hasStorage ? "browser-storage" : "memory",
-    localSessions: Boolean(s?.findDaemon),
+    // A shell finds the daemon; a browser build in development may have been told where
+    // it is (`daemonHint`). Either way there are local sessions to show.
+    localSessions: Boolean(s?.findDaemon) || daemonHint() !== null,
     shellName: s?.name ?? null,
   };
 }
@@ -126,6 +128,31 @@ export function likelyPlaneUrl(): string {
   const origin = (globalThis as { location?: { origin?: string } }).location?.origin ?? "";
   const mounted = (import.meta.env.BASE_URL || "/") !== "/";
   return mounted ? origin : "";
+}
+
+/**
+ * A daemon endpoint the environment named, for a browser build in development.
+ *
+ * A page cannot read `daemon.json`, but the person running `pnpm dev` can paste what it
+ * says once — `VITE_TROUPE_DAEMON=<port>:<token>` in `apps/desktop/.env.local`, or
+ * `#daemon=<port>:<token>` on the URL — instead of into the form at every reload. The
+ * token goes where the form's would: memory, for this tab. The rule that the GUI
+ * persists exactly one secret has no exception for a local one, and a `.env.local` is
+ * the developer's file, not the app's storage.
+ */
+export function daemonHint(): DaemonEndpoint | null {
+  const fromEnv = (import.meta.env["VITE_TROUPE_DAEMON"] as string | undefined) ?? null;
+  const hash = (globalThis as { location?: { hash?: string } }).location?.hash ?? "";
+  const fromHash = new URLSearchParams(hash.replace(/^#/, "")).get("daemon");
+  return parseEndpoint(fromEnv) ?? parseEndpoint(fromHash);
+}
+
+function parseEndpoint(value: string | null): DaemonEndpoint | null {
+  const match = /^(\d+):(.+)$/.exec((value ?? "").trim());
+  if (!match) return null;
+  const port = Number(match[1]);
+  if (!Number.isInteger(port) || port <= 0 || port > 65_535) return null;
+  return { transport: "ws", port, token: match[2]! };
 }
 
 /** Plain preferences — a plane URL, the last filter. Never a credential. */
