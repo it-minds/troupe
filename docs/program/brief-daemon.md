@@ -291,11 +291,11 @@ tests for it (`limits_test.exs`, 26 of them; `reasoning_test.exs`, 12) ported al
 | what | the TUI had (its `main`) | lands in core as | PR |
 |---|---|---|---|
 | Usage shape: four disjoint figures; the budget charges billed input; compaction and the context gauge read the prompt's length | Decision 59, `llm/provider.ex` | `Troupe.LLM.Usage` (Decision 657) | #26 |
-| Reasoning round-trip: `reasoning_content` accumulated, kept as a provider-bound block, replayed verbatim (DeepSeek 400s without it); Anthropic thinking blocks, signatures, redacted thinking; reasoning deltas shown live | `llm/message.ex`, `llm/openai.ex`, `llm/anthropic.ex` | a `Reasoning` block, `Delta` kind `reasoning` | — |
-| Output caps for reasoning models: `max_completion_tokens` and `reasoning_effort` on the wire, the 400 retry that swaps the field, Anthropic effort → `thinking.budget_tokens` with `max_tokens` raised to fit | Decision 61 | the adapters read the target's effort and cap | — |
-| Truncation recovery: a `max_tokens` stop retried once with a note, a call cut mid-argument answered with an error rather than run, a reasoning-only reply nudged once, `refusal` ends as `:refused` | `agent/server.ex` (`d6b3a0f`) | a `truncated` event; `output_truncated`, `empty_reply`, `refused` done reasons | — |
-| Context-overflow 400: classify, compact once, re-send the turn; actionable `llm_error` text; the error classes (auth, unknown model, rate limit with `retry-after`) | `llm/provider.ex` `classify/1`, `describe_error/1` | `Provider.classify/1` and the agent's overflow path | — |
-| Budget question: `y` / `n` / `a` with grants, one more slice each time | Decisions 62–66, `agent/budget.ex` grants | `budget_ask_started` / `budget_ask_answered`, a `budget.answer` method | — |
+| Reasoning round-trip: `reasoning_content` accumulated, kept as a provider-bound block, replayed verbatim (DeepSeek 400s without it); Anthropic thinking blocks, signatures, redacted thinking; reasoning deltas shown live | `llm/message.ex`, `llm/openai.ex`, `llm/anthropic.ex` | a `Reasoning` block, `Delta` kind `reasoning` | #27 |
+| Output caps for reasoning models: `max_completion_tokens` and `reasoning_effort` on the wire, the 400 retry that swaps the field, Anthropic effort → `thinking.budget_tokens` with `max_tokens` raised to fit | Decision 61 | the adapters read the target's effort and cap | #27 |
+| Truncation recovery: a `max_tokens` stop retried once with a note, a call cut mid-argument answered with an error rather than run, a reasoning-only reply nudged once, `refusal` ends as `:refused` | `agent/server.ex` (`d6b3a0f`) | a `truncated` event; `output_truncated`, `empty_reply`, `refused` done reasons | #28 |
+| Context-overflow 400: classify, compact once, re-send the turn; actionable `llm_error` text; the error classes (auth, unknown model, rate limit with `retry-after`) | `llm/provider.ex` `classify/1`, `describe_error/1` | `Provider.classify/1` and the agent's overflow path | #28 |
+| Budget question: `y` / `n` / `a` with grants, one more slice each time | Decisions 62–66, `agent/budget.ex` grants | `budget_ask_started` / `budget_ask_answered`, a `budget.answer` method | #29 |
 
 ### Phase 4 — the GUI gets local sessions
 
