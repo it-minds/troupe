@@ -4571,3 +4571,21 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `session.create`. What the harness did next, asking the person at the ceiling
      whether to extend the budget, is not here: a budget is a limit, `budget_exhausted`
      is honest about it, and the person who wants more starts a session with more.
+
+656. **The harness's twelve agents are the core's eleven, and the watcher keeps driving
+     the root agent.** The TUI shipped twelve definitions; the core had four. Eight came
+     over across phase 3 as the features they needed did — `workflow`, `implementer`,
+     `reviewer` with workflows, `librarian` with the brief — and the last three come
+     here: `answer` (an `AI?` question, cheap and read-only, six turns), `quick` (an `AI!`
+     change, cheap, no task list, never asks), `ask` (a question across this session's
+     branches through `read_branch`). Two of the twelve are not agents any more: `code`
+     is `build`, and `worktree` was `code` in a worktree, which is a way of creating a
+     session (`worktree: "always"`) rather than a profile. Watch mode is where the two
+     harnesses differed most and the core's shape stands: the watcher hands an `AI!` or
+     `AI?` trigger to the session's own root agent — a question under the read-only plan
+     permissions for that turn — instead of starting a cheap branch per trigger, because a
+     branch is a session now (7.3 b) and a watcher that creates sessions would be a client.
+     `quick` and `answer` exist for the client that wants that — a `session.create` on the
+     workspace with the marker's text as the prompt — and for a person who runs them by
+     hand; the marker grammar, the debounce, the self-write filter and `watch.set` were
+     already here and are unchanged.
