@@ -22,6 +22,24 @@ defmodule Troupe.Plane.Identity.Team do
 
   import Ecto.Changeset
 
+  # What a name may be. It is not a label: it is the address a team has everywhere —
+  # a grant, a session's team, an audit row, an API argument — and it is also *part of
+  # other names*. The worker keys a session under `troupe/teams/<name>/sessions/<id>` in
+  # OpenBao, and the operator names a team's volume claim `team-<name>` in Kubernetes,
+  # which accepts lowercase letters, digits and dashes and nothing else, in at most 63
+  # characters. Fifty-eight here leaves room for the `team-`.
+  #
+  # `Admin Buddies` is the name that found this. It was accepted, and every session create
+  # then failed at the pod: the worker sent the space raw in an OpenBao URL, and the HTTP
+  # client refused the request before it left the building. A worker new enough to encode
+  # the segment would have got further and failed later, at the volume claim.
+  @name_format ~r/^[a-z0-9]([a-z0-9-]{0,56}[a-z0-9])?$/
+  @name_rule "lowercase letters, digits and dashes, starting and ending with a letter or digit, at most 58 characters — it becomes part of a Kubernetes name and an OpenBao path"
+
+  @doc "What a team name must be, in words, for a form to show beside the field."
+  @spec name_rule() :: String.t()
+  def name_rule, do: @name_rule
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -79,6 +97,7 @@ defmodule Troupe.Plane.Identity.Team do
     team
     |> cast(attrs, @fields)
     |> validate_required([:group_id, :name])
+    |> validate_format(:name, @name_format, message: @name_rule)
     |> validate_inclusion(:budget_period, ["monthly", "never"])
     |> validate_number(:idle_timeout_seconds, greater_than: 0)
     # The name, not the group. A team is addressed by name everywhere — a grant, a

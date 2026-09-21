@@ -493,12 +493,31 @@ defmodule Troupe.Plane.Admin do
           {:ok, team_detail(team)}
 
         {:error, changeset} ->
-          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+          {:error, Error.new(:invalid_params, changeset_reason(changeset))}
       end
     else
       nil -> {:error, Error.new(:not_found, %{group: group_id})}
       other -> other
     end
+  end
+
+  # A refused changeset as a sentence per field rather than an inspected keyword list. A
+  # console shows `reason` beside the form, and `[name: {"must be…", [validation:
+  # :format]}]` is a thing to be decoded before it is a thing to be fixed.
+  defp changeset_reason(changeset) do
+    errors =
+      Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
+        Enum.reduce(opts, message, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+      end)
+
+    reason =
+      Enum.map_join(errors, "; ", fn {field, messages} ->
+        "#{field}: #{Enum.join(messages, ", ")}"
+      end)
+
+    %{reason: reason, fields: Map.keys(errors)}
   end
 
   # What a team starts with, from the platform's settings rather than from the schema's

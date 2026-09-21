@@ -374,6 +374,10 @@ defmodule Troupe.Plane.Web.Live.Teams do
             placeholder="delivery"
             autocomplete="off"
           />
+          <p class="field-help">
+            {Troupe.Plane.Identity.Team.name_rule() |> String.capitalize()}. Blank takes one
+            from the group's display name.
+          </p>
 
           <label for="enable-team-budget">Monthly ceiling, in micros</label>
           <input
