@@ -4,6 +4,10 @@ defmodule Troupe.Agent.DelegationTest do
   alias Troupe.Agent.{Definition, Definitions}
   alias Troupe.Agent.Node, as: AgentNode
 
+  # How many times `kill_until_gone/3` may kill the agent before giving up, and so also
+  # how many answers the doomed child's script has to have.
+  @kill_attempts 12
+
   describe "parallel delegation" do
     test "the root delegates to four children and gets four results", context do
       %{session: session} =
@@ -57,7 +61,12 @@ defmodule Troupe.Agent.DelegationTest do
             ],
             "general" => List.duplicate({:tools, [{"finish", %{"summary" => "ok"}}]}, 3),
             # The doomed child never answers: the test kills it until its Node gives up.
-            "doomed" => [{:tools, [{"shell", %{"command" => "sleep 30"}}]}]
+            # A restarted agent asks again, so there is a step here for every kill: a
+            # request whose answer the kill threw away has still consumed its step, and
+            # one step alone would leave the next request to the fake's default — a
+            # plain reply, which is a child that *finished*, not one that failed.
+            "doomed" =>
+              List.duplicate({:tools, [{"shell", %{"command" => "sleep 30"}}]}, @kill_attempts)
           },
           definitions: definitions_with_doomed()
         )
@@ -267,7 +276,7 @@ defmodule Troupe.Agent.DelegationTest do
   # for good. Reaching that state means killing the agent faster than the Node can
   # restart it — and waiting on the *Node*, because right after a kill the restarted
   # agent has not re-registered yet and looking for it would end the loop early.
-  defp kill_until_gone(session_id, path, attempts \\ 12) do
+  defp kill_until_gone(session_id, path, attempts \\ @kill_attempts) do
     node_pid = Registry.whereis({:node, session_id, path})
     assert is_pid(node_pid), "no Node registered for #{inspect(path)}"
     ref = Process.monitor(node_pid)
@@ -283,8 +292,12 @@ defmodule Troupe.Agent.DelegationTest do
       {:DOWN, ^ref, :process, ^node_pid, _reason} -> :ok
     after
       0 ->
+        # Only the Node's own `:DOWN` ends this loop. An agent missing from the
+        # registry is not the same thing — a child that answered and finished leaves
+        # one too — and taking it for the end would let a *successful* delegation pass
+        # for a dead one, which is the opposite of what this test is about.
         case await_agent(session_id, path, 1_000) do
-          nil -> :ok
+          nil -> :not_registered
           pid -> Process.exit(pid, :kill)
         end
 
