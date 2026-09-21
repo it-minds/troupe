@@ -276,8 +276,8 @@ jobs:
           fi
 
   # One leg per app the change can have broken, in parallel. Each leg compiles the
-  # umbrella (from the cache) and runs that app's suite from its own directory, which is
-  # what `mix test` at the root does one app after another.
+  # umbrella (from the cache) and runs that app's suite, which is what `mix test` at the
+  # root does one app after another.
   test:
     name: test ${{ matrix.app }}
     needs: [changes]
@@ -337,19 +337,21 @@ jobs:
       - name: Migrate the plane's test database
         run: MIX_ENV=test mix ecto.create --quiet && MIX_ENV=test mix ecto.migrate --quiet
 
+      # From the umbrella's root with the app's own test directory, not from inside the
+      # app: some suites read across the umbrella — `troupe_protocol`'s checks every
+      # app's version and borrows the operator's fixtures — and only the root loads it all.
       - name: Test
-        working-directory: apps/${{ matrix.app }}
-        run: mix test
+        run: mix test "apps/${{ matrix.app }}/test"
 
       # A full run's soak: the suite is concurrent, and a race that shows up one time in
       # five is a bug this project cares about. The nightly and a release owe it; a pull
       # request and an ordinary merge do not.
       - name: Test, ${{ inputs.soak }} more times
         if: inputs.soak > 0
-        working-directory: apps/${{ matrix.app }}
         env:
           SOAK: ${{ inputs.soak }}
-        run: for i in $(seq "$SOAK"); do mix test || exit 1; done
+          APP: ${{ matrix.app }}
+        run: for _ in $(seq "$SOAK"); do mix test "apps/$APP/test" || exit 1; done
 
   chart:
     name: helm lint, render, kubeconform
