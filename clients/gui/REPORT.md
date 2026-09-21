@@ -453,7 +453,7 @@ it is server work first.
 
 ---
 
-## Stage 4 — review, fleet health, and administration
+## Stage 4 — review, fleet health, and administration (since removed)
 
 Built, and it needed no server change: every method it calls already existed on the plane.
 
@@ -467,33 +467,31 @@ approvals are open, so a hundred unattended runs cost one request. A session is 
 when somebody answers an approval on it, in `read` mode, over the same `InlineApprovals`
 the inbox uses.
 
-**Administration** is six panels over the `admin.*` methods and nothing else:
+**Administration was six panels over the `admin.*` methods, and has been removed.**
 
-| panel | what it is |
-| --- | --- |
-| Fleet | profiles with their pods, capacity, conditions, versions and bundle adoption; drain a pod |
-| Bundles | every version of a channel, one version in full with its adoption, publish and retire |
-| Teams | spend against budget, grants, administrators, membership (read-only, always) |
-| Automation | service principals and triggers, with each trigger's runs |
-| Audit | who changed what, with the diff keyed by the path it changed |
-| Settings | every platform setting with where its value came from, and the four identity checks |
+It is recorded here rather than deleted because the reasoning outlived it. The plane's
+own console at `/admin` is seven screens over the same methods, with `ConsoleCoverageTest`
+behind it: a method reachable from no screen fails that test. This app's panel had no such
+test, and it drifted. By the time it was taken out, its Settings tab was mapping over the
+answer to `admin.settings.list` as though it were an array — it has been a map for as long
+as anyone can remember — and rendering a `description` the plane has never sent. Nobody had
+noticed, which is the finding: nobody administers from here.
 
-Three rules run through all of it.
+Two renderings of one surface is two things to keep in step, and only one of them was
+holding up its end. This app is for sessions. Administration is a different job, done by a
+different person, at a different moment, and it is one link away.
 
-**The navigation is asked for, not inferred.** `platform_admin` is a claim, but the other
-role — `team_admin` — is in no claim a client can read. So `admin.overview` is the probe: it
-is the cheapest administrative read, it is scoped to whatever the caller administers, and a
-person who administers nothing is refused. Refused is an answer, not an error, and the
-navigation is simply not offered.
+What survived: `AdminApi` in `@troupe/client`, because it is the library's coverage of the
+plane's API rather than a screen, and Review, which uses `admin.runs.list`. The probe that
+decided whether to offer the tab went with the tab, so signing in makes one fewer call.
 
-**One public method per action, and the audit row it produced is shown.** An admin screen
-that says "saved" is asking to be believed; one that reads back the record it just wrote is
-not. `AfterTheChange` does that after every write.
-
-**Irreversible means typing the thing's own name.** Draining a pod, retiring a version,
-revoking a grant, rotating a secret, disabling a principal, deleting a trigger — each asks
-for the identifier, which is the same rule the platform applies to a model calling those
-methods over MCP.
+The three rules the panel was built on are still worth stating, because the console
+enforces all three and the next surface over these methods should too: the navigation is
+asked for rather than inferred, since `team_admin` is in no claim a client can read and
+`admin.overview` is the cheapest probe that answers it; one public method per action, with
+the audit row that action wrote shown back rather than the word "saved"; and irreversible
+means typing the thing's own identifier, which is the rule the platform already applies to
+a model calling those methods over MCP.
 
 ### The two that are about a specific promise
 

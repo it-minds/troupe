@@ -11,7 +11,6 @@ import type { AuthSession } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { capabilities } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
-import { Admin } from "./views/Admin";
 import { Approvals } from "./views/Approvals";
 import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
@@ -26,7 +25,6 @@ type Where =
   | { screen: "approvals" }
   | { screen: "review" }
   | { screen: "local" }
-  | { screen: "admin" }
   | { screen: "appearance" }
   | { screen: "session"; id: string };
 
@@ -35,7 +33,9 @@ export function App(): JSX.Element {
   const [where, setWhere] = useState<Where>({ screen: "sessions" });
   const daemon = useDaemon();
   const { snapshot, refresh } = useFleet(auth, daemon.client);
-  const admin = useAdmin(auth);
+  // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
+  // the runs nobody has looked at. Administration itself is the console's, at /admin.
+  const adminApi = useAdmin(auth);
   const appearance = useAppearance();
   // Asked once, on this person's first sign-in, and never again. Tracked per subject:
   // two people on one computer are two first sign-ins, and the second should not
@@ -96,13 +96,6 @@ export function App(): JSX.Element {
             This computer
             {daemon.status === "connected" && <span className="count muted">{local}</span>}
           </button>
-          {/* Offered only to somebody who administers something. `admin.overview` is
-              what decides, because the other role is in no claim a client can read. */}
-          {admin.available && (
-            <button aria-current={where.screen === "admin" ? "page" : undefined} onClick={() => setWhere({ screen: "admin" })}>
-              Administration
-            </button>
-          )}
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
           </button>
@@ -146,17 +139,7 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "review" && (
-          <Review auth={auth} admin={admin.api} daemon={daemon.client} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
-        )}
-
-        {where.screen === "admin" && admin.available && admin.api && (
-          <Admin
-            auth={auth}
-            api={admin.api}
-            platform={admin.platform}
-            overview={admin.overview}
-            onOpen={(id) => setWhere({ screen: "session", id })}
-          />
+          <Review auth={auth} admin={adminApi} daemon={daemon.client} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
         )}
 
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}

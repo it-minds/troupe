@@ -7,7 +7,7 @@
 // theme; that it means exactly one thing does not.
 
 import { useEffect, useState } from "react";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
@@ -160,5 +160,78 @@ export function Loading({ what }: { what: string }): JSX.Element {
     <p className="note" aria-busy="true">
       {what}
     </p>
+  );
+}
+
+/** A plain data table. Scrolls on its own so the page never does, sideways. */
+export function Table({ head, children }: { head: string[]; children: ReactNode }): JSX.Element {
+  return (
+    <div className="table-scroll">
+      <table className="table">
+        <thead>
+          <tr>
+            {head.map((h) => (
+              <th key={h} scope="col">
+                {h}
+              </th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>{children}</tbody>
+      </table>
+    </div>
+  );
+}
+
+/**
+ * An irreversible action, gated on typing the thing's own identifier.
+ *
+ * Not a checkbox and not a second button. The identifier is what the person has to
+ * produce, so the action cannot be completed by muscle memory on the wrong row.
+ */
+export function Confirm({
+  what,
+  identifier,
+  consequence,
+  busy,
+  onCancel,
+  onConfirm,
+}: {
+  what: string;
+  identifier: string;
+  consequence: string;
+  busy: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}): JSX.Element {
+  const [typed, setTyped] = useState("");
+
+  return (
+    <div className="scrim" onClick={onCancel}>
+      <div className="dialog" role="dialog" aria-modal="true" aria-label={what} onClick={(e) => e.stopPropagation()}>
+        <h1>{what}</h1>
+        <p className="copy">{consequence}</p>
+        <label>
+          Type <code className="mono">{identifier}</code> to confirm
+          <input value={typed} onChange={(e) => setTyped(e.target.value)} autoFocus spellCheck={false} />
+        </label>
+        <div className="actions">
+          <button onClick={onCancel}>Cancel</button>
+          <button className="primary danger" disabled={busy || typed !== identifier} onClick={onConfirm}>
+            {busy ? "Working…" : what}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+/** A read that failed, said once and in the same place on every screen. */
+export function Failed({ error }: { error: string | null }): JSX.Element | null {
+  if (!error) return null;
+  return (
+    <div className="banner error">
+      <p>{error}</p>
+    </div>
   );
 }

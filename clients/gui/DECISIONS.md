@@ -368,3 +368,24 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     the wire, and the sign-in group is left out of the Settings tab for the reason the
     console leaves it off Policy — its save is gated and a second, ungated one would be a
     gate somebody walks around.
+
+44. **The administration panel is gone from this app.** It was six panels over the
+    `admin.*` methods, and the plane's own console at `/admin` is seven screens over the
+    same ones — with `ConsoleCoverageTest` behind it, which fails when a method is
+    reachable from no screen. Two renderings of one surface is two things to keep in
+    step, and only one of them had a test saying it was complete. Every time the plane
+    grew a method this month the panel fell a little further behind: the Settings tab was
+    reading a bare array from `admin.settings.list`, which has answered with a map for as
+    long as anyone can remember, and rendering a `description` field the plane has never
+    sent. Nobody noticed, because nobody administers from here.
+
+    What this app is for is sessions: starting them, watching them, answering them, and
+    the work on this computer. Administration is a different job done by a different
+    person at a different moment, and sending them to `/admin` costs a link.
+
+    Two things stay. `AdminApi` is still in `@troupe/client`, because it is the client
+    library's coverage of the plane's API and not a screen; and Review still uses it, for
+    `admin.runs.list`. The probe that decided whether to offer the tab is gone with the
+    tab, so signing in makes one fewer call. `Table`, `Confirm` and `Failed` moved out of
+    `views/admin/` into the shared `views/bits.tsx`, because *This computer* uses all
+    three and they were never administrative.
