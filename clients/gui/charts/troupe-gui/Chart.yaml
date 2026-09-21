@@ -1,6 +1,0 @@
-apiVersion: v2
-name: troupe-gui
-description: The Troupe GUI — one static bundle, served beside the plane it talks to.
-type: application
-version: 0.1.0
-appVersion: "0.1.0"

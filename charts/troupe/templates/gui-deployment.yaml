@@ -1,0 +1,134 @@
+{{/*
+The GUI's selector labels. Here rather than in `_helpers.tpl`, as the A2A facade's are, so
+the whole of the GUI is one template that `gui.enabled` switches on and off.
+*/}}
+{{- define "troupe.gui.selectorLabels" -}}
+app.kubernetes.io/name: troupe
+app.kubernetes.io/component: gui
+app.kubernetes.io/instance: {{ .Release.Name }}
+{{- end -}}
+
+{{- define "troupe.gui.base" -}}
+{{- $base := trimSuffix "/" .Values.gui.basePath -}}
+{{- if and $base (ne $base "/") }}{{ $base }}{{ end -}}
+{{- end -}}
+
+{{- if and .Values.gui.enabled .Values.plane.enabled }}
+{{- if not (include "troupe.gui.base" .) }}
+{{- fail "gui.basePath is the root of the plane's host, which the plane itself serves. Mount the GUI under a path, such as /app." }}
+{{- end }}
+# The graphical client (`clients/gui`), served at `gui.basePath` on the plane's own host.
+#
+# It was a release of its own with its own chart, installed beside this one onto the
+# same host; it is part of this chart now, on by default, because the product is the
+# platform and a client to use it with (Decision 670). It is a protocol client and
+# nothing else: static files behind nginx, no secrets, no database, no ServiceAccount
+# privileges, nothing configured at runtime — what it serves was decided when the image
+# was built. A cluster whose people bring their own client sets `gui.enabled: false` and
+# points `plane.appUrl` at it.
+apiVersion: v1
+kind: Service
+metadata:
+  name: troupe-gui
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  type: ClusterIP
+  selector: {{- include "troupe.gui.selectorLabels" . | nindent 4 }}
+  ports:
+    - name: http
+      port: 80
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: troupe-gui
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.gui.replicas }}
+  selector:
+    matchLabels: {{- include "troupe.gui.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "troupe.labels" . | nindent 8 }}
+        app.kubernetes.io/component: gui
+    spec:
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      {{- end }}
+      # Nothing here reads a file it did not ship with, so the whole filesystem can be
+      # read-only bar the two directories nginx writes its own scratch into.
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 101
+        fsGroup: 101
+        seccompProfile: {type: RuntimeDefault}
+      containers:
+        - name: gui
+          image: "{{ .Values.gui.image.repository }}:{{ .Values.gui.image.tag | default .Chart.AppVersion }}"
+          imagePullPolicy: {{ .Values.gui.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: 8080
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities: {drop: ["ALL"]}
+          # Static files and no upstream: if nginx answers, it is serving, and there is
+          # no second thing for readiness to mean.
+          readinessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 2
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /healthz, port: http}
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          resources: {{- toYaml .Values.gui.resources | nindent 12 }}
+          volumeMounts:
+            - {name: cache, mountPath: /var/cache/nginx}
+            - {name: run, mountPath: /tmp}
+      volumes:
+        - {name: cache, emptyDir: {}}
+        - {name: run, emptyDir: {}}
+---
+{{- $base := include "troupe.gui.base" . }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: troupe-gui
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+  annotations:
+    # The bundle is served from the container's root and its asset URLs carry the base
+    # path, so the prefix is stripped on the way in: `{{ $base }}/assets/x.js` becomes
+    # `/assets/x.js`, and `{{ $base }}/anything` becomes `/anything`, which the SPA
+    # fallback turns into `index.html`. Done here rather than in the image, so the
+    # container does not know where it is mounted.
+    nginx.ingress.kubernetes.io/rewrite-target: /$2
+    # No cert-manager annotation: this is the plane's host, and the plane's Ingress is
+    # what asks for its certificate. Two Ingresses on one host share one secret.
+spec:
+  ingressClassName: {{ .Values.plane.ingressClassName }}
+  {{- if .Values.plane.tlsSecretName }}
+  tls:
+    - hosts: [{{ .Values.plane.host | quote }}]
+      secretName: {{ .Values.plane.tlsSecretName }}
+  {{- end }}
+  rules:
+    - host: {{ .Values.plane.host | quote }}
+      http:
+        paths:
+          # `ImplementationSpecific` because the capture groups the rewrite refers to are
+          # nginx's, not the Ingress API's. `(/|$)` is what makes both `{{ $base }}` and
+          # `{{ $base }}/` reach the app rather than only the second.
+          - path: {{ printf "%s(/|$)(.*)" $base | quote }}
+            pathType: ImplementationSpecific
+            backend:
+              service:
+                name: troupe-gui
+                port: {name: http}
+{{- end }}

@@ -241,14 +241,13 @@ spec:
             - name: TROUPE_BASE_URL
               value: {{ .Values.plane.baseUrl | default (printf "https://%s" .Values.plane.host) | quote }}
             # Where the index page at `/` points a browser looking for the graphical
-            # client. The GUI is a separate release (`charts/troupe-gui`) mounted on this
-            # host; empty means this plane ships without one and the index offers no door.
+            # client: `plane.appUrl` when it is set, else the GUI this chart serves on
+            # this host (`gui:`), else nothing — and the index offers no door.
             - name: TROUPE_APP_URL
-              value: {{ .Values.plane.appUrl | quote }}
-            # And where the terminal client is published — a release from another
-            # repository, which this cluster does not host. Empty means the page tells a
-            # reader to ask an administrator instead of linking at a download that is not
-            # there.
+              value: {{ .Values.plane.appUrl | default (ternary (include "troupe.gui.base" .) "" .Values.gui.enabled) | quote }}
+            # And where the terminal client is published. This cluster does not host it;
+            # empty means the page tells a reader to ask an administrator instead of
+            # linking at a download that is not there.
             - name: TROUPE_CLI_URL
               value: {{ .Values.plane.cliUrl | quote }}
             # Browser origins the API answers cross-origin requests from. Empty means

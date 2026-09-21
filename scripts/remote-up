@@ -126,7 +126,7 @@ if [ "${TROUPE_SKIP_BUILD:-}" = "1" ]; then
   # starts — "trying and failing to pull image" — several steps from anything that
   # mentions building. Whatever is on this machine is loaded; what is not, is not.
   echo "skipping the build (TROUPE_SKIP_BUILD=1); loading what is already built"
-  for release in troupe-operator troupe-plane troupe-worker troupe-a2a; do
+  for release in troupe-operator troupe-plane troupe-worker troupe-a2a troupe-gui; do
     image="ghcr.io/objective-mj/${release}:${TROUPE_IMAGE_TAG:-dev}"
     if docker image inspect "$image" >/dev/null 2>&1; then
       kind load docker-image "$image" --name "$cluster"
@@ -226,7 +226,7 @@ helm --kube-context "$context" upgrade --install troupe charts/troupe \
 # no reason to replace the pods. Restarting is the only way to pick one up, and skipping
 # it is how you spend an hour debugging the code you did not deploy.
 if [ "${TROUPE_SKIP_BUILD:-}" != "1" ]; then
-  kc rollout restart -n "$namespace" deployment/troupe-plane deployment/troupe-operator
+  kc rollout restart -n "$namespace" deployment/troupe-plane deployment/troupe-operator deployment/troupe-gui
 fi
 
 kc rollout status -n "$namespace" deployment/troupe-plane --timeout=180s

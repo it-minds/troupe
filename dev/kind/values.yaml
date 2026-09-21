@@ -64,6 +64,12 @@ objectStore:
 # On, because `mix troupe.e2e` has a claim about it and a facade nobody deploys is a
 # facade nobody tests. It is off by default in the chart for the opposite and equally
 # good reason: a cluster with nothing calling it has no reason to run one.
+# The GUI, at http://plane.localtest.me:30080/app, from the image scripts/build-images
+# loads into kind.
+gui:
+  image: {tag: dev}
+  replicas: 1
+
 a2a:
   enabled: true
   image: {tag: dev}

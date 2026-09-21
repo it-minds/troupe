@@ -4918,3 +4918,25 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      fails when any of the 25 differ and CI runs it. The first thing it would have caught:
      mint, 1.10.1 in the TUI for a security advisory and 1.10.0 here. Proof: `mix check` in
      `clients/tui`, 107 tests, against the umbrella's source.
+
+670. **`charts/troupe` serves the GUI, on by default, and `plane.appUrl` follows it.** The
+     GUI had a chart of its own, installed as a second release onto the plane's host and
+     linked from the plane's index by a hand-set `/app`. It is now `gui:` in this chart:
+     a Deployment, a Service, a NetworkPolicy that admits the ingress namespace on 8080
+     and nothing else, and an Ingress on `plane.host` at `gui.basePath` that shares the
+     plane's TLS secret and asks cert-manager for nothing. The templates are the GUI
+     chart's, moved, not rethought — the security context, the probes, the rewrite that
+     strips the base path — and `charts/troupe-gui` goes with the move, never having been
+     released. `gui.enabled` is true because the defaults are the product: one `helm
+     install` is a plane and a client to use it with. Bringing your own is
+     `gui.enabled: false` and `plane.appUrl` set, and `plane.appUrl` now defaults to empty
+     meaning *the chart's GUI if there is one*, so turning the GUI off no longer leaves
+     the index linking to a 404 at `/app`. The chart refuses `gui.basePath: /`, because the
+     root of that host is the plane's. The GUI needs `plane.enabled`: a workers-only
+     cluster has no host to mount it on. `scripts/build-images` builds the GUI image from
+     `clients/gui` and `scripts/remote-up` loads and restarts it, so the kind cluster
+     serves it at `http://plane.localtest.me:30080/app`. Proof: `helm lint` with each values
+     file; `kubeconform` passes 29 resources with the GUI (25 without); the refusal
+     renders as an error; `plane.appUrl` renders `/app`, empty, and a BYO URL in the three
+     cases; and `scripts/deploy charts/troupe --dry-run` is accepted by a kind cluster's API
+     server.
