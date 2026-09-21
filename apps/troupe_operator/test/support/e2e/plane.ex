@@ -23,6 +23,11 @@ defmodule Troupe.E2E.Plane do
   @password "troupe"
   @client "troupe"
 
+  # Seconds of life left below which a cached token is replaced rather than sent: longer
+  # than the slowest single call, so a token is never sent with time left and received
+  # without any.
+  @renew_before 120
+
   @doc """
   The subject this suite signs in as, as the plane knows it.
 
@@ -53,18 +58,22 @@ defmodule Troupe.E2E.Plane do
   @doc """
   A plane token for the development person, who is a platform admin and in `engineering`.
 
-  Cached for the run: every test would otherwise spend two round trips on the same
-  answer, and a token is valid for far longer than a suite takes.
+  Cached, because every test would otherwise spend two round trips on the same answer —
+  but only until shortly before it expires. A plane token lives fifteen minutes and the
+  suite takes longer than that: cached for the whole run, every test from minute sixteen
+  on was refused as `expired`, and the release gate with them.
   """
   @spec token() :: String.t()
   def token do
+    now = System.os_time(:second)
+
     case :persistent_term.get({__MODULE__, :token}, nil) do
-      nil ->
-        token = sign_in()
-        :persistent_term.put({__MODULE__, :token}, token)
+      {token, expires_at} when expires_at - now > @renew_before ->
         token
 
-      token ->
+      _missing_or_expiring ->
+        {token, expires_at} = sign_in()
+        :persistent_term.put({__MODULE__, :token}, {token, expires_at})
         token
     end
   end
@@ -370,13 +379,13 @@ You are a helpful assistant on a cluster."
   defp sign_in do
     id_token = id_token()
 
-    %{status: 200, body: %{"token" => token}} =
+    %{status: 200, body: %{"token" => token, "expires_at" => expires_at}} =
       Req.post!(World.plane_url() <> "/auth/exchange",
         json: %{"id_token" => id_token},
         retry: false
       )
 
-    token
+    {token, expires_at}
   end
 
   @doc """
