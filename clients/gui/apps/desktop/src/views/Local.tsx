@@ -2,9 +2,10 @@
 // has.
 //
 // Everything on this screen is about the machine rather than about a session — where the
-// daemon is, who it thinks you are, which directories have worktrees left over, and
-// which workspace is being watched. A local session's transcript is the same screen a
-// team session's is, because it is the same protocol; what differs is here.
+// daemon is, who it thinks you are, which model its sessions talk to, which directories
+// have worktrees left over, and which workspace is being watched. A local session's
+// transcript is the same screen a team session's is, because it is the same protocol;
+// what differs is here.
 //
 // The connect panel is the honest part. A desktop shell finds the daemon by reading the
 // file it publishes and can start it; a browser tab can do neither, so it is given the
@@ -13,9 +14,10 @@
 
 import { useCallback, useState } from "react";
 import type { JSX } from "react";
-import type { DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
+import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
 import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
+import { Models } from "./Models";
 
 export interface DaemonState {
   client: DaemonClient | null;
@@ -33,10 +35,13 @@ export interface DaemonState {
 
 export function Local({
   daemon,
+  auth,
   me,
   planeUrl,
 }: {
   daemon: DaemonState;
+  /** For the organisation's model defaults. Null when nobody is signed in to a plane. */
+  auth: AuthSession | null;
   me: { subject: string; display_name?: string | undefined } | null;
   planeUrl: string;
 }): JSX.Element {
@@ -51,6 +56,7 @@ export function Local({
       <div className="listing">
         <Connect daemon={daemon} />
         {daemon.client && <WhoAmI daemon={daemon} me={me} planeUrl={planeUrl} />}
+        {daemon.client && <Models client={daemon.client} auth={auth} />}
         {daemon.client && <Workspaces client={daemon.client} />}
         {daemon.client && <Worktrees client={daemon.client} />}
       </div>

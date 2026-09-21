@@ -1,0 +1,25 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/config.models.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "api_key": {
+      "type": "string"
+    },
+    "auth": {
+      "type": "string"
+    },
+    "base_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "title": "config.models",
+  "type": "object"
+}

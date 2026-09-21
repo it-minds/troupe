@@ -133,6 +133,7 @@ export function App(): JSX.Element {
         {where.screen === "local" && (
           <Local
             daemon={daemon}
+            auth={auth}
             me={auth.me ? { subject: auth.me.subject, display_name: auth.me.display_name } : null}
             planeUrl={auth.planeUrl}
           />

@@ -195,8 +195,10 @@ defmodule Troupe.Remote.Translate do
       "llm_request" ->
         {[emit.(:agent_state, %{to: :thinking})], memory}
 
+      # Its own event rather than a note, so the status line can say the model failed
+      # instead of spinning on "starting" — which is all an idle agent looked like.
       "llm_error" ->
-        {[emit.(:remote_note, %{text: "model error" <> because(data)})], memory}
+        {[emit.(:llm_error, %{message: data["reason"] || "the model call failed"})], memory}
 
       type when type in ["tool.started", "tool_call_started"] ->
         {[

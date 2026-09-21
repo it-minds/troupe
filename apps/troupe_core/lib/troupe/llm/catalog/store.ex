@@ -51,18 +51,28 @@ defmodule Troupe.LLM.Catalog.Store do
   """
   @spec refresh(Config.t()) :: {:ok, %{String.t() => Catalog.t()}, [{String.t(), term()}]}
   def refresh(%Config{} = config) do
-    {entries, failures} =
-      config
-      |> targets()
-      |> Enum.map(&fetch/1)
-      |> Enum.reduce({[], []}, fn
-        {:ok, name, entries}, {acc, fails} -> {acc ++ Catalog.qualify(entries, name), fails}
-        {:error, name, reason}, {acc, fails} -> {acc, fails ++ [{name || "(session)", reason}]}
-      end)
-
+    {entries, failures} = discover(config)
     catalog = Map.new(entries, &{&1.id, &1})
     write(catalog)
     {:ok, catalog, failures}
+  end
+
+  @doc """
+  Asks every provider in `config` what models it serves, and writes nothing.
+
+  What `refresh/1` does before it caches, exposed on its own for a client that is
+  trying a provider out — a key pasted into a settings form and not yet saved has no
+  business in the cache, and a wrong one must not empty it.
+  """
+  @spec discover(Config.t()) :: {[Catalog.t()], [{String.t(), term()}]}
+  def discover(%Config{} = config) do
+    config
+    |> targets()
+    |> Enum.map(&fetch/1)
+    |> Enum.reduce({[], []}, fn
+      {:ok, name, entries}, {acc, fails} -> {acc ++ Catalog.qualify(entries, name), fails}
+      {:error, name, reason}, {acc, fails} -> {acc, fails ++ [{name || "(session)", reason}]}
+    end)
   end
 
   # Every provider worth asking: the named ones, plus the session-wide provider when it

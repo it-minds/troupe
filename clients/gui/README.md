@@ -64,7 +64,9 @@ no clicking: a browser is sent to the provider and straight back as Alice, and a
 code approves itself. Three
 prompt prefixes drive the scripted agent: `approve: <command>` asks for an approval,
 `big: <label>` returns a tool result too large to inline, and `quiet: …` answers without
-streaming.
+streaming. The plane answers `me.client_defaults` with an organisation gateway, so *Use
+organisation defaults* on the models panel has something to fill in;
+`NO_CLIENT_DEFAULTS=1 pnpm fake` is an organisation that has set nothing.
 
 ### Against the real daemon, with a fake model
 
@@ -125,7 +127,7 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # 49 tests: stage 1 and 2's done items, PKCE, the fold, the fleet store
+pnpm test                        # 77 tests: stage 1 and 2's done items, PKCE, the fold, the fleet store, model settings
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
 ```
@@ -137,7 +139,8 @@ token expiry with `auth.expiring` and `auth.refresh`, blob range caps, and appro
 where the first answer wins. `browserFetch` puts a browser's same-origin policy in front
 of Node's `fetch`, so the CORS behaviour is tested here rather than assumed. `daemon.ts`
 is the other half: one token for the whole machine, several sessions live on one socket,
-directories it owns, and an actor that changes when an identity is linked.
+directories it owns, an actor that changes when an identity is linked, and model settings
+it keeps without ever answering with the key.
 
 What none of it proves is the *server's* half. See [REPORT.md](REPORT.md), and
 [docs/e2e.md](docs/e2e.md) for the suites that run against a real plane and a real
@@ -273,6 +276,7 @@ packages/client/src
   transcript.ts   the fold: events → a transcript. Pure, and the reason two clients agree
   fleet.ts        FleetStore — one list from however many sources there are
   daemon.ts       DaemonClient — the machine in front of you: one socket, many sessions
+  config.ts       model settings: the shapes, and what an empty field in the form means
   admin.ts        the plane's administrative surface, one call per method
 
 apps/desktop/src
@@ -282,7 +286,7 @@ apps/desktop/src
   tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
   mark.ts         the mask's geometry, generated from the same files — do not edit
   views/          SignIn · Sessions · Session · Approval · Approvals · Files · Review
-                  Local · Admin (Fleet · Bundles · Teams · Automation · Audit · Settings)
+                  Local (Models) · Admin (Fleet · Bundles · Teams · Automation · Audit · Settings)
 ```
 
 `SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so

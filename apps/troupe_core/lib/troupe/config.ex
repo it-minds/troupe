@@ -188,18 +188,29 @@ defmodule Troupe.Config do
   @doc """
   Load configuration for a workspace.
 
-  `overrides` wins over everything and is where CLI flags land.
+  `overrides` wins over everything and is where CLI flags land. A `nil` workspace is
+  the configuration outside any project: the user's file, the environment and the
+  fallbacks, which is what a settings screen that is not about one repository shows.
   """
-  @spec load(Path.t(), keyword()) :: t()
+  @spec load(Path.t() | nil, keyword()) :: t()
   def load(workspace_root, overrides \\ []) do
+    project =
+      if workspace_root,
+        do: read_yaml(Path.join(Troupe.Paths.project_dir(workspace_root), "config.yaml")),
+        else: %{}
+
     %__MODULE__{}
-    |> merge_map(read_yaml(Path.join(Troupe.Paths.config_dir(), "config.yaml")))
-    |> merge_map(read_yaml(Path.join(Troupe.Paths.project_dir(workspace_root), "config.yaml")))
+    |> merge_map(read_yaml(user_path()))
+    |> merge_map(project)
     |> merge_env()
     |> merge_keyword(overrides)
     |> apply_opencode()
     |> apply_catalog()
   end
+
+  @doc "The user's own `config.yaml`, the file every workspace starts from."
+  @spec user_path() :: Path.t()
+  def user_path, do: Path.join(Troupe.Paths.config_dir(), "config.yaml")
 
   @doc "The budget an agent starts with under this config."
   @spec budget(t()) :: Troupe.Budget.t()

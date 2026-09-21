@@ -33,7 +33,21 @@ export interface PlaneOptions {
   /** Seconds a plane token is good for. */
   planeTokenLifetime?: number;
   profiles?: string[];
+  /**
+   * What `me.client_defaults` answers. Defaults to an organisation that routes through
+   * its own gateway; `{ configured: false }` is one whose administrator has set nothing.
+   */
+  clientDefaults?: Record<string, unknown>;
 }
+
+/** An organisation that points its clients at an OpenAI-compatible gateway of its own. */
+export const GATEWAY_DEFAULTS = {
+  configured: true,
+  provider: "openai",
+  base_url: "https://llm-gw.example/v1",
+  auth: "bearer",
+  models: { default: "glm-5.2", cheap: "qwen3.6-35b" },
+};
 
 export class FakePlane {
   readonly server: Server;
@@ -180,6 +194,11 @@ export class FakePlane {
             platform_admin: false,
           },
         };
+
+      // What any signed-in person's client should use. Never a key: the plane does not
+      // hold one to hand out, and each person brings their own.
+      case "me.client_defaults":
+        return { result: this.opts.clientDefaults ?? GATEWAY_DEFAULTS };
 
       case "teams.list":
         return { result: { teams: [{ name: "core", id: "t-1", budget_micros: 1_000_000 }] } };

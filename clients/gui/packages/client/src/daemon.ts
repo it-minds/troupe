@@ -14,6 +14,7 @@
 import { TroupeConnection } from "./connection.js";
 import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
+import type { ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { EventEnvelope, SessionCreateResult, ToolInvoke } from "./types.js";
 
@@ -309,6 +310,31 @@ export class DaemonClient {
   /** Watch mode is exclusive per workspace; a second session on it answers `conflict`. */
   setWatch(workspace: string, enabled: boolean): Promise<{ enabled: boolean; backend?: string }> {
     return this.command("watch.set", { workspace, enabled });
+  }
+
+  /**
+   * The model settings in effect, and the file they come from.
+   *
+   * `workspace` asks as a session in that directory would see them, which is what
+   * surfaces a project's own settings file as an override.
+   */
+  modelConfig(workspace?: string): Promise<ModelConfig> {
+    return this.call<ModelConfig>("config.get", workspace ? { workspace } : {});
+  }
+
+  /**
+   * Ask a provider which models it offers, with settings that need not be saved yet.
+   *
+   * A query rather than a command — nothing changes — but it is `admin` all the same,
+   * because it spends the key it is handed on a request to somebody else's server.
+   */
+  discoverModels(params: ModelsParams = {}): Promise<ModelDiscovery> {
+    return this.call<ModelDiscovery>("config.models", { ...params });
+  }
+
+  /** Write the model settings. The next session reads them; nothing has to restart. */
+  setModelConfig(params: ConfigSetParams): Promise<ModelConfig> {
+    return this.command<ModelConfig>("config.set", { ...params });
   }
 
   /**

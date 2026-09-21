@@ -13,6 +13,7 @@ defmodule Troupe.CLI do
       troupe logout [PLANE_URL]    forget a plane's credentials (--all forgets every one)
       troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
       troupe config                show the resolved providers and models (keys masked)
+      troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
       troupe --version
@@ -26,6 +27,7 @@ defmodule Troupe.CLI do
             | :version
             | :help
             | :config
+            | :config_pull
             | :models
             | :login
             | :logout
@@ -129,6 +131,11 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["run"], _base), do: {:error, "usage: troupe run [AGENT] \"task\""}
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
+  defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}
+
+  defp parse_rest(["config", "pull", url], base),
+    do: {:ok, %{base | mode: :config_pull, plane_url: url}}
+
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}

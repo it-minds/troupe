@@ -285,4 +285,9 @@ defmodule Troupe.Client do
   """
   @spec connect_plane(String.t()) :: {:ok, origin()} | {:error, term()}
   def connect_plane(plane_url), do: Remote.connect(plane_url)
+
+  @doc "The plane's defaults for this machine's own model settings; never a key."
+  @spec client_defaults(origin()) :: {:ok, map()} | {:error, term()}
+  def client_defaults({:remote, _plane} = origin), do: Remote.client_defaults(origin)
+  def client_defaults(_origin), do: {:error, :unsupported}
 end
