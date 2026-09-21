@@ -1,0 +1,11 @@
+{
+  "folds": {
+    "approval": "sha256:844e42b685135450a350d44aa1285b1616cf2062e5deb287b357a10dc5dd5952",
+    "error_and_recovery": "sha256:f60ff87b66c796716c9b7d1cc3b8db1b044871d255d059e99aa69623cd80ff07",
+    "metered_turn": "sha256:bb9f2dc9587a442511d1178bb69c7ce7b44bc910956112431d5308deb305a336",
+    "simple_turn": "sha256:1febf343cd74f4f5573ecd102a094d94f5b47f83208ca5ff28b4f37105f25055",
+    "subagents": "sha256:b3796abe79efbd0fc58bc35489b9cf728a51bca02696bece690ee8273710bac3",
+    "tool_use": "sha256:f7819dda1fc6a4a13141f4bd1ec38c86c7e9354f94d30dd5f071aad2825a2405"
+  },
+  "version": "0.3.0"
+}
