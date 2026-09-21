@@ -140,6 +140,9 @@ defmodule Troupe.TestHelpers do
           "provider" => "fake",
           "model" => "fake-model",
           "auto_approve" => auto_approve?,
+          # A test's session must not start a librarian of its own; the one test about
+          # the refresh turns it back on through `:config`.
+          "memory_auto_refresh" => false,
           "fake_script" => script
         },
         Map.new(extra, fn {k, v} -> {to_string(k), v} end)

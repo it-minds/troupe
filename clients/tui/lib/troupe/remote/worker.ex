@@ -823,6 +823,10 @@ defmodule Troupe.Remote.Worker do
   # Where an event goes: to this session's subscribers as it is, or — for a branch shown
   # inside another session's screen — to that session's, under the window's name. The
   # journal keeps the branch's own spelling; only what reaches a screen is renamed.
+  # The parent's client opened a branch's window itself, with the branch's real name and
+  # session id; the one this session's translation would open (named after `root`) stays
+  # in the journal and off the screen.
+  defp publish(%{as: {_sid, _window}}, %Troupe.Event{type: :branch_spawned}), do: :ok
   defp publish(state, %Troupe.Event{} = event), do: Events.publish(out(state, event))
 
   defp notify(state, agent, type, data),
