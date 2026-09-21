@@ -103,6 +103,39 @@ defmodule Troupe.CLITest do
            )
   end
 
+  # A session starts working the moment it is created, before anything can subscribe to
+  # it, so a quick run can rest before the printer exists. Found by CI's clean-container
+  # check, where a slow runner let the smoke run finish first and `troupe run --headless`
+  # then waited for a rest it had already missed, until the job's timeout.
+  test "headless printer reports a rest that happened before it started, and prints it once" do
+    ws = tmp_workspace()
+
+    script = [
+      {:tool, "write_file", %{"path" => "out.txt", "content" => "hi"}},
+      {:finish, "done before anyone looked"}
+    ]
+
+    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
+    say!(sid, "write early")
+    await_done()
+
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, _} =
+      Printer.start_link(
+        session_id: sid,
+        target: "root",
+        io: io,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    assert_receive {:rest, 0}, 5_000
+    {_, out} = StringIO.contents(io)
+    assert out =~ "root> → write_file"
+    assert [_once] = Regex.scan(~r/^root> < write early$/m, out)
+  end
+
   # Nobody can press a key in headless mode: an approval the printer cannot answer is
   # denied, and the run still rests.
   test "headless printer denies an approval it cannot ask about, and the session still rests" do

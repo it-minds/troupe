@@ -169,3 +169,16 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      that asserted `troupe 0.1.0` now reads the file. Erlang is 28.5.0.5, the umbrella's.
      The TUI remains its own Mix project rather than an umbrella application: ExRatatui,
      Burrito and `rustler_precompiled` stay out of the server's lock and images.
+
+110. **The headless printer reads back what the session did before it was listening.**
+     `troupe run --headless` creates the session and then starts the printer, and the
+     session starts working the moment it is created. On a slow machine a short run
+     finished and rested before the printer subscribed, and the printer, which only
+     listened, waited for a rest that had already happened — CI's clean-container check
+     hit it on its first run on GitHub and sat until its timeout, with `hello.txt` written
+     and nothing printed for `root`. The printer now subscribes, then reads the session's
+     journal (`Client.events/1`, what the TUI rebuilds its model from) and handles those
+     events exactly as it handles live ones, including the rest; a durable event that
+     arrives both ways is handled once, keyed by its path and `seq`. Proof: the CLI test
+     that lets a session rest before starting the printer, which timed out before this and
+     passes after.

@@ -3,6 +3,12 @@ defmodule Troupe.UI.Headless.Printer do
   Headless renderer: prints the event stream as plain lines prefixed by
   `agent_path`, for CI and scripting. Notifies `:on_rest` when the target
   branch rests. Pending approvals are denied (use `--auto-approve`).
+
+  A session starts working the moment it is created, and this process is started
+  after that, so a quick run can have finished — and rested — before anything here
+  subscribes. So what the session has already done is read back from its journal
+  and handled exactly like the live stream, and a durable event that arrives both
+  ways (one published while the journal was being read) is handled once.
   """
 
   use GenServer
@@ -26,26 +32,51 @@ defmodule Troupe.UI.Headless.Printer do
         :ok
     end
 
-    {:ok,
-     %{
-       session_id: sid,
-       target: Keyword.get(opts, :target),
-       on_rest: Keyword.get(opts, :on_rest),
-       io: io,
-       streaming: %{}
-     }}
+    state = %{
+      session_id: sid,
+      target: Keyword.get(opts, :target),
+      on_rest: Keyword.get(opts, :on_rest),
+      io: io,
+      streaming: %{},
+      seen: MapSet.new()
+    }
+
+    # Subscribed first, read back second: anything published in between is in both,
+    # and `seen` drops the second copy, where the other order would lose it.
+    {:ok, Enum.reduce(Client.events(sid), state, &handle_event/2)}
   end
 
   @impl true
-  def handle_info({:troupe_event, event}, state) do
-    state = print(event, state)
+  def handle_info({:troupe_event, event}, state), do: {:noreply, handle_event(event, state)}
 
+  def handle_info(_msg, state), do: {:noreply, state}
+
+  defp handle_event(event, state) do
+    case first_time(event, state) do
+      {:ok, state} -> react(event, print(event, state))
+      :seen -> state
+    end
+  end
+
+  # Durable events carry a sequence number, unique within their session's window, so
+  # the pair identifies one; a transient event has none and is never replayed anyway.
+  defp first_time(%{seq: seq, agent_path: path}, state) when is_integer(seq) do
+    key = {path, seq}
+
+    if MapSet.member?(state.seen, key),
+      do: :seen,
+      else: {:ok, %{state | seen: MapSet.put(state.seen, key)}}
+  end
+
+  defp first_time(_event, state), do: {:ok, state}
+
+  defp react(event, state) do
     # A session rests when its agent is done (`agent_done`, folded to `agent_state
     # :done`) or fails. `branch_state` is the older local spelling and still read.
     case event do
       %{type: :agent_state, agent_path: path, data: %{to: :done}} when path == state.target ->
         if state.on_rest, do: state.on_rest.(0)
-        {:noreply, state}
+        state
 
       %{type: t, agent_path: path}
       when t in [:branch_state, :branch_failed] and path == state.target ->
@@ -55,14 +86,12 @@ defmodule Troupe.UI.Headless.Printer do
           state.on_rest.(if(t == :branch_failed, do: 1, else: 0))
         end
 
-        {:noreply, state}
+        state
 
       _ ->
-        {:noreply, state}
+        state
     end
   end
-
-  def handle_info(_msg, state), do: {:noreply, state}
 
   defp print(%{type: :llm_delta}, state), do: state
 
