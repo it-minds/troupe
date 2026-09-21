@@ -41,8 +41,6 @@ defmodule Troupe.Plane.Control.Connection do
   # Short: this runs on every enrolment, and a pod that cannot answer promptly is
   # better left alone than waited on.
   @index_timeout_ms 10_000
-  @index_attempts 3
-  @index_retry_ms 2_000
 
   @enforce_keys [:socket]
   defstruct [:socket, :identity, :worker, buffer: "", next_id: 1, pending: %{}, verify: nil]
@@ -642,37 +640,29 @@ defmodule Troupe.Plane.Control.Connection do
   # Only ever on an answer. A pod that cannot be reached has said nothing about what it
   # holds, and reading silence as "holding none" would dormant a healthy fleet.
   #
-  # Asked more than once. This is the only thing that ever rescues the sessions of a pod
-  # that came back under its own name — the sweeper cannot, because the row they point
-  # at is that pod's row, healthy again — so an answer that did not come the first time
-  # is asked for again before the pod is given up on.
+  # Asked once, and not again on failure. This is the only thing that rescues the
+  # sessions of a pod that came back under its own name — the sweeper cannot, because the
+  # row they point at is that pod's row, healthy again — which is why `register/1` makes
+  # sure the question reaches the pod that just enrolled. A retry from this task would
+  # outlive the connection it was asked on and could reach whatever was registered under
+  # the name by then, which in the suite was the next test's pod.
   defp reconcile_index(worker) do
     # In a task because the answer arrives on this socket, which this process is the one
     # reading: asking from inside the handler would deadlock waiting on its own reply.
-    Task.start(fn -> reconcile_index(worker, @index_attempts) end)
-  end
+    Task.start(fn ->
+      case Router.push(worker, "session.index", %{}, @index_timeout_ms) do
+        {:ok, %{"sessions" => held}} ->
+          orphans(worker, held) |> Enum.each(&strand(worker, &1))
 
-  defp reconcile_index(worker, attempts_left) do
-    case Router.push(worker, "session.index", %{}, @index_timeout_ms) do
-      {:ok, %{"sessions" => held}} ->
-        orphans(worker, held) |> Enum.each(&strand(worker, &1))
+        {:ok, _other} ->
+          :ok
 
-      {:ok, _other} ->
-        :ok
-
-      {:error, reason} when attempts_left > 1 ->
-        Logger.info(
-          "troupe plane: #{worker.pod_name} has not said what it holds (#{inspect(reason)}); asking again"
-        )
-
-        Process.sleep(@index_retry_ms)
-        reconcile_index(worker, attempts_left - 1)
-
-      {:error, reason} ->
-        Logger.warning(
-          "troupe plane: #{worker.pod_name} did not say what it holds: #{inspect(reason)}"
-        )
-    end
+        {:error, reason} ->
+          Logger.warning(
+            "troupe plane: #{worker.pod_name} did not say what it holds: #{inspect(reason)}"
+          )
+      end
+    end)
   end
 
   defp orphans(worker, held) do

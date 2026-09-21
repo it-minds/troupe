@@ -5139,7 +5139,8 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      cluster suite's pod-deletion test failed two runs in three on this, and every run
      before that behind the CNI that enforced nothing (#65). Now enrolling drops any
      connection already registered under the pod's name (the fence in
-     `Fleet.disconnected/3` keeps its teardown off the fresh row), `for_pod` takes the
-     newest when there are two, and the index question is asked three times before the
-     pod is given up on. Proof: `Troupe.Plane.ControlTest` "replaced under its own name
+     `Fleet.disconnected/3` keeps its teardown off the fresh row) and `for_pod` takes the
+     newest when there are two. Not a retry of the question: one from a task that
+     outlived its connection reached whatever was registered under the name by then,
+     which in the suite was the next test's pod. Proof: `Troupe.Plane.ControlTest` "replaced under its own name
      before its old connection closed", which fails on `main`, and the cluster suite.

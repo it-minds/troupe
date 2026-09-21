@@ -297,19 +297,10 @@ defmodule Troupe.Plane.ControlTest do
       assert until(fn -> Sessions.get("s-stranded").state == "dormant" end),
              "the session stayed active on a pod replaced under its own name"
 
-      # The predecessor's connection is closed from the plane's side, and the new pod is
-      # the one a push reaches.
+      # The predecessor's connection is closed from the plane's side. That the session
+      # went dormant is already the proof the question reached the new pod.
       assert until(fn -> match?({:error, :closed}, :gen_tcp.recv(first.socket, 0, 100)) end),
              "the old connection was left open"
-
-      assert {:ok, %{"sessions" => []}} =
-               Task.async(fn ->
-                 Troupe.Plane.Control.Router.push(pod, "session.index", %{}, 5_000)
-               end)
-               |> then(fn task ->
-                 answer_index(second, [])
-                 Task.await(task)
-               end)
     end
 
     test "leaves alone what the pod says it still holds", %{port: port} do
