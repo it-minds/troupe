@@ -10,7 +10,7 @@ defmodule Troupe.MixProject do
   # is set here, before Mix evaluates them. `TROUPE_HARNESS_GIT` points a local build at a
   # checkout on disk.
   @harness_git System.get_env("TROUPE_HARNESS_GIT", "https://github.com/it-minds/troupe-remote.git")
-  @harness_ref System.get_env("TROUPE_HARNESS_REF", "c757ede075c0b47cf8bf7df27be28c697580ed5b")
+  @harness_ref System.get_env("TROUPE_HARNESS_REF", "c39e2317ab9282b97213a7eb8dde156f7531d1b2")
   @harness_version "0.2.0"
 
   System.put_env("TROUPE_VERSION", @harness_version)

@@ -272,4 +272,21 @@ defmodule Troupe.RemoteTranslateTest do
     assert answered.type == :question_answered
     assert answered.data == %{call_id: "q1", text: "blue"}
   end
+
+  test "a budget warning names its dimension and carries the sentence" do
+    data = %{"dimension" => "input", "used" => 4_900_000, "limit" => 6_000_000, "fraction" => 0.817}
+
+    [warning] =
+      translate(durable("budget_warning", Map.put(data, "detail", "input tokens 4.9M/6.0M (82%)")))
+
+    assert warning.type == :budget_warning
+    assert warning.agent_path == "root"
+    assert warning.data.dimension == :input
+    assert warning.data.detail == "input tokens 4.9M/6.0M (82%)"
+    assert warning.data.fraction == 0.817
+
+    [odd] = translate(durable("budget_warning", %{data | "dimension" => "moon"}))
+    assert odd.data.dimension == :other
+    assert odd.data.detail == "moon"
+  end
 end
