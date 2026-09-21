@@ -47,9 +47,10 @@ defmodule Troupe.Plane.Web.Index do
   either is `nil` on a plane that was not given one, and the page then does not offer a
   door that would be a 404 or a link to a download that is not there.
 
-  Both are clients from other repositories. This one serves neither of them and cannot
-  tell whether they exist, which is why each is a URL somebody configured rather than
-  something discovered.
+  The plane serves neither of them. The chart serves the GUI beside it and names it in
+  `:app_url` (Decision 670), and the terminal client is published with a release; either
+  may equally be somebody else's client, which is why each is a URL the deployment gives
+  rather than something the plane discovers.
   """
   @spec render(keyword()) :: String.t()
   def render(opts) do

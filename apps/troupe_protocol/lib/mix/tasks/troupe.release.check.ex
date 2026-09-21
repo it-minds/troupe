@@ -30,9 +30,10 @@ defmodule Mix.Tasks.Troupe.Release.Check do
 
   ## What this repository cannot check
 
-  The GUI's Playwright suite runs in the GUI's repository against the same cluster, and no
-  task here can claim it passed. It is listed in the summary as owed by the other repository
-  so that the list of what a tag needs is complete even where this half cannot supply it.
+  The GUI's Playwright suite runs from `clients/gui`, with its own toolchain, against the
+  same cluster, and no Mix task can claim it passed. It is listed in the summary as owed by
+  the GUI so that the list of what a release needs is complete even where this task cannot
+  supply it.
   """
 
   use Mix.Task
@@ -131,7 +132,7 @@ defmodule Mix.Tasks.Troupe.Release.Check do
 
   defp run_step(:gui) do
     {:not_run,
-     "it lives in the GUI's repository — run `pnpm test:e2e` there against the same cluster"}
+     "it lives in clients/gui — run `pnpm test:e2e` there against the same cluster"}
   end
 
   # -- running things ---------------------------------------------------------
