@@ -659,6 +659,13 @@ defmodule Troupe.Plane.Settings do
     # A plane answering `/healthz` before its database is reachable, or a unit test with
     # no repo: the deployment's values are a complete answer on their own.
     _error -> %{}
+  catch
+    # A database that goes away *during* the query rather than refusing it: a connection
+    # whose owner exits takes its caller down with an exit, and an exit is not an
+    # exception, so the clause above never sees it. Without this, a request reading a
+    # setting at the moment a connection dies answers 500 — from a plane that had the
+    # complete answer in its own configuration all along.
+    :exit, _reason -> %{}
   end
 
   defp lookup do
