@@ -23,7 +23,7 @@ defmodule Troupe.Remote.Worker do
   use GenServer
 
   alias Troupe.Client.Events
-  alias Troupe.Remote.{Backoff, Capability, Journal, Plane, RPC, Socket, Tokens, Translate}
+  alias Troupe.Remote.{Backoff, Branch, Capability, Journal, Plane, RPC, Socket, Tokens, Translate}
 
   require Logger
 
@@ -155,6 +155,9 @@ defmodule Troupe.Remote.Worker do
       plane_url: Keyword.get(opts, :plane_url),
       token: Keyword.get(opts, :token),
       workspace: Keyword.get(opts, :workspace),
+      # `{parent_session_id, window}` when this session is a branch shown inside another
+      # session's screen: what it publishes is renamed for that screen (`Troupe.Remote.Branch`).
+      as: Keyword.get(opts, :as),
       endpoint: Keyword.fetch!(opts, :endpoint),
       session_state: Keyword.get(opts, :state, :active),
       tokens: Keyword.get(opts, :tokens, Tokens),
@@ -210,6 +213,7 @@ defmodule Troupe.Remote.Worker do
        team: state.team,
        profile: state.profile,
        title: state.title,
+       as: state.as,
        state: state.session_state
      }, state}
   end
@@ -223,7 +227,7 @@ defmodule Troupe.Remote.Worker do
 
     # The line goes on screen now, tagged with the command id the server will
     # echo back; `input.accepted` is what clears the tag.
-    Events.notify(state.session_id, state.agent, :input, %{
+    notify(state, state.agent, :input, %{
       content: text,
       source: :user,
       command_id: command,
@@ -593,7 +597,7 @@ defmodule Troupe.Remote.Worker do
         state = flush_deltas(state)
         command_id = Translate.command_id(params)
 
-        for event <- kept, publish?(state, event, command_id), do: Events.publish(event)
+        for event <- kept, publish?(state, event, command_id), do: publish(state, event)
 
         %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
         |> forget_command(params, command_id)
@@ -635,7 +639,7 @@ defmodule Troupe.Remote.Worker do
 
   defp ephemeral(state, %{} = params) do
     {events, memory} = Translate.ephemeral(state.session_id, params, state.memory)
-    for event <- events, do: Events.publish(event)
+    for event <- events, do: publish(state, event)
     %{state | memory: memory}
   end
 
@@ -671,7 +675,7 @@ defmodule Troupe.Remote.Worker do
       text = chunks |> Enum.reverse() |> Enum.map_join(&elem(&1, 0))
       reasoning? = Enum.all?(chunks, &elem(&1, 1))
       data = if reasoning?, do: %{text: text, reasoning: true}, else: %{text: text}
-      Events.notify(state.session_id, agent, :llm_delta, data)
+      notify(state, agent, :llm_delta, data)
     end
 
     %{state | deltas: %{}, delta_bytes: 0}
@@ -741,8 +745,8 @@ defmodule Troupe.Remote.Worker do
   defp publish_status(state) do
     capability = Capability.of(state.session_state, state.scopes, state.status == :up)
 
-    Events.notify(
-      state.session_id,
+    notify(
+      state,
       state.agent || "session",
       :remote_status,
       Map.put(capability, :endpoint, state.endpoint)
@@ -750,13 +754,18 @@ defmodule Troupe.Remote.Worker do
   end
 
   defp publish_note(state, text),
-    do: Events.notify(state.session_id, state.agent || "session", :notice, %{text: text})
+    do: notify(state, state.agent || "session", :notice, %{text: text})
 
   # The window a remote session's transcript lives in is named by the first
   # event that mentions an agent. Input typed before anything has arrived (a
   # session created a moment ago) opens it from the profile instead, which is
   # the same spelling a local branch of that profile would have.
   defp ensure_window(%{agent: agent} = state) when is_binary(agent), do: state
+
+  # A branch's window was opened by the parent's client when it created the session;
+  # the branch itself only needs to know which agent its input goes to.
+  defp ensure_window(%{as: {_sid, _window}} = state),
+    do: %{state | agent: "root", memory: Translate.remember(state.memory, "root")}
 
   defp ensure_window(state) do
     root = "root"
@@ -769,7 +778,7 @@ defmodule Troupe.Remote.Worker do
       data: %{name: state.profile, isolation: :remote, prompt: ""}
     }
 
-    for event <- Journal.append(state.session_id, [spawned]), do: Events.publish(event)
+    for event <- Journal.append(state.session_id, [spawned]), do: publish(state, event)
 
     %{state | agent: root, memory: Translate.remember(state.memory, root)}
   end
@@ -808,4 +817,34 @@ defmodule Troupe.Remote.Worker do
     Logger.debug("worker #{state.session_id}: #{inspect(reason)}")
     %{state | error: reason}
   end
+
+  ## Publishing
+
+  # Where an event goes: to this session's subscribers as it is, or — for a branch shown
+  # inside another session's screen — to that session's, under the window's name. The
+  # journal keeps the branch's own spelling; only what reaches a screen is renamed.
+  defp publish(state, %Troupe.Event{} = event), do: Events.publish(out(state, event))
+
+  defp notify(state, agent, type, data),
+    do: publish(state, Troupe.Event.transient(state.session_id, agent, type, data))
+
+  defp out(%{as: nil}, event), do: event
+
+  defp out(%{as: {sid, window}} = state, %Troupe.Event{} = event) do
+    remember_call(state, event)
+    %{event | session_id: sid, agent_path: Branch.rewrite(event.agent_path, window)}
+  end
+
+  # An approval a branch asks for is answered through the parent's session id, so the
+  # client finds its way back to this session by the call id. The registration dies
+  # with this process, like the window it belongs to.
+  defp remember_call(%{as: {sid, _}} = state, %Troupe.Event{
+         type: :approval_requested,
+         data: %{call_id: call_id}
+       }) do
+    _ = Registry.register(Troupe.Client.Registry, {:call, sid, call_id}, state.session_id)
+    :ok
+  end
+
+  defp remember_call(_state, _event), do: :ok
 end

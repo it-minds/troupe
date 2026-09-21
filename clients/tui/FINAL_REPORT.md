@@ -233,6 +233,15 @@ Known environmental miss, unchanged: `remote_session_test.exs` "a slow TUI keeps
 connection process bounded" (the 4 MB bound) fails about one run in five, here as on
 `main`. `WatchTest` and its inotify-tools miss are gone with the watch tests.
 
+### Phase 3, branches (stacked on the phase 2 branch)
+
+| item | state | proof |
+|---|---|---|
+| `/build …`, `/plan …`, `/worktree …` open a branch as a window; its transcript, approvals and state show under the window's name | done (Decision 103; troupe-remote Decisions 646–647) | `branch_client_test.exs` "a slash command opens a branch…", "…the TUI…" |
+| input typed into a branch window, and an approval answered from it, reach the branch's session | done | `branch_client_test.exs` "input typed into a branch window…" |
+| `/merge` lands the branch's worktree on the checkout and closes the window; `/discard` throws it away | done, through `worktree.merge` / `worktree.discard` | `branch_client_test.exs` |
+| a reopened session brings its branch windows back | done | `branch_client_test.exs` "a session opened again…" |
+
 ### Tests dropped, and why
 
 Each file below tested the harness this repository no longer has. Their subjects are
