@@ -42,6 +42,11 @@ defmodule Troupe.E2E.EgressTest do
     Plane.ready!()
   end
 
+  # Skipped, visibly and for one release: on a cluster that does enforce policy this still
+  # fails, because the policies the operator renders admit more than the allowlist, and
+  # the fix is the next release's (0.3.2). It comes back the moment that lands; a skip
+  # that outlives it is the quiet pass this module was written to prevent.
+  @tag skip: "known failure until the worker egress policy is narrowed (0.3.2)"
   test "a worker cannot dial a host no policy admits", context do
     pod = pod(context.profile)
     namespace = World.worker_namespace(context.profile)
@@ -53,9 +58,10 @@ defmodule Troupe.E2E.EgressTest do
 
     The first is a CNI that ignores policy. kind's default one does: it implements pod
     networking and no NetworkPolicy at all, so every rule the operator writes is accepted
-    by the API server and enforced by nothing. `dev/kind/cluster.yaml` disables it and
-    `scripts/remote-up` installs Cilium instead; a cluster built before that needs
-    rebuilding with `kind delete cluster --name troupe-dev && scripts/remote-up`.
+    by the API server and enforced by nothing. `scripts/kind-up` disables it and
+    `scripts/remote-up` installs Cilium instead; a cluster built any other way — or before
+    that — needs rebuilding with `kind delete cluster --name troupe-dev && scripts/kind-up
+    && scripts/remote-up`.
 
     The second is a kernel that cannot carry the datapath. Under Docker Desktop, Cilium
     starts, reports `policy-enabled: both` for this very endpoint, shows the

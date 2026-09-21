@@ -630,12 +630,19 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
+      # `kind` and `kubectl` only; the cluster is `scripts/kind-up`'s. kind-action used to
+      # create it from `dev/kind/cluster.yaml` alone, which keeps kind's own CNI — the
+      # `disableDefaultCNI` that makes Cilium the only one is appended by `kind-up`. So
+      # CI's cluster enforced no NetworkPolicy, and the egress test failed on every run it
+      # reached, hidden until now behind the token that expired mid-suite (#47).
       - uses: helm/kind-action@v1
         with:
-          cluster_name: troupe-dev
-          config: dev/kind/cluster.yaml
+          install_only: true
 
       - uses: azure/setup-helm@v4
+
+      - name: A cluster whose CNI enforces policy
+        run: scripts/kind-up
 
       # The same script a developer runs, so that a cluster failure here is reproducible
       # by one command on a laptop. It builds the five images and `kind load`s them,
