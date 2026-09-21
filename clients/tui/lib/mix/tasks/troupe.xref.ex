@@ -1,6 +1,6 @@
 defmodule Mix.Tasks.Troupe.Xref do
   @moduledoc """
-  Fails when the UI reaches past `Troupe.Client`.
+  Fails when the UI reaches past `Troupe.Client`, or the TUI past the harness's doors.
 
   Local and remote sessions look the same on screen only if the UI cannot tell
   them apart, and it cannot tell them apart only if every call it makes goes
@@ -19,12 +19,29 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Client.Message  content blocks, for the text of an assistant message
       Troupe.Codec     decoding events the client hands over
 
+  The second rule is about the whole TUI and the harness under it. `troupe_core`,
+  `troupe_gateway` and `troupe_protocol` are path dependencies on the umbrella beside this
+  project (Decision 109), so every public function in them is one `alias` away — and the
+  TUI is only an ordinary client of the daemon if it does not use that. It may call the
+  harness through these and nothing else, which is what it calls today:
+
+      Troupe.Protocol.Client, .Daemon, .Endpoint   finding, starting and talking to a daemon
+      Troupe.Config                                 the configuration the daemon reads too
+      Troupe.Paths                                  where state and config live
+      Troupe.Reaper                                 the helper every OS process runs under
+      Troupe.LLM.Catalog.Store                      refreshing the model catalog on request
+
+  A new call into, say, the agent tree or the session log fails here, and the way to add
+  one is to put it in the protocol. What the import table cannot see is a module named as
+  an atom — `Troupe.Gateway.Daemon` in the child spec that embeds a daemon when none is
+  running — which is the one place the TUI hosts the harness rather than calling it.
+
   Run it with `mix troupe.xref`; CI runs it alongside `mix test`.
   """
 
   use Mix.Task
 
-  @shortdoc "Fails if the TUI or HQ call anything but Troupe.Client"
+  @shortdoc "Fails if the UI calls anything but Troupe.Client, or the TUI reaches into the harness"
 
   @allowed [
     Troupe.Client,
@@ -33,6 +50,18 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Event,
     Troupe.Client.Message,
     Troupe.Codec
+  ]
+
+  @harness_apps [:troupe_core, :troupe_gateway, :troupe_protocol]
+
+  @harness_allowed [
+    Troupe.Protocol.Client,
+    Troupe.Protocol.Daemon,
+    Troupe.Protocol.Endpoint,
+    Troupe.Config,
+    Troupe.Paths,
+    Troupe.Reaper,
+    Troupe.LLM.Catalog.Store
   ]
 
   @impl true
@@ -45,18 +74,67 @@ defmodule Mix.Tasks.Troupe.Xref do
       |> Enum.sort()
       |> Enum.uniq()
 
-    if offenders == [] do
-      Mix.shell().info("troupe.xref: the UI only calls #{inspect(Troupe.Client)} ✓")
-      :ok
-    else
-      Mix.shell().error("troupe.xref: the UI must only call Troupe.Client\n")
+    harness = harness_modules()
 
-      for {caller, {module, function, arity}} <- offenders do
-        Mix.shell().error("  #{inspect(caller)} calls #{inspect(module)}.#{function}/#{arity}")
-      end
+    reaching =
+      own_modules()
+      |> Enum.flat_map(&harness_calls(&1, harness))
+      |> Enum.sort()
+      |> Enum.uniq()
 
-      Mix.raise("#{length(offenders)} call(s) from the UI reach past Troupe.Client")
+    report(offenders, "the UI must only call Troupe.Client", "from the UI reach past Troupe.Client")
+
+    report(
+      reaching,
+      "the TUI may reach the harness only through #{Enum.map_join(@harness_allowed, ", ", &inspect/1)}",
+      "from the TUI reach into the harness"
+    )
+
+    Mix.shell().info("troupe.xref: the UI only calls #{inspect(Troupe.Client)} ✓")
+    Mix.shell().info("troupe.xref: the TUI reaches the harness only through its doors ✓")
+    :ok
+  end
+
+  defp report([], _rule, _summary), do: :ok
+
+  defp report(calls, rule, summary) do
+    Mix.shell().error("troupe.xref: #{rule}\n")
+
+    for {caller, {module, function, arity}} <- calls do
+      Mix.shell().error("  #{inspect(caller)} calls #{inspect(module)}.#{function}/#{arity}")
     end
+
+    Mix.raise("#{length(calls)} call(s) #{summary}")
+  end
+
+  @doc "This project's own compiled modules."
+  @spec own_modules() :: [module()]
+  def own_modules do
+    Mix.Project.compile_path()
+    |> Path.join("Elixir.*.beam")
+    |> Path.wildcard()
+    |> Enum.map(&(&1 |> Path.basename(".beam") |> String.to_atom()))
+  end
+
+  @doc "Every module of the three harness applications, from their `.app` files."
+  @spec harness_modules() :: MapSet.t(module())
+  def harness_modules do
+    for app <- @harness_apps,
+        _ = Application.load(app),
+        module <- Application.spec(app, :modules) || [],
+        into: MapSet.new(),
+        do: module
+  end
+
+  @doc "The calls one module makes into the harness past its allowed doors, as `{caller, mfa}`."
+  @spec harness_calls(module(), MapSet.t(module())) :: [{module(), mfa()}]
+  def harness_calls(caller, harness) do
+    caller
+    |> imports()
+    |> Enum.filter(fn {module, _f, _a} ->
+      MapSet.member?(harness, module) and module not in @harness_allowed
+    end)
+    |> Enum.map(&{caller, &1})
   end
 
   @doc "The compiled modules under `Troupe.UI`."

@@ -186,6 +186,17 @@ jobs:
       - name: Boundaries
         run: MIX_ENV=test mix troupe.boundaries
 
+      # The clients depend on the platform — the TUI on the harness apps, by path — and
+      # never the other way: nothing under `apps/` may name anything under `clients/`.
+      # `troupe.boundaries` sees only the umbrella, so this is the check for the direction
+      # it cannot see (Decision 666).
+      - name: Nothing in the umbrella depends on a client
+        run: |
+          if grep -nE 'path:[^,}]*clients/' mix.exs apps/*/mix.exs; then
+            echo "an umbrella mix.exs depends on a client"
+            exit 1
+          fi
+
       # The same two commands `test_helper.exs` tells a developer to run when it finds
       # no database; the sandbox then owns every transaction the suite opens.
       - name: Migrate the plane's test database

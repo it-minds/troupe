@@ -5055,3 +5055,26 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      whole plane suite, 674 tests, cluster-tagged included, against a kind cluster;
      `helm template` renders `TROUPE_WORKER_IMAGE` as the worker repository at the chart's
      version.
+
+673. **The clients in this repository get no private door, and four checks say so.**
+     Decision 320 gave up the TUI as a mechanical proof that built-in clients had no
+     private access and replaced it with where the code lived: with no client inside the
+     boundary, "no private door" was a property of the tree. Bringing the clients back
+     (666) gives that up, so it is a rule again, and each part of it fails CI. The GUI's
+     image is built with `clients/gui` as its whole Docker context, so a reach into the
+     rest of the repository fails the build. The TUI's `mix troupe.xref` keeps its rule
+     that the UI calls only `Troupe.Client`, and gains one for the whole project: it may
+     call into `troupe_core`, `troupe_gateway` and `troupe_protocol` only through the seven
+     modules it uses today — `Troupe.Protocol.{Client,Daemon,Endpoint}`, `Troupe.Config`,
+     `Troupe.Paths`, `Troupe.Reaper` and `Troupe.LLM.Catalog.Store` — measured from its
+     beams, so that a path dependency does not become a way around the protocol. It cannot
+     see a module named as an atom, and there is one: the child spec that embeds
+     `Troupe.Gateway.Daemon` when no daemon is running, which is the TUI hosting the
+     harness rather than calling it. The direction the umbrella's `troupe.boundaries`
+     cannot see — an umbrella app depending on a client — is a step in `check` that fails
+     on a dependency path into `clients/`. And `conformance.py`, a client written against
+     `PROTOCOL.md` in another language with no access to this source, stays the proof that
+     the protocol alone is enough, because that is what a client somebody else writes
+     relies on. Proof: `mix troupe.xref` passes, and fails naming the call when a module
+     calls `Troupe.Log.Fold.witnessed_types/0`; the grep passes on the tree and matches
+     `{:troupe, path: "../../clients/tui"}`.
