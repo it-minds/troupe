@@ -13,9 +13,13 @@ jobs:
   suite:
     name: the full suite
     uses: ./.github/workflows/ci.yml
+    # Everything any job in `ci.yml` asks for, used or not: a called workflow's
+    # permissions are checked before any job runs, and its `images` job asks for
+    # `packages: write` (see `release.yml`).
     permissions:
       contents: read
       pull-requests: read
+      packages: write
     with:
       full: true
       soak: 9

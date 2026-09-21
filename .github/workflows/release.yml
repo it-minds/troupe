@@ -69,9 +69,14 @@ jobs:
     needs: [version]
     if: needs.version.outputs.cut == 'true'
     uses: ./.github/workflows/ci.yml
+    # Everything any job in `ci.yml` asks for, used or not: GitHub checks a called
+    # workflow's permissions before it runs a job, and `ci.yml`'s `images` job — skipped
+    # in a full run — asks for `packages: write`. Granting less is a `startup_failure`
+    # with no message, which is how the first release through this file ended.
     permissions:
       contents: read
       pull-requests: read
+      packages: write
     with:
       full: true
       soak: 9
