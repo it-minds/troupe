@@ -1,6 +1,17 @@
-# Continuous integration for a thing that is only ever deployed to Kubernetes: the
-# quality gate, the chart, the protocol, and four images. There is no build matrix and
-# no per-platform artifact, because nothing here is installed on anybody's machine.
+# Continuous integration for the whole repository — the platform, the daemon, and the two
+# clients — and the release that ships all of it (Decision 669).
+#
+# One workflow and one required check, `ci-ok`. A pull request runs the jobs for what it
+# touched: `changes` decides, and each job's `if:` reads its answer. The filters are on
+# jobs and not on the workflow because a workflow skipped by `paths:` leaves a required
+# check pending forever, while a job skipped by `if:` reports success. A push to `main`
+# runs everything, because that run publishes images and may cut a release.
+#
+# A release is cut by merging a change to VERSION (`scripts/release`). The `main` run
+# that follows sees a version with no tag, tags it, promotes the images it has just built
+# and tested to that version, packages the chart, builds the daemon, the TUI and the
+# desktop app on every platform (`release.yml`), and deploys to production. Nothing is
+# released by pushing a tag by hand, and nothing is deployed from a laptop.
 #
 # GitHub Actions syntax, which Forgejo Actions also runs. Nothing here depends on
 # github.com specifically except the marketplace actions, which Forgejo resolves from
@@ -8,21 +19,20 @@
 name: ci
 
 # A push to a branch runs nothing: the pull request for that branch runs the gate, and
-# running it twice for every push measured the same thing twice. `main` and release tags
-# run on push, because those runs publish images and soak the suite.
+# running it twice for every push measured the same thing twice. `main` runs on push,
+# because that run publishes images, soaks the suite, and may cut a release.
 on:
   push:
     branches: [main]
-    tags: ["v*"]
   pull_request:
 
 # A pull request under active work can have several pipelines in flight at once, all
 # measuring the same thing and only the last of them answering a question anyone still
-# has. Superseded runs are cancelled; `main` and release tags are not, because their runs
-# publish images somebody may already be waiting on.
+# has. Superseded runs are cancelled; `main` is not, because its runs publish images
+# somebody may already be waiting on, and may be part-way through a release.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !startsWith(github.ref, 'refs/tags/') }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   ELIXIR_VERSION: "1.20.4"
@@ -30,8 +40,82 @@ env:
   ZIG_VERSION: "0.16.0"
 
 jobs:
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    # On a push every answer is yes, bar `native`: the native builds run nightly and when
+    # a release is cut, not on every merge.
+    outputs:
+      server: ${{ github.event_name != 'pull_request' || steps.filter.outputs.server == 'true' }}
+      tui: ${{ github.event_name != 'pull_request' || steps.filter.outputs.tui == 'true' }}
+      gui: ${{ github.event_name != 'pull_request' || steps.filter.outputs.gui == 'true' }}
+      gui_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs.gui_e2e == 'true' }}
+      native: ${{ github.event_name == 'pull_request' && steps.filter.outputs.native == 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dorny/paths-filter@v3
+        id: filter
+        if: github.event_name == 'pull_request'
+        with:
+          # A protocol change runs everything: it is the one contract every part of this
+          # repository is on one side of. So does a change to this file or the toolchain.
+          filters: |
+            shared: &shared
+              - PROTOCOL.md
+              - protocol/**
+              - VERSION
+              - .tool-versions
+              - .github/workflows/ci.yml
+            server:
+              - *shared
+              - apps/**
+              - config/**
+              - mix.exs
+              - mix.lock
+              - charts/**
+              - docker/**
+              - dev/**
+              - scripts/**
+              - test/**
+              - fixtures/**
+            harness: &harness
+              - apps/troupe_protocol/**
+              - apps/troupe_core/**
+              - apps/troupe_gateway/**
+              - mix.lock
+            tui:
+              - *shared
+              - *harness
+              - clients/tui/**
+              - scripts/locks-agree.exs
+            gui:
+              - *shared
+              - clients/gui/**
+              - scripts/version.exs
+            gui_e2e:
+              - *shared
+              - clients/gui/packages/client/**
+              - clients/gui/dev/**
+              - apps/troupe_plane/**
+              - apps/troupe_gateway/**
+              - apps/troupe_protocol/**
+              - config/**
+              - docker/**
+            native:
+              - clients/tui/**
+              - clients/gui/apps/desktop/**
+              - clients/gui/packages/client/**
+              - apps/troupe_daemon/**
+              - .github/workflows/release.yml
+
   check:
     name: compile, format, credo, boundaries, test
+    needs: [changes]
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -120,6 +204,8 @@ jobs:
 
   chart:
     name: helm lint, render, kubeconform
+    needs: [changes]
+    if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -131,6 +217,7 @@ jobs:
           helm lint charts/troupe
           helm lint charts/troupe --values charts/troupe/values.small.yaml
           helm lint charts/troupe --values charts/troupe/values.scaleway.yaml
+          helm lint charts/troupe --set gui.enabled=false --set plane.appUrl=https://gui.example.test
 
       # The one combination the chart refuses on purpose — replicas that do not form an
       # Erlang cluster — has to keep being refused, or the check is decoration.
@@ -138,6 +225,14 @@ jobs:
         run: |
           if helm template troupe charts/troupe --set plane.replicas=2 --set plane.distribution=none >/dev/null 2>&1; then
             echo "plane.replicas=2 with plane.distribution=none rendered; the chart must refuse it"
+            exit 1
+          fi
+
+      # The GUI shares the plane's host, and the root of that host is the plane's.
+      - name: The chart refuses a GUI mounted at /
+        run: |
+          if helm template troupe charts/troupe --set gui.basePath=/ >/dev/null 2>&1; then
+            echo "gui.basePath=/ rendered; the chart must refuse it"
             exit 1
           fi
 
@@ -155,13 +250,69 @@ jobs:
               | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
                   -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
           done
+          echo "=== values.small.yaml, bringing its own client"
+          helm template troupe charts/troupe \
+            --namespace troupe-system --include-crds \
+            --values charts/troupe/values.small.yaml --set gui.enabled=false \
+            | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+                -strict -summary -ignore-missing-schemas -kubernetes-version 1.31.0
+
+  protocol:
+    name: schema compatibility and the Python client
+    needs: [changes]
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      # Fields may be added; they may not be removed, renamed, retyped, or newly made
+      # required. A published protocol is a promise to people who are not in this
+      # repository, and this is what keeps it.
+      - name: Schema compatibility
+        run: mix troupe.schema.diff
+
+      - name: Committed schema is current
+        run: |
+          mix troupe.schema.gen
+          git diff --exit-code protocol/schema/v1 \
+            || { echo "protocol/schema/v1 is stale: run mix troupe.schema.gen and commit"; exit 1; }
+
+      # A client written against PROTOCOL.md in another language, with no access to this
+      # source. The TUI and the GUI live in this repository now, so this is the check that
+      # proves the protocol alone is enough to be a client — the one that bring-your-own
+      # clients rely on (Decision 320).
+      - name: Python reference client, end to end
+        run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
 
   cluster:
     name: the suite that needs a cluster
     needs: [check, chart]
-    # On `main` and on tags only. It takes twenty minutes and the gate on every push is
-    # what keeps the loop tight; a branch that wants it can be pushed to a tag.
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    # On `main` only. It takes twenty minutes and the gate on every pull request is what
+    # keeps the loop tight; it is also what a release waits for, so a release has passed it.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -208,8 +359,8 @@ jobs:
           path: cluster-logs/
 
   images:
-    name: image ${{ matrix.release }}
-    needs: [check, protocol]
+    name: image ${{ matrix.image }}
+    needs: [check, protocol, gui]
     # A push needs a credential and a pull request from a fork has none, so images are
     # built from pushes — which is also when there is a commit worth naming a tag after.
     if: github.event_name == 'push'
@@ -220,7 +371,14 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        release: [troupe_operator, troupe_plane, troupe_worker, troupe_a2a]
+        include:
+          - {image: troupe-operator, release: troupe_operator, context: ., file: docker/Dockerfile}
+          - {image: troupe-plane, release: troupe_plane, context: ., file: docker/Dockerfile}
+          - {image: troupe-worker, release: troupe_worker, context: ., file: docker/Dockerfile}
+          - {image: troupe-a2a, release: troupe_a2a, context: ., file: docker/Dockerfile}
+          # The GUI is built from its own directory, which is also the proof that nothing
+          # in it reaches into the rest of the repository.
+          - {image: troupe-gui, release: "", context: clients/gui, file: clients/gui/Dockerfile}
     steps:
       - uses: actions/checkout@v4
 
@@ -235,18 +393,18 @@ jobs:
       # to, and answer `denied: denied`: a credential for one registry offered to
       # another. A half-configured registry is not a state worth guessing about, so
       # publishing requires the pair, and the summary says which secrets are missing.
-      - name: Resolve the registry and the tags
+      - name: Resolve the registry and the tag
         id: registry
         env:
           REGISTRY: ${{ secrets.REGISTRY }}
           REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
           REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-          RELEASE: ${{ matrix.release }}
+          IMAGE: ${{ matrix.image }}
         run: |
           if [ -z "${REGISTRY}" ] || [ -z "${REGISTRY_PASSWORD}" ]; then
             echo "publish=false" >> "$GITHUB_OUTPUT"
             {
-              echo "### ${RELEASE}: not published"
+              echo "### ${IMAGE}: not published"
               echo
               echo "No registry is configured. Set the repository secrets \`REGISTRY\`,"
               echo "\`REGISTRY_NAMESPACE\`, \`REGISTRY_USERNAME\` and \`REGISTRY_PASSWORD\`,"
@@ -257,18 +415,15 @@ jobs:
 
           namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
           # Registries want lower case, and a GitHub owner need not be.
-          image=$(echo "${REGISTRY}/${namespace}/${RELEASE//_/-}" | tr '[:upper:]' '[:lower:]')
+          image=$(echo "${REGISTRY}/${namespace}/${IMAGE}" | tr '[:upper:]' '[:lower:]')
 
-          # `sha-<short>` on every push, so every commit is pullable; and the version on
-          # a release tag, without its `v`, because that is what the values files write.
-          tags="${image}:sha-${GITHUB_SHA::7}"
-          case "$GITHUB_REF" in
-            refs/tags/v*) tags="${tags},${image}:${GITHUB_REF_NAME#v}" ;;
-          esac
-
+          # `sha-<short>` only: every commit is pullable by a name that can only ever mean
+          # one build. A version tag is not built here — the release job promotes this
+          # very image to it, so production runs the bytes this run tested.
           echo "publish=true" >> "$GITHUB_OUTPUT"
           echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
-          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "tags=${image}:sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
 
       - uses: docker/setup-buildx-action@v3
         if: steps.registry.outputs.publish == 'true'
@@ -281,23 +436,41 @@ jobs:
           password: ${{ secrets.REGISTRY_PASSWORD }}
 
       # linux/amd64 only: that is what the node pool is, and an arm64 build of the
-      # umbrella under emulation is an hour nobody has asked for. The four images share
-      # every layer up to `mix release`, so one cache serves the whole matrix.
+      # umbrella under emulation is an hour nobody has asked for. The four server images
+      # share every layer up to `mix release`, so one cache serves them.
+      #
+      # `BUILD_COMMIT` and `BUILD_TIME` are what the plane reports at `/.well-known/troupe`,
+      # which is how a deploy proves it is running what it rolled. `TROUPE_GUI_BASE` is
+      # baked into the GUI's asset URLs and must match the chart's `gui.basePath`; the
+      # `GUI_BASE` variable changes both for a deployment that mounts it elsewhere.
       - uses: docker/build-push-action@v6
         if: steps.registry.outputs.publish == 'true'
         with:
-          context: .
-          file: docker/Dockerfile
-          build-args: RELEASE=${{ matrix.release }}
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: |
+            RELEASE=${{ matrix.release }}
+            BUILD_COMMIT=${{ github.sha }}
+            BUILD_TIME=${{ steps.registry.outputs.built_at }}
+            TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}
           platforms: linux/amd64
           push: true
           tags: ${{ steps.registry.outputs.tags }}
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
-  protocol:
-    name: schema compatibility and the Python client
-    runs-on: ubuntu-latest
+  tui:
+    name: the TUI — compile, format, credo, xref, test
+    needs: [changes]
+    if: needs.changes.outputs.tui == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: clients/tui
+    env:
+      MIX_ENV: test
+      # The idle-shutdown test waits a minute without it.
+      TROUPE_IDLE_TEST_MS: "1000"
     steps:
       - uses: actions/checkout@v4
 
@@ -306,78 +479,386 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
 
+      # The harness is a path dependency on `apps/`, and `troupe_core` builds the reaper
+      # when it compiles; without Zig every OS-process test would fail on a missing helper.
       - uses: mlugg/setup-zig@v2
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-
       - uses: actions/cache@v4
         with:
           path: |
-            deps
-            _build
-          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
-          restore-keys: ${{ runner.os }}-mix-
+            clients/tui/deps
+            clients/tui/_build
+          key: ${{ runner.os }}-tui-${{ hashFiles('clients/tui/mix.lock', 'mix.lock') }}
+          restore-keys: ${{ runner.os }}-tui-
+
+      # The TUI locks the 25 packages it shares with the umbrella in its own `mix.lock`;
+      # a harness built against one version on a laptop and another in a pod is the drift
+      # this repository exists to end.
+      - name: The two Mix locks agree
+        working-directory: .
+        run: elixir scripts/locks-agree.exs
 
       - run: mix deps.get
+      - run: mix check
 
-      # Fields may be added; they may not be removed, renamed, retyped, or newly made
-      # required. A published protocol is a promise to people who are not in this
-      # repository, and this is what keeps it.
-      - name: Schema compatibility
-        run: mix troupe.schema.diff
+  gui:
+    name: the GUI — tokens, typecheck, build, test
+    needs: [changes]
+    if: needs.changes.outputs.gui == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/gui
+    steps:
+      - uses: actions/checkout@v4
 
-      - name: Committed schema is current
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/gui/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/gui/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+
+      # The generated stylesheet is committed, so a design token changed without running
+      # `pnpm tokens` would otherwise reach a deployment as a file nobody regenerated.
+      - name: The committed design tokens match the design file
+        run: pnpm tokens:check
+
+      - run: pnpm typecheck
+
+      # The protocol client has to be built before the app typechecks against its types
+      # in a clean checkout, and building it is most of what `pnpm build` does anyway.
+      - run: pnpm build
+
+      - run: pnpm test
+
+
+  gui-e2e:
+    name: the GUI against a plane built from this commit
+    needs: [changes]
+    if: needs.changes.outputs.gui_e2e == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/gui/package.json
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/gui/pnpm-lock.yaml
+
+      - run: pnpm install --frozen-lockfile
+        working-directory: clients/gui
+
+      - uses: docker/setup-buildx-action@v3
+
+      # Postgres, OpenBao, Dex and the plane — built from `docker/Dockerfile` here, not
+      # pulled — in one compose project with no Kubernetes. The test drives Dex's device
+      # flow headlessly, so "sign in" is a test rather than something somebody sits
+      # through (clients/gui/docs/e2e.md).
+      - name: A plane from this commit
+        working-directory: clients/gui
+        run: docker compose -f dev/plane-stack.yml up -d --wait --wait-timeout 600 --build
+
+      - name: The client against it
+        working-directory: clients/gui/packages/client
+        env:
+          TROUPE_E2E_PLANE: http://localhost:4020
+        run: node --test --import tsx --test-reporter=spec test/e2e.plane.test.ts
+
+      - name: The plane's log, on failure
+        if: failure()
+        working-directory: clients/gui
+        run: docker compose -f dev/plane-stack.yml logs --no-color plane plane-migrate | tail -300
+
+  # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
+  # read it; a copy nobody checks is how four numbers came to have no relation. Cheap, so
+  # it runs on every pull request whatever it touched.
+  versions:
+    name: every copy of the version agrees
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - run: elixir scripts/version.exs check
+
+  native:
+    name: native builds
+    needs: [changes]
+    if: needs.changes.outputs.native == 'true'
+    uses: ./.github/workflows/release.yml
+
+  # The one required check. Every job a pull request can run is under it, and it fails
+  # when any of them failed or was cancelled; a job skipped because its part of the
+  # repository did not change counts as passing, which is the point of skipping it.
+  ci-ok:
+    name: ci-ok
+    if: always()
+    needs: [changes, versions, check, chart, protocol, tui, gui, gui-e2e, native]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job that ran passed
+        env:
+          RESULTS: ${{ toJSON(needs) }}
         run: |
-          mix troupe.schema.gen
-          git diff --exit-code protocol/schema/v1 \
-            || { echo "protocol/schema/v1 is stale: run mix troupe.schema.gen and commit"; exit 1; }
+          echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
+          if echo "$RESULTS" | jq -e 'to_entries | map(.value.result) | any(. == "failure" or . == "cancelled")' >/dev/null; then
+            echo "::error::a job this pull request needed did not pass"
+            exit 1
+          fi
 
-      # A client written against PROTOCOL.md in another language, with no access to this
-      # source. Every client is now outside this repository, and this is the check that
-      # proves the protocol is enough to be one.
-      - name: Python reference client, end to end
-        run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
-
+  # -- release ------------------------------------------------------------------
+  #
+  # Runs on every push to `main` and does nothing unless VERSION names a version that has
+  # no tag yet — which is to say, unless the commit being pushed is a merged release pull
+  # request (`scripts/release`). It needs the whole gate, the nine soak runs and the
+  # cluster suite included: a release is this commit, already tested.
   release:
-    name: publish the chart
-    # The images are published by `images` on the same tag, under the version without its
-    # `v` — which is the tag `values.yaml` names. This adds the one artifact a person
-    # still has to fetch by hand: the chart that deploys them.
-    needs: [check, protocol, chart, images]
-    if: startsWith(github.ref, 'refs/tags/v')
+    name: cut a release, when VERSION is new
+    needs: [versions, check, chart, protocol, cluster, images, tui, gui, gui-e2e]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: write
+    outputs:
+      cut: ${{ steps.version.outputs.cut }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Is this a new version
+        id: version
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+            echo "${tag} is already released; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "cut=true" >> "$GITHUB_OUTPUT"
+            echo "Cutting ${tag} from ${GITHUB_SHA::7}." >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      # A release is its images, so a release with nowhere to put them is not cut.
+      - name: The registry
+        id: registry
+        if: steps.version.outputs.cut == 'true'
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -z "${REGISTRY}" ] || [ -z "${REGISTRY_PASSWORD}" ]; then
+            echo "::error title=No registry::A release promotes the images this run built, and no registry is configured. Set REGISTRY, REGISTRY_NAMESPACE, REGISTRY_USERNAME and REGISTRY_PASSWORD."
+            exit 1
+          fi
+          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          echo "base=$(echo "${REGISTRY}/${namespace}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.version.outputs.cut == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.version.outputs.cut == 'true'
+        with:
+          registry: ${{ steps.registry.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # Build once, promote: the version tag is added to the manifest `images` pushed as
+      # `sha-<short>` a few minutes ago, so what production runs is byte for byte what
+      # this run tested. Nothing is rebuilt.
+      - name: Promote this commit's images to the version
+        if: steps.version.outputs.cut == 'true'
+        env:
+          BASE: ${{ steps.registry.outputs.base }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          for image in troupe-plane troupe-operator troupe-worker troupe-a2a troupe-gui; do
+            docker buildx imagetools create \
+              --tag "${BASE}/${image}:${VERSION}" \
+              "${BASE}/${image}:sha-${GITHUB_SHA::7}"
+            echo "- \`${BASE}/${image}:${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      - uses: azure/setup-helm@v4
+        if: steps.version.outputs.cut == 'true'
+
+      # The chart's own version and its appVersion are the release's, so an install of
+      # this file pulls the images just promoted rather than whatever `values.yaml` was
+      # last edited to say (Decision 322).
+      - name: Package the chart
+        if: steps.version.outputs.cut == 'true'
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          helm package charts/troupe --version "$VERSION" --app-version "$VERSION" --destination dist
+
+      # The tag is pushed with this workflow's own token, which starts no other workflow:
+      # everything this release needs happens in this run. The release is a draft until
+      # the native builds have attached their artifacts (`publish`, below).
+      - name: Tag it, and open a draft release
+        if: steps.version.outputs.cut == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
+          PRERELEASE: ${{ steps.version.outputs.prerelease }}
+        run: |
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/${TAG}"
+          cat > notes.md <<NOTES
+          Everything in this repository at \`${GITHUB_SHA::7}\`, as one release.
+
+          **On a cluster** — the chart, whose images are this version:
+
+              helm upgrade --install troupe \\
+                https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/troupe-${VERSION}.tgz \\
+                --namespace troupe-system --create-namespace --values my-values.yaml
+
+          Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`.
+
+          **On a machine** — \`install.sh\` / \`install.ps1\` install \`troupe\` (the TUI) and \`troupe-daemon\` from here. The desktop app's installers are attached as well.
+          NOTES
+          flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
+          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz
+
+      - uses: actions/upload-artifact@v4
+        if: steps.version.outputs.cut == 'true'
+        with:
+          name: chart
+          path: dist/troupe-*.tgz
+
+  release-native:
+    name: native builds for the release
+    needs: [release]
+    if: needs.release.outputs.cut == 'true'
+    uses: ./.github/workflows/release.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.release.outputs.tag }}
+    secrets: inherit
+
+  # Published once everything is attached, with one SHA256SUMS over all of it.
+  publish:
+    name: publish the release
+    needs: [release, release-native]
+    if: needs.release.outputs.cut == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checksums, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.release.outputs.tag }}
+          PRERELEASE: ${{ needs.release.outputs.prerelease }}
+        run: |
+          mkdir dist && cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          rm -f SHA256SUMS
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$PRERELEASE"
+
+  # -- deploy -------------------------------------------------------------------
+  #
+  # A release deploys itself (Decision 669). Pushing an image and changing production are
+  # still two decisions, but the second is now the reviewed merge of a VERSION change,
+  # not a laptop session: a push to `main` that does not change VERSION deploys nothing.
+  # A release candidate (`0.4.0-rc.1`) runs everything and deploys as a dry run only.
+  #
+  # The `production` environment holds `KUBECONFIG` (the `troupe-deployer` account's,
+  # from `scripts/ci-kubeconfig`) and `DEPLOY_VALUES` (the deployment's values file), and
+  # its variable `PLANE_URL`. Its deployment policy should allow `main` alone, so no pull
+  # request can reach them; a required reviewer on it is optional, and makes this job
+  # wait for a second person. Each run of this job is a row on the repository's
+  # Deployments page: what went where, when, and from which merge.
+  deploy:
+    name: deploy ${{ needs.release.outputs.version }}
+    needs: [release]
+    if: needs.release.outputs.cut == 'true'
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PLANE_URL }}
+    # One roll at a time, shared with `deploy.yml`: two overlapping `helm upgrade`s on one
+    # release is a race whose loser is whichever finished second.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
     steps:
       - uses: actions/checkout@v4
 
       - uses: azure/setup-helm@v4
 
-      # The chart's own version and the images' tag are the release's version, so a
-      # `helm install` of this file pulls the images this run built rather than whatever
-      # `values.yaml` was last edited to say.
-      - name: Package the chart at this version
-        run: |
-          set -euo pipefail
-          version="${GITHUB_REF_NAME#v}"
-          helm package charts/troupe \
-            --version "$version" --app-version "$version" \
-            --destination dist
-
-      - uses: softprops/action-gh-release@v2
+      - uses: actions/download-artifact@v4
         with:
-          files: dist/troupe-*.tgz
-          body: |
-            Deployed with `charts/troupe`; there is nothing to install on a machine.
+          name: chart
+          path: dist
 
-                helm upgrade --install troupe \
-                  https://github.com/${{ github.repository }}/releases/download/${{ github.ref_name }}/troupe-${{ github.ref_name }}.tgz \
-                  --namespace troupe-system --create-namespace \
-                  --values my-values.yaml
+      - name: Check this deployment is configured
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          missing=""
+          [ -n "${KUBECONFIG_CONTENT}" ] || missing="${missing} KUBECONFIG"
+          [ -n "${VALUES_CONTENT}" ] || missing="${missing} DEPLOY_VALUES"
+          if [ -n "${missing}" ]; then
+            echo "::error title=Deployment not configured::The production environment has no${missing}. KUBECONFIG is the troupe-deployer account's (deploy/ci-deployer.yaml, then scripts/ci-kubeconfig); DEPLOY_VALUES is the deployment's Helm values file."
+            exit 1
+          fi
 
-            Images for this tag: `troupe-plane`, `troupe-operator`, `troupe-worker` and
-            `troupe-a2a`, each tagged `${{ github.ref_name }}` without the `v`.
+      - name: Lay out the credentials
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          mkdir -p .local
+          printf '%s' "${KUBECONFIG_CONTENT}" > .local/kubeconfig.yaml
+          printf '%s' "${VALUES_CONTENT}" > .local/values.itminds.yaml
+          chmod 600 .local/kubeconfig.yaml .local/values.itminds.yaml
+
+      - name: ${{ needs.release.outputs.prerelease == 'true' && 'Render it (a release candidate)' || 'Roll it' }}
+        env:
+          PLANE_URL: ${{ vars.PLANE_URL }}
+          EXPECT_COMMIT: ${{ github.sha }}
+          DRY_RUN: ${{ needs.release.outputs.prerelease == 'true' && '--dry-run' || '' }}
+        run: scripts/deploy dist/troupe-${{ needs.release.outputs.version }}.tgz $DRY_RUN
+
+      - name: Say what is running
+        if: always()
+        env:
+          VERSION: ${{ needs.release.outputs.version }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "### production: ${VERSION} — ${OUTCOME}"
+            echo
+            echo "From \`${GITHUB_SHA::7}\`, started by @${GITHUB_ACTOR}."
+          } >> "$GITHUB_STEP_SUMMARY"

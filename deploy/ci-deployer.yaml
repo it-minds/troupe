@@ -1,0 +1,137 @@
+# The identity CI deploys as.
+#
+# A person's kubeconfig cannot be handed to a runner. The one Scaleway issues carries an
+# *exec plugin* — it shells out to `scw` on the machine using it to mint a token — so it
+# works on a laptop and fails on a runner with "executable scw not found". So CI gets an
+# identity of its own: this service account, with a token that does not expire, turned
+# into a kubeconfig by `scripts/ci-kubeconfig` and kept as the `production` environment's
+# `KUBECONFIG` secret.
+#
+#   kubectl apply -f deploy/ci-deployer.yaml
+#   scripts/ci-kubeconfig > .local/kubeconfig.ci.yaml     # the kubeconfig to upload
+#
+# To take it away again:
+#
+#   kubectl delete -f deploy/ci-deployer.yaml
+#
+# **What it can do, said plainly.** It installs `charts/troupe`, and that chart creates
+# cluster-scoped objects — three CRDs, the operator's ClusterRoles and their bindings,
+# a Namespace, a TroupePolicy, and a ValidatingAdmissionPolicy — so this cannot be the
+# one-namespace Role the GUI's own deployer was. And a ClusterRole can only be created by
+# somebody who holds every permission in it, or who may `escalate` and `bind`; the
+# operator's grants are broad, so this account has `escalate` and `bind`, which makes it
+# as powerful as cluster-admin in principle. The rules below list what the chart touches
+# rather than granting `*`, so that the everyday reach of the account is what a deploy
+# does — it cannot delete a Deployment in somebody else's namespace — but the protection
+# that matters is where the credential lives: only in the `production` environment,
+# which only `main` may use (Decision 669).
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: troupe-deployer
+  namespace: troupe-system
+---
+# Kubernetes stopped minting service-account token Secrets automatically in 1.24, and
+# `kubectl create token` issues one that expires — which is right for a person and wrong
+# for a runner that has to still work in three months without anybody remembering why it
+# stopped. A Secret of this type is the supported way to ask for one that does not.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: troupe-deployer
+  namespace: troupe-system
+  annotations:
+    kubernetes.io/service-account.name: troupe-deployer
+type: kubernetes.io/service-account-token
+---
+# The cluster-scoped half: what the chart creates outside any namespace.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: troupe-deployer
+rules:
+  # `scripts/deploy` applies the chart's CRDs itself, server-side, because Helm installs
+  # a chart's CRDs once and never upgrades them.
+  - apiGroups: ["apiextensions.k8s.io"]
+    resources: ["customresourcedefinitions"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["clusterroles", "clusterrolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "escalate", "bind"]
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["get", "list", "watch", "create", "update", "patch"]
+  - apiGroups: ["admissionregistration.k8s.io"]
+    resources: ["validatingadmissionpolicies", "validatingadmissionpolicybindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["troupe.dev"]
+    resources: ["troupepolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: troupe-deployer
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: troupe-deployer
+subjects:
+  - kind: ServiceAccount
+    name: troupe-deployer
+    namespace: troupe-system
+---
+# The namespaced half: everything the chart puts in `troupe-system`.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: troupe-deployer
+  namespace: troupe-system
+rules:
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services", "serviceaccounts"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses", "networkpolicies"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["policy"]
+    resources: ["poddisruptionbudgets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["rbac.authorization.k8s.io"]
+    resources: ["roles", "rolebindings"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete", "escalate", "bind"]
+  # The plane's migrations run as a pre-upgrade hook Job, which Helm creates, waits for
+  # and deletes.
+  - apiGroups: ["batch"]
+    resources: ["jobs"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # Where Helm keeps release history: one Secret per revision, in this namespace.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  # `--wait` and `rollout status` watch the rollout, and the script prints the running
+  # digests afterwards. Read-only: CI has no business deleting a pod by hand.
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: troupe-deployer
+  namespace: troupe-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: troupe-deployer
+subjects:
+  - kind: ServiceAccount
+    name: troupe-deployer
+    namespace: troupe-system

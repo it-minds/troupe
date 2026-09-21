@@ -1,0 +1,96 @@
+#!/usr/bin/env bash
+# Roll a release of `charts/troupe` onto a cluster — the plane, the operator, the A2A
+# facade and the GUI — and prove the plane that answers afterwards is the one it rolled.
+#
+#     scripts/deploy <chart> [--dry-run]
+#
+# <chart> is a packaged chart as a release publishes it (`troupe-0.3.0.tgz`) or a chart
+# directory. Its appVersion is the version every image is deployed at; the chart's image
+# tags default to it, so the release, the images and what the plane reports are one number.
+#
+# This is the one implementation of "deploy" (Decision 669). The `deploy` job in `ci.yml`
+# runs it when a release is cut, `deploy.yml` runs it to roll back or to render, and a
+# person holding the same credentials can run it by hand — the same steps each time,
+# because two implementations of deploying is how the documented one stops being what
+# actually happens.
+#
+# Environment:
+#   KUBECONFIG_FILE  the cluster's kubeconfig (default .local/kubeconfig.yaml)
+#   VALUES           this deployment's values file (default .local/values.itminds.yaml)
+#   NAMESPACE        default troupe-system
+#   RELEASE          the Helm release (default troupe)
+#   PLANE_URL        the plane's public URL. When set, `/.well-known/troupe` has to report
+#                    the chart's appVersion, and EXPECT_COMMIT if that is set too.
+#   EXPECT_COMMIT    the commit the images were built from
+set -euo pipefail
+
+chart="${1:?usage: scripts/deploy <chart .tgz or directory> [--dry-run]}"
+dry_run="${2:-}"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+
+kubeconfig="${KUBECONFIG_FILE:-$root/.local/kubeconfig.yaml}"
+values="${VALUES:-$root/.local/values.itminds.yaml}"
+namespace="${NAMESPACE:-troupe-system}"
+release="${RELEASE:-troupe}"
+
+for f in "$chart" "$kubeconfig" "$values"; do
+  [ -e "$f" ] || { echo "deploy: $f does not exist" >&2; exit 1; }
+done
+
+version="$(helm show chart "$chart" | sed -n 's/^appVersion: *"\{0,1\}\([^"]*\)"\{0,1\}$/\1/p')"
+[ -n "$version" ] || { echo "deploy: $chart has no appVersion" >&2; exit 1; }
+
+k() { kubectl --kubeconfig "$kubeconfig" "$@"; }
+
+# Helm 4 renamed `--atomic`; a laptop may still have 3.
+case "$(helm version --template '{{.Version}}')" in
+  v3.*) rollback=(--atomic) ;;
+  *) rollback=(--rollback-on-failure) ;;
+esac
+
+upgrade=(upgrade --install "$release" "$chart"
+  --kubeconfig "$kubeconfig" --namespace "$namespace" --create-namespace
+  --values "$values")
+
+if [ "$dry_run" = "--dry-run" ]; then
+  echo "deploy: rendering ${release} ${version} against the cluster; nothing changes"
+  crds="$(helm show crds "$chart")"
+  [ -z "$crds" ] || printf '%s\n' "$crds" | k apply --server-side --force-conflicts --dry-run=server -f -
+  helm "${upgrade[@]}" --dry-run=server >/dev/null
+  echo "deploy: ${release} ${version} renders and the API server accepts it"
+  exit 0
+fi
+
+# Helm installs a chart's CRDs once and never upgrades them, so a release that changes one
+# (a field a WorkerProfile gained) would otherwise leave the cluster validating against
+# the old schema. Server-side, because a CRD's last-applied annotation outgrows the limit.
+echo "deploy: CRDs"
+crds="$(helm show crds "$chart")"
+[ -z "$crds" ] || printf '%s\n' "$crds" | k apply --server-side --force-conflicts -f -
+
+echo "deploy: ${release} ${version}"
+helm "${upgrade[@]}" --wait --timeout 10m "${rollback[@]}"
+
+k -n "$namespace" rollout status deployment -l "app.kubernetes.io/instance=${release}" --timeout=5m
+
+if [ -n "${PLANE_URL:-}" ]; then
+  # The plane says which build it is at `/.well-known/troupe`; a deploy that cannot see
+  # its own version there did not deploy what it thinks it did.
+  answer=""
+  for _ in $(seq 1 30); do
+    answer="$(curl -fsS "${PLANE_URL%/}/.well-known/troupe" 2>/dev/null)" && break
+    sleep 5
+  done
+  running="$(printf '%s' "$answer" | jq -r '.plane.build.version // empty')"
+  commit="$(printf '%s' "$answer" | jq -r '.plane.build.commit // empty')"
+  echo "deploy: ${PLANE_URL} reports ${running:-nothing} at ${commit:-nothing}"
+  [ "$running" = "$version" ] || { echo "deploy: expected ${version}" >&2; exit 1; }
+  if [ -n "${EXPECT_COMMIT:-}" ] && [ "$commit" != "${EXPECT_COMMIT:0:7}" ]; then
+    echo "deploy: expected commit ${EXPECT_COMMIT:0:7}" >&2
+    exit 1
+  fi
+fi
+
+echo
+k -n "$namespace" get pods -l "app.kubernetes.io/instance=${release}" \
+  -o custom-columns='POD:.metadata.name,READY:.status.containerStatuses[0].ready,IMAGE:.status.containerStatuses[0].imageID'

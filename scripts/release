@@ -1,0 +1,51 @@
+#!/usr/bin/env bash
+# Cut a release: open the pull request that changes VERSION.
+#
+#     scripts/release 0.3.1          # a release
+#     scripts/release 0.4.0-rc.1     # a release candidate: published, deployed as a dry run
+#
+# Merging that pull request is the release (Decision 669). The run on `main` that follows
+# sees a VERSION with no tag, tags it, promotes the images it has just built and tested to
+# that version, packages the chart, builds the daemon, the TUI and the desktop app for
+# every platform, and deploys to production. There is no other way to cut one: a tag
+# pushed by hand is not a release, and nothing deploys from a laptop.
+#
+# Needs a clean checkout, `gh` signed in, and Elixir (for scripts/version.exs).
+set -euo pipefail
+
+version="${1:?usage: scripts/release <version>   e.g. scripts/release 0.3.1}"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$root"
+
+if [ -n "$(git status --porcelain)" ]; then
+  echo "release: the working tree has changes; commit or stash them first" >&2
+  exit 1
+fi
+
+git fetch --quiet origin main --tags
+if git rev-parse --quiet --verify "refs/tags/v${version}" >/dev/null; then
+  echo "release: v${version} is already a release" >&2
+  exit 1
+fi
+
+current="$(tr -d '[:space:]' < VERSION)"
+branch="release/v${version}"
+git switch --quiet -c "$branch" origin/main
+elixir scripts/version.exs set "$version"
+git commit --quiet -am "Release ${version}"
+git push --quiet -u origin "$branch"
+
+case "$version" in
+  *-*) what="a release candidate: published as a prerelease, and deployed to production as a dry run only" ;;
+  *) what="a release, deployed to production when this merges" ;;
+esac
+
+gh pr create --base main --head "$branch" --title "Release ${version}" --body "$(cat <<EOF
+VERSION ${current} → ${version}: ${what}.
+
+Merging this is the release. The run on \`main\` tags \`v${version}\`, promotes the images
+it built from this commit, publishes the chart and the daemon, TUI and desktop builds, and
+runs the \`deploy\` job against the \`production\` environment. \`scripts/version.exs\`
+wrote every copy of the version; nothing else changes here.
+EOF
+)"

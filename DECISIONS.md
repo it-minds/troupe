@@ -4922,6 +4922,66 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      mint, 1.10.1 in the TUI for a security advisory and 1.10.0 here. Proof: `mix check` in
      `clients/tui`, 107 tests, against the umbrella's source.
 
+669. **A release is a merged change to `VERSION`, and it deploys itself.** Issue #37 set out
+     what was wrong: four repositories delivered four ways, no repository had ever been
+     tagged so no release path had ever run, the plane — the core — was deployed by hand
+     from one laptop with a script that hard-coded `0.2.17`, and nothing but the cluster
+     knew what was running. It proposed one deploy workflow per deployable, manual, and
+     asked whether deploying should stay manual. The team's answer is no (Martin,
+     2026-09-21: "I want a deployment on releases too"), and this is its shape.
+
+     *Cutting one.* `scripts/release <version>` opens a pull request whose only change is
+     `VERSION` and its copies (`scripts/version.exs set`). Merging it is the release: the
+     run on `main` that follows has the whole gate behind it — the soak and the cluster
+     suite included — and its `release` job sees a version with no tag. It tags the commit,
+     promotes the images the same run built from `sha-<short>` to the version with
+     `docker buildx imagetools create` (build once: production runs the bytes CI tested,
+     not a rebuild), packages the chart at that version, and opens a draft release;
+     `release.yml` builds the daemon and the TUI for five platforms and the desktop app
+     for three and attaches them; `publish` adds one `SHA256SUMS` and publishes. A push to
+     `main` that does not change `VERSION` publishes images and releases nothing. A tag
+     pushed by hand is not a release. It all happens in one run because a tag pushed with
+     the workflow's own token starts no other workflow, which is also what keeps it from
+     running twice.
+
+     *Deploying it.* The `deploy` job runs `scripts/deploy` against the `production`
+     environment: the chart's CRDs server-side (Helm never upgrades them), `helm upgrade
+     --wait` rolling back on failure, `rollout status`, and then `/.well-known/troupe` must
+     report the release's version and commit, which the images now carry because CI
+     passes `BUILD_COMMIT` — it never had, so every CI-built plane said `dev`. Pushing an
+     image and changing production are still two decisions, as the GUI's workflow insisted;
+     the second is now a reviewed merge instead of a laptop session. A release candidate
+     (`-rc.N`) runs everything and deploys as a server-side dry run, which is #37's "tag
+     something before it matters". `deploy.yml` stays for what the automatic path does
+     not do: roll an earlier release back, or render one, through the same script. The
+     environment's deployments are the record of what ran where and when, from which
+     merge (#37 item 6).
+
+     *Credentials.* `production` holds `KUBECONFIG` and `DEPLOY_VALUES` and the variable
+     `PLANE_URL`, and should allow `main` alone. The kubeconfig is the `troupe-deployer`
+     service account's (`deploy/ci-deployer.yaml`, `scripts/ci-kubeconfig`), not a person's
+     `scw` login. It is not the one-namespace Role the GUI's deployer had: the chart creates
+     CRDs, ClusterRoles and an admission policy, and granting a ClusterRole takes
+     `escalate` and `bind`, which is cluster-admin in principle. That is said in the
+     manifest rather than hidden, and the rules list what the chart touches so the
+     account's everyday reach is a deploy's. A required reviewer on the environment is left
+     to the team: the bump pull request's review is the approval this design assumes.
+
+     *Worker images* are the part a chart cannot roll, because each profile names its own
+     and service principals may not administer (`admin.ex:77-82`); a profile whose image is
+     `release` follows the chart's worker image (below).
+
+     *What CI checks on a pull request* is decided per job by `changes`, under one required
+     check, `ci-ok`: the server suite for the platform, `mix check` in `clients/tui` with the
+     lock-agreement step, the GUI's build and tests, the GUI's end-to-end suite against a
+     plane built from the same commit, the version copies, and the native builds when a
+     pull request touches them. Proof: every workflow parses and `actionlint` reports only
+     the `macos-15-intel` label it does not know; `scripts/deploy --dry-run` is accepted by
+     a kind cluster's API server both as a cluster admin and as the `troupe-deployer`
+     account applied from `deploy/ci-deployer.yaml` (then deleted); the GUI's end-to-end
+     suite passes 8 of 8 against a plane built from this checkout; `scripts/version.exs`
+     sets and checks a release candidate and a release.
+
 670. **`charts/troupe` serves the GUI, on by default, and `plane.appUrl` follows it.** The
      GUI had a chart of its own, installed as a second release onto the plane's host and
      linked from the plane's index by a hand-set `/app`. It is now `gui:` in this chart:

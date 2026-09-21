@@ -1,0 +1,374 @@
+# The builds that run on somebody's machine rather than in a cluster: `troupe-daemon` and
+# `troupe` (the TUI) for five platforms each, and the desktop app's installers for three.
+#
+# One native runner per target. A Mix release carries the build host's ERTS, the TUI's
+# precompiled ExRatatui NIF resolves against the build host, and the desktop app links
+# the platform's webview — none of it cross-builds. So this is slow and wide, and it runs
+# when it proves something: on a pull request that touches one of them (called from
+# `ci.yml`, under `ci-ok`), nightly on `main`, and when a release is cut — called with the
+# release's tag, and then it attaches everything to that draft release (Decision 669).
+#
+# `workflow_dispatch` runs it by hand, attaching nothing.
+name: native builds
+
+on:
+  workflow_call:
+    inputs:
+      tag:
+        description: "The draft release to attach the artifacts to; empty attaches nothing"
+        type: string
+        default: ""
+  workflow_dispatch:
+  schedule:
+    # Nightly, so a harness change that breaks the Windows or macOS build is found the
+    # next morning rather than at the next release.
+    - cron: "17 2 * * *"
+
+env:
+  OTP_VERSION: "28.5"
+  ELIXIR_VERSION: "1.20.4"
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  # -- troupe-daemon ------------------------------------------------------------
+  daemon:
+    name: troupe-daemon ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      MIX_ENV: prod
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, target: linux_x86_64}
+          - {os: ubuntu-24.04-arm, target: linux_aarch64}
+          - {os: macos-15-intel, target: macos_x86_64}
+          - {os: macos-14, target: macos_aarch64}
+          - {os: windows-2022, target: windows_x86_64}
+    defaults:
+      run:
+        shell: bash
+        # Built from its own directory, so the runner compiles the harness and not the
+        # plane's database and Kubernetes clients (Decision 667).
+        working-directory: apps/troupe_daemon
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - run: mix deps.get
+
+      - name: Build the release
+        run: mix release troupe_daemon --overwrite
+
+      - name: Name the artifact
+        id: art
+        run: |
+          VERSION=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
+          NAME="troupe-daemon-${VERSION}-${{ matrix.target }}.tar.gz"
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          mv "$GITHUB_WORKSPACE/_build/prod/troupe_daemon-${VERSION}.tar.gz" "$GITHUB_WORKSPACE/dist/${NAME}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      - name: "Smoke test (unpack; version, status, run, status, eval)"
+        if: runner.os != 'Windows'
+        env:
+          TROUPE_PROVIDER: fake
+          TROUPE_DAEMON_LOG: stderr
+          TROUPE_DAEMON_IDLE_MINUTES: "1"
+        run: |
+          INST=$(mktemp -d); tar -xzf "$GITHUB_WORKSPACE/dist/${{ steps.art.outputs.name }}" -C "$INST"
+          BIN="$INST/bin/troupe-daemon"
+          ls "$INST"/lib/troupe_core-*/priv/reaper/
+          "$BIN" version
+          "$BIN" status && exit 1 || echo "not running, as expected"
+          "$BIN" run &
+          for i in $(seq 1 60); do "$BIN" status >/dev/null 2>&1 && break; sleep 1; done
+          "$BIN" status
+          "$BIN" run   # idempotent: names the running one and exits 0
+          "$INST/bin/troupe_daemon" eval 'IO.puts(Troupe.Version.version())'
+          kill %1 || true
+
+      - name: "Smoke test (Windows: unpack, version, status, eval)"
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          TROUPE_PROVIDER: fake
+          TROUPE_DAEMON_LOG: stderr
+        run: |
+          $inst = Join-Path $env:RUNNER_TEMP "troupe-daemon"
+          New-Item -ItemType Directory -Force $inst | Out-Null
+          tar -xzf "$env:GITHUB_WORKSPACE/dist/${{ steps.art.outputs.name }}" -C $inst
+          Get-ChildItem "$inst\lib\troupe_core-*\priv\reaper"
+          Get-ChildItem "$inst\lib\ezstd-*\priv"
+          & "$inst\bin\troupe-daemon.cmd" version
+          & "$inst\bin\troupe-daemon.cmd" status
+          if ($LASTEXITCODE -ne 1) { throw "status should say not running (exit 1), got $LASTEXITCODE" }
+          & "$inst\bin\troupe_daemon.bat" eval "b = :binary.list_to_bin(List.duplicate(0, 1000)); true = :ezstd.decompress(:ezstd.compress(b)) == b; IO.puts(:zstd_ok)"
+          if ($LASTEXITCODE -ne 0) { throw "eval failed with $LASTEXITCODE" }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.name }}
+          path: dist/${{ steps.art.outputs.name }}
+
+  # -- troupe (the TUI) ---------------------------------------------------------
+  tui:
+    name: troupe ${{ matrix.target }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 40
+    env:
+      MIX_ENV: prod
+      TROUPE_REAPER_TARGETS: all
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {os: ubuntu-24.04, target: linux_x86_64, target_abi: musl}
+          - {os: ubuntu-24.04-arm, target: linux_aarch64, target_abi: musl}
+          - {os: macos-15-intel, target: macos_x86_64}
+          - {os: macos-14, target: macos_aarch64}
+          - {os: windows-2022, target: windows_x86_64}
+    defaults:
+      run:
+        shell: bash
+        working-directory: clients/tui
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - name: Install xz and 7z
+        run: |
+          if [[ "$RUNNER_OS" == "Linux" ]]; then sudo apt-get update && sudo apt-get install -y xz-utils p7zip-full; fi
+          if [[ "$RUNNER_OS" == "macOS" ]]; then brew install xz p7zip || true; fi
+
+      # The harness is a path dependency on the umbrella beside it; nothing is fetched
+      # from anywhere private.
+      - run: mix deps.get
+
+      - name: Build the release
+        env:
+          BURRITO_TARGET: ${{ matrix.target }}
+          MATRIX_TARGET_ABI: ${{ matrix.target_abi }}
+        run: |
+          if [ -n "${MATRIX_TARGET_ABI}" ]; then export TARGET_ABI="${MATRIX_TARGET_ABI}"; fi
+          mix release --overwrite
+          ls -la burrito_out
+
+      - name: Name the artifact
+        id: art
+        run: |
+          VERSION=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
+          EXT=""; [[ "${{ matrix.target }}" == windows* ]] && EXT=".exe"
+          NAME="troupe-${VERSION}-${{ matrix.target }}${EXT}"
+          mv "burrito_out/troupe_${{ matrix.target }}${EXT}" "burrito_out/${NAME}"
+          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
+
+      # The daemon reads the model from the workspace, so the fake is configured there.
+      - name: Smoke test (--version and a headless Fake run in the embedded daemon)
+        run: |
+          BIN="$PWD/burrito_out/${{ steps.art.outputs.name }}"
+          chmod +x "$BIN" || true
+          START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
+          echo "cold first run (extraction + --version): $(( (END-START)/1000000 )) ms"
+          START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
+          echo "warm --version: $(( (END-START)/1000000 )) ms"
+          ls -la "$BIN"
+          SMOKE="$RUNNER_TEMP/smoke"; mkdir -p "$SMOKE/.troupe" && cd "$SMOKE"
+          printf 'provider: fake\nmodel: fake-model\nfake_script: %s\n' "$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/smoke.json" > .troupe/config.yaml
+          "$BIN" run build "smoke" --headless --auto-approve
+          test -f hello.txt && cat hello.txt
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.art.outputs.name }}
+          path: clients/tui/burrito_out/${{ steps.art.outputs.name }}
+
+  tui-containers:
+    name: the TUI's Linux binary in clean containers
+    needs: [tui]
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: troupe-*-linux_x86_64
+          merge-multiple: true
+          path: dist
+      - name: ubuntu:24.04 and alpine (no Erlang, no Elixir, no inotify-tools)
+        run: |
+          chmod +x dist/troupe-*-linux_x86_64
+          for img in ubuntu:24.04 alpine:3.20; do
+            docker run --rm -v "$PWD/dist:/dist" -v "$PWD/clients/tui/fixtures:/fixtures" "$img" sh -c '
+              set -e; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work/.troupe && cd /work
+              printf "provider: fake\nmodel: fake-model\nfake_script: /fixtures/fake_scripts/smoke.json\n" > .troupe/config.yaml
+              $BIN --version
+              $BIN run build "smoke" --headless --auto-approve --watch 2>&1 | tee out.log
+              grep -q polling out.log && echo "watch fell back to polling"
+              test -f hello.txt'
+          done
+
+  # -- the desktop app ----------------------------------------------------------
+  #
+  # Unsigned until the signing secrets exist. Every signing step is gated on a secret, and
+  # adding the secret turns it on with nothing else to change; until then the installers
+  # warn on first launch (clients/gui/docs/install.md).
+  desktop:
+    name: desktop ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-14
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: Windows (x64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+          # 22.04 is the glibc floor: the oldest Ubuntu that carries
+          # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
+          # silently breaks every 22.04 user. Do not "modernise" this.
+          - name: Linux (x64)
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
+    defaults:
+      run:
+        working-directory: clients/gui
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: System dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libgtk-3-dev libssl-dev build-essential file
+
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/gui/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/gui/pnpm-lock.yaml
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: clients/gui/apps/desktop/src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: pnpm install --frozen-lockfile
+
+      - name: Decide whether this build is signed
+        id: signing
+        shell: bash
+        env:
+          APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+        run: |
+          signed=false
+          case "${{ matrix.os }}" in
+            macos-*)   [ -n "$APPLE_CERT" ]     && signed=true ;;
+            windows-*) [ -n "$AZURE_ENDPOINT" ] && signed=true ;;
+          esac
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          if [ "$signed" = false ]; then
+            echo "::notice::Unsigned build. Installers will warn; see clients/gui/docs/install.md."
+          fi
+
+      - name: Install the Windows signing client
+        if: steps.signing.outputs.signed == 'true' && runner.os == 'Windows'
+        run: cargo install trusted-signing-cli
+
+      # Two steps, not one with a conditional env block. An undefined secret is not an
+      # absent variable: GitHub substitutes an empty string, so `APPLE_CERTIFICATE` is
+      # still *defined*, and tauri-action reads its presence as "set up a signing
+      # keychain" and then fails importing nothing. The unsigned build must not be able
+      # to see these names at all. No `tagName`: the release job owns the release, and
+      # this only builds.
+      - name: Build the bundles (unsigned)
+        if: steps.signing.outputs.signed != 'true'
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: clients/gui/apps/desktop
+          args: --target ${{ matrix.target }}
+
+      - name: Build the bundles (signed)
+        if: steps.signing.outputs.signed == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_CODE_SIGNING_NAME: ${{ secrets.AZURE_CODE_SIGNING_NAME }}
+          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        with:
+          projectPath: clients/gui/apps/desktop
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
+
+      - name: Keep the installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
+
+  # -- the release --------------------------------------------------------------
+  attach:
+    name: attach to ${{ inputs.tag }}
+    needs: [daemon, tui, tui-containers, desktop]
+    if: inputs.tag != ''
+    runs-on: ubuntu-latest
+    # No `permissions:` of its own: it inherits the caller's, and the release job in
+    # `ci.yml` calls this with `contents: write`. Declaring it here would make every other
+    # caller — a pull request's `native` job — fail validation for a job it never runs.
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - name: Upload every artifact to the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ inputs.tag }}
+        run: |
+          find dist -type f | sort
+          find dist -type f -print0 | xargs -0 gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber

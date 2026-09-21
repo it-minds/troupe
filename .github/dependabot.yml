@@ -1,7 +1,9 @@
-# Keeping the three ecosystems this repository actually has from rotting.
+# Keeping the ecosystems this repository actually has from rotting: the workflows' actions,
+# the GUI's npm packages and the desktop app's crates (from the GUI's own configuration,
+# which came with it), and the two Mix projects.
 #
-# There was no configuration here, so only GitHub's default security updates ran — and
-# those produced one thing: a weekly failure on a `glib` advisory with no version that
+# The GUI had no configuration at first, so only GitHub's default security updates ran —
+# and those produced one thing: a weekly failure on a `glib` advisory with no version that
 # fixes it. Meanwhile every workflow action sat on a major pinned to a Node runtime
 # GitHub is removing, which nothing was watching at all.
 #
@@ -24,7 +26,7 @@ updates:
       prefix: ci
 
   - package-ecosystem: npm
-    directory: /
+    directory: /clients/gui
     schedule:
       interval: monthly
     groups:
@@ -38,7 +40,7 @@ updates:
       prefix: deps
 
   - package-ecosystem: cargo
-    directory: /apps/desktop/src-tauri
+    directory: /clients/gui/apps/desktop/src-tauri
     schedule:
       interval: monthly
     groups:
@@ -52,5 +54,28 @@ updates:
       # rather than on the next advisory.
       - dependency-name: glib
         versions: ["0.18.x"]
+    commit-message:
+      prefix: deps
+
+  # The umbrella and the TUI lock 25 packages in common, and `scripts/locks-agree.exs`
+  # fails CI when they drift, so the two are updated together: one group each, the same
+  # month, and a pull request that bumps one lock and not the other is caught by CI.
+  - package-ecosystem: mix
+    directory: /
+    schedule:
+      interval: monthly
+    groups:
+      hex:
+        patterns: ["*"]
+    commit-message:
+      prefix: deps
+
+  - package-ecosystem: mix
+    directory: /clients/tui
+    schedule:
+      interval: monthly
+    groups:
+      hex:
+        patterns: ["*"]
     commit-message:
       prefix: deps
