@@ -657,8 +657,18 @@ jobs:
       tag: ${{ steps.version.outputs.tag }}
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
+      # Two commits deep, so the push can be compared with what `main` was before it.
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
 
+      # A release is a merged *change* to VERSION, not a VERSION that happens to have no
+      # tag. The difference showed on the merge that made this a monorepo: VERSION had
+      # said 0.2.0 for weeks, nothing had ever been tagged, and the run would have
+      # released 0.2.0 — below the 0.2.17 running in production — without anybody having
+      # asked for a release. So both have to hold: this push changed VERSION, and the
+      # version it names has no tag yet (a re-run of a release's own run must not cut it
+      # twice).
       - name: Is this a new version
         id: version
         run: |
@@ -667,7 +677,10 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
-          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
+          if git diff --quiet HEAD^1 HEAD -- VERSION; then
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+            echo "VERSION did not change in this push; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
+          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
             echo "cut=false" >> "$GITHUB_OUTPUT"
             echo "${tag} is already released; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
           else

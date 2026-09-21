@@ -5080,3 +5080,14 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      relies on. Proof: `mix troupe.xref` passes, and fails naming the call when a module
      calls `Troupe.Log.Fold.witnessed_types/0`; the grep passes on the tree and matches
      `{:troupe, path: "../../clients/tui"}`.
+
+674. **A release is cut when a push changes `VERSION`, not whenever `VERSION` has no tag.**
+     Decision 669 said the first and built the second: the `release` job cut any version
+     that had no tag. The merge that made this repository the monorepo showed the
+     difference — `VERSION` had said 0.2.0 for weeks, nothing had ever been tagged, and
+     that run would have released and deployed 0.2.0, below the 0.2.17 production was
+     running, with nobody having asked for a release. It was cancelled before it got
+     there. The job now reads two commits and cuts only when the pushed commit changed
+     `VERSION` from its first parent — the previous `main` — and the version still has no
+     tag, so a re-run of a release's own run cannot cut it twice. The first release is
+     0.3.0.
