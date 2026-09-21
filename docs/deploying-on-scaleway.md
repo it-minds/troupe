@@ -220,6 +220,9 @@ that, apply `deploy/ci-deployer.yaml` to this cluster, turn its account into a
 kubeconfig with `scripts/ci-kubeconfig` — a Scaleway kubeconfig shells out to `scw`, which
 a runner does not have — and give the `production` environment that kubeconfig as
 `KUBECONFIG`, this values file as `DEPLOY_VALUES`, and the plane's URL as `PLANE_URL`.
+A cluster that already runs the GUI from its old `troupe-gui` chart has to
+`helm uninstall troupe-gui -n troupe-system` before the first deploy of this one: both
+name their objects `troupe-gui`, and Helm will not take over another release's.
 
 **Label the ingress namespace.** A worker's NetworkPolicy admits traffic only from
 namespaces carrying `troupe.dev/ingress=true`. That is how "only the ingress may reach a

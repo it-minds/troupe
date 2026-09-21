@@ -7,9 +7,16 @@ which is effectively one large stage-1 change on top of that commit: 16 modified
 the CI workflow, `DECISIONS.md`, `REPORT.md` and the design system. Audit date: 2026-09-13.
 `pnpm --filter @troupe/client test` (33 tests) and `pnpm typecheck` pass on the working tree.
 
+> A record of the GUI as a repository of its own on that date, not revised since. It now
+> lives at `clients/gui` in the Troupe repository (root Decision 666; Decision 45), and the
+> Helm chart, `scripts/deploy` and CI workflow inventoried below were removed with the
+> move: the GUI is deployed as the `gui:` block of the root `charts/troupe`, and the root
+> workflows build, test, release and deploy it (root Decisions 669 and 670). The SHAs
+> quoted here are mapped in [docs/history](../../../docs/history/README.md).
+
 This is the Phase 1 output for the GUI repository. The server it talks to is documented in
-`../../docs/`; this repository's docs link there rather than restating protocol
-semantics.
+the repository root's `docs/` ([../../../docs/](../../../docs/README.md)); these docs link
+there rather than restating protocol semantics.
 
 ---
 

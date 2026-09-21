@@ -4,7 +4,7 @@
 
 Every screen and control in the GUI, what it does, how you use it, and what you will see. Labels are quoted as they appear on screen. Where the screen's own wording promises something the page does not do, it is marked **Discrepancy**.
 
-What the platform does behind these screens — how approvals work, what an agent or a profile is, budgets, why sessions go to sleep — is documented in the server repository, which is separate from this one: [../../../../docs/user/features.md](../../../../docs/user/features.md).
+What the platform does behind these screens — how approvals work, what an agent or a profile is, budgets, why sessions go to sleep — is documented with the platform, at the repository root: [../../../../docs/user/features.md](../../../../docs/user/features.md).
 
 Contents:
 

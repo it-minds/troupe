@@ -4,16 +4,24 @@
 > tree, 2026-09-13. The working tree is one large unpushed stage-1 change on top of that
 > commit; [AUDIT.md](AUDIT.md) §0 lists what is modified and untracked, so a reader checking
 > out `783e660` alone will not find most of what these documents describe.
+>
+> Since then the GUI has moved into the Troupe repository at `clients/gui` (root Decision
+> 666; Decision 45 here), and its chart, deploy script and workflows went with the move:
+> it is deployed as the `gui:` block of the root `charts/troupe` and built, tested and
+> released by the root workflows (root Decisions 669 and 670). The pages that described
+> those have been brought in line; SHAs quoted from the old repository are mapped in
+> [docs/history](../../../docs/history/README.md).
 
-Four tracks, one audit, one deep dive, the same shape as the server repository's
-`../../../docs/README.md`. Server-side concepts (approvals, agents, profiles,
-budgets, dormancy) are documented there and linked from here rather than restated.
+Four tracks, one audit, one deep dive, the same shape as the platform's
+[`docs/README.md`](../../../docs/README.md) at the repository root. Server-side concepts
+(approvals, agents, profiles, budgets, dormancy) are documented there and linked from here
+rather than restated.
 
 | Document | One line |
 |---|---|
-| [developer/](developer/README.md) | The pnpm workspace, the client library and the desktop app module by module, local setup with the fake deployment, tests, the image build, the (untracked) CI workflow, deployment with the Helm chart, conventions. |
+| [developer/](developer/README.md) | The pnpm workspace, the client library and the desktop app module by module, local setup with the fake deployment, tests, the image build, the root workflows' GUI jobs, deployment as part of the platform's chart, conventions. |
 | [user/](user/README.md) | Using the GUI in a browser: signing in, the sessions list, a session, approvals and the inbox, files, workflows, troubleshooting. |
-| [admin/](admin/README.md) | Operating the GUI: every Helm value, the base-path contract, what the identity provider must allow, what the plane must allow, health, upgrades, troubleshooting from the operator's side. |
+| [admin/](admin/README.md) | Operating the GUI: every `gui.*` value of the platform's chart, the base-path contract, what the identity provider must allow, what the plane must allow, health, upgrades, troubleshooting from the operator's side. |
 | [whitepaper.md](whitepaper.md) | How the client is built and why: the sign-in flows, the poll-based fleet, attachment and cursor, the pure fold, build and delivery, with diagrams and the trade-offs. |
 | [AUDIT.md](AUDIT.md) | The Phase 1 inventory: what exists in the working tree, where README, spec and design docs disagree with the code, caveats, open questions. |
 
@@ -23,10 +31,12 @@ Older documents remain the design record: `README.md`, `spec.md`, `DECISIONS.md`
 
 ## Self-check
 
-- [developer/README.md](developer/README.md): every job and step in `.github/workflows/ci.yml`
-  and every development and build variable, with the section that documents it.
-- [admin/README.md](admin/README.md): every Helm value in `charts/troupe-gui/values.yaml`,
-  every browser storage key, and every server-side setting the GUI depends on.
+- [developer/README.md](developer/README.md): every job of the root workflows that builds,
+  tests or ships the GUI, and every development and build variable, with the section that
+  documents it.
+- [admin/README.md](admin/README.md): every `gui.*` value in the root
+  `charts/troupe/values.yaml`, every browser storage key, and every server-side setting the
+  GUI depends on.
 - [user/README.md](user/README.md): every screen and every user action, plus the list of what
   the GUI does not do yet.
 

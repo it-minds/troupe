@@ -3,12 +3,13 @@
 > Audited against troupe-gui commit `783e660` (branch `master`) plus the uncommitted working
 > tree, 2026-09-13. See [AUDIT.md](AUDIT.md) for what could not be confirmed. Companion
 > documents: [developer/](developer/README.md), [user/](user/README.md), [admin/](admin/README.md).
-> The server this client speaks to is documented in the troupe-remote repository:
+> The GUI now lives at `clients/gui` in the Troupe repository (root Decision 666), and the
+> server this client speaks to is in the same repository, documented at its root:
 > [`../../../docs/whitepaper.md`](../../../docs/whitepaper.md).
 
 This document explains how the GUI is built and why it is shaped the way it is. It cites the
-code that decides each behaviour. It does not restate the protocol; `PROTOCOL.md` in the
-server repository is normative and the client library follows it.
+code that decides each behaviour. It does not restate the protocol; `PROTOCOL.md` at the
+repository root is normative and the client library follows it.
 
 ---
 
@@ -25,9 +26,9 @@ through the daemon on the person's own machine, private sessions sealed under th
 key, and the review and administration screens are stages 2–4 and are not built
 (`REPORT.md:574-582`).
 
-Three packages, one rule: `apps/desktop` imports `@troupe/client` and nothing from the server
-repository; `@troupe/client` depends on no framework and has no runtime dependencies
-(`packages/client/package.json`); nothing reads a file under `$TROUPE_STATE_HOME`
+Three packages, one rule: `apps/desktop` imports `@troupe/client` and nothing from the
+platform's code, although that now sits in the same repository; `@troupe/client` depends
+on no framework and has no runtime dependencies (`packages/client/package.json`); nothing reads a file under `$TROUPE_STATE_HOME`
 (`spec.md`, "Boundaries are enforced by the build").
 
 ```mermaid
@@ -268,14 +269,16 @@ and bakes it into the bundle as the base path; `app`, `/app` and `/app/` all nor
 `/app/` (`apps/desktop/vite.config.ts:16-17`). The Dockerfile builds and **tests** the client
 before building the bundle, then serves it from an unprivileged nginx on port 8080 with an SPA
 fallback, immutable hashed assets and a `/healthz` (`Dockerfile:43-45`, `docker/nginx.conf`;
-`DECISIONS.md` #33). The Helm chart deploys two replicas behind an ingress whose path is
-`/app(/|$)(.*)` with a rewrite when the base path is not `/`
-(`charts/troupe-gui/templates/ingress.yaml`), so the GUI is served from the plane's own host
-under `/app` and is same-origin with it (`DECISIONS.md` #29–#31). The container receives no
+`DECISIONS.md` #33). The platform's chart deploys it — the `gui:` block of `charts/troupe`,
+on by default — as two replicas behind an Ingress on the plane's own host whose path is
+`/app(/|$)(.*)` with a rewrite (`charts/troupe/templates/gui-deployment.yaml`, root Decision
+670), so the GUI is served under `/app` and is same-origin with the plane (`DECISIONS.md`
+#29–#31). A release promotes its image with the server's and deploys them together (root
+Decision 669). The container receives no
 environment variables: the client id and endpoints come from the plane's discovery document
 and the plane URL from the person or the serving origin (`apps/desktop/src/shell.ts:105-109`).
 
-Two allowlists outside this repository decide whether sign-in works: the plane's
+Two allowlists outside the GUI decide whether sign-in works: the plane's
 `TROUPE_CORS_ORIGINS` must contain the GUI's origin, and the identity provider must register
 the GUI's origin (plus base path) as a single-page-application redirect URI. A browser cannot
 tell a page *why* a cross-origin request failed, so the GUI names both possibilities and the

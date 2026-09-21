@@ -1,8 +1,9 @@
 # troupe-gui
 
-The graphical client for [Troupe](https://github.com/it-minds/troupe-remote), and the
-ground work every other client will stand on. Nothing here has a private door into the
-server: it speaks `PROTOCOL.md` over a WebSocket, the same as the TUI and the Python
+The graphical client for [Troupe](../../README.md), and the ground work every other
+client will stand on. It lives at `clients/gui` in the Troupe repository, beside the
+platform it talks to, and gets no private door into the server for it: it speaks
+[`PROTOCOL.md`](../../PROTOCOL.md) over a WebSocket, the same as the TUI and the Python
 reference client.
 
 Three packages in one pnpm workspace:
@@ -73,8 +74,9 @@ with its scripted model, which is how its own smoke tests and the TUI's client t
 drive it:
 
 ```sh
-# 1. the daemon: install it (github.com/it-minds/troupe, install.sh / install.ps1) or
-#    build it there with `MIX_ENV=prod mix release troupe_daemon`
+# 1. the daemon: install it (install.sh / install.ps1 at the repository root; --no-tui
+#    for the daemon alone) or build it in ../../apps/troupe_daemon with
+#    `MIX_ENV=prod mix release troupe_daemon`
 # 2. a workspace whose model is the script
 mkdir -p ~/demo/.troupe && cat > ~/demo/.troupe/config.yaml <<'YAML'
 provider: fake
@@ -137,7 +139,9 @@ of Node's `fetch`, so the CORS behaviour is tested here rather than assumed. `da
 is the other half: one token for the whole machine, several sessions live on one socket,
 directories it owns, and an actor that changes when an identity is linked.
 
-What none of it proves is the *server's* half. See [REPORT.md](REPORT.md).
+What none of it proves is the *server's* half. See [REPORT.md](REPORT.md), and
+[docs/e2e.md](docs/e2e.md) for the suites that run against a real plane and a real
+worker; CI runs the plane suite against a plane built from the same commit.
 
 ## Shipping it
 
@@ -146,48 +150,52 @@ client, so what ships is HTML, CSS and JavaScript, and every call goes from the 
 to the plane or to a worker. Nothing in the image holds a secret or needs telling
 anything at runtime.
 
+It ships with the platform, not as a release of its own. The image is built from this
+directory alone, with it as the whole Docker context:
+
 ```sh
 docker build --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
-scripts/deploy                       # helm upgrade --install, then print the digest
-TAG=sha-1a2b3c4 scripts/deploy       # a specific build from CI
-scripts/deploy --dry-run             # render, change nothing
 ```
 
-CI (`.github/workflows/ci.yml`) typechecks, tests, lints the chart against real
-Kubernetes schemas, and builds and pushes an image for every push — tagged `sha-<short>`,
-and the version on a `v*` tag. It takes the same four secrets the server's workflow does
-(`REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`) and falls
-back to this repository's own packages on ghcr.io without them. **CI does not deploy.**
-Pushing an image and rolling a cluster are different decisions, and a workflow that does
-both makes every merge a production change.
+and the platform's chart, [`charts/troupe`](../../charts/troupe), serves it: its `gui:`
+block, on by default, is a Deployment, a Service, a NetworkPolicy and an Ingress at
+`gui.basePath` on the plane's own host (root Decision 670). There is no chart and no Helm
+release of the GUI's own; a team that uses another client sets `gui.enabled: false` and
+points `plane.appUrl` at it.
+
+CI is the root [`ci.yml`](../../.github/workflows/ci.yml): its `gui` job typechecks, tests
+and builds this workspace, `gui-e2e` runs the client against a plane built from the same
+commit, and `images` builds and pushes `troupe-gui` beside the server images on every
+push to `main`, tagged `sha-<short>`. **A release deploys itself** (root Decision 669):
+`scripts/release <version>` opens a pull request that changes `VERSION`, and merging it
+promotes the images — this one included — to that version, attaches the desktop
+installers the root [`release.yml`](../../.github/workflows/release.yml) builds, and rolls
+the whole chart onto production with the root [`scripts/deploy`](../../scripts/deploy).
+A push to `main` that does not change `VERSION` deploys nothing. See the root README's
+[Releasing and deploying](../../README.md#releasing-and-deploying).
 
 ### Where it is mounted
 
 `TROUPE_GUI_BASE` is baked in at build time, because Vite writes it into every asset
-URL — an image built for `/app/` cannot be served at `/`. The chart's `basePath` must
-match it; the Ingress strips the prefix so the container stays ignorant of where it is.
+URL — an image built for `/app/` cannot be served at `/`. The chart's `gui.basePath` must
+match it (CI builds with the repository variable `GUI_BASE`, default `app`); the Ingress
+strips the prefix so the container stays ignorant of where it is.
 
-**Serving the GUI at a path on the plane's own host is worth preferring.** Same origin
-means no CORS allowlist to keep in step, no second DNS record, no second certificate,
-and a sign-in whose redirect URI is the address people already have. The deployment at
-IT Minds does exactly that: the plane's Ingress owns `/`, the GUI's owns `/app`, and
-nginx routes the more specific path.
-
-```sh
-helm upgrade --install troupe-gui charts/troupe-gui -n troupe-system   --set image.repository=<registry>/troupe-gui --set image.tag=<tag>   --set basePath=/app --set ingress.host=troupe.example.com   --set ingress.tlsSecretName=troupe-plane-tls
-```
-
-`tlsSecretName` naming a secret another release owns is deliberate: two Ingresses on one
-host share one certificate. Leave `certIssuer` empty there, or cert-manager will be asked
-for a second certificate for a host that already has one.
+**Serving the GUI at a path on the plane's own host is worth preferring**, and it is the
+shape the chart gives it. Same origin means no CORS allowlist to keep in step, no second
+DNS record, no second certificate, and a sign-in whose redirect URI is the address people
+already have. The plane's Ingress owns `/`, the GUI's owns `/app`, and nginx routes the
+more specific path. The GUI's Ingress uses the plane's `tlsSecretName` and asks
+cert-manager for nothing — two Ingresses on one host share one certificate — and the
+chart refuses `gui.basePath: /`, because the root of that host is the plane's.
 
 ### Check the digest, not the tag
 
 A tag that already exists in the registry plus `imagePullPolicy: IfNotPresent` means the
 node keeps the image it has — and since the Deployment's spec did not change, no pod is
 restarted. `helm upgrade` reports success and the old code carries on serving. This is
-not hypothetical; it happened on this cluster. `scripts/deploy` prints the running
-digest for that reason, and CI never publishes a floating tag.
+not hypothetical; it happened on this cluster. The root `scripts/deploy` prints every
+pod's running digest for that reason, and CI never publishes a floating tag.
 
 ## Design
 

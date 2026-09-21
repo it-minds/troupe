@@ -7,10 +7,11 @@
 #
 # Installs, from one release of this repository:
 #   * `troupe`, the terminal client — one binary, in ~/.local/bin;
-#   * `troupe-daemon`, the local harness every client stands on — a release directory
-#     under ~/.local/lib/troupe-daemon and a link in ~/.local/bin. The TUI and the desktop
-#     app find it on the PATH (or through TROUPE_DAEMON_COMMAND) and start it when a
-#     session needs one.
+#   * `troupe-daemon`, the local harness — a release directory under
+#     ~/.local/lib/troupe-daemon and a link in ~/.local/bin. The desktop app finds it on
+#     the PATH (or through TROUPE_DAEMON_COMMAND) and starts it when a session needs one.
+#     The TUI uses a running one if there is one and otherwise runs the same harness in
+#     its own process; `troupe daemon run` starts this one by hand.
 # Both are checked against the release's SHA256SUMS before anything is replaced.
 #
 # With no TROUPE_VERSION it installs the latest release, which GitHub names at

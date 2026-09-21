@@ -2,7 +2,7 @@
 
 # Workflows
 
-Seven walkthroughs, start to finish, with what appears on screen at each step. Each assumes the previous section's controls as described in [features.md](features.md). What the platform is doing on the other side — why it asks, when it sleeps, what a budget is — is in the server repository's user docs: [../../../../docs/user/features.md](../../../../docs/user/features.md).
+Seven walkthroughs, start to finish, with what appears on screen at each step. Each assumes the previous section's controls as described in [features.md](features.md). What the platform is doing on the other side — why it asks, when it sleeps, what a budget is — is in the platform's user docs at the repository root: [../../../../docs/user/features.md](../../../../docs/user/features.md).
 
 ## 1. First sign-in, first session, first approval
 

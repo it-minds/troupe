@@ -54,7 +54,7 @@ Sources:
 
 ## Where the rest is
 
-- The platform's own user documentation (approvals, agents, profiles, budgets, dormant sessions) is in the server repository, which is separate from this one: [../../../../docs/user/](../../../../docs/user/).
+- The platform's own user documentation (approvals, agents, profiles, budgets, dormant sessions) is with the platform, at the repository root: [../../../../docs/user/](../../../../docs/user/README.md).
 - For the person who runs the platform: [../admin/README.md](../admin/README.md).
 - For anyone building on the GUI: [../developer/README.md](../developer/README.md).
 - The reasoning behind the whole system: [../whitepaper.md](../whitepaper.md).

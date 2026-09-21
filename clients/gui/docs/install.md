@@ -6,11 +6,13 @@ worth installing. Every hook signing needs is already in the repository and swit
 see *Turning signing on*, at the end.
 
 Until then every operating system will object, and the objection is correct. An unsigned
-installer carries no proof of who built it. Check the SHA-256 against the workflow run
-that produced it before you run it, and do not hand these to anyone outside the team.
+installer carries no proof of who built it. The installers are attached to each release
+of this repository (the `desktop` job of the root `release.yml`), beside a `SHA256SUMS`
+over everything in the release: check the SHA-256 against it before you run one, and do
+not hand these to anyone outside the team.
 
 ```sh
-# what CI says it built, against what you downloaded
+# what the release says it contains, against what you downloaded
 shasum -a 256 ~/Downloads/Troupe_0.1.0_universal.dmg     # macOS, Linux
 certutil -hashfile Troupe_0.1.0_x64-setup.exe SHA256     # Windows
 ```

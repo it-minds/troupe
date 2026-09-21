@@ -9,7 +9,7 @@ Other tracks:
 - Running the platform and deploying the GUI: [../admin/README.md](../admin/README.md)
 - Building on or changing the GUI: [../developer/README.md](../developer/README.md)
 - Why Troupe is shaped the way it is: [../whitepaper.md](../whitepaper.md)
-- The platform's own user documentation (approvals, agents, profiles, budgets, dormant sessions) lives in the server repository, which is separate from this one: [../../../../docs/user/](../../../../docs/user/)
+- The platform's own user documentation (approvals, agents, profiles, budgets, dormant sessions) lives with the platform, at the repository root: [../../../../docs/user/](../../../../docs/user/README.md)
 
 ## Files in this track
 

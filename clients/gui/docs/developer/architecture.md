@@ -1,4 +1,5 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository, beside the server (root Decision 666).
 
 # Architecture
 
@@ -6,8 +7,8 @@ How the GUI is put together: three packages, one boundary rule, and the modules 
 make up the protocol client and the React app. Diagrams and the reasoning behind the
 shape are in [../whitepaper.md](../whitepaper.md); this file is the map with file and
 line references. Protocol semantics are the server's to define — see
-[PROTOCOL.md](../../../../PROTOCOL.md) in the separate `troupe-remote`
-repository — and are only restated here where the client depends on a specific detail.
+[PROTOCOL.md](../../../../PROTOCOL.md) at the repository root — and are only restated
+here where the client depends on a specific detail.
 
 ## 1. Three packages
 
@@ -22,8 +23,8 @@ The workspace is `packages/*` and `apps/*` (`pnpm-workspace.yaml:1-3`).
 ### The boundary rule
 
 `spec.md:24` states it: `apps/desktop` imports `@troupe/client` and nothing from the
-server repository; `@troupe/client` depends on no framework; nothing in the GUI reads a
-file under `$TROUPE_STATE_HOME`. What the code does:
+platform's code in `../../apps`; `@troupe/client` depends on no framework; nothing in the
+GUI reads a file under `$TROUPE_STATE_HOME`. What the code does:
 
 - Every desktop import of client code goes through the `@troupe/client` entry point
   (`apps/desktop/src/hooks.ts:6-15`, `App.tsx:9-10`, `shell.ts:13-14`, `views/*.tsx`).
@@ -356,4 +357,4 @@ Helpers: `rootState`, `isBusy` (`thinking|acting|compacting|busy`), `openApprova
 - [conventions.md](conventions.md) — where a new protocol method or view goes.
 - [../user/features.md](../user/features.md) — the same modules from the person's side.
 - Server: [docs/AUDIT.md](../../../../docs/AUDIT.md) and
-  [PROTOCOL.md](../../../../PROTOCOL.md) in the `troupe-remote` repository.
+  [PROTOCOL.md](../../../../PROTOCOL.md) at the repository root.

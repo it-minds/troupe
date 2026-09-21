@@ -5007,7 +5007,9 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 671. **The installers put the TUI and the daemon on a machine, from the latest release.**
      `install.sh` and `install.ps1` came with the umbrella repository and installed the
      daemon alone, at a version written into them (`0.1.0`) that nothing kept current. They
-     now install `troupe` beside `troupe-daemon`, both from one release and both checked
+     now install `troupe` beside `troupe-daemon` — the daemon for the desktop app, which
+     spawns it from the `PATH`, and for `troupe daemon run`; the TUI embeds the same harness
+     when no daemon is running — both from one release and both checked
      against its `SHA256SUMS` before anything on the machine is replaced, with
      `--no-tui` / `-NoTui` for a machine that only runs the desktop app. With no
      `TROUPE_VERSION` they install the release GitHub calls latest — the newest that is not

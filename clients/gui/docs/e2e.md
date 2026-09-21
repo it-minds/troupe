@@ -13,22 +13,25 @@ a replay actually sends, whether `TROUPE_CORS_ORIGINS` really decides who gets a
 and whether the idempotency ledger really collapses a command sent twice.
 
 Both suites skip unless their environment variables are set, so `pnpm test` stays
-runnable anywhere and CI is unchanged.
+runnable anywhere. CI sets them for the first: the root `ci.yml`'s `gui-e2e` job brings up
+the stack below with a plane built from the same commit and runs the plane suite against
+it.
 
 ---
 
 ## A whole plane
 
-`dev/plane-stack.yml` is Postgres, OpenBao with the transit key, Dex and the plane image
-in one compose project, on ports of its own. **No Kubernetes and no Elixir toolchain**:
-the plane runs from a published image and migrations run as a release eval before it
-serves.
+`dev/plane-stack.yml` is Postgres, OpenBao with the transit key, Dex and the plane in one
+compose project, on ports of its own. **No Kubernetes and no Elixir toolchain**: the plane
+is built in Docker from this checkout — `docker/Dockerfile` at the repository root, the
+same build CI publishes — so the GUI is tested against the plane of its own commit, and
+migrations run as a release eval before it serves.
 
 ```sh
-docker compose -f dev/plane-stack.yml up -d --wait --wait-timeout 240
-# or a particular build:
+docker compose -f dev/plane-stack.yml up -d --wait --wait-timeout 600 --build
+# or a published build, instead of this checkout's:
 TROUPE_PLANE_IMAGE=rg.fr-par.scw.cloud/troupe/troupe-plane:0.2.14 \
-  docker compose -f dev/plane-stack.yml up -d --wait
+  docker compose -f dev/plane-stack.yml up -d --wait --no-build
 
 cd packages/client
 TROUPE_E2E_PLANE=http://localhost:4020 \
@@ -110,7 +113,7 @@ instead of at a plane.
 | test | what only a real worker can show |
 | --- | --- |
 | negotiates the protocol this client speaks | the real `initialize` result, its scopes and principal |
-| folds a real turn into a transcript | `fold`, over event shapes this repository did not invent |
+| folds a real turn into a transcript | `fold`, over event shapes the client did not invent |
 | times a real turn, and returns when it ends | guards the regression where a turn waited out its timeout |
 | collapses a command id sent twice | the real idempotency ledger, which is what makes a retry after a drop safe |
 | resumes from the cursor after the socket dies | a real replay, with no gap and no duplicate |

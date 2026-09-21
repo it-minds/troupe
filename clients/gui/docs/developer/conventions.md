@@ -1,4 +1,5 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository (root Decision 666; Decision 45).
 
 # Conventions
 
@@ -51,7 +52,7 @@ protocol" (`hooks.ts:1-3`; `DECISIONS.md` #1). If something needs a socket or a
 `docs/design/themes/*.tokens.json` by `scripts/tokens.ts` and committed
 (`tokens.css:1-3`; `DECISIONS.md` #14). Change a token in **all three** theme files, run
 `pnpm tokens`, commit the lot. `pnpm tokens:check` (`package.json:14`) regenerates and
-`git diff --exit-code`s them; CI's `check` job would run it first (`ci.yml:42-43`).
+`git diff --exit-code`s them; the root CI's `gui` job runs it first.
 
 The generator refuses a theme whose token names do not match the others exactly
 (`DECISIONS.md` #37), which is what "three themes, one contract" means in practice: a
@@ -128,7 +129,8 @@ Decide which transport carries it:
 Then: add the shape to `types.ts` or `plane.ts` as an open object; export anything new
 from `index.ts` (`index.ts:1-30`); expose it to React through `hooks.ts` only if a view
 needs it; add a case to `test/support/worker.ts` or `plane.ts` and a test. Before any of
-this, the server's `PROTOCOL.md` should already name the method (`spec.md:61`).
+this, `PROTOCOL.md` at the repository root should already name the method, and the
+server change that answers it goes in the same pull request (`spec.md:61`; Decision 45).
 
 ## Adding a view
 

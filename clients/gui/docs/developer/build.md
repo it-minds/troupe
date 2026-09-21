@@ -1,4 +1,5 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository, and this directory is still the image's whole build context; the chart and CI below are the root's (root Decisions 666, 670).
 
 # Build
 
@@ -37,8 +38,8 @@ and vice versa (`DECISIONS.md` #30). The value is documented without a leading s
 because a POSIX shell on Windows rewrites `/app` into a drive path on its way to
 `--build-arg` (`Dockerfile:10-13`; `DECISIONS.md` #32).
 
-The chart's `basePath` must equal what was baked in
-(`charts/troupe-gui/values.yaml:22-25`); see [deployment.md](deployment.md).
+The chart's `gui.basePath` must equal what was baked in (the root
+`charts/troupe/values.yaml`); see [deployment.md](deployment.md).
 
 ## The Dockerfile, stage by stage
 
@@ -63,9 +64,9 @@ docker build --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
 | `:58-59` | | `HEALTHCHECK` every 30 s: `wget -q -O /dev/null http://127.0.0.1:8080/healthz` |
 
 The runtime image runs as uid 101 and listens on 8080 (`Dockerfile:50-51`); the chart
-relies on both (`charts/troupe-gui/templates/deployment.yaml:24, 33`).
+relies on both (the root `charts/troupe/templates/gui-deployment.yaml`).
 
-Unconfirmed: `charts/troupe-gui/values.yaml:11` calls the image "30 MB of nginx". No
+Unconfirmed: the chart's comment on `gui.replicas` calls the image "30 MB of nginx". No
 image size was measured for the audit.
 
 ## `docker/nginx.conf`
@@ -94,8 +95,10 @@ copies `.local/kubeconfig.yaml` and `.local/values.itminds.yaml` into the build 
 any image built on a machine that has them. The runtime image copies only
 `apps/desktop/dist` (`Dockerfile:52`), so the files do not ship — but they sit in an
 intermediate layer in the local Docker cache, and in CI's `type=gha` cache if a runner
-ever had them (`ci.yml:113-114`; CI runners do not). Adding `.local` to `.dockerignore`
-is a one-line fix not made at audit time.
+ever had them (CI runners do not). Adding `.local` to `.dockerignore` is a one-line fix
+not made at audit time. Since the move the deploy credentials live in the repository
+root's `.local/`, which the root `scripts/deploy` reads and which is outside this build
+context, so the gap only matters for a `clients/gui/.local/` somebody makes by hand.
 
 It also does not exclude `docs/`, `REPORT.md` or `spec.md`; they are copied into the
 build stage and discarded with it.
@@ -132,12 +135,14 @@ sub-path build behind the chart, or build with `/` for a direct run.
 On Git Bash for Windows, `MSYS_NO_PATHCONV=1` is not needed for the build argument
 because of the normalisation, but is for any `-v /path` mount (`docs/bench.md:51-52`).
 
-## What CI would build
+## What CI builds
 
-`.github/workflows/ci.yml` builds the same Dockerfile with
-`TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}` for `linux/amd64` and pushes it
-(`ci.yml:105-114`). The workflow is untracked and has never run; see
-[ci-cd.md](ci-cd.md).
+The `images` job of the root `.github/workflows/ci.yml` builds this Dockerfile with
+`clients/gui` as the whole context and
+`TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}`, for `linux/amd64`, and pushes it as
+`sha-<short>` on every push to `main`; a release promotes that image to its version rather
+than building another. `scripts/build-images` at the root builds the same image, with
+`/app`, for the kind cluster. See [ci-cd.md](ci-cd.md).
 
 ## Related
 

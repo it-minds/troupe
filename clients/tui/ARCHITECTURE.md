@@ -1,5 +1,13 @@
 # Troupe architecture
 
+> **§1–8 describe the harness as it was before the daemon**, when sessions, agents,
+> tools and persistence ran inside this binary. That harness is no longer in this
+> directory: it is `troupe_core`, `troupe_gateway` and `troupe_protocol` in `apps/` at
+> the repository root, which this project depends on by path, and the root
+> [ARCHITECTURE.md](../../ARCHITECTURE.md) describes it as it is. Read §1–8 as the design
+> it grew from. **§9, the client boundary and the remote client, is current**: it is
+> what this project is today.
+
 Troupe is a local coding-agent harness built on the actor model. Every agent,
 LLM stream, tool run, subagent, watcher and UI is a process; they share nothing
 and talk only by message passing. This document is the contract the code

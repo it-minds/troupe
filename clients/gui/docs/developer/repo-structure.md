@@ -1,9 +1,11 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository (root Decision 666). Its `.github/`, `charts/troupe-gui/` and `scripts/deploy` were removed with the move — the root workflows, `charts/troupe` and `scripts/deploy` replace them — and are left out of the tree below. The committed-versus-uncommitted section is the audit's record of the old repository; its SHAs are mapped in [docs/history](../../../../docs/history/README.md).
 
 # Repository structure
 
 An annotated tree of what is in the working directory, what is generated, and — because
-`HEAD` does not match what these documents describe — what is committed and what is not.
+at audit time `HEAD` did not match what these documents describe — what was committed and
+what was not.
 
 ## The tree
 
@@ -11,7 +13,7 @@ Line counts are `wc -l` on 2026-09-13. `node_modules/`, `dist/` and `bench-resul
 are ignored and omitted.
 
 ```
-troupe-gui/
+clients/gui/
 ├── package.json                  workspace root: scripts, tsx, typescript
 ├── pnpm-workspace.yaml           packages/*, apps/*
 ├── pnpm-lock.yaml
@@ -27,16 +29,10 @@ troupe-gui/
 ├── REPORT.md                     stage-1 report and the live-deployment log
 ├── spec.md                       the four-stage brief this repository builds against
 ├── .claude/launch.json           dev server definition for the Claude Code browser pane
-├── .github/workflows/ci.yml      check / image / chart jobs — untracked, never run
-├── .local/                       ignored; cluster credentials and values (names below)
+├── .local/                       ignored; nothing reads it any more (below)
 ├── docker/
 │   └── nginx.conf                the runtime server config
-├── charts/troupe-gui/            Helm chart, version 0.1.0
-│   ├── Chart.yaml
-│   ├── values.yaml
-│   └── templates/                _helpers.tpl, deployment.yaml, ingress.yaml, service.yaml
 ├── scripts/
-│   ├── deploy                    bash: helm upgrade --install, then print pod digests
 │   ├── fake-deployment.ts        pnpm fake: IdP + plane + worker on loopback
 │   ├── first-token.ts            pnpm first-token: sign-in to first delta, timed
 │   └── tokens.ts                 pnpm tokens: themes/*.tokens.json → tokens.css, mark.ts
@@ -139,20 +135,24 @@ The three commits in the history:
 68a132c Ground work: the protocol client, a throughput bench, and a first GUI shell
 ```
 
-Discrepancy: `REPORT.md:290-291` says there is "no CI configuration in this repository
-yet"; `.github/workflows/ci.yml` exists in the working tree, untracked (AUDIT §2). Open
-question AUDIT §4.7: whether it should be committed.
+Discrepancy at audit time: `REPORT.md:290-291` says there is "no CI configuration in this
+repository yet"; `.github/workflows/ci.yml` existed in the working tree, untracked (AUDIT
+§2). It was committed, and then replaced by the root workflows' GUI jobs when the GUI
+moved ([ci-cd.md](ci-cd.md)).
 
 ## The `.local/` directory
 
-Ignored by `.gitignore:7` and never committed. On the audit machine it holds three
+Ignored by `.gitignore:7` and never committed. On the audit machine it held three
 files; names only, contents deliberately not read for these documents:
 
-| File | What it is for |
+| File | What it was for |
 |---|---|
-| `kubeconfig.yaml` | `scripts/deploy`'s default `KUBECONFIG_FILE` (`scripts/deploy:23`) |
-| `values.itminds.yaml` | `scripts/deploy`'s default `VALUES` (`scripts/deploy:24`); the values for the recorded deployment (`REPORT.md:236-251`) |
+| `kubeconfig.yaml` | The old `scripts/deploy`'s default `KUBECONFIG_FILE` |
+| `values.itminds.yaml` | The old `scripts/deploy`'s default `VALUES`; the values for the recorded deployment (`REPORT.md:236-251`) |
 | `entra-patch.json` | Unconfirmed: not referenced by any script or document in the tree |
+
+The script that read them went with the move. The root `scripts/deploy` reads the same two
+names from the repository root's `.local/`, not from this one ([deployment.md](deployment.md)).
 
 `.dockerignore` does not exclude `.local/`, so a local `docker build` copies it into the
 build stage (AUDIT §3.1); see [build.md](build.md).
@@ -161,4 +161,4 @@ build stage (AUDIT §3.1); see [build.md](build.md).
 
 - [architecture.md](architecture.md) — what each module in the tree does.
 - [conventions.md](conventions.md) — where a new file goes.
-- [ci-cd.md](ci-cd.md) — the untracked workflow.
+- [ci-cd.md](ci-cd.md) — the root workflows' GUI jobs.

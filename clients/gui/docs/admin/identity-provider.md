@@ -1,14 +1,14 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository, beside the plane (root Decision 666).
 
 # Identity provider
 
 What an OpenID Connect provider must allow for the GUI to sign people in. The GUI has no
 client secret and no provider configuration of its own: it learns the issuer, client id,
 endpoints and scopes from the plane's discovery document, and the plane's own provider
-setup is documented in the server repository — see
-[docs/admin/integrations.md](../../../../docs/admin/integrations.md) in
-`troupe-remote` (a separate repository; not present in that tree at audit time, so the
-link is to where it is expected).
+setup is documented with the platform — see
+[docs/admin/integrations.md](../../../../docs/admin/integrations.md) at the repository
+root.
 
 ## The one registration the GUI adds
 
@@ -26,7 +26,7 @@ strips trailing slashes. Examples:
 |---|---|---|
 | Development | `/` | `http://localhost:5173` |
 | At a path on the plane's host | `/app` | `https://troupe.example.com/app` |
-| Own host | `/` | `https://gui.example.com` |
+| Own host (a build you serve yourself, with `gui.enabled: false`) | `/` | `https://gui.example.com` |
 
 Providers match redirect URIs exactly (`shell.ts:88-89`), so `https://…/app/` with a
 slash is a different URI. The recorded deployment's is
@@ -107,7 +107,7 @@ A browser build must be allowed in two places besides the provider (`README.md:6
 
 | Allowlist | Where | What breaks without it | What the GUI shows |
 |---|---|---|---|
-| The plane's CORS allowlist | `TROUPE_CORS_ORIGINS` on the plane (`../../../../config/runtime.exs:266`; chart `plane.corsOrigins`, `charts/troupe/values.yaml:82` in the server repo) | Discovery, `/auth/exchange` and `/rpc` from the browser | The text below |
+| The plane's CORS allowlist | `TROUPE_CORS_ORIGINS` on the plane (`../../../../config/runtime.exs:266`; chart `plane.corsOrigins` in the root `charts/troupe/values.yaml`) | Discovery, `/auth/exchange` and `/rpc` from the browser | The text below |
 | The worker's allowed origins | `TROUPE_WORKER_ALLOWED_ORIGINS` (`runtime.exs:130`; chart `workerAllowedOrigins`, `values.yaml:49`) | The `wss://` upgrade to a pod from the browser — the one hop with no fallback (`REPORT.md:188-191`) | A reconnecting banner, then "Could not reach this session" after the backoff list (`Session.tsx:183-196`) |
 
 When the GUI is served at a path on the plane's own host, the plane allowlist is not

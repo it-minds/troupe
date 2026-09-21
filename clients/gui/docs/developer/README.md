@@ -1,17 +1,19 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository; CI, release and deployment are the root's (root Decisions 666, 669, 670).
 
 # Developer track
 
-Documentation for someone changing this repository: the graphical client for Troupe,
-a pnpm workspace of `packages/client` (the protocol in TypeScript), `packages/bench`
-(a throughput test) and `apps/desktop` (the Vite + React GUI). The server it talks to
-is a separate repository, `troupe-remote`, documented at
-[../../../../docs/](../../../../docs/AUDIT.md); protocol semantics
-live in its [PROTOCOL.md](../../../../PROTOCOL.md) and are not restated here.
+Documentation for someone changing the GUI: the graphical client for Troupe, at
+`clients/gui` in the Troupe repository, a pnpm workspace of `packages/client` (the
+protocol in TypeScript), `packages/bench` (a throughput test) and `apps/desktop` (the
+Vite + React GUI). The server it talks to is in the same repository, documented at
+[../../../../docs/](../../../../docs/README.md); protocol semantics live in the root
+[PROTOCOL.md](../../../../PROTOCOL.md) and are not restated here.
 
-Read [../AUDIT.md](../AUDIT.md) first if you have not: `HEAD` (`783e660`) does not
-contain most of what these pages describe — the stage-1 work is one large uncommitted
-change ([repo-structure.md](repo-structure.md) lists what is tracked and what is not).
+Read [../AUDIT.md](../AUDIT.md) first if you have not: at audit time `HEAD` (`783e660`)
+did not contain most of what these pages describe — the stage-1 work was one large
+uncommitted change ([repo-structure.md](repo-structure.md) lists what was tracked and what
+was not).
 
 ## Pages
 
@@ -23,8 +25,8 @@ change ([repo-structure.md](repo-structure.md) lists what is tracked and what is
 | [local-setup.md](local-setup.md) | Prerequisites, the root scripts, `pnpm fake`, running against a real plane, the bench, `first-token`, tokens, and every development variable |
 | [testing.md](testing.md) | The 33 tests by file and what each proves; the fake deployment; typechecking tests; what is not tested |
 | [build.md](build.md) | `pnpm build` per package, the base path, the Dockerfile stage by stage, `nginx.conf`, `.dockerignore` |
-| [ci-cd.md](ci-cd.md) | Every job and step of the untracked, never-run workflow; secrets; tags; the ordering risk; no deploy job |
-| [deployment.md](deployment.md) | The chart, `scripts/deploy`, the base-path contract, the recorded live deployment, rollback, no staging |
+| [ci-cd.md](ci-cd.md) | The root workflows' GUI jobs: tests, the end-to-end suite, the image, the desktop installers; secrets; tags; how a release ships and deploys it |
+| [deployment.md](deployment.md) | The `gui:` block of the platform's chart, the root `scripts/deploy`, the base-path contract, the recorded live deployment, rollback, staging |
 | [conventions.md](conventions.md) | Strictness, open types, no framework in the client, generated tokens, design rules, `DECISIONS.md`/`REPORT.md`, commits, LF, adding a method or a view |
 
 Other tracks: [../user/README.md](../user/README.md) and
@@ -34,27 +36,21 @@ for diagrams and rationale.
 
 ## Self-check: CI
 
-`.github/workflows/ci.yml` is untracked and has never run (AUDIT §1.5). Every job and
-step in it, and where it is documented:
+The GUI has no workflow of its own. Its jobs are in the root
+[`ci.yml`](../../../../.github/workflows/ci.yml) and
+[`release.yml`](../../../../.github/workflows/release.yml); each one that builds, tests or
+ships it, and where it is documented:
 
-| Job | Step | Line | Documented in |
+| Workflow | Job | What it does for the GUI | Documented in |
 |---|---|---|---|
-| `check` | `actions/checkout@v4` | `ci.yml:29` | [ci-cd.md](ci-cd.md) |
-| `check` | `pnpm/action-setup@v4` | `:31` | [tech-stack.md](tech-stack.md) "Runtime and package manager" |
-| `check` | `actions/setup-node@v4` (Node 24, pnpm cache) | `:33-36` | [tech-stack.md](tech-stack.md) |
-| `check` | `pnpm install --frozen-lockfile` | `:38` | [local-setup.md](local-setup.md) "Install" |
-| `check` | `pnpm tokens:check` | `:42-43` | [local-setup.md](local-setup.md) "pnpm tokens", [conventions.md](conventions.md) "The generated stylesheet" |
-| `check` | `pnpm typecheck` | `:45` | [local-setup.md](local-setup.md) "The root scripts"; ordering risk in [ci-cd.md](ci-cd.md) |
-| `check` | `pnpm build` | `:49` | [build.md](build.md) "pnpm build" |
-| `check` | `pnpm test` | `:51` | [testing.md](testing.md) |
-| `image` | `actions/checkout@v4` | `:64` | [ci-cd.md](ci-cd.md) |
-| `image` | Resolve the registry and the tags | `:71-92` | [ci-cd.md](ci-cd.md) "Job image", "Tags" |
-| `image` | `docker/setup-buildx-action@v3` | `:94` | [ci-cd.md](ci-cd.md) |
-| `image` | `docker/login-action@v3` | `:96-100` | [ci-cd.md](ci-cd.md) "Secrets and variables" |
-| `image` | `docker/build-push-action@v6` | `:105-114` | [ci-cd.md](ci-cd.md); the Dockerfile in [build.md](build.md) |
-| `chart` | `actions/checkout@v4`, `azure/setup-helm@v4` | `:120-121` | [ci-cd.md](ci-cd.md) "Job chart" |
-| `chart` | `helm lint` | `:123` | [ci-cd.md](ci-cd.md) |
-| `chart` | `helm template … \| kubeconform` | `:128-134` | [ci-cd.md](ci-cd.md); the chart in [deployment.md](deployment.md) |
+| `ci.yml` | `changes` | Decides what a pull request runs: `gui` for any change under `clients/gui/`, `gui-e2e` for the client package, `dev/` or the plane's side of the protocol | [ci-cd.md](ci-cd.md) |
+| `ci.yml` | `gui` | In `clients/gui`: `pnpm install --frozen-lockfile`, `pnpm tokens:check`, `pnpm typecheck`, `pnpm build`, `pnpm test` | [ci-cd.md](ci-cd.md) "`gui`"; [local-setup.md](local-setup.md) "The root scripts"; [testing.md](testing.md) |
+| `ci.yml` | `gui-e2e` | `dev/plane-stack.yml` with the plane built from the same commit, then `test/e2e.plane.test.ts` against it | [ci-cd.md](ci-cd.md) "`gui-e2e`"; [../e2e.md](../e2e.md) |
+| `ci.yml` | `chart` | `helm lint` and `kubeconform` on the platform's chart with the GUI on and off; `gui.basePath: /` must be refused | [ci-cd.md](ci-cd.md) "`chart`"; [deployment.md](deployment.md) |
+| `ci.yml` | `images` | Builds `troupe-gui` from `clients/gui` with `TROUPE_GUI_BASE` and pushes `sha-<short>` | [ci-cd.md](ci-cd.md) "The image"; [build.md](build.md) |
+| `ci.yml` | `versions` | `scripts/version.exs check`: the GUI's package, Tauri and Cargo versions agree with `VERSION` | [ci-cd.md](ci-cd.md) "`versions`" |
+| `ci.yml` | `release`, `publish`, `deploy` | Promote `troupe-gui` to the release's version, attach the installers, roll the chart onto production | [ci-cd.md](ci-cd.md) "Releasing and deploying"; [deployment.md](deployment.md) |
+| `release.yml` | `desktop` | The installers for macOS, Windows and Linux | [ci-cd.md](ci-cd.md) "`desktop`"; [../install.md](../install.md) |
 
 ## Self-check: development, build and deploy variables
 
@@ -62,7 +58,7 @@ There is no `.env`, no `.env.example`, and no `VITE_*` variable (AUDIT §1.4).
 
 | Variable | Read at | Documented in |
 |---|---|---|
-| `TROUPE_GUI_BASE` | `apps/desktop/vite.config.ts:16`; `Dockerfile:38-39`; `ci.yml:109` | [build.md](build.md) "The base path"; [deployment.md](deployment.md) "The base-path contract"; [local-setup.md](local-setup.md) table |
+| `TROUPE_GUI_BASE` | `apps/desktop/vite.config.ts:16`; `Dockerfile:38-39`; the root `ci.yml`'s `images` job | [build.md](build.md) "The base path"; [deployment.md](deployment.md) "The base-path contract"; [local-setup.md](local-setup.md) table |
 | `import.meta.env.BASE_URL` (derived) | `apps/desktop/src/shell.ts:93, 107` | [architecture.md](architecture.md) §3 `shell.ts`; [build.md](build.md) |
 | `ORIGINS` | `scripts/fake-deployment.ts:14` | [local-setup.md](local-setup.md) "pnpm fake" |
 | `RUNS` | `scripts/first-token.ts:15` | [local-setup.md](local-setup.md) "pnpm first-token" |
@@ -70,8 +66,9 @@ There is no `.env`, no `.env.example`, and no `VITE_*` variable (AUDIT §1.4).
 | `BENCH_SIGNING_KEY`, `BENCH_POD_ID`, `BENCH_WS` | `main.ts:42-44`; `trace.ts:13-15` | [local-setup.md](local-setup.md) |
 | `BENCH_PLANE`, `BENCH_PLANE_TOKEN`, `BENCH_PROFILE` | `main.ts:63-65` | [local-setup.md](local-setup.md) |
 | `BENCH_AGENT`, `TRACE_SECONDS` | `trace.ts:26`, `:16` | [local-setup.md](local-setup.md) |
-| `KUBECONFIG_FILE`, `VALUES`, `NAMESPACE`, `RELEASE`, `TAG` | `scripts/deploy:23-26, 39` | [deployment.md](deployment.md) "scripts/deploy" |
-| CI secrets `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`; variable `GUI_BASE`; env `NODE_VERSION` | `ci.yml:74-75, 99-100, 109, 22` | [ci-cd.md](ci-cd.md) "Secrets and variables" |
+| `KUBECONFIG_FILE`, `VALUES`, `NAMESPACE`, `RELEASE`, `PLANE_URL`, `EXPECT_COMMIT` | the root `scripts/deploy` | [deployment.md](deployment.md) "The root `scripts/deploy`" |
+| CI secrets `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD`; variable `GUI_BASE`; the `production` environment's `KUBECONFIG`, `DEPLOY_VALUES` and `PLANE_URL` | the root `ci.yml` and `deploy.yml` | [ci-cd.md](ci-cd.md) "The image", "Releasing and deploying" |
+| Node's version | the root `.tool-versions`, which CI reads | [tech-stack.md](tech-stack.md) |
 
 Browser storage keys (`troupe.auth.refresh:<planeUrl>`, `troupe.auth.pending`,
 `troupe.pref.planeUrl`, `troupe.pref.theme`) and the Helm values are inventoried in the

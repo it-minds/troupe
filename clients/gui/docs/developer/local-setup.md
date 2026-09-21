@@ -1,4 +1,5 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository; run everything below from that directory (root Decision 666).
 
 # Local setup
 
@@ -9,11 +10,11 @@ real plane, and every development variable the scripts read.
 
 | Requirement | Why | Where declared |
 |---|---|---|
-| Node 24 | The tests use Node's built-in runner; the image and CI use 24 | `Dockerfile:20`, `.github/workflows/ci.yml:22`, `@types/node ^24.3.0` (`packages/client/package.json:23`) |
+| Node 24 | The tests use Node's built-in runner; the image and CI use 24 | `Dockerfile:20`, the root `.tool-versions` (which CI reads), `@types/node ^24.3.0` (`packages/client/package.json:23`) |
 | pnpm 10.15.0 | `packageManager` pin; `corepack enable` gives it to you | `package.json:5` |
 | Git with LF checkout | `.gitattributes:1` normalises to LF; `pnpm tokens:check` diffs a generated file and CRLF would fail it | `.gitattributes:1`, `package.json:14` |
 | Docker (optional) | Only for `docker build` and the bench's worker container | `Dockerfile`, `docs/bench.md:33-41` |
-| Helm 3, kubectl (optional) | Only for `scripts/deploy` | `scripts/deploy:37-58` |
+| Helm 3, kubectl (optional) | Only for the root `scripts/deploy`, which deploys the platform's chart with the GUI in it | [deployment.md](deployment.md) |
 
 No Elixir, no cluster and no browser driver is needed for `pnpm test`.
 
@@ -24,7 +25,7 @@ pnpm install
 ```
 
 The lockfile is `pnpm-lock.yaml`; the image and CI use `--frozen-lockfile`
-(`Dockerfile:34`, `ci.yml:38`).
+(`Dockerfile:34`; the root `ci.yml`'s `gui` job).
 
 ## The root scripts
 
@@ -99,7 +100,7 @@ against `pnpm fake` as unverified.
 
 ## Against a real plane
 
-Two things outside this repository have to allow the development origin
+Two things outside the GUI have to allow the development origin
 (`README.md:69-76`; `DECISIONS.md` #10):
 
 1. The plane's `TROUPE_CORS_ORIGINS` must include `http://localhost:5173`. When it does
@@ -135,7 +136,7 @@ the worker verifies them against a JWKS you mount (`docs/bench.md:33-41`).
 
 The worker container environment in `docs/bench.md:33-41` is the *server's* — its
 variables (`TROUPE_JWKS_PATH`, `TROUPE_PROVIDER=fake`, `TROUPE_STATE_HOME`, …) are
-documented in the `troupe-remote` repository, not here. `TROUPE_POD_ORDINAL` is the
+documented with the platform, in the repository root's `docs/`, not here. `TROUPE_POD_ORDINAL` is the
 token audience (`docs/bench.md:47-48`), so `BENCH_POD_ID` must equal it.
 
 ```bash
@@ -192,7 +193,7 @@ which Vite sets from `TROUPE_GUI_BASE`.
 
 | Variable | Read at | Default | Meaning |
 |---|---|---|---|
-| `TROUPE_GUI_BASE` | `apps/desktop/vite.config.ts:16` (build time); `Dockerfile:38-39`; `ci.yml:109` | `/` | Vite `base`. Normalised: `""` or `/` → `/`; anything else → `/<trimmed>/` (`vite.config.ts:17`). Baked into asset URLs; must equal the chart's `basePath` |
+| `TROUPE_GUI_BASE` | `apps/desktop/vite.config.ts:16` (build time); `Dockerfile:38-39`; the root `ci.yml`'s `images` job | `/` | Vite `base`. Normalised: `""` or `/` → `/`; anything else → `/<trimmed>/` (`vite.config.ts:17`). Baked into asset URLs; must equal the chart's `gui.basePath` |
 | `ORIGINS` | `scripts/fake-deployment.ts:14` | `http://localhost:5173,http://127.0.0.1:5173` | Comma-separated CORS allowlist for the fake IdP and plane |
 | `RUNS` | `scripts/first-token.ts:15` | `20` | Iterations of the first-token measurement |
 | `BENCH_MODE` | `packages/bench/src/main.ts:27` | `worker` | `worker` dials `BENCH_WS` with self-minted tokens; `plane` goes through `BENCH_PLANE` |
@@ -209,8 +210,9 @@ which Vite sets from `TROUPE_GUI_BASE`.
 | `BENCH_AGENT` | `trace.ts:26` | unset | Passed as `profile` to `createLocalSession` (`trace.ts:27-31`). Discrepancy: the variable is named "agent" but the field it sets is `profile`; `main.ts` does not read it |
 | `TRACE_SECONDS` | `trace.ts:16` | `10` | How long `trace.ts` listens before `session.get` and exit |
 
-Deploy-time variables (`KUBECONFIG_FILE`, `VALUES`, `NAMESPACE`, `RELEASE`, `TAG`) are
-in [deployment.md](deployment.md); CI secrets and variables are in [ci-cd.md](ci-cd.md).
+Deploy-time variables (`KUBECONFIG_FILE`, `VALUES`, `NAMESPACE`, `RELEASE`, `PLANE_URL`,
+`EXPECT_COMMIT`, all read by the root `scripts/deploy`) are in
+[deployment.md](deployment.md); CI secrets and variables are in [ci-cd.md](ci-cd.md).
 
 Discrepancy: `docs/bench.md:61-68` lists six of the `BENCH_*` variables; the table
 above is the full set read by `main.ts` and `trace.ts`.

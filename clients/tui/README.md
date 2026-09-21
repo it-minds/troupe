@@ -1,26 +1,34 @@
 # Troupe
 
-Troupe is a local coding-agent harness built all the way down on the actor
-model and OTP. It ships as one self-contained executable per platform (Linux,
-macOS, Windows) built with [Burrito](https://github.com/burrito-elixir/burrito);
-users need no Erlang or Elixir installed.
+`troupe` is the terminal client of the Troupe harness. Every session runs in the troupe
+daemon — the `troupe-daemon` on this machine, or, when none is running, the same daemon
+started inside `troupe` itself — or on a plane's worker pod, and the TUI speaks to all of
+them over [`PROTOCOL.md`](../../PROTOCOL.md): a remote session looks exactly like a local
+one. It ships as one self-contained executable per platform (Linux, macOS, Windows) built
+with [Burrito](https://github.com/burrito-elixir/burrito); users need no Erlang or Elixir
+installed.
 
-There is no resident assistant. The root of a session is a **dispatcher**: you
-type `/code fix the failing test` or `/worktree add rate limiting`, it spawns
-an independent, supervised **branch** for each command and returns control
-immediately. Every branch is a window in the TUI. Branches run concurrently;
-a window that needs you (an approval, a question) blinks; you activate it,
-answer, and go back to what you were doing. When nothing is running the
-harness is truly idle: zero LLM calls, zero tokens.
+It lives at `clients/tui` in the Troupe repository, a Mix project of its own. The harness
+it runs — `troupe_core`, `troupe_gateway` and `troupe_protocol` — is not in this
+directory: it is the umbrella's own source in `../../apps`, a path dependency at the same
+commit, and the root [ARCHITECTURE.md](../../ARCHITECTURE.md) describes it.
+
+A session has one agent, and a line that does not start with `/` is what you say to it.
+`/build fix the failing test` or `/worktree add rate limiting` opens a **branch** — a
+session of its own, in its own worktree when the checkout is busy — and returns control
+immediately. Every branch is a window in the TUI. Branches
+run concurrently; a window that needs you (an approval, a question) blinks; you activate
+it, answer, and go back to what you were doing. When nothing is running the harness is
+truly idle: zero LLM calls, zero tokens.
 
 ## Install
 
-The TUI binary is built by this repository's release workflow (one Burrito binary per
-platform, attached to the tag's GitHub release). Download the one for your platform and
-put it on your `PATH`.
-
-The **local daemon** it will stand on — `troupe-daemon`, from the
-[`troupe`](https://github.com/it-minds/troupe) repository — has installers of its own:
+`troupe` is released with the rest of the repository: every release on this repository's
+GitHub releases page carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
+Windows), beside `troupe-daemon-<version>-<target>.tar.gz` and one `SHA256SUMS`. The
+installers at the repository root put both on the machine — `troupe`, and the
+`troupe-daemon` it stands on — and check them against `SHA256SUMS` before replacing
+anything:
 
 ```sh
 curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh
@@ -30,9 +38,18 @@ curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | s
 irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex
 ```
 
-`troupe daemon status` says whether one is running; `troupe daemon run` starts it.
-Today's `troupe` still runs sessions in-process; phase 2 of the daemon plan makes it a
-client of the daemon.
+They install the latest release; `TROUPE_VERSION=0.3.0` pins one, and `--no-tui`
+(`-NoTui` on Windows) installs the daemon alone. A private repository answers
+`/releases/latest` only to somebody signed in, so there the installers ask for
+`TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. To build a binary yourself,
+`scripts/build-local` builds one for this host and installs it as `troupe` in
+`~/.local/bin`.
+
+`troupe` uses the daemon already running on this machine, found through its
+`daemon.json` as every client finds it, and starts the same daemon inside itself when
+none is. `troupe daemon run` starts the standalone `troupe-daemon` instead — found through
+`TROUPE_DAEMON_COMMAND` or on the `PATH` — and `troupe daemon status` says whether one is
+running.
 
 ### Unsigned binaries
 
@@ -473,7 +490,7 @@ Pinned toolchain in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir
 1.20.4, Zig 0.16.0 (Burrito 1.6 requires exactly that Zig).
 
 ```sh
-mix deps.get              # the harness apps come from it-minds/troupe-remote (see mix.exs)
+mix deps.get              # the harness apps are path dependencies on ../../apps
 mix check                 # compile --warnings-as-errors, format, credo --strict, test
 scripts/dev [args]        # run the CLI/TUI from source without a build (dev loop)
 scripts/build-local       # Burrito binary for this host into burrito_out/
@@ -481,21 +498,26 @@ printf 'provider: fake\nfake_script: %s\n' "$PWD/fixtures/fake_scripts/smoke.jso
 burrito_out/troupe_linux_x86_64 run build smoke --headless --auto-approve
 ```
 
-The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a
-dependency pinned to one `troupe-remote` commit (`@harness_ref` in `mix.exs`);
-`troupe_core`'s compile cross-compiles the `reaper` helper for the host, and
-`TROUPE_REAPER_TARGETS=all` builds every target (the release does this). Every
-OS process a session starts runs under reaper, which kills the whole process
-tree when its owner dies. The model is the workspace's business: `provider:
+The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a path
+dependency on `../../apps/`, the umbrella this project sits in, at the same commit: there
+is no pin to bump, and a change to the harness is made there, with `PROTOCOL.md` and the
+root `DECISIONS.md`, in the same pull request as the TUI change that needs it. A package
+both this project and the umbrella lock must be at one version in both `mix.lock` files;
+`elixir scripts/locks-agree.exs` at the repository root checks the 25 they share, and CI
+runs it. The version is the root `VERSION`. `troupe_core`'s compile cross-compiles the
+`reaper` helper for the host, and `TROUPE_REAPER_TARGETS=all` builds every target (the
+release does this). Every OS process a session starts runs under reaper, which kills the
+whole process tree when its owner dies. The model is the workspace's business: `provider:
 fake` and `fake_script:` in its `.troupe/config.yaml` give a deterministic one.
 
-See `ARCHITECTURE.md` for the supervision tree, state machines, message
-protocol and failure matrix, and `DECISIONS.md` for every deviation from the
-original specification.
+See `ARCHITECTURE.md` §9 for the client boundary and the remote client — its §1–8
+describe the harness as it was before the daemon, and the root
+[ARCHITECTURE.md](../../ARCHITECTURE.md) describes it as it is — and `DECISIONS.md` for
+every deviation from the original specification.
 
 ## Out of scope (for now)
 
-Offering this machine's tools to a remote session, a GUI for the remote side,
-Web UI, multi-node distribution, a resident assistant or free-text
-routing at the dispatcher, auto-commit or undo in the user's checkout,
+Offering this machine's tools to a remote session, a GUI for the remote side (that is
+`clients/gui`, beside this directory), Web UI, multi-node distribution, a resident
+assistant or free-text routing at the dispatcher, auto-commit or undo in the user's checkout,
 auto-update, code signing and notarization, native Windows ARM builds.

@@ -1,48 +1,56 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Since revised for the move into the Troupe repository: the GUI's values are the `gui:` block of the root `charts/troupe`, and its own chart is gone (root Decision 670).
 
 # Configuration
 
 Everything an operator can set, and everything the running GUI reads. There is little of
 either: the container takes **no environment variables**, there is no `.env.example`,
-and the one build-time input is baked into the image (`charts/troupe-gui/values.yaml:1-3`;
-AUDIT §1.4). What varies per deployment is the Helm values, the identity provider's
-registration ([identity-provider.md](identity-provider.md)), and the plane's own
-allowlist, which belongs to the server's configuration.
+and the one build-time input is baked into the image (AUDIT §1.4). What varies per
+deployment is the chart's `gui:` values, the identity provider's registration
+([identity-provider.md](identity-provider.md)), and the plane's own allowlist, which
+belongs to the server's configuration.
 
 ## Helm values
 
-`charts/troupe-gui/values.yaml`, with the template line each one reaches.
+The GUI is the `gui:` block of the platform's chart, the root
+[`charts/troupe`](../../../../charts/troupe), rendered by `templates/gui-deployment.yaml`
+and, for its NetworkPolicy, `templates/network-policy.yaml` (root Decision 670). It has no
+chart and no Helm release of its own; it is installed, upgraded and rolled back with the
+platform.
 
-| Value | Default | Template | Effect |
-|---|---|---|---|
-| `image.repository` | `ghcr.io/objective-mj/troupe-gui` (`values.yaml:6`) | `deployment.yaml:29` | Image name. The recorded deployment uses a different registry (`REPORT.md:247`) |
-| `image.tag` | `""` (`:7`) | `deployment.yaml:29` — `default .Chart.AppVersion` | Empty means the chart's `appVersion`, `0.1.0` (`Chart.yaml:6`). `scripts/deploy` overrides it with `--set image.tag=$TAG` when `TAG` is set (`scripts/deploy:39`) |
-| `image.pullPolicy` | `IfNotPresent` (`:8`) | `deployment.yaml:30` | With a reused tag, the node keeps the image it has and no pod restarts; check the digest, not the tag (`values.yaml`, `scripts/deploy:48-54`) |
-| `imagePullSecrets` | `[]` (`:9`) | `deployment.yaml:17-19` | Needed for a private registry |
-| `replicas` | `2` (`:13`) | `deployment.yaml:7` | Two so a rolling deploy has no 502 window; there is no state to coordinate (`:11-12`) |
-| `nameOverride` | `""` (`:15`) | `_helpers.tpl:1-3` | Chart name in labels and resource names |
-| `fullnameOverride` | `""` (`:16`) | `_helpers.tpl:5-16` | Full resource name; otherwise `<release>` or `<release>-troupe-gui` |
-| `resources.requests` | `cpu: 10m, memory: 32Mi` (`:19`) | `deployment.yaml:48` | |
-| `resources.limits` | `cpu: 200m, memory: 128Mi` (`:20`) | `deployment.yaml:48` | |
-| `basePath` | `/app` (`:25`) | `_helpers.tpl:31-35` → `ingress.yaml:2, 12-19, 37-46` | The mount point. **Must equal the `TROUPE_GUI_BASE` the image was built with** (`:22-24`). `/` disables the rewrite and uses a `Prefix` path |
-| `ingress.enabled` | `true` (`:28`) | `ingress.yaml:1` | |
-| `ingress.className` | `nginx` (`:29`) | `ingress.yaml:27` | The `rewrite-target` annotation is nginx-ingress's; another class will not strip the prefix |
-| `ingress.host` | `""` (`:30`) | `ingress.yaml:3-5, 30, 34` | **Required** when the ingress is enabled; the template fails otherwise |
-| `ingress.tlsSecretName` | `""` (`:35`) | `ingress.yaml:28-32` | Names the certificate secret. Naming one another release owns is supported: two Ingresses on one host share one certificate (`:31-34`) |
-| `ingress.certIssuer` | `""` (`:36`) | `ingress.yaml:20-22` | Sets `cert-manager.io/cluster-issuer`. Leave empty when sharing a secret, or cert-manager issues a second certificate for the same host (`:33-34`) |
-| `ingress.annotations` | `{}` (`:37`) | `ingress.yaml:23-25` | Merged after the chart's own |
-| `podAnnotations` | `{}` (`:39`) | `deployment.yaml:13-15` | |
-| `nodeSelector` | `{}` (`:40`) | `deployment.yaml:55-57` | |
-| `tolerations` | `[]` (`:41`) | `deployment.yaml:58-60` | |
-| `affinity` | `{}` (`:42`) | `deployment.yaml:61-63` | |
+| Value | Default | Effect |
+|---|---|---|
+| `gui.enabled` | `true` | Serves the GUI. Needs `plane.enabled`, since it mounts on the plane's host. A cluster whose people use another client sets it to `false` and points `plane.appUrl` at that client |
+| `gui.image.repository` | `ghcr.io/objective-mj/troupe-gui` | Image name. The recorded deployment uses a different registry (`REPORT.md:247`) |
+| `gui.image.tag` | `""` | Empty means the chart's `appVersion`, which is the release's version: a release promotes `troupe-gui` to that tag, so the GUI, the plane and the chart are one number |
+| `gui.image.pullPolicy` | `IfNotPresent` | With a reused tag, the node keeps the image it has and no pod restarts; check the digest, not the tag |
+| `gui.replicas` | `2` | Two so a rolling deploy has no 502 window; there is no state to coordinate |
+| `gui.basePath` | `/app` | The mount point on `plane.host`. **Must equal the `TROUPE_GUI_BASE` the image was built with.** `/` is refused, because the root of that host is the plane's |
+| `gui.resources.requests` | `cpu: 10m, memory: 32Mi` | |
+| `gui.resources.limits` | `cpu: 200m, memory: 128Mi` | |
+
+Values of the rest of the chart that the GUI uses rather than setting its own:
+
+| Value | Effect on the GUI |
+|---|---|
+| `namespace` | Where its Deployment, Service, Ingress and NetworkPolicy go (`troupe-system`) |
+| `imagePullSecrets` | Chart-wide; needed for a private registry |
+| `plane.host` | Its Ingress host |
+| `plane.ingressClassName` | Its ingress class. The `rewrite-target` annotation is nginx-ingress's; another class will not strip the prefix |
+| `plane.tlsSecretName` | Its TLS secret, shared with the plane's Ingress. The GUI's Ingress has no cert-manager annotation: the plane's asks for the host's certificate |
+| `plane.appUrl` | Where the plane's index page links to the GUI. Empty means `gui.basePath` when `gui.enabled`, and no link when not |
+
+The old chart's `nameOverride`, `fullnameOverride`, `ingress.*`, `podAnnotations`,
+`nodeSelector`, `tolerations` and `affinity` have no counterpart: every object is named
+`troupe-gui`, and the Ingress is on the plane's host.
 
 Fixed by the templates, not configurable: pod `runAsNonRoot`, `runAsUser: 101`,
-`fsGroup: 101`, `seccompProfile: RuntimeDefault` (`deployment.yaml:22-26`); container
+`fsGroup: 101`, `seccompProfile: RuntimeDefault`; container
 `allowPrivilegeEscalation: false`, `readOnlyRootFilesystem: true`, `capabilities.drop:
-["ALL"]` (`:34-37`); port 8080 named `http` (`:31-33`); readiness probe `/healthz` after
-2 s every 10 s and liveness after 10 s every 30 s (`:40-47`); `emptyDir` volumes at
-`/var/cache/nginx` and `/tmp` (`:49-54`); Service `ClusterIP` port 80 → `http`
-(`service.yaml:7-12`).
+["ALL"]`; port 8080 named `http`; readiness probe `/healthz` after 2 s every 10 s and
+liveness after 10 s every 30 s; `emptyDir` volumes at `/var/cache/nginx` and `/tmp`;
+Service `ClusterIP` port 80 → `http`; a NetworkPolicy that admits the ingress namespace
+on 8080 and nothing else.
 
 Unconfirmed: the values used for the recorded deployment are in the gitignored
 `.local/values.itminds.yaml` and were not read for this audit (AUDIT §1.5).
@@ -53,22 +61,22 @@ Three places must say the same thing:
 
 | Where | What | Set by |
 |---|---|---|
-| The image | `TROUPE_GUI_BASE` at `docker build` time; normalised so `app`, `/app`, `/app/` are the same (`apps/desktop/vite.config.ts:16-17`) | Whoever built the image; CI would use `vars.GUI_BASE` or `app` (`.github/workflows/ci.yml:109`); the Dockerfile default is `/` (`Dockerfile:38`) |
-| The chart | `basePath` (`values.yaml:25`, default `/app`) | The values file |
-| The ingress | Path `<basePath>(/\|$)(.*)` with `rewrite-target: /$2` (`ingress.yaml:18, 41`) | Rendered from `basePath` |
+| The image | `TROUPE_GUI_BASE` at `docker build` time; normalised so `app`, `/app`, `/app/` are the same (`apps/desktop/vite.config.ts:16-17`) | Whoever built the image; the root CI uses the repository variable `GUI_BASE` or `app`, and `scripts/build-images` uses `/app`; the Dockerfile default is `/` (`Dockerfile:38`) |
+| The chart | `gui.basePath` (default `/app`) | The values file |
+| The ingress | Path `<basePath>(/\|$)(.*)` with `rewrite-target: /$2` (`templates/gui-deployment.yaml`) | Rendered from `gui.basePath` |
 
 Vite writes the base into every asset URL, so an image built for `/app/` served at `/`
 (or the reverse) loads `index.html` and then 404s on every script: a blank page
-(`values.yaml:22-24`; `DECISIONS.md` #30). **Changing the base path is a rebuild of the
-image, not a values change.** The ingress strips the prefix so the container is
-"ignorant of where it is mounted" (`ingress.yaml:13-17`; `DECISIONS.md` #31).
+(`DECISIONS.md` #30). **Changing the base path is a rebuild of the image, not a values
+change.** The ingress strips the prefix so the container is "ignorant of where it is
+mounted" (`DECISIONS.md` #31).
 
 The bundle also uses the base path at runtime: the OIDC redirect URI is
 `<origin><basePath>` without a trailing slash (`apps/desktop/src/shell.ts:91-95`), and
 when the base path is not `/` the sign-in screen prefills the plane URL with the page's
 own origin (`shell.ts:105-109`; `DECISIONS.md` #35). Serving the GUI at a path on the
-plane's host is therefore the recommended shape: same origin, no CORS entry, one
-certificate (`DECISIONS.md` #29; `README.md:127-131`).
+plane's host is therefore the shape the chart gives it: same origin, no CORS entry, one
+certificate (`DECISIONS.md` #29; root Decision 670).
 
 ## Browser storage
 
@@ -140,10 +148,10 @@ again for systems that ask for it when no toggle has been set (`scripts/tokens.t
 | Real client IP | `X-Forwarded-For` trusted from `0.0.0.0/0` — assumes the ingress is the only thing in front | `:19-20` |
 | Security headers | `X-Content-Type-Options: nosniff`, `X-Frame-Options: DENY`, `Referrer-Policy: strict-origin-when-cross-origin`, on every response. No CSP, no HSTS (HSTS is the ingress's job) | `:23-25` |
 | Compression | gzip for CSS, JS, JSON, SVG ≥ 1 KiB | `:27-29` |
-| Health | `GET /healthz` → `200 ok`, no access log; both probes and the image `HEALTHCHECK` use it (`deployment.yaml:41, 45`; `Dockerfile:58-59`) | `:33-37` |
+| Health | `GET /healthz` → `200 ok`, no access log; both probes and the image `HEALTHCHECK` use it (`templates/gui-deployment.yaml`; `Dockerfile:58-59`) | `:33-37` |
 | Hashed assets | `.js .css .woff2 .woff .png .jpg .jpeg .gif .svg .ico .webp .map` → `Cache-Control: public, immutable`, one year. Safe because Vite renames on content change | `:41-45` |
 | Everything else | `Cache-Control: no-cache`; `try_files $uri $uri/ /index.html` — the SPA fallback, so a deep link or a refresh on `/app/anything` serves the app rather than 404 | `:47-50` |
-| Read-only filesystem | nginx writes only under `/var/cache/nginx` and `/tmp`, both `emptyDir`s in the chart | `deployment.yaml:49-54` |
+| Read-only filesystem | nginx writes only under `/var/cache/nginx` and `/tmp`, both `emptyDir`s in the chart | `templates/gui-deployment.yaml` |
 | Logs | Default nginx access and error logs to stdout/stderr (the base image's configuration; not overridden here). `/healthz` is excluded | `:34` |
 
 ## Related
@@ -154,5 +162,6 @@ again for systems that ask for it when no toggle has been set (`scripts/tokens.t
   image.
 - Server-side settings the GUI depends on: the plane's `TROUPE_CORS_ORIGINS`
   (`../../../../config/runtime.exs:266`) and the worker's
-  `TROUPE_WORKER_ALLOWED_ORIGINS` (`runtime.exs:130`), documented in the server's
-  [docs/AUDIT.md](../../../../docs/AUDIT.md) — a separate repository.
+  `TROUPE_WORKER_ALLOWED_ORIGINS` (`runtime.exs:130`), documented with the platform in
+  [docs/admin/configuration.md](../../../../docs/admin/configuration.md) at the
+  repository root.

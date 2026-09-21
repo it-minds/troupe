@@ -1,5 +1,9 @@
 # Local sessions, and private sessions that follow you
 
+> Written when the GUI and the server were separate repositories. Both now live in the
+> Troupe repository — the "troupe-remote" and "troupe-gui" halves below are `apps/` and
+> `clients/gui` — and a change to both is one pull request (root Decision 666).
+
 Today the GUI shows one kind of session: a team session on a remote worker. People also
 work in two other ways. On their own machine, in a directory they have open, with the
 agent running in the local daemon. And on something that is theirs alone — not a team's,

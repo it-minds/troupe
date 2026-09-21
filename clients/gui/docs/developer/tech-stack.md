@@ -1,4 +1,5 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository; its chart and CI are the root's (root Decisions 666, 670).
 
 # Tech stack
 
@@ -10,8 +11,8 @@ that justifies it where one is recorded. Resolved versions come from `pnpm-lock.
 
 | Tool | Declared | Resolved / observed | Why |
 |---|---|---|---|
-| Node 24 | `Dockerfile:20` (`node:24-bookworm-slim`), `.github/workflows/ci.yml:22` (`NODE_VERSION: "24"`), `@types/node ^24.3.0` (`packages/client/package.json:23`) | `node --version` → v24.12.0 on the audit machine | The tests run on Node's built-in runner with `--import tsx`; no `engines` field pins it in any manifest |
-| pnpm 10.15.0 | `package.json:5` `"packageManager": "pnpm@10.15.0"` | 10.15.0 on the audit machine; Corepack pins it in the image (`Dockerfile:22-24`) and `pnpm/action-setup@v4` reads it in CI (`ci.yml:31`) | One version for developers, the image and CI |
+| Node 24 | `Dockerfile:20` (`node:24-bookworm-slim`), the root `.tool-versions` (`nodejs 24.19.0`, which CI's `setup-node` reads), `@types/node ^24.3.0` (`packages/client/package.json:23`) | `node --version` → v24.12.0 on the audit machine | The tests run on Node's built-in runner with `--import tsx`; no `engines` field pins it in any manifest |
+| pnpm 10.15.0 | `package.json:5` `"packageManager": "pnpm@10.15.0"` | 10.15.0 on the audit machine; Corepack pins it in the image (`Dockerfile:22-24`) and `pnpm/action-setup` reads it in the root CI's `gui` job | One version for developers, the image and CI |
 | pnpm workspace | `pnpm-workspace.yaml:1-3` (`packages/*`, `apps/*`) | — | Three packages, one lockfile |
 | `.npmrc` | `strict-peer-dependencies=false` (`.npmrc:1`) | — | No decision recorded |
 
@@ -71,9 +72,9 @@ is a dev dependency (AUDIT §2).
 |---|---|---|
 | Docker, multi-stage | `Dockerfile:20` build stage on `node:24-bookworm-slim`; `Dockerfile:48` runtime on `nginxinc/nginx-unprivileged:1.29-alpine` | The image runs the client tests on the way through (`Dockerfile:43-45`; `DECISIONS.md` #33) |
 | nginx (unprivileged) | `docker/nginx.conf`; port 8080, uid 101 (`Dockerfile:50-51`) | SPA fallback, `/healthz`, immutable hashed assets (`docker/nginx.conf:33-50`) |
-| Helm 3 chart (`apiVersion: v2`) | `charts/troupe-gui/Chart.yaml:1-6`, version and appVersion 0.1.0 | `scripts/deploy` runs `helm upgrade --install` (`scripts/deploy:37-46`) |
-| `kubeconform` v0.6.7 | `ci.yml:133` (`ghcr.io/yannh/kubeconform:v0.6.7`, `-kubernetes-version 1.31.0`) | Validates rendered manifests in the `chart` job |
-| GitHub Actions | `.github/workflows/ci.yml` — **untracked and never run** (AUDIT §1.5) | `actions/checkout@v4`, `pnpm/action-setup@v4`, `actions/setup-node@v4`, `docker/setup-buildx-action@v3`, `docker/login-action@v3`, `docker/build-push-action@v6`, `azure/setup-helm@v4` (`ci.yml:29-33, 94-105, 121`) |
+| Helm 3 chart (`apiVersion: v2`) | The `gui:` block of the root `charts/troupe`, whose version and appVersion are the root `VERSION` | The root `scripts/deploy` runs `helm upgrade --install` for the whole platform, the GUI with it |
+| `kubeconform` v0.6.7 | The root CI's `chart` job (`ghcr.io/yannh/kubeconform:v0.6.7`, `-kubernetes-version 1.31.0`) | Validates the rendered chart, with the GUI and without it |
+| GitHub Actions | The root `.github/workflows/ci.yml` (`gui`, `gui-e2e`, `images`) and `release.yml` (`desktop`) | `actions/checkout`, `pnpm/action-setup`, `actions/setup-node`, `docker/build-push-action`, `tauri-apps/tauri-action`; see [ci-cd.md](ci-cd.md) |
 
 ## Formatting and line endings
 

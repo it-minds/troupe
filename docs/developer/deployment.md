@@ -186,8 +186,11 @@ the `deploy` job runs `scripts/deploy` with the release's chart — the CRDs ser
 `helm upgrade --wait` rolling back on failure, `rollout status`, and a check that
 `/.well-known/troupe` reports the new version and commit. Before the first one, the
 `production` environment needs its `KUBECONFIG` (from `deploy/ci-deployer.yaml` and
-`scripts/ci-kubeconfig`), `DEPLOY_VALUES` and `PLANE_URL`. The second manual step below
-still applies.
+`scripts/ci-kubeconfig`), `DEPLOY_VALUES` and `PLANE_URL`. And on a cluster that ran the
+GUI from its old chart, `helm uninstall troupe-gui -n troupe-system` first: that release
+owns a Deployment, Service and Ingress named `troupe-gui`, the names `charts/troupe` now
+uses, and Helm will not adopt objects another release owns, so the first deploy with
+`gui.enabled` fails until it is gone. The second manual step below still applies.
 
 ## 5. Post-upgrade manual steps
 

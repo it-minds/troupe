@@ -1,4 +1,5 @@
 > Audited against troupe-gui commit 783e660 (branch master) plus the uncommitted working tree, 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> The GUI now lives at `clients/gui` in the Troupe repository, and CI is the root's `gui` and `gui-e2e` jobs (root Decision 666; Decision 45).
 
 # Testing
 
@@ -128,7 +129,10 @@ imitate screens (`stage1.test.ts:3-7`). `pnpm fake` runs the same three
 - **No browser tests.** Nothing renders `apps/desktop`; the views were driven by hand
   (`REPORT.md:288-291`). Playwright in CI is in the spec (`spec.md:62`) and not present.
 - **The server's half.** Every assumption in the right-hand column above; a kind or
-  Kapsule run is what would check it (`REPORT.md:282-287`; `DECISIONS.md` #19).
+  Kapsule run is what would check it (`REPORT.md:282-287`; `DECISIONS.md` #19). The
+  plane's share of it is now `test/e2e.plane.test.ts`, which the root CI's `gui-e2e` job
+  runs against a plane built from the same commit ([../e2e.md](../e2e.md)); a session on
+  a real pod still wants a cluster.
 - **Hash-chain verification.** `SessionLog.verify()` exists only in the fake; no code
   in `packages/client/src` checks `prev_hash` (AUDIT §3.2). The spec defers it to stage 3
   (`spec.md:80`).
@@ -138,11 +142,11 @@ imitate screens (`stage1.test.ts:3-7`). `pnpm fake` runs the same three
 - **`presence`, `todo.edit`, `session.grant`, `session.pin`, `session.review`,
   `session.erase`, `teams.list`, `me`** — in the client, called by no screen and, apart
   from `presence.set` being sent, by no test.
-- **`tokens:check`** is a build guard, not a test; CI would run it (`ci.yml:42-43`) but
-  CI has never run.
+- **`tokens:check`** is a build guard, not a test; the root CI's `gui` job runs it
+  before the typecheck.
 
 ## Related
 
 - [architecture.md](architecture.md) §5–7 — the code under test.
-- [ci-cd.md](ci-cd.md) — where the suite would run automatically.
+- [ci-cd.md](ci-cd.md) — where the suite runs automatically.
 - [build.md](build.md) — the image runs this suite too (`Dockerfile:44`).
