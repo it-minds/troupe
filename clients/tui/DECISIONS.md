@@ -142,3 +142,19 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
 106. **A question is answered as a question, not typed as input.** `Client.answer/3` used to send the person's answer to `ask_user` as ordinary input, because the wire had no other way; the daemon now has `question.answer` (troupe-remote Decision 651), so the worker sends that, with the call id the question carried. `Troupe.Remote.Translate` turns `question_asked` into the `:question_asked` the model already drew as a menu and `question_answered` into what clears it, and a branch's worker registers a question's call id beside an approval's so the parent's screen routes the answer to the right session. Nothing in the UI changed: it asked for exactly this shape before the harness left.
 
 107. **The last of phase 3 on the screen: the `/mcp` page reads the daemon, a near limit is a warning, and three settings gain a row.** `Client.mcp_status/1` asks `mcp.status` and hands the page what it drew before — name, state, a count of tools, the error — so the workspace's own MCP servers (troupe-remote Decision 654) show as the harness's did, with nothing in the view changed. `budget_warning` (troupe-remote Decision 655) translates into the `:budget_warning` the window already folds into its warnings and prints once; `troupe --full-send` and `troupe run … --full-send` pass `full_send` in the session's config, which is the daemon's switch for the same thing, and the settings page shows it beside `memory` and `memory_auto_refresh`, the two the brief brought. The harness pin moves to the head of the phase 3 stack, which is what brings `read_output`, `read_roots`, the local MCP servers, the headroom and the eleven definitions to this binary.
+
+108. **The harness's budget question is answered with the keys the TUI already had, and
+     what the harness writes about a cut or empty reply is shown as the harness's words.**
+     troupe-remote #29 (its Decision 660) made a spent budget a question: it rides on the
+     `ask_user` path as a `question_asked` with id `budget-<n>` and options `allow` /
+     `always` / `deny`, with a `budget_ask_started` / `budget_ask_answered` pair beside
+     it. The window has known a `:budget` pending item and answered it with `y` / `n` /
+     `a` since Decision 62, so the translator hands it that item from the harness's own
+     event and drops the `question_asked` that carries the same id rather than drawing the
+     question twice; the keys send the words the harness listens for through
+     `question.answer`, not an approval. `a` lifts this agent and its subagents, not every
+     branch — a branch is a session now. troupe-remote #28 (Decision 659) writes the note
+     it gives a model whose reply the output cap cut, or that said nothing, as a
+     `user_input` from source `harness`, and a `truncated` event beside it: both are shown
+     as notes, because neither is something the person typed. The pin moves to
+     troupe-remote `main` at `84edcb9`, the merge of #29.
