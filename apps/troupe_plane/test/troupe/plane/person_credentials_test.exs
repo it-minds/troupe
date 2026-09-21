@@ -206,7 +206,11 @@ defmodule Troupe.Plane.PersonCredentialsTest do
   defp requires_bao(%{skip: reason}), do: flunk("skipped: #{reason}")
   defp requires_bao(_context), do: :ok
 
-  defp unique, do: System.unique_integer([:positive])
+  # Unique across runs, not only within one. The database forgets between runs and
+  # OpenBao does not, and `System.unique_integer/1` starts again in every VM — small
+  # numbers, stepping by the scheduler count — so a later run would draw an earlier run's
+  # subject and find the slot that run wrote still there.
+  defp unique, do: Base.encode16(:crypto.strong_rand_bytes(6), case: :lower)
 
   defp address, do: Application.get_env(:troupe_plane, :transit, [])[:address]
   defp root_token, do: Application.get_env(:troupe_plane, :transit, [])[:token]
@@ -342,6 +346,7 @@ defmodule Troupe.Plane.PersonCredentialsTest do
 
     get_in(body, ["auth", "client_token"])
   end
+
   defp as(user), do: %{user: user, platform_admin?: false}
 
   # The claims, without verifying the signature: what is checked here is which subject the
