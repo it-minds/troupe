@@ -4901,3 +4901,20 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      unpacked and smoked — `version` prints 0.2.0 for daemon and harness alike, `status`
      says not running, `run` serves, a second `run` names the running one and exits 0,
      `eval` answers — and the release's `lib/` holds none of the platform's applications.
+
+668. **One `VERSION` for everything this repository releases, and the TUI builds against
+     the harness of its own commit.** The TUI was at 0.1.0, the daemon at 0.1.0, the
+     umbrella at 0.2.0 and the GUI's chart at 0.1.0, while the live plane ran 0.2.17 off
+     a script that hard-coded it — four numbers with no relation, which issue #37 names as
+     the thing to end. The root `VERSION` is now the version of the images, the chart, the
+     daemon and the TUI, and a release is cut by changing it (below). `clients/tui` stays a
+     Mix project of its own and depends on the three harness apps by path, `override: true`,
+     since they also name each other as siblings. That removes the pin, the
+     `TROUPE_VERSION` environment workaround the sparse checkout needed, and the
+     `HARNESS_TOKEN` its CI used to fetch a private repository. What two Mix projects
+     cannot share is a lock: the TUI's `mix.lock` and the umbrella's each lock the 25
+     packages they have in common, and a harness built against one version on a laptop and
+     another in a pod is the drift this was meant to end, so `scripts/locks-agree.exs`
+     fails when any of the 25 differ and CI runs it. The first thing it would have caught:
+     mint, 1.10.1 in the TUI for a security advisory and 1.10.0 here. Proof: `mix check` in
+     `clients/tui`, 107 tests, against the umbrella's source.

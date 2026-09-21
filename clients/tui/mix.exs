@@ -1,19 +1,9 @@
 defmodule Troupe.MixProject do
   use Mix.Project
 
-  @version "0.1.0"
-
-  # The harness: `troupe_core`, `troupe_gateway` and `troupe_protocol` from `troupe-remote`,
-  # at one commit, as sparse git dependencies — the same three applications the worker pod
-  # and `troupe-daemon` run. One ref for all three. Each reads `TROUPE_VERSION` for the
-  # version it has no `VERSION` file for (a sparse checkout has no repository root), so it
-  # is set here, before Mix evaluates them. `TROUPE_HARNESS_GIT` points a local build at a
-  # checkout on disk.
-  @harness_git System.get_env("TROUPE_HARNESS_GIT", "https://github.com/it-minds/troupe-remote.git")
-  @harness_ref System.get_env("TROUPE_HARNESS_REF", "84edcb93f177d5dbfe556e88e7520e724c86b906")
-  @harness_version "0.2.0"
-
-  System.put_env("TROUPE_VERSION", @harness_version)
+  # The umbrella's version: the TUI, the daemon, the images and the chart are released
+  # together from one `VERSION` (Decision 668).
+  @version "../../VERSION" |> File.read!() |> String.trim()
 
   def project do
     [
@@ -61,10 +51,13 @@ defmodule Troupe.MixProject do
     ]
   end
 
-  # `override: true` because the apps declare each other as ordinary dependencies when
-  # they are not siblings in an umbrella, and this project is what says where they are.
+  # The harness: `troupe_core`, `troupe_gateway` and `troupe_protocol`, the same three
+  # applications the worker pod and `troupe-daemon` run, from the umbrella this project sits
+  # in. A path, so the TUI is always built against the harness of its own commit; there is
+  # no pin to move and nothing to fetch. `override: true` because the three also name each
+  # other, as siblings, and this is what says the two are the same place.
   defp harness(app) do
-    {app, git: @harness_git, sparse: "apps/#{app}", ref: @harness_ref, override: true}
+    {app, path: "../../apps/#{app}", override: true}
   end
 
   defp aliases do

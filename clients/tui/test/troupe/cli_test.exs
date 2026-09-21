@@ -26,7 +26,8 @@ defmodule Troupe.CLITest do
     assert {:ok, %{mode: :version}} = CLI.parse(["--version"])
     assert {:error, _} = CLI.parse(["--bogus"])
     assert {:error, _} = CLI.parse(["run"])
-    assert CLI.version() =~ "troupe 0.1.0"
+    # The umbrella's `VERSION`, which the TUI shares with everything it is released with.
+    assert CLI.version() == "troupe " <> (File.read!("../../VERSION") |> String.trim())
   end
 
   test "parses the remote command lines" do

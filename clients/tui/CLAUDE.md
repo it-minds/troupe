@@ -4,15 +4,15 @@ Troupe is the terminal client of the troupe daemon: an Elixir TUI, packaged
 as one Burrito binary per platform, that runs every session in `troupe_core`
 behind `troupe_gateway` — a daemon it embeds when none is running on the
 machine, or a plane's worker pod — and talks to over `PROTOCOL.md`. The harness
-itself (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a dependency
-pinned to one `it-minds/troupe-remote` commit (`@harness_ref` in `mix.exs`). The spec is `elixir-prmpt.md`; read
+itself (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a path dependency on
+`../../apps/` — the umbrella this project sits in, at the same commit. The spec is `elixir-prmpt.md`; read
 `ARCHITECTURE.md` (contract the code implements) and `DECISIONS.md` (every
 deviation, numbered; append one line per new deviation) before changing
 behaviour. `FINAL_REPORT.md` maps each done item to the test that proves it.
 
 ## Toolchain and commands
 
-Pinned in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir 1.20.4-otp-28,
+Pinned in `.tool-versions` / `mise.toml`: Erlang 28.5.0.5, Elixir 1.20.4-otp-28,
 Zig 0.16.0 (Burrito 1.6 pins exactly that). Always run mix through mise:
 
 ```sh
@@ -42,9 +42,10 @@ workspace; a client cannot set the provider), then `scripts/dev run build smoke
 env (`TROUPE_*`), or opencode's `~/.config/opencode/opencode.jsonc` as a
 fallback; `scripts/dev config` shows the resolution.
 
-Bumping the harness: change `@harness_ref` in `mix.exs` to the `troupe-remote`
-commit, `mise exec -- mix deps.update troupe_core troupe_gateway troupe_protocol`,
-commit `mix.lock` with it.
+There is no harness to bump: the path dependency is the umbrella's own source. A
+package both this project and the umbrella lock must be at the same version in both
+`mix.lock` files; `elixir scripts/locks-agree.exs` from the repository root says so, and
+CI runs it.
 
 
 Read skills in the .skills repo
@@ -61,7 +62,7 @@ Read skills in the .skills repo
 
 - **Anything under `Troupe.UI` may call `Troupe.Client` and nothing else** in the harness (bar the pure data modules `Config`, `Settings`, `Event`, `Client.Message`, `Codec`). `mix troupe.xref` reads the BEAM import tables and fails the build otherwise; it is in the `check` alias and in CI.
 - A remote session must be indistinguishable from a local one on screen: translate at the edge (`Troupe.Remote.Translate`), never branch on "is this remote?" in the model or the view.
-- The harness is not edited here. A missing method or event is a `troupe-remote` change (its `PROTOCOL.md`, `DECISIONS.md`), then a pin bump; the TUI's own deviations still go in this repo's `DECISIONS.md`.
+- The harness is not edited from here. A missing method or event is a change to `PROTOCOL.md` and the umbrella's apps first (the root `DECISIONS.md`), in the same pull request as the TUI change that needs it; the TUI's own deviations still go in this directory's `DECISIONS.md`.
 - Every OS process goes through `Troupe.OS.Process` (reaper). Never `System.cmd` in lib code.
 - A session has one agent, the window `"root"`; a line that does not start with `/` is input to it (Decision 101). `/<agent> prompt` opens a **branch**: a session of its own with `parent` set, shown as the window `<agent>-N`; its worker publishes under that name (`Troupe.Remote.Branch`), the parent's journal records the windows (Decision 103).
 - Tests: `assert_receive` on events, never `Process.sleep` to wait. A test arranges the fake through the workspace (`start_session!(script: …)`), never by handing the harness a process; a text-only step ends the turn, so helpers append `finish` to it.
@@ -77,6 +78,6 @@ assertion failure mid-script leaves earlier files changed and later ones not.
 ## What is not verified locally
 
 CI on the non-Linux native runners, and the two acceptance items that need a real model
-(35, 36 in the spec). The installers live in the `troupe` repository now and install
-`troupe-daemon`, not this binary. `feature/` in the
-repo root is the user's own git worktree; leave it out of the index.
+(35, 36 in the spec). The installers are `install.sh` / `install.ps1` at the repository
+root and install this binary beside `troupe-daemon`. A `feature/` directory is somebody's
+own git worktree; leave it out of the index.

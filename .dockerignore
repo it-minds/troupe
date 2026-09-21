@@ -26,3 +26,8 @@ charts
 dev
 scripts
 *.md
+
+# The clients are built on their own: the TUI and the desktop app natively for each
+# platform, the GUI's image with `clients/gui` as its own context. No server image needs
+# any of it, and `clients/gui/node_modules` alone would be most of the context.
+clients

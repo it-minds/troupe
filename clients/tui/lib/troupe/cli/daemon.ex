@@ -2,12 +2,12 @@ defmodule Troupe.CLI.Daemon do
   @moduledoc """
   `troupe daemon …`: hand the arguments to the local daemon binary.
 
-  The daemon is `troupe-daemon`, released from the `troupe` repository and built from the
-  harness in `troupe-remote`. This binary does not embed it yet — phase 2 of the daemon
-  plan is where the TUI's own harness goes and the daemon's comes in — so today `troupe
-  daemon run` is a way to start it, `troupe daemon status` a way to ask, and the rest is
-  passed through untouched. Found the same way every client finds it:
-  `TROUPE_DAEMON_COMMAND`, then `troupe-daemon` on the `PATH`.
+  The daemon is `troupe-daemon`, the `troupe_daemon` release of the umbrella this project
+  sits in. The TUI also embeds the same harness and starts it in its own VM when no daemon
+  is running (`Troupe.Client.Daemon.Link`); this command is for the standalone one: `troupe
+  daemon run` starts it, `troupe daemon status` asks, and the rest is passed through
+  untouched. Found the same way every client finds it: `TROUPE_DAEMON_COMMAND`, then
+  `troupe-daemon` on the `PATH`.
   """
 
   @install_sh "curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh"
