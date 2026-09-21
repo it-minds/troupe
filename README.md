@@ -1,18 +1,25 @@
-# Troupe Remote
+# Troupe
 
-A coding-agent harness that runs on Kubernetes. Teams' agents run on pods this cluster
-schedules; a control plane hands out the sessions, endpoints and tokens to reach them,
-and an admin console runs the whole fleet from a browser.
+A coding-agent harness that runs on Kubernetes and on your own machine. Teams' agents run
+on pods a cluster schedules; a control plane hands out the sessions, endpoints and tokens
+to reach them, and an admin console runs the whole fleet from a browser. The same harness
+runs on a laptop as the local daemon.
 
-**This repository is the remote, and the harness the daemon is built from.** It ships
-four container images and a Helm chart. It ships no client and no binary — no installer,
-no TUI, no CLI, no Python package — and it is installed on nobody's machine. Three of
-its apps, `troupe_core`, `troupe_gateway` and `troupe_protocol`, are also the whole of
-the **local daemon**: the [`troupe`](https://github.com/it-minds/troupe) repository pins
-them by git ref and packages them as `troupe-daemon`, one binary per platform, and the
-clients stand on that. Clients are separate releases from separate repositories that
-speak [PROTOCOL.md](PROTOCOL.md) and get no private access to any of this; the plane's
-front page links to whichever ones your organisation publishes.
+**This repository is all of it** (Decision 666): the platform, the daemon, and the two
+clients that are its defaults — the terminal UI and the graphical app. One `VERSION`
+versions everything, and one release ships it: five container images and a Helm chart
+for a cluster, and `troupe`, `troupe-daemon` and the desktop app for a machine. The
+clients live here and get no private access for it: everything they do goes over
+[PROTOCOL.md](PROTOCOL.md), and a client somebody else writes against that document is
+as supported as ours.
+
+| directory | what it is |
+|---|---|
+| [`apps/`](apps/) | The Elixir umbrella: the harness (`troupe_core`, `troupe_gateway`, `troupe_protocol`), the worker, the plane, the operator, the A2A facade, and the daemon (`troupe_daemon`). |
+| [`clients/tui`](clients/tui/README.md) | `troupe`, the terminal client. Its own Mix project, built against the harness in `apps/` by path; it embeds the daemon when none is running. |
+| [`clients/gui`](clients/gui/README.md) | The graphical client: `@troupe/client` (the protocol in TypeScript), the web app the chart serves at `/app`, and the desktop app that wraps it. A pnpm workspace. |
+| [`charts/troupe`](charts/troupe) | The Helm chart for the platform and the GUI. |
+| [`docs/`](docs/README.md) | The operator's, developer's and user's documentation; [`docs/program/`](docs/program/README.md) is the plan the repositories were built to. |
 
 Sessions live on a **pod**, not in whatever window you happened to open. Close the
 client and the work carries on; open it again, or a second one, or a script, and you are
@@ -35,16 +42,21 @@ repository.
 
 ## What it ships
 
+On a cluster:
+
 | Image | What it is |
 |---|---|
 | `troupe-plane` | The control plane: the client and admin API as JSON-RPC and MCP, the OIDC relying party, the front page at `/` and the admin console at `/admin`. |
 | `troupe-operator` | Turns a `WorkerProfile` into a namespace of pods, and a `TroupePolicy` into what those pods may do. |
 | `troupe-worker` | The agent harness itself, running inside one of those pods, reached over a WebSocket through its own Ingress. |
 | `troupe-a2a` | The A2A facade: every profile as an agent other agents can call. |
+| `troupe-gui` | The graphical client, served at `/app` on the plane's host. |
 
-Plus [`charts/troupe`](charts/troupe), which deploys the lot. There is no fifth artifact.
-`.github/workflows/ci.yml` has no build matrix, no per-platform runner and no release
-binaries, because there is no machine to build for other than a Linux node pool.
+Plus [`charts/troupe`](charts/troupe), which deploys the lot.
+
+On a machine, from the same release: `troupe` (the TUI) and `troupe-daemon` for Linux,
+macOS and Windows, which `install.sh` and `install.ps1` install, and the desktop app's
+installers.
 
 ## Deploy
 
@@ -55,17 +67,36 @@ helm upgrade --install troupe charts/troupe \
   --values my-values.yaml
 ```
 
-`values.small.yaml` is one plane, one operator and a handful of workers — the shape a
-team actually starts with. `values.scaleway.yaml` is the same on a Kapsule cluster with
+`values.small.yaml` is one plane, one operator, the GUI and a handful of workers — the shape
+a team actually starts with. `values.scaleway.yaml` is the same on a Kapsule cluster with
 Scaleway's registry and object storage.
 [docs/deploying-on-scaleway.md](docs/deploying-on-scaleway.md) walks a real deployment
 end to end; [docs/admin/configuration.md](docs/admin/configuration.md) is every value and
 every environment variable.
 
 It needs Postgres for the plane, an S3-compatible bucket for session storage, and an
-OIDC provider to sign people in. `scripts/build-images` builds the four images into a
+OIDC provider to sign people in. `scripts/build-images` builds the five images into a
 local cluster or pushes them to a registry; `dev/docker-compose.yml` and `scripts/dev-up`
 bring up the dependencies for a development run.
+
+A team that uses its own client sets `gui.enabled: false` and points `plane.appUrl` at it.
+
+## Releasing and deploying
+
+A release is a merged change to `VERSION`, and it deploys itself (Decision 669):
+
+```sh
+scripts/release 0.3.1        # opens the pull request that changes VERSION
+```
+
+Merging it makes the run on `main` tag `v0.3.1`, promote the images it has just built and
+tested to that version, publish the chart and the daemon, TUI and desktop builds, and roll
+the release onto the `production` environment with [`scripts/deploy`](scripts/deploy) —
+CRDs, `helm upgrade --wait` with rollback, and a check that `/.well-known/troupe` reports
+the new version and commit. A release candidate (`0.4.0-rc.1`) does all of it and deploys
+as a dry run. The `deploy` workflow rolls back to, or renders, a named release. Nothing is
+deployed from a laptop, and the repository's Deployments page is the record of what ran
+where.
 
 ## The front door
 
@@ -73,15 +104,14 @@ bring up the dependencies for a development run.
 where, and the ways in. `/docs` explains the concepts behind it, `/admin` is the console,
 `/healthz` is for Kubernetes, and the rest is API.
 
-Two of the ways in are clients this repository does not build and cannot discover, so
-each is a URL somebody configures:
+Two of the ways in are the clients, and each is a URL:
 
-* `plane.appUrl` (`TROUPE_APP_URL`) — where the graphical client is mounted, `/app` by
-  default, which is where its own chart puts it. Empty means no app is mounted, and the
-  page then offers no door to a 404.
-* `plane.cliUrl` (`TROUPE_CLI_URL`) — where the terminal client is published. Empty means
-  the page tells a reader to ask their administrator rather than linking at a download
-  that is not there.
+* `plane.appUrl` (`TROUPE_APP_URL`) — where the graphical client is. Empty, it is the GUI
+  the chart serves at `/app` when `gui.enabled`, and no door at all when not — never a
+  link to a 404. A team with its own client points it there.
+* `plane.cliUrl` (`TROUPE_CLI_URL`) — where the terminal client is published. The TUI is
+  released with the chart, but a private repository's release page is a door most readers
+  cannot open, so empty means the page tells a reader to ask their administrator.
 
 ## The admin console
 
@@ -149,15 +179,24 @@ spawned.
 
 ## Building from source
 
-Needs Elixir 1.20.4 on OTP 28.5.0.5 and Zig 0.16.0 — see `.tool-versions`. Zig builds
-`reaper`, the small helper every shell command runs under; the worker's image builds it
-inside the image, for Linux, and nothing here is cross-compiled for anything else.
+Needs Elixir 1.20.4 on OTP 28.5.0.5, Zig 0.16.0 and, for the GUI, Node 24 — see
+`.tool-versions`. Zig builds `reaper`, the small helper every shell command runs under;
+the worker's image builds it inside the image, and the daemon and the TUI build it for the
+machine they are built on.
 
 ```sh
 mix deps.get
 mix check                    # compile --warnings-as-errors, format, credo, boundaries, test
-scripts/build-images         # the four images, into kind or a registry
+scripts/build-images         # the five images, into kind or a registry
+
+(cd clients/tui && mix deps.get && mix check)                  # the TUI
+(cd clients/gui && pnpm install && pnpm build && pnpm test)    # the GUI
+(cd apps/troupe_daemon && MIX_ENV=prod mix release)            # the daemon, for this machine
 ```
+
+`elixir scripts/locks-agree.exs` checks the TUI's lock and the umbrella's agree on the
+packages both lock, and `elixir scripts/version.exs check` that every copy of the version
+agrees with `VERSION`. CI runs both.
 
 `mix troupe.boundaries` is part of that gate and is not decoration: the A2A facade may
 depend on `troupe_protocol` and nothing else, the plane does not run agents, and the
@@ -202,9 +241,9 @@ That is `apps/troupe_gateway/test/conformance/troupe.py`, 220 lines of standard 
 and a **test fixture rather than a deliverable** — this repository publishes no Python
 package. `conformance.py` beside it runs in CI against a real daemon: it initializes,
 lists the fleet, replays a session from `seq` 0, sends input, answers an approval, and
-verifies the hash chain itself. Now that every client is outside this repository, it is
-the check that proves the protocol is enough to be one. If it stops working, the protocol
-broke.
+verifies the hash chain itself. The TUI and the GUI live in this repository, so this is
+the check that proves the protocol alone is enough to be a client — the one a client of
+your own relies on. If it stops working, the protocol broke.
 
 ## The A2A facade
 
@@ -217,13 +256,13 @@ no credential of its own, and exchanges each caller's at the plane.
 
 ## Not included
 
-No client of any kind, and no packaged binary for any platform — the daemon binary is
-built from this repository's apps, in the `troupe` repository, on its runners. No MCP
-client, no git auto-commit or undo, no image signing.
+No MCP client, no git auto-commit or undo, no image signing, and no signed desktop or
+Windows builds until the signing secrets exist.
 
-[docs/user/](docs/user/README.md) documents the terminal client that used to live here.
-It is deprecated and kept as an artifact: the code it cites is in git history, and the
-client's own repository is where that material belongs.
+[docs/user/](docs/user/README.md) documents the terminal client as it was when it last
+lived in `apps/`, before 2026-09-14. It is kept as an artifact; the TUI's own
+documentation is [`clients/tui`](clients/tui/README.md), and the GUI's is
+[`clients/gui/docs`](clients/gui/docs/README.md).
 
 ## Licence
 

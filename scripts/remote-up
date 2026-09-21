@@ -323,7 +323,7 @@ cat <<EOF
   identity   http://dex.localtest.me:30080/dex   (ada@example.test / troupe)
   workers    ws://<n>.${profile}.workers.localtest.me:30080/v1/socket
 
-Log in and use it, with a client from its own repository:
+Log in and use it — the GUI at http://plane.localtest.me:30080/app, or the TUI from clients/tui:
 
   troupe login http://plane.localtest.me:30080
   troupe --remote sessions

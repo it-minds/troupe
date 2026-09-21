@@ -4,8 +4,9 @@
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; every line number below is from that tree, whose working copy was otherwise clean.
 
-> **Re-audited 2026-09-14.** The client apps were deleted and this repository now ships
-> only its four images and the chart. `TROUPE_CLI_URL` / `plane.cliUrl` are new; the
+> **Re-audited 2026-09-14; updated 2026-09-21.** The chart now serves the GUI too (`gui.*`,
+> Decision 670) and names the release's worker image (`worker.image`, 672); the TUI and the
+> daemon are released from this repository again, but nothing here deploys them. `TROUPE_CLI_URL` / `plane.cliUrl` are new; the
 > client-side variables in A.2 are kept for client authors and no longer read by anything
 > here.
 
@@ -245,8 +246,13 @@ Chart `troupe` version `0.2.0`, `appVersion "0.2.0"` (`charts/troupe/Chart.yaml:
 | `plane.replicas` (75) | `2` | `plane-deployment.yaml:127,131,383`; `_helpers.tpl:31-35` | Deployment replicas; `Recreate` when 1; PDB `minAvailable: 1` when >1; render fails when >1 with `distribution` not `name` |
 | `plane.host` (76) | `plane.example.test` | `plane-deployment.yaml:213-214,434,438` | `TROUPE_HOST`; Ingress host and TLS host |
 | `plane.baseUrl` (79) | `""` → `https://<host>` | `plane-deployment.yaml:215-216` | `TROUPE_BASE_URL` |
-| `plane.appUrl` (83) | `/app` | `plane-deployment.yaml:220-221` | `TROUPE_APP_URL`; the GUI's own chart mounts it at this path on the same host |
-| `plane.cliUrl` (88) | (empty) | `plane-deployment.yaml` | `TROUPE_CLI_URL`; the terminal client is published from another repository and this chart does not serve it |
+| `plane.appUrl` | `""` → `gui.basePath` when `gui.enabled`, else empty | `plane-deployment.yaml` | `TROUPE_APP_URL`; set it to point the front page at a GUI of your own |
+| `plane.cliUrl` | (empty) | `plane-deployment.yaml` | `TROUPE_CLI_URL`; where the TUI is published. It ships in this repository's releases, but the chart does not serve it |
+| `gui.enabled` | `true` | `gui-deployment.yaml` | the GUI's Deployment, Service, Ingress and NetworkPolicy; needs `plane.enabled` (Decision 670) |
+| `gui.image.repository`, `gui.image.tag` | `ghcr.io/objective-mj/troupe-gui`, `""` → appVersion | `gui-deployment.yaml` | the GUI image |
+| `gui.replicas` | `2` | `gui-deployment.yaml` | |
+| `gui.basePath` | `/app` | `gui-deployment.yaml` | where the GUI mounts on `plane.host`; must match the image's `TROUPE_GUI_BASE`; `/` is refused |
+| `gui.resources` | 10m/32Mi requests, 200m/128Mi limits | `gui-deployment.yaml` | |
 | `plane.corsOrigins` (82) | `[]` | `plane-deployment.yaml:219-220` | `TROUPE_CORS_ORIGINS` (csv) |
 | `plane.ingressClassName` (83) | `nginx` | `plane-deployment.yaml:431` | Ingress class |
 | `plane.certIssuer` (86) | `""` | `plane-deployment.yaml:408-413` | `cert-manager.io/cluster-issuer` annotation |
@@ -441,7 +447,7 @@ Troupe creates no Secrets (`values.yaml:11-16,126-130`). Every one below must ex
 | 4369 | epmd on plane pods (only with `distribution: name`) | pod-to-pod only | `plane-deployment.yaml:171-173`; `network-policy.yaml:58` |
 | 9100 | Erlang distribution on plane pods (`plane.distPort`) | pod-to-pod only | `values.yaml:110`; `plane-deployment.yaml:174-175,203`; `network-policy.yaml:59` |
 | 8200 / 9000 / 5432 | OpenBao, MinIO, Postgres (defaults) | in-cluster Services, not part of this chart | `values.yaml:214,226`; `dev/kind/dependencies.yaml` |
-| 8080 | the GUI | a separate repository; not in this chart | see [integrations.md](integrations.md) |
+| 8080 | the GUI (`gui.enabled`) | Service `troupe-gui` port 80 → 8080; Ingress at `gui.basePath` on `plane.host`; NetworkPolicy admits the ingress namespace | `gui-deployment.yaml`; `network-policy.yaml` |
 
 ### Namespace labels
 

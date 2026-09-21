@@ -10,6 +10,13 @@
 > `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
 > that; line citations that predate it refer to the tree at commit `20fe871`.
 
+> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
+> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
+> installers are back at the root, installing the TUI and the daemon (671). A merged
+> `VERSION` change releases and deploys everything (669). Where this page says the
+> repository ships no client or no binary, that was true of the tree it was audited
+> against and is not now.
+
 One kind of artefact comes out of the umbrella: four server images, built by
 `docker/Dockerfile` with `RELEASE` picking which. Plus the chart that deploys them, and
 three generators whose output is committed.
@@ -87,14 +94,13 @@ each of five targets, built by `scripts/build-local` on a laptop and by one nati
 per target in CI, verified by `Troupe.Release.verify_linux_nif/1`, installed by
 `install.sh` and `install.ps1`, and smoke-tested in a clean container.
 
-All of it is gone, and so are the two apps it packaged. This repository is deployed to
-Kubernetes by `charts/troupe`; it is installed on no machine, so there is no machine to
-build for and no target matrix to maintain. A terminal or graphical client is a separate
-release from a separate repository that speaks [PROTOCOL.md](../../PROTOCOL.md), and the
-plane's front page links to it through `plane.cliUrl` and `plane.appUrl`.
-
-What this leaves is one build path — `docker/Dockerfile`, four times — and the reaper
-inside it.
+All of it went on 2026-09-14, and so did the two apps it packaged. Since 2026-09-21 the
+repository builds for machines again, from outside the umbrella (Decisions 666–669): the
+daemon from `apps/troupe_daemon` as a plain Mix release per platform, the TUI from
+`clients/tui` as a Burrito binary per platform, and the desktop app from `clients/gui` —
+all on native runners in `.github/workflows/release.yml`
+([ci-cd.md](ci-cd.md) §4). The server images are unaffected by any of it: `docker/Dockerfile`,
+four times, with the reaper inside the worker's, and the GUI's image from `clients/gui`.
 
 ### The reaper
 

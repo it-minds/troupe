@@ -4,10 +4,10 @@
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers in this tree are from that commit.
 
-> **Re-audited 2026-09-14.** The client apps were deleted; this repository ships four
-> images and the chart. The `troupe admin …` commands used throughout this track are the
-> **terminal client's** rendering of the admin API, and that client is published from its
-> own repository — `plane.cliUrl` is where you tell the front page it lives. Every command
+> **Re-audited 2026-09-14; updated 2026-09-21.** The `troupe admin …` commands used
+> throughout this track are the **terminal client's** rendering of the admin API. That
+> client is `clients/tui` in this repository again (Decision 666), released beside the
+> daemon; `plane.cliUrl` is still where you tell the front page it is published. Every command
 > shown has three equivalents that do ship here: an `admin.*` JSON-RPC method at
 > `POST /rpc`, the same method as an MCP tool at `POST /mcp`, and a page in the console at
 > `/admin`. [roles-and-permissions.md §9](roles-and-permissions.md#9-the-admin-method-table)
@@ -98,7 +98,7 @@ The three overlays (`charts/troupe/values.small.yaml`, `charts/troupe/values.sca
 
 ### Not covered, and why
 
-- **The GUI's admin guide** (`troupe-gui/docs/admin/README.md`) did not exist when this was written; what the plane must provide for the GUI is in [integrations.md §10](integrations.md#10-the-gui).
+- **The GUI's admin guide** is [`clients/gui/docs/admin/README.md`](../../clients/gui/docs/admin/README.md); what the plane must provide for the GUI is in [integrations.md §10](integrations.md#10-the-gui).
 - **Hatchet** and any webhook receiver: not in this repository ([bundles-and-triggers.md §3](bundles-and-triggers.md#3-triggers)).
 - **Installing per-profile OpenBao worker policies in a cluster**: the code renders them, nothing installs them; the dev manifest installs one wide policy ([integrations.md §2](integrations.md#2-openbao)).
 - **The live deployment's actual values, image tags and secrets**: all under the gitignored `.local/` ([AUDIT.md §4.1](../AUDIT.md)).

@@ -16,11 +16,14 @@ Read it before changing anything under `apps/troupe_gateway/`,
 
 ## 1. The umbrella
 
-Four releases come out of one umbrella, and every one of them is a container image. There
-was a fifth — `troupe`, the TUI and the CLI wrapped by Burrito into an executable per
-platform — and it was deleted on 2026-09-14 along with the two apps it packaged. This
-repository is the remote: it is deployed by `charts/troupe` and installed on no machine,
-and every client is a separate release from a separate repository.
+Four releases come out of the umbrella's root, and every one of them is a container image;
+a fifth, `troupe_daemon`, is defined in `apps/troupe_daemon` and built on each platform it
+ships for. The clients are in the same repository and outside the umbrella (Decision
+666): `clients/tui` is a Mix project of its own that depends on the harness apps by
+path, and `clients/gui` is a pnpm workspace that depends on nothing here but the
+protocol. There was once a `troupe` Burrito release of the TUI and the CLI built from
+this umbrella; it was deleted on 2026-09-14, and the TUI's binary is now built from
+`clients/tui`.
 
 | App | In which release | What it is |
 | --- | --- | --- |
@@ -795,14 +798,15 @@ they find out from the transcript.
 ## 13. Kept possible, then built
 
 The spec ruled three things out and asked that they stay reachable. Stage 5 built two
-of them and the third is a client in the GUI repository:
+of them and the third is the GUI:
 
 * **Remote triggers** and **the A2A facade** are §14. Both turned out to be what §13 once
   promised: callers of the plane and the worker socket, with a service principal where a
   person used to be, and a few lifecycle facts the plane can now list.
-* **A GUI harness** is `troupe-gui`, its own repository, speaking the protocol over a
-  WebSocket to pods and, in its second stage, to the daemon on loopback. Nothing in the
-  protocol assumed a terminal, and nothing had to change here for it.
+* **A GUI harness** is `clients/gui`, built in its own repository and in this one since
+  Decision 666, speaking the protocol over a WebSocket to pods and to the daemon on
+  loopback. Nothing in the protocol assumed a terminal, and nothing had to change here
+  for it.
 
 ---
 

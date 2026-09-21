@@ -61,6 +61,11 @@ provider and still never typed in Troupe.
 
 ## The working contract between the repositories
 
+> **2026-09-21:** the repositories are one (Decision 666), and these are its rules. Rule 1
+> still orders the work — the protocol, then the server, then the client — but it is one
+> pull request now, not three. Rule 3 is enforced: every copy of the version, the chart's
+> and the GUI's included, must equal `VERSION`, and CI checks it (`scripts/version.exs`).
+
 Unchanged from `../../clients/gui/spec.md` and restated because it governs every package here:
 
 1. **Protocol first.** A new method or field lands in `../../PROTOCOL.md`, then in

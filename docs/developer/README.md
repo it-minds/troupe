@@ -10,6 +10,13 @@
 > `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
 > that; line citations that predate it refer to the tree at commit `20fe871`.
 
+> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
+> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
+> installers are back at the root, installing the TUI and the daemon (671). A merged
+> `VERSION` change releases and deploys everything (669). Where this page says the
+> repository ships no client or no binary, that was true of the tree it was audited
+> against and is not now.
+
 Note on the baseline: while these files were being written the uncommitted change landed
 as commit `6c29471` ("`groups` is not a scope, in the last place that still asked for
 it"). The line numbers cited here were checked against the working tree that contains
@@ -22,8 +29,8 @@ it, which is identical to `3f7c91f` plus that change.
 | [repo-structure.md](repo-structure.md) | Annotated tree, each app's `lib/` layout, where tests, fixtures, schemas and CRDs live, what is generated and by which task |
 | [local-setup.md](local-setup.md) | Prerequisites, `scripts/dev-up`, the test database, why the only local plane is `scripts/remote-up`, every development variable and `config.yaml` key |
 | [testing.md](testing.md) | Suite layout, what each suite needs and what it does without it, fixtures, the conformance client, the parity test, the ten CI runs |
-| [build.md](build.md) | The four images, the reaper, the three generators — and nothing else, because there is nothing else to build |
-| [ci-cd.md](ci-cd.md) | Every job and step of `ci.yml`; the chart published on a tag; no deploy step; no branch protection in the repo |
+| [build.md](build.md) | The four server images, the reaper, the three generators; where the GUI's image, the daemon and the TUI are built |
+| [ci-cd.md](ci-cd.md) | The three workflows: what a pull request runs under `ci-ok`, what `main` publishes, how a merged `VERSION` change releases and deploys |
 | [deployment.md](deployment.md) | Images, CRDs, the chart, the migration hook, rollout behaviour, the kind and Scaleway flows, rollback |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter blind spot, credo, stated rules, commit style, naming, recipes |
 
@@ -32,57 +39,25 @@ The other tracks: [../user/README.md](../user/README.md),
 
 ## Self-check: CI coverage
 
-Every job and step of `.github/workflows/ci.yml`, and the section of
-[ci-cd.md](ci-cd.md) that covers it.
+Every job of the three workflows, and the section of [ci-cd.md](ci-cd.md) that covers it.
+Line numbers are left out on purpose: the workflows were rewritten for the monorepo
+(Decision 669), and a job's name is the stable way to find it.
 
-| Job | Step | `ci.yml` | Covered in |
-|---|---|---|---|
-| — | triggers and `env` | `:9-18` | ci-cd.md §1 |
-| `check` | postgres service | `:31-43` | ci-cd.md §2 `check` |
-| `check` | checkout | `:45` | ci-cd.md §2 `check` #1 |
-| `check` | setup-beam | `:47-50` | #2 |
-| `check` | setup-zig | `:52-54` | #3 |
-| `check` | Install inotify-tools | `:56-59` | #4 |
-| `check` | cache deps/_build | `:61-67` | #5; §5 |
-| `check` | `mix deps.get` | `:69` | #6 |
-| `check` | Compile with warnings as errors | `:71-72` | #7 |
-| `check` | `mix format --check-formatted` | `:74` | #8; conventions.md §3 |
-| `check` | `mix credo --strict` | `:75` | #9 |
-| `check` | Boundaries | `:77-80` | #10 |
-| `check` | Migrate the plane's test database | `:82-85` | #11 |
-| `check` | Test (10 consecutive runs) | `:87-90` | #12; testing.md §7 |
-| `chart` | checkout | `:96` | ci-cd.md §2 `chart` #1 |
-| `chart` | setup-helm | `:98` | #2 |
-| `chart` | Lint, with each values file | `:100-104` | #3 |
-| `chart` | The chart refuses unclustered replicas | `:106-113` | #4 |
-| `chart` | Render and validate | `:115-128` | #5 |
-| `images` | `needs`, `if`, permissions, matrix | `:132-143` | ci-cd.md §2 `images` |
-| `images` | checkout | `:145` | #1 |
-| `images` | Resolve the registry and the tags | `:153-173` | #2 |
-| `images` | setup-buildx | `:175` | #3 |
-| `images` | login | `:177-181` | #4 |
-| `images` | build-push | `:186-195` | #5 |
-| `protocol` | checkout | `:201` | ci-cd.md §2 `protocol` #1 |
-| `protocol` | setup-beam | `:203-206` | #2 |
-| `protocol` | setup-zig | `:208-210` | #3 |
-| `protocol` | setup-python | `:212-214` | #4 |
-| `protocol` | cache | `:216-222` | #5 |
-| `protocol` | `mix deps.get` | `:224` | #6 |
-| `protocol` | Schema compatibility | `:226-230` | #7; build.md §3 |
-| `protocol` | Committed schema is current | `:232-236` | #8 |
-| `protocol` | Python reference client, end to end | `:238-242` | #9; testing.md §5 |
-| `release` | `needs`, `if`, permissions | ci-cd.md §2 `release` |
-| `release` | checkout, setup-helm | #1 |
-| `release` | Package the chart at this version | #2 |
-| `release` | action-gh-release, the chart tarball | #3 |
+| Workflow | Job | Covered in |
+|---|---|---|
+| `ci.yml` | triggers, concurrency, `env` | ci-cd.md §1 |
+| `ci.yml` | `changes` | §2, the filter table |
+| `ci.yml` | `check`, `chart`, `protocol` | §2; testing.md §7 (the soak); build.md §3 (the schema) |
+| `ci.yml` | `tui`, `gui`, `gui-e2e`, `versions` | §2 |
+| `ci.yml` | `native` | §2; §4 |
+| `ci.yml` | `ci-ok` | §2 |
+| `ci.yml` | `cluster`, `images` | §3 |
+| `ci.yml` | `release`, `release-native`, `publish`, `deploy` | §3; deployment.md |
+| `release.yml` | `daemon`, `tui`, `tui-containers`, `desktop`, `attach` | §4 |
+| `deploy.yml` | `deploy` | §3; deployment.md §6 |
 
-Nothing in the workflow is left uncovered. What the workflow does not contain — a deploy
-step, branch protection, a cluster — is in ci-cd.md §6.
-
-The four columns above became three for the `release` rows: the `ci.yml` line numbers in
-this table are from the 2026-09-13 audit, and the workflow has been rewritten twice since
-— once to make it green, once to remove the client build. Treat them as a reading order
-rather than as coordinates, and read `ci.yml` itself for the lines.
+Secrets, variables and the `production` environment are §5. What the workflows do not
+contain — a staging environment, signing, native builds on every merge — is §7.
 
 ## Self-check: development variables
 

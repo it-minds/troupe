@@ -10,6 +10,13 @@
 > `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
 > that; line citations that predate it refer to the tree at commit `20fe871`.
 
+> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
+> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
+> installers are back at the root, installing the TUI and the daemon (671). A merged
+> `VERSION` change releases and deploys everything (669). Where this page says the
+> repository ships no client or no binary, that was true of the tree it was audited
+> against and is not now.
+
 593 tracked files (`git ls-files | wc -l` on 2026-09-13). The umbrella root has no `lib/`
 of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Reaper` and
 `Troupe.Release`, live in `apps/troupe_core/lib/` (`DECISIONS.md:8-16`).
@@ -21,27 +28,31 @@ of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Rea
 ├── .credo.exs               credo config; includes apps/*/lib and apps/*/test (:24-33)
 ├── .dockerignore            what the image build never needs
 ├── .formatter.exs           inputs: {mix,.formatter}.exs and {config,lib,test}/** at the ROOT only (:3)
-├── .github/workflows/ci.yml the one workflow
+├── .github/workflows/       ci.yml (the gate, images, release, deploy), release.yml (native builds), deploy.yml (rollback)
 ├── .gitignore               _build, deps, apps/*/priv/reaper, .local/
-├── .tool-versions           erlang 28.5.0.5, elixir 1.20.4-otp-28, zig 0.16.0
+├── .tool-versions           erlang 28.5.0.5, elixir 1.20.4-otp-28, zig 0.16.0, nodejs 24.19.0
 ├── ARCHITECTURE.md          prose architecture (stale in places; see architecture.md)
 ├── DECISIONS.md             every deviation from spec.md, numbered, newest at the bottom (:1-4)
 ├── PROTOCOL.md              the normative wire document for client authors
 ├── README.md                what it ships, deploy, the front door, the console, build
 ├── REPORT.md                per-stage evidence that done items are done
 ├── spec.md                  the specification DECISIONS.md deviates from
-├── apps/                    seven Mix projects (below)
-├── charts/troupe/           the Helm chart, its CRDs and three values files
+├── VERSION                  the one version of everything released (Decision 668)
+├── apps/                    eight Mix projects (below)
+├── charts/troupe/           the Helm chart — the platform and the GUI — its CRDs and three values files
+├── clients/tui/             the terminal client: its own Mix project, the harness by path from apps/
+├── clients/gui/             the graphical client: a pnpm workspace (client, bench, desktop)
 ├── config/                  config.exs (compile time) and runtime.exs (prod only)
-├── deploy/scaleway/         ingress-nginx, cert-manager and OpenBao values for Kapsule
+├── deploy/                  ci-deployer.yaml (the account CI deploys as); scaleway/ values for Kapsule
 ├── dev/                     docker-compose.yml; kind/dependencies.yaml and kind/values.yaml
-├── docker/Dockerfile        one two-stage Dockerfile for all four releases
-├── docs/                    AUDIT.md, a2a.md, deploying-on-scaleway.md, design/admin/, plans/, and the four tracks
+├── docker/Dockerfile        one two-stage Dockerfile for the four server releases
+├── docs/                    AUDIT.md, a2a.md, deploying-on-scaleway.md, design/admin/, plans/, program/, history/, and the four tracks
 ├── fixtures/sample_repo/    a small Elixir project the core's workspace tests read
+├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: aliases (check), releases, umbrella-wide deps
 ├── native/reaper/reaper.zig the process-tree reaper, one source for every triple
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, dev-down, kind-up, kind-down, build-images, remote-up, pitr-drill, brand-icons.py
+├── scripts/                 dev-up, dev-down, kind-up, kind-down, build-images, remote-up, pitr-drill, release, deploy, ci-kubeconfig, version.exs, locks-agree.exs, …
 └── test/fixtures/logs/      recorded log fixtures per released version (0.2.0/)
 ```
 
@@ -102,12 +113,22 @@ test/support/harness_case.ex            several clients as distinct principals o
 test/troupe/gateway/**                  11 files, including python_client_test.exs
 ```
 
-### There are no client apps
+### The clients are not umbrella apps
 
-`apps/troupe_tui` and `apps/troupe_ctl` — the terminal UI, the fleet view, the CLI, the
-headless renderer and the login and credential handling — were deleted on 2026-09-14.
-Nothing in this repository is a client any more, and nothing it builds is installed on a
-machine. `git show 20fe871:apps/troupe_ctl` has them if the client repository wants them.
+`apps/troupe_tui` and `apps/troupe_ctl` were deleted on 2026-09-14
+(`git show 20fe871:apps/troupe_ctl` has them). The clients came back on 2026-09-21 outside
+the umbrella (Decision 666): `clients/tui` is a Mix project of its own that depends on the
+three harness apps by path, and `clients/gui` is a pnpm workspace that depends on nothing
+here but the protocol. Neither is compiled by `mix check` at the root; each has its own
+gate, and CI runs both.
+
+### `apps/troupe_daemon` — the harness on a laptop
+
+The harness and a command line, released as `troupe-daemon` from this directory
+(`MIX_ENV=prod mix release`), so a runner compiles the harness and nothing else of the
+umbrella (Decision 667). `mix troupe.boundaries` holds it to `troupe_protocol`,
+`troupe_core` and `troupe_gateway`. Its release's runtime configuration is its own
+`config/runtime.exs`.
 
 ### `apps/troupe_worker` — a pod
 
@@ -198,7 +219,8 @@ test/troupe/a2a/**                        5 files
 ## 5. What the image build sees
 
 `docker/Dockerfile:25-43` copies `mix.exs`, `mix.lock`, each `apps/*/mix.exs`, then
-`config/`, `apps/` and `native/`, and nothing else. `.dockerignore` removes `_build`,
+`config/`, `apps/` and `native/`, and nothing else. `.dockerignore` removes `clients/`
+entirely (the GUI's image is built with `clients/gui` as its own context), `_build`,
 `deps`, `apps/*/priv/reaper`, every `test/` directory (which is where the Python
 conformance fixture now lives), `fixtures`, `docs`, `charts`, `dev`, `scripts` and
 `*.md`. This is why

@@ -2,8 +2,8 @@
 
 What comes after the small release, written before it was built. The first three are
 built as stage 5 — `ARCHITECTURE.md` §14 describes what landed and `REPORT.md` proves
-it — and stay here as the record of what was intended and why. The fourth is the GUI
-repository's `spec.md`; the fifth is not built. Each plan says what
+it — and stay here as the record of what was intended and why. The fourth is the GUI's
+`spec.md` (`clients/gui`); the fifth is not built. Each plan says what
 it brings, what it takes, what is already in place, what the code is missing today
 (with file and line), the design, the order of work, and the done items that prove it.
 `spec.md` and `ARCHITECTURE.md` remain the authority on invariants; nothing here weakens
@@ -14,15 +14,16 @@ apps were deleted (`DECISIONS.md` 319–320) and with them the argument that a b
 client was the protocol's test harness. What carries that proof now is
 `apps/troupe_gateway/test/conformance/conformance.py` — a client written against
 `PROTOCOL.md` in another language, with no access to this source — run by the gateway
-suite that owns it. A client is a separate release from a separate repository; nothing in
-these plans that reads "the TUI does X" describes code in this tree.
+suite that owns it. Nothing in these plans that reads "the TUI does X" describes the
+TUI that is in `clients/tui` now.
 
-A terminal client is expected to come back the way the graphical one did — its own
-repository, its own release, reaching a plane over `PROTOCOL.md` with the scopes its
-principal has. When it does, nothing here changes: what was deleted was a client *inside*
-the boundary, and the reason it went is that there is no longer any client that could be
-special. The conformance suite stays where it is, because a client of ours proving the
-protocol is exactly the argument that was given up.
+A terminal client came back the way the graphical one did — a client of the protocol,
+reaching the daemon and a plane over `PROTOCOL.md` with the scopes its principal has —
+and on 2026-09-21 both moved into this repository, under `clients/` and outside the
+umbrella (Decision 666). Nothing here changes for it: what was deleted was a client
+*inside* the umbrella's boundary, and neither client is one. The conformance suite stays
+where it is, because a client of ours proving the protocol is exactly the argument that
+was given up.
 
 | Plan | One line | Depends on |
 | --- | --- | --- |
