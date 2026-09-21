@@ -66,12 +66,32 @@ async function approveAtDex(issuer: string, device: DeviceAuthorization): Promis
   assert.ok(res.status < 400, `the device code was approved (last status ${res.status})`);
 }
 
+/**
+ * The plane's discovery document, once the plane answers. A plane is up when it answers,
+ * not when its container is running: `docker compose up --wait` returns as soon as the
+ * container starts, because the plane has no health check it could run
+ * (dev/plane-stack.yml says why), and the release listens a few seconds later. Asked
+ * before then, Docker's port proxy accepts the connection and closes it. So the suite
+ * waits the way a client would, by asking again.
+ */
+async function waitForPlane(plane: string, timeoutMs = 180_000): Promise<Discovery> {
+  const deadline = Date.now() + timeoutMs;
+  for (;;) {
+    try {
+      return await new PlaneClient(plane).discover();
+    } catch (error) {
+      if (Date.now() > deadline) throw error;
+      await new Promise((resolve) => setTimeout(resolve, 1_000));
+    }
+  }
+}
+
 describe("against a real plane", { skip }, () => {
   let discovery: Discovery;
 
   before(async () => {
     if (!PLANE) return;
-    discovery = await new PlaneClient(PLANE).discover();
+    discovery = await waitForPlane(PLANE);
   });
 
   /**

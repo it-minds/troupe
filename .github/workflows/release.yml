@@ -204,6 +204,10 @@ jobs:
     name: the TUI's Linux binary in clean containers
     needs: [tui]
     runs-on: ubuntu-24.04
+    # A binary that hangs in a container must fail this job, not hold a runner for six
+    # hours: the first run of this job on GitHub did exactly that, with no log to show
+    # for it until the job ended.
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -211,17 +215,27 @@ jobs:
           pattern: troupe-*-linux_x86_64
           merge-multiple: true
           path: dist
+      # Each command under `timeout`, so a hang is a failure that names the command; the
+      # run's output to a file rather than through `tee`, because a pipe stays open while
+      # anything the binary started still holds it, and `tee` would wait for all of them;
+      # and `--init`, so something reaps whatever the harness leaves behind. The output is
+      # printed either way.
       - name: ubuntu:24.04 and alpine (no Erlang, no Elixir, no inotify-tools)
         run: |
           chmod +x dist/troupe-*-linux_x86_64
           for img in ubuntu:24.04 alpine:3.20; do
-            docker run --rm -v "$PWD/dist:/dist" -v "$PWD/clients/tui/fixtures:/fixtures" "$img" sh -c '
-              set -e; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work/.troupe && cd /work
+            echo "::group::$img"
+            docker run --rm --init -v "$PWD/dist:/dist" -v "$PWD/clients/tui/fixtures:/fixtures" "$img" sh -c '
+              set -e; ulimit -n; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work/.troupe && cd /work
               printf "provider: fake\nmodel: fake-model\nfake_script: /fixtures/fake_scripts/smoke.json\n" > .troupe/config.yaml
-              $BIN --version
-              $BIN run build "smoke" --headless --auto-approve --watch 2>&1 | tee out.log
-              grep -q polling out.log && echo "watch fell back to polling"
+              timeout 120 $BIN --version
+              status=0
+              timeout 300 $BIN run build "smoke" --headless --auto-approve --watch > out.log 2>&1 || status=$?
+              cat out.log
+              [ "$status" = 0 ] || { echo "the run exited $status (124 is the timeout)"; exit 1; }
+              if grep -q polling out.log; then echo "watch fell back to polling"; fi
               test -f hello.txt'
+            echo "::endgroup::"
           done
 
   # -- the desktop app ----------------------------------------------------------

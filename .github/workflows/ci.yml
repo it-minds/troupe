@@ -589,10 +589,15 @@ jobs:
           TROUPE_E2E_PLANE: http://localhost:4020
         run: node --test --import tsx --test-reporter=spec test/e2e.plane.test.ts
 
+      # The plane's own log, and the migration's apart from it: together, the migration's
+      # hundred lines of `create table` are all a tail of the pair would show.
       - name: The plane's log, on failure
         if: failure()
         working-directory: clients/gui
-        run: docker compose -f dev/plane-stack.yml logs --no-color plane plane-migrate | tail -300
+        run: |
+          docker compose -f dev/plane-stack.yml ps --all
+          docker compose -f dev/plane-stack.yml logs --no-color plane | tail -200
+          docker compose -f dev/plane-stack.yml logs --no-color plane-migrate | tail -20
 
   # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
   # read it; a copy nobody checks is how four numbers came to have no relation. Cheap, so
