@@ -147,6 +147,8 @@ defmodule Troupe.UI.TUI.Model do
           badge: false,
           activity: %{},
           activity_since: e.ts,
+          # The last model error per agent, until the agent next does something.
+          model_errors: %{},
           summary: nil,
           message: nil,
           diff_stat: nil,
@@ -251,7 +253,14 @@ defmodule Troupe.UI.TUI.Model do
         end)
 
       :agent_state ->
-        %{w | activity: Map.put(w.activity, path, d.to), activity_since: ts}
+        errors = Map.get(w, :model_errors, %{})
+        errors = if d.to in [nil, :idle], do: errors, else: Map.delete(errors, path)
+
+        Map.merge(w, %{
+          activity: Map.put(w.activity, path, d.to),
+          activity_since: ts,
+          model_errors: errors
+        })
 
       :assistant_message ->
         text = Message.text(d.content)
@@ -399,7 +408,10 @@ defmodule Troupe.UI.TUI.Model do
         w |> ensure_agent(path) |> push(path, {:system, "cancelled"}) |> drop_pending(path)
 
       :llm_error ->
-        push(ensure_agent(w, path), path, {:system, "LLM error: #{d.message}"})
+        w
+        |> ensure_agent(path)
+        |> push(path, {:system, "LLM error: #{d.message}"})
+        |> Map.put(:model_errors, Map.put(Map.get(w, :model_errors, %{}), path, d.message))
 
       :todo_updated ->
         update_agent(ensure_agent(w, path), path, fn a -> %{a | todos: d.items} end)
@@ -774,6 +786,10 @@ defmodule Troupe.UI.TUI.Model do
 
           state in [nil, :idle] and tools != [] ->
             "#{spinner} running #{Enum.join(tools, ", ")}"
+
+          # Stopped, not starting: no spinner, and the reason where the user is looking.
+          state in [nil, :idle] and is_map_key(Map.get(w, :model_errors, %{}), path) ->
+            "model error: #{w.model_errors[path]}"
 
           state in [nil, :idle] ->
             "#{spinner} starting"

@@ -10,6 +10,8 @@
 //   it owns directories          `session.create` takes a workspace, `worktree.list`
 //                                and `workspace.recent` answer about this machine
 //   it can be told who you are   `identity.link` changes the actor on everything after
+//   it keeps the model settings  `config.set` writes them, `config.get` reads them back
+//                                without the key, and `config.models` asks a provider
 //
 // It implements the protocol rather than imitating a screen, for the same reason the
 // fake worker does: a test that passes against a fake that agrees with the client by
@@ -43,7 +45,40 @@ export interface FakeDaemonOptions {
   /** What `initialize` reports. A daemon that cannot seal says so by leaving it out. */
   capabilities?: Record<string, unknown>;
   osUser?: string;
+  /**
+   * False is a daemon from before `config.*` existed, which answers `method_not_found`
+   * the way an old one does — the case a client has to say something useful about.
+   */
+  modelSettings?: boolean;
+  /** Things with a stronger claim than the file, as `config.get` reports them. */
+  overrides?: Array<{ source: "project" | "env" | "opencode"; detail: string }>;
 }
+
+/** What the fake daemon's settings file holds. The key is here and nowhere in an answer. */
+export interface FakeModelSettings {
+  exists: boolean;
+  provider: string | null;
+  base_url: string | null;
+  auth: "api_key" | "bearer" | null;
+  api_key: string | null;
+  models: { default: string | null; cheap: string | null; expensive: string | null };
+}
+
+/**
+ * What each provider offers. Anthropic says what everything costs; a gateway in front of
+ * open-weight models usually says nothing, so those come back null — which is the case
+ * a client has to render without inventing a price.
+ */
+const OFFERS: Record<string, Array<Record<string, unknown>>> = {
+  anthropic: [
+    { id: "claude-opus-5", context: 200_000, max_output: 64_000, input: 5.0, output: 25.0 },
+    { id: "claude-haiku-4-5", context: 200_000, max_output: 64_000, input: 1.0, output: 5.0 },
+  ],
+  openai: [
+    { id: "glm-5.2", context: 128_000, max_output: null, input: null, output: null },
+    { id: "qwen3.6-35b", context: 32_768, max_output: 8_192, input: null, output: null },
+  ],
+};
 
 function reply(ws: WebSocket, id: unknown, result: unknown, error?: unknown): void {
   ws.send(JSON.stringify(error ? { jsonrpc: "2.0", id, error } : { jsonrpc: "2.0", id, result }));
@@ -59,18 +94,31 @@ export class FakeDaemon {
   readonly calls: Array<{ method: string; params: Record<string, unknown> }> = [];
   /** Who the daemon says its user is. `null` until somebody links an identity. */
   linked: { subject: string; display_name?: string; plane_url?: string } | null = null;
+  /** The settings file, as `config.set` last wrote it. Nothing is saved until then. */
+  settings: FakeModelSettings = {
+    exists: false,
+    provider: null,
+    base_url: null,
+    auth: null,
+    api_key: null,
+    models: { default: null, cheap: null, expensive: null },
+  };
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
   private readonly clients = new Set<Client>();
   private readonly capabilities: Record<string, unknown>;
   private readonly osUser: string;
+  private readonly modelSettings: boolean;
+  private readonly overrides: NonNullable<FakeDaemonOptions["overrides"]>;
   private nextId = 1;
 
   constructor(opts: FakeDaemonOptions = {}) {
     this.token = opts.token ?? "daemon-token";
     this.capabilities = opts.capabilities ?? { blobs: true, tools: true };
     this.osUser = opts.osUser ?? "ada";
+    this.modelSettings = opts.modelSettings ?? true;
+    this.overrides = opts.overrides ?? [];
   }
 
   get principal(): { subject: string; display_name: string; kind: string } {
@@ -298,9 +346,77 @@ export class FakeDaemon {
         return reply(ws, id, { enabled, backend: "poll" });
       }
 
+      case "config.get":
+      case "config.models":
+      case "config.set":
+        if (!this.modelSettings) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+        return this.config(ws, id, method, params);
+
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
     }
+  }
+
+  /**
+   * The three model-settings methods, with the daemon's semantics for an absent field:
+   * `config.models` falls back to what is saved, and `config.set` keeps the saved key
+   * unless it is handed one, removing it only when handed the empty string.
+   */
+  private config(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    const s = this.settings;
+
+    if (method === "config.get") return reply(ws, id, this.configJson());
+
+    if (method === "config.models") {
+      const provider = String(params["provider"] ?? s.provider ?? "anthropic");
+      const offers = OFFERS[provider];
+      if (!offers) return invalid(`unknown provider ${provider}`);
+      const key = params["api_key"] === undefined ? s.api_key : String(params["api_key"]);
+      // A provider refuses a missing or wrong key with a 401, and the daemon reports
+      // that as a failure beside an empty list rather than as an error: a person trying
+      // a key wants to be told it is wrong, not that the call went badly. Here a key is
+      // right when it looks like one.
+      if (!key || !key.startsWith("sk-")) {
+        return reply(ws, id, { models: [], failures: [{ provider, reason: "401 unauthorized" }] });
+      }
+      return reply(ws, id, { models: offers, failures: [] });
+    }
+
+    // config.set
+    if (!params["command_id"]) return invalid("command_id is required");
+    const provider = String(params["provider"] ?? "");
+    if (!OFFERS[provider]) return invalid(`provider must be one of ${Object.keys(OFFERS).join(", ")}`);
+    const auth = params["auth"];
+    if (auth !== undefined && auth !== "api_key" && auth !== "bearer") return invalid("auth must be api_key or bearer");
+
+    s.exists = true;
+    s.provider = provider;
+    if ("base_url" in params) s.base_url = (params["base_url"] as string | null) || null;
+    if (auth !== undefined) s.auth = auth;
+    if ("api_key" in params) s.api_key = String(params["api_key"] ?? "") || null;
+    const models = (params["models"] ?? {}) as Record<string, string | null | undefined>;
+    for (const role of ["default", "cheap", "expensive"] as const) {
+      if (role in models) s.models[role] = models[role] || null;
+    }
+    return reply(ws, id, this.configJson());
+  }
+
+  private configJson(): Record<string, unknown> {
+    const s = this.settings;
+    const dir = `/home/${this.osUser}/.config/troupe`;
+    return {
+      config_dir: dir,
+      path: `${dir}/config.yaml`,
+      exists: s.exists,
+      provider: s.provider,
+      base_url: s.base_url,
+      auth: s.auth,
+      api_key_set: s.api_key !== null,
+      api_key_source: s.api_key !== null ? "file" : null,
+      models: { ...s.models },
+      overrides: this.overrides,
+    };
   }
 
   private identityJson(): Record<string, unknown> {

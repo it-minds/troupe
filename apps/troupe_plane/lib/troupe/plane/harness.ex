@@ -92,6 +92,7 @@ defmodule Troupe.Plane.Harness do
 
   @methods %{
     "me" => :observe,
+    "me.client_defaults" => :observe,
     "me.connections.list" => :observe,
     "me.connections.grant" => :control,
     "teams.list" => :observe,
@@ -212,6 +213,25 @@ defmodule Troupe.Plane.Harness do
        "teams" => Enum.map(Identity.teams_for(user), &team_json/1),
        "profiles" => granted_profiles(user),
        "platform_admin" => Map.get(context, :platform_admin?, false)
+     }}
+  end
+
+  # What a person's own machine should talk to, for a client to offer as a starting
+  # point. Anybody signed in may read it, which is exactly why there is no key in it.
+  defp handle("me.client_defaults", _params, _context) do
+    provider = Settings.get("client_provider")
+
+    {:ok,
+     %{
+       "configured" => not is_nil(provider),
+       "provider" => provider && to_string(provider),
+       "base_url" => blank_to_nil(Settings.get("client_base_url")),
+       "auth" => provider && to_string(Settings.get("client_auth")),
+       "models" => %{
+         "default" => blank_to_nil(Settings.get("client_model_default")),
+         "cheap" => blank_to_nil(Settings.get("client_model_cheap")),
+         "expensive" => blank_to_nil(Settings.get("client_model_expensive"))
+       }
      }}
   end
 
@@ -2162,6 +2182,12 @@ defmodule Troupe.Plane.Harness do
       "idle_timeout_seconds" => resolved.idle_timeout_seconds
     }
   end
+
+  defp blank_to_nil(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp blank_to_nil(_value), do: nil
 
   defp worker_json(worker) do
     %{

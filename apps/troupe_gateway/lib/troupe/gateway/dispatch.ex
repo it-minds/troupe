@@ -15,6 +15,7 @@ defmodule Troupe.Gateway.Dispatch do
   """
 
   alias Troupe.Agent.Definitions
+  alias Troupe.Config.ModelSettings
   alias Troupe.Gateway.{ClientTool, Commands, Plane, Presence, Private, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
@@ -93,7 +94,13 @@ defmodule Troupe.Gateway.Dispatch do
     # back does not, because a client needs to know whether to offer the control at all.
     "identity.get" => :observe,
     "identity.link" => :admin,
-    "identity.unlink" => :admin
+    "identity.unlink" => :admin,
+    # The machine's own model settings. Reading them says nothing secret — the key is
+    # reported as set or not — but trying a provider sends a key to a URL, and saving
+    # changes what every later session on the machine talks to.
+    "config.get" => :observe,
+    "config.models" => :admin,
+    "config.set" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -657,9 +664,41 @@ defmodule Troupe.Gateway.Dispatch do
     {:ok, Identity.to_json(nil)}
   end
 
+  # -- model settings -----------------------------------------------------------
+  #
+  # The daemon's alone. A pod's provider is its profile's business and a pod has no user
+  # file to edit, so on a worker these do not exist rather than answer about a file
+  # nobody reads.
+
+  defp handle("config." <> _ = method, params, _context) do
+    if Process.whereis(Troupe.Gateway.Daemon),
+      do: model_settings(method, params),
+      else: {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
   end
+
+  defp model_settings("config.get", params) do
+    {:ok, ModelSettings.describe(workspace_param(params))}
+  end
+
+  defp model_settings("config.models", params) do
+    settings_result(ModelSettings.discover(params))
+  end
+
+  defp model_settings("config.set", params) do
+    settings_result(ModelSettings.write(params, workspace_param(params)))
+  end
+
+  defp settings_result({:ok, result}), do: {:ok, result}
+  defp settings_result({:error, reason}), do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
+  defp workspace_param(%{"workspace" => workspace}) when is_binary(workspace) and workspace != "",
+    do: Path.expand(workspace)
+
+  defp workspace_param(_params), do: nil
 
   defp maybe_private(opts, false), do: opts
   defp maybe_private(opts, true), do: [{:kind, :private} | opts]

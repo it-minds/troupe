@@ -259,6 +259,19 @@ defmodule Troupe.Client.Remote do
 
   def whoami(_origin), do: {:error, :unsupported}
 
+  @doc """
+  What the plane's administrators say this machine should talk to: provider, URL, auth
+  style and models, never a key (`me.client_defaults`).
+  """
+  @spec client_defaults(Troupe.Client.origin()) :: {:ok, map()} | {:error, term()}
+  def client_defaults({:remote, plane}) do
+    case call(plane, "me.client_defaults") do
+      {:ok, %{} = defaults} -> {:ok, defaults}
+      {:ok, other} -> {:error, {:unexpected, other}}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
   @impl true
   def fleet_status({:remote, plane} = origin) do
     status = Plane.status(plane)

@@ -66,6 +66,9 @@ defmodule Troupe.CLI.Runner do
         IO.puts(Troupe.Config.describe(Troupe.Config.load(args.workspace)))
         0
 
+      {:ok, %{mode: :config_pull} = args} ->
+        Troupe.CLI.ModelConfig.pull(args.plane_url)
+
       {:ok, %{mode: :models} = args} ->
         IO.puts(models_report(args))
         0

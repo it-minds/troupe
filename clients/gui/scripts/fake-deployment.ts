@@ -8,7 +8,7 @@
 // there is no browser at the other end to click anything.
 
 import { FakeIdp } from "../packages/client/test/support/idp.js";
-import { FakePlane } from "../packages/client/test/support/plane.js";
+import { FakePlane, GATEWAY_DEFAULTS } from "../packages/client/test/support/plane.js";
 import { FakeWorker } from "../packages/client/test/support/worker.js";
 
 const origins = process.env["ORIGINS"]?.split(",") ?? ["http://localhost:5173", "http://127.0.0.1:5173"];
@@ -18,7 +18,16 @@ const idp = await FakeIdp.start();
 // has to allow the GUI's origin as well as the plane does.
 idp.corsOrigins = origins;
 const worker = await FakeWorker.start({ deltaDelayMs: 25 });
-const plane = await FakePlane.start({ idp, worker, corsOrigins: origins, podTokenLifetime: 900 });
+// An organisation with a gateway of its own, so "Use organisation defaults" on the
+// models panel has something to fill in. NO_CLIENT_DEFAULTS=1 is one that has set
+// nothing, which is what hides the button.
+const plane = await FakePlane.start({
+  idp,
+  worker,
+  corsOrigins: origins,
+  podTokenLifetime: 900,
+  clientDefaults: process.env["NO_CLIENT_DEFAULTS"] ? { configured: false } : GATEWAY_DEFAULTS,
+});
 
 // Something to look at on the first screen.
 plane.seed("alice@example.com", { title: "Rewrite the placement loop", profile: "dev" });

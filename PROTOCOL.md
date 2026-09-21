@@ -675,6 +675,49 @@ every other MCP tool.
 `.troupe/workflows/<name>.json` files in the workspace, each a JSON array of
 `{"name", "prompt", "agent"?, "parallel"?}` steps.
 
+#### `config.get`, `config.models`, `config.set`
+
+The machine's own model settings — the provider, key and models every local session
+starts from — for a settings screen. **The daemon's only**: a worker answers
+`method_not_found`, because a pod's provider is its profile's business. They edit one
+file, the user's `config.yaml` in the daemon's config directory; a client never names a
+path, because the daemon is the process whose environment decides which file a session
+reads.
+
+```json
+{"workspace": "/home/me/project"}
+```
+`config.get` (`observe`; `workspace` optional) → `{"config_dir", "path", "exists",
+"provider", "base_url", "auth", "api_key_set", "api_key_source", "models": {"default",
+"cheap", "expensive"}, "overrides": [{"source", "detail"}]}` — what the **file** says,
+since that is what saving changes. The key is never in the answer: `api_key_set` says
+whether one is in force and `api_key_source` where from (`file`, `env`, `opencode` or
+null). `overrides` names what beats the file anyway: a project's `.troupe/config.yaml`
+(only when `workspace` is given), a `TROUPE_*` variable, or the opencode fallback that
+applies while no key is saved.
+
+```json
+{"provider": "openai", "base_url": "https://llm-gw.example/v1", "api_key": "sk-...", "auth": "bearer"}
+```
+`config.models` (`admin`; every field optional, falling back to the file) →
+`{"models": [{"id", "context", "max_output", "input", "output"}], "failures":
+[{"provider", "reason"}]}` — asks the provider what it serves, for settings that need not
+be saved yet. Prices are dollars per million tokens, and null where the provider quotes
+none (only a LiteLLM proxy does). Nothing is written, not even the model cache. `admin`
+because it sends a key to a URL of the caller's choosing.
+
+```json
+{"command_id": "c-12", "provider": "openai", "base_url": "https://llm-gw.example/v1",
+ "auth": "bearer", "api_key": "sk-...", "models": {"default": "glm-5.2", "cheap": "qwen3.6-35b"}}
+```
+`config.set` (`admin`) → the `config.get` answer after the write. `provider` is
+`anthropic` or `openai` (anything speaking Chat Completions). An absent `api_key` keeps
+the saved one and `""` removes it; a `base_url` of null or `""` removes it; a model role
+set to null is removed. Keys it does not own are kept, but the file is rewritten, so
+comments are not: the file before the save is kept as `config.yaml.previous`. A file
+that does not parse is never overwritten — the call fails with `invalid_params`. The
+next session reads the new file; nothing restarts.
+
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
 ```json
@@ -787,9 +830,9 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -1067,6 +1110,7 @@ than an admin uses them:
 | `trigger.fire` | control | the trigger's principal, or an admin of its team | `{trigger (name, `team/name` or id), idempotency_key, event}` → the run and, when a session was made, the same `{session_id, endpoint, token}` `session.create` returns. The run names the `revision` and `revision_hash` it ran. The same key returns the same run, the same revision and a fresh token; over the trigger's `concurrency` the run is `skipped` and has no session |
 | `session.grant` | control | the session's owner, or an admin of its team | `{session_id, subject, role}` (`owner`, `collaborator`, `viewer`; default collaborator) → mirrored in the plane's ACL and pushed to the pod holding the session as `acl.changed` |
 | `session.review` | control | anybody who can see the session | `{session_id}` → sets `reviewed_by`/`reviewed_at` on the session and its run, audited as `session.review` |
+| `me.client_defaults` | observe | anybody | `{}` → `{configured, provider, base_url, auth, models: {default, cheap, expensive}}` — what an administrator says people's own machines should talk to (the *Client defaults* settings), for a client to pre-fill its model settings with. **Never a key**: anybody signed in may ask, so each person supplies their own. `configured` is false, and the rest null, until a provider is set |
 | `me.connections.list` | observe | anybody | the MCP servers on the caller's profiles that act as *them*, each with its `slot` and whether they have `connected` it. Whether, never what: the plane can see that a slot has a version and cannot read one |
 | `me.connections.grant` | control | anybody, for themselves | `{slot}` → `{assertion, expires_at, audience, key_manager: {address, mount, auth_path, role, path}}`. **No value crosses the plane**: it answers a short-lived assertion for the caller's own subject, which the client exchanges with the key manager itself for a token scoped to its own subtree, and then writes the value directly. The same grant is how a person removes one — deletion is theirs, always |
 | `session.register` | control | anybody, for their own private sessions | `{session_id, device, epoch, head_hash, last_seq, object_bytes, workspace_bytes, title, claim}` → the session row. Idempotent on the id: the first call mints epoch 1, a later one is a seal report. A seal carries the `epoch` the device holds and is refused with `stale_version` if another device has moved past it; `last_seq` never goes backwards. `claim: true` takes the session over on this device, bumping the epoch conditionally — two devices sending the same `epoch` produce one winner, and the loser learns it lost on its next seal rather than by being told |

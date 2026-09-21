@@ -1,0 +1,101 @@
+defmodule Troupe.ModelConfigTest do
+  @moduledoc """
+  `troupe config pull`, and the status line when the model cannot be reached — the two
+  things a machine with no key used to meet as an endless "starting".
+  """
+
+  use ExUnit.Case, async: true
+
+  alias Troupe.CLI
+  alias Troupe.CLI.ModelConfig
+  alias Troupe.Event
+  alias Troupe.Remote.Translate
+  alias Troupe.UI.TUI.Model
+
+  test "config pull parses with and without a plane" do
+    assert {:ok, %{mode: :config_pull, plane_url: nil}} = CLI.parse(["config", "pull"])
+
+    assert {:ok, %{mode: :config_pull, plane_url: "https://plane.example"}} =
+             CLI.parse(["config", "pull", "https://plane.example"])
+
+    assert {:ok, %{mode: :config}} = CLI.parse(["config"])
+    assert CLI.usage() =~ "troupe config pull"
+  end
+
+  describe "the config.set a plane's defaults become" do
+    test "carries what the plane says, and no key" do
+      params =
+        ModelConfig.params(%{
+          "configured" => true,
+          "provider" => "openai",
+          "base_url" => "https://llm-gw.example/v1",
+          "auth" => "bearer",
+          "models" => %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b", "expensive" => nil}
+        })
+
+      assert %{
+               "provider" => "openai",
+               "base_url" => "https://llm-gw.example/v1",
+               "auth" => "bearer",
+               "models" => %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b"}
+             } = params
+
+      assert "c-" <> _ = params["command_id"]
+      # Absent, not empty: an empty key would remove the one already saved.
+      refute Map.has_key?(params, "api_key")
+    end
+
+    test "a role the plane leaves empty keeps this machine's choice" do
+      params =
+        ModelConfig.params(%{
+          "provider" => "anthropic",
+          "base_url" => nil,
+          "models" => %{"default" => ""}
+        })
+
+      refute Map.has_key?(params, "models")
+      refute Map.has_key?(params, "auth")
+    end
+  end
+
+  describe "a model error" do
+    test "arrives from the daemon as its own event, with the reason" do
+      wire = %{
+        "seq" => 6,
+        "ts" => "2026-09-21T18:53:11.170Z",
+        "agent" => ["root"],
+        "type" => "llm_error",
+        "v" => 1,
+        "data" => %{"reason" => "no API key is configured for the provider"}
+      }
+
+      {events, _memory} =
+        Translate.durable("s-1", wire, Translate.remember(Translate.memory(), "root"))
+
+      assert [%{type: :llm_error, data: %{message: "no API key is configured for the provider"}}] =
+               events
+    end
+
+    test "stops the status line saying starting, until the agent works again" do
+      model =
+        Model.rebuild("s-1", "/w", [
+          event(:branch_spawned, %{name: "build", isolation: :shared}),
+          event(:agent_state, %{to: :thinking}),
+          event(:llm_error, %{message: "no API key is configured for the provider"}),
+          event(:agent_state, %{to: :idle})
+        ])
+
+      [window] = Model.windows(model)
+
+      assert Model.activity_line(window, "root", 0, 10) ==
+               "model error: no API key is configured for the provider"
+
+      model = Model.apply(model, event(:agent_state, %{to: :thinking}))
+      [window] = Model.windows(model)
+      assert Model.activity_line(window, "root", 0, 10) =~ "thinking"
+    end
+  end
+
+  defp event(type, data),
+    do: %Event{session_id: "s-1", agent_path: "root", type: type, data: data, ts: 1}
+end

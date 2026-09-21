@@ -480,6 +480,25 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "session_id" => required(:string),
         "tools" => optional({:array, :string})
+      },
+      # The machine's model settings — the daemon's only; a worker answers
+      # `method_not_found`. The key goes in through `config.models` and `config.set` and
+      # never comes back out: `config.get` reports `api_key_set`.
+      "config.get" => %{"workspace" => optional(:string)},
+      "config.models" => %{
+        "provider" => optional(:string),
+        "base_url" => optional({:nullable, :string}),
+        "api_key" => optional(:string),
+        "auth" => optional(:string)
+      },
+      "config.set" => %{
+        "command_id" => required(:string),
+        "provider" => required(:string),
+        "base_url" => optional({:nullable, :string}),
+        "auth" => optional(:string),
+        "api_key" => optional(:string),
+        "models" => optional(:object),
+        "workspace" => optional(:string)
       }
     }
   end
@@ -553,6 +572,7 @@ defmodule Troupe.Protocol.Schema do
 
   defp json_type({:array, inner}), do: %{"type" => "array", "items" => json_type(inner)}
   defp json_type(:text_or_blob), do: %{"type" => ["string", "object"]}
+  defp json_type({:nullable, inner}), do: %{"type" => [Atom.to_string(inner), "null"]}
   defp json_type(:object), do: %{"type" => "object"}
   defp json_type(type), do: %{"type" => Atom.to_string(type)}
 

@@ -76,3 +76,29 @@ export type {
   RecentWorkspace,
   Worktree,
 } from "./daemon.js";
+export {
+  MODEL_ROLES,
+  PROVIDER_DEFAULT_URLS,
+  applyClientDefaults,
+  clientDefaults,
+  configSetParams,
+  describeOffer,
+  describeOverride,
+  discoveryParams,
+  formFromConfig,
+  modelConfigError,
+  tokenCount,
+} from "./config.js";
+export type {
+  ClientDefaults,
+  ConfigOverride,
+  ConfigSetParams,
+  ModelAuth,
+  ModelConfig,
+  ModelDiscovery,
+  ModelForm,
+  ModelOffer,
+  ModelProvider,
+  ModelRole,
+  ModelsParams,
+} from "./config.js";

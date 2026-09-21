@@ -1,0 +1,37 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/config.set.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "api_key": {
+      "type": "string"
+    },
+    "auth": {
+      "type": "string"
+    },
+    "base_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "models": {
+      "type": "object"
+    },
+    "provider": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "provider"
+  ],
+  "title": "config.set",
+  "type": "object"
+}

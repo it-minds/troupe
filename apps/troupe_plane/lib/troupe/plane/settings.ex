@@ -346,6 +346,61 @@ defmodule Troupe.Plane.Settings do
       consequence:
         "Deployment only, and never shown. Unset means the door is not there at all: /admin/breakglass answers 404 like any other path that does not exist.",
       effect: :restart
+    },
+    # What a person's own machine should talk to, offered to the clients through
+    # `me.client_defaults`. Never a key: whoever can sign in could read it, so the key
+    # stays each person's to paste into their own settings.
+    %Setting{
+      key: "client_provider",
+      group: :client_defaults,
+      type: :enum,
+      values: [:anthropic, :openai],
+      summary: "The provider people's own machines use: Anthropic's API, or anything that speaks OpenAI's Chat Completions.",
+      consequence:
+        "Unset means the clients offer no organisation defaults at all. Changing it changes what a client pre-fills next time somebody asks; nobody's saved settings change.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_base_url",
+      group: :client_defaults,
+      type: :string,
+      summary: "Where that provider is: a gateway's URL, or empty for the provider's own API.",
+      consequence: "An OpenAI-compatible provider needs one; for Anthropic, empty means api.anthropic.com.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_auth",
+      group: :client_defaults,
+      type: :enum,
+      values: [:api_key, :bearer],
+      fallback: :api_key,
+      summary: "How the key is presented: the provider's own header, or Authorization: Bearer for a gateway.",
+      consequence: "Wrong, and every request from a machine using the defaults is refused as unauthenticated.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_model_default",
+      group: :client_defaults,
+      type: :string,
+      summary: "The model that does the editing, as the provider names it.",
+      consequence: "Pre-filled as the default model; empty leaves the client's own choice.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_model_cheap",
+      group: :client_defaults,
+      type: :string,
+      summary: "The cheaper model for exploring, summarising and quick questions.",
+      consequence: "Pre-filled as the cheap model; empty leaves the client's own choice.",
+      effect: :immediate
+    },
+    %Setting{
+      key: "client_model_expensive",
+      group: :client_defaults,
+      type: :string,
+      summary: "The premium model an orchestrating agent may ask for, if there is one.",
+      consequence: "Pre-filled as the expensive model; empty means the default model is used for that too.",
+      effect: :immediate
     }
   ]
 
@@ -364,6 +419,8 @@ defmodule Troupe.Plane.Settings do
      "Whether the console applies a profile itself or writes a commit for somebody to review."},
     {:team_defaults, "What a new team starts with",
      "Applied when a group is enabled as a team. Changing them leaves existing teams alone; each team's own values are on the Teams page."},
+    {:client_defaults, "What people's own machines talk to",
+     "Offered to the desktop app and the TUI as organisation defaults for a person's local sessions: provider, URL and models. Never a key; each person pastes their own."},
     {:sessions, "What a new session runs with",
      "Defaults for work started after the change. Running sessions keep what they were given."},
     {:sign_in, "Where people sign in",
