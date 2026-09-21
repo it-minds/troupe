@@ -1,388 +1,249 @@
-# The builds that run on somebody's machine rather than in a cluster: `troupe-daemon` and
-# `troupe` (the TUI) for five platforms each, and the desktop app's installers for three.
+# A release: the full suite, then the version's images, the chart, the native builds, a
+# published GitHub release, and production (Decisions 669, 674, 676). `.github/CI.md` has
+# the picture.
 #
-# One native runner per target. A Mix release carries the build host's ERTS, the TUI's
-# precompiled ExRatatui NIF resolves against the build host, and the desktop app links
-# the platform's webview — none of it cross-builds. So this is slow and wide, and it runs
-# when it proves something: on a pull request that touches one of them (called from
-# `ci.yml`, under `ci-ok`), nightly on `main`, and when a release is cut — called with the
-# release's tag, and then it attaches everything to that draft release (Decision 669).
+# Started by a push to `main` that changes VERSION — which is to say, by merging the pull
+# request `scripts/release <version>` opens — and cut only when that version has no tag
+# yet, so a re-run cannot cut it twice. `workflow_dispatch` cuts the version VERSION
+# names when it has no tag, for the release whose run failed and whose VERSION change is
+# already behind `main`.
 #
-# `workflow_dispatch` runs it by hand, attaching nothing.
-name: native builds
+# Nothing here trusts an earlier run: the whole suite runs again, soak and cluster
+# included, on exactly the commit being released, and the images are built from that
+# commit and tagged with the version. A release candidate (`0.4.0-rc.1`) does all of it
+# and deploys as a dry run.
+name: release
 
 on:
-  workflow_call:
-    inputs:
-      tag:
-        description: "The draft release to attach the artifacts to; empty attaches nothing"
-        type: string
-        default: ""
+  push:
+    branches: [main]
+    paths: [VERSION]
   workflow_dispatch:
-  schedule:
-    # Nightly, so a harness change that breaks the Windows or macOS build is found the
-    # next morning rather than at the next release.
-    - cron: "17 2 * * *"
 
-env:
-  OTP_VERSION: "28.5"
-  ELIXIR_VERSION: "1.20.4"
-  ZIG_VERSION: "0.16.0"
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
-  # -- troupe-daemon ------------------------------------------------------------
-  daemon:
-    name: troupe-daemon ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    env:
-      MIX_ENV: prod
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {os: ubuntu-24.04, target: linux_x86_64}
-          - {os: ubuntu-24.04-arm, target: linux_aarch64}
-          - {os: macos-15-intel, target: macos_x86_64}
-          - {os: macos-14, target: macos_aarch64}
-          - {os: windows-2022, target: windows_x86_64}
-    defaults:
-      run:
-        shell: bash
-        # Built from its own directory, so the runner compiles the harness and not the
-        # plane's database and Kubernetes clients (Decision 667).
-        working-directory: apps/troupe_daemon
+  version:
+    name: is this a new version
+    runs-on: ubuntu-latest
+    outputs:
+      cut: ${{ steps.version.outputs.cut }}
+      version: ${{ steps.version.outputs.version }}
+      tag: ${{ steps.version.outputs.tag }}
+      prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
+      # Two commits deep, so the push can be compared with what `main` was before it.
       - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
         with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
+          fetch-depth: 2
 
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - run: mix deps.get
-
-      - name: Build the release
-        run: mix release troupe_daemon --overwrite
-
-      - name: Name the artifact
-        id: art
-        run: |
-          VERSION=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
-          NAME="troupe-daemon-${VERSION}-${{ matrix.target }}.tar.gz"
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          mv "$GITHUB_WORKSPACE/_build/prod/troupe_daemon-${VERSION}.tar.gz" "$GITHUB_WORKSPACE/dist/${NAME}"
-          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
-
-      - name: "Smoke test (unpack; version, status, run, status, eval)"
-        if: runner.os != 'Windows'
+      # A release is a merged *change* to VERSION, not a VERSION that happens to have no
+      # tag: the monorepo merge had a 0.2.0 nobody meant to release (Decision 674). By
+      # hand, the second condition alone — somebody asked.
+      - name: Is this a new version
+        id: version
         env:
-          TROUPE_PROVIDER: fake
-          TROUPE_DAEMON_LOG: stderr
-          TROUPE_DAEMON_IDLE_MINUTES: "1"
+          EVENT: ${{ github.event_name }}
         run: |
-          INST=$(mktemp -d); tar -xzf "$GITHUB_WORKSPACE/dist/${{ steps.art.outputs.name }}" -C "$INST"
-          BIN="$INST/bin/troupe-daemon"
-          ls "$INST"/lib/troupe_core-*/priv/reaper/
-          "$BIN" version
-          "$BIN" status && exit 1 || echo "not running, as expected"
-          "$BIN" run &
-          for i in $(seq 1 60); do "$BIN" status >/dev/null 2>&1 && break; sleep 1; done
-          "$BIN" status
-          "$BIN" run   # idempotent: names the running one and exits 0
-          "$INST/bin/troupe_daemon" eval 'IO.puts(Troupe.Version.version())'
-          kill %1 || true
-
-      - name: "Smoke test (Windows: unpack, version, status, eval)"
-        if: runner.os == 'Windows'
-        shell: pwsh
-        env:
-          TROUPE_PROVIDER: fake
-          TROUPE_DAEMON_LOG: stderr
-        run: |
-          $inst = Join-Path $env:RUNNER_TEMP "troupe-daemon"
-          New-Item -ItemType Directory -Force $inst | Out-Null
-          tar -xzf "$env:GITHUB_WORKSPACE/dist/${{ steps.art.outputs.name }}" -C $inst
-          Get-ChildItem "$inst\lib\troupe_core-*\priv\reaper"
-          Get-ChildItem "$inst\lib\ezstd-*\priv"
-          & "$inst\bin\troupe-daemon.cmd" version
-          & "$inst\bin\troupe-daemon.cmd" status
-          if ($LASTEXITCODE -ne 1) { throw "status should say not running (exit 1), got $LASTEXITCODE" }
-          & "$inst\bin\troupe_daemon.bat" eval "b = :binary.list_to_bin(List.duplicate(0, 1000)); true = :ezstd.decompress(:ezstd.compress(b)) == b; IO.puts(:zstd_ok)"
-          if ($LASTEXITCODE -ne 0) { throw "eval failed with $LASTEXITCODE" }
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.art.outputs.name }}
-          path: dist/${{ steps.art.outputs.name }}
-
-  # -- troupe (the TUI) ---------------------------------------------------------
-  tui:
-    name: troupe ${{ matrix.target }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 40
-    env:
-      MIX_ENV: prod
-      TROUPE_REAPER_TARGETS: all
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {os: ubuntu-24.04, target: linux_x86_64, target_abi: musl}
-          - {os: ubuntu-24.04-arm, target: linux_aarch64, target_abi: musl}
-          - {os: macos-15-intel, target: macos_x86_64}
-          - {os: macos-14, target: macos_aarch64}
-          - {os: windows-2022, target: windows_x86_64}
-    defaults:
-      run:
-        shell: bash
-        working-directory: clients/tui
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          otp-version: ${{ env.OTP_VERSION }}
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-
-      - uses: mlugg/setup-zig@v2
-        with:
-          version: ${{ env.ZIG_VERSION }}
-
-      - name: Install xz and 7z
-        run: |
-          if [[ "$RUNNER_OS" == "Linux" ]]; then sudo apt-get update && sudo apt-get install -y xz-utils p7zip-full; fi
-          if [[ "$RUNNER_OS" == "macOS" ]]; then brew install xz p7zip || true; fi
-
-      # The harness is a path dependency on the umbrella beside it; nothing is fetched
-      # from anywhere private.
-      - run: mix deps.get
-
-      - name: Build the release
-        env:
-          BURRITO_TARGET: ${{ matrix.target }}
-          MATRIX_TARGET_ABI: ${{ matrix.target_abi }}
-        run: |
-          if [ -n "${MATRIX_TARGET_ABI}" ]; then export TARGET_ABI="${MATRIX_TARGET_ABI}"; fi
-          mix release --overwrite
-          ls -la burrito_out
-
-      - name: Name the artifact
-        id: art
-        run: |
-          VERSION=$(tr -d '[:space:]' < "$GITHUB_WORKSPACE/VERSION")
-          EXT=""; [[ "${{ matrix.target }}" == windows* ]] && EXT=".exe"
-          NAME="troupe-${VERSION}-${{ matrix.target }}${EXT}"
-          mv "burrito_out/troupe_${{ matrix.target }}${EXT}" "burrito_out/${NAME}"
-          echo "name=${NAME}" >> "$GITHUB_OUTPUT"
-
-      # The daemon reads the model from the workspace, so the fake is configured there.
-      - name: Smoke test (--version and a headless Fake run in the embedded daemon)
-        run: |
-          BIN="$PWD/burrito_out/${{ steps.art.outputs.name }}"
-          chmod +x "$BIN" || true
-          START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
-          echo "cold first run (extraction + --version): $(( (END-START)/1000000 )) ms"
-          START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
-          echo "warm --version: $(( (END-START)/1000000 )) ms"
-          ls -la "$BIN"
-          SMOKE="$RUNNER_TEMP/smoke"; mkdir -p "$SMOKE/.troupe" && cd "$SMOKE"
-          printf 'provider: fake\nmodel: fake-model\nfake_script: %s\n' "$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/smoke.json" > .troupe/config.yaml
-          "$BIN" run build "smoke" --headless --auto-approve
-          test -f hello.txt && cat hello.txt
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: ${{ steps.art.outputs.name }}
-          path: clients/tui/burrito_out/${{ steps.art.outputs.name }}
-
-  tui-containers:
-    name: the TUI's Linux binary in clean containers
-    needs: [tui]
-    runs-on: ubuntu-24.04
-    # A binary that hangs in a container must fail this job, not hold a runner for six
-    # hours: the first run of this job on GitHub did exactly that, with no log to show
-    # for it until the job ended.
-    timeout-minutes: 20
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/download-artifact@v4
-        with:
-          pattern: troupe-*-linux_x86_64
-          merge-multiple: true
-          path: dist
-      # Each command under `timeout`, so a hang is a failure that names the command; the
-      # run's output to a file rather than through `tee`, because a pipe stays open while
-      # anything the binary started still holds it, and `tee` would wait for all of them;
-      # and `--init`, so something reaps whatever the harness leaves behind. The output is
-      # printed either way.
-      - name: ubuntu:24.04 and alpine (no Erlang, no Elixir, no inotify-tools)
-        run: |
-          chmod +x dist/troupe-*-linux_x86_64
-          for img in ubuntu:24.04 alpine:3.20; do
-            echo "::group::$img"
-            docker run --rm --init -v "$PWD/dist:/dist" -v "$PWD/clients/tui/fixtures:/fixtures" "$img" sh -c '
-              set -e; ulimit -n; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work/.troupe && cd /work
-              printf "provider: fake\nmodel: fake-model\nfake_script: /fixtures/fake_scripts/smoke.json\n" > .troupe/config.yaml
-              timeout 120 $BIN --version
-              status=0
-              timeout 300 $BIN run build "smoke" --headless --auto-approve --watch > out.log 2>&1 || status=$?
-              cat out.log
-              [ "$status" = 0 ] || { echo "the run exited $status (124 is the timeout)"; exit 1; }
-              if grep -q polling out.log; then echo "watch fell back to polling"; fi
-              test -f hello.txt'
-            echo "::endgroup::"
-          done
-
-  # -- the desktop app ----------------------------------------------------------
-  #
-  # Unsigned until the signing secrets exist. Every signing step is gated on a secret, and
-  # adding the secret turns it on with nothing else to change; until then the installers
-  # warn on first launch (clients/gui/docs/install.md).
-  desktop:
-    name: desktop ${{ matrix.name }}
-    runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: macOS (universal)
-            os: macos-14
-            target: universal-apple-darwin
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-          - name: Windows (x64)
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            rust-targets: x86_64-pc-windows-msvc
-          # 22.04 is the glibc floor: the oldest Ubuntu that carries
-          # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
-          # silently breaks every 22.04 user. Do not "modernise" this.
-          - name: Linux (x64)
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            rust-targets: x86_64-unknown-linux-gnu
-    defaults:
-      run:
-        working-directory: clients/gui
-    steps:
-      - uses: actions/checkout@v4
-
-      - name: System dependencies (Linux)
-        if: matrix.os == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
-            libgtk-3-dev libssl-dev build-essential file
-
-      - uses: pnpm/action-setup@v6
-        with:
-          package_json_file: clients/gui/package.json
-      - uses: actions/setup-node@v7
-        with:
-          node-version-file: .tool-versions
-          cache: pnpm
-          cache-dependency-path: clients/gui/pnpm-lock.yaml
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: ${{ matrix.rust-targets }}
-      - uses: swatinem/rust-cache@v2
-        with:
-          workspaces: clients/gui/apps/desktop/src-tauri -> target
-          key: ${{ matrix.target }}
-
-      - run: pnpm install --frozen-lockfile
-
-      - name: Decide whether this build is signed
-        id: signing
-        shell: bash
-        env:
-          APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
-          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
-        run: |
-          signed=false
-          case "${{ matrix.os }}" in
-            macos-*)   [ -n "$APPLE_CERT" ]     && signed=true ;;
-            windows-*) [ -n "$AZURE_ENDPOINT" ] && signed=true ;;
-          esac
-          echo "signed=$signed" >> "$GITHUB_OUTPUT"
-          if [ "$signed" = false ]; then
-            echo "::notice::Unsigned build. Installers will warn; see clients/gui/docs/install.md."
+          version="$(tr -d '[:space:]' < VERSION)"
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
+          if [ "$EVENT" = push ] && git diff --quiet HEAD^1 HEAD -- VERSION; then
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+            echo "VERSION did not change in this push; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
+          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
+            echo "cut=false" >> "$GITHUB_OUTPUT"
+            echo "${tag} is already released; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "cut=true" >> "$GITHUB_OUTPUT"
+            echo "Cutting ${tag} from ${GITHUB_SHA::7}." >> "$GITHUB_STEP_SUMMARY"
           fi
 
-      - name: Install the Windows signing client
-        if: steps.signing.outputs.signed == 'true' && runner.os == 'Windows'
-        run: cargo install trusted-signing-cli
+  # Everything, whatever changed, nine more times for the races, and the cluster suite.
+  suite:
+    name: the full suite
+    needs: [version]
+    if: needs.version.outputs.cut == 'true'
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      full: true
+      soak: 9
+      cluster: true
 
-      # Two steps, not one with a conditional env block. An undefined secret is not an
-      # absent variable: GitHub substitutes an empty string, so `APPLE_CERTIFICATE` is
-      # still *defined*, and tauri-action reads its presence as "set up a signing
-      # keychain" and then fails importing nothing. The unsigned build must not be able
-      # to see these names at all. No `tagName`: the release job owns the release, and
-      # this only builds.
-      - name: Build the bundles (unsigned)
-        if: steps.signing.outputs.signed != 'true'
-        uses: tauri-apps/tauri-action@v0
-        with:
-          projectPath: clients/gui/apps/desktop
-          args: --target ${{ matrix.target }}
+  images:
+    name: images at ${{ needs.version.outputs.version }}
+    needs: [version, suite]
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.version.outputs.version }}
+    secrets: inherit
 
-      - name: Build the bundles (signed)
-        if: steps.signing.outputs.signed == 'true'
-        uses: tauri-apps/tauri-action@v0
-        env:
-          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
-          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
-          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
-          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
-          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
-          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
-          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
-          AZURE_CODE_SIGNING_NAME: ${{ secrets.AZURE_CODE_SIGNING_NAME }}
-          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
-          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
-          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
-          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
-        with:
-          projectPath: clients/gui/apps/desktop
-          args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
-
-      - name: Keep the installers
-        uses: actions/upload-artifact@v4
-        with:
-          name: desktop-${{ matrix.target }}
-          if-no-files-found: error
-          path: |
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
-            clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage
-
-  # -- the release --------------------------------------------------------------
-  attach:
-    name: attach to ${{ inputs.tag }}
-    needs: [daemon, tui, tui-containers, desktop]
-    if: inputs.tag != ''
+  # The tag, the chart, and a draft release for the native builds to attach to.
+  cut:
+    name: tag ${{ needs.version.outputs.tag }}
+    needs: [version, images]
     runs-on: ubuntu-latest
-    # No `permissions:` of its own: it inherits the caller's, and the release job in
-    # `ci.yml` calls this with `contents: write`. Declaring it here would make every other
-    # caller — a pull request's `native` job — fail validation for a job it never runs.
+    permissions:
+      contents: write
     steps:
-      - uses: actions/download-artifact@v4
-        with:
-          path: dist
-          merge-multiple: true
-      - name: Upload every artifact to the draft release
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      # The chart's own version and its appVersion are the release's, so an install of
+      # this file pulls the images just built rather than whatever `values.yaml` was
+      # last edited to say (Decision 322).
+      - name: Package the chart
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: helm package charts/troupe --version "$VERSION" --app-version "$VERSION" --destination dist
+
+      # The tag is pushed with this workflow's own token, which starts no other workflow:
+      # everything this release needs happens in this run. The release is a draft until
+      # the native builds have attached their artifacts (`publish`, below).
+      - name: Tag it, and open a draft release
         env:
           GH_TOKEN: ${{ github.token }}
-          TAG: ${{ inputs.tag }}
+          TAG: ${{ needs.version.outputs.tag }}
+          VERSION: ${{ needs.version.outputs.version }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
-          find dist -type f | sort
-          find dist -type f -print0 | xargs -0 gh release upload "$TAG" --repo "$GITHUB_REPOSITORY" --clobber
+          git tag "$TAG" "$GITHUB_SHA"
+          git push origin "refs/tags/${TAG}"
+          cat > notes.md <<NOTES
+          Everything in this repository at \`${GITHUB_SHA::7}\`, as one release, after the full suite.
+
+          **On a cluster** — the chart, whose images are this version:
+
+              helm upgrade --install troupe \\
+                https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/troupe-${VERSION}.tgz \\
+                --namespace troupe-system --create-namespace --values my-values.yaml
+
+          Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`.
+
+          **On a machine** — \`install.sh\` / \`install.ps1\` install \`troupe\` (the TUI) and \`troupe-daemon\` from here. The desktop app's installers are attached as well.
+          NOTES
+          flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
+          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
+          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chart
+          path: dist/troupe-*.tgz
+
+  native:
+    name: native builds
+    needs: [version, cut]
+    uses: ./.github/workflows/native.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.version.outputs.tag }}
+    secrets: inherit
+
+  # Published once everything is attached, with one SHA256SUMS over all of it.
+  publish:
+    name: publish ${{ needs.version.outputs.tag }}
+    needs: [version, native]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checksums, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: |
+          mkdir dist && cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          rm -f SHA256SUMS
+          sha256sum -- * > SHA256SUMS
+          cat SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$PRERELEASE"
+
+  # A release deploys itself (Decision 669). Pushing an image and changing production are
+  # still two decisions, but the second is the reviewed merge of a VERSION change, not a
+  # laptop session. A release candidate runs everything and deploys as a dry run only.
+  #
+  # The `production` environment holds `KUBECONFIG` (the `troupe-deployer` account's,
+  # from `scripts/ci-kubeconfig`) and `DEPLOY_VALUES` (the deployment's values file), and
+  # its variable `PLANE_URL`. Its deployment policy should allow `main` alone, so no pull
+  # request can reach them; a required reviewer on it is optional, and makes this job
+  # wait for a second person. Each run of this job is a row on the repository's
+  # Deployments page: what went where, when, and from which merge.
+  deploy:
+    name: deploy ${{ needs.version.outputs.version }}
+    needs: [version, cut]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PLANE_URL }}
+    # One roll at a time, shared with `deploy.yml`: two overlapping `helm upgrade`s on one
+    # release is a race whose loser is whichever finished second.
+    concurrency:
+      group: deploy-production
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: chart
+          path: dist
+
+      - name: Check this deployment is configured
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          missing=""
+          [ -n "${KUBECONFIG_CONTENT}" ] || missing="${missing} KUBECONFIG"
+          [ -n "${VALUES_CONTENT}" ] || missing="${missing} DEPLOY_VALUES"
+          if [ -n "${missing}" ]; then
+            echo "::error title=Deployment not configured::The production environment has no${missing}. KUBECONFIG is the troupe-deployer account's (deploy/ci-deployer.yaml, then scripts/ci-kubeconfig); DEPLOY_VALUES is the deployment's Helm values file."
+            exit 1
+          fi
+
+      - name: Lay out the credentials
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          mkdir -p .local
+          printf '%s' "${KUBECONFIG_CONTENT}" > .local/kubeconfig.yaml
+          printf '%s' "${VALUES_CONTENT}" > .local/values.itminds.yaml
+          chmod 600 .local/kubeconfig.yaml .local/values.itminds.yaml
+
+      - name: ${{ needs.version.outputs.prerelease == 'true' && 'Render it (a release candidate)' || 'Roll it' }}
+        env:
+          PLANE_URL: ${{ vars.PLANE_URL }}
+          EXPECT_COMMIT: ${{ github.sha }}
+          DRY_RUN: ${{ needs.version.outputs.prerelease == 'true' && '--dry-run' || '' }}
+        run: scripts/deploy dist/troupe-${{ needs.version.outputs.version }}.tgz $DRY_RUN
+
+      - name: Say what is running
+        if: always()
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+          OUTCOME: ${{ job.status }}
+        run: |
+          {
+            echo "### production: ${VERSION} — ${OUTCOME}"
+            echo
+            echo "From \`${GITHUB_SHA::7}\`, started by @${GITHUB_ACTOR}."
+          } >> "$GITHUB_STEP_SUMMARY"

@@ -1,17 +1,23 @@
 # Continuous integration for the whole repository — the platform, the daemon, and the two
-# clients — and the release that ships all of it (Decision 669).
+# clients. `.github/CI.md` has the picture; this is the detail.
 #
-# One workflow and one required check, `ci-ok`. A pull request runs the jobs for what it
-# touched: `changes` decides, and each job's `if:` reads its answer. The filters are on
-# jobs and not on the workflow because a workflow skipped by `paths:` leaves a required
-# check pending forever, while a job skipped by `if:` reports success. A push to `main`
-# runs everything, because that run publishes images and may cut a release.
+# One workflow and one required check, `ci-ok`, in two modes:
 #
-# A release is cut by merging a change to VERSION (`scripts/release`). The `main` run
-# that follows sees a version with no tag, tags it, promotes the images it has just built
-# and tested to that version, packages the chart, builds the daemon, the TUI and the
-# desktop app on every platform (`release.yml`), and deploys to production. Nothing is
-# released by pushing a tag by hand, and nothing is deployed from a laptop.
+#   * **Focused** — a pull request, and every push to `main`. `changes` works out what the
+#     change can have broken and only that runs: a GUI change builds and tests the GUI, a
+#     daemon change tests the daemon, and a change to `troupe_core` tests core and every
+#     app that depends on it. The filters are on jobs and not on the workflow because a
+#     workflow skipped by `paths:` leaves a required check pending forever, while a job
+#     skipped by `if:` reports success. A push to `main` also publishes the five images as
+#     `sha-<short>` once what it changed has passed.
+#
+#   * **Full** — called by `nightly.yml` and `release.yml` with `full: true`: every job,
+#     whatever changed, plus the soak (`soak` more runs of each app's suite) and the
+#     cluster suite when asked. That is what a release has passed.
+#
+# Releases are not cut here: `release.yml` (a merged change to VERSION: the full suite,
+# then tag, publish and deploy) and `prerelease.yml` (by hand: an untested build of any
+# commit, published as a pre-release) do that.
 #
 # GitHub Actions syntax, which Forgejo Actions also runs. Nothing here depends on
 # github.com specifically except the marketplace actions, which Forgejo resolves from
@@ -19,20 +25,34 @@
 name: ci
 
 # A push to a branch runs nothing: the pull request for that branch runs the gate, and
-# running it twice for every push measured the same thing twice. `main` runs on push,
-# because that run publishes images, soaks the suite, and may cut a release.
+# running it twice for every push measured the same thing twice.
 on:
   push:
     branches: [main]
   pull_request:
+  workflow_call:
+    inputs:
+      full:
+        description: Run every job, whatever changed.
+        type: boolean
+        default: false
+      soak:
+        description: Run each app's suite this many more times, for the race that shows one time in five.
+        type: number
+        default: 0
+      cluster:
+        description: Run the suite that needs a Kubernetes cluster (twenty minutes).
+        type: boolean
+        default: false
 
 # A pull request under active work can have several pipelines in flight at once, all
 # measuring the same thing and only the last of them answering a question anyone still
-# has. Superseded runs are cancelled; `main` is not, because its runs publish images
-# somebody may already be waiting on, and may be part-way through a release.
+# has. Superseded runs are cancelled; `main` is not, and neither is a full run, because
+# a release or the nightly is waiting on it. A full run has its own group, so a release
+# does not queue behind the focused run of the push that started it.
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+  group: ci-${{ inputs.full && 'full' || 'focused' }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' && !inputs.full }}
 
 env:
   ELIXIR_VERSION: "1.20.4"
@@ -46,77 +66,227 @@ jobs:
     permissions:
       contents: read
       pull-requests: read
-    # On a push every answer is yes, bar `native`: the native builds run nightly and when
-    # a release is cut, not on every merge.
     outputs:
-      server: ${{ github.event_name != 'pull_request' || steps.filter.outputs.server == 'true' }}
-      tui: ${{ github.event_name != 'pull_request' || steps.filter.outputs.tui == 'true' }}
-      gui: ${{ github.event_name != 'pull_request' || steps.filter.outputs.gui == 'true' }}
-      gui_e2e: ${{ github.event_name != 'pull_request' || steps.filter.outputs.gui_e2e == 'true' }}
-      native: ${{ github.event_name == 'pull_request' && steps.filter.outputs.native == 'true' }}
+      apps: ${{ steps.plan.outputs.apps }}
+      server: ${{ steps.plan.outputs.server }}
+      chart: ${{ steps.plan.outputs.chart }}
+      protocol: ${{ steps.plan.outputs.protocol }}
+      tui: ${{ steps.plan.outputs.tui }}
+      gui: ${{ steps.plan.outputs.gui }}
+      gui_e2e: ${{ steps.plan.outputs.gui_e2e }}
+      native: ${{ steps.plan.outputs.native }}
+      images: ${{ steps.plan.outputs.images }}
     steps:
       - uses: actions/checkout@v4
 
+      # On a pull request, against its base; on a push, against what `main` was before it.
+      # A full run asks nothing: everything runs.
       - uses: dorny/paths-filter@v3
         id: filter
-        if: github.event_name == 'pull_request'
+        if: ${{ !inputs.full }}
         with:
-          # A protocol change runs everything: it is the one contract every part of this
-          # repository is on one side of. So does a change to this file or the toolchain.
           filters: |
-            shared: &shared
+            # The one contract every part of this repository is on one side of, the
+            # version, the toolchain and CI itself: a change to any of them runs everything.
+            shared:
               - PROTOCOL.md
               - protocol/**
               - VERSION
               - .tool-versions
-              - .github/workflows/ci.yml
-            server:
-              - *shared
-              - apps/**
+              - .github/workflows/**
+            # Shared by every umbrella app: a change here tests all of them.
+            umbrella:
               - config/**
               - mix.exs
               - mix.lock
-              - charts/**
-              - docker/**
-              - dev/**
-              - scripts/**
               - test/**
               - fixtures/**
-            harness: &harness
-              - apps/troupe_protocol/**
-              - apps/troupe_core/**
-              - apps/troupe_gateway/**
-              - mix.lock
+              - .credo.exs
+              - .formatter.exs
+              - scripts/dev-up
+              - dev/docker-compose.yml
+            troupe_protocol: [apps/troupe_protocol/**]
+            troupe_core: [apps/troupe_core/**]
+            troupe_gateway: [apps/troupe_gateway/**]
+            troupe_daemon: [apps/troupe_daemon/**]
+            troupe_plane: [apps/troupe_plane/**]
+            troupe_operator: [apps/troupe_operator/**]
+            troupe_worker: [apps/troupe_worker/**]
+            troupe_a2a: [apps/troupe_a2a/**]
+            chart:
+              - charts/**
+              - docker/**
+              - deploy/**
+              - dev/kind/**
+              - scripts/remote-up
+              - scripts/build-images
             tui:
-              - *shared
-              - *harness
               - clients/tui/**
               - scripts/locks-agree.exs
             gui:
-              - *shared
               - clients/gui/**
               - scripts/version.exs
             gui_e2e:
-              - *shared
               - clients/gui/packages/client/**
               - clients/gui/dev/**
-              - apps/troupe_plane/**
-              - apps/troupe_gateway/**
-              - apps/troupe_protocol/**
-              - config/**
-              - docker/**
             native:
               - clients/tui/**
               - clients/gui/apps/desktop/**
               - clients/gui/packages/client/**
               - apps/troupe_daemon/**
-              - .github/workflows/release.yml
+              - .github/workflows/native.yml
 
-  check:
-    name: compile, format, credo, boundaries, test
+      # Which umbrella apps to test follows the dependency graph, read from the apps' own
+      # `mix.exs` rather than written down here, so it cannot drift: a change to an app
+      # tests it and every app that depends on it, directly or not. Today that is
+      #
+      #   troupe_protocol  <- every app
+      #   troupe_core      <- troupe_gateway, troupe_daemon, troupe_worker
+      #   troupe_gateway   <- troupe_daemon, troupe_worker
+      #   troupe_plane     <- troupe_worker
+      #
+      # and the rest are leaves.
+      - name: Plan
+        id: plan
+        env:
+          FULL: ${{ inputs.full && 'true' || 'false' }}
+          EVENT: ${{ github.event_name }}
+          F: ${{ toJSON(steps.filter.outputs) }}
+        run: |
+          on() { [ "$FULL" = true ] || [ "$(echo "$F" | jq -r --arg k "$1" '.[$k] // "false"')" = true ]; }
+          deps_of() { grep -oE '\{:troupe_[a-z0-9_]+, in_umbrella: true' "apps/$1/mix.exs" | sed -E 's/\{:([a-z0-9_]+).*/\1/'; }
+
+          all=$(ls apps)
+          if on shared || on umbrella; then
+            apps="$all"
+          else
+            apps=""
+            for app in $all; do on "$app" && apps="$apps $app"; done
+            # Add every app that depends on one already in the set, until nothing changes.
+            grew=true
+            while $grew; do
+              grew=false
+              for app in $all; do
+                case " $apps " in *" $app "*) continue ;; esac
+                for dep in $(deps_of "$app"); do
+                  case " $apps " in *" $dep "*) apps="$apps $app"; grew=true; break ;; esac
+                done
+              done
+            done
+          fi
+          json=$(printf '%s\n' $apps | jq -R . | jq -cs 'map(select(. != "")) | sort')
+          has() { echo "$json" | jq -e --arg a "$1" 'index($a) != null' >/dev/null; }
+          flag() { if "$@"; then echo true; else echo false; fi; }
+
+          server=$(flag test "$json" != "[]")
+          chart=$(flag eval 'on shared || on chart')
+          # The schema and the Python client stand on the protocol and the harness.
+          protocol=$(flag eval 'has troupe_protocol || has troupe_gateway')
+          # The TUI builds the harness apps by path.
+          tui=$(flag eval 'on shared || on tui || has troupe_gateway')
+          gui=$(flag eval 'on shared || on gui')
+          # The client against a plane built from this commit.
+          gui_e2e=$(flag eval 'on shared || on gui_e2e || on chart || has troupe_plane || has troupe_gateway')
+          # Native builds on a pull request that touches them; a full run leaves them to
+          # its caller, which attaches them to what it publishes.
+          native=$(flag eval '[ "$EVENT" = pull_request ] && on native')
+          # Every merged commit that changed something an image is built from.
+          images=$(flag eval '[ "$FULL" = false ] && [ "$EVENT" = push ] && { [ "$server" = true ] || on gui || on chart; }')
+
+          {
+            echo "apps=$json"
+            echo "server=$server"
+            echo "chart=$chart"
+            echo "protocol=$protocol"
+            echo "tui=$tui"
+            echo "gui=$gui"
+            echo "gui_e2e=$gui_e2e"
+            echo "native=$native"
+            echo "images=$images"
+          } | tee -a "$GITHUB_OUTPUT"
+
+          {
+            echo "### What runs"
+            echo
+            echo "| | |"
+            echo "|---|---|"
+            echo "| umbrella apps | \`$json\` |"
+            for k in chart protocol tui gui gui_e2e native images; do echo "| $k | ${!k} |"; done
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # Compile, format, credo, generated assets and boundaries: once, for the whole
+  # umbrella, whenever any app is under test. None of it needs a database.
+  lint:
+    name: compile, format, credo, boundaries
     needs: [changes]
     if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+
+      - run: mix deps.get
+
+      - name: Compile with warnings as errors
+        run: MIX_ENV=test mix compile --force --warnings-as-errors
+
+      - run: mix format --check-formatted
+      - run: mix credo --strict
+
+      # Three files that are generated and committed: the console's bundle, its design
+      # tokens, and the theme stylesheet a browser is served. Each task's own moduledoc
+      # says CI checks it with `--check` — so a token changed without regenerating fails
+      # here rather than reaching a browser as a colour that is slightly wrong.
+      - name: Generated assets are current
+        run: |
+          MIX_ENV=test mix troupe.admin.assets --check
+          MIX_ENV=test mix troupe.admin.tokens --check
+          MIX_ENV=test mix troupe.theme --check
+
+      # The architecture is a claim about coupling, and claims like that decay
+      # silently. This is the thing that makes it fail loudly instead.
+      - name: Boundaries
+        run: MIX_ENV=test mix troupe.boundaries
+
+      # The clients depend on the platform — the TUI on the harness apps, by path — and
+      # never the other way: nothing under `apps/` may name anything under `clients/`.
+      # `troupe.boundaries` sees only the umbrella, so this is the check for the direction
+      # it cannot see (Decision 666).
+      - name: Nothing in the umbrella depends on a client
+        run: |
+          if grep -nE 'path:[^,}]*clients/' mix.exs apps/*/mix.exs; then
+            echo "an umbrella mix.exs depends on a client"
+            exit 1
+          fi
+
+  # One leg per app the change can have broken, in parallel. Each leg compiles the
+  # umbrella (from the cache) and runs that app's suite from its own directory, which is
+  # what `mix test` at the root does one app after another.
+  test:
+    name: test ${{ matrix.app }}
+    needs: [changes]
+    if: needs.changes.outputs.server == 'true'
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: ${{ fromJSON(needs.changes.outputs.apps) }}
     steps:
       - uses: actions/checkout@v4
 
@@ -148,9 +318,7 @@ jobs:
       # Postgres, MinIO and OpenBao, from the same compose file a laptop uses, on the
       # same ports `config/config.exs` names. Not three `services:` blocks: the bucket
       # needs versioning enabled and OpenBao needs a transit engine and a signing key
-      # before anything can mint a token, and `services:` has nowhere to put that. Two
-      # thirds of the suite — the object store, the KMS, every worker test that wants a
-      # durable tier — used to fail here for want of them.
+      # before anything can mint a token, and `services:` has nowhere to put that.
       - name: Postgres, MinIO and OpenBao
         run: scripts/dev-up
 
@@ -164,59 +332,29 @@ jobs:
 
       - run: mix deps.get
 
-      - name: Compile with warnings as errors
-        run: MIX_ENV=test mix compile --force --warnings-as-errors
-
-      - run: mix format --check-formatted
-      - run: mix credo --strict
-
-      # Three files that are generated and committed: the console's bundle, its design
-      # tokens, and the theme stylesheet a browser is served. Each task's own moduledoc
-      # says CI checks it with `--check`, and CI never did — so a token changed without
-      # regenerating would have reached a browser as whatever was there before, and the
-      # only evidence would have been a colour that was slightly wrong.
-      - name: Generated assets are current
-        run: |
-          MIX_ENV=test mix troupe.admin.assets --check
-          MIX_ENV=test mix troupe.admin.tokens --check
-          MIX_ENV=test mix troupe.theme --check
-
-      # The architecture is a claim about coupling, and claims like that decay
-      # silently. This is the thing that makes it fail loudly instead.
-      - name: Boundaries
-        run: MIX_ENV=test mix troupe.boundaries
-
-      # The clients depend on the platform — the TUI on the harness apps, by path — and
-      # never the other way: nothing under `apps/` may name anything under `clients/`.
-      # `troupe.boundaries` sees only the umbrella, so this is the check for the direction
-      # it cannot see (Decision 666).
-      - name: Nothing in the umbrella depends on a client
-        run: |
-          if grep -nE 'path:[^,}]*clients/' mix.exs apps/*/mix.exs; then
-            echo "an umbrella mix.exs depends on a client"
-            exit 1
-          fi
-
       # The same two commands `test_helper.exs` tells a developer to run when it finds
       # no database; the sandbox then owns every transaction the suite opens.
       - name: Migrate the plane's test database
         run: MIX_ENV=test mix ecto.create --quiet && MIX_ENV=test mix ecto.migrate --quiet
 
       - name: Test
+        working-directory: apps/${{ matrix.app }}
         run: mix test
 
-      # Nine more on `main` and release tags, because the suite is concurrent and a race
-      # that shows up one time in five is a bug this project cares about. A pull request
-      # gets one run: the soak is what `main` owes the people downstream of it, not what
-      # every push owes a reviewer twenty-five minutes later.
-      - name: Test (nine more runs, for the race that shows one time in five)
-        if: github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/')
-        run: for i in $(seq 9); do mix test || exit 1; done
+      # A full run's soak: the suite is concurrent, and a race that shows up one time in
+      # five is a bug this project cares about. The nightly and a release owe it; a pull
+      # request and an ordinary merge do not.
+      - name: Test, ${{ inputs.soak }} more times
+        if: inputs.soak > 0
+        working-directory: apps/${{ matrix.app }}
+        env:
+          SOAK: ${{ inputs.soak }}
+        run: for i in $(seq "$SOAK"); do mix test || exit 1; done
 
   chart:
     name: helm lint, render, kubeconform
     needs: [changes]
-    if: needs.changes.outputs.server == 'true'
+    if: needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -271,7 +409,7 @@ jobs:
   protocol:
     name: schema compatibility and the Python client
     needs: [changes]
-    if: needs.changes.outputs.server == 'true'
+    if: needs.changes.outputs.protocol == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -317,158 +455,6 @@ jobs:
       # clients rely on (Decision 320).
       - name: Python reference client, end to end
         run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
-
-  cluster:
-    name: the suite that needs a cluster
-    needs: [check, chart]
-    # On `main` only. It takes twenty minutes and the gate on every pull request is what
-    # keeps the loop tight; it is also what a release waits for, so a release has passed it.
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    timeout-minutes: 45
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: erlef/setup-beam@v1
-        with:
-          elixir-version: ${{ env.ELIXIR_VERSION }}
-          otp-version: ${{ env.OTP_VERSION }}
-
-      - uses: helm/kind-action@v1
-        with:
-          cluster_name: troupe-dev
-          config: dev/kind/cluster.yaml
-
-      - uses: azure/setup-helm@v4
-
-      # The same script a developer runs, so that a cluster failure here is reproducible
-      # by one command on a laptop. It builds the five images and `kind load`s them,
-      # which is why nothing is pushed for this job.
-      - name: Bring up a Troupe
-        run: scripts/remote-up
-
-      - run: mix deps.get
-
-      - name: The cluster suite
-        run: mix troupe.e2e
-
-      # A cluster failure that produces only an exit code is a failure nobody will
-      # diagnose. These are the two logs that say what happened.
-      - name: Logs, on failure
-        if: failure()
-        run: |
-          mkdir -p cluster-logs
-          kubectl logs -n troupe-system deployment/troupe-plane --tail=2000 > cluster-logs/plane.log 2>&1 || true
-          kubectl logs -n troupe-system deployment/troupe-operator --tail=2000 > cluster-logs/operator.log 2>&1 || true
-          kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
-          kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
-
-      - uses: actions/upload-artifact@v4
-        if: failure()
-        with:
-          name: cluster-logs
-          path: cluster-logs/
-
-  images:
-    name: image ${{ matrix.image }}
-    needs: [check, protocol, gui]
-    # A push needs a credential and a pull request from a fork has none, so images are
-    # built from pushes — which is also when there is a commit worth naming a tag after.
-    if: github.event_name == 'push'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      packages: write
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - {image: troupe-operator, release: troupe_operator, context: ., file: docker/Dockerfile}
-          - {image: troupe-plane, release: troupe_plane, context: ., file: docker/Dockerfile}
-          - {image: troupe-worker, release: troupe_worker, context: ., file: docker/Dockerfile}
-          - {image: troupe-a2a, release: troupe_a2a, context: ., file: docker/Dockerfile}
-          # The GUI is built from its own directory, which is also the proof that nothing
-          # in it reaches into the rest of the repository.
-          - {image: troupe-gui, release: "", context: clients/gui, file: clients/gui/Dockerfile}
-    steps:
-      - uses: actions/checkout@v4
-
-      # Where the images go. Four secrets: `REGISTRY` and `REGISTRY_NAMESPACE` name it
-      # and the path under it (Scaleway's registry wants its namespace there, not the
-      # GitHub owner), `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` are how to log in.
-      #
-      # All four, or none. There used to be a fallback — `${REGISTRY:-ghcr.io}` with the
-      # workflow's own token — described as what a fork or a first run wants. What it
-      # actually did the first time this job ran was take a registry *password* that had
-      # been set on its own, pair it with the ghcr.io the missing `REGISTRY` defaulted
-      # to, and answer `denied: denied`: a credential for one registry offered to
-      # another. A half-configured registry is not a state worth guessing about, so
-      # publishing requires the pair, and the summary says which secrets are missing.
-      - name: Resolve the registry and the tag
-        id: registry
-        env:
-          REGISTRY: ${{ secrets.REGISTRY }}
-          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-          IMAGE: ${{ matrix.image }}
-        run: |
-          if [ -z "${REGISTRY}" ] || [ -z "${REGISTRY_PASSWORD}" ]; then
-            echo "publish=false" >> "$GITHUB_OUTPUT"
-            {
-              echo "### ${IMAGE}: not published"
-              echo
-              echo "No registry is configured. Set the repository secrets \`REGISTRY\`,"
-              echo "\`REGISTRY_NAMESPACE\`, \`REGISTRY_USERNAME\` and \`REGISTRY_PASSWORD\`,"
-              echo "and this job will build and push the image."
-            } >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-
-          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
-          # Registries want lower case, and a GitHub owner need not be.
-          image=$(echo "${REGISTRY}/${namespace}/${IMAGE}" | tr '[:upper:]' '[:lower:]')
-
-          # `sha-<short>` only: every commit is pullable by a name that can only ever mean
-          # one build. A version tag is not built here — the release job promotes this
-          # very image to it, so production runs the bytes this run tested.
-          echo "publish=true" >> "$GITHUB_OUTPUT"
-          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
-          echo "tags=${image}:sha-${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
-          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-        if: steps.registry.outputs.publish == 'true'
-
-      - uses: docker/login-action@v3
-        if: steps.registry.outputs.publish == 'true'
-        with:
-          registry: ${{ steps.registry.outputs.registry }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      # linux/amd64 only: that is what the node pool is, and an arm64 build of the
-      # umbrella under emulation is an hour nobody has asked for. The four server images
-      # share every layer up to `mix release`, so one cache serves them.
-      #
-      # `BUILD_COMMIT` and `BUILD_TIME` are what the plane reports at `/.well-known/troupe`,
-      # which is how a deploy proves it is running what it rolled. `TROUPE_GUI_BASE` is
-      # baked into the GUI's asset URLs and must match the chart's `gui.basePath`; the
-      # `GUI_BASE` variable changes both for a deployment that mounts it elsewhere.
-      - uses: docker/build-push-action@v6
-        if: steps.registry.outputs.publish == 'true'
-        with:
-          context: ${{ matrix.context }}
-          file: ${{ matrix.file }}
-          build-args: |
-            RELEASE=${{ matrix.release }}
-            BUILD_COMMIT=${{ github.sha }}
-            BUILD_TIME=${{ steps.registry.outputs.built_at }}
-            TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}
-          platforms: linux/amd64
-          push: true
-          tags: ${{ steps.registry.outputs.tags }}
-          cache-from: type=gha,scope=${{ matrix.image }}
-          cache-to: type=gha,mode=max,scope=${{ matrix.image }}
 
   tui:
     name: the TUI — compile, format, credo, xref, test
@@ -550,7 +536,6 @@ jobs:
 
       - run: pnpm test
 
-
   gui-e2e:
     name: the GUI against a plane built from this commit
     needs: [changes]
@@ -601,7 +586,7 @@ jobs:
 
   # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
   # read it; a copy nobody checks is how four numbers came to have no relation. Cheap, so
-  # it runs on every pull request whatever it touched.
+  # it runs whatever the change touched.
   versions:
     name: every copy of the version agrees
     runs-on: ubuntu-latest
@@ -617,15 +602,66 @@ jobs:
     name: native builds
     needs: [changes]
     if: needs.changes.outputs.native == 'true'
-    uses: ./.github/workflows/release.yml
+    uses: ./.github/workflows/native.yml
 
-  # The one required check. Every job a pull request can run is under it, and it fails
-  # when any of them failed or was cancelled; a job skipped because its part of the
-  # repository did not change counts as passing, which is the point of skipping it.
+  # Twenty minutes on a kind cluster, so it is not a pull request's to wait for: the
+  # nightly and a release ask for it.
+  cluster:
+    name: the suite that needs a cluster
+    needs: [lint, test, chart]
+    if: inputs.cluster
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+
+      - uses: helm/kind-action@v1
+        with:
+          cluster_name: troupe-dev
+          config: dev/kind/cluster.yaml
+
+      - uses: azure/setup-helm@v4
+
+      # The same script a developer runs, so that a cluster failure here is reproducible
+      # by one command on a laptop. It builds the five images and `kind load`s them,
+      # which is why nothing is pushed for this job.
+      - name: Bring up a Troupe
+        run: scripts/remote-up
+
+      - run: mix deps.get
+
+      - name: The cluster suite
+        run: mix troupe.e2e
+
+      # A cluster failure that produces only an exit code is a failure nobody will
+      # diagnose. These are the two logs that say what happened.
+      - name: Logs, on failure
+        if: failure()
+        run: |
+          mkdir -p cluster-logs
+          kubectl logs -n troupe-system deployment/troupe-plane --tail=2000 > cluster-logs/plane.log 2>&1 || true
+          kubectl logs -n troupe-system deployment/troupe-operator --tail=2000 > cluster-logs/operator.log 2>&1 || true
+          kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
+          kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: cluster-logs
+          path: cluster-logs/
+
+  # The one required check. Every job a run can have is under it, and it fails when any
+  # of them failed or was cancelled; a job skipped because its part of the repository
+  # did not change counts as passing, which is the point of skipping it.
   ci-ok:
     name: ci-ok
     if: always()
-    needs: [changes, versions, check, chart, protocol, tui, gui, gui-e2e, native]
+    needs: [changes, versions, lint, test, chart, protocol, tui, gui, gui-e2e, native, cluster]
     runs-on: ubuntu-latest
     steps:
       - name: Every job that ran passed
@@ -634,260 +670,19 @@ jobs:
         run: |
           echo "$RESULTS" | jq -r 'to_entries[] | "\(.key): \(.value.result)"'
           if echo "$RESULTS" | jq -e 'to_entries | map(.value.result) | any(. == "failure" or . == "cancelled")' >/dev/null; then
-            echo "::error::a job this pull request needed did not pass"
+            echo "::error::a job this run needed did not pass"
             exit 1
           fi
 
-  # -- release ------------------------------------------------------------------
-  #
-  # Runs on every push to `main` and does nothing unless VERSION names a version that has
-  # no tag yet — which is to say, unless the commit being pushed is a merged release pull
-  # request (`scripts/release`). It needs the whole gate, the nine soak runs and the
-  # cluster suite included: a release is this commit, already tested.
-  release:
-    name: cut a release, when VERSION is new
-    needs: [versions, check, chart, protocol, cluster, images, tui, gui, gui-e2e]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
+  # Every merged commit that changed something an image is built from is pullable as
+  # `sha-<short>`, once what it changed has passed. Not a release: `release.yml` builds
+  # and tags a version, and nothing here deploys.
+  images:
+    name: images
+    needs: [changes, ci-ok]
+    if: ${{ !cancelled() && needs.ci-ok.result == 'success' && needs.changes.outputs.images == 'true' }}
+    uses: ./.github/workflows/images.yml
     permissions:
-      contents: write
-    outputs:
-      cut: ${{ steps.version.outputs.cut }}
-      version: ${{ steps.version.outputs.version }}
-      tag: ${{ steps.version.outputs.tag }}
-      prerelease: ${{ steps.version.outputs.prerelease }}
-    steps:
-      # Two commits deep, so the push can be compared with what `main` was before it.
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 2
-
-      # A release is a merged *change* to VERSION, not a VERSION that happens to have no
-      # tag. The difference showed on the merge that made this a monorepo: VERSION had
-      # said 0.2.0 for weeks, nothing had ever been tagged, and the run would have
-      # released 0.2.0 — below the 0.2.17 running in production — without anybody having
-      # asked for a release. So both have to hold: this push changed VERSION, and the
-      # version it names has no tag yet (a re-run of a release's own run must not cut it
-      # twice).
-      - name: Is this a new version
-        id: version
-        run: |
-          version="$(tr -d '[:space:]' < VERSION)"
-          tag="v${version}"
-          echo "version=${version}" >> "$GITHUB_OUTPUT"
-          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
-          case "$version" in *-*) echo "prerelease=true" ;; *) echo "prerelease=false" ;; esac >> "$GITHUB_OUTPUT"
-          if git diff --quiet HEAD^1 HEAD -- VERSION; then
-            echo "cut=false" >> "$GITHUB_OUTPUT"
-            echo "VERSION did not change in this push; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
-          elif git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null; then
-            echo "cut=false" >> "$GITHUB_OUTPUT"
-            echo "${tag} is already released; nothing to cut." >> "$GITHUB_STEP_SUMMARY"
-          else
-            echo "cut=true" >> "$GITHUB_OUTPUT"
-            echo "Cutting ${tag} from ${GITHUB_SHA::7}." >> "$GITHUB_STEP_SUMMARY"
-          fi
-
-      # A release is its images, so a release with nowhere to put them is not cut.
-      - name: The registry
-        id: registry
-        if: steps.version.outputs.cut == 'true'
-        env:
-          REGISTRY: ${{ secrets.REGISTRY }}
-          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
-          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
-        run: |
-          if [ -z "${REGISTRY}" ] || [ -z "${REGISTRY_PASSWORD}" ]; then
-            echo "::error title=No registry::A release promotes the images this run built, and no registry is configured. Set REGISTRY, REGISTRY_NAMESPACE, REGISTRY_USERNAME and REGISTRY_PASSWORD."
-            exit 1
-          fi
-          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
-          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
-          echo "base=$(echo "${REGISTRY}/${namespace}" | tr '[:upper:]' '[:lower:]')" >> "$GITHUB_OUTPUT"
-
-      - uses: docker/setup-buildx-action@v3
-        if: steps.version.outputs.cut == 'true'
-
-      - uses: docker/login-action@v3
-        if: steps.version.outputs.cut == 'true'
-        with:
-          registry: ${{ steps.registry.outputs.registry }}
-          username: ${{ secrets.REGISTRY_USERNAME }}
-          password: ${{ secrets.REGISTRY_PASSWORD }}
-
-      # Build once, promote: the version tag is added to the manifest `images` pushed as
-      # `sha-<short>` a few minutes ago, so what production runs is byte for byte what
-      # this run tested. Nothing is rebuilt.
-      - name: Promote this commit's images to the version
-        if: steps.version.outputs.cut == 'true'
-        env:
-          BASE: ${{ steps.registry.outputs.base }}
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          for image in troupe-plane troupe-operator troupe-worker troupe-a2a troupe-gui; do
-            docker buildx imagetools create \
-              --tag "${BASE}/${image}:${VERSION}" \
-              "${BASE}/${image}:sha-${GITHUB_SHA::7}"
-            echo "- \`${BASE}/${image}:${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
-          done
-
-      - uses: azure/setup-helm@v4
-        if: steps.version.outputs.cut == 'true'
-
-      # The chart's own version and its appVersion are the release's, so an install of
-      # this file pulls the images just promoted rather than whatever `values.yaml` was
-      # last edited to say (Decision 322).
-      - name: Package the chart
-        if: steps.version.outputs.cut == 'true'
-        env:
-          VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          helm package charts/troupe --version "$VERSION" --app-version "$VERSION" --destination dist
-
-      # The tag is pushed with this workflow's own token, which starts no other workflow:
-      # everything this release needs happens in this run. The release is a draft until
-      # the native builds have attached their artifacts (`publish`, below).
-      - name: Tag it, and open a draft release
-        if: steps.version.outputs.cut == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ steps.version.outputs.tag }}
-          VERSION: ${{ steps.version.outputs.version }}
-          PRERELEASE: ${{ steps.version.outputs.prerelease }}
-        run: |
-          git tag "$TAG" "$GITHUB_SHA"
-          git push origin "refs/tags/${TAG}"
-          cat > notes.md <<NOTES
-          Everything in this repository at \`${GITHUB_SHA::7}\`, as one release.
-
-          **On a cluster** — the chart, whose images are this version:
-
-              helm upgrade --install troupe \\
-                https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/troupe-${VERSION}.tgz \\
-                --namespace troupe-system --create-namespace --values my-values.yaml
-
-          Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`.
-
-          **On a machine** — \`install.sh\` / \`install.ps1\` install \`troupe\` (the TUI) and \`troupe-daemon\` from here. The desktop app's installers are attached as well.
-          NOTES
-          flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
-          [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
-          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz
-
-      - uses: actions/upload-artifact@v4
-        if: steps.version.outputs.cut == 'true'
-        with:
-          name: chart
-          path: dist/troupe-*.tgz
-
-  release-native:
-    name: native builds for the release
-    needs: [release]
-    if: needs.release.outputs.cut == 'true'
-    uses: ./.github/workflows/release.yml
-    permissions:
-      contents: write
-    with:
-      tag: ${{ needs.release.outputs.tag }}
+      contents: read
+      packages: write
     secrets: inherit
-
-  # Published once everything is attached, with one SHA256SUMS over all of it.
-  publish:
-    name: publish the release
-    needs: [release, release-native]
-    if: needs.release.outputs.cut == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-    steps:
-      - name: Checksums, then publish
-        env:
-          GH_TOKEN: ${{ github.token }}
-          TAG: ${{ needs.release.outputs.tag }}
-          PRERELEASE: ${{ needs.release.outputs.prerelease }}
-        run: |
-          mkdir dist && cd dist
-          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
-          rm -f SHA256SUMS
-          sha256sum -- * > SHA256SUMS
-          cat SHA256SUMS
-          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$PRERELEASE"
-
-  # -- deploy -------------------------------------------------------------------
-  #
-  # A release deploys itself (Decision 669). Pushing an image and changing production are
-  # still two decisions, but the second is now the reviewed merge of a VERSION change,
-  # not a laptop session: a push to `main` that does not change VERSION deploys nothing.
-  # A release candidate (`0.4.0-rc.1`) runs everything and deploys as a dry run only.
-  #
-  # The `production` environment holds `KUBECONFIG` (the `troupe-deployer` account's,
-  # from `scripts/ci-kubeconfig`) and `DEPLOY_VALUES` (the deployment's values file), and
-  # its variable `PLANE_URL`. Its deployment policy should allow `main` alone, so no pull
-  # request can reach them; a required reviewer on it is optional, and makes this job
-  # wait for a second person. Each run of this job is a row on the repository's
-  # Deployments page: what went where, when, and from which merge.
-  deploy:
-    name: deploy ${{ needs.release.outputs.version }}
-    needs: [release]
-    if: needs.release.outputs.cut == 'true'
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ vars.PLANE_URL }}
-    # One roll at a time, shared with `deploy.yml`: two overlapping `helm upgrade`s on one
-    # release is a race whose loser is whichever finished second.
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: azure/setup-helm@v4
-
-      - uses: actions/download-artifact@v4
-        with:
-          name: chart
-          path: dist
-
-      - name: Check this deployment is configured
-        env:
-          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
-          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
-        run: |
-          missing=""
-          [ -n "${KUBECONFIG_CONTENT}" ] || missing="${missing} KUBECONFIG"
-          [ -n "${VALUES_CONTENT}" ] || missing="${missing} DEPLOY_VALUES"
-          if [ -n "${missing}" ]; then
-            echo "::error title=Deployment not configured::The production environment has no${missing}. KUBECONFIG is the troupe-deployer account's (deploy/ci-deployer.yaml, then scripts/ci-kubeconfig); DEPLOY_VALUES is the deployment's Helm values file."
-            exit 1
-          fi
-
-      - name: Lay out the credentials
-        env:
-          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
-          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
-        run: |
-          mkdir -p .local
-          printf '%s' "${KUBECONFIG_CONTENT}" > .local/kubeconfig.yaml
-          printf '%s' "${VALUES_CONTENT}" > .local/values.itminds.yaml
-          chmod 600 .local/kubeconfig.yaml .local/values.itminds.yaml
-
-      - name: ${{ needs.release.outputs.prerelease == 'true' && 'Render it (a release candidate)' || 'Roll it' }}
-        env:
-          PLANE_URL: ${{ vars.PLANE_URL }}
-          EXPECT_COMMIT: ${{ github.sha }}
-          DRY_RUN: ${{ needs.release.outputs.prerelease == 'true' && '--dry-run' || '' }}
-        run: scripts/deploy dist/troupe-${{ needs.release.outputs.version }}.tgz $DRY_RUN
-
-      - name: Say what is running
-        if: always()
-        env:
-          VERSION: ${{ needs.release.outputs.version }}
-          OUTCOME: ${{ job.status }}
-        run: |
-          {
-            echo "### production: ${VERSION} — ${OUTCOME}"
-            echo
-            echo "From \`${GITHUB_SHA::7}\`, started by @${GITHUB_ACTOR}."
-          } >> "$GITHUB_STEP_SUMMARY"

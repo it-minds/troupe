@@ -5091,3 +5091,21 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      `VERSION` from its first parent — the previous `main` — and the version still has no
      tag, so a re-run of a release's own run cannot cut it twice. The first release is
      0.3.0.
+
+676. **CI runs what a change can have broken; a release runs everything; a pre-release runs
+     nothing.** One pipeline for every pull request and every merge cost a merge to `main`
+     an hour: the whole umbrella suite ten times over and twenty minutes of kind cluster,
+     whatever the change was — a GUI stylesheet included. `ci.yml` now plans each run from
+     what changed: umbrella apps from the dependency graph their own `mix.exs` files
+     declare (a change tests the app and every app that depends on it), each app a
+     parallel leg, the clients only when they or what they build against changed. The
+     soak and the cluster suite moved to where they are owed: `nightly.yml` and
+     `release.yml`, which call the same `ci.yml` with `full: true`, so a release still
+     passes every job on exactly the commit it ships and builds its images from it. And a
+     build to try no longer waits for a release: `prerelease.yml`, by hand, builds any
+     commit without the suite and publishes it as a GitHub pre-release `<VERSION>-pre.<n>`
+     — the installers' default never picks one — keeping the newest five. The native
+     builds are `native.yml` (was `release.yml`), and `images.yml` is the one definition
+     of the five images for all three. `release.yml` can be started by hand to retry a
+     version whose run failed after its VERSION change merged, which Decision 674 had
+     left with no way out but a new version. `.github/CI.md` has the picture.

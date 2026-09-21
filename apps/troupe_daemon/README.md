@@ -95,9 +95,9 @@ defined in this directory's `mix.exs`; its runtime configuration is
 `env.sh.eex` and `env.bat.eex`. The version is the umbrella's `VERSION`, and so is the
 harness's: they are one commit.
 
-`.github/workflows/release.yml` builds the Linux, macOS and Windows targets on native
-runners — nightly, at every release, and on a pull request that touches the daemon or the
-workflow — and smokes each (unpack, `version`, `status`, `run`, `status`, `eval`; on
+`.github/workflows/native.yml` builds the Linux, macOS and Windows targets on native
+runners — nightly, for every pre-release and release, and on a pull request that touches
+the daemon — and smokes each (unpack, `version`, `status`, `run`, `status`, `eval`; on
 Windows `version`, `status` and a zstd round trip in `eval`). A release attaches the
 tarballs to the GitHub release with everything else it ships.
 

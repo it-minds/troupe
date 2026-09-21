@@ -89,14 +89,18 @@ A release is a merged change to `VERSION`, and it deploys itself (Decision 669):
 scripts/release 0.3.1        # opens the pull request that changes VERSION
 ```
 
-Merging it makes the run on `main` tag `v0.3.1`, promote the images it has just built and
-tested to that version, publish the chart and the daemon, TUI and desktop builds, and roll
-the release onto the `production` environment with [`scripts/deploy`](scripts/deploy) —
-CRDs, `helm upgrade --wait` with rollback, and a check that `/.well-known/troupe` reports
-the new version and commit. A release candidate (`0.4.0-rc.1`) does all of it and deploys
-as a dry run. The `deploy` workflow rolls back to, or renders, a named release. Nothing is
-deployed from a laptop, and the repository's Deployments page is the record of what ran
-where.
+Merging it runs the full suite on that commit — every job, nine soak runs and the cluster
+suite — then builds the images at `0.3.1`, tags `v0.3.1`, publishes the chart and the
+daemon, TUI and desktop builds, and rolls the release onto the `production` environment
+with [`scripts/deploy`](scripts/deploy) — CRDs, `helm upgrade --wait` with rollback, and a
+check that `/.well-known/troupe` reports the new version and commit. A release candidate
+(`0.4.0-rc.1`) does all of it and deploys as a dry run. The `deploy` workflow rolls back
+to, or renders, a named release. Nothing is deployed from a laptop, and the repository's
+Deployments page is the record of what ran where.
+
+Pull requests and merges run only what a change can have broken, and a **pre-release** —
+any commit, built without the test suite and published as `0.3.1-pre.<n>` for trying
+out — is a button in Actions. [`.github/CI.md`](.github/CI.md) has the whole picture.
 
 ## The front door
 

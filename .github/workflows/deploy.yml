@@ -1,6 +1,6 @@
 # Rolling back, or rendering, by hand.
 #
-# A release deploys itself: the `deploy` job in `ci.yml` runs when a merged VERSION change
+# A release deploys itself: the `deploy` job in `release.yml` runs when a merged VERSION change
 # cuts one (Decision 669). This is for the two things that job does not do — putting an
 # earlier release back, and rendering one against the cluster without changing anything —
 # and it does them the same way: the release's own chart, through the same
@@ -21,7 +21,7 @@ on:
         type: boolean
 
 concurrency:
-  # Shared with the `deploy` job in `ci.yml`. Two overlapping `helm upgrade`s on one
+  # Shared with the `deploy` job in `release.yml`. Two overlapping `helm upgrade`s on one
   # release is a race whose loser is whichever finished second.
   group: deploy-production
   cancel-in-progress: false
