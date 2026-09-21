@@ -1,0 +1,18 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "lib": ["ES2022", "DOM"],
+    "types": ["node"],
+    // The client's source, not its `dist`. The package points `types` at a build
+    // output, so on a clean checkout — which is every CI run — this package could not
+    // be typechecked until something had built the client first. `tsx` resolves the
+    // source at runtime anyway, so reading the built `.d.ts` here would also mean
+    // checking against a different file from the one that actually runs.
+    // `apps/desktop` does the same, for the same reason.
+    "paths": {
+      "@troupe/client": ["../../packages/client/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

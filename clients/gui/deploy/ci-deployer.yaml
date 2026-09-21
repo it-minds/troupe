@@ -1,0 +1,83 @@
+# The identity CI deploys as.
+#
+# A person's kubeconfig cannot be handed to a runner. The one Scaleway issues carries an
+# *exec plugin* — it shells out to `scw` on the machine using it to mint a token — so it
+# works on a laptop and fails on a runner with "executable scw not found". The token it
+# would have minted is also that person's, which means cluster-admin, which is rather
+# more than rolling one Deployment needs.
+#
+# So CI gets its own identity, and only what the chart actually touches: a Deployment, a
+# Service and an Ingress in one namespace, plus the Secrets Helm keeps its release
+# history in and the Pods it watches while waiting. Nothing cluster-scoped, nothing in
+# another namespace, nothing that could read the plane's secrets.
+#
+#   kubectl apply -f deploy/ci-deployer.yaml
+#   scripts/ci-kubeconfig > .local/kubeconfig.ci.yaml     # the kubeconfig to upload
+#
+# To take it away again:
+#
+#   kubectl delete -f deploy/ci-deployer.yaml
+
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: troupe-gui-deployer
+  namespace: troupe-system
+---
+# Kubernetes stopped minting service-account token Secrets automatically in 1.24, and
+# `kubectl create token` issues one that expires — which is right for a person and wrong
+# for a runner that has to still work in three months without anybody remembering why it
+# stopped. A Secret of this type is the supported way to ask for one that does not.
+apiVersion: v1
+kind: Secret
+metadata:
+  name: troupe-gui-deployer
+  namespace: troupe-system
+  annotations:
+    kubernetes.io/service-account.name: troupe-gui-deployer
+type: kubernetes.io/service-account-token
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: troupe-gui-deployer
+  namespace: troupe-system
+rules:
+  # What the chart creates.
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: [""]
+    resources: ["services"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+  - apiGroups: ["networking.k8s.io"]
+    resources: ["ingresses"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # Where Helm keeps release history: one Secret per revision, in this namespace.
+  - apiGroups: [""]
+    resources: ["secrets"]
+    verbs: ["get", "list", "watch", "create", "update", "patch", "delete"]
+
+  # `--wait` watches the rollout, and the script prints the running digest afterwards.
+  # Read-only: CI has no business deleting a pod by hand.
+  - apiGroups: [""]
+    resources: ["pods", "events"]
+    verbs: ["get", "list", "watch"]
+  - apiGroups: ["apps"]
+    resources: ["replicasets"]
+    verbs: ["get", "list", "watch"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: troupe-gui-deployer
+  namespace: troupe-system
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: Role
+  name: troupe-gui-deployer
+subjects:
+  - kind: ServiceAccount
+    name: troupe-gui-deployer
+    namespace: troupe-system

@@ -1,0 +1,593 @@
+{
+  "$meta": {
+    "name": "Troupe — Signal",
+    "id": "signal",
+    "version": "1.0.0",
+    "default": true,
+    "description": "Neutral graphite with no blue cast, and a printer's duotone on top: cyan is the machine working, magenta is you being asked.",
+    "reservedColour": "status.waiting — magenta #FF5CB8 / #C11A79. Denied and error are pushed to clay and orange to stay distinct from it.",
+    "defaultMode": "dark"
+  },
+  "$themeContract": "Every colour token carries a dark and a light value under one semantic name. Components read the name, never a hex. All three Troupe themes expose exactly this token set — swapping a theme swaps values only. A theme that needs a new token name is a redesign, not a theme.",
+  "color": {
+    "bg": {
+      "stage": {
+        "dark": "#0A0B0D",
+        "light": "#D9DCE0"
+      },
+      "canvas": {
+        "dark": "#101215",
+        "light": "#EDEFF2"
+      },
+      "panel": {
+        "dark": "#16191E",
+        "light": "#F9FAFB"
+      },
+      "raised": {
+        "dark": "#1D2128",
+        "light": "#FFFFFF"
+      },
+      "sunken": {
+        "dark": "#0B0D10",
+        "light": "#E3E6EA"
+      },
+      "hover": {
+        "dark": "#242931",
+        "light": "#E4E8ED"
+      },
+      "selected": {
+        "dark": "#1F2630",
+        "light": "#DFE5EC"
+      },
+      "scrim": {
+        "dark": "rgba(4,5,7,0.72)",
+        "light": "rgba(14,16,19,0.44)"
+      }
+    },
+    "text": {
+      "primary": {
+        "dark": "#ECEFF3",
+        "light": "#0E1013"
+      },
+      "secondary": {
+        "dark": "#AEB5BE",
+        "light": "#3A4049"
+      },
+      "muted": {
+        "dark": "#7D848E",
+        "light": "#585F68"
+      },
+      "inverse": {
+        "dark": "#0A0B0D",
+        "light": "#FFFFFF"
+      },
+      "link": {
+        "dark": "#7FB6F5",
+        "light": "#14568F"
+      },
+      "linkHover": {
+        "dark": "#ABD2FA",
+        "light": "#0B3A64"
+      }
+    },
+    "border": {
+      "hairline": {
+        "dark": "#252A31",
+        "light": "#C8CCD2"
+      },
+      "strong": {
+        "dark": "#3A424C",
+        "light": "#979EA7"
+      },
+      "focus": {
+        "dark": "#3FD2E8",
+        "light": "#0A5866"
+      },
+      "divider": {
+        "dark": "#1A1E24",
+        "light": "#D9DDE2"
+      }
+    },
+    "status": {
+      "running": {
+        "description": "An agent is working right now.",
+        "fg": {
+          "dark": "#3FD2E8",
+          "light": "#0A5866"
+        },
+        "bg": {
+          "dark": "#062A31",
+          "light": "#D8EFF3"
+        },
+        "border": {
+          "dark": "#125B69",
+          "light": "#85C4CF"
+        }
+      },
+      "waiting": {
+        "description": "Stopped, waiting for a human decision. The reserved colour.",
+        "fg": {
+          "dark": "#FF7FC6",
+          "light": "#9B0A5E"
+        },
+        "solid": {
+          "dark": "#FF5CB8",
+          "light": "#C11A79"
+        },
+        "bg": {
+          "dark": "#2C0B1F",
+          "light": "#FCE0F0"
+        },
+        "border": {
+          "dark": "#8A2160",
+          "light": "#E68BC0"
+        }
+      },
+      "queued": {
+        "description": "Accepted but not yet started.",
+        "fg": {
+          "dark": "#99A1AC",
+          "light": "#4E555E"
+        },
+        "bg": {
+          "dark": "#15181D",
+          "light": "#E5E8EC"
+        },
+        "border": {
+          "dark": "#2D343C",
+          "light": "#B5BBC3"
+        }
+      },
+      "allowed": {
+        "description": "Decision record: the action was permitted.",
+        "fg": {
+          "dark": "#5FD69B",
+          "light": "#0F6342"
+        },
+        "bg": {
+          "dark": "#07281B",
+          "light": "#DCF1E6"
+        },
+        "border": {
+          "dark": "#1E5C40",
+          "light": "#8AC7AC"
+        }
+      },
+      "denied": {
+        "description": "Decision record: the action was refused. Not an error.",
+        "fg": {
+          "dark": "#DA8B7B",
+          "light": "#8E3626"
+        },
+        "bg": {
+          "dark": "#2A1411",
+          "light": "#F9E2DD"
+        },
+        "border": {
+          "dark": "#6E382E",
+          "light": "#D79F92"
+        }
+      },
+      "dormant": {
+        "description": "Session asleep. Costs nothing, wakes on the next message.",
+        "fg": {
+          "dark": "#8E93E8",
+          "light": "#3B3FA0"
+        },
+        "bg": {
+          "dark": "#15172B",
+          "light": "#E3E4F6"
+        },
+        "border": {
+          "dark": "#343869",
+          "light": "#ABAEDE"
+        }
+      },
+      "readonly": {
+        "description": "Access withdrawn or archived. Readable, not writable.",
+        "fg": {
+          "dark": "#9AA2AC",
+          "light": "#414850"
+        },
+        "bg": {
+          "dark": "#14171B",
+          "light": "#E6E9ED"
+        },
+        "border": {
+          "dark": "#2B3139",
+          "light": "#B3B9C0"
+        }
+      },
+      "private": {
+        "description": "Session belongs to one person; nobody can be added.",
+        "fg": {
+          "dark": "#7FA8B8",
+          "light": "#245061"
+        },
+        "bg": {
+          "dark": "#101619",
+          "light": "#E0EAEE"
+        },
+        "border": {
+          "dark": "#2A3A42",
+          "light": "#9DBAC5"
+        }
+      },
+      "error": {
+        "description": "Something failed. Reserved for failure, never for denial.",
+        "fg": {
+          "dark": "#FF6B5B",
+          "light": "#A3200F"
+        },
+        "bg": {
+          "dark": "#2C100C",
+          "light": "#FBDFDB"
+        },
+        "border": {
+          "dark": "#7F3228",
+          "light": "#E0998E"
+        }
+      },
+      "offline": {
+        "description": "Connection lost or platform unreachable.",
+        "fg": {
+          "dark": "#C9B27A",
+          "light": "#5D4A1E"
+        },
+        "bg": {
+          "dark": "#201B12",
+          "light": "#EFE8D8"
+        },
+        "border": {
+          "dark": "#4B4028",
+          "light": "#C2B391"
+        }
+      }
+    },
+    "diff": {
+      "addedBg": {
+        "dark": "#07251A",
+        "light": "#DCF1E6"
+      },
+      "addedText": {
+        "dark": "#7FDCAE",
+        "light": "#0B5637"
+      },
+      "addedMarker": {
+        "dark": "#22754F",
+        "light": "#2A8659"
+      },
+      "removedBg": {
+        "dark": "#291310",
+        "light": "#F9E2DD"
+      },
+      "removedText": {
+        "dark": "#EFA294",
+        "light": "#832E1E"
+      },
+      "removedMarker": {
+        "dark": "#87402F",
+        "light": "#B35538"
+      },
+      "contextText": {
+        "dark": "#8A919B",
+        "light": "#4B525B"
+      },
+      "gutterBg": {
+        "dark": "#0A0C0F",
+        "light": "#E1E5E9"
+      },
+      "gutterText": {
+        "dark": "#5E656E",
+        "light": "#646B74"
+      },
+      "hunkHeader": {
+        "dark": "#7D848E",
+        "light": "#525A64"
+      }
+    },
+    "person": {
+      "1": {
+        "dark": "#6FB5FF",
+        "light": "#1B5299"
+      },
+      "2": {
+        "dark": "#C08BFF",
+        "light": "#5B2E96"
+      },
+      "3": {
+        "dark": "#59D6B4",
+        "light": "#0A6B55"
+      },
+      "4": {
+        "dark": "#E8C15E",
+        "light": "#7A5B00"
+      },
+      "5": {
+        "dark": "#6FD3E8",
+        "light": "#0B6076"
+      },
+      "6": {
+        "dark": "#A8B6C4",
+        "light": "#3F4C5A"
+      },
+      "self": {
+        "dark": "#A6ADB6",
+        "light": "#414850"
+      },
+      "agent": {
+        "dark": "#C9CFD6",
+        "light": "#1C2127"
+      }
+    }
+  },
+  "shadow": {
+    "none": "none",
+    "raise": {
+      "dark": "0 1px 2px rgba(0,0,0,0.55)",
+      "light": "0 1px 2px rgba(14,16,19,0.10)",
+      "use": "Menus and chips only."
+    },
+    "sheet": {
+      "dark": "0 -8px 28px rgba(0,0,0,0.6)",
+      "light": "0 -8px 28px rgba(14,16,19,0.16)",
+      "use": "Bottom sheet and mobile backstage."
+    },
+    "overlay": {
+      "dark": "0 16px 48px rgba(0,0,0,0.68)",
+      "light": "0 16px 48px rgba(14,16,19,0.22)",
+      "use": "Dialogs."
+    },
+    "footlight": {
+      "dark": "0 -1px 0 #FF5CB8, 0 -14px 34px rgba(255,92,184,0.15)",
+      "light": "0 -1px 0 #C11A79, 0 -14px 34px rgba(193,26,121,0.13)",
+      "use": "The approval panel only."
+    }
+  },
+  "typography": {
+    "family": {
+      "sans": {
+        "value": "'IBM Plex Sans','Segoe UI',system-ui,sans-serif",
+        "description": "Interface and reading. Full Danish diacritic coverage at every weight."
+      },
+      "mono": {
+        "value": "'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace",
+        "description": "Anything literal: paths, commands, diffs, identifiers, status words, the wordmark."
+      }
+    },
+    "role": {
+      "display": {
+        "family": "sans",
+        "size": "clamp(28px, 5vw, 40px)",
+        "weight": 600,
+        "lineHeight": 1.12,
+        "letterSpacing": "-0.02em",
+        "use": "Sign-in, single-purpose screens."
+      },
+      "title": {
+        "family": "sans",
+        "size": "clamp(21px, 3vw, 26px)",
+        "weight": 600,
+        "lineHeight": 1.2,
+        "letterSpacing": "-0.015em",
+        "use": "Screen title, session subject."
+      },
+      "heading": {
+        "family": "sans",
+        "size": "17px",
+        "weight": 600,
+        "lineHeight": 1.35,
+        "letterSpacing": "-0.008em",
+        "use": "Panel headings, approval headline."
+      },
+      "subheading": {
+        "family": "sans",
+        "size": "15px",
+        "weight": 600,
+        "lineHeight": 1.4,
+        "letterSpacing": "0",
+        "use": "Group headings, list section labels."
+      },
+      "body": {
+        "family": "sans",
+        "size": "15px",
+        "weight": 400,
+        "lineHeight": 1.62,
+        "letterSpacing": "0.002em",
+        "use": "Conversation and all long-form reading."
+      },
+      "bodyStrong": {
+        "family": "sans",
+        "size": "15px",
+        "weight": 600,
+        "lineHeight": 1.62,
+        "letterSpacing": "0.002em",
+        "use": "Emphasis inside body copy."
+      },
+      "ui": {
+        "family": "sans",
+        "size": "14px",
+        "weight": 500,
+        "lineHeight": 1.4,
+        "letterSpacing": "0.004em",
+        "use": "Buttons, tabs, inputs, list rows."
+      },
+      "uiSmall": {
+        "family": "sans",
+        "size": "13px",
+        "weight": 500,
+        "lineHeight": 1.4,
+        "letterSpacing": "0.006em",
+        "use": "Secondary controls, chips, metadata."
+      },
+      "micro": {
+        "family": "mono",
+        "size": "11.5px",
+        "weight": 500,
+        "lineHeight": 1.3,
+        "letterSpacing": "0.04em",
+        "use": "Status pills, counts, relative times. Sentence case, never all caps."
+      },
+      "code": {
+        "family": "mono",
+        "size": "13px",
+        "weight": 400,
+        "lineHeight": 1.55,
+        "letterSpacing": "0",
+        "use": "Commands, file paths, inline code."
+      },
+      "codeSmall": {
+        "family": "mono",
+        "size": "12px",
+        "weight": 400,
+        "lineHeight": 1.5,
+        "letterSpacing": "0",
+        "use": "Diff bodies and dense log output."
+      },
+      "wordmark": {
+        "family": "mono",
+        "size": "32px",
+        "weight": 600,
+        "lineHeight": 1,
+        "letterSpacing": "-0.01em",
+        "use": "The word 'troupe'. Always lowercase."
+      }
+    },
+    "measure": {
+      "reading": {
+        "value": "68ch",
+        "description": "Max line length for agent output and long copy."
+      },
+      "narrow": {
+        "value": "46ch",
+        "description": "Empty states, sign-in, error copy."
+      }
+    }
+  },
+  "space": {
+    "0": "0px",
+    "1": "4px",
+    "2": "8px",
+    "3": "12px",
+    "4": "16px",
+    "5": "20px",
+    "6": "24px",
+    "7": "32px",
+    "8": "40px",
+    "9": "56px",
+    "10": "72px",
+    "11": "96px",
+    "px": "1px",
+    "half": "2px"
+  },
+  "radius": {
+    "none": "0px",
+    "xs": "2px",
+    "sm": "3px",
+    "md": "5px",
+    "lg": "8px",
+    "pill": "999px",
+    "$note": "Deliberately tight. Structure comes from hairlines and alignment, not rounding."
+  },
+  "border": {
+    "hairline": "1px",
+    "strong": "1.5px",
+    "focus": "2px",
+    "marker": "3px",
+    "$note": "marker is the left edge that flags a row or panel as needing attention."
+  },
+  "motion": {
+    "duration": {
+      "instant": "0ms",
+      "fast": "120ms",
+      "base": "180ms",
+      "slow": "300ms",
+      "wake": "700ms",
+      "pulse": "2200ms"
+    },
+    "easing": {
+      "standard": "cubic-bezier(0.2, 0, 0, 1)",
+      "enter": "cubic-bezier(0.05, 0.7, 0.1, 1)",
+      "exit": "cubic-bezier(0.3, 0, 0.8, 0.15)",
+      "linear": "linear"
+    },
+    "rules": [
+      "Every animation is idempotent: a server-driven DOM replacement may restart it at any time, and restarting must look acceptable.",
+      "Nothing animates except a state genuinely in motion: running, waiting, reconnecting, waking.",
+      "prefers-reduced-motion: reduce collapses all durations to instant and replaces pulses with static marks."
+    ]
+  },
+  "breakpoint": {
+    "min": {
+      "value": "380px",
+      "description": "Hard floor. Everything must work here."
+    },
+    "sm": {
+      "value": "480px"
+    },
+    "md": {
+      "value": "720px",
+      "description": "Backstage becomes a side panel instead of a sheet."
+    },
+    "lg": {
+      "value": "1040px",
+      "description": "Session list rail appears beside the conversation."
+    },
+    "xl": {
+      "value": "1320px",
+      "description": "Reading column caps; backstage widens."
+    }
+  },
+  "zIndex": {
+    "base": 0,
+    "raised": 10,
+    "sticky": 100,
+    "rail": 200,
+    "approval": 300,
+    "sheet": 400,
+    "overlay": 500,
+    "toast": 600
+  },
+  "size": {
+    "touchTarget": {
+      "value": "44px",
+      "description": "Minimum hit area for anything tappable, approvals included."
+    },
+    "avatar": {
+      "sm": "20px",
+      "md": "26px",
+      "lg": "34px"
+    },
+    "railWidth": "272px",
+    "backstageWidth": "336px",
+    "composerMinHeight": "52px",
+    "switchTrack": {
+      "value": "44px",
+      "description": "Tool on/off switch track. Knob 18px, travel 18px."
+    }
+  },
+  "mark": {
+    "$note": "The mask. One silhouette, split down the middle: the filled half is what the agent did alone, the hollow half is what still needs a person.",
+    "path": "M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z",
+    "viewBox": "0 0 48 48",
+    "strokeWidth": {
+      "lg": "2.6",
+      "md": "3",
+      "sm": "3.4"
+    },
+    "eyeLeft": "M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z",
+    "eyeRight": "M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z",
+    "seam": {
+      "path": "M24 8 L24 42",
+      "minSize": "32px",
+      "description": "Drop the seam line below 32px and let the colour change be the seam."
+    },
+    "lightDirection": "right",
+    "rules": [
+      "Fill the mask with the surface behind it, never a colour outside the token set.",
+      "No mouth, ever.",
+      "An eye on a filled half is cut out of it; an eye on a hollow half is solid.",
+      "People never get a mask. A human is initials in a ring."
+    ]
+  }
+}

@@ -1,0 +1,157 @@
+# Installers for the desktop shell.
+#
+# Separate from `ci.yml` because it is slow, needs a runner per platform, and proves
+# something different: `ci` proves the code is right, this proves it can be installed.
+# Typecheck and tests are not repeated here — `ci` already ran them on the same commit.
+#
+# Unsigned on purpose, for now. Every signing step below is written out and gated on a
+# secret that does not exist yet; adding the secret turns it on and nothing else has to
+# change. Until then the artifacts warn on first launch and people install them the
+# awkward way — see docs/install.md.
+
+name: desktop
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+    paths:
+      - "apps/desktop/**"
+      - "packages/client/**"
+      - ".github/workflows/desktop.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: desktop-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  bundle:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: macOS (universal)
+            os: macos-14
+            target: universal-apple-darwin
+            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - name: Windows (x64)
+            os: windows-latest
+            target: x86_64-pc-windows-msvc
+            rust-targets: x86_64-pc-windows-msvc
+          # 22.04 is the glibc floor: the oldest Ubuntu that carries
+          # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
+          # silently breaks every 22.04 user. Do not "modernise" this.
+          - name: Linux (x64)
+            os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+            rust-targets: x86_64-unknown-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: System dependencies (Linux)
+        if: matrix.os == 'ubuntu-22.04'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev libappindicator3-dev librsvg2-dev patchelf \
+            libgtk-3-dev libssl-dev build-essential file
+
+      - uses: pnpm/action-setup@v6
+        with:
+          version: 10.15.0
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust-targets }}
+      - uses: swatinem/rust-cache@v2
+        with:
+          workspaces: apps/desktop/src-tauri -> target
+          key: ${{ matrix.target }}
+
+      - run: pnpm install --frozen-lockfile
+
+      # ---------------------------------------------------------------------------
+      # Signing. Every step here is inert until the matching secret is set; see
+      # docs/install.md for what each one is and what it costs.
+      # ---------------------------------------------------------------------------
+      - name: Decide whether this build is signed
+        id: signing
+        shell: bash
+        env:
+          APPLE_CERT: ${{ secrets.APPLE_CERTIFICATE }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+        run: |
+          signed=false
+          case "${{ matrix.os }}" in
+            macos-*)   [ -n "$APPLE_CERT" ]     && signed=true ;;
+            windows-*) [ -n "$AZURE_ENDPOINT" ] && signed=true ;;
+          esac
+          echo "signed=$signed" >> "$GITHUB_OUTPUT"
+          if [ "$signed" = false ]; then
+            echo "::notice::Unsigned build. Installers will warn; see docs/install.md."
+          fi
+
+      - name: Install the Windows signing client
+        if: steps.signing.outputs.signed == 'true' && runner.os == 'Windows'
+        run: cargo install trusted-signing-cli
+
+      # Two steps, not one with a conditional env block. An undefined secret is not an
+      # absent variable: GitHub substitutes an empty string, so `APPLE_CERTIFICATE` is
+      # still *defined*, and tauri-action reads its presence as "set up a signing
+      # keychain" and then fails importing nothing. The unsigned build must not be able
+      # to see these names at all.
+      - name: Build the bundles (unsigned)
+        if: steps.signing.outputs.signed != 'true'
+        uses: tauri-apps/tauri-action@v0
+        with:
+          projectPath: apps/desktop
+          args: --target ${{ matrix.target }}
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseDraft: true
+          prerelease: false
+
+      - name: Build the bundles (signed)
+        if: steps.signing.outputs.signed == 'true'
+        uses: tauri-apps/tauri-action@v0
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
+          APPLE_API_KEY: ${{ secrets.APPLE_API_KEY }}
+          APPLE_API_KEY_PATH: ${{ secrets.APPLE_API_KEY_PATH }}
+          AZURE_ENDPOINT: ${{ secrets.AZURE_ENDPOINT }}
+          AZURE_CODE_SIGNING_NAME: ${{ secrets.AZURE_CODE_SIGNING_NAME }}
+          AZURE_CERT_PROFILE_NAME: ${{ secrets.AZURE_CERT_PROFILE_NAME }}
+          AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+          AZURE_CLIENT_SECRET: ${{ secrets.AZURE_CLIENT_SECRET }}
+          AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+        with:
+          projectPath: apps/desktop
+          args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
+          tagName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseName: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || '' }}
+          releaseDraft: true
+          prerelease: false
+
+      - name: Keep the installers
+        uses: actions/upload-artifact@v7
+        with:
+          name: troupe-${{ matrix.target }}
+          if-no-files-found: error
+          path: |
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.dmg
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.exe
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.msi
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.deb
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.rpm
+            apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle/**/*.AppImage

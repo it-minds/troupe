@@ -1,0 +1,1670 @@
+/* The Troupe GUI, built on docs/design/DESIGN.md.
+ *
+ * Three rules do most of the work here and are worth stating before the code:
+ *
+ *   1. Amber is a job, not a mood. `--waiting-*` marks work that has stopped and needs
+ *      a person, and nothing else in this file is allowed to use it.
+ *   2. Structure comes from hairlines and alignment. No cards, no soft grey shadows,
+ *      no gradients; radii top out at 8px and mostly sit at 3–5px.
+ *   3. Mono for anything literal — paths, commands, status pills, times — and sans for
+ *      anything a person wrote or the agent said.
+ *
+ * The one ornament is the 3px left marker in a status colour, and the one decorative
+ * shadow is the footlight under the approval panel.
+ */
+
+@import "@fontsource/ibm-plex-sans/400.css";
+@import "@fontsource/ibm-plex-sans/500.css";
+@import "@fontsource/ibm-plex-sans/600.css";
+@import "@fontsource/ibm-plex-mono/400.css";
+@import "@fontsource/ibm-plex-mono/500.css";
+@import "./tokens.css";
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--bg-stage);
+  color: var(--text-primary);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.62;
+  letter-spacing: 0.002em;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Focus is never removed. 2px ring, 2px offset, on everything. */
+:focus-visible {
+  outline: var(--bw-focus) solid var(--focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-xs);
+}
+
+a {
+  color: var(--link);
+  text-underline-offset: 2px;
+}
+a:hover {
+  color: var(--link-hover);
+}
+
+code,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  line-height: 1.55;
+}
+pre {
+  margin: 0;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0;
+  font-weight: 600;
+  letter-spacing: -0.008em;
+}
+h1 {
+  font-size: clamp(21px, 3vw, 26px);
+  line-height: 1.2;
+  letter-spacing: -0.015em;
+}
+h2 {
+  font-size: 17px;
+  line-height: 1.35;
+}
+h3 {
+  font-size: 15px;
+  line-height: 1.4;
+}
+
+/* -- controls ------------------------------------------------------------- */
+
+button,
+input,
+select,
+textarea {
+  font-family: inherit;
+  font-size: 14px;
+  line-height: 1.4;
+  font-weight: 500;
+  color: inherit;
+}
+
+button {
+  min-height: 32px;
+  padding: 6px 12px;
+  background: var(--bg-raised);
+  color: var(--text-primary);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  cursor: pointer;
+  transition: background var(--dur-fast) var(--ease-standard);
+}
+button:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+button.primary {
+  background: var(--bg-selected);
+  border-color: var(--border-strong);
+}
+button.link {
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  font-weight: 500;
+}
+button.link:hover:not(:disabled) {
+  background: none;
+  color: var(--link-hover);
+}
+
+input,
+select,
+textarea {
+  min-height: 34px;
+  padding: 6px 10px;
+  background: var(--bg-raised);
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-radius: var(--radius-md);
+}
+textarea {
+  resize: vertical;
+  line-height: 1.5;
+}
+
+label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+}
+label small {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+/* -- shared ---------------------------------------------------------------- */
+
+.muted {
+  color: var(--text-muted);
+}
+.secondary {
+  color: var(--text-secondary);
+}
+.spacer {
+  flex: 1;
+}
+.stack {
+  display: flex;
+  flex-direction: column;
+}
+.measure {
+  max-width: 68ch;
+}
+.copy {
+  max-width: 46ch;
+}
+.centred {
+  display: grid;
+  place-items: center;
+  height: 100%;
+  padding: var(--space-6);
+  text-align: center;
+}
+
+/* The micro role: mono, 11.5px, sentence case. Never all caps. */
+.micro,
+.pill,
+.when,
+.count {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  line-height: 1.3;
+  letter-spacing: 0.04em;
+  font-weight: 500;
+}
+
+/* Status pill: always a dot and a word, never colour on its own. */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+.pill .eye {
+  flex: none;
+  display: block;
+  /* Drawn on a 16 grid, set here against 11.5px mono. */
+  width: 13px;
+  height: 13px;
+  margin-top: -1px;
+}
+
+.pill.running {
+  color: var(--running-fg);
+  background: var(--running-bg);
+  border-color: var(--running-bd);
+}
+.pill.waiting {
+  color: var(--waiting-fg);
+  background: var(--waiting-bg);
+  border-color: var(--waiting-bd);
+}
+.pill.queued {
+  color: var(--queued-fg);
+  background: var(--queued-bg);
+  border-color: var(--queued-bd);
+}
+.pill.allowed {
+  color: var(--allowed-fg);
+  background: var(--allowed-bg);
+  border-color: var(--allowed-bd);
+}
+.pill.denied {
+  color: var(--denied-fg);
+  background: var(--denied-bg);
+  border-color: var(--denied-bd);
+}
+.pill.dormant {
+  color: var(--dormant-fg);
+  background: var(--dormant-bg);
+  border-color: var(--dormant-bd);
+}
+.pill.readonly {
+  color: var(--readonly-fg);
+  background: var(--readonly-bg);
+  border-color: var(--readonly-bd);
+}
+.pill.error {
+  color: var(--error-fg);
+  background: var(--error-bg);
+  border-color: var(--error-bd);
+}
+.pill.offline {
+  color: var(--offline-fg);
+  background: var(--offline-bg);
+  border-color: var(--offline-bd);
+}
+.pill.private {
+  color: var(--private-fg);
+  background: var(--private-bg);
+  border-color: var(--private-bd);
+}
+
+/* Only live states animate, and only as a pulse that restarts cleanly. */
+.pill.running .eye,
+.pill.waiting .eye,
+.pill.reconnecting .eye {
+  animation: pulse var(--dur-pulse) var(--ease-standard) infinite;
+}
+@keyframes pulse {
+  0%,
+  100% {
+    opacity: 1;
+  }
+  50% {
+    opacity: 0.35;
+  }
+}
+
+.banner {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: 10px var(--space-4);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  border-left: var(--bw-marker) solid currentColor;
+  font-size: 14px;
+}
+.banner p {
+  margin: 0;
+  color: var(--text-primary);
+}
+.banner.dormant {
+  color: var(--dormant-fg);
+  background: var(--dormant-bg);
+}
+.banner.readonly {
+  color: var(--readonly-fg);
+  background: var(--readonly-bg);
+}
+.banner.offline {
+  color: var(--offline-fg);
+  background: var(--offline-bg);
+}
+.banner.error {
+  color: var(--error-fg);
+  background: var(--error-bg);
+}
+
+.empty {
+  padding: var(--space-9) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: flex-start;
+  max-width: 46ch;
+  margin: 0 auto;
+  text-align: left;
+}
+.empty h2 {
+  margin: 0;
+}
+.empty p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* -- sign in --------------------------------------------------------------- */
+
+.signin {
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 46ch;
+  margin: 0 auto;
+  padding: clamp(var(--space-7), 12vh, var(--space-11)) var(--space-5) var(--space-7);
+}
+.signin .wordmark {
+  gap: var(--space-3);
+}
+.signin p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.signin form {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.signin form button {
+  min-height: var(--touch-target);
+}
+.signin footer {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  padding-top: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.device {
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  padding: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  align-items: center;
+  text-align: center;
+}
+.usercode {
+  font-family: var(--font-mono);
+  font-size: 28px;
+  font-weight: 500;
+  letter-spacing: 0.16em;
+  padding: var(--space-2) var(--space-4);
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+}
+
+/* -- shell ----------------------------------------------------------------- */
+
+.app {
+  height: 100%;
+  display: flex;
+  background: var(--bg-canvas);
+}
+
+.rail {
+  flex: 0 0 auto;
+  width: 232px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  padding: var(--space-4) var(--space-3);
+  background: var(--bg-stage);
+  border-right: var(--bw-hairline) solid var(--border-hairline);
+}
+/* The lockup: the mask and the word. The platform writes its own name the way it
+   writes an identifier — mono, lowercase, always. */
+.wordmark {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-width: 0;
+}
+.wordmark .word {
+  font-family: var(--font-mono);
+  font-weight: 600;
+  line-height: 1;
+  letter-spacing: -0.01em;
+}
+.mask {
+  display: block;
+  flex: none;
+}
+
+.rail .wordmark {
+  padding: 0 var(--space-2) var(--space-4);
+}
+.rail nav {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.rail nav button {
+  min-height: var(--touch-target);
+  background: none;
+  border: none;
+  border-left: var(--bw-marker) solid transparent;
+  border-radius: 0 var(--radius-md) var(--radius-md) 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+}
+.rail nav button[aria-current="page"] {
+  background: var(--bg-selected);
+  border-left-color: var(--border-strong);
+  font-weight: 600;
+}
+.rail .me {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  padding-top: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-size: 13px;
+}
+.rail .me .name {
+  font-weight: 600;
+  font-size: 14px;
+}
+.rail .me button {
+  align-self: flex-start;
+  margin-top: var(--space-2);
+}
+
+main {
+  flex: 1 1 0;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-stage);
+}
+.toolbar .search {
+  flex: 1 1 200px;
+  max-width: 300px;
+}
+.toolbar .count {
+  color: var(--text-muted);
+  white-space: nowrap;
+}
+
+/* -- the one list ----------------------------------------------------------- */
+
+.listing {
+  flex: 1;
+  overflow: auto;
+  padding: var(--space-4);
+}
+.group {
+  margin-bottom: var(--space-6);
+}
+.group > h3 {
+  margin: 0 0 var(--space-2);
+  color: var(--text-secondary);
+}
+.group.waiting > h3 {
+  color: var(--waiting-fg);
+}
+
+/* Rows are single-pixel-separated inside one bordered block, the way a schedule is
+   ruled — not fifteen floating rectangles. */
+.rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+  background: var(--bg-panel);
+}
+.rows li + li {
+  border-top: var(--bw-hairline) solid var(--divider);
+}
+
+.row {
+  width: 100%;
+  min-height: var(--touch-target);
+  background: none;
+  border: none;
+  border-left: var(--bw-marker) solid transparent;
+  border-radius: 0;
+  padding: 10px var(--space-4) 10px 13px;
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  text-align: left;
+}
+.row:hover:not(:disabled) {
+  background: var(--bg-hover);
+}
+.row .subject {
+  flex: 1 1 200px;
+  min-width: 0;
+  font-size: 15px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.row .meta {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  color: var(--text-muted);
+  flex: none;
+}
+.row.is-waiting {
+  background: var(--waiting-bg);
+  border-left-color: var(--waiting-solid);
+}
+.row.is-running {
+  border-left-color: var(--running-fg);
+}
+.row.is-dormant {
+  border-left-color: var(--dormant-fg);
+}
+
+/* -- dialog ----------------------------------------------------------------- */
+
+.scrim {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: grid;
+  place-items: center;
+  padding: var(--space-4);
+  z-index: 50;
+}
+.dialog {
+  background: var(--bg-canvas);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-overlay);
+  padding: var(--space-5);
+  width: min(560px, 100%);
+  max-height: 88vh;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+.dialog .actions {
+  display: flex;
+  gap: var(--space-2);
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+.dialog .actions button {
+  min-height: var(--touch-target);
+}
+
+/* A choice is a stack of options, each saying what it means for the reader. */
+.options {
+  display: flex;
+  flex-direction: column;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+.option {
+  min-height: var(--touch-target);
+  text-align: left;
+  background: var(--bg-panel);
+  border: none;
+  border-left: var(--bw-marker) solid transparent;
+  border-radius: 0;
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.option + .option {
+  border-top: var(--bw-hairline) solid var(--divider);
+}
+.option[aria-pressed="true"] {
+  background: var(--bg-selected);
+  border-left-color: var(--border-strong);
+}
+.option .label {
+  font-weight: 600;
+  font-size: 15px;
+}
+.option .consequence {
+  font-size: 13px;
+  color: var(--text-secondary);
+  font-weight: 400;
+}
+
+.facts {
+  margin: 0;
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 4px var(--space-3);
+  font-size: 13px;
+}
+.facts dt {
+  color: var(--text-muted);
+}
+.facts dd {
+  margin: 0;
+  color: var(--text-secondary);
+}
+
+/* -- session ---------------------------------------------------------------- */
+
+.session {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.session-head {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-stage);
+}
+.session-head .subject {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.session-head .subject strong {
+  display: block;
+  font-size: clamp(17px, 2vw, 21px);
+  font-weight: 600;
+  letter-spacing: -0.01em;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.session-head .sub {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+.tabs {
+  display: flex;
+  gap: 2px;
+}
+.tabs button[aria-selected="true"] {
+  background: var(--bg-selected);
+  border-color: var(--border-strong);
+}
+
+/* The conversation and the backstage are wrapping flex tracks, not breakpoints. */
+/* Narrow: the tracks stack and the page scrolls. Wide: each track scrolls itself, so
+   the composer and the approval stay where the thumb is. One property differs. */
+.stagearea {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: stretch;
+  overflow: auto;
+}
+.conversation {
+  flex: 3 1 420px;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+@media (min-width: 720px) {
+  .stagearea {
+    overflow: hidden;
+  }
+  .conversation {
+    min-height: 0;
+  }
+}
+.backstage {
+  flex: 1 1 300px;
+  max-width: 420px;
+  min-width: 0;
+  border-left: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+  overflow: auto;
+}
+.backstage section {
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  padding: var(--space-3) var(--space-4);
+}
+.backstage h3 {
+  margin-bottom: var(--space-2);
+  color: var(--text-secondary);
+}
+
+.stream {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.turn {
+  max-width: 68ch;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  border-left: var(--bw-hairline) solid transparent;
+  padding-left: var(--space-3);
+}
+.turn .byline {
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  font-size: 13px;
+  font-weight: 500;
+}
+.turn .body {
+  font-size: 15px;
+  line-height: 1.62;
+}
+.turn.person {
+  border-left-color: var(--author, var(--p-self));
+}
+.turn.person .byline .name {
+  color: var(--author, var(--p-self));
+}
+.turn.self {
+  --author: var(--p-self);
+}
+.turn.agent .byline .name {
+  color: var(--p-agent);
+}
+.turn.queued {
+  border-left: var(--bw-hairline) dashed var(--queued-bd);
+  color: var(--queued-fg);
+}
+
+.caret::after {
+  content: "▌";
+  color: var(--running-fg);
+  animation: pulse var(--dur-pulse) steps(2) infinite;
+}
+
+/* Tool activity: one mono line — verb, target, duration — collapsed by default. */
+.tool {
+  max-width: 68ch;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  background: var(--bg-sunken);
+}
+.tool > summary {
+  cursor: pointer;
+  list-style: none;
+  min-height: 30px;
+  padding: 5px var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+}
+.tool > summary::-webkit-details-marker {
+  display: none;
+}
+.tool .verb {
+  color: var(--running-fg);
+  font-weight: 500;
+}
+.tool.failed .verb {
+  color: var(--error-fg);
+}
+.tool .target {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.tool .payload {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  padding: var(--space-3);
+  max-height: 420px;
+  overflow: auto;
+  font-size: 12px;
+}
+.tool .payload + .payload {
+  border-top-style: dashed;
+}
+
+.thinking {
+  max-width: 68ch;
+  color: var(--text-muted);
+  font-size: 14px;
+}
+.thinking summary {
+  cursor: pointer;
+}
+
+.note {
+  color: var(--text-muted);
+  font-size: 13px;
+  font-family: var(--font-mono);
+}
+.note.error {
+  color: var(--error-fg);
+}
+
+.tasks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 14px;
+}
+.tasks li {
+  border-left: var(--bw-marker) solid transparent;
+  padding: 3px var(--space-2);
+}
+.tasks li.in_progress {
+  border-left-color: var(--running-fg);
+}
+.tasks li.completed {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.tasks li.cancelled {
+  color: var(--text-muted);
+  opacity: 0.7;
+}
+
+/* -- the approval ----------------------------------------------------------- */
+
+/* The loudest thing on the screen, and the only amber. Sticky at the bottom of the
+   conversation so scrolling up to read the context never loses the decision. No modal,
+   no dimming, no countdown. */
+.approval {
+  position: sticky;
+  bottom: 0;
+  z-index: 10;
+  background: var(--bg-panel);
+  border-top: var(--bw-marker) solid var(--waiting-solid);
+  box-shadow: var(--sh-footlight);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.approval h2 {
+  color: var(--waiting-fg);
+}
+.approval .consequence {
+  margin: 0;
+  max-width: 46ch;
+  color: var(--text-primary);
+}
+.approval .also {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+.approval .evidence {
+  background: var(--bg-sunken);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  padding: var(--space-3);
+  max-height: 240px;
+  overflow: auto;
+}
+.approval .evidence .command {
+  font-family: var(--font-mono);
+  font-size: 13px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.approval .evidence .command::before {
+  content: "$ ";
+  color: var(--text-muted);
+}
+.approval .answers {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+/* Side by side at the 380px floor, and not stretched across a desktop: a button the
+   width of the window is not more decisive, only larger. */
+.approval .answers .allow,
+.approval .answers .deny {
+  flex: 1 1 140px;
+  max-width: 220px;
+  min-height: var(--touch-target);
+}
+/* Allow is the only filled button. */
+.approval .answers .allow {
+  background: var(--waiting-solid);
+  color: var(--text-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+.approval .answers .allow:hover:not(:disabled) {
+  background: var(--waiting-solid);
+  filter: brightness(1.08);
+}
+/* The one people regret: full width, secondary, spelled out in full. */
+.approval .answers .scoped {
+  flex: 1 1 100%;
+  min-height: var(--touch-target);
+  font-weight: 500;
+}
+
+/* Answered: the panel transforms in place rather than vanishing. */
+.approval.answered {
+  border-top-color: var(--border-hairline);
+  box-shadow: none;
+}
+.approval.answered h2 {
+  color: var(--text-primary);
+}
+
+/* What an approval becomes in the stream once it is answered. */
+.decision {
+  max-width: 68ch;
+  display: flex;
+  gap: var(--space-2);
+  align-items: baseline;
+  flex-wrap: wrap;
+  font-size: 14px;
+  border-left: var(--bw-marker) solid var(--border-hairline);
+  padding: 2px var(--space-3);
+}
+.decision.allow,
+.decision.allow_session {
+  border-left-color: var(--allowed-bd);
+}
+.decision.deny {
+  border-left-color: var(--denied-bd);
+}
+
+/* -- composer --------------------------------------------------------------- */
+
+.composer {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-stage);
+  padding: var(--space-3) var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.composer textarea {
+  min-height: var(--composer-min-height);
+  font-size: 15px;
+}
+.composer .row {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  flex-wrap: wrap;
+}
+.composer .row button {
+  min-height: var(--touch-target);
+}
+.composer .hint {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-muted);
+}
+
+/* A read-only session has no composer at all: a disabled box invites clicking at it. */
+.instead {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-panel);
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  max-width: 46ch;
+}
+.instead p {
+  margin: 0;
+  color: var(--text-secondary);
+}
+.instead button {
+  align-self: flex-start;
+  min-height: var(--touch-target);
+}
+
+/* -- files ------------------------------------------------------------------ */
+
+.files {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-wrap: wrap;
+}
+.files .tree {
+  flex: 1 1 240px;
+  max-width: 340px;
+  min-width: 0;
+  border-right: var(--bw-hairline) solid var(--border-hairline);
+  overflow: auto;
+}
+.files .viewer {
+  flex: 2 1 360px;
+  min-width: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.files .crumbs,
+.files .viewer > header {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  padding: var(--space-2) var(--space-3);
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  background: var(--bg-sunken);
+}
+.files .crumbs code,
+.files .viewer > header code {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files ul {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-1) 0;
+}
+.files .entry {
+  width: 100%;
+  min-height: 30px;
+  background: none;
+  border: none;
+  border-left: var(--bw-marker) solid transparent;
+  border-radius: 0;
+  padding: 3px var(--space-3);
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  text-align: left;
+  font-family: var(--font-mono);
+  font-size: 12.5px;
+}
+.files .entry:hover {
+  background: var(--bg-hover);
+}
+.files .entry.changed {
+  border-left-color: var(--running-fg);
+}
+.files .entry .name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.files .entry.directory .name::after {
+  content: "/";
+  color: var(--text-muted);
+}
+.files .viewer pre {
+  padding: var(--space-4);
+  font-size: 13px;
+}
+
+/* -- inbox ------------------------------------------------------------------ */
+
+.inbox {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+  overflow: auto;
+}
+.inbox > li {
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left: var(--bw-marker) solid var(--waiting-solid);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.inbox > li > header {
+  display: flex;
+  gap: var(--space-3);
+  align-items: baseline;
+  flex-wrap: wrap;
+  padding: var(--space-3) var(--space-4);
+  border-bottom: var(--bw-hairline) solid var(--divider);
+}
+.inbox > li > header .subject {
+  font-weight: 600;
+  text-decoration: none;
+  color: var(--text-primary);
+}
+.inbox .approval {
+  position: static;
+  box-shadow: none;
+  border-top: none;
+}
+
+/* -- appearance -------------------------------------------------------------- */
+
+/* Theme and mode, on first sign-in and afterwards in Settings. Two controls, ten
+   seconds, and a sentence saying it can be changed again. Nothing here is theme-aware
+   except the previews, which are deliberately in a theme that is not yours yet. */
+
+.onboarding {
+  min-height: 100%;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+  max-width: 900px;
+  margin: 0 auto;
+  padding: clamp(var(--space-6), 8vh, var(--space-9)) var(--space-5) var(--space-7);
+}
+.onboarding > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.onboarding > header p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-secondary);
+}
+.onboarding > footer {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  flex-wrap: wrap;
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  padding-top: var(--space-4);
+}
+.onboarding > footer .continue {
+  min-height: var(--touch-target);
+  min-width: 160px;
+  font-weight: 600;
+  background: var(--bg-raised);
+  border-color: var(--border-strong);
+}
+
+.appearance {
+  max-width: 900px;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.appearance > header {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.appearance > header p {
+  margin: 0;
+  max-width: 68ch;
+  color: var(--text-secondary);
+}
+
+.chooser {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-6);
+}
+.chooser > section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.chooser > section > h2 {
+  color: var(--text-secondary);
+}
+.chooser .mode .options {
+  max-width: 46ch;
+}
+
+/* The three cards. Structure from a hairline and the left marker, like every other
+   choice in the product — no elevation, no scale-on-hover. */
+.themes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-3);
+}
+.theme {
+  flex: 1 1 260px;
+  min-width: 0;
+  text-align: left;
+  background: var(--bg-panel);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-left: var(--bw-marker) solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+.theme[aria-pressed="true"] {
+  background: var(--bg-selected);
+  border-left-color: var(--border-strong);
+}
+.theme > .label {
+  font-weight: 600;
+  font-size: 15px;
+}
+.theme > .label .micro {
+  color: var(--text-muted);
+  font-weight: 500;
+}
+.theme > .consequence {
+  font-size: 13px;
+  font-weight: 400;
+  line-height: 1.45;
+  color: var(--text-secondary);
+  white-space: normal;
+}
+
+/* The preview is the product at a quarter size, not a row of swatches: the session
+   that needs you, the approval, the cast. It carries its own theme and mode, so these
+   rules are the only place in the app where a colour is read outside the document
+   root. Nothing inside is interactive — the card is the control. */
+.preview {
+  background: var(--bg-canvas);
+  color: var(--text-primary);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  pointer-events: none;
+  overflow: hidden;
+}
+.preview .rows {
+  border-radius: var(--radius-sm);
+}
+.preview .row {
+  min-height: 0;
+  padding: 5px var(--space-2) 5px 6px;
+  gap: 6px;
+  flex-wrap: nowrap;
+}
+.preview .row .subject {
+  flex: 1 1 auto;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.preview .pill {
+  padding: 1px 6px;
+  font-size: 9.5px;
+  gap: 4px;
+}
+.preview .pill .eye {
+  width: 10px;
+  height: 10px;
+}
+
+/* The footlight is the one decorative shadow in the product and the previews keep it:
+   it is most of what a theme's reserved colour looks like in use. The answers are
+   chips here rather than the real buttons, which are sized for a thumb — a preview
+   that reaches the touch target is a preview that is no longer a preview. */
+.preview .approval {
+  position: static;
+  background: var(--bg-panel);
+  border-top: var(--bw-marker) solid var(--waiting-solid);
+  box-shadow: var(--sh-footlight);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+  padding: var(--space-2);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.preview .approval .question {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--waiting-fg);
+}
+.preview .approval .answers {
+  display: flex;
+  gap: 5px;
+}
+.preview .approval .allow,
+.preview .approval .deny {
+  font-size: 10px;
+  line-height: 1.4;
+  padding: 2px 8px;
+  border-radius: var(--radius-md);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  flex: 0 0 auto;
+  min-height: 0;
+  max-width: none;
+}
+.preview .approval .allow {
+  background: var(--waiting-solid);
+  color: var(--text-inverse);
+  border-color: transparent;
+  font-weight: 600;
+}
+
+.preview .cast {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-primary);
+}
+.preview .cast .micro {
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 9.5px;
+}
+
+/* People never get a mask. A human is initials in a ring. */
+.ring {
+  width: 20px;
+  height: 20px;
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: var(--bw-strong) solid currentColor;
+  border-radius: 50%;
+  font-family: var(--font-mono);
+  font-size: 8.5px;
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* -- motion ----------------------------------------------------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 1ms !important;
+  }
+  .pill .eye {
+    animation: none;
+  }
+}
+
+/* At the 380px floor the rail becomes a top strip and every track stacks. */
+@media (max-width: 719px) {
+  .app {
+    flex-direction: column;
+  }
+  .rail {
+    width: auto;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-2);
+    padding: var(--space-2) var(--space-3);
+    border-right: none;
+    border-bottom: var(--bw-hairline) solid var(--border-hairline);
+    overflow-x: auto;
+  }
+  .rail .wordmark {
+    padding: 0 var(--space-2) 0 0;
+  }
+  .rail nav {
+    flex-direction: row;
+  }
+  .rail nav button {
+    border-left: none;
+    border-bottom: var(--bw-marker) solid transparent;
+    border-radius: var(--radius-md) var(--radius-md) 0 0;
+  }
+  .rail nav button[aria-current="page"] {
+    border-left: none;
+    border-bottom-color: var(--border-strong);
+  }
+  .rail nav button {
+    white-space: nowrap;
+  }
+  /* Who you are is not what you came for on a phone: the strip keeps the two things
+     you might actually press and drops the rest. */
+  .rail .me {
+    border-top: none;
+    padding-top: 0;
+    flex-direction: row;
+    align-items: center;
+    gap: var(--space-3);
+    margin-left: auto;
+    white-space: nowrap;
+  }
+  .rail .me .name,
+  .rail .me .teams,
+  .rail .me .host {
+    display: none;
+  }
+  .rail .me button {
+    margin-top: 0;
+  }
+  /* One card at a time below the fold beats three unreadable ones side by side. */
+  .theme {
+    flex-basis: 100%;
+  }
+  /* The backstage is last on a narrow screen, and it is the one thing that may be
+     scrolled past rather than shown. */
+  .backstage {
+    flex-basis: 100%;
+  }
+  .backstage {
+    border-left: none;
+    border-top: var(--bw-hairline) solid var(--border-hairline);
+    max-width: none;
+  }
+}
+
+/* -- administration and review ---------------------------------------------- */
+
+/* Structure from hairlines and alignment, here as everywhere: a table is ruled rows
+   inside one bordered block, not a grid of boxes. It scrolls sideways on its own so the
+   page never does — the one exception DESIGN.md allows. */
+.table-scroll {
+  overflow-x: auto;
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  background: var(--bg-panel);
+}
+.table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.table th,
+.table td {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  vertical-align: middle;
+  white-space: nowrap;
+}
+.table thead th {
+  color: var(--text-muted);
+  font-weight: 500;
+  font-size: 12px;
+  letter-spacing: 0.02em;
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+}
+.table tbody tr + tr {
+  border-top: var(--bw-hairline) solid var(--divider);
+}
+.table tbody th {
+  font-weight: 600;
+  color: var(--text-primary);
+}
+.table td {
+  color: var(--text-secondary);
+}
+.table td .link + .link {
+  margin-left: var(--space-3);
+}
+
+/* The facts grid widens for administration, where a value is a sentence rather than a
+   word and wrapping at the second column is what keeps the labels in a line. */
+.facts.wide {
+  grid-template-columns: minmax(7rem, auto) 1fr;
+  gap: var(--space-2) var(--space-4);
+  margin-bottom: var(--space-3);
+}
+
+/* A chip is a fact, not a state: no glyph, no reserved colour, never clickable. */
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px var(--space-2);
+  margin-right: var(--space-2);
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: var(--text-secondary);
+  white-space: nowrap;
+}
+
+.inline-form {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-end;
+  flex-wrap: wrap;
+  margin-bottom: var(--space-3);
+}
+.inline-form input,
+.inline-form select {
+  min-width: 10rem;
+}
+label.inline {
+  flex-direction: row;
+  align-items: center;
+  gap: var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+label.inline input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+}
+
+fieldset {
+  border: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: var(--radius-md);
+  padding: var(--space-3);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+fieldset legend {
+  font-size: 13px;
+  color: var(--text-secondary);
+  padding: 0 var(--space-2);
+}
+
+h4 {
+  margin: var(--space-4) 0 var(--space-2);
+  font-size: 13px;
+  color: var(--text-secondary);
+}
+
+.dialog.wide {
+  width: min(760px, 100%);
+}
+
+/* One sentence per problem, against the document that caused them. */
+.problems {
+  margin: var(--space-2) 0 0;
+  padding-left: var(--space-4);
+  font-size: 13px;
+}
+.problems li + li {
+  margin-top: 4px;
+}
+
+/* A diff is keyed by the path it changed, which is how the platform wrote it. */
+.diff {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 12px;
+}
+.diff .was {
+  color: var(--text-muted);
+  text-decoration: line-through;
+}
+.diff .now {
+  color: var(--text-primary);
+}
+
+/* The one place a secret is ever on screen. Selectable, and nothing else beside it. */
+.payload.secret {
+  user-select: all;
+  font-size: 13px;
+  word-break: break-all;
+  white-space: pre-wrap;
+}
+
+/* An irreversible button says so in its own right, not only in the dialog's words. */
+button.danger {
+  border-color: var(--error-bd);
+  color: var(--error-fg);
+}
+
+/* Review: a run is a header, its facts, and what it is waiting for. */
+.run {
+  padding: var(--space-3) var(--space-4);
+}
+.run-actions {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  padding: 0 var(--space-4) var(--space-3);
+}
+.run-actions .note {
+  margin: 0;
+}
+
+/* -- this computer ---------------------------------------------------------- */
+
+/* Recent workspaces are chips you can press. A chip is normally a fact, so the one that
+   is a control says so by behaving like one. */
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+.chip.as-button {
+  cursor: pointer;
+  margin: 0;
+  font-family: var(--font-mono);
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.chip.as-button:hover {
+  border-color: var(--border-strong);
+  color: var(--text-primary);
+}

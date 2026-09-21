@@ -1,0 +1,1020 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&amp;family=IBM+Plex+Sans:wght@400;500;600;700&amp;display=swap" rel="stylesheet" />
+<style>
+:root{
+  --font-sans:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono',ui-monospace,'SFMono-Regular',Menlo,monospace;
+
+  --bg-stage:#080C12; --bg-canvas:#0E141D; --bg-panel:#141C27; --bg-raised:#1B2532;
+  --bg-sunken:#0A0F16; --bg-hover:#223040; --bg-selected:#1E2C3C; --scrim:rgba(4,7,11,0.68);
+  --text-primary:#E9EEF4; --text-secondary:#AEBCCA; --text-muted:#7E8FA2; --text-inverse:#080C12;
+  --link:#8CC0F0; --link-hover:#B4D8FB;
+  --border-hairline:#23303F; --border-strong:#36485D; --focus:#8CC0F0; --divider:#18222E;
+
+  --running-fg:#4FCFB0; --running-bg:#0D2A25; --running-bd:#1C5B4E;
+  --waiting-fg:#FFB43D; --waiting-bg:#2E1F05; --waiting-bd:#8A5E12; --waiting-solid:#FFB43D; --waiting-glow:rgba(255,180,61,0.22);
+  --queued-fg:#9BADC2; --queued-bg:#151E29; --queued-bd:#2B3B4D;
+  --allowed-fg:#6BD08C; --allowed-bg:#0E2617; --allowed-bd:#265C39;
+  --denied-fg:#F0897A; --denied-bg:#2B1512; --denied-bd:#743A31;
+  --dormant-fg:#A79EDB; --dormant-bg:#181A2B; --dormant-bd:#393B63;
+  --readonly-fg:#A3B1BF; --readonly-bg:#141A21; --readonly-bd:#2E3A46;
+  --error-fg:#FF7E6E; --error-bg:#2E110D; --error-bd:#83352A;
+  --offline-fg:#C6B08A; --offline-bg:#211B10; --offline-bd:#4E4227;
+
+  --diff-add-bg:#0D2418; --diff-add-fg:#8FE0AC; --diff-add-mark:#2F7A4E;
+  --diff-del-bg:#2A1310; --diff-del-fg:#F5A79A; --diff-del-mark:#8C3E31;
+  --diff-ctx:#8B9BAC; --diff-gutter-bg:#0A1119; --diff-gutter-fg:#5F7186; --diff-hunk:#7E8FA2;
+
+  --private-fg:#8FB3C9; --private-bg:#111A21; --private-bd:#2D414F;
+
+  --p1:#7FB3FF; --p2:#C79BF2; --p3:#6FD3B6; --p4:#F096BE; --p5:#6FC5D8; --p6:#B6C36E;
+  --p-self:#A9B7C6; --p-agent:#C3CCD6;
+
+  --sh-raise:0 1px 2px rgba(0,0,0,0.5);
+  --sh-sheet:0 -8px 28px rgba(0,0,0,0.55);
+  --sh-overlay:0 16px 48px rgba(0,0,0,0.62);
+  --sh-footlight:0 -1px 0 #FFB43D, 0 -14px 34px rgba(255,180,61,0.16);
+
+  --t-display:600 clamp(28px,5vw,40px)/1.12 var(--font-sans); --ls-display:-0.02em;
+  --t-title:600 clamp(21px,3vw,26px)/1.2 var(--font-sans); --ls-title:-0.015em;
+  --t-heading:600 17px/1.35 var(--font-sans); --ls-heading:-0.008em;
+  --t-subheading:600 15px/1.4 var(--font-sans);
+  --t-body:400 15px/1.62 var(--font-sans);
+  --t-body-strong:600 15px/1.62 var(--font-sans);
+  --t-ui:500 14px/1.4 var(--font-sans);
+  --t-ui-small:500 13px/1.4 var(--font-sans);
+  --t-micro:500 11.5px/1.3 var(--font-mono); --ls-micro:0.04em;
+  --t-code:400 13px/1.55 var(--font-mono);
+  --t-code-small:400 12px/1.5 var(--font-mono);
+
+  --s-px:1px; --s-half:2px; --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:20px;
+  --s-6:24px; --s-7:32px; --s-8:40px; --s-9:56px; --s-10:72px; --s-11:96px;
+
+  --r-xs:2px; --r-sm:3px; --r-md:5px; --r-lg:8px; --r-pill:999px;
+  --bw-hair:1px; --bw-strong:1.5px; --bw-focus:2px; --bw-marker:3px;
+
+  --d-fast:120ms; --d-base:180ms; --d-slow:300ms; --d-wake:700ms; --d-pulse:2200ms;
+  --e-standard:cubic-bezier(0.2,0,0,1); --e-enter:cubic-bezier(0.05,0.7,0.1,1);
+
+  --z-raised:10; --z-sticky:100; --z-rail:200; --z-approval:300; --z-sheet:400; --z-overlay:500;
+
+  --touch:44px; --measure-reading:68ch; --measure-narrow:46ch;
+  --rail-w:272px; --backstage-w:336px;
+  color-scheme:dark;
+}
+[data-theme="light"]{
+  --bg-stage:#DDE3EA; --bg-canvas:#EEF1F5; --bg-panel:#F8FAFC; --bg-raised:#FFFFFF;
+  --bg-sunken:#E5EAF0; --bg-hover:#E2E9F1; --bg-selected:#DCE6F2; --scrim:rgba(16,24,33,0.42);
+  --text-primary:#101821; --text-secondary:#3E4C5B; --text-muted:#5C6B7A; --text-inverse:#FFFFFF;
+  --link:#1A5A96; --link-hover:#0E3C69;
+  --border-hairline:#C9D2DC; --border-strong:#98A7B6; --focus:#0F4C81; --divider:#D7DEE6;
+
+  --running-fg:#046B57; --running-bg:#DCF1EB; --running-bd:#8FCDBE;
+  --waiting-fg:#7A4A00; --waiting-bg:#FBEBCB; --waiting-bd:#D89722; --waiting-solid:#B36A00; --waiting-glow:rgba(179,106,0,0.18);
+  --queued-fg:#4D5F75; --queued-bg:#E4EAF2; --queued-bd:#B4C0CF;
+  --allowed-fg:#116B33; --allowed-bg:#DDF2E3; --allowed-bd:#8CC79F;
+  --denied-fg:#95331F; --denied-bg:#FAE3DE; --denied-bd:#DB9C8E;
+  --dormant-fg:#4F4489; --dormant-bg:#E7E5F4; --dormant-bd:#B3AEDA;
+  --readonly-fg:#44525F; --readonly-bg:#E6EAEE; --readonly-bd:#B2BCC6;
+  --error-fg:#A32213; --error-bg:#FCE0DC; --error-bd:#E09A90;
+  --offline-fg:#5F4A21; --offline-bg:#EFE8D9; --offline-bd:#C3B392;
+
+  --diff-add-bg:#DFF3E4; --diff-add-fg:#0E5C2C; --diff-add-mark:#2C8A50;
+  --diff-del-bg:#FBE2DD; --diff-del-fg:#8C2C18; --diff-del-mark:#B54B33;
+  --diff-ctx:#4F5D6B; --diff-gutter-bg:#E1E7EE; --diff-gutter-fg:#68768A; --diff-hunk:#55647A;
+
+  --private-fg:#33586E; --private-bg:#E6ECF1; --private-bd:#A9BAC7;
+
+  --p1:#1B5299; --p2:#61338F; --p3:#0A6B55; --p4:#96306A; --p5:#0B6076; --p6:#4E5B10;
+  --p-self:#44525F; --p-agent:#2A3642;
+
+  --sh-raise:0 1px 2px rgba(16,24,33,0.10);
+  --sh-sheet:0 -8px 28px rgba(16,24,33,0.16);
+  --sh-overlay:0 16px 48px rgba(16,24,33,0.22);
+  --sh-footlight:0 -1px 0 #B36A00, 0 -14px 34px rgba(179,106,0,0.14);
+  color-scheme:light;
+}
+html,body{margin:0;padding:0;background:var(--bg-stage);}
+body{font:var(--t-body);color:var(--text-primary);-webkit-font-smoothing:antialiased;}
+*{box-sizing:border-box;}
+a{color:var(--link);text-decoration:underline;text-underline-offset:2px;text-decoration-thickness:1px;}
+a:hover{color:var(--link-hover);}
+button,input,textarea,select{font-family:inherit;}
+:focus-visible{outline:var(--bw-focus) solid var(--focus);outline-offset:2px;border-radius:var(--r-xs);}
+[data-chip][aria-pressed="true"]{background:var(--bg-selected);color:var(--text-primary);border-color:var(--border-strong);}
+[data-nav][aria-current="page"]{background:var(--bg-selected);color:var(--text-primary);border-color:var(--border-strong);}
+[data-row]:hover{background:var(--bg-hover);}
+[data-switch][aria-checked="true"]{background:var(--running-bg);border-color:var(--running-bd);}
+[data-switch][aria-checked="true"] [data-knob]{transform:translateX(18px);background:var(--running-fg);}
+[data-opt][aria-pressed="true"]{background:var(--bg-selected);border-color:var(--border-strong);}
+@keyframes troupe-pulse{0%,100%{opacity:1}50%{opacity:0.35}}
+@keyframes troupe-caret{0%,45%{opacity:1}46%,100%{opacity:0}}
+@keyframes troupe-sweep{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+@media (prefers-reduced-motion:reduce){
+  *,*::before,*::after{animation-duration:1ms !important;animation-iteration-count:1 !important;transition-duration:1ms !important;}
+}
+</style>
+</helmet>
+
+<div data-theme="{{ theme }}" style="min-height:100vh;background:var(--bg-stage);color:var(--text-primary);font:var(--t-body)">
+
+  <header style="position:sticky;top:0;z-index:var(--z-sticky);display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;padding:var(--s-2) var(--s-4);background:var(--bg-sunken);border-bottom:var(--bw-hair) solid var(--border-hairline)">
+    <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted);padding-right:var(--s-2);border-right:var(--bw-hair) solid var(--border-hairline)">Mock — nothing here is live</span>
+    <nav aria-label="Example screens" style="display:flex;flex-wrap:wrap;gap:var(--s-1)">
+      <button type="button" data-nav="1" aria-current="{{ navSignin }}" onClick="{{ goSignin }}" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Sign in</button>
+      <button type="button" data-nav="1" aria-current="{{ navHome }}" onClick="{{ goHome }}" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Home</button>
+      <button type="button" data-nav="1" aria-current="{{ navNew }}" onClick="{{ goNew }}" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">New session</button>
+      <button type="button" data-nav="1" aria-current="{{ navSession }}" onClick="{{ goSession }}" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Session</button>
+      <button type="button" data-nav="1" aria-current="{{ navStates }}" onClick="{{ goStates }}" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Empty, loading, offline</button>
+    </nav>
+    <button type="button" onClick="{{ toggleTheme }}" style="margin-left:auto;min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">{{ themeLabel }}</button>
+  </header>
+
+  <!-- ============================ SIGN IN ============================ -->
+  <sc-if value="{{ isSignin }}" hint-placeholder-val="{{ false }}">
+    <main style="min-height:calc(100vh - 53px);display:flex;align-items:center;justify-content:center;padding:var(--s-6)">
+      <div style="width:100%;max-width:420px">
+        <div style="display:flex;align-items:center;gap:var(--s-3);margin-bottom:var(--s-7)">
+          <span style="display:block;width:var(--bw-marker);height:34px;background:var(--waiting-solid)"></span>
+          <span style="font:var(--t-display);letter-spacing:var(--ls-display)">Troupe</span>
+        </div>
+        <h1 style="font:var(--t-title);letter-spacing:var(--ls-title);margin:0 0 var(--s-3)">Sign in to Troupe</h1>
+        <p style="font:var(--t-body);color:var(--text-secondary);margin:0 0 var(--s-6);max-width:var(--measure-narrow)">Troupe runs work for you on the company platform. Sessions you have been added to are waiting for you.</p>
+        <button type="button" onClick="{{ goHome }}" style="width:100%;min-height:var(--touch);border-radius:var(--r-md);border:var(--bw-hair) solid var(--waiting-solid);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-ui);cursor:pointer" style-hover="filter:brightness(1.08)">Continue with company account</button>
+        <p style="font:var(--t-ui-small);color:var(--text-muted);margin:var(--s-4) 0 0">You will be sent to the company sign-in page and back again.</p>
+        <div style="display:flex;align-items:center;gap:var(--s-2);margin-top:var(--s-8);padding-top:var(--s-4);border-top:var(--bw-hair) solid var(--border-hairline);font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">
+          <span style="width:6px;height:6px;border-radius:50%;background:var(--running-fg)"></span>
+          <span>Platform reachable</span>
+          <span style="margin-left:auto">Troupe 2.4 · internal</span>
+        </div>
+      </div>
+    </main>
+  </sc-if>
+
+  <!-- ============================ HOME ============================ -->
+  <sc-if value="{{ isHome }}" hint-placeholder-val="{{ false }}">
+    <main style="max-width:1040px;margin:0 auto;padding:var(--s-6) var(--s-4) var(--s-10)">
+      <div style="display:flex;align-items:flex-end;gap:var(--s-4);flex-wrap:wrap;margin-bottom:var(--s-5)">
+        <div>
+          <h1 style="font:var(--t-title);letter-spacing:var(--ls-title);margin:0">Your sessions</h1>
+          <p style="font:var(--t-ui-small);color:var(--text-muted);margin:var(--s-1) 0 0">Signed in as Signe Brandt-Møller</p>
+        </div>
+        <button type="button" onClick="{{ toggleComposer }}" style="margin-left:auto;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">{{ composerButtonLabel }}</button>
+      </div>
+
+      <sc-if value="{{ composerOpen }}" hint-placeholder-val="{{ false }}">
+        <section aria-label="Start a new session" style="border:var(--bw-hair) solid var(--border-strong);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-5);margin-bottom:var(--s-6)">
+          <h2 style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0 0 var(--s-4)">Start a session</h2>
+
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-5)">
+            <div style="flex:1 1 200px;min-width:0">
+              <label for="team" style="display:block;font:var(--t-ui-small);color:var(--text-secondary);margin-bottom:var(--s-2)">Who this session belongs to</label>
+              <select id="team" value="{{ team }}" onChange="{{ pickTeam }}" style="width:100%;min-height:var(--touch);padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui)">
+                <option value="Private">Private — only you</option>
+                <option value="Design">Design</option>
+                <option value="Consulting">Consulting</option>
+                <option value="Sales">Sales</option>
+                <option value="Administration">Administration</option>
+              </select>
+              <p style="font:var(--t-ui-small);color:var(--text-muted);margin:var(--s-2) 0 0">{{ teamNote }}</p>
+            </div>
+            <div style="flex:1 1 200px;min-width:0">
+              <label for="source" style="display:block;font:var(--t-ui-small);color:var(--text-secondary);margin-bottom:var(--s-2)">Source <span style="color:var(--text-muted)">(optional)</span></label>
+              <button id="source" type="button" style="width:100%;min-height:var(--touch);padding:0 var(--s-3);text-align:left;border-radius:var(--r-md);border:var(--bw-hair) dashed var(--border-strong);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Attach files or a folder</button>
+            </div>
+          </div>
+
+          <fieldset style="border:0;padding:0;margin:var(--s-5) 0 0">
+            <legend style="padding:0;font:var(--t-ui-small);color:var(--text-secondary);margin-bottom:var(--s-2)">What kind of work</legend>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-2)">
+              <button type="button" data-chip="1" aria-pressed="true" style="min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Write a document</button>
+              <button type="button" data-chip="1" aria-pressed="false" style="min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Research and summarise</button>
+              <button type="button" data-chip="1" aria-pressed="false" style="min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Review and comment</button>
+              <button type="button" data-chip="1" aria-pressed="false" style="min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Tidy up a spreadsheet</button>
+            </div>
+            <p style="font:var(--t-ui-small);color:var(--text-muted);margin:var(--s-2) 0 0">Your administrator decides what appears here.</p>
+          </fieldset>
+
+          <section aria-label="Tools this session can use" style="margin-top:var(--s-5);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-canvas)">
+            <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-2);padding:var(--s-3) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider)">
+              <h3 style="font:var(--t-subheading);margin:0">Tools this session can use</h3>
+              <span style="font:var(--t-ui-small);color:var(--text-muted);flex:1 1 180px;min-width:0">{{ toolsNote }}</span>
+              <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">{{ toolsCount }}</span>
+            </div>
+            <ul style="list-style:none;margin:0;padding:var(--s-2)">
+              <sc-for list="{{ mcps }}" as="m" hint-placeholder-count="3">
+                <li style="display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-3);border-radius:var(--r-xs)">
+                  <span style="flex:1 1 auto;min-width:0">
+                    <span style="display:block;font:var(--t-ui);color:var(--text-primary)">{{ m.name }}</span>
+                    <span style="display:block;font:var(--t-ui-small);color:var(--text-muted);margin-top:var(--s-1)">{{ m.note }}</span>
+                  </span>
+                  <button type="button" data-switch="1" role="switch" aria-checked="{{ m.checked }}" aria-label="{{ m.label }}" disabled="{{ m.locked }}" onClick="{{ m.toggle }}" style="flex:0 0 auto;width:44px;height:26px;padding:2px;border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-sunken);cursor:pointer;opacity:{{ m.opacity }}">
+                    <span data-knob="1" aria-hidden="true" style="display:block;width:18px;height:18px;border-radius:var(--r-pill);background:var(--text-muted);transition:transform var(--d-base) var(--e-standard),background var(--d-base) var(--e-standard)"></span>
+                  </button>
+                </li>
+              </sc-for>
+            </ul>
+          </section>
+
+          <fieldset style="border:0;padding:0;margin:var(--s-5) 0 0">
+            <legend style="padding:0;font:var(--t-ui-small);color:var(--text-secondary);margin-bottom:var(--s-2)">Where finished files go</legend>
+            <div style="display:flex;flex-direction:column;gap:var(--s-2)">
+              <sc-for list="{{ outputs }}" as="o" hint-placeholder-count="3">
+                <button type="button" data-opt="1" aria-pressed="{{ o.pressed }}" disabled="{{ o.disabled }}" onClick="{{ o.pick }}" style="display:flex;align-items:flex-start;gap:var(--s-3);text-align:left;min-height:var(--touch);padding:var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;cursor:pointer;opacity:{{ o.opacity }}" style-hover="background:var(--bg-hover)">
+                  <span aria-hidden="true" style="flex:0 0 auto;margin-top:3px;width:12px;height:12px;border-radius:var(--r-pill);border:var(--bw-strong) solid var(--border-strong);background:{{ o.dot }}"></span>
+                  <span style="flex:1 1 auto;min-width:0">
+                    <span style="display:block;font:var(--t-ui);color:var(--text-primary)">{{ o.label }}</span>
+                    <span style="display:block;font:var(--t-ui-small);color:var(--text-muted);margin-top:var(--s-1)">{{ o.desc }}</span>
+                  </span>
+                </button>
+              </sc-for>
+            </div>
+          </fieldset>
+
+          <div style="margin-top:var(--s-5)">
+            <label for="firstmsg" style="display:block;font:var(--t-ui-small);color:var(--text-secondary);margin-bottom:var(--s-2)">First instruction</label>
+            <textarea id="firstmsg" rows="3" placeholder="Write the first draft of the tilbud for Kolding Kommune, using the two most recent ones for tone." style="width:100%;padding:var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-body);resize:vertical"></textarea>
+          </div>
+
+          <div style="display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap;margin-top:var(--s-4)">
+            <button type="button" onClick="{{ goSession }}" style="min-height:var(--touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--waiting-solid);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-ui);cursor:pointer" style-hover="filter:brightness(1.08)">Start session</button>
+            <span style="font:var(--t-ui-small);color:var(--text-muted)">Starting takes about twenty seconds.</span>
+          </div>
+        </section>
+      </sc-if>
+
+      <div role="group" aria-label="Filter by team" style="display:flex;flex-wrap:wrap;gap:var(--s-2);margin-bottom:var(--s-5)">
+        <button type="button" data-chip="1" aria-pressed="true" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">All teams</button>
+        <button type="button" data-chip="1" aria-pressed="false" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Private</button>
+        <button type="button" data-chip="1" aria-pressed="false" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Design</button>
+        <button type="button" data-chip="1" aria-pressed="false" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Consulting</button>
+        <button type="button" data-chip="1" aria-pressed="false" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Sales</button>
+        <button type="button" data-chip="1" aria-pressed="false" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Administration</button>
+      </div>
+
+      <h2 style="display:flex;align-items:center;gap:var(--s-2);font:var(--t-subheading);margin:0 0 var(--s-3);color:var(--waiting-fg)">
+        <span style="display:block;width:var(--bw-marker);height:16px;background:var(--waiting-solid)"></span>
+        Waiting for you
+      </h2>
+      <ul style="list-style:none;margin:0 0 var(--s-7);padding:0;display:flex;flex-direction:column;gap:var(--s-2)">
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goApprovalDiff }}" style="display:block;text-decoration:none;color:inherit;border:var(--bw-hair) solid var(--waiting-bd);border-left:var(--bw-marker) solid var(--waiting-solid);border-radius:var(--r-md);background:var(--waiting-bg);padding:var(--s-4);transition:background var(--d-fast) var(--e-standard)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Tilbud til Kolding Kommune — digital borgerservice</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--waiting-bd);background:var(--bg-stage);color:var(--waiting-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></span>Waiting for you
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>Wants to change a file</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>Mette Sørensen · Sales</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Active now</span>
+            </div>
+          </a>
+        </li>
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goApprovalCmd }}" style="display:block;text-decoration:none;color:inherit;border:var(--bw-hair) solid var(--waiting-bd);border-left:var(--bw-marker) solid var(--waiting-solid);border-radius:var(--r-md);background:var(--waiting-bg);padding:var(--s-4)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Natlig opsamling: support-tickets uge 37</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--waiting-bd);background:var(--bg-stage);color:var(--waiting-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></span>Waiting for you
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>Wants to run a command</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>You · Administration</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Waiting for 41 minutes</span>
+            </div>
+          </a>
+        </li>
+      </ul>
+
+      <h2 style="font:var(--t-subheading);margin:0 0 var(--s-3);color:var(--text-secondary)">Working now</h2>
+      <ul style="list-style:none;margin:0 0 var(--s-7);padding:0;display:flex;flex-direction:column;gap:var(--s-px);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);overflow:hidden;background:var(--border-hairline)">
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goSession }}" style="display:block;text-decoration:none;color:inherit;background:var(--bg-panel);padding:var(--s-4)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Workshopmateriale — Aarhus Vand, feltinterviews</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--running-bd);background:var(--running-bg);color:var(--running-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></span>Working
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>Writing the interview guide</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>Jonas Bak · Design</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Active now</span>
+            </div>
+          </a>
+        </li>
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goSession }}" style="display:block;text-decoration:none;color:inherit;background:var(--bg-panel);padding:var(--s-4)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Konkurrentoverblik — nordiske HR-platforme</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--running-bd);background:var(--running-bg);color:var(--running-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></span>Working
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>Reading 14 sources</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>Amira Haddad · Consulting</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Active 3 minutes ago</span>
+            </div>
+          </a>
+        </li>
+      </ul>
+
+      <h2 style="font:var(--t-subheading);margin:0 0 var(--s-3);color:var(--text-secondary)">Earlier</h2>
+      <ul style="list-style:none;margin:0 0 var(--s-2);padding:0">
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goSession }}" style="display:block;text-decoration:none;color:inherit;border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-panel);padding:var(--s-4)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Mine noter til MUS-samtaler</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--private-bd);background:var(--private-bg);color:var(--private-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span aria-hidden="true">&#9679;</span>Private
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>Only you can open this one</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>You · no team</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Last active 2 days ago</span>
+            </div>
+          </a>
+        </li>
+      </ul>
+      <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s-px);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);overflow:hidden;background:var(--border-hairline)">
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goDormant }}" style="display:block;text-decoration:none;color:inherit;background:var(--bg-panel);padding:var(--s-4)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Onboarding-mails, dansk og engelsk</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--dormant-bd);background:var(--dormant-bg);color:var(--dormant-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>Asleep
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>18 files · 4 people</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>You · Administration</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Last active 6 days ago</span>
+            </div>
+          </a>
+        </li>
+        <li>
+          <a data-row="1" href="#session" onClick="{{ goReadonly }}" style="display:block;text-decoration:none;color:inherit;background:var(--bg-panel);padding:var(--s-4)">
+            <div style="display:flex;gap:var(--s-3);flex-wrap:wrap;align-items:baseline">
+              <span style="font:var(--t-body-strong);flex:1 1 240px;min-width:0">Udbudsmateriale — Region Midtjylland</span>
+              <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--readonly-bd);background:var(--readonly-bg);color:var(--readonly-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">
+                <span style="width:6px;height:6px;border-radius:50%;background:currentColor"></span>Read only
+              </span>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);margin-top:var(--s-2);font:var(--t-ui-small);color:var(--text-secondary)">
+              <span>You can read this one</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span>Lars Vestergaard · Consulting</span>
+              <span aria-hidden="true" style="color:var(--text-muted)">·</span>
+              <span style="color:var(--text-muted)">Last active 11 days ago</span>
+            </div>
+          </a>
+        </li>
+      </ul>
+    </main>
+  </sc-if>
+
+  <!-- ============================ SESSION ============================ -->
+  <sc-if value="{{ isSession }}" hint-placeholder-val="{{ true }}">
+    <main id="session" style="max-width:1320px;margin:0 auto;padding:0 var(--s-4) var(--s-10)">
+
+      <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center;padding:var(--s-3) 0;border-bottom:var(--bw-hair) solid var(--border-hairline)">
+        <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Demo state</span>
+        <button type="button" data-chip="1" aria-pressed="{{ pLive }}" onClick="{{ viewLive }}" style="min-height:34px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Streaming</button>
+        <button type="button" data-chip="1" aria-pressed="{{ pDiff }}" onClick="{{ viewDiff }}" style="min-height:34px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Approval: file</button>
+        <button type="button" data-chip="1" aria-pressed="{{ pCmd }}" onClick="{{ viewCmd }}" style="min-height:34px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Approval: command</button>
+        <button type="button" data-chip="1" aria-pressed="{{ pAnswered }}" onClick="{{ viewAnswered }}" style="min-height:34px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Someone answered first</button>
+        <button type="button" data-chip="1" aria-pressed="{{ pDormant }}" onClick="{{ viewDormant }}" style="min-height:34px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Asleep</button>
+        <button type="button" data-chip="1" aria-pressed="{{ pReadonly }}" onClick="{{ viewReadonly }}" style="min-height:34px;padding:0 var(--s-3);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Read only</button>
+      </div>
+
+      <header style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:center;padding:var(--s-4) 0">
+        <button type="button" onClick="{{ goHome }}" aria-label="Back to your sessions" style="min-height:36px;min-width:36px;border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">&#8592;</button>
+        <div style="flex:1 1 260px;min-width:0">
+          <h1 style="font:var(--t-title);letter-spacing:var(--ls-title);margin:0;overflow-wrap:break-word">Tilbud til Kolding Kommune — digital borgerservice</h1>
+          <p style="font:var(--t-ui-small);color:var(--text-muted);margin:var(--s-1) 0 0">Sales · started by Mette Sørensen two days ago · you are a collaborator</p>
+        </div>
+        <div style="display:flex;align-items:center;gap:var(--s-3);flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:var(--s-2)" aria-label="Here now">
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-pill);background:var(--bg-raised);border:var(--bw-hair) solid var(--p1);color:var(--p1);font:var(--t-micro)">MS</span>
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-pill);background:var(--bg-raised);border:var(--bw-hair) solid var(--p2);color:var(--p2);font:var(--t-micro)">JB</span>
+            <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border-radius:var(--r-pill);background:var(--bg-raised);border:var(--bw-hair) dashed var(--p-self);color:var(--p-self);font:var(--t-micro)">SB</span>
+            <span style="font:var(--t-ui-small);color:var(--text-secondary)">Mette, Jonas and you are here</span>
+          </div>
+          <button type="button" onClick="{{ toggleBackstage }}" style="min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">{{ backstageLabel }}</button>
+        </div>
+      </header>
+
+      <sc-if value="{{ isDormant }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:var(--s-3) var(--s-4);border:var(--bw-hair) solid var(--dormant-bd);border-radius:var(--r-md);background:var(--dormant-bg);color:var(--dormant-fg);font:var(--t-ui);margin-bottom:var(--s-4)">
+          <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:currentColor"></span>
+          <span>This session is asleep. Everything below is here, and reading it does not wake it.</span>
+        </div>
+      </sc-if>
+
+      <sc-if value="{{ isReadonly }}" hint-placeholder-val="{{ false }}">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:var(--s-3) var(--s-4);border:var(--bw-hair) solid var(--readonly-bd);border-radius:var(--r-md);background:var(--readonly-bg);color:var(--readonly-fg);font:var(--t-ui);margin-bottom:var(--s-4)">
+          <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:currentColor"></span>
+          <span>You can read this session but not add to it. Lars Vestergaard removed your access on 4 March.</span>
+          <a href="#ask" style="margin-left:auto">Ask for access again</a>
+        </div>
+      </sc-if>
+
+      <div style="display:flex;flex-wrap:wrap;gap:var(--s-5);align-items:flex-start">
+
+        <!-- conversation column -->
+        <section aria-label="Conversation" style="flex:3 1 420px;min-width:0;display:flex;flex-direction:column;gap:var(--s-5)">
+
+          <ol style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s-6);max-width:var(--measure-reading)">
+
+            <li>
+              <div style="display:flex;align-items:baseline;gap:var(--s-2);margin-bottom:var(--s-2)">
+                <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:var(--r-pill);border:var(--bw-hair) solid var(--p1);color:var(--p1);font:var(--t-micro)">MS</span>
+                <span style="font:var(--t-ui);color:var(--p1)">Mette Sørensen</span>
+                <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Tuesday 09:14</span>
+              </div>
+              <p style="margin:0;padding:var(--s-3) var(--s-4);border-left:var(--bw-hair) solid var(--p1);background:var(--bg-panel);border-radius:0 var(--r-md) var(--r-md) 0;font:var(--t-body)">Skriv første udkast til tilbuddet til Kolding. Brug de to seneste tilbud som tonereference, og hold leverancerne på maks. to sider.</p>
+            </li>
+
+            <li>
+              <div style="display:flex;align-items:baseline;gap:var(--s-2);margin-bottom:var(--s-2)">
+                <span style="font:var(--t-ui);color:var(--p-agent)">Troupe</span>
+                <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Tuesday 09:14</span>
+              </div>
+              <div style="font:var(--t-body);color:var(--text-primary)">
+                <p style="margin:0 0 var(--s-3)">I have read the two most recent tilbud and the Kolding digitalisation strategy. Here is how I plan to work:</p>
+                <ol style="margin:0 0 var(--s-3);padding-left:var(--s-5);display:flex;flex-direction:column;gap:var(--s-1)">
+                  <li>Match the tone of the Randers and Vejle tilbud — short sentences, no jargon.</li>
+                  <li>Reuse the delivery model, but shorten the first phase.</li>
+                  <li>Check every price against the 2026 rate card before writing it down.</li>
+                </ol>
+                <p style="margin:0">I will ask you before I change any file.</p>
+              </div>
+            </li>
+
+            <li>
+              <div style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-sunken);overflow:hidden">
+                <button type="button" onClick="{{ toggleTool1 }}" aria-expanded="{{ tool1Expanded }}" style="width:100%;display:flex;align-items:center;gap:var(--s-3);min-height:var(--touch);padding:0 var(--s-3);background:transparent;border:0;color:var(--text-secondary);font:var(--t-code);text-align:left;cursor:pointer" style-hover="background:var(--bg-hover)">
+                  <span aria-hidden="true" style="color:var(--text-muted)">{{ tool1Caret }}</span>
+                  <span style="color:var(--running-fg)">read</span>
+                  <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">4 files in tilbud/</span>
+                  <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">1.2s</span>
+                </button>
+                <sc-if value="{{ tool1Open }}" hint-placeholder-val="{{ false }}">
+                  <div style="padding:var(--s-3);border-top:var(--bw-hair) solid var(--border-hairline);font:var(--t-code-small);color:var(--diff-ctx);display:flex;flex-direction:column;gap:var(--s-1)">
+                    <span>tilbud/randers-selvbetjening.md — 1 842 words</span>
+                    <span>tilbud/vejle-borgerpanel.md — 2 311 words</span>
+                    <span>tilbud/skabelon-2026.md — 640 words</span>
+                    <span>tilbud/kolding-borgerservice.md — 118 words</span>
+                  </div>
+                </sc-if>
+              </div>
+            </li>
+
+            <li>
+              <div style="display:flex;align-items:baseline;gap:var(--s-2);margin-bottom:var(--s-2)">
+                <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:var(--r-pill);border:var(--bw-hair) solid var(--p2);color:var(--p2);font:var(--t-micro)">JB</span>
+                <span style="font:var(--t-ui);color:var(--p2)">Jonas Bak</span>
+                <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Yesterday 16:02</span>
+              </div>
+              <p style="margin:0;padding:var(--s-3) var(--s-4);border-left:var(--bw-hair) solid var(--p2);background:var(--bg-panel);border-radius:0 var(--r-md) var(--r-md) 0;font:var(--t-body)">Kolding har bedt om en tidligere prototype. Kan vi nå seks uger?</p>
+            </li>
+
+            <li>
+              <div style="display:flex;align-items:center;gap:var(--s-2);padding:var(--s-2) var(--s-3);border:var(--bw-hair) solid var(--allowed-bd);border-radius:var(--r-md);background:var(--allowed-bg);color:var(--allowed-fg);font:var(--t-ui-small)">
+                <span aria-hidden="true">&#10003;</span>
+                <span>Allowed by Mette Sørensen — created research/rate-card-2026.md</span>
+                <span style="margin-left:auto;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Yesterday 16:20</span>
+              </div>
+            </li>
+
+            <sc-if value="{{ showStream }}" hint-placeholder-val="{{ false }}">
+              <li>
+                <div style="display:flex;align-items:baseline;gap:var(--s-2);margin-bottom:var(--s-2)">
+                  <span style="font:var(--t-ui);color:var(--p-agent)">Troupe</span>
+                  <span style="display:inline-flex;align-items:center;gap:var(--s-1);font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--running-fg)">
+                    <span aria-hidden="true" style="width:6px;height:6px;border-radius:50%;background:currentColor;animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></span>Writing now
+                  </span>
+                </div>
+                <div aria-live="polite" style="font:var(--t-body);color:var(--text-primary)">{{ streamText }}<span aria-hidden="true" style="display:inline-block;width:7px;height:1.05em;margin-left:2px;vertical-align:-2px;background:var(--running-fg);animation:troupe-caret 1s steps(1) infinite"></span></div>
+                <button type="button" onClick="{{ replay }}" style="margin-top:var(--s-3);min-height:34px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-muted);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Replay the mock stream</button>
+              </li>
+            </sc-if>
+
+            <sc-if value="{{ hasRecord }}" hint-placeholder-val="{{ false }}">
+              <li>
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);padding:var(--s-2) var(--s-3);border-width:var(--bw-hair);border-style:solid;border-radius:var(--r-md);font:var(--t-ui-small);border-color:{{ recordBorder }};background:{{ recordBg }};color:{{ recordFg }}">
+                  <span aria-hidden="true">{{ recordGlyph }}</span>
+                  <span>{{ recordText }}</span>
+                  <span style="margin-left:auto;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Just now</span>
+                </div>
+              </li>
+            </sc-if>
+
+            <sc-for list="{{ queued }}" as="q" hint-placeholder-count="0">
+              <li>
+                <div style="display:flex;align-items:baseline;gap:var(--s-2);margin-bottom:var(--s-2)">
+                  <span style="font:var(--t-ui);color:var(--text-secondary)">You</span>
+                  <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--queued-bd);background:var(--queued-bg);color:var(--queued-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">Queued</span>
+                </div>
+                <p style="margin:0;padding:var(--s-3) var(--s-4);border-left:var(--bw-hair) dashed var(--queued-bd);background:var(--bg-panel);border-radius:0 var(--r-md) var(--r-md) 0;font:var(--t-body);color:var(--text-secondary)">{{ q.text }}</p>
+              </li>
+            </sc-for>
+          </ol>
+
+          <!-- ===== APPROVAL: FILE DIFF ===== -->
+          <sc-if value="{{ showDiff }}" hint-placeholder-val="{{ true }}">
+            <section role="region" aria-labelledby="approval-title" style="position:sticky;bottom:var(--s-3);z-index:var(--z-approval);border:var(--bw-hair) solid var(--waiting-bd);border-top:var(--bw-marker) solid var(--waiting-solid);border-radius:var(--r-lg);background:var(--bg-panel);box-shadow:var(--sh-footlight)">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-2);padding:var(--s-4) var(--s-4) var(--s-3)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-micro);letter-spacing:var(--ls-micro)">Waiting for you</span>
+                <h2 id="approval-title" style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0;flex:1 1 220px;min-width:0">Change a file?</h2>
+                <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Stopped 12 seconds ago</span>
+              </div>
+              <p style="margin:0;padding:0 var(--s-4) var(--s-3);font:var(--t-body);color:var(--text-secondary)">The troupe wants to rewrite the delivery section so the prototype lands after six weeks instead of eight.</p>
+              <div style="margin:0 var(--s-4);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);overflow:hidden;background:var(--bg-sunken)">
+                <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center;padding:var(--s-2) var(--s-3);border-bottom:var(--bw-hair) solid var(--border-hairline);font:var(--t-code);color:var(--text-secondary)">
+                  <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;min-width:0;flex:1 1 auto">tilbud/kolding-borgerservice.md</span>
+                  <span style="color:var(--diff-add-fg)">+3</span>
+                  <span style="color:var(--diff-del-fg)">&#8722;1</span>
+                </div>
+                <div style="overflow-x:auto">
+                  <div style="font:var(--t-code-small);min-width:280px">
+                    <div style="padding:var(--s-1) var(--s-3);color:var(--diff-hunk);background:var(--diff-gutter-bg)">@@ Leverance og tidsplan @@</div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);color:var(--diff-ctx)"><span aria-hidden="true" style="width:1ch;color:var(--diff-gutter-fg)"> </span><span>Vi arbejder i to faser.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:var(--diff-del-bg);color:var(--diff-del-fg);border-left:var(--bw-marker) solid var(--diff-del-mark)"><span aria-hidden="true" style="width:1ch">&#8722;</span><span>Første prototype leveres otte uger efter opstart.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>Første prototype leveres seks uger efter opstart.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>&nbsp;</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:var(--diff-add-bg);color:var(--diff-add-fg);border-left:var(--bw-marker) solid var(--diff-add-mark)"><span aria-hidden="true" style="width:1ch">+</span><span>Prototypen testes med fire borgere i Kolding inden overdragelse.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3) var(--s-1);color:var(--diff-ctx)"><span aria-hidden="true" style="width:1ch;color:var(--diff-gutter-fg)"> </span><span>Testforløbet aftales særskilt.</span></div>
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);padding:var(--s-4)">
+                <button type="button" onClick="{{ allow }}" style="flex:1 1 150px;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--waiting-solid);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-ui);cursor:pointer" style-hover="filter:brightness(1.08)">Allow <span style="opacity:0.75">A</span></button>
+                <button type="button" onClick="{{ deny }}" style="flex:1 1 120px;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Deny <span style="opacity:0.6">D</span></button>
+                <button type="button" onClick="{{ allowSession }}" style="flex:1 1 100%;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Allow every file change for this session</button>
+              </div>
+              <p style="margin:0;padding:0 var(--s-4) var(--s-4);font:var(--t-ui-small);color:var(--text-muted)">Mette and Jonas can answer this too. The first answer counts.</p>
+            </section>
+          </sc-if>
+
+          <!-- ===== APPROVAL: COMMAND ===== -->
+          <sc-if value="{{ showCmd }}" hint-placeholder-val="{{ false }}">
+            <section role="region" aria-labelledby="approval-title-cmd" style="position:sticky;bottom:var(--s-3);z-index:var(--z-approval);border:var(--bw-hair) solid var(--waiting-bd);border-top:var(--bw-marker) solid var(--waiting-solid);border-radius:var(--r-lg);background:var(--bg-panel);box-shadow:var(--sh-footlight)">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-2);padding:var(--s-4) var(--s-4) var(--s-3)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-micro);letter-spacing:var(--ls-micro)">Waiting for you</span>
+                <h2 id="approval-title-cmd" style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0;flex:1 1 220px;min-width:0">Run a command?</h2>
+                <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">Stopped 41 minutes ago</span>
+              </div>
+              <p style="margin:0;padding:0 var(--s-4) var(--s-3);font:var(--t-body);color:var(--text-secondary)">This turns the draft into a PDF. It reads the tilbud and writes one new file. It runs on the platform, not on your computer.</p>
+              <div style="margin:0 var(--s-4);border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-sunken);overflow-x:auto">
+                <pre style="margin:0;padding:var(--s-3);font:var(--t-code);color:var(--text-primary);white-space:pre-wrap;overflow-wrap:anywhere"><span style="color:var(--text-muted)">$ </span>pandoc tilbud/kolding-borgerservice.md \
+  --template=itm-tilbud.latex \
+  -o leverancer/tilbud-kolding.pdf</pre>
+              </div>
+              <p style="margin:0;padding:var(--s-2) var(--s-4) 0;font:var(--t-ui-small);color:var(--text-muted)">Working folder: sessions/kolding-borgerservice</p>
+              <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);padding:var(--s-4)">
+                <button type="button" onClick="{{ allow }}" style="flex:1 1 150px;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--waiting-solid);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-ui);cursor:pointer" style-hover="filter:brightness(1.08)">Allow <span style="opacity:0.75">A</span></button>
+                <button type="button" onClick="{{ deny }}" style="flex:1 1 120px;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Deny <span style="opacity:0.6">D</span></button>
+                <button type="button" onClick="{{ allowSession }}" style="flex:1 1 100%;min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">Allow this command for this session</button>
+              </div>
+            </section>
+          </sc-if>
+
+          <!-- ===== APPROVAL: ANSWERED BY SOMEONE ELSE ===== -->
+          <sc-if value="{{ showAnswered }}" hint-placeholder-val="{{ false }}">
+            <section role="region" aria-live="assertive" aria-labelledby="approval-title-answered" style="border:var(--bw-hair) solid var(--allowed-bd);border-radius:var(--r-lg);background:var(--bg-panel);overflow:hidden">
+              <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-2);padding:var(--s-4) var(--s-4) var(--s-3)">
+                <span style="display:inline-flex;align-items:center;gap:var(--s-1);padding:var(--s-half) var(--s-2);border-radius:var(--r-pill);border:var(--bw-hair) solid var(--allowed-bd);background:var(--allowed-bg);color:var(--allowed-fg);font:var(--t-micro);letter-spacing:var(--ls-micro)">&#10003; Allowed</span>
+                <h2 id="approval-title-answered" style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0;flex:1 1 220px;min-width:0;color:var(--text-secondary)">Mette Sørensen answered this</h2>
+                <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">2 seconds ago</span>
+              </div>
+              <p style="margin:0;padding:0 var(--s-4) var(--s-4);font:var(--t-body);color:var(--text-secondary)">Mette allowed the change to <span style="font:var(--t-code)">tilbud/kolding-borgerservice.md</span> while you were reading it. Nothing is waiting for you now. The troupe is working again.</p>
+              <div style="display:flex;gap:var(--s-2);flex-wrap:wrap;padding:0 var(--s-4) var(--s-4)">
+                <button type="button" onClick="{{ viewLive }}" style="min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">Follow the work</button>
+                <button type="button" style="min-height:var(--touch);padding:0 var(--s-4);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)">See what changed</button>
+              </div>
+            </section>
+          </sc-if>
+
+          <!-- ===== COMPOSER ===== -->
+          <sc-if value="{{ canWrite }}" hint-placeholder-val="{{ true }}">
+            <div style="border:var(--bw-hair) solid var(--border-strong);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-3)">
+              <label for="composer" style="display:block;font:var(--t-ui-small);color:var(--text-muted);margin:0 0 var(--s-2)">{{ composerHint }}</label>
+              <textarea id="composer" ref="{{ composerRef }}" rows="2" placeholder="Write to the troupe" style="width:100%;padding:var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:var(--bg-raised);color:var(--text-primary);font:var(--t-body);resize:vertical"></textarea>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);margin-top:var(--s-2)">
+                <button type="button" style="min-height:var(--touch);min-width:var(--touch);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:transparent;color:var(--text-secondary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover);color:var(--text-primary)" aria-label="Attach a file">+</button>
+                <span style="font:var(--t-ui-small);color:var(--text-muted)">Mette and Jonas see what you send.</span>
+                <button type="button" onClick="{{ send }}" style="margin-left:auto;min-height:var(--touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-strong);background:var(--bg-raised);color:var(--text-primary);font:var(--t-ui);cursor:pointer" style-hover="background:var(--bg-hover)">{{ sendLabel }}</button>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isDormant }}" hint-placeholder-val="{{ false }}">
+            <div style="border:var(--bw-hair) solid var(--dormant-bd);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-4)">
+              <h2 style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0 0 var(--s-2)">This session is asleep</h2>
+              <p style="margin:0 0 var(--s-4);font:var(--t-body);color:var(--text-secondary);max-width:var(--measure-reading)">It stopped on its own after six days without activity, and it costs nothing while it sleeps. Everything is still here: 18 files, the task list, and the whole conversation. Sending a message wakes it, which takes about twenty seconds.</p>
+              <textarea rows="2" placeholder="Write to the troupe" style="width:100%;padding:var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:var(--bg-raised);color:var(--text-primary);font:var(--t-body);resize:vertical"></textarea>
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);margin-top:var(--s-3)">
+                <button type="button" onClick="{{ wake }}" style="min-height:var(--touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--dormant-bd);background:var(--dormant-bg);color:var(--dormant-fg);font:var(--t-ui);cursor:pointer" style-hover="filter:brightness(1.1)">{{ wakeLabel }}</button>
+                <sc-if value="{{ waking }}" hint-placeholder-val="{{ false }}">
+                  <span style="flex:1 1 200px;min-width:0">
+                    <span style="display:block;font:var(--t-ui-small);color:var(--text-secondary);margin-bottom:var(--s-1)">Waking the session. This usually takes twenty seconds.</span>
+                    <span style="display:block;height:3px;border-radius:var(--r-pill);background:var(--bg-sunken);overflow:hidden"><span style="display:block;width:30%;height:100%;background:var(--dormant-fg);animation:troupe-sweep 1.4s var(--e-standard) infinite"></span></span>
+                  </span>
+                </sc-if>
+              </div>
+            </div>
+          </sc-if>
+
+          <sc-if value="{{ isReadonly }}" hint-placeholder-val="{{ false }}">
+            <div style="border:var(--bw-hair) dashed var(--readonly-bd);border-radius:var(--r-lg);background:var(--bg-panel);padding:var(--s-4)">
+              <h2 style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0 0 var(--s-2)">The message box is gone</h2>
+              <p style="margin:0;font:var(--t-body);color:var(--text-secondary);max-width:var(--measure-reading)">Your access was set to read only, so you cannot write here or answer approvals. You can still read everything and open the files. Ask Lars Vestergaard if you need to take part again.</p>
+            </div>
+          </sc-if>
+        </section>
+
+        <!-- backstage column -->
+        <sc-if value="{{ backstageOpen }}" hint-placeholder-val="{{ true }}">
+          <aside aria-label="Backstage" style="flex:1 1 300px;min-width:0;max-width:420px;display:flex;flex-direction:column;gap:var(--s-4)">
+
+            <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-panel)">
+              <h2 style="font:var(--t-subheading);margin:0;padding:var(--s-3) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider)">Tasks <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">1 of 4 in progress</span></h2>
+              <ol style="list-style:none;margin:0;padding:var(--s-2);display:flex;flex-direction:column;gap:var(--s-half)">
+                <li style="display:flex;gap:var(--s-3);padding:var(--s-2) var(--s-3);font:var(--t-ui);color:var(--text-muted)"><span aria-hidden="true" style="color:var(--allowed-fg)">&#10003;</span><span style="text-decoration:line-through">Read the three most recent tilbud for tone</span></li>
+                <li style="display:flex;gap:var(--s-3);padding:var(--s-2) var(--s-3);font:var(--t-ui);color:var(--text-primary);background:var(--bg-selected);border-left:var(--bw-marker) solid var(--running-fg);border-radius:var(--r-xs)"><span aria-hidden="true" style="color:var(--running-fg);animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite">&#9656;</span><span>Write Leverance og tidsplan<span style="display:block;font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--running-fg);margin-top:var(--s-1)">In progress</span></span></li>
+                <li style="display:flex;gap:var(--s-3);padding:var(--s-2) var(--s-3);font:var(--t-ui);color:var(--text-secondary)"><span aria-hidden="true" style="color:var(--queued-fg)">&#9675;</span><span>Check every price against the 2026 rate card</span></li>
+                <li style="display:flex;gap:var(--s-3);padding:var(--s-2) var(--s-3);font:var(--t-ui);color:var(--text-secondary)"><span aria-hidden="true" style="color:var(--queued-fg)">&#9675;</span><span>Export to PDF and hand it to Mette</span></li>
+              </ol>
+            </section>
+
+            <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-panel)">
+              <h2 style="font:var(--t-subheading);margin:0;padding:var(--s-3) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider)">Who is working</h2>
+              <ul style="list-style:none;margin:0;padding:var(--s-3) var(--s-4);display:flex;flex-direction:column;gap:var(--s-2);font:var(--t-ui)">
+                <li style="display:flex;align-items:center;gap:var(--s-2)"><span style="color:var(--running-fg)" aria-hidden="true">&#9679;</span><span>Lead</span><span style="font:var(--t-ui-small);color:var(--text-muted);margin-left:auto">Keeping the plan</span></li>
+                <li style="display:flex;align-items:center;gap:var(--s-2);padding-left:var(--s-4);border-left:var(--bw-hair) solid var(--border-hairline);margin-left:var(--s-2)"><span style="color:var(--running-fg)" aria-hidden="true">&#9679;</span><span>Research</span><span style="font:var(--t-ui-small);color:var(--text-muted);margin-left:auto">Reading the rate card</span></li>
+                <li style="display:flex;align-items:center;gap:var(--s-2);padding-left:var(--s-4);border-left:var(--bw-hair) solid var(--border-hairline);margin-left:var(--s-2)"><span style="color:var(--waiting-fg)" aria-hidden="true">&#9679;</span><span>Draft</span><span style="font:var(--t-ui-small);color:var(--waiting-fg);margin-left:auto">Waiting for you</span></li>
+                <li style="display:flex;align-items:center;gap:var(--s-2);padding-left:var(--s-4);border-left:var(--bw-hair) solid var(--border-hairline);margin-left:var(--s-2);color:var(--text-muted)"><span aria-hidden="true">&#9675;</span><span>Proofreading</span><span style="font:var(--t-ui-small);margin-left:auto">Not started</span></li>
+              </ul>
+            </section>
+
+            <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-md);background:var(--bg-panel)">
+              <h2 style="font:var(--t-subheading);margin:0;padding:var(--s-3) var(--s-4);border-bottom:var(--bw-hair) solid var(--divider)">Files <span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--text-muted)">18 in this session</span></h2>
+              <ul style="list-style:none;margin:0;padding:var(--s-2);display:flex;flex-direction:column;gap:var(--s-half);font:var(--t-code)">
+                <li data-row="1" style="display:flex;align-items:center;gap:var(--s-2);padding:var(--s-2) var(--s-3);border-radius:var(--r-xs)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">tilbud/kolding-borgerservice.md</span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--waiting-fg)">Change waiting</span></li>
+                <li data-row="1" style="display:flex;align-items:center;gap:var(--s-2);padding:var(--s-2) var(--s-3);border-radius:var(--r-xs)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">research/rate-card-2026.md</span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--allowed-fg)">New</span></li>
+                <li data-row="1" style="display:flex;align-items:center;gap:var(--s-2);padding:var(--s-2) var(--s-3);border-radius:var(--r-xs)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">research/kolding-strategi.md</span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro);color:var(--allowed-fg)">New</span></li>
+                <li data-row="1" style="display:flex;align-items:center;gap:var(--s-2);padding:var(--s-2) var(--s-3);border-radius:var(--r-xs);color:var(--text-muted)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">noter/spørgsmål-til-mette.md</span><span style="font:var(--t-micro);letter-spacing:var(--ls-micro)">2 days ago</span></li>
+              </ul>
+              <a href="#files" style="display:block;padding:var(--s-2) var(--s-4) var(--s-3);font:var(--t-ui-small)">See all 18 files</a>
+            </section>
+          </aside>
+        </sc-if>
+      </div>
+    </main>
+  </sc-if>
+
+  <!-- ============================ STATES ============================ -->
+  <sc-if value="{{ isStates }}" hint-placeholder-val="{{ false }}">
+    <main style="max-width:1040px;margin:0 auto;padding:var(--s-6) var(--s-4) var(--s-10);display:flex;flex-direction:column;gap:var(--s-7)">
+      <h1 style="font:var(--t-title);letter-spacing:var(--ls-title);margin:0">When there is nothing, not yet, or no connection</h1>
+
+      <section style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-canvas);padding:var(--s-7) var(--s-5);text-align:center">
+        <h2 style="font:var(--t-heading);letter-spacing:var(--ls-heading);margin:0 0 var(--s-2)">No sessions yet</h2>
+        <p style="margin:0 auto var(--s-5);max-width:var(--measure-narrow);font:var(--t-body);color:var(--text-secondary)">A session is one piece of work: a conversation, the files it produces, and the troupe doing it. Start one and it keeps running after you close the browser.</p>
+        <button type="button" onClick="{{ goNew }}" style="min-height:var(--touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--waiting-solid);background:var(--waiting-solid);color:var(--text-inverse);font:var(--t-ui);cursor:pointer" style-hover="filter:brightness(1.08)">Start your first session</button>
+      </section>
+
+      <section aria-busy="true" style="border:var(--bw-hair) solid var(--border-hairline);border-radius:var(--r-lg);background:var(--bg-canvas);padding:var(--s-5)">
+        <h2 style="font:var(--t-subheading);margin:0 0 var(--s-3);color:var(--text-secondary)">Loading the history</h2>
+        <div style="display:flex;flex-direction:column;gap:var(--s-3)">
+          <div style="height:14px;width:62%;border-radius:var(--r-xs);background:var(--bg-hover);animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></div>
+          <div style="height:14px;width:88%;border-radius:var(--r-xs);background:var(--bg-hover);animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></div>
+          <div style="height:14px;width:44%;border-radius:var(--r-xs);background:var(--bg-hover);animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></div>
+        </div>
+        <p style="margin:var(--s-4) 0 0;font:var(--t-ui-small);color:var(--text-muted)">Two days of conversation. The newest part arrives first.</p>
+      </section>
+
+      <section style="border:var(--bw-hair) solid var(--offline-bd);border-radius:var(--r-lg);background:var(--bg-canvas);overflow:hidden">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:var(--s-3) var(--s-4);background:var(--offline-bg);color:var(--offline-fg);font:var(--t-ui)">
+          <span aria-hidden="true" style="width:8px;height:8px;border-radius:50%;background:currentColor;animation:troupe-pulse var(--d-pulse) var(--e-standard) infinite"></span>
+          <span>Connection lost. Trying again in 3 seconds.</span>
+          <button type="button" style="margin-left:auto;min-height:36px;padding:0 var(--s-3);border-radius:var(--r-md);border:var(--bw-hair) solid currentColor;background:transparent;color:inherit;font:var(--t-ui-small);cursor:pointer" style-hover="background:var(--bg-hover)">Try now</button>
+        </div>
+        <p style="margin:0;padding:var(--s-4);font:var(--t-body);color:var(--text-secondary);max-width:var(--measure-reading)">The work carries on without you. Nothing you have already sent is lost, and anything you write now is sent when the connection comes back.</p>
+      </section>
+
+      <section style="border:var(--bw-hair) solid var(--error-bd);border-radius:var(--r-lg);background:var(--bg-canvas);overflow:hidden">
+        <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:var(--s-3) var(--s-4);background:var(--error-bg);color:var(--error-fg);font:var(--t-ui)">
+          <span aria-hidden="true" style="width:8px;height:8px;border-radius:var(--r-xs);background:currentColor"></span>
+          <span>Troupe cannot reach the platform</span>
+        </div>
+        <div style="padding:var(--s-4)">
+          <p style="margin:0 0 var(--s-3);font:var(--t-body);color:var(--text-secondary);max-width:var(--measure-reading)">Sessions that are already running keep going and keep streaming to you. You cannot start new ones until this is fixed. We are trying again every thirty seconds.</p>
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);align-items:center">
+            <button type="button" disabled="disabled" style="min-height:var(--touch);padding:0 var(--s-5);border-radius:var(--r-md);border:var(--bw-hair) solid var(--border-hairline);background:var(--bg-sunken);color:var(--text-muted);font:var(--t-ui);cursor:not-allowed">Start session</button>
+            <span style="font:var(--t-ui-small);color:var(--text-muted)">Not possible right now</span>
+            <a href="#status" style="margin-left:auto;font:var(--t-ui-small)">Platform status</a>
+          </div>
+        </div>
+      </section>
+    </main>
+  </sc-if>
+
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:900}}">
+const STREAM = "Jeg har nu skrevet afsnittet om leverance og tidsplan. Jeg har holdt sætningerne korte og fjernet fagudtryk, som Kolding ikke bruger selv. Prisen på fase to stemmer med 2026-taksterne. Jeg mangler stadig at kende antallet af workshops, før jeg kan skrive tidsplanen færdig.";
+
+const CATALOGUE = {
+  Private: [
+    { id: 'web', name: 'Web search', note: 'Reads public web pages' },
+    { id: 'drive-own', name: 'Your own files', note: 'Only the folders you have access to' }
+  ],
+  Design: [
+    { id: 'web', name: 'Web search', note: 'Reads public web pages' },
+    { id: 'figma', name: 'Figma', note: 'Reads the Design team files' },
+    { id: 'sp-design', name: 'SharePoint — Design', note: 'Reads and writes in Design' },
+    { id: 'notes', name: 'Meeting notes', note: 'Reads notes from Design meetings' }
+  ],
+  Consulting: [
+    { id: 'web', name: 'Web search', note: 'Reads public web pages' },
+    { id: 'jira', name: 'Jira', note: 'Reads projects and issues' },
+    { id: 'sp-proj', name: 'SharePoint — Projekter', note: 'Reads and writes in Projekter' }
+  ],
+  Sales: [
+    { id: 'web', name: 'Web search', note: 'Reads public web pages' },
+    { id: 'crm', name: 'CRM', note: 'Reads customers and deals' },
+    { id: 'sp-tilbud', name: 'SharePoint — Tilbud', note: 'Reads and writes in Tilbud' },
+    { id: 'rates', name: 'Rate card 2026', note: 'Your administrator keeps this one on', locked: true }
+  ],
+  Administration: [
+    { id: 'web', name: 'Web search', note: 'Reads public web pages' },
+    { id: 'economic', name: 'Economic', note: 'Reads invoices and hours' },
+    { id: 'sp-hr', name: 'SharePoint — HR', note: 'Reads and writes in HR', locked: true }
+  ]
+};
+
+const OUTPUT_MCP = {
+  Design: { id: 'sp-design', label: 'SharePoint — Design', desc: 'Written straight into the team library when the session finishes' },
+  Consulting: { id: 'sp-proj', label: 'SharePoint — Projekter', desc: 'Written straight into the team library when the session finishes' },
+  Sales: { id: 'sp-tilbud', label: 'SharePoint — Tilbud', desc: 'Written straight into the team library when the session finishes' },
+  Administration: { id: 'sp-hr', label: 'SharePoint — HR', desc: 'Written straight into the team library when the session finishes' }
+};
+
+class Component extends DCLogic {
+  state = {
+    team: 'Sales',
+    mcpOff: {},
+    output: 'none',
+    screen: 'session',
+    view: 'approval-diff',
+    theme: 'dark',
+    composerOpen: false,
+    backstage: true,
+    tool1: false,
+    stream: '',
+    queued: [],
+    record: null,
+    waking: false
+  };
+
+  composerRef = React.createRef();
+
+  componentDidMount() {
+    this.onKey = (e) => {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (this.state.screen !== 'session') return;
+      if (this.state.view !== 'approval-diff' && this.state.view !== 'approval-cmd') return;
+      const k = e.key.toLowerCase();
+      if (k === 'a') { e.preventDefault(); this.answer('allowed'); }
+      if (k === 'd') { e.preventDefault(); this.answer('denied'); }
+    };
+    document.addEventListener('keydown', this.onKey);
+    this.maybeStream();
+  }
+
+  componentDidUpdate(_p, prev) {
+    if (prev.screen !== this.state.screen || prev.view !== this.state.view) this.maybeStream();
+  }
+
+  componentWillUnmount() {
+    document.removeEventListener('keydown', this.onKey);
+    clearInterval(this.timer);
+  }
+
+  maybeStream() {
+    clearInterval(this.timer);
+    if (this.state.screen === 'session' && this.state.view === 'live') this.startStream();
+  }
+
+  startStream() {
+    clearInterval(this.timer);
+    const words = STREAM.split(' ');
+    let i = 0;
+    this.setState({ stream: '' });
+    this.timer = setInterval(() => {
+      i += 1;
+      this.setState({ stream: words.slice(0, i).join(' ') });
+      if (i >= words.length) clearInterval(this.timer);
+    }, 90);
+  }
+
+  answer(kind) {
+    const map = {
+      allowed: { text: 'Allowed by you — changed tilbud/kolding-borgerservice.md', glyph: '\u2713', fg: 'var(--allowed-fg)', bg: 'var(--allowed-bg)', bd: 'var(--allowed-bd)' },
+      denied: { text: 'Denied by you — the file was not changed. The troupe will suggest something else.', glyph: '\u00D7', fg: 'var(--denied-fg)', bg: 'var(--denied-bg)', bd: 'var(--denied-bd)' },
+      session: { text: 'Allowed for this session by you — file changes will not stop again here', glyph: '\u2713', fg: 'var(--allowed-fg)', bg: 'var(--allowed-bg)', bd: 'var(--allowed-bd)' }
+    };
+    this.setState({ record: map[kind], view: 'live' });
+  }
+
+  setView = (view) => this.setState({ view, screen: 'session', waking: false });
+
+  renderVals() {
+    const s = this.state;
+    const session = s.screen === 'session';
+    const rec = s.record;
+    const priv = s.team === 'Private';
+    const list = CATALOGUE[s.team] || [];
+    const on = (m) => !s.mcpOff[s.team + ':' + m.id];
+    const mcps = list.map((m) => ({
+      name: m.name,
+      note: m.locked ? m.note : (on(m) ? m.note : 'Off — the session cannot use this'),
+      checked: on(m) ? 'true' : 'false',
+      locked: !!m.locked,
+      opacity: m.locked ? '0.55' : '1',
+      label: (on(m) ? 'Turn off ' : 'Turn on ') + m.name,
+      toggle: () => {
+        const key = s.team + ':' + m.id;
+        const next = Object.assign({}, s.mcpOff);
+        if (next[key]) { delete next[key]; } else { next[key] = true; }
+        this.setState({ mcpOff: next });
+      }
+    }));
+    const mcpOut = OUTPUT_MCP[s.team];
+    const mcpOutOn = mcpOut ? !s.mcpOff[s.team + ':' + mcpOut.id] : false;
+    const outDefs = [
+      { id: 'none', label: 'Nowhere — files stay in the session', desc: 'You download what you need. Nothing leaves Troupe on its own.' },
+      priv
+        ? { id: 'team', label: 'Your own folder', desc: 'Finished files are copied to your personal folder.' }
+        : { id: 'team', label: 'The ' + s.team + ' team folder', desc: 'Everyone on ' + s.team + ' can open the finished files.' }
+    ];
+    if (mcpOut) {
+      outDefs.push({
+        id: 'mcp',
+        label: mcpOut.label,
+        desc: mcpOutOn ? mcpOut.desc : 'Turn this tool on above to write results there.',
+        disabled: !mcpOutOn
+      });
+    }
+    const chosen = outDefs.some((o) => o.id === s.output && !o.disabled) ? s.output : 'none';
+    const outputs = outDefs.map((o) => ({
+      label: o.label,
+      desc: o.desc,
+      pressed: chosen === o.id ? 'true' : 'false',
+      disabled: !!o.disabled,
+      opacity: o.disabled ? '0.5' : '1',
+      dot: chosen === o.id ? 'var(--waiting-solid)' : 'transparent',
+      pick: () => this.setState({ output: o.id })
+    }));
+    return {
+      team: s.team,
+      pickTeam: (e) => this.setState({ team: e.target.value, output: 'none' }),
+      teamNote: priv
+        ? 'Only you can open this session. Nobody can be added later.'
+        : 'Everyone on ' + s.team + ' can open this session and answer its approvals.',
+      mcps: mcps,
+      toolsCount: mcps.length + ' available',
+      toolsNote: priv
+        ? 'A private session gets only the tools you have yourself.'
+        : s.team + ' turns these on. Switch off anything this session should not touch.',
+      outputs: outputs,
+
+      theme: s.theme,
+      themeLabel: s.theme === 'dark' ? 'Light' : 'Dark',
+      toggleTheme: () => this.setState({ theme: s.theme === 'dark' ? 'light' : 'dark' }),
+
+      isSignin: s.screen === 'signin',
+      isHome: s.screen === 'home',
+      isSession: session,
+      isStates: s.screen === 'states',
+      navSignin: s.screen === 'signin' ? 'page' : 'false',
+      navHome: s.screen === 'home' && !s.composerOpen ? 'page' : 'false',
+      navNew: s.screen === 'home' && s.composerOpen ? 'page' : 'false',
+      navSession: session ? 'page' : 'false',
+      navStates: s.screen === 'states' ? 'page' : 'false',
+      goSignin: () => this.setState({ screen: 'signin' }),
+      goHome: () => this.setState({ screen: 'home', composerOpen: false }),
+      goNew: () => this.setState({ screen: 'home', composerOpen: true }),
+      goSession: () => this.setState({ screen: 'session', view: 'live', record: null }),
+      goStates: () => this.setState({ screen: 'states' }),
+      goApprovalDiff: () => this.setState({ screen: 'session', view: 'approval-diff', record: null }),
+      goApprovalCmd: () => this.setState({ screen: 'session', view: 'approval-cmd', record: null }),
+      goDormant: () => this.setState({ screen: 'session', view: 'dormant', waking: false }),
+      goReadonly: () => this.setState({ screen: 'session', view: 'readonly' }),
+
+      composerOpen: s.composerOpen,
+      composerButtonLabel: s.composerOpen ? 'Close' : 'New session',
+      toggleComposer: () => this.setState({ composerOpen: !s.composerOpen }),
+
+      viewLive: () => this.setView('live'),
+      viewDiff: () => this.setView('approval-diff'),
+      viewCmd: () => this.setView('approval-cmd'),
+      viewAnswered: () => this.setView('answered'),
+      viewDormant: () => this.setView('dormant'),
+      viewReadonly: () => this.setView('readonly'),
+      pLive: s.view === 'live' ? 'true' : 'false',
+      pDiff: s.view === 'approval-diff' ? 'true' : 'false',
+      pCmd: s.view === 'approval-cmd' ? 'true' : 'false',
+      pAnswered: s.view === 'answered' ? 'true' : 'false',
+      pDormant: s.view === 'dormant' ? 'true' : 'false',
+      pReadonly: s.view === 'readonly' ? 'true' : 'false',
+
+      showDiff: s.view === 'approval-diff',
+      showCmd: s.view === 'approval-cmd',
+      showAnswered: s.view === 'answered',
+      isDormant: s.view === 'dormant',
+      isReadonly: s.view === 'readonly',
+      canWrite: s.view !== 'dormant' && s.view !== 'readonly',
+      showStream: s.view === 'live',
+      streamText: s.stream,
+      replay: () => this.startStream(),
+
+      hasRecord: !!rec,
+      recordText: rec ? rec.text : '',
+      recordGlyph: rec ? rec.glyph : '',
+      recordFg: rec ? rec.fg : '',
+      recordBg: rec ? rec.bg : '',
+      recordBorder: rec ? rec.bd : '',
+
+      allow: () => this.answer('allowed'),
+      deny: () => this.answer('denied'),
+      allowSession: () => this.answer('session'),
+
+      backstageOpen: s.backstage,
+      backstageLabel: s.backstage ? 'Hide backstage' : 'Show backstage',
+      toggleBackstage: () => this.setState({ backstage: !s.backstage }),
+
+      tool1Open: s.tool1,
+      tool1Expanded: s.tool1 ? 'true' : 'false',
+      tool1Caret: s.tool1 ? '\u25BE' : '\u25B8',
+      toggleTool1: () => this.setState({ tool1: !s.tool1 }),
+
+      composerRef: this.composerRef,
+      composerHint: s.view === 'live'
+        ? 'The troupe is working. What you send is queued and goes next.'
+        : 'Write to the troupe.',
+      sendLabel: s.view === 'live' ? 'Queue' : 'Send',
+      send: () => {
+        const el = this.composerRef.current;
+        const text = el && el.value.trim() ? el.value.trim() : 'Husk at nævne, at vi kan starte 1. oktober.';
+        if (el) el.value = '';
+        this.setState({ queued: s.queued.concat([{ text: text }]) });
+      },
+      queued: s.queued,
+
+      waking: s.waking,
+      wakeLabel: s.waking ? 'Waking…' : 'Wake and send',
+      wake: () => {
+        this.setState({ waking: true });
+        setTimeout(() => this.setState({ waking: false, view: 'live', record: null }), 2400);
+      }
+    };
+  }
+}
+
+</script>
+</body>
+</html>

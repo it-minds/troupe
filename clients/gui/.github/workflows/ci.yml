@@ -1,0 +1,179 @@
+# The GUI's CI, deliberately shaped like the remote's: check first, then build an image
+# from anything that is pushed, to whichever registry the repository is configured with.
+#
+# What it does not do is deploy. Pushing an image and rolling a cluster are different
+# decisions with different blast radii, and a workflow that does both means every merge
+# is a production change. `scripts/deploy` is the second half, run by a person.
+
+name: ci
+
+on:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+  pull_request:
+
+# A second push to the same branch makes the first one's answer irrelevant.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: "24"
+
+jobs:
+  check:
+    name: typecheck, test, build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v7
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+
+      # The generated stylesheet is committed, so a design token changed without running
+      # `pnpm tokens` would otherwise reach a deployment as a file nobody regenerated.
+      - name: The committed design tokens match the design file
+        run: pnpm tokens:check
+
+      - run: pnpm typecheck
+
+      # The protocol client has to be built before the app typechecks against its types
+      # in a clean checkout, and building it is most of what `pnpm build` does anyway.
+      - run: pnpm build
+
+      - run: pnpm test
+
+  image:
+    name: image
+    needs: [check]
+    # A push has a credential; a pull request from a fork does not. It is also the only
+    # time there is a commit worth naming a tag after.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v7
+
+      # Four secrets, exactly as the remote's workflow takes them, so one set of
+      # repository secrets configures both: `REGISTRY` and `REGISTRY_NAMESPACE` say
+      # where, `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` say how to get in. With none
+      # of them the image goes to this repository's own packages on ghcr.io, which is
+      # what a fork or a first run wants.
+      #
+      # **Where and how-to-get-in are one decision, not four.** They used to fall back
+      # one secret at a time, so a repository that set `REGISTRY` and stopped there
+      # pointed at somebody else's registry and then offered it GitHub's own token. That
+      # cannot work, and it fails at the login rather than at the configuration that
+      # caused it: the registry says the credential is unknown, and nothing says the
+      # credential was never configured.
+      #
+      # So there are two configurations and no third. Nothing set is a fork or a first
+      # run, and the image goes to this repository's own packages. Everything set is a
+      # deployment, and the image goes where it says. A registry named with no credential
+      # is neither, and is refused here — quietly publishing somewhere else would be a
+      # green run whose images no deployment will ever pull.
+      - name: Resolve the registry and the tags
+        id: registry
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+        run: |
+          if [ -n "${REGISTRY_PASSWORD}" ]; then
+            configured=true
+            registry="${REGISTRY:-ghcr.io}"
+            namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          elif [ -n "${REGISTRY}" ] && [ "${REGISTRY}" != "ghcr.io" ]; then
+            echo "::error title=Registry named but no credential::REGISTRY is set to ${REGISTRY}, but REGISTRY_PASSWORD is not set, so there is no way to push there. Add REGISTRY_PASSWORD (and REGISTRY_USERNAME if that registry wants a real user name), or remove REGISTRY to publish to this repository's own packages on ghcr.io instead. Publishing elsewhere without saying so would leave the deployment pulling from ${REGISTRY} on whatever it already had."
+            exit 1
+          else
+            configured=false
+            registry="ghcr.io"
+            namespace="${GITHUB_REPOSITORY_OWNER}"
+          fi
+
+          image=$(echo "${registry}/${namespace}/troupe-gui" | tr '[:upper:]' '[:lower:]')
+
+          # `sha-<short>` on every push, so every commit is pullable by a name that can
+          # only ever mean one build; and the version on a release tag, without its `v`,
+          # because that is what a values file writes. Never a floating tag: a reused tag
+          # plus `imagePullPolicy: IfNotPresent` is how a cluster keeps serving old code
+          # while `helm upgrade` reports success.
+          tags="${image}:sha-${GITHUB_SHA::7}"
+          case "$GITHUB_REF" in
+            refs/tags/v*) tags="${tags},${image}:${GITHUB_REF_NAME#v}" ;;
+          esac
+
+          {
+            echo "registry=${registry}"
+            echo "configured=${configured}"
+            echo "tags=${tags}"
+          } >> "$GITHUB_OUTPUT"
+
+          echo "Pushing ${tags}" >> "$GITHUB_STEP_SUMMARY"
+
+      - uses: docker/setup-buildx-action@v4
+
+      # Two logins rather than one with fallbacks inside it, because the credential has
+      # to match the registry the step above actually chose.
+      - name: Sign in to the configured registry
+        if: steps.registry.outputs.configured == 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ${{ steps.registry.outputs.registry }}
+          # Scaleway, Harbor and most others take a fixed name beside a secret key;
+          # `nologin` is the conventional one, and a registry that wants a real user
+          # is told which by `REGISTRY_USERNAME`.
+          username: ${{ secrets.REGISTRY_USERNAME || 'nologin' }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      - name: Sign in to this repository's own packages
+        if: steps.registry.outputs.configured != 'true'
+        uses: docker/login-action@v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # `TROUPE_GUI_BASE` is baked in: Vite writes it into every asset URL, so an image
+      # built for one mount point cannot be served at another. `GUI_BASE` as a repository
+      # variable lets a deployment that serves the GUI at its own root set it to `/`.
+      - uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: Dockerfile
+          build-args: TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.registry.outputs.tags }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  chart:
+    name: chart
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: azure/setup-helm@v5
+
+      - run: helm lint charts/troupe-gui --set ingress.host=example.test
+
+      # Rendered and validated against real Kubernetes schemas, because a chart that only
+      # ever fails at `helm upgrade` fails in front of a cluster rather than in front of
+      # a reviewer.
+      - name: The rendered manifests are valid Kubernetes
+        run: |
+          helm template troupe-gui charts/troupe-gui \
+            --set ingress.host=example.test \
+            --set ingress.tlsSecretName=example-tls \
+            | docker run --rm -i ghcr.io/yannh/kubeconform:v0.6.7 \
+                -strict -summary -kubernetes-version 1.31.0 -
