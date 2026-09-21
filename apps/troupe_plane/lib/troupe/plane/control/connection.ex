@@ -41,6 +41,8 @@ defmodule Troupe.Plane.Control.Connection do
   # Short: this runs on every enrolment, and a pod that cannot answer promptly is
   # better left alone than waited on.
   @index_timeout_ms 10_000
+  @index_attempts 3
+  @index_retry_ms 2_000
 
   @enforce_keys [:socket]
   defstruct [:socket, :identity, :worker, buffer: "", next_id: 1, pending: %{}, verify: nil]
@@ -639,23 +641,38 @@ defmodule Troupe.Plane.Control.Connection do
   #
   # Only ever on an answer. A pod that cannot be reached has said nothing about what it
   # holds, and reading silence as "holding none" would dormant a healthy fleet.
+  #
+  # Asked more than once. This is the only thing that ever rescues the sessions of a pod
+  # that came back under its own name — the sweeper cannot, because the row they point
+  # at is that pod's row, healthy again — so an answer that did not come the first time
+  # is asked for again before the pod is given up on.
   defp reconcile_index(worker) do
     # In a task because the answer arrives on this socket, which this process is the one
     # reading: asking from inside the handler would deadlock waiting on its own reply.
-    Task.start(fn ->
-      case Router.push(worker, "session.index", %{}, @index_timeout_ms) do
-        {:ok, %{"sessions" => held}} ->
-          orphans(worker, held) |> Enum.each(&strand(worker, &1))
+    Task.start(fn -> reconcile_index(worker, @index_attempts) end)
+  end
 
-        {:ok, _other} ->
-          :ok
+  defp reconcile_index(worker, attempts_left) do
+    case Router.push(worker, "session.index", %{}, @index_timeout_ms) do
+      {:ok, %{"sessions" => held}} ->
+        orphans(worker, held) |> Enum.each(&strand(worker, &1))
 
-        {:error, reason} ->
-          Logger.warning(
-            "troupe plane: #{worker.pod_name} did not say what it holds: #{inspect(reason)}"
-          )
-      end
-    end)
+      {:ok, _other} ->
+        :ok
+
+      {:error, reason} when attempts_left > 1 ->
+        Logger.info(
+          "troupe plane: #{worker.pod_name} has not said what it holds (#{inspect(reason)}); asking again"
+        )
+
+        Process.sleep(@index_retry_ms)
+        reconcile_index(worker, attempts_left - 1)
+
+      {:error, reason} ->
+        Logger.warning(
+          "troupe plane: #{worker.pod_name} did not say what it holds: #{inspect(reason)}"
+        )
+    end
   end
 
   defp orphans(worker, held) do
@@ -693,9 +710,31 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # A pod name is one pod at a time, so a connection already registered under this one
+  # belongs to a pod that is gone: killed and replaced under its own name faster than its
+  # socket closed, which a StatefulSet does in seconds, and a kill sends no FIN, so the
+  # socket stays open for the whole lease. Left registered, it made `for_pod` answer
+  # nobody, the index question after enrolment went unanswered, and every session the
+  # plane believed on the old pod stayed `active` for good — the sweeper never looks at a
+  # row that is healthy again. Dropping it costs nothing: the fence in
+  # `Fleet.disconnected/3` keeps its teardown off the row this enrolment just wrote.
+  #
+  # The value carries when this connection enrolled, which is how `for_pod` picks the
+  # newest in the moment both are still here.
   defp register(worker) do
     registry = Connections.registry()
-    Registry.register(registry, {:pod, worker.namespace, worker.pod_name}, worker.id)
+    key = {:pod, worker.namespace, worker.pod_name}
+
+    for {pid, _value} <- Registry.lookup(registry, key), pid != self() do
+      Logger.info(
+        "troupe plane: #{worker.namespace}/#{worker.pod_name} enrolled again; " <>
+          "dropping the connection its predecessor left open"
+      )
+
+      Process.exit(pid, :shutdown)
+    end
+
+    Registry.register(registry, key, {worker.id, System.monotonic_time()})
     Registry.register(registry, {:profile, worker.profile}, worker.id)
   end
 

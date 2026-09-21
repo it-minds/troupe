@@ -278,6 +278,40 @@ defmodule Troupe.Plane.ControlTest do
       assert is_nil(Sessions.get("s-live").worker_id)
     end
 
+    test "replaced under its own name before its old connection closed", %{port: port} do
+      first = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(first, [])
+
+      [pod] = Fleet.list_workers("dev")
+      {:ok, _} = Sessions.create(%{id: "s-stranded", owner_subject: "idp|alice", profile: "dev"})
+      {:ok, _} = Sessions.place("s-stranded", pod)
+
+      # The first socket is *not* closed. A worker deleted with `kubectl delete pod` is
+      # recreated by its StatefulSet in seconds, and a kill sends no FIN, so the plane
+      # still holds the dead pod's connection when the new pod enrols under the same
+      # name. With two connections registered, the index question used to reach neither,
+      # and the session stayed active on a pod that no longer had it.
+      second = enrolled(port, "dev-token", "troupe-w-dev-0")
+      answer_index(second, [])
+
+      assert until(fn -> Sessions.get("s-stranded").state == "dormant" end),
+             "the session stayed active on a pod replaced under its own name"
+
+      # The predecessor's connection is closed from the plane's side, and the new pod is
+      # the one a push reaches.
+      assert until(fn -> match?({:error, :closed}, :gen_tcp.recv(first.socket, 0, 100)) end),
+             "the old connection was left open"
+
+      assert {:ok, %{"sessions" => []}} =
+               Task.async(fn ->
+                 Troupe.Plane.Control.Router.push(pod, "session.index", %{}, 5_000)
+               end)
+               |> then(fn task ->
+                 answer_index(second, [])
+                 Task.await(task)
+               end)
+    end
+
     test "leaves alone what the pod says it still holds", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
       answer_index(worker, [])

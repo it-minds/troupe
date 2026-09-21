@@ -148,12 +148,19 @@ defmodule Troupe.Plane.Control.Connections do
   @spec registry() :: atom()
   def registry, do: @registry
 
-  @doc "The connection for one pod, or `nil`."
+  @doc """
+  The connection for one pod, or `nil`.
+
+  The newest, when there is more than one: a pod replaced under its own name enrols
+  before its predecessor's socket has closed, and for a moment both are registered. The
+  older is on its way out — `Connection.register/1` drops it — and a question sent to it
+  would never be answered. Accepting exactly one, as this used to, answered nobody.
+  """
   @spec for_pod(String.t(), String.t()) :: pid() | nil
   def for_pod(namespace, pod_name) do
     case lookup({:pod, namespace, pod_name}) do
-      [{pid, _value}] -> pid
-      _none -> nil
+      [] -> nil
+      entries -> entries |> Enum.max_by(fn {_pid, {_worker_id, since}} -> since end) |> elem(0)
     end
   end
 

@@ -5126,3 +5126,20 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      of the five images for all three. `release.yml` can be started by hand to retry a
      version whose run failed after its VERSION change merged, which Decision 674 had
      left with no way out but a new version. `.github/CI.md` has the picture.
+
+677. **A pod that comes back under its own name evicts the connection it left behind.** A
+     worker deleted with `kubectl delete pod` is recreated by its StatefulSet in seconds,
+     and a kill sends no FIN, so the plane still held the dead pod's control connection
+     when the new one enrolled. The registry allows duplicates and `for_pod` accepted
+     exactly one, so with two it answered nobody; the one question that rescues a
+     replaced pod's sessions — `session.index` at enrolment — went unanswered, was logged
+     and was never asked again; and the sweeper could not help, because the row those
+     sessions pointed at was the same row, healthy again. They stayed `active` for good,
+     which is what every worker rotation would have done to whatever it was holding. The
+     cluster suite's pod-deletion test failed two runs in three on this, and every run
+     before that behind the CNI that enforced nothing (#65). Now enrolling drops any
+     connection already registered under the pod's name (the fence in
+     `Fleet.disconnected/3` keeps its teardown off the fresh row), `for_pod` takes the
+     newest when there are two, and the index question is asked three times before the
+     pod is given up on. Proof: `Troupe.Plane.ControlTest` "replaced under its own name
+     before its old connection closed", which fails on `main`, and the cluster suite.

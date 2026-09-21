@@ -661,8 +661,10 @@ jobs:
         if: failure()
         run: |
           mkdir -p cluster-logs
-          kubectl logs -n troupe-system deployment/troupe-plane --tail=2000 > cluster-logs/plane.log 2>&1 || true
-          kubectl logs -n troupe-system deployment/troupe-operator --tail=2000 > cluster-logs/operator.log 2>&1 || true
+          # Enough of the plane's log to reach the pod deletion the suite made a few minutes
+          # earlier: at its debug level 2,000 lines was ten seconds of SQL.
+          kubectl logs -n troupe-system deployment/troupe-plane --tail=100000 > cluster-logs/plane.log 2>&1 || true
+          kubectl logs -n troupe-system deployment/troupe-operator --tail=20000 > cluster-logs/operator.log 2>&1 || true
           kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
           kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
 
