@@ -1,10 +1,17 @@
 import Config
 
-# Read at boot, in the release and under `mix run` alike. Nothing here turns an
-# environment value into an atom by lookup (troupe-remote Decision 634): a value is
-# compared against the strings it may be, and anything else is refused with a message
-# that names the variable, so `bin/troupe_daemon eval` works on a machine whose
+# The `troupe_daemon` release's runtime configuration, in place of the platform's
+# `config/runtime.exs` (the release's `runtime_config_path` in the root `mix.exs`). Read at
+# boot. Nothing here turns an environment value into an atom by lookup (Decision 634): a
+# value is compared against the strings it may be, and anything else is refused with a
+# message that names the variable, so `bin/troupe_daemon eval` works on a machine whose
 # environment is not the daemon's.
+
+# The gateway must not open a socket on its own: `Troupe.Daemon.Application` starts the
+# daemon when — and only when — the binary was invoked to run one. `troupe-daemon status`
+# boots the same applications and listens on nothing. Off is the gateway's default too;
+# said here because a pod's configuration is the one place it is ever turned on.
+config :troupe_gateway, autostart: false
 
 # -- where the daemon writes ------------------------------------------------------------
 

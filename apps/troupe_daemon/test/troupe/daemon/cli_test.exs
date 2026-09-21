@@ -18,12 +18,17 @@ defmodule Troupe.Daemon.CLITest do
 
     File.mkdir_p!(Path.join(base, "state"))
     File.mkdir_p!(Path.join(base, "run"))
+    File.mkdir_p!(Path.join(base, "config"))
 
+    # The config directory too: `config` reads `config.yaml` from it, and a developer's own
+    # (a gateway, a provider) is not what these tests are about.
     previous =
-      for k <- ~w(TROUPE_STATE_HOME XDG_RUNTIME_DIR LOCALAPPDATA TROUPE_DAEMON_SOCKET),
+      for k <-
+            ~w(TROUPE_STATE_HOME TROUPE_CONFIG_HOME XDG_RUNTIME_DIR LOCALAPPDATA TROUPE_DAEMON_SOCKET),
           into: %{},
           do: {k, System.get_env(k)}
 
+    System.put_env("TROUPE_CONFIG_HOME", Path.join(base, "config"))
     System.put_env("TROUPE_STATE_HOME", Path.join(base, "state"))
     System.put_env("XDG_RUNTIME_DIR", Path.join(base, "run"))
     System.put_env("LOCALAPPDATA", Path.join(base, "run"))

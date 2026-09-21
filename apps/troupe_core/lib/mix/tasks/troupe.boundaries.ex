@@ -31,7 +31,9 @@ defmodule Mix.Tasks.Troupe.Boundaries do
      "the A2A facade is a protocol client and gets no private access"},
     {:troupe_plane, :never, [:troupe_core, :troupe_gateway], "the plane does not run agents"},
     {:troupe_operator, :never, [:troupe_core, :troupe_gateway, :troupe_plane],
-     "the operator holds cluster privileges and has no public surface"}
+     "the operator holds cluster privileges and has no public surface"},
+    {:troupe_daemon, :only, [:troupe_protocol, :troupe_core, :troupe_gateway],
+     "the daemon is the harness and a command line, and nothing of the platform"}
   ]
 
   # A rule about *modules* rather than apps: every module under the first prefix may call

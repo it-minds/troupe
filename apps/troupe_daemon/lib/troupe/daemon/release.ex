@@ -65,17 +65,16 @@ defmodule Troupe.Daemon.Release do
     release
   end
 
-  # The dependency's checkout, whichever shape Mix gave the sparse clone.
+  # The sibling app's source. The release is assembled from the umbrella root, where
+  # `apps_paths/0` names every app it has.
   defp source! do
-    base = Mix.Project.deps_paths() |> Map.fetch!(:troupe_core)
+    path =
+      Mix.Project.apps_paths()
+      |> Map.fetch!(:troupe_core)
+      |> Path.join("native/reaper/reaper.zig")
+      |> Path.expand()
 
-    Enum.find(
-      [
-        Path.join([base, "native", "reaper", "reaper.zig"]),
-        Path.join([base, "apps", "troupe_core", "native", "reaper", "reaper.zig"])
-      ],
-      &File.exists?/1
-    ) || Mix.raise("reaper: no reaper.zig under #{base}")
+    if File.exists?(path), do: path, else: Mix.raise("reaper: no reaper.zig at #{path}")
   end
 
   defp exe_name("x86_64-windows"), do: "reaper.exe"

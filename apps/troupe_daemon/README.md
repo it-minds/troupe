@@ -1,11 +1,10 @@
 # troupe-daemon
 
 The local harness, as one release per platform. It is `troupe_core`, `troupe_gateway` and
-`troupe_protocol` from [`troupe-remote`](https://github.com/it-minds/troupe-remote) — the
-same three applications a worker pod runs — pinned to one commit in `mix.exs` and packaged
-as a Mix release with the platform's own Erlang runtime inside. The TUI and the desktop
-app are clients of it: a session on your machine runs here, speaks
-[PROTOCOL.md](https://github.com/it-minds/troupe-remote/blob/main/PROTOCOL.md) over a
+`troupe_protocol` — the same three applications a worker pod runs, its siblings in this
+umbrella — packaged as the `troupe_daemon` Mix release with the platform's own Erlang
+runtime inside. The TUI (`clients/tui`) and the desktop app (`clients/gui`) are clients of
+it: a session on your machine runs here, speaks [PROTOCOL.md](../../PROTOCOL.md) over a
 Unix socket, loopback TCP or a loopback WebSocket, and emits the same events a pod does.
 
 ```
@@ -78,10 +77,10 @@ The daemon is not a distributed Erlang node (`rel/env.sh.eex` sets
 
 ## Building
 
+From the umbrella root:
+
 ```sh
-cd daemon
-mix deps.get            # the harness apps come from troupe-remote by git; a private repo
-mix check               # compile --warnings-as-errors, format, credo --strict, test
+cd apps/troupe_daemon && mix test && cd -     # the daemon's own tests
 MIX_ENV=prod mix release troupe_daemon
 tar -xzf _build/prod/troupe_daemon-*.tar.gz -C /some/dir
 /some/dir/bin/troupe-daemon version
@@ -89,16 +88,16 @@ tar -xzf _build/prod/troupe_daemon-*.tar.gz -C /some/dir
 ```
 
 `zig` must be on the `PATH`: the release step builds the `reaper` helper for the host
-triple into the release, and a daemon without it fails every `shell` call.
-`TROUPE_HARNESS_GIT=/path/to/troupe-remote` points a local build at a checkout on disk;
-`TROUPE_HARNESS_REF` overrides the pinned commit. The pinned commit and its harness
-version are the two constants at the top of `mix.exs`; bumping them is how the daemon
-picks up a core change. `VERSION` is the daemon's own.
+triple into the release, and a daemon without it fails every `shell` call. The release's
+runtime configuration is [`config/runtime.exs`](config/runtime.exs) here, not the
+platform's, and `rel/` holds its `env.sh.eex` and `env.bat.eex`; both are named in the root
+`mix.exs`. The version is the umbrella's `VERSION`, and so is the harness's: they are one
+commit.
 
 `.github/workflows/release.yml` builds the Linux, macOS and Windows targets on native
-runners for every push that touches `daemon/`, smokes each (unpack, `version`, `status`,
-`run`, `status`, `eval`; on Windows `version`, `status` and a zstd round trip in `eval`),
-and on a `v*` tag attaches the tarballs and `SHA256SUMS` to the GitHub release. It needs a `HARNESS_TOKEN` repository secret: a fine-grained token
-with read access to `it-minds/troupe-remote`'s contents.
+runners — nightly, at every release, and on a pull request that touches the daemon or the
+workflow — and smokes each (unpack, `version`, `status`, `run`, `status`, `eval`; on
+Windows `version`, `status` and a zstd round trip in `eval`). A release attaches the
+tarballs to the GitHub release with everything else it ships.
 
 [`DECISIONS.md`](DECISIONS.md) says why a release and not a Burrito binary, and the rest.

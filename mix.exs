@@ -52,13 +52,15 @@ defmodule Troupe.Umbrella.MixProject do
     ]
   end
 
-  # Four releases from one umbrella, and every one of them is a container image.
+  # Five releases from one umbrella: four container images, and the daemon.
   #
-  # This repository is the remote: it is deployed to Kubernetes by `charts/troupe` and
-  # it is not installed on anybody's machine. So there is no packaged executable here,
-  # no target matrix, and nothing cross-built — each release is a plain Mix release
-  # that runs where an Erlang runtime is the container's business rather than the
-  # user's. Clients live in their own repositories and reach a plane over the protocol.
+  # The four are deployed to Kubernetes by `charts/troupe`; each is a plain Mix release
+  # that runs where an Erlang runtime is the container's business rather than the user's.
+  # The daemon is the one release that is installed on somebody's machine, so it is built
+  # natively on each platform it ships for (`.github/workflows/release.yml`) rather than in
+  # a container. The clients are not releases of this umbrella: `clients/tui` is its own
+  # Mix project and `clients/gui` a pnpm workspace, and both reach the harness the way any
+  # client does, over the protocol (Decision 666).
   defp releases do
     [
       troupe_operator: [
@@ -85,6 +87,27 @@ defmodule Troupe.Umbrella.MixProject do
         ],
         include_executables_for: [:unix],
         steps: [:assemble, &Troupe.Release.build_reapers/1, :tar]
+      ],
+      # The laptop harness. It carries the reaper for the host it was built on, and
+      # `bin/troupe-daemon`, the command line a person and a client use. Its runtime
+      # configuration is its own: the platform's `config/runtime.exs` reads a pod's
+      # environment, and a laptop has none of it.
+      troupe_daemon: [
+        applications: [
+          troupe_protocol: :permanent,
+          troupe_core: :permanent,
+          troupe_gateway: :permanent,
+          troupe_daemon: :permanent
+        ],
+        include_executables_for: [:unix, :windows],
+        runtime_config_path: "apps/troupe_daemon/config/runtime.exs",
+        rel_templates_path: "apps/troupe_daemon/rel",
+        steps: [
+          :assemble,
+          &Troupe.Daemon.Release.reaper/1,
+          &Troupe.Daemon.Release.wrapper/1,
+          :tar
+        ]
       ]
     ]
   end
