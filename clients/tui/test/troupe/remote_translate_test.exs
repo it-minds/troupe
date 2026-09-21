@@ -240,4 +240,122 @@ defmodule Troupe.RemoteTranslateTest do
         memory
       )
   end
+
+  test "a question asked and answered: the menu the model draws, and what clears it" do
+    [asked] =
+      translate(
+        durable("question_asked", %{
+          "call_id" => "q1",
+          "agent_path" => ["root"],
+          "question" => "Which colour?",
+          "options" => [
+            %{"label" => "red", "description" => nil},
+            %{"label" => "blue", "description" => "calm"},
+            "green"
+          ],
+          "multiple" => true
+        })
+      )
+
+    assert asked.type == :question_asked
+    assert asked.data.call_id == "q1"
+    assert asked.data.question == "Which colour?"
+    assert asked.data.multiple == true
+
+    assert asked.data.options == [
+             %{label: "red", description: nil},
+             %{label: "blue", description: "calm"},
+             %{label: "green", description: nil}
+           ]
+
+    [answered] = translate(durable("question_answered", %{"call_id" => "q1", "text" => "blue"}))
+    assert answered.type == :question_answered
+    assert answered.data == %{call_id: "q1", text: "blue"}
+  end
+
+  test "the budget question is its own item, the question it rides on is not drawn twice, and the harness's notes are notes" do
+    [started] =
+      translate(
+        durable("budget_ask_started", %{
+          "call_id" => "budget-1",
+          "dimension" => "turns",
+          "used" => 40,
+          "limit" => 40,
+          "detail" => "turns 40/40 (100%)"
+        })
+      )
+
+    assert started.type == :budget_ask_started
+    assert started.data == %{call_id: "budget-1", detail: "turns 40/40 (100%)", dimension: :turns}
+
+    assert translate(
+             durable("question_asked", %{
+               "call_id" => "budget-1",
+               "agent_path" => ["root"],
+               "question" => "turns 40/40 (100%) — continue?",
+               "options" => [%{"label" => "allow"}, %{"label" => "always"}, %{"label" => "deny"}],
+               "multiple" => false
+             })
+           ) == []
+
+    assert translate(durable("question_answered", %{"call_id" => "budget-1", "text" => "allow"})) ==
+             []
+
+    [answered] =
+      translate(
+        durable("budget_ask_answered", %{
+          "call_id" => "budget-1",
+          "decision" => "allow",
+          "grant" => %{"turns" => 40}
+        })
+      )
+
+    assert answered.type == :budget_ask_answered
+    assert answered.data == %{call_id: "budget-1", decision: "allow"}
+
+    # An ordinary question with an ordinary id still comes through.
+    assert [%{type: :question_asked}] =
+             translate(
+               durable("question_asked", %{
+                 "call_id" => "q7",
+                 "question" => "Which?",
+                 "options" => [],
+                 "multiple" => false
+               })
+             )
+
+    [note] =
+      translate(
+        durable("user_input", %{"source" => "harness", "text" => "Your previous reply was cut off"})
+      )
+
+    assert note.type == :remote_note
+    assert note.data.text == "harness: Your previous reply was cut off"
+
+    [cut] = translate(durable("truncated", %{"reason" => "max_tokens", "note" => "…"}))
+    assert cut.data.text == "the reply was cut at the output cap; asking again"
+
+    [empty] = translate(durable("truncated", %{"reason" => "empty", "final" => true}))
+    assert empty.data.text == "the reply had no text and no tool call; giving up"
+
+    [calls] = translate(durable("truncated", %{"reason" => "max_tokens", "calls" => 2}))
+    assert calls.data.text =~ "2 tool call(s) answered with an error"
+  end
+
+  test "a budget warning names its dimension and carries the sentence" do
+    data = %{"dimension" => "input", "used" => 4_900_000, "limit" => 6_000_000, "fraction" => 0.817}
+
+    [warning] =
+      translate(durable("budget_warning", Map.put(data, "detail", "input tokens 4.9M/6.0M (82%)")))
+
+    assert warning.type == :budget_warning
+    assert warning.agent_path == "root"
+    assert warning.data.dimension == :input
+    assert warning.data.detail == "input tokens 4.9M/6.0M (82%)"
+    assert warning.data.fraction == 0.817
+
+    [odd] = translate(durable("budget_warning", %{data | "dimension" => "moon"}))
+    assert odd.data.dimension == :other
+    assert odd.data.detail == "moon"
+  end
 end

@@ -130,7 +130,8 @@ defmodule Troupe.Client.Daemon do
     do: describe(Worker.approve(call_target(sid, call_id), call_id, decision))
 
   @impl true
-  def answer(sid, call_id, text), do: describe(Worker.input(call_target(sid, call_id), text))
+  def answer(sid, call_id, text),
+    do: describe(Worker.answer(call_target(sid, call_id), call_id, text))
 
   @impl true
   def edit_todo(sid, path, change), do: route(sid, path, &Worker.edit_todo(&1, change))
@@ -258,8 +259,31 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def watch_status(sid), do: Link.watch_status(sid)
 
+  # The workspace's own MCP servers (troupe-remote Decision 654), as the `/mcp` page
+  # draws them: a count of tools, and the error when there is one.
   @impl true
-  def mcp_status(_sid), do: []
+  def mcp_status(sid) do
+    case Worker.rpc(sid, "mcp.status", %{}) do
+      {:ok, %{"servers" => servers}} when is_list(servers) ->
+        Enum.map(servers, fn server ->
+          %{
+            name: server["name"],
+            state: mcp_state(server["state"]),
+            tools: server["tools"] |> List.wrap() |> length(),
+            error: server["error"]
+          }
+        end)
+
+      _ ->
+        []
+    end
+  end
+
+  defp mcp_state("ready"), do: :ready
+  defp mcp_state("connecting"), do: :connecting
+  defp mcp_state("error"), do: :error
+  defp mcp_state("stopped"), do: :stopped
+  defp mcp_state(_other), do: :unknown
 
   # `/memory` shows the brief, `/memory refresh` has the librarian rewrite it as a branch
   # of this session, `/memory forget` deletes it.

@@ -69,7 +69,7 @@ defmodule Troupe.Client.Remote do
   # The contract has no question method: an answer is input, which is how a
   # remote agent's `ask_user` reaches it.
   @impl true
-  def answer(sid, _call_id, text), do: describe(Worker.input(sid, text))
+  def answer(sid, call_id, text), do: describe(Worker.answer(sid, call_id, text))
 
   @impl true
   def edit_todo(sid, _path, change), do: describe(Worker.edit_todo(sid, change))

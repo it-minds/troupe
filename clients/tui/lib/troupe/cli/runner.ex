@@ -116,7 +116,7 @@ defmodule Troupe.CLI.Runner do
   # What a client may ask the daemon to set on a session, and only that (the daemon
   # refuses the rest; the provider and its key are the machine's).
   defp config(args) do
-    %{auto_approve: args.auto_approve, watch: args.watch}
+    %{auto_approve: args.auto_approve, watch: args.watch, full_send: args.full_send}
   end
 
   # `troupe run AGENT "task"`: one session, one agent, one task, in its own worktree

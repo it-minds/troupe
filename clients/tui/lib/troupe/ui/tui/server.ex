@@ -1360,6 +1360,12 @@ defmodule Troupe.UI.TUI.Server do
       nil ->
         put_win(state, code)
 
+      # The budget question is a question the harness asks (troupe-remote Decision 660):
+      # the same three keys, answered in the words it listens for. `a` lifts this agent
+      # and its subagents, not every branch — a branch is a session now.
+      %{kind: :budget, call_id: call_id} ->
+        send_answer(state, call_id, %{"y" => "allow", "n" => "deny", "a" => "always"}[code])
+
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
 

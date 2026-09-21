@@ -160,10 +160,22 @@ defmodule Troupe.Remote.Translate do
     seq = seq(event)
     emit = &durable_event(session_id, agent, &1, at, &2, seq)
 
+    # Two facts the clauses below need in guards: the budget question (troupe-remote
+    # Decision 660) rides on the question path under a `budget-<n>` id and has an event
+    # of its own beside it, and a `user_input` from the harness is a note, not something
+    # anybody typed.
+    budget_question? = match?("budget-" <> _, call_id(data))
+    harness_note? = data["source"] == "harness"
+
     # Two spellings of one vocabulary: the worker's (`llm_response`,
     # `tool_call_started` — PROTOCOL.md §4) and the older dotted one the contract's
     # example and the fake use. Both land on the same local events (Decision 98).
     case type do
+      # The note the harness gives a model whose reply was cut or empty (troupe-remote
+      # Decision 659): shown as what it is rather than as the person's words.
+      "user_input" when harness_note? ->
+        {[emit.(:remote_note, %{text: "harness: " <> text_of(data)})], memory}
+
       type when type in ["input.queued", "input_queued", "user_input"] ->
         {[
            emit.(:input, %{
@@ -213,6 +225,45 @@ defmodule Troupe.Remote.Translate do
       type when type in ["approval.resolved", "approval_decided"] ->
         {[emit.(:approval_answered, %{call_id: call_id(data), decision: decision(data)})], memory}
 
+      # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
+      # at the screen, with options a client may draw as a menu.
+      # The window already knows a `:budget` item and answers it with y / n / a, so the
+      # question the harness also wrote is not drawn a second time.
+      type when type in ["question_asked", "question_answered"] and budget_question? ->
+        {[], memory}
+
+      "budget_ask_started" ->
+        {[
+           emit.(:budget_ask_started, %{
+             call_id: call_id(data),
+             detail: data["detail"] || "budget exhausted",
+             dimension: dimension(data["dimension"])
+           })
+         ], memory}
+
+      "budget_ask_answered" ->
+        {[emit.(:budget_ask_answered, %{call_id: call_id(data), decision: data["decision"]})],
+         memory}
+
+      # A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
+      "truncated" ->
+        {[emit.(:remote_note, %{text: truncated(data)})], memory}
+
+      "question_asked" ->
+        {[
+           emit.(:question_asked, %{
+             call_id: call_id(data),
+             question: to_string(data["question"] || ""),
+             options: options(data),
+             multiple: data["multiple"] == true
+           })
+         ], memory}
+
+      "question_answered" ->
+        {[
+           emit.(:question_answered, %{call_id: call_id(data), text: to_string(data["text"] || "")})
+         ], memory}
+
       "approval_resolved" ->
         {[], memory}
 
@@ -244,6 +295,19 @@ defmodule Troupe.Remote.Translate do
 
       "budget_exhausted" ->
         {[emit.(:remote_note, %{text: "budget exhausted" <> limit(data)})], memory}
+
+      # A limit is near (troupe-remote Decision 655): durable on the wire, shown once by
+      # the window, which already knew how.
+      "budget_warning" ->
+        {[
+           emit.(:budget_warning, %{
+             dimension: dimension(data["dimension"]),
+             used: data["used"],
+             limit: data["limit"],
+             fraction: data["fraction"],
+             detail: data["detail"] || to_string(data["dimension"])
+           })
+         ], memory}
 
       "profile_switched" ->
         {[emit.(:remote_note, %{text: "profile switched" <> switch(data)})], memory}
@@ -370,6 +434,15 @@ defmodule Troupe.Remote.Translate do
   defp as(%{"profile" => profile}) when is_binary(profile), do: " as #{profile}"
   defp as(_data), do: ""
 
+  @dimensions %{
+    "turns" => :turns,
+    "input" => :input,
+    "output" => :output,
+    "wall" => :wall,
+    "context" => :context
+  }
+  defp dimension(name), do: Map.get(@dimensions, name, :other)
+
   defp limit(%{"limit" => limit}) when is_binary(limit), do: ": #{limit}"
 
   defp limit(%{"limit" => %{} = limit}),
@@ -455,6 +528,21 @@ defmodule Troupe.Remote.Translate do
     end
   end
 
+  defp options(%{"options" => options}) when is_list(options) do
+    Enum.flat_map(options, fn
+      %{"label" => label} = option when is_binary(label) ->
+        [%{label: label, description: option["description"]}]
+
+      label when is_binary(label) ->
+        [%{label: label, description: nil}]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp options(_data), do: []
+
   defp decision(data) do
     case data["decision"] do
       "allow" -> :allow
@@ -517,6 +605,24 @@ defmodule Troupe.Remote.Translate do
   defp subject(%{"subject" => subject}) when is_binary(subject), do: ": #{subject}"
   defp subject(%{"principal" => principal}) when is_binary(principal), do: ": #{principal}"
   defp subject(_data), do: ""
+
+  defp truncated(data) do
+    what =
+      case data["reason"] do
+        "empty" -> "the reply had no text and no tool call"
+        _max_tokens -> "the reply was cut at the output cap"
+      end
+
+    then =
+      cond do
+        data["final"] == true -> "; giving up"
+        is_integer(data["calls"]) -> "; #{data["calls"]} tool call(s) answered with an error"
+        is_binary(data["note"]) -> "; asking again"
+        true -> ""
+      end
+
+    what <> then
+  end
 
   defp because(%{"reason" => reason}) when is_binary(reason), do: ": #{reason}"
   defp because(_data), do: ""
