@@ -29,7 +29,7 @@ Older documents at the repository root and under `docs/` remain the design recor
 says so and the track documents follow the code.
 
 The clients live in their own repositories with their own documentation. The graphical
-one is `../../troupe-gui/docs/README.md`; the terminal one has not been extracted yet, and
+one is `../clients/gui/docs/README.md`; the terminal one has not been extracted yet, and
 until it is, [user/](user/README.md) is where its prose sits.
 
 ## Self-check

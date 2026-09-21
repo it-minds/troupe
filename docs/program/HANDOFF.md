@@ -4,8 +4,8 @@ What was decided, what to read, and how the two repositories work while this lan
 
 Two briefs come out of this document and are what the teams actually work from:
 
-* **[`docs/brief-remote.md`](docs/brief-remote.md)** — nine work packages for `troupe-remote`.
-* **[`docs/brief-gui.md`](docs/brief-gui.md)** — six for `troupe-gui`.
+* **[`docs/brief-remote.md`](brief-remote.md)** — nine work packages for `troupe-remote`.
+* **[`docs/brief-gui.md`](brief-gui.md)** — six for `troupe-gui`.
 
 Read this page once. Then read your brief, then the documents it names, then start.
 
@@ -28,15 +28,15 @@ person sees, and what happens when demand exceeds a number somebody guessed.
 
 | document | authority over |
 | --- | --- |
-| `../troupe-remote/spec.md`, `../troupe-gui/spec.md` | **Invariants.** Nothing below weakens one. Where something is revised, it is named and argued. |
-| `../troupe-remote/PROTOCOL.md` | The wire. Changes land here first, in `troupe-remote`, before any client implements them. |
-| `../troupe-remote/ARCHITECTURE.md` | What is built and how. Updated per stage, before the stage. |
+| `../../spec.md`, `../../clients/gui/spec.md` | **Invariants.** Nothing below weakens one. Where something is revised, it is named and argued. |
+| `../../PROTOCOL.md` | The wire. Changes land here first, in `troupe-remote`, before any client implements them. |
+| `../../ARCHITECTURE.md` | What is built and how. Updated per stage, before the stage. |
 | [`RELEASE.md`](RELEASE.md) | What is left to 1.0, in seven workstreams, and in what order. |
-| [`docs/orchestration-review.md`](docs/orchestration-review.md) | Capacity, scaling, teams-to-groups, and the admin's morning. Supersedes `RELEASE.md` W4 where they differ. |
-| [`docs/control-panel.md`](docs/control-panel.md) | The console. |
-| [`docs/client-ux.md`](docs/client-ux.md) | The client. |
-| [`docs/as-built.md`](docs/as-built.md) | The target. Every claim in it must end up proven somewhere. |
-| [`docs/landscape.md`](docs/landscape.md) | Why. Read once; do not re-derive. |
+| [`docs/orchestration-review.md`](orchestration-review.md) | Capacity, scaling, teams-to-groups, and the admin's morning. Supersedes `RELEASE.md` W4 where they differ. |
+| [`docs/control-panel.md`](control-panel.md) | The console. |
+| [`docs/client-ux.md`](client-ux.md) | The client. |
+| [`docs/as-built.md`](as-built.md) | The target. Every claim in it must end up proven somewhere. |
+| [`docs/landscape.md`](landscape.md) | Why. Read once; do not re-derive. |
 
 Both repositories keep their own `DECISIONS.md` and `REPORT.md`. Nothing about that changes.
 
@@ -61,9 +61,9 @@ provider and still never typed in Troupe.
 
 ## The working contract between the repositories
 
-Unchanged from `../troupe-gui/spec.md` and restated because it governs every package here:
+Unchanged from `../../clients/gui/spec.md` and restated because it governs every package here:
 
-1. **Protocol first.** A new method or field lands in `../troupe-remote/PROTOCOL.md`, then in
+1. **Protocol first.** A new method or field lands in `../../PROTOCOL.md`, then in
    `troupe-remote` with its own tests, then the GUI implements it. Never the other way.
 2. **Capability-gated clients.** The GUI offers a control when the server it is talking to
    announced the thing at `initialize` — never because the build was compiled with it. This

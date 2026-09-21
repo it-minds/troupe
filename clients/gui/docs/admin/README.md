@@ -5,7 +5,7 @@
 Documentation for whoever runs the Troupe GUI: a static web bundle served by nginx from
 a Helm chart, talking from the user's browser to a Troupe plane and its worker pods. The
 plane and workers are the separate `troupe-remote` repository; their operator docs are
-under [../../../troupe-remote/docs/](../../../troupe-remote/docs/AUDIT.md).
+under [../../../../docs/](../../../../docs/AUDIT.md).
 
 Three facts shape everything here (`charts/troupe-gui/values.yaml:1-3`; AUDIT §1.4):
 
@@ -78,7 +78,7 @@ the identity provider that the GUI's behaviour assumes.
 
 | Setting | Owner | Why the GUI needs it | Documented in |
 |---|---|---|---|
-| `TROUPE_CORS_ORIGINS` (chart `plane.corsOrigins`) | plane (`../../../troupe-remote/config/runtime.exs:266`) | Discovery, `/auth/exchange`, `/rpc` from a browser on another origin; the GUI names it in its error (`packages/client/src/auth.ts:88`) | [identity-provider.md](identity-provider.md) "The two allowlists"; [operations.md](operations.md) "Troubleshooting" |
+| `TROUPE_CORS_ORIGINS` (chart `plane.corsOrigins`) | plane (`../../../../config/runtime.exs:266`) | Discovery, `/auth/exchange`, `/rpc` from a browser on another origin; the GUI names it in its error (`packages/client/src/auth.ts:88`) | [identity-provider.md](identity-provider.md) "The two allowlists"; [operations.md](operations.md) "Troubleshooting" |
 | `TROUPE_WORKER_ALLOWED_ORIGINS` (chart `operator.workerAllowedOrigins`) | workers (`runtime.exs:130`) | The `wss://` upgrade from the browser to a pod (`REPORT.md:188-191`) | [identity-provider.md](identity-provider.md); [operations.md](operations.md) |
 | `TROUPE_OIDC_SCOPES` (chart `plane.oidc.scopes`) and the absence of `groups` | plane (`runtime.exs:260`) | The GUI sends the published scopes verbatim; `groups` as a scope fails at Entra (`DECISIONS.md` #27) | [identity-provider.md](identity-provider.md) "Scopes, and groups" |
 | `TROUPE_GROUPS_CLAIM` | plane | Group membership is a claim, not a scope (`DECISIONS.md` #27) | [identity-provider.md](identity-provider.md) |
@@ -88,7 +88,7 @@ the identity provider that the GUI's behaviour assumes.
 | Public client with PKCE; device grant enabled; refresh tokens | identity provider | Browser and non-browser sign-in; staying signed in | [identity-provider.md](identity-provider.md) "Which flow, and why" |
 
 Server-side detail for the first five is in the `troupe-remote` repository's docs, in
-particular [docs/admin/integrations.md](../../../troupe-remote/docs/admin/integrations.md)
+particular [docs/admin/integrations.md](../../../../docs/admin/integrations.md)
 (not present in that tree at audit time; linked to where it is expected).
 
 ## Findings an operator should know

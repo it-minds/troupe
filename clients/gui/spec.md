@@ -1,5 +1,5 @@
 **Troupe GUI: one client for team, local, and private sessions**  
-This extends ../troupe-remote/spec.md and assumes the remote's stages 1–4 and stage 5 (bundles, skills, MCP servers, unattended sessions, service principals, the A2A facade) are finished and green. Same rules apply: work autonomously, do not ask me questions, record every judgment call in DECISIONS.md, and prove every done item with command output.  
+This extends ../../spec.md and assumes the remote's stages 1–4 and stage 5 (bundles, skills, MCP servers, unattended sessions, service principals, the A2A facade) are finished and green. Same rules apply: work autonomously, do not ask me questions, record every judgment call in DECISIONS.md, and prove every done item with command output.  
 The goal is a graphical client that is the first thing a person opens and the last thing they close: their team's sessions on remote workers, the sessions running in the daemon on their own machine, and the sessions that are theirs alone, sealed to the remote under their own key so they follow them to another device. It signs in once, shows one list, and speaks nothing but the protocol.  
 Build in four stages. Each stage ships on its own, and a stage is not started until the previous one is green.  
 **Invariants**  
@@ -58,8 +58,8 @@ Boundaries are enforced by the build: apps/desktop imports @troupe/client and no
 - A bundled copy of the daemon, the plane, or any server code inside the GUI.  
 - An admin view reachable by a non-admin, or one that shows session content.  
 **Working order**  
-For each stage, update ../troupe-remote/PROTOCOL.md for any new method or field first, land the server change in troupe-remote with its own tests, then write the stage's done items as failing tests here, then implement until green.  
-Stages 1 and 4 run against the kind cluster from ../troupe-remote/scripts/remote-up. Stages 2 and 3 run against a daemon built from ../troupe-remote with the Fake provider, and stage 3 additionally against the kind cluster's MinIO and OpenBao with the JWT auth role configured by dev/kind/dependencies.yaml. The Fake provider stays the model for every automated test; browser tests run under Playwright in CI.  
+For each stage, update ../../PROTOCOL.md for any new method or field first, land the server change in troupe-remote with its own tests, then write the stage's done items as failing tests here, then implement until green.  
+Stages 1 and 4 run against the kind cluster from ../../scripts/remote-up. Stages 2 and 3 run against a daemon built from this repository (`../..`) with the Fake provider, and stage 3 additionally against the kind cluster's MinIO and OpenBao with the JWT auth role configured by dev/kind/dependencies.yaml. The Fake provider stays the model for every automated test; browser tests run under Playwright in CI.  
 **Done means all of these pass, with command output shown**  
 Stage 1:  
 1. From a clean profile, sign in against the kind cluster's Dex, list sessions, create one on the dev profile choosing the plan agent, send a prompt, and watch the answer stream; the rotated refresh token is persisted and a relaunch needs no new sign-in.  

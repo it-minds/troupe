@@ -466,7 +466,7 @@ to carry:
 
 Two more entries for `RELEASE.md`'s revision list, a fourth and a fifth.
 
-> **`../troupe-remote/spec.md`, out of scope: "autoscaling".**
+> **`spec.md`, out of scope: "autoscaling".**
 
 Revised, narrowly and for a reason the spec could not have had: it was written for a cluster
 serving one workload where an administrator sizing a fleet is a normal thing to ask. At
@@ -482,7 +482,7 @@ to type a number.
 **Scale-to-zero is the part that pays**, and it is the part a CPU-based HPA could never do,
 because an idle agent session consumes almost nothing and is not idle.
 
-> **`../troupe-remote/spec.md`, identity: "A team is an IdP group that a platform admin has
+> **`spec.md`, identity: "A team is an IdP group that a platform admin has
 > enabled as a team."**
 
 Revised by finding 8. A team becomes a Troupe object that links to any number of groups. The

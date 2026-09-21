@@ -2,7 +2,7 @@
 
 Every judgment call this repository made that a reader could reasonably have made
 differently, with the reason. Numbered, append-only. The remote's own decisions live in
-`../troupe-remote/DECISIONS.md`; these are the client's.
+`../../DECISIONS.md`; these are the client's.
 
 ## Stage 1 — the shell, team sessions, and sign-in
 
@@ -389,3 +389,17 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     tab, so signing in makes one fewer call. `Table`, `Confirm` and `Failed` moved out of
     `views/admin/` into the shared `views/bits.tsx`, because *This computer* uses all
     three and they were never administrative.
+
+45. **The GUI lives at `clients/gui` in the monorepo, and the plane it is tested against is
+    built from the same commit.** The repository's root `DECISIONS.md` (666) is the
+    reason; this is what changed here. Nothing inside the workspace moved: `pnpm build`,
+    `pnpm test` and the image build run in this directory as they did at the old root, and
+    the image is still built with this directory as its whole context — which is now also
+    the proof that nothing here reaches into the rest of the repository. The links that
+    named `../troupe-remote/…` are relative paths into the repository now. The
+    end-to-end stack (`dev/plane-stack.yml`) builds the plane from `docker/Dockerfile` at
+    the root instead of pulling `troupe-plane:dev`, so a protocol change and the client
+    change that answers it are tested together; `TROUPE_PLANE_IMAGE` with `--no-build`
+    still tests a published plane. Node is pinned once, in the root `.tool-versions`.
+    Rule 1 of the working contract — the protocol first, then the server, then the client
+    — holds; it is now one pull request instead of three.

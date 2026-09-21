@@ -376,7 +376,7 @@ set:
 Sources:
 - config/runtime.exs:265-270
 - apps/troupe_plane/lib/troupe/plane/web/cors.ex:3-7, 36-42
-- ../../../troupe-gui/docs/AUDIT.md §1.4, §2
+- ../../clients/gui/docs/AUDIT.md §1.4, §2
 
 ## The binary and the daemon
 

@@ -6,7 +6,7 @@
 > out `783e660` alone will not find most of what these documents describe.
 
 Four tracks, one audit, one deep dive, the same shape as the server repository's
-`../../troupe-remote/docs/README.md`. Server-side concepts (approvals, agents, profiles,
+`../../../docs/README.md`. Server-side concepts (approvals, agents, profiles,
 budgets, dormancy) are documented there and linked from here rather than restated.
 
 | Document | One line |

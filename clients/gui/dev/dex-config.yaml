@@ -1,5 +1,5 @@
 # The identity provider the GUI's device grant runs against. Mirrors the one in
-# ../troupe-remote/dev/kind/dependencies.yaml, on a port of its own.
+# ../../dev/kind/dependencies.yaml, on a port of its own.
 #
 # `dex.localtest.me` resolves to 127.0.0.1 publicly, and the plane is given an
 # `extra_hosts` entry pointing it at the Docker host, so the issuer is one string that

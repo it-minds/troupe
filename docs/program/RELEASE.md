@@ -10,7 +10,7 @@ still have no way for an administrator to see what it is doing, no way for a sec
 person to watch a session, and no story at all for the developer who has one laptop and
 no cluster.
 
-Nothing here weakens an invariant. `../troupe-remote/spec.md` and `../troupe-gui/spec.md`
+Nothing here weakens an invariant. `../../spec.md` and `../../clients/gui/spec.md`
 stay the authority; three decisions are revised and each is named, with the reason, in
 [Decisions this plan revises](#decisions-this-plan-revises).
 
@@ -32,18 +32,18 @@ The uneven bit is not the harness. It is everything a person or an administrator
 
 | owed | where it is written | size |
 | --- | --- | --- |
-| Entitlements below the profile | `../troupe-remote/docs/plans/stage-6.md` §2 | medium |
+| Entitlements below the profile | `../plans/stage-6.md` §2 | medium |
 | Credentials that belong to a person | `stage-6.md` §3 | medium |
 | Trigger revisions | `stage-6.md` §4 | small |
 | The cluster e2e suite | `stage-6.md` §5 | medium |
-| Private sessions, end to end | `../troupe-gui/docs/plans/local-and-private-sessions.md` | large |
-| Client-hosted MCP servers in the GUI | `../troupe-gui` stage 2, done item 5 | small |
+| Private sessions, end to end | `../../clients/gui/docs/plans/local-and-private-sessions.md` | large |
+| Client-hosted MCP servers in the GUI | `clients/gui` stage 2, done item 5 | small |
 | Identity and Integrations as their own screens | `admin-surface.md`, "what is still owed" | medium |
 | The erase dialog's full text | `admin-surface.md` | small |
 | Audit's integrity tab | `admin-surface.md` | small |
 | Bundles as a diff | `admin-surface.md` | small |
 | A settings surface for the operator's own config | `admin-surface.md` | small |
-| A fake plane, so the admin views can be tested | `../troupe-gui` stage 4, known limitations | small |
+| A fake plane, so the admin views can be tested | `clients/gui` stage 4, known limitations | small |
 
 That list is the floor. Everything below it is new.
 
@@ -91,7 +91,7 @@ and stays refused.
 | **W3** | [Sessions people share](#w3--sessions-people-share) | Fork at a sequence number, a share link with a grade, and presence — the one thing worth a push channel. | medium | W2's principals |
 | **W4** | [The substrate widens](#w4--the-substrate-widens) | A worker is behind an interface, so it can be an SSH host and not only a pod; and a workspace is built once per bundle hash, not once per session. | large | W1's e2e suite |
 | **W5** | [Interop](#w5--interop) | The daemon speaks ACP; the platform exposes itself over MCP; A2A keeps the external agents. | medium | W2 |
-| **W6** | [The console](#w6--the-console) | One surface that configures the whole product, with a ladder that says which scope decided each effective value. See [`docs/control-panel.md`](docs/control-panel.md). | large | a screen per workstream, landing with it |
+| **W6** | [The console](#w6--the-console) | One surface that configures the whole product, with a ladder that says which scope decided each effective value. See [`docs/control-panel.md`](control-panel.md). | large | a screen per workstream, landing with it |
 | **W7** | [Release](#w7--release) | What 1.0 means as a command that either passes or does not. | medium | all |
 
 ---
@@ -162,9 +162,9 @@ computed.
 | A trigger run points at a mutable row | `apps/troupe_plane/lib/troupe/plane/triggers/run.ex` |
 | The `Sealer` is in `troupe_worker`, so the daemon cannot use it | `apps/troupe_worker/lib/troupe/worker/session/sealer.ex` |
 | The plane has no `session.register`, `session.seal-report` or `session.presign` | `Troupe.Plane.Harness` |
-| The GUI's **Keep it private** control is gated on a `private_sessions` capability no daemon reports | `../troupe-gui` stage 3 |
+| The GUI's **Keep it private** control is gated on a `private_sessions` capability no daemon reports | `clients/gui` stage 3 |
 | Client-hosted MCP servers are implemented in `Troupe.Session.ClientTools` and offered by no client | `apps/troupe_core/lib/troupe/session/client_tools.ex` |
-| Nothing has run on a cluster | `../troupe-remote/REPORT.md` |
+| Nothing has run on a cluster | `../../REPORT.md` |
 
 ### Design
 
@@ -232,7 +232,7 @@ Two additions to §5's table, both from things this plan adds:
    started.
 6. A personal MCP server from `mcp.json` is registered after the consent challenge, served
    through `tool.invoke`, and shows as `session_tainted` to a second client.
-7. `../troupe-remote/REPORT.md`'s "nothing has run on a cluster" paragraph is deleted and
+7. `../../REPORT.md`'s "nothing has run on a cluster" paragraph is deleted and
    replaced by command output.
 
 ---
@@ -397,7 +397,7 @@ they are the two an administrator actually asks for:
 And the thing that makes the ladder usable rather than merely correct: **an effective-value
 view** that, for any setting, names the value, the rung that decided it, and every rung that
 had an opinion. That is a console feature and it is specified in
-[`docs/control-panel.md`](docs/control-panel.md).
+[`docs/control-panel.md`](control-panel.md).
 
 #### 2e. The platform as a tool surface
 
@@ -469,8 +469,8 @@ and one narrow push channel for the only fact whose value is being under a secon
 | There is no fork. A second attempt is a second session with no relationship to the first | — |
 | An ACL is a list of subjects, not a link somebody can be given | `Troupe.Plane.Sessions` |
 | Presence is specified and has no transport to a client that is not already attached | stage 4 |
-| The GUI's fleet row has no notion of who else is in a session | `../troupe-gui` `FleetRow` |
-| A private session cannot become a team session | `../troupe-gui/spec.md`, out of scope |
+| The GUI's fleet row has no notion of who else is in a session | `clients/gui` `FleetRow` |
+| A private session cannot become a team session | `../../clients/gui/spec.md`, out of scope |
 
 ### Design
 
@@ -771,7 +771,7 @@ is adopted where it would weaken the log.
 *Folds in landscape items 7 and 10, and every screen the six workstreams above need.*
 
 This is the largest single piece of 1.0 and it has its own document:
-**[`docs/control-panel.md`](docs/control-panel.md)**.
+**[`docs/control-panel.md`](control-panel.md)**.
 
 The summary, so this plan reads straight through:
 
@@ -815,7 +815,7 @@ the cheapest thing on this list to copy and the most expensive to leave implicit
 
 ### Done
 
-See [`docs/control-panel.md`](docs/control-panel.md). The two that gate the release:
+See [`docs/control-panel.md`](control-panel.md). The two that gate the release:
 
 1. Every `Plane.Admin` function is reachable from a console screen or listed as API-only
    with a reason, asserted by a test.
@@ -936,7 +936,7 @@ ceiling is the whole team's runway. The deferral stands for *entitlements* — w
 and servers a person may use is still a team's answer — and ends for *budgets*, which is
 where it bites first and costs least.
 
-**3. `../troupe-remote/spec.md`, forbidden list: nothing in it. And the assumption beneath
+**3. `../../spec.md`, forbidden list: nothing in it. And the assumption beneath
 it.**
 
 Nothing in the forbidden list is weakened by W4 and this is worth being explicit about,

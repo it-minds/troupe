@@ -153,6 +153,6 @@ again for systems that ask for it when no toggle has been set (`scripts/tokens.t
 - [../developer/build.md](../developer/build.md) — how the base path gets into the
   image.
 - Server-side settings the GUI depends on: the plane's `TROUPE_CORS_ORIGINS`
-  (`../../../troupe-remote/config/runtime.exs:266`) and the worker's
+  (`../../../../config/runtime.exs:266`) and the worker's
   `TROUPE_WORKER_ALLOWED_ORIGINS` (`runtime.exs:130`), documented in the server's
-  [docs/AUDIT.md](../../../troupe-remote/docs/AUDIT.md) — a separate repository.
+  [docs/AUDIT.md](../../../../docs/AUDIT.md) — a separate repository.

@@ -1,13 +1,13 @@
 # The landscape, September 2026
 
-The competitive read [`../RELEASE.md`](../RELEASE.md) folds in. Seventeen platforms that run
+The competitive read [`../RELEASE.md`](RELEASE.md) folds in. Seventeen platforms that run
 agents somewhere other than a terminal, on the six dimensions that matter to Troupe.
 
 A rendered version with the full matrix is published at
 <https://claude.ai/artifact/D18ho1CdkwTzwcW2KaGrW7>. This file is the durable copy of the
 conclusions.
 
-OpenWork is treated as known context — `../../troupe-remote/docs/plans/stage-6.md` is the
+OpenWork is treated as known context — `../plans/stage-6.md` is the
 review of it and is not re-derived here.
 
 ---

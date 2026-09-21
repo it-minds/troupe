@@ -1,7 +1,7 @@
 # Troupe 1.0, as built
 
 Written in the present tense on purpose. Nothing here is aspiration: every claim maps to a
-done item in [`../RELEASE.md`](../RELEASE.md) or
+done item in [`../RELEASE.md`](RELEASE.md) or
 [`control-panel.md`](control-panel.md), and the release gate is a reviewer checking that
 mapping by hand.
 

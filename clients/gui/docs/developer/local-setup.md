@@ -105,8 +105,8 @@ Two things outside this repository have to allow the development origin
 1. The plane's `TROUPE_CORS_ORIGINS` must include `http://localhost:5173`. When it does
    not, the GUI shows the message built at `packages/client/src/auth.ts:87-90`, which
    names the origin and the variable. On the server this is `plane.corsOrigins` in the
-   chart (`../troupe-remote/charts/troupe/values.yaml:82`) → `TROUPE_CORS_ORIGINS`
-   (`../troupe-remote/config/runtime.exs:266`). The worker's WebSocket upgrade has its
+   chart (`../../charts/troupe/values.yaml:82`) → `TROUPE_CORS_ORIGINS`
+   (`../../config/runtime.exs:266`). The worker's WebSocket upgrade has its
    own allowlist, `TROUPE_WORKER_ALLOWED_ORIGINS` (`runtime.exs:130`;
    `REPORT.md:142-150`).
 2. The identity provider must register `http://localhost:5173` as a single-page

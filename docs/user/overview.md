@@ -36,7 +36,7 @@ gets you to a first session; [features.md](features.md) lists everything you can
 |---|---|---|
 | `troupe` in a directory | The terminal UI, talking to a daemon on your own machine. Sessions work on the files in that directory. | Your own laptop, your own repository, your own model key. |
 | `troupe --remote` | The same terminal UI, but the session runs on one of your team's worker pods. The plane picks the pod; your terminal connects to it directly. | Work that should be billed to the team, run on the team's model access, and be visible to teammates. |
-| The GUI | A web page that signs in to the plane and shows the team's sessions. It lives in its own repository: [troupe-gui user guide](../../../troupe-gui/docs/user/README.md). | Reading, starting and steering remote sessions from a browser, and answering approvals from an inbox. |
+| The GUI | A web page that signs in to the plane and shows the team's sessions. It lives in its own repository: [troupe-gui user guide](../../clients/gui/docs/user/README.md). | Reading, starting and steering remote sessions from a browser, and answering approvals from an inbox. |
 
 Two more callers exist that are not people: a script can speak the protocol directly
 to a daemon or a pod, and another agent can call a profile through the A2A facade.

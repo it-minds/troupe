@@ -4,7 +4,7 @@ This extends `spec.md` and assumes stages 1, 2 and 4 are built and deployed. Sam
 apply: work autonomously, do not ask questions the documents answer, record every judgment
 call in `DECISIONS.md`, and prove every done item with command output in `REPORT.md`.
 
-Read [`../HANDOFF.md`](../HANDOFF.md) first. The binding document for everything below is
+Read [`../HANDOFF.md`](HANDOFF.md) first. The binding document for everything below is
 [`client-ux.md`](client-ux.md); `docs/design/DESIGN.md` remains the authority on how it
 looks.
 

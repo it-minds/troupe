@@ -1,6 +1,6 @@
 # A whole plane, on a laptop, for the GUI's end-to-end tests.
 #
-# `../troupe-remote/dev/docker-compose.yml` brings up what a plane talks to; the kind
+# The repository's `dev/docker-compose.yml` brings up what a plane talks to; the kind
 # cluster brings up the plane itself. This is the third option: the plane image, its
 # dependencies and an identity provider, in one compose project, with no Kubernetes and
 # no Elixir toolchain — because what the GUI needs to be tested against is the plane's
@@ -13,9 +13,22 @@
 # `session.create` fails with no capacity — by design, not by breakage. Everything before
 # that is real: discovery, the device grant, /auth/exchange, /rpc, and the admin surface.
 #
-#   docker compose -f dev/plane-stack.yml up -d --wait
+#   docker compose -f dev/plane-stack.yml up -d --wait --build
 #   docker compose -f dev/plane-stack.yml down -v
+#
+# The plane is built from this checkout — `docker/Dockerfile` at the repository root, the
+# same build CI publishes — so the GUI is tested against the plane of its own commit.
+# `TROUPE_PLANE_IMAGE=<registry>/troupe-plane:<tag>` with `--no-build` tests against a
+# published one instead.
 name: troupe-gui-e2e
+
+x-plane-image: &plane-image
+  image: ${TROUPE_PLANE_IMAGE:-troupe-plane:e2e}
+  build:
+    context: ../../..
+    dockerfile: docker/Dockerfile
+    args:
+      RELEASE: troupe_plane
 
 services:
   postgres:
@@ -81,7 +94,7 @@ services:
 
   # A release has no Mix, so migrations run as an eval before the plane serves.
   plane-migrate:
-    image: ${TROUPE_PLANE_IMAGE:-ghcr.io/objective-mj/troupe-plane:dev}
+    <<: *plane-image
     depends_on:
       postgres: {condition: service_healthy}
     environment:
@@ -90,7 +103,7 @@ services:
     entrypoint: ["/bin/sh", "-c", "/app/bin/troupe_plane eval 'Troupe.Plane.Release.migrate()'"]
 
   plane:
-    image: ${TROUPE_PLANE_IMAGE:-ghcr.io/objective-mj/troupe-plane:dev}
+    <<: *plane-image
     depends_on:
       postgres: {condition: service_healthy}
       openbao-setup: {condition: service_completed_successfully}

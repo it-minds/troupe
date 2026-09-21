@@ -8,7 +8,7 @@ the CI workflow, `DECISIONS.md`, `REPORT.md` and the design system. Audit date: 
 `pnpm --filter @troupe/client test` (33 tests) and `pnpm typecheck` pass on the working tree.
 
 This is the Phase 1 output for the GUI repository. The server it talks to is documented in
-`../troupe-remote/docs/`; this repository's docs link there rather than restating protocol
+`../../docs/`; this repository's docs link there rather than restating protocol
 semantics.
 
 ---
@@ -170,5 +170,5 @@ planned (`spec.md:62`).
 
 One read-only pass over every source file outside `node_modules`, plus `git status`,
 `git diff --stat`, `git ls-files --others`, a test run and a typecheck. Server behaviour was
-cross-checked against the troupe-remote audit (`../troupe-remote/docs/AUDIT.md`), not
+cross-checked against the troupe-remote audit (`../../docs/AUDIT.md`), not
 against a running plane.

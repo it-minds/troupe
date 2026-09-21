@@ -6,7 +6,7 @@ How the GUI is put together: three packages, one boundary rule, and the modules 
 make up the protocol client and the React app. Diagrams and the reasoning behind the
 shape are in [../whitepaper.md](../whitepaper.md); this file is the map with file and
 line references. Protocol semantics are the server's to define — see
-[PROTOCOL.md](../../../troupe-remote/PROTOCOL.md) in the separate `troupe-remote`
+[PROTOCOL.md](../../../../PROTOCOL.md) in the separate `troupe-remote`
 repository — and are only restated here where the client depends on a specific detail.
 
 ## 1. Three packages
@@ -355,5 +355,5 @@ Helpers: `rootState`, `isBusy` (`thinking|acting|compacting|busy`), `openApprova
 - [testing.md](testing.md) — what the 33 tests prove about the modules above.
 - [conventions.md](conventions.md) — where a new protocol method or view goes.
 - [../user/features.md](../user/features.md) — the same modules from the person's side.
-- Server: [docs/AUDIT.md](../../../troupe-remote/docs/AUDIT.md) and
-  [PROTOCOL.md](../../../troupe-remote/PROTOCOL.md) in the `troupe-remote` repository.
+- Server: [docs/AUDIT.md](../../../../docs/AUDIT.md) and
+  [PROTOCOL.md](../../../../PROTOCOL.md) in the `troupe-remote` repository.

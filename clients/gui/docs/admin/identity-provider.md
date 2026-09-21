@@ -6,7 +6,7 @@ What an OpenID Connect provider must allow for the GUI to sign people in. The GU
 client secret and no provider configuration of its own: it learns the issuer, client id,
 endpoints and scopes from the plane's discovery document, and the plane's own provider
 setup is documented in the server repository — see
-[docs/admin/integrations.md](../../../troupe-remote/docs/admin/integrations.md) in
+[docs/admin/integrations.md](../../../../docs/admin/integrations.md) in
 `troupe-remote` (a separate repository; not present in that tree at audit time, so the
 link is to where it is expected).
 
@@ -84,7 +84,7 @@ configured to issue, named on the plane by `TROUPE_GROUPS_CLAIM`, and asking for
 scope makes Entra refuse the sign-in with `AADSTS650053` before a password is typed
 (`DECISIONS.md` #27; `REPORT.md:193-202`). The server's default scope list is now the
 four OIDC scopes (`openid profile email offline_access`, `REPORT.md:222-226`) with
-`TROUPE_OIDC_SCOPES` to override (`../../../troupe-remote/config/runtime.exs:260`).
+`TROUPE_OIDC_SCOPES` to override (`../../../../config/runtime.exs:260`).
 
 Discrepancy: the fake plane used by tests and `pnpm fake` still advertises `groups`
 among its scopes (`packages/client/test/support/plane.ts:126`). The fake provider
@@ -107,7 +107,7 @@ A browser build must be allowed in two places besides the provider (`README.md:6
 
 | Allowlist | Where | What breaks without it | What the GUI shows |
 |---|---|---|---|
-| The plane's CORS allowlist | `TROUPE_CORS_ORIGINS` on the plane (`../../../troupe-remote/config/runtime.exs:266`; chart `plane.corsOrigins`, `charts/troupe/values.yaml:82` in the server repo) | Discovery, `/auth/exchange` and `/rpc` from the browser | The text below |
+| The plane's CORS allowlist | `TROUPE_CORS_ORIGINS` on the plane (`../../../../config/runtime.exs:266`; chart `plane.corsOrigins`, `charts/troupe/values.yaml:82` in the server repo) | Discovery, `/auth/exchange` and `/rpc` from the browser | The text below |
 | The worker's allowed origins | `TROUPE_WORKER_ALLOWED_ORIGINS` (`runtime.exs:130`; chart `workerAllowedOrigins`, `values.yaml:49`) | The `wss://` upgrade to a pod from the browser — the one hop with no fallback (`REPORT.md:188-191`) | A reconnecting banner, then "Could not reach this session" after the backoff list (`Session.tsx:183-196`) |
 
 When the GUI is served at a path on the plane's own host, the plane allowlist is not

@@ -4,7 +4,7 @@ What a person sees. Not what an administrator sees; that is
 [`control-panel.md`](control-panel.md), and the two are deliberately different products
 wearing the same design system.
 
-This builds on [`../../troupe-gui/docs/design/DESIGN.md`](../../troupe-gui/docs/design/DESIGN.md)
+This builds on [`../../clients/gui/docs/design/DESIGN.md`](../../clients/gui/docs/design/DESIGN.md)
 and does not restate it. Three of its rules are load-bearing here and are quoted rather
 than re-decided:
 

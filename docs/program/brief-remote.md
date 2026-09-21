@@ -5,7 +5,7 @@ finished and green. Same rules apply: work autonomously, do not ask questions th
 answer, record every judgment call in `DECISIONS.md`, and prove every done item with command
 output in `REPORT.md`.
 
-Read [`../HANDOFF.md`](../HANDOFF.md) first — the five spec revisions and the list of things
+Read [`../HANDOFF.md`](HANDOFF.md) first — the five spec revisions and the list of things
 not to do are there and are binding.
 
 Nine packages. R1 first; after that the order is a recommendation and the dependencies are
@@ -54,7 +54,7 @@ corrected.
 * **`docs/plans/stage-6.md` parts 2, 3, 4 and 5**, as written: entitlements below the
   profile, credentials that belong to a person, trigger revisions, and the cluster suite.
 * **The server half of private sessions**, from
-  `../troupe-gui/docs/plans/local-and-private-sessions.md`.
+  `clients/gui/docs/plans/local-and-private-sessions.md`.
 
 ### Order within the package
 

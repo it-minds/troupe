@@ -1,7 +1,7 @@
 // The client half of the phase 0 spike: `@troupe/client` against the daemon that
 // `scripts/daemon-spike.exs` started, over the loopback WebSocket it published.
 //
-//     node scripts/daemon-spike.mjs <path-to-troupe-gui/packages/client> <workspace-dir>
+//     node scripts/daemon-spike.mjs <clients/gui/packages/client> <workspace-dir>
 //
 // initialize → session.create → input.send, then wait for the turn to complete and
 // print every event type seen. Exits 0 only if an `llm_response` and an `agent_done`

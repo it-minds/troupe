@@ -6,8 +6,8 @@ Documentation for someone changing this repository: the graphical client for Tro
 a pnpm workspace of `packages/client` (the protocol in TypeScript), `packages/bench`
 (a throughput test) and `apps/desktop` (the Vite + React GUI). The server it talks to
 is a separate repository, `troupe-remote`, documented at
-[../../../troupe-remote/docs/](../../../troupe-remote/docs/AUDIT.md); protocol semantics
-live in its [PROTOCOL.md](../../../troupe-remote/PROTOCOL.md) and are not restated here.
+[../../../../docs/](../../../../docs/AUDIT.md); protocol semantics
+live in its [PROTOCOL.md](../../../../PROTOCOL.md) and are not restated here.
 
 Read [../AUDIT.md](../AUDIT.md) first if you have not: `HEAD` (`783e660`) does not
 contain most of what these pages describe — the stage-1 work is one large uncommitted

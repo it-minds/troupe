@@ -36,7 +36,7 @@ source (that is [../developer/README.md](../developer/README.md) and
 | [troubleshooting.md](troubleshooting.md) | something on the screen does not make sense |
 
 The GUI lives in a separate repository; its user guide is
-[../../../troupe-gui/docs/user/README.md](../../../troupe-gui/docs/user/README.md).
+[../../clients/gui/docs/user/README.md](../../clients/gui/docs/user/README.md).
 What it can do today is summarised in [features.md](features.md) where relevant.
 
 Every claim in this track was checked against the code at the commit above. Where the

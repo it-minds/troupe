@@ -161,5 +161,5 @@ chart's `appVersion` (`0.1.0`) has since been aligned.
 - [identity-provider.md](identity-provider.md) — the registration steps.
 - [../developer/deployment.md](../developer/deployment.md) — the same procedures with
   the chart internals.
-- Server side: [docs/AUDIT.md](../../../troupe-remote/docs/AUDIT.md) in `troupe-remote`
+- Server side: [docs/AUDIT.md](../../../../docs/AUDIT.md) in `troupe-remote`
   (separate repository) for the plane's and workers' settings.

@@ -223,7 +223,7 @@ Sources:
 - apps/troupe_tui/lib/troupe/ui/tui/state.ex:216-218
 - apps/troupe_core/lib/troupe.ex:111
 - PROTOCOL.md:386-387
-- ../../../troupe-gui/docs/AUDIT.md §1.2
+- ../../clients/gui/docs/AUDIT.md §1.2
 
 ## Approvals
 
@@ -571,7 +571,7 @@ Sources:
 - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex:157-210
 - apps/troupe_core/lib/troupe/config.ex:37-41
 - PROTOCOL.md:415-445
-- ../../../troupe-gui/docs/AUDIT.md §1.2, §1.3
+- ../../clients/gui/docs/AUDIT.md §1.2, §1.3
 
 ## Large outputs
 
@@ -658,7 +658,7 @@ Sources:
 - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex:59-61, 344-347
 - apps/troupe_core/lib/troupe/session/approvals.ex:14-16, 232-245
 - PROTOCOL.md:377-382, 644-654
-- ../../../troupe-gui/docs/AUDIT.md §1.2
+- ../../clients/gui/docs/AUDIT.md §1.2
 
 ## Skills from a profile bundle
 
@@ -745,7 +745,7 @@ Sources:
 - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex:62-64, 357-394
 - apps/troupe_protocol/lib/troupe/protocol/error.ex:33-34
 - PROTOCOL.md:584-642
-- ../../../troupe-gui/docs/AUDIT.md §1.3
+- ../../clients/gui/docs/AUDIT.md §1.3
 
 ## Sessions started by triggers or by other agents
 
@@ -806,7 +806,7 @@ Sources:
 - apps/troupe_tui/lib/troupe/ui/tui/state.ex:303-310
 - apps/troupe_plane/lib/troupe/plane/harness.ex:685-689, 977
 - PROTOCOL.md:360-365
-- ../../../troupe-gui/docs/AUDIT.md §1.2
+- ../../clients/gui/docs/AUDIT.md §1.2
 - docs/AUDIT.md §1.7 (usage sink, ledger)
 
 ## Dormancy and what wakes a session
@@ -845,7 +845,7 @@ Sources:
 - apps/troupe_plane/lib/troupe/plane/harness.ex:225-235, 561-666, 931-938
 - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex:420-424
 - PROTOCOL.md:468-486
-- ../../../troupe-gui/docs/AUDIT.md §2 (GUI opens with `activate` from the list, `read` from the inbox)
+- ../../clients/gui/docs/AUDIT.md §2 (GUI opens with `activate` from the list, `read` from the inbox)
 
 ## Interrupted sessions after a restart
 

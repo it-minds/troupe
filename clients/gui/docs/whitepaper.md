@@ -4,7 +4,7 @@
 > tree, 2026-09-13. See [AUDIT.md](AUDIT.md) for what could not be confirmed. Companion
 > documents: [developer/](developer/README.md), [user/](user/README.md), [admin/](admin/README.md).
 > The server this client speaks to is documented in the troupe-remote repository:
-> [`../../troupe-remote/docs/whitepaper.md`](../../troupe-remote/docs/whitepaper.md).
+> [`../../../docs/whitepaper.md`](../../../docs/whitepaper.md).
 
 This document explains how the GUI is built and why it is shaped the way it is. It cites the
 code that decides each behaviour. It does not restate the protocol; `PROTOCOL.md` in the
@@ -145,7 +145,7 @@ interface for the shell that is not yet built.
 ### 2.2 One list from a poll
 
 The plane has no push channel to harness clients; `/rpc` is request and answer
-(`../../troupe-remote/docs/whitepaper.md`, §6.2). So the fleet is a poll: `PlaneSource`
+(`../../../docs/whitepaper.md`, §6.2). So the fleet is a poll: `PlaneSource`
 calls `sessions.list` and `FleetStore` refreshes every 4 seconds from the app
 (`packages/client/src/fleet.ts:60-68`, `apps/desktop/src/hooks.ts:18`; `DECISIONS.md` #4).
 The store is written for the three sources the spec names — `team`, `local`, `private` —
