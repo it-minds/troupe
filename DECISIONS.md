@@ -5003,3 +5003,23 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      renders as an error; `plane.appUrl` renders `/app`, empty, and a BYO URL in the three
      cases; and `scripts/deploy charts/troupe --dry-run` is accepted by a kind cluster's API
      server.
+
+671. **The installers put the TUI and the daemon on a machine, from the latest release.**
+     `install.sh` and `install.ps1` came with the umbrella repository and installed the
+     daemon alone, at a version written into them (`0.1.0`) that nothing kept current. They
+     now install `troupe` beside `troupe-daemon`, both from one release and both checked
+     against its `SHA256SUMS` before anything on the machine is replaced, with
+     `--no-tui` / `-NoTui` for a machine that only runs the desktop app. With no
+     `TROUPE_VERSION` they install the release GitHub calls latest — the newest that is not
+     a release candidate — so the script on `main` needs no version of its own and there is
+     no ninth copy of `VERSION` to keep in step. A private repository answers
+     `/releases/latest` only to somebody signed in, and the installers say so and ask for
+     `TROUPE_VERSION` (and `TROUPE_RELEASE_URL` for a mirror) rather than guessing; making
+     releases reachable without a GitHub account is the team's call, and until then
+     `plane.cliUrl` stays empty (670). The TUI binary a new one replaces is kept as
+     `troupe.previous`, as the daemon's release directory already was. Proof: `install.sh`
+     against a local `file://` release — install, reinstall keeping the previous release, a
+     tampered binary refused with nothing installed, `--no-tui`, uninstall, and the latest
+     lookup refused with that message against this private repository. `install.ps1` has
+     the same changes and is untested here: this machine has no PowerShell, and no release
+     exists yet for the Windows runner to install.
