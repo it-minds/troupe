@@ -22,6 +22,15 @@ defmodule Troupe.Plane.Provision do
   immediately rather than after a round trip. It is not the enforcement: admission is,
   and the operator is again after that. A panel that was the only check would be a check
   anybody could bypass with `kubectl`.
+
+  ## `release` is a reference, not an image
+
+  A profile may give its image as the word `release`: the worker image of the release
+  this plane is running, which the chart sets from its own version. The row keeps the
+  word and the manifest gets the image, resolved here and nowhere else — so every write
+  after an upgrade carries the upgrade's image, and the policy checks the image a pod will
+  actually run rather than the word. `Troupe.Plane.Fleet.ReleaseImage` is what makes an
+  upgraded plane write those profiles again when nothing else would.
   """
 
   alias Troupe.Plane.{ClusterPolicy, Fleet, Identity, Settings}
@@ -29,6 +38,8 @@ defmodule Troupe.Plane.Provision do
   alias Troupe.Policy
   alias Troupe.Protocol.Error
   alias Troupe.WorkerProfile
+
+  @release "release"
 
   @doc "Which way this plane provisions."
   @spec mode() :: :direct | :gitops
@@ -123,7 +134,20 @@ defmodule Troupe.Plane.Provision do
   defp image_spec(nil), do: nil
   defp image_spec(%{} = already), do: already
 
-  defp image_spec(image) when is_binary(image) do
+  # Resolved when the manifest is rendered rather than when the profile is saved, so the
+  # row goes on saying what an administrator meant and the image moves when the plane
+  # does. A plane that names no release image resolves it to nothing, and `apply/2`
+  # refuses to write a resource without one.
+  defp image_spec(@release) do
+    case release_image() do
+      nil -> nil
+      image -> split_image(image)
+    end
+  end
+
+  defp image_spec(image) when is_binary(image), do: split_image(image)
+
+  defp split_image(image) do
     case String.split(image, "@", parts: 2) do
       [repository, digest] -> %{"repository" => repository, "digest" => digest}
       [_image] -> tagged(image)
@@ -145,6 +169,76 @@ defmodule Troupe.Plane.Provision do
   defp get(%Profile{} = profile, key), do: Map.get(profile, key)
   defp get(attrs, key), do: Map.get(attrs, key) || Map.get(attrs, to_string(key))
 
+  # -- the release's image ----------------------------------------------------
+
+  @doc """
+  The worker image of the release this plane is running, or `nil` where it names none.
+
+  `TROUPE_WORKER_IMAGE`, which the chart sets from `worker.image` and its own version. Read
+  from configuration on every call rather than remembered, because it is a fact about the
+  deployment and a test has to be able to change it.
+  """
+  @spec release_image() :: String.t() | nil
+  def release_image do
+    case Application.get_env(:troupe_plane, :worker_image) do
+      image when is_binary(image) and image != "" -> image
+      _unset -> nil
+    end
+  end
+
+  @doc "Whether a profile's image is the word `release` rather than an image."
+  @spec follows_release?(Profile.t() | map()) :: boolean()
+  def follows_release?(profile), do: get(profile, :image) == @release
+
+  @doc """
+  The image a profile's `WorkerProfile` carries now, or `nil` where there is none yet.
+
+  Direct mode asks the cluster, because the resource there is what the plane wrote. GitOps
+  mode reads the manifest the plane last committed: the resource in the cluster lags the
+  commit by however long Flux takes, and comparing against it would commit the same image
+  again every time the plane restarted before Flux caught up.
+  """
+  @spec current_image(Profile.t()) :: {:ok, String.t() | nil} | {:error, term()}
+  def current_image(%Profile{} = profile) do
+    case mode() do
+      :direct -> live_image(profile)
+      :gitops -> committed_image(profile)
+    end
+  end
+
+  defp live_image(profile) do
+    case live_resource(profile) do
+      {:ok, resource} -> {:ok, image_of(resource)}
+      # Never written, which is as different from any image as a resource can be.
+      {:error, %K8s.Client.APIError{reason: "NotFound"}} -> {:ok, nil}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  defp committed_image(profile) do
+    with {:ok, repo} <- repository() do
+      repo.path |> Path.join(manifest_path(profile)) |> File.read() |> committed()
+    end
+  end
+
+  # Never committed is no image at all, which is as different from any image as a
+  # manifest can be.
+  defp committed({:error, :enoent}), do: {:ok, nil}
+  defp committed({:error, reason}), do: {:error, reason}
+
+  defp committed({:ok, yaml}) do
+    with {:ok, resource} <- YamlElixir.read_from_string(yaml), do: {:ok, image_of(resource)}
+  end
+
+  # Read back with the operator's own parser, so "the same image" means what the operator
+  # would take it to mean — a digest winning over a tag included.
+  defp image_of(resource) do
+    case WorkerProfile.from_resource(resource).image do
+      "" -> nil
+      image -> image
+    end
+  end
+
   @doc """
   Put a profile into the cluster, whichever way this plane does that.
 
@@ -153,10 +247,22 @@ defmodule Troupe.Plane.Provision do
   """
   @spec apply(Profile.t(), map()) :: {:ok, map()} | {:error, term()}
   def apply(%Profile{} = profile, actor) do
-    case mode() do
-      :direct -> direct_apply(profile, actor)
-      :gitops -> gitops_commit(profile, actor)
+    with :ok <- resolvable(profile) do
+      case mode() do
+        :direct -> direct_apply(profile, actor)
+        :gitops -> gitops_commit(profile, actor)
+      end
     end
+  end
+
+  # `spec.image` is the one field the resource cannot be without, and a profile following
+  # a release this plane cannot name would render without it. Refused here, by name, rather
+  # than left for the API server to refuse as a schema error — or, in GitOps mode, for
+  # Flux to refuse long after the commit said it had worked.
+  defp resolvable(profile) do
+    if follows_release?(profile) and is_nil(release_image()),
+      do: {:error, :no_worker_image},
+      else: :ok
   end
 
   @doc "Take one out again."

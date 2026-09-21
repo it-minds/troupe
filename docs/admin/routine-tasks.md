@@ -168,7 +168,7 @@ Prerequisites: a cluster with a `NetworkPolicy`-enforcing CNI (Cilium on Kapsule
    troupe admin overview
    ```
 
-6. Worker images are per profile, not per chart: change `image` with `troupe admin profile put`, then see §9 for the restart, because the StatefulSet is `OnDelete`.
+6. Worker images are per profile, not per chart. A profile whose `image` is `release` follows the chart: the upgraded plane writes the new `worker.image` into its `WorkerProfile` as it starts ([profiles-and-policy.md §9](profiles-and-policy.md#9-troupe-admin-profile-)). Any other profile keeps its image until you change it with `troupe admin profile put`. Either way the pods move only when they are recreated — see §9 for the restart, because the StatefulSet is `OnDelete`.
 
 ---
 

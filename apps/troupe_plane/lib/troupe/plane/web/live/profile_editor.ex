@@ -424,6 +424,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       |> assign(:changes, changes_of(assigns))
       |> assign(:providers, @providers)
       |> assign(:size_classes, Admin.size_classes())
+      |> assign(:release_image, Admin.release_image())
 
     ~H"""
     <.shell actor={@actor} breakglass={@breakglass} page={:workers}>
@@ -446,8 +447,11 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
           </.field>
           <.field form={@fields} name="image" label="image">
             repository:tag, or repository@sha256:… A digest pins the image; a tag does not,
-            and a pod that restarts on a moved tag comes back running something else.
+            and a pod that restarts on a moved tag comes back running something else. Or
+            release, for the worker image of the release this plane runs, which the plane
+            writes again after every upgrade.
           </.field>
+          <p :if={@fields["image"] == "release"} class="micro">{release_note(@release_image)}</p>
         </section>
 
         <section class="panel">
@@ -665,6 +669,14 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
 
   defp apply_label(:gitops), do: "commit for review"
   defp apply_label(_direct), do: "apply now"
+
+  # The word alone does not say which image the pods will be given, and a plane deployed
+  # without one has nothing to follow — which is better read here than in the refusal
+  # after pressing apply.
+  defp release_note(nil),
+    do: "This plane was deployed without a worker image, so release cannot be saved here."
+
+  defp release_note(image), do: "Follows the release — #{image}."
 
   defp state_of(%{state: state}), do: "Last write: #{state}."
   defp state_of(_other), do: ""

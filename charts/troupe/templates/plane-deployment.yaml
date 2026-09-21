@@ -258,6 +258,10 @@ spec:
               value: {{ .Values.namespace | quote }}
             - name: TROUPE_PROVISIONING_MODE
               value: {{ .Values.plane.provisioningMode | quote }}
+            # What a profile whose image is `release` runs: this release's worker, so an
+            # upgrade of the chart is an upgrade of those profiles' workers too.
+            - name: TROUPE_WORKER_IMAGE
+              value: "{{ .Values.worker.image.repository }}:{{ .Values.worker.image.tag | default .Chart.AppVersion }}"
             - name: TROUPE_PLATFORM_ADMIN_GROUP
               value: {{ .Values.plane.platformAdminGroup | quote }}
             - name: TROUPE_GROUPS_CLAIM

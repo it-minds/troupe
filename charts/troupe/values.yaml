@@ -183,6 +183,16 @@ plane:
     secretName: troupe-plane-scim
     secretKey: token
 
+# The worker image of this release. Nothing here runs it: the operator does, for each
+# WorkerProfile, and each profile names its own image. A profile whose image is the word
+# `release` gets this one, and the plane writes those profiles again when an upgrade
+# changes it — which is how workers move with the platform instead of staying on whatever
+# they were first given. The policy still has to allow the repository.
+worker:
+  image:
+    repository: ghcr.io/objective-mj/troupe-worker
+    tag: ""            # defaults to the chart's appVersion
+
 # The graphical client (`clients/gui`), served on the plane's own host at `basePath`
 # (Decision 670). Static files behind nginx: no secrets, no database, nothing configured
 # at runtime. On by default, because the product is the platform and a client to use it

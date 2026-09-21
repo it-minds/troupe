@@ -49,6 +49,11 @@ plane:
     # `troupe login` uses that grant.
     secretName: ""
 
+# What a profile whose image is `release` runs here: the worker scripts/build-images
+# loads into kind.
+worker:
+  image: {tag: dev}
+
 bao:
   address: http://openbao.troupe-system.svc:8200
   # Dev mode, so a root token rather than Kubernetes auth.

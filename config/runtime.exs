@@ -349,6 +349,11 @@ if config_env() == :prod do
       # repository is deployed to a cluster and installs on no machine — so there is no
       # sensible default: unset, the page says to ask an administrator; set, it links.
       cli_url: System.get_env("TROUPE_CLI_URL", ""),
+      # The worker image of this release, which is what a profile whose image is `release`
+      # runs. The chart sets it from `worker.image` and its own version, so an upgrade
+      # moves those profiles with it; unset, the plane refuses `release` rather than
+      # writing a WorkerProfile with no image.
+      worker_image: presence.(System.get_env("TROUPE_WORKER_IMAGE")),
       issuer: base_url,
       cors_origins: cors_origins,
       control_port: String.to_integer(System.get_env("TROUPE_PLANE_CONTROL_PORT", "4001")),

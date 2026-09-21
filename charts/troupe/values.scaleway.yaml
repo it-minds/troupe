@@ -107,6 +107,16 @@ plane:
 # per-session data keys and the transit engine to sign plane tokens, and Scaleway's Key
 # Manager is neither of those APIs. Run it with Raft storage and auto-unseal *via*
 # Scaleway Key Manager, which is what that product is good at.
+# The GUI and the worker image of this release, from the same registry as the rest. A
+# profile whose image is `release` runs the worker named here, which the policy below
+# has to allow.
+gui:
+  image:
+    repository: rg.fr-par.scw.cloud/troupe/troupe-gui        # CHANGE ME: your registry
+worker:
+  image:
+    repository: rg.fr-par.scw.cloud/troupe/troupe-worker     # CHANGE ME: your registry
+
 bao:
   address: http://openbao.troupe-system.svc:8200
   authPath: kubernetes
