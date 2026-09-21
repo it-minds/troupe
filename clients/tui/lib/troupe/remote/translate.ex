@@ -213,6 +213,23 @@ defmodule Troupe.Remote.Translate do
       type when type in ["approval.resolved", "approval_decided"] ->
         {[emit.(:approval_answered, %{call_id: call_id(data), decision: decision(data)})], memory}
 
+      # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
+      # at the screen, with options a client may draw as a menu.
+      "question_asked" ->
+        {[
+           emit.(:question_asked, %{
+             call_id: call_id(data),
+             question: to_string(data["question"] || ""),
+             options: options(data),
+             multiple: data["multiple"] == true
+           })
+         ], memory}
+
+      "question_answered" ->
+        {[
+           emit.(:question_answered, %{call_id: call_id(data), text: to_string(data["text"] || "")})
+         ], memory}
+
       "approval_resolved" ->
         {[], memory}
 
@@ -454,6 +471,21 @@ defmodule Troupe.Remote.Translate do
       _ -> nil
     end
   end
+
+  defp options(%{"options" => options}) when is_list(options) do
+    Enum.flat_map(options, fn
+      %{"label" => label} = option when is_binary(label) ->
+        [%{label: label, description: option["description"]}]
+
+      label when is_binary(label) ->
+        [%{label: label, description: nil}]
+
+      _ ->
+        []
+    end)
+  end
+
+  defp options(_data), do: []
 
   defp decision(data) do
     case data["decision"] do
