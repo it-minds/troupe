@@ -8,10 +8,11 @@
 > source citations under each section point at files that now exist only in git history
 > (`git show 20fe871 -- apps/troupe_ctl` and the tree at that commit).
 >
-> What this repository is, is the remote: the plane, the operator, the worker pods and
-> the admin console, deployed to Kubernetes by `charts/troupe` and reached over
-> [PROTOCOL.md](../../PROTOCOL.md). A terminal or graphical client is a separate release
-> from a separate repository, and its own documentation goes with it.
+> On 2026-09-21 the terminal client came back to this repository as `clients/tui`
+> (Decision 666), rebuilt since as a client of the daemon, and its current documentation
+> is [`clients/tui`](../../clients/tui/README.md); the graphical client's is
+> [`clients/gui/docs`](../../clients/gui/docs/README.md). This page describes the client as
+> it was in `apps/`, and is not brought up to date.
 >
 > Nothing in this directory is maintained against the code. It is here because the prose
 > is worth keeping until the client repository can take it, and for no other reason.
@@ -36,7 +37,7 @@ gets you to a first session; [features.md](features.md) lists everything you can
 |---|---|---|
 | `troupe` in a directory | The terminal UI, talking to a daemon on your own machine. Sessions work on the files in that directory. | Your own laptop, your own repository, your own model key. |
 | `troupe --remote` | The same terminal UI, but the session runs on one of your team's worker pods. The plane picks the pod; your terminal connects to it directly. | Work that should be billed to the team, run on the team's model access, and be visible to teammates. |
-| The GUI | A web page that signs in to the plane and shows the team's sessions. It lives in its own repository: [troupe-gui user guide](../../../troupe-gui/docs/user/README.md). | Reading, starting and steering remote sessions from a browser, and answering approvals from an inbox. |
+| The GUI | A web page that signs in to the plane and shows the team's sessions. It lives in its own repository: [troupe-gui user guide](../../clients/gui/docs/user/README.md). | Reading, starting and steering remote sessions from a browser, and answering approvals from an inbox. |
 
 Two more callers exist that are not people: a script can speak the protocol directly
 to a daemon or a pod, and another agent can call a profile through the A2A facade.

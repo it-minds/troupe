@@ -1,15 +1,19 @@
-# Troupe Remote documentation
+# Troupe documentation
 
 > Audited against troupe-remote commit `4083b1f` (branch `main`), 2026-09-13. Every document in this tree carries the same
 > line; when the code moves, re-audit before trusting a line number.
 
-> **Re-audited 2026-09-14.** This repository is the remote, deployed to Kubernetes by
-> `charts/troupe`, and it ships no client: `apps/troupe_tui`, `apps/troupe_ctl`, the
-> `troupe` Burrito release and its installers were deleted, and `clients/python` moved to
-> `apps/troupe_gateway/test/conformance/` as the test fixture it always was. The
-> **developer** and **admin** tracks have been brought in line with that. The **user**
-> track documents the terminal client and is deprecated: it is kept as an artifact, and
-> each of its pages says so at the top.
+> **Re-audited 2026-09-14.** This repository was then the remote only: `apps/troupe_tui`,
+> `apps/troupe_ctl`, the `troupe` Burrito release and its installers were deleted, and
+> `clients/python` moved to `apps/troupe_gateway/test/conformance/` as the test fixture it
+> always was.
+>
+> **2026-09-21: the monorepo** (Decision 666). The TUI and the GUI came back as
+> `clients/tui` and `clients/gui`, with their history and their own documentation, the
+> daemon as `apps/troupe_daemon`, and the program documents as [program/](program/README.md).
+> The chart serves the GUI, and a merged `VERSION` change releases and deploys everything
+> (669, 670). The **developer** and **admin** tracks say so where it matters; the **user**
+> track below still documents the terminal client as it was in `apps/`, and is deprecated.
 
 Four tracks, one audit, one deep dive. Each track links to the others rather than repeating
 them; start with the one that matches what you are trying to do.
@@ -17,7 +21,9 @@ them; start with the one that matches what you are trying to do.
 | Document | One line |
 |---|---|
 | [developer/](developer/README.md) | How the code is organised, how to build and test it, what CI does, how a build reaches a cluster, and the conventions the gate enforces. |
-| [user/](user/README.md) | **Deprecated.** What Troupe does from the user's seat, written when the terminal client lived here: signing in, running sessions, every feature, end-to-end workflows, troubleshooting. Kept as an artifact for the client's own repository. |
+| [user/](user/README.md) | **Deprecated.** What Troupe does from the user's seat, written when the terminal client lived in `apps/`: signing in, running sessions, every feature, end-to-end workflows, troubleshooting. Kept as an artifact; the TUI's current documentation is [`clients/tui`](../clients/tui/README.md). |
+| [program/](program/README.md) | The plan the separate repositories were built to — the handoff, the briefs, the release plan — kept as it was written. |
+| [history/](history/README.md) | The commit maps for the three imported repositories, for a SHA an imported document quotes. |
 | [admin/](admin/README.md) | Operating a deployment: every environment variable and Helm value, roles and permissions, profiles and policy, bundles and triggers, integrations, backup and restore, monitoring, routine tasks. |
 | [whitepaper.md](whitepaper.md) | How the subsystems fit together and why: the event log, the daemon, the plane, worker pods, the operator, cost accounting, with architecture and flow diagrams and the trade-offs each decision carries. |
 | [AUDIT.md](AUDIT.md) | The Phase 1 inventory this suite was written from: what exists, where the older prose contradicts the code, findings that need a caveat, and the open questions the docs mark as unconfirmed. |
@@ -28,9 +34,9 @@ Older documents at the repository root and under `docs/` remain the design recor
 [plans/](plans/README.md). Where one of them disagrees with the code, [AUDIT.md](AUDIT.md) §2
 says so and the track documents follow the code.
 
-The clients live in their own repositories with their own documentation. The graphical
-one is `../../troupe-gui/docs/README.md`; the terminal one has not been extracted yet, and
-until it is, [user/](user/README.md) is where its prose sits.
+The clients keep their own documentation beside their code: the graphical one's is
+[`clients/gui/docs`](../clients/gui/docs/README.md), the terminal one's
+[`clients/tui`](../clients/tui/README.md).
 
 ## Self-check
 

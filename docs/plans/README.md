@@ -2,8 +2,8 @@
 
 What comes after the small release, written before it was built. The first three are
 built as stage 5 — `ARCHITECTURE.md` §14 describes what landed and `REPORT.md` proves
-it — and stay here as the record of what was intended and why. The fourth is the GUI
-repository's `spec.md`; the fifth is not built. Each plan says what
+it — and stay here as the record of what was intended and why. The fourth is the GUI's
+`spec.md` (`clients/gui`); the fifth is not built. Each plan says what
 it brings, what it takes, what is already in place, what the code is missing today
 (with file and line), the design, the order of work, and the done items that prove it.
 `spec.md` and `ARCHITECTURE.md` remain the authority on invariants; nothing here weakens
@@ -14,22 +14,23 @@ apps were deleted (`DECISIONS.md` 319–320) and with them the argument that a b
 client was the protocol's test harness. What carries that proof now is
 `apps/troupe_gateway/test/conformance/conformance.py` — a client written against
 `PROTOCOL.md` in another language, with no access to this source — run by the gateway
-suite that owns it. A client is a separate release from a separate repository; nothing in
-these plans that reads "the TUI does X" describes code in this tree.
+suite that owns it. Nothing in these plans that reads "the TUI does X" describes the
+TUI that is in `clients/tui` now.
 
-A terminal client is expected to come back the way the graphical one did — its own
-repository, its own release, reaching a plane over `PROTOCOL.md` with the scopes its
-principal has. When it does, nothing here changes: what was deleted was a client *inside*
-the boundary, and the reason it went is that there is no longer any client that could be
-special. The conformance suite stays where it is, because a client of ours proving the
-protocol is exactly the argument that was given up.
+A terminal client came back the way the graphical one did — a client of the protocol,
+reaching the daemon and a plane over `PROTOCOL.md` with the scopes its principal has —
+and on 2026-09-21 both moved into this repository, under `clients/` and outside the
+umbrella (Decision 666). Nothing here changes for it: what was deleted was a client
+*inside* the umbrella's boundary, and neither client is one. The conformance suite stays
+where it is, because a client of ours proving the protocol is exactly the argument that
+was given up.
 
 | Plan | One line | Depends on |
 | --- | --- | --- |
 | [Skills and MCP servers](skills-and-mcp.md) | A profile carries admin-published skills and MCP servers; every session has them from its first turn. | — |
 | [Remote triggers](remote-triggers.md) | Sessions nobody starts by hand, run by Hatchet through the plane API as service principals, reviewed in HQ. | the bundle's `agent` list for what a trigger runs; nothing else |
 | [The A2A facade](a2a-facade.md) | Other agents delegate tasks to a profile; a task is a session, an artifact is a published file. | service principals, `prompt` through activation and status columns from triggers; skills from the first plan for the agent card |
-| [Local and private sessions](../../../troupe-gui/docs/plans/local-and-private-sessions.md) (in the GUI repository) | The GUI shows local sessions beside team sessions, and a person's private session is sealed to object storage under their own key and follows them to another device. | independent of the other three; shares the sealer with workers |
+| [Local and private sessions](../../clients/gui/docs/plans/local-and-private-sessions.md) (in the GUI repository) | The GUI shows local sessions beside team sessions, and a person's private session is sealed to object storage under their own key and follows them to another device. | independent of the other three; shares the sealer with workers |
 | [Stage 6](stage-6.md) | Token accounting as a fold over the log, entitlements below the profile and trigger revisions (all three built), credentials that belong to a person, and the cluster suite that proves the last three stages. | all of stage 5 |
 | [The admin surface](admin-surface.md) (built) | A fourth rendering of the admin context, for a model; platform settings an operator can change without a deploy; and a console that configures the whole of a profile. | the admin context and its parity test |
 

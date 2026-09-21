@@ -19,15 +19,16 @@ Troupe runs coding agents. An agent is a process that talks to a language model,
 (read, edit, search, shell, and tools from MCP servers), and keeps an append-only log of
 everything that happened. A **session** is one such agent tree plus its log and workspace. A
 **harness** is any client that attaches to a session and speaks the JSON-RPC protocol in
-`PROTOCOL.md`: the terminal UI, the CLI, a Python script, the GUI in its own repository, or
-the A2A facade acting for another agent.
+`PROTOCOL.md`: the terminal UI (`clients/tui`), the GUI (`clients/gui`), a Python script, or
+the A2A facade acting for another agent — the first two in this repository, and none of
+them with any access the others lack.
 
-The codebase still has two deployment shapes in it, but only one of them is built here:
+The codebase has two deployment shapes, and both are built here:
 
 - **Local**: a daemon owns sessions on a person's machine and clients attach over a Unix
-  socket or loopback TCP. `troupe_core` and `troupe_gateway` implement it and the suite
-  exercises it, but no release in this repository packages it — that is a client's job,
-  and clients live elsewhere now.
+  socket or loopback TCP. `troupe_core` and `troupe_gateway` implement it, and
+  `apps/troupe_daemon` releases it as `troupe-daemon`, one build per platform; the TUI
+  also embeds it when none is running.
 - **Remote**: a **plane** (control plane) decides who may use what and where a session runs;
   an **operator** turns a `WorkerProfile` custom resource into a namespace of **worker pods**;
   a worker pod is the same daemon code, reached over a WebSocket with a short-lived token.
@@ -52,8 +53,8 @@ now outside it.
 flowchart LR
   subgraph clients["Clients (protocol only)"]
     a2a[troupe_a2a]
-    gui[troupe-gui<br/>separate repo]
-    cli[terminal client<br/>separate repo]
+    gui[clients/gui<br/>the GUI]
+    cli[clients/tui<br/>the terminal client]
     py[conformance fixture<br/>test/conformance]
   end
   proto[troupe_protocol<br/>wire, events, tokens,<br/>KMS + S3 clients, bundles]
@@ -728,8 +729,9 @@ DNS-01 in the prose, per-pod HTTP-01 in the values) and on OpenBao (three auto-u
 replicas in the prose, one Shamir-sealed replica in `deploy/scaleway/openbao.values.yaml`);
 the docs here follow the values files and [AUDIT.md](AUDIT.md) §2 lists both.
 
-CI builds the four images and the five client binaries and runs the quality gate; it deploys
-nothing ([developer/ci-cd.md](developer/ci-cd.md)).
+CI runs the quality gate for the platform and both clients, builds the five images, and —
+when a merged change to `VERSION` cuts a release — publishes the chart and the daemon, TUI
+and desktop builds and deploys to production ([developer/ci-cd.md](developer/ci-cd.md)).
 
 ---
 

@@ -8,10 +8,11 @@
 > source citations under each section point at files that now exist only in git history
 > (`git show 20fe871 -- apps/troupe_ctl` and the tree at that commit).
 >
-> What this repository is, is the remote: the plane, the operator, the worker pods and
-> the admin console, deployed to Kubernetes by `charts/troupe` and reached over
-> [PROTOCOL.md](../../PROTOCOL.md). A terminal or graphical client is a separate release
-> from a separate repository, and its own documentation goes with it.
+> On 2026-09-21 the terminal client came back to this repository as `clients/tui`
+> (Decision 666), rebuilt since as a client of the daemon, and its current documentation
+> is [`clients/tui`](../../clients/tui/README.md); the graphical client's is
+> [`clients/gui/docs`](../../clients/gui/docs/README.md). This page describes the client as
+> it was in `apps/`, and is not brought up to date.
 >
 > Nothing in this directory is maintained against the code. It is here because the prose
 > is worth keeping until the client repository can take it, and for no other reason.
@@ -376,7 +377,7 @@ set:
 Sources:
 - config/runtime.exs:265-270
 - apps/troupe_plane/lib/troupe/plane/web/cors.ex:3-7, 36-42
-- ../../../troupe-gui/docs/AUDIT.md §1.4, §2
+- ../../clients/gui/docs/AUDIT.md §1.4, §2
 
 ## The binary and the daemon
 

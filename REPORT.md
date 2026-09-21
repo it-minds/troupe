@@ -1489,7 +1489,7 @@ session is sealed under its person's own key in a subtree no pod credential can 
 
 ## R1e — two of the three log fixes
 
-`../troupe-gui/docs/plans/local-and-private-sessions.md` §7 lists three. Two are done and
+`clients/gui/docs/plans/local-and-private-sessions.md` §7 lists three. Two are done and
 the third was already there — `session_created.data` has carried `kind` and `owner` since
 stage 5.
 
@@ -1591,7 +1591,7 @@ shape of it for service principals. `DECISIONS.md` 380–384.
 
 ## R1h — a session that belongs to a person
 
-`../troupe-gui/docs/plans/local-and-private-sessions.md` §4 and §5, the server half. The
+`clients/gui/docs/plans/local-and-private-sessions.md` §4 and §5, the server half. The
 plane learns that a private session exists and how far it has got; it does not learn a
 profile, a team, a pod or a byte.
 

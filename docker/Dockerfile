@@ -1,8 +1,9 @@
-# One Dockerfile for the four releases this repository has. `RELEASE` picks which.
+# One Dockerfile for the four server releases. `RELEASE` picks which.
 #
 # Two stages: build against the full Elixir image, run on a slim Debian with only what
-# the release needs at runtime. There is nothing else to build: every deliverable here
-# is an image that `charts/troupe` deploys, and the clients are in other repositories.
+# the release needs at runtime. The fifth image, the GUI, is built from `clients/gui` by
+# its own Dockerfile, and the daemon and the TUI are built natively for each platform —
+# `.dockerignore` keeps `clients/` out of this context entirely.
 
 ARG ELIXIR_VERSION=1.20.4
 ARG OTP_VERSION=28.5.0.5

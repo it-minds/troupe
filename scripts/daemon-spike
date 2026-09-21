@@ -2,16 +2,17 @@
 # Phase 0 of the daemon: boot the local daemon from this checkout with the fake provider
 # and drive it with the TypeScript client (`@troupe/client`) over the loopback WebSocket.
 #
-#     scripts/daemon-spike <path-to-troupe-gui/packages/client> [workspace-dir]
+#     scripts/daemon-spike [client-package-dir] [workspace-dir]
 #
-# The client package must be built (`pnpm --filter @troupe/client build`). Everything the
+# The client package defaults to this repository's `clients/gui/packages/client`, and must
+# be built (`pnpm --dir clients/gui --filter @troupe/client build`). Everything the
 # daemon writes goes under a scratch directory, never the developer's real state. Exit
 # status is the client's: 0 means `initialize → session.create → input.send` produced
 # `llm_response` and `agent_done` events at the client.
 set -euo pipefail
 
-CLIENT_DIR="${1:?usage: scripts/daemon-spike <client-package-dir> [workspace]}"
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+CLIENT_DIR="${1:-$ROOT/clients/gui/packages/client}"
 BASE="$(mktemp -d "${TMPDIR:-/tmp}/troupe-spike-XXXXXX")"
 WORKSPACE="${2:-$BASE/workspace}"
 mkdir -p "$BASE/state" "$BASE/run" "$WORKSPACE"

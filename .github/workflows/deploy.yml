@@ -1,0 +1,87 @@
+# Rolling back, or rendering, by hand.
+#
+# A release deploys itself: the `deploy` job in `ci.yml` runs when a merged VERSION change
+# cuts one (Decision 669). This is for the two things that job does not do — putting an
+# earlier release back, and rendering one against the cluster without changing anything —
+# and it does them the same way: the release's own chart, through the same
+# `scripts/deploy`, in the same `production` environment, one roll at a time.
+name: deploy
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "The release to deploy, e.g. 0.3.1 — its published chart is what rolls"
+        required: true
+        type: string
+      dry_run:
+        description: "Render against the cluster and change nothing"
+        required: false
+        default: false
+        type: boolean
+
+concurrency:
+  # Shared with the `deploy` job in `ci.yml`. Two overlapping `helm upgrade`s on one
+  # release is a race whose loser is whichever finished second.
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: ${{ inputs.dry_run && 'render' || 'roll' }} ${{ inputs.version }}
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: ${{ vars.PLANE_URL }}
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: azure/setup-helm@v4
+
+      - name: The release's chart
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          mkdir -p dist
+          gh release download "v${VERSION}" --repo "$GITHUB_REPOSITORY" --pattern "troupe-${VERSION}.tgz" --dir dist
+
+      - name: Check this deployment is configured
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          missing=""
+          [ -n "${KUBECONFIG_CONTENT}" ] || missing="${missing} KUBECONFIG"
+          [ -n "${VALUES_CONTENT}" ] || missing="${missing} DEPLOY_VALUES"
+          if [ -n "${missing}" ]; then
+            echo "::error title=Deployment not configured::The production environment has no${missing}. KUBECONFIG is the troupe-deployer account's (deploy/ci-deployer.yaml, then scripts/ci-kubeconfig); DEPLOY_VALUES is the deployment's Helm values file."
+            exit 1
+          fi
+
+      - name: Lay out the credentials
+        env:
+          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
+          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
+        run: |
+          mkdir -p .local
+          printf '%s' "${KUBECONFIG_CONTENT}" > .local/kubeconfig.yaml
+          printf '%s' "${VALUES_CONTENT}" > .local/values.itminds.yaml
+          chmod 600 .local/kubeconfig.yaml .local/values.itminds.yaml
+
+      - name: ${{ inputs.dry_run && 'Render it' || 'Roll it' }}
+        env:
+          PLANE_URL: ${{ vars.PLANE_URL }}
+          DRY_RUN: ${{ inputs.dry_run && '--dry-run' || '' }}
+        run: scripts/deploy "dist/troupe-${{ inputs.version }}.tgz" $DRY_RUN
+
+      - name: Say what is running
+        if: always()
+        env:
+          VERSION: ${{ inputs.version }}
+          OUTCOME: ${{ job.status }}
+          DRY: ${{ inputs.dry_run && ' (rendered only)' || '' }}
+        run: |
+          echo "### production: ${VERSION}${DRY} — ${OUTCOME}, started by @${GITHUB_ACTOR}" >> "$GITHUB_STEP_SUMMARY"

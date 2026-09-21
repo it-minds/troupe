@@ -10,6 +10,13 @@
 > `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
 > that; line citations that predate it refer to the tree at commit `20fe871`.
 
+> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
+> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
+> installers are back at the root, installing the TUI and the daemon (671). A merged
+> `VERSION` change releases and deploys everything (669). Where this page says the
+> repository ships no client or no binary, that was true of the tree it was audited
+> against and is not now.
+
 There is no `.env.example` in this repository ([../AUDIT.md](../AUDIT.md) §1.5). The
 variables a developer may set are tabulated in §7 of this document; every runtime
 variable a deployment sets is in [../admin/configuration.md](../admin/configuration.md).
@@ -156,7 +163,7 @@ in the script's own numbering:
 |---|---|---|
 | 1 | `scripts/kind-up` unless cluster `troupe-dev` exists: one control-plane node labelled `ingress-ready=true`, host 30080 to container 80 and 30443 to 443 | `remote-up:36-41`, `kind-up:13-37` |
 | 2 | ingress-nginx `controller-v1.14.1` kind manifest; namespace `ingress-nginx` labelled `troupe.dev/ingress=true`; waits for the controller pod and its admission webhook endpoints | `remote-up:49-76` |
-| 3 | `scripts/build-images` (four images, loaded into kind) unless `TROUPE_SKIP_BUILD=1` | `remote-up:80-85` |
+| 3 | `scripts/build-images` (five images, loaded into kind) unless `TROUPE_SKIP_BUILD=1` | `remote-up:80-85` |
 | 4 | namespace `troupe-system`; `kubectl apply -f dev/kind/dependencies.yaml` with five retries; `llm-credentials` secret rewritten from `ITM_LLM_GW_KEY` if set, else a warning that "workers will start but cannot reach a model" | `remote-up:89-111` |
 | 4b | CoreDNS rewrite of `dex.localtest.me` to `dex-public.troupe-system.svc.cluster.local`, then a CoreDNS rollout | `remote-up:116-127` |
 | — | waits for the `postgres`, `minio`, `openbao`, `dex` deployments | `remote-up:129-131` |

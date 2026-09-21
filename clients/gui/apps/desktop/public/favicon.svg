@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" role="img" aria-label="Troupe">
+  <!-- The mask, at tile size. A favicon cannot read a CSS variable, so this one file is
+       the only place in the product where the theme's colours are written as hexes:
+       Signal in dark, the default a new install starts in. Geometry is the 32px cut of
+       docs/design/themes/*.tokens.json `mark` — no seam line, heavier stroke. -->
+  <defs>
+    <clipPath id="lit"><rect x="24" y="0" width="24" height="48"/></clipPath>
+  </defs>
+  <rect x="2" y="2" width="44" height="44" rx="7" fill="#0B0D10"/>
+  <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="#FF5CB8" clip-path="url(#lit)"/>
+  <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="none" stroke="#ECEFF3" stroke-width="3" stroke-linejoin="round"/>
+  <path d="M15.8 21 Q19.2 18.6 22.6 21 Q19.2 23.4 15.8 21 Z" fill="#ECEFF3"/>
+  <path d="M25.4 21 Q28.8 18.6 32.2 21 Q28.8 23.4 25.4 21 Z" fill="#0A0B0D"/>
+</svg>

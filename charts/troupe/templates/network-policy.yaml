@@ -75,4 +75,25 @@ spec:
     matchLabels: {{- include "troupe.operator.selectorLabels" . | nindent 6 }}
   policyTypes: [Ingress]
   ingress: []
+{{- if and .Values.gui.enabled .Values.plane.enabled }}
+---
+# The GUI serves static files to browsers, through the ingress controller and from
+# nowhere else. It calls nothing in the cluster: the browser it loads into does.
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: troupe-gui
+  namespace: {{ .Values.namespace }}
+  labels: {{- include "troupe.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels: {{- include "troupe.gui.selectorLabels" . | nindent 6 }}
+  policyTypes: [Ingress]
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels: {"troupe.dev/ingress": "true"}
+      ports:
+        - {protocol: TCP, port: 8080}
+{{- end }}
 {{- end }}

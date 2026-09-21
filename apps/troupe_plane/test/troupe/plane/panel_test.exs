@@ -454,6 +454,25 @@ defmodule Troupe.Plane.PanelTest do
       end
     end
 
+    test "says what an image of release resolves to on this plane", context do
+      image = "ghcr.io/objective-mj/troupe-worker:0.2.17"
+      Application.put_env(:troupe_plane, :worker_image, image)
+      on_exit(fn -> Application.delete_env(:troupe_plane, :worker_image) end)
+      {:ok, _} = Fleet.put_profile(%{name: "dev", image: "release"})
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      assert html =~ "Follows the release — #{image}"
+
+      # A plane that cannot say is read before pressing apply rather than in the refusal
+      # after it.
+      Application.delete_env(:troupe_plane, :worker_image)
+      html = view |> element("form") |> render_change(%{"name" => "dev", "image" => "release"})
+
+      assert html =~ "deployed without a worker image"
+    end
+
     test "a blank field is absent from the spec rather than empty in it" do
       draft =
         ProfileEditor.draft(%{

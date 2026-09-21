@@ -8,10 +8,11 @@
 > source citations under each section point at files that now exist only in git history
 > (`git show 20fe871 -- apps/troupe_ctl` and the tree at that commit).
 >
-> What this repository is, is the remote: the plane, the operator, the worker pods and
-> the admin console, deployed to Kubernetes by `charts/troupe` and reached over
-> [PROTOCOL.md](../../PROTOCOL.md). A terminal or graphical client is a separate release
-> from a separate repository, and its own documentation goes with it.
+> On 2026-09-21 the terminal client came back to this repository as `clients/tui`
+> (Decision 666), rebuilt since as a client of the daemon, and its current documentation
+> is [`clients/tui`](../../clients/tui/README.md); the graphical client's is
+> [`clients/gui/docs`](../../clients/gui/docs/README.md). This page describes the client as
+> it was in `apps/`, and is not brought up to date.
 >
 > Nothing in this directory is maintained against the code. It is here because the prose
 > is worth keeping until the client repository can take it, and for no other reason.
@@ -35,8 +36,8 @@ source (that is [../developer/README.md](../developer/README.md) and
 | [cli-reference.md](cli-reference.md) | you want every command, flag, exit code, key and file path |
 | [troubleshooting.md](troubleshooting.md) | something on the screen does not make sense |
 
-The GUI lives in a separate repository; its user guide is
-[../../../troupe-gui/docs/user/README.md](../../../troupe-gui/docs/user/README.md).
+The GUI lives in `clients/gui`; its user guide is
+[../../clients/gui/docs/user/README.md](../../clients/gui/docs/user/README.md).
 What it can do today is summarised in [features.md](features.md) where relevant.
 
 Every claim in this track was checked against the code at the commit above. Where the
@@ -46,7 +47,7 @@ code wins. Citations (file:line) sit at the end of each section, never in the pr
 ## Self-check
 
 Every top-level feature and every user-reachable route, and where it is documented.
-"GUI" rows summarise the separate repository's confirmed capabilities.
+"GUI" rows summarise the GUI's confirmed capabilities, as its own documentation lists them.
 
 ### Features
 
@@ -151,7 +152,7 @@ Every top-level feature and every user-reachable route, and where it is document
 | `admin.*` (team-admin subset) | features.md § troupe admin; cli-reference.md § Commands: admin |
 | `admin.*` (platform-only) | ../admin/README.md (out of this track) |
 
-### GUI (separate repository; confirmed list)
+### GUI (`clients/gui`; confirmed list)
 
 | Capability | Documented in |
 |---|---|

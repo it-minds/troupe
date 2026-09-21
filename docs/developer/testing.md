@@ -10,6 +10,13 @@
 > `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
 > that; line citations that predate it refer to the tree at commit `20fe871`.
 
+> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
+> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
+> installers are back at the root, installing the TUI and the daemon (671). A merged
+> `VERSION` change releases and deploys everything (669). Where this page says the
+> repository ships no client or no binary, that was true of the tree it was audited
+> against and is not now.
+
 ## 1. Layout
 
 Every app keeps its tests under `apps/<app>/test/troupe/**/*_test.exs` with case

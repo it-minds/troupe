@@ -55,7 +55,7 @@ defmodule Troupe.Plane.Admin.API do
       type: :string,
       required: true,
       description:
-        "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not."
+        "The worker image, as repository:tag or repository@sha256:digest. A digest pins it; a tag does not. Or the word release: the worker image of the release this plane is running, which the plane writes again after every upgrade so the profile moves with the platform. release is refused on a plane deployed without a worker image."
     },
     %Argument{
       name: "size_class",

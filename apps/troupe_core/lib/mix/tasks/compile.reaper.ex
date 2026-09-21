@@ -3,8 +3,8 @@ defmodule Mix.Tasks.Compile.Reaper do
   Cross-compiles the `reaper` helper into this app's `priv/reaper/`.
 
   The Zig source lives in this app, at `apps/troupe_core/native/reaper/`, beside the
-  module that loads the binaries at runtime — and so that a checkout of this app alone
-  (the daemon binary is built from it in another repository) carries everything the
+  module that loads the binaries at runtime, so that everything built on this app — the
+  worker, the daemon, and the TUI that depends on it by path — carries everything the
   `shell` tool needs.
 
   `reaper` is the process-tree supervisor every shell command runs under, and it is

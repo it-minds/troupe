@@ -54,11 +54,13 @@ defmodule Troupe.Umbrella.MixProject do
 
   # Four releases from one umbrella, and every one of them is a container image.
   #
-  # This repository is the remote: it is deployed to Kubernetes by `charts/troupe` and
-  # it is not installed on anybody's machine. So there is no packaged executable here,
-  # no target matrix, and nothing cross-built — each release is a plain Mix release
-  # that runs where an Erlang runtime is the container's business rather than the
-  # user's. Clients live in their own repositories and reach a plane over the protocol.
+  # They are deployed to Kubernetes by `charts/troupe`; each is a plain Mix release that
+  # runs where an Erlang runtime is the container's business rather than the user's. The
+  # daemon, the one release installed on somebody's machine, is defined in
+  # `apps/troupe_daemon/mix.exs` and built from that directory, so that a Windows or macOS
+  # runner compiles the harness and not the plane's database and Kubernetes clients
+  # (Decision 667). The clients are not releases of this umbrella: `clients/tui` is its
+  # own Mix project and `clients/gui` a pnpm workspace (Decision 666).
   defp releases do
     [
       troupe_operator: [

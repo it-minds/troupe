@@ -58,6 +58,9 @@ defmodule Troupe.Plane.MixProject do
       # GitOps mode commits the same manifest the direct mode applies, and a manifest in
       # a repository is YAML because that is what Flux reads.
       {:ymlr, "~> 5.1"},
+      # And reads back what it committed, to tell whether a profile following the
+      # release already carries the release's image.
+      {:yaml_elixir, "~> 2.12"},
       {:req, "~> 0.7"},
       {:jason, "~> 1.4"}]
   end

@@ -42,6 +42,11 @@ defmodule Troupe.Plane.Application do
       # typed. Also a `:global` singleton nobody asks for on the happy path, so it gets a
       # keeper of its own for the same reason the scheduler does.
       Troupe.Plane.Fleet.Scaler.Keeper,
+      # Once as this replica starts: every profile whose image is `release` is written
+      # again if the cluster carries anything but this release's worker image. On every
+      # replica rather than as a singleton, which could be on a replica of the release being
+      # replaced; `Fleet.ReleaseImage` says why that matters.
+      Troupe.Plane.Fleet.ReleaseImage,
       {Registry, keys: :duplicate, name: Troupe.Plane.Control.Registry},
       Troupe.Plane.Control.Connections,
       Troupe.Plane.Control.Listener,

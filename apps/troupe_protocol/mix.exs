@@ -4,7 +4,7 @@ defmodule Troupe.Protocol.MixProject do
   def project do
     [
       app: :troupe_protocol,
-      version: version(),
+      version: File.read!("../../VERSION") |> String.trim(),
       build_path: "../../_build",
       config_path: "../../config/config.exs",
       deps_path: "../../deps",
@@ -25,16 +25,6 @@ defmodule Troupe.Protocol.MixProject do
 
   defp elixirc_paths(:test), do: ["lib", "test/support"]
   defp elixirc_paths(_), do: ["lib"]
-
-  # `VERSION` at the umbrella root, or `TROUPE_VERSION` when this app is a dependency of
-  # another project — a sparse git checkout of `apps/troupe_protocol` has no root — and
-  # never a plausible default: a consumer that pins this app says which version it is.
-  defp version do
-    case File.read("../../VERSION") do
-      {:ok, contents} -> String.trim(contents)
-      {:error, _} -> System.get_env("TROUPE_VERSION") || raise "TROUPE_VERSION is not set and ../../VERSION is not here"
-    end
-  end
 
   defp deps do
     [
@@ -60,7 +50,9 @@ defmodule Troupe.Protocol.MixProject do
       # affordable. The it-minds fork of ezstd 1.2.4 adds the Windows build (a `win32`
       # rebar hook that compiles the NIF with Zig); upstream has hooks for Linux and
       # macOS only, and the daemon is released for Windows too. See DECISIONS.md 643.
-      {:ezstd, git: "https://github.com/it-minds/ezstd.git", ref: "e3c9239fc1ead0fab110e82a9c3cf4ffb5add88d"},
+      {:ezstd,
+       git: "https://github.com/it-minds/ezstd.git",
+       ref: "e3c9239fc1ead0fab110e82a9c3cf4ffb5add88d"},
       # Agent definitions and skills carry YAML frontmatter, and a bundle is checked by
       # the plane before it is published as well as by the worker that applies it, so
       # the parser sits where both can reach it.

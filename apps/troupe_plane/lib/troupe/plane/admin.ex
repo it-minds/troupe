@@ -234,6 +234,7 @@ defmodule Troupe.Plane.Admin do
     with :ok <- require_platform_admin(actor),
          {:ok, name} <- require_name(attrs),
          {:ok, attrs} <- without_derived(attrs),
+         :ok <- release_named(attrs),
          :ok <- Provision.check(attrs) do
       before = Fleet.get_profile(name)
 
@@ -277,6 +278,33 @@ defmodule Troupe.Plane.Admin do
        })}
     end
   end
+
+  # `release` stands for the worker image this plane's release names, and a plane deployed
+  # without one has nothing for it to stand for. Refused rather than saved: saved, it would
+  # reach the cluster with no image at all — the one field the resource cannot be without
+  # — and whoever typed it would find out from a pod that never appeared.
+  defp release_named(attrs) do
+    if Provision.follows_release?(attrs) and is_nil(Provision.release_image()) do
+      {:error,
+       Error.new(:invalid_params, %{
+         image: "release",
+         reason:
+           "this plane was deployed without a worker image (worker.image in the chart, " <>
+             "TROUPE_WORKER_IMAGE), so there is no release to follow; name an image instead"
+       })}
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  The image a profile whose image is `release` runs on this plane, or `nil` if it names none.
+
+  Here for the reason `size_classes/0` is: the console says what the word means right now,
+  and a LiveView is an admin API client with no private way to find out.
+  """
+  @spec release_image() :: String.t() | nil
+  def release_image, do: Provision.release_image()
 
   @doc """
   The size classes a profile may be, in the order a console offers them.

@@ -77,12 +77,14 @@ plane:
   # What the plane calls itself in the links it hands out — device-flow pages, the
   # panel. Defaults to https://<host>.
   baseUrl: ""
-  # Where the index page at `/` links to the graphical client. The GUI is a separate
-  # release with its own chart, which mounts it at `/app` on this host by default. Empty
-  # means this plane ships without one, and the index offers no door rather than a 404.
-  appUrl: /app
-  # Where the index page at `/` links to the terminal client. That is a release from
-  # another repository and nothing in this chart serves it, so there is no default
+  # Where the index page at `/` links to the graphical client. Empty means the GUI this
+  # chart serves (`gui:` below) when it is enabled, and no door at all when it is not —
+  # never a link to a 404. A cluster whose people bring their own client points this at
+  # it.
+  appUrl: ""
+  # Where the index page at `/` links to the terminal client. The TUI and the daemon are
+  # released with this chart, as assets of the same GitHub release, but a private
+  # repository's release page is a door most readers cannot open, so there is no default
   # worth guessing: empty means the page says to ask an administrator. Point it at the
   # release page, the internal mirror, or wherever your organisation keeps it.
   cliUrl: ""
@@ -180,6 +182,38 @@ plane:
     enabled: false
     secretName: troupe-plane-scim
     secretKey: token
+
+# The worker image of this release. Nothing here runs it: the operator does, for each
+# WorkerProfile, and each profile names its own image. A profile whose image is the word
+# `release` gets this one, and the plane writes those profiles again when an upgrade
+# changes it — which is how workers move with the platform instead of staying on whatever
+# they were first given. The policy still has to allow the repository.
+worker:
+  image:
+    repository: ghcr.io/objective-mj/troupe-worker
+    tag: ""            # defaults to the chart's appVersion
+
+# The graphical client (`clients/gui`), served on the plane's own host at `basePath`
+# (Decision 670). Static files behind nginx: no secrets, no database, nothing configured
+# at runtime. On by default, because the product is the platform and a client to use it
+# with; a cluster whose people use their own client sets `enabled: false` and points
+# `plane.appUrl` at it. Needs `plane.enabled`, since it is the plane's host it mounts on.
+gui:
+  enabled: true
+  image:
+    repository: ghcr.io/objective-mj/troupe-gui
+    tag: ""            # defaults to the chart's appVersion
+    pullPolicy: IfNotPresent
+  # Two because it is 30 MB of nginx and a rolling deploy should not have a window where
+  # the app is a 502. There is no state to coordinate.
+  replicas: 2
+  # Where the bundle is mounted, and it must match the `TROUPE_GUI_BASE` the image was
+  # built with: Vite writes that prefix into every asset URL, so an image built for one
+  # path cannot be served at another. Not `/`, which is the plane's.
+  basePath: /app
+  resources:
+    requests: {cpu: 10m, memory: 32Mi}
+    limits: {cpu: 200m, memory: 128Mi}
 
 # The A2A facade: every profile as an agent other agents can call, at `a2a.<domain>`.
 # A client of the plane and of worker pods over their public APIs, with no database and

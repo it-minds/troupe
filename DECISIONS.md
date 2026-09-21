@@ -4843,3 +4843,240 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      format is only checked when the name changes, so a team named before this rule can
      still have its budget edited and can still be removed with `team.disable`, which is
      the way out for it. Proof: `Troupe.Plane.TeamNameTest`.
+
+## One repository
+
+666. **This repository is the monorepo: the platform, the daemon, and the default GUI and
+     TUI.** Decided by the team on 2026-09-21, and it supersedes 319–321 and the
+     2026-09-19 answers 1 and 2 in `docs/program/brief-daemon.md` §7. Those said a client
+     is a separate release from a separate repository and the daemon is built elsewhere
+     by pinning this one by git ref. What that produced was four repositories and three
+     pins: the TUI and the daemon each named a `troupe-remote` commit by hand, seventeen
+     commits behind main by the time anybody looked, and a protocol change was three or
+     four pull requests in three repositories with a version bump in the middle. The GUI
+     and TUI are now the defaults; a client somebody else writes against `PROTOCOL.md`
+     is exactly as supported as it was.
+
+     Three repositories came in with their history, each rewritten by `git filter-repo`
+     under its new prefix and merged as unrelated history, so every import merge changes
+     nothing but a path prefix and every adaptation after it is a commit of its own:
+     `it-minds/troupe-gui` main at `2c86ccd` under `clients/gui`, `it-minds/troupe-tui`
+     main at `5cf5be2` under `clients/tui`, and `it-minds/troupe` main at `de07e9c` —
+     `daemon/`, the installers, and its documents under `docs/program/`. Only `main` was
+     imported. The GitHub-generated references to a repository's own pull requests,
+     "Merge pull request #N" and a squash title's "(#N)", were rewritten to name that
+     repository, because a bare `#N` here links to this repository's #N; every other
+     `#N` in those messages already meant a `troupe-remote` pull request, which is this
+     one. The umbrella repository's are written as `it-minds/troupe-program#N`, the name
+     it takes when this repository is renamed `it-minds/troupe`, so that rename has to use
+     that name. `docs/history/` keeps the three commit maps, because every imported SHA
+     changed and the documents quote them.
+
+     The clients sit under `clients/`, not `apps/`. Mix treats every directory in
+     `apps/` as an umbrella application and warns about any without a `mix.exs`, which
+     the GUI's pnpm workspace would be; and the TUI as an umbrella application would put
+     ExRatatui, Burrito and `rustler_precompiled` into the shared lock, into every image
+     build and into `mix check` — the cost 319 was right to name. As its own Mix project it
+     costs the server nothing. The daemon is the opposite case: its dependencies are three
+     umbrella applications and nothing else, so it becomes one (below). The plan this
+     follows is the *Troupe monorepo adoption plan*; issue #37 is its brief for release and
+     deployment.
+
+667. **The daemon is an application of this umbrella, released from its own directory.**
+     `apps/troupe_daemon` is the `daemon/` project from the umbrella repository, moved rather
+     than rewritten: three modules (`Application`, `CLI`, `Release`) and a test. Its
+     `mix.exs` is an umbrella application's, with `troupe_protocol`, `troupe_core` and
+     `troupe_gateway` as `in_umbrella` dependencies in place of the sparse git pins, and
+     the pin constants, `HARNESS_TOKEN`, its own lock, `VERSION` and `.tool-versions` are
+     gone. The `troupe_daemon` release stays in that `mix.exs`, with the steps it had —
+     the host-triple reaper and the `troupe-daemon` wrapper — and is built from that
+     directory rather than from the root: a release defined at the root compiles every
+     umbrella application first, and on a Windows or macOS runner that is the plane's
+     Postgres and Kubernetes clients built for a machine that will never run them. Built
+     from its own directory it compiles the harness and nothing else, and its `lib/` holds
+     none of the platform's applications. Its runtime configuration is its own
+     `config/runtime.exs`, because the platform's reads a pod's environment and the daemon
+     must boot without it; its `rel/` turns distribution off. `mix troupe.boundaries`
+     holds it to the three harness apps. The one test that failed on the way was not
+     about the move: `config describes providers` read the developer's own
+     `~/.config/troupe`, so it now points `TROUPE_CONFIG_HOME` at its scratch directory
+     like the state and runtime directories beside it. Proof: `MIX_ENV=prod mix release`
+     in `apps/troupe_daemon`, unpacked and smoked — `version` prints 0.2.0 for daemon and
+     harness alike, `status` says not running, `run` serves, a second `run` names the
+     running one and exits 0, `eval` answers.
+
+668. **One `VERSION` for everything this repository releases, and the TUI builds against
+     the harness of its own commit.** The TUI was at 0.1.0, the daemon at 0.1.0, the
+     umbrella at 0.2.0 and the GUI's chart at 0.1.0, while the live plane ran 0.2.17 off
+     a script that hard-coded it — four numbers with no relation, which issue #37 names as
+     the thing to end. The root `VERSION` is now the version of the images, the chart, the
+     daemon and the TUI, and a release is cut by changing it (below). `clients/tui` stays a
+     Mix project of its own and depends on the three harness apps by path, `override: true`,
+     since they also name each other as siblings. That removes the pin, the
+     `TROUPE_VERSION` environment workaround the sparse checkout needed, and the
+     `HARNESS_TOKEN` its CI used to fetch a private repository. What two Mix projects
+     cannot share is a lock: the TUI's `mix.lock` and the umbrella's each lock the 25
+     packages they have in common, and a harness built against one version on a laptop and
+     another in a pod is the drift this was meant to end, so `scripts/locks-agree.exs`
+     fails when any of the 25 differ and CI runs it. The first thing it would have caught:
+     mint, 1.10.1 in the TUI for a security advisory and 1.10.0 here. Proof: `mix check` in
+     `clients/tui`, 107 tests, against the umbrella's source.
+
+669. **A release is a merged change to `VERSION`, and it deploys itself.** Issue #37 set out
+     what was wrong: four repositories delivered four ways, no repository had ever been
+     tagged so no release path had ever run, the plane — the core — was deployed by hand
+     from one laptop with a script that hard-coded `0.2.17`, and nothing but the cluster
+     knew what was running. It proposed one deploy workflow per deployable, manual, and
+     asked whether deploying should stay manual. The team's answer is no (Martin,
+     2026-09-21: "I want a deployment on releases too"), and this is its shape.
+
+     *Cutting one.* `scripts/release <version>` opens a pull request whose only change is
+     `VERSION` and its copies (`scripts/version.exs set`). Merging it is the release: the
+     run on `main` that follows has the whole gate behind it — the soak and the cluster
+     suite included — and its `release` job sees a version with no tag. It tags the commit,
+     promotes the images the same run built from `sha-<short>` to the version with
+     `docker buildx imagetools create` (build once: production runs the bytes CI tested,
+     not a rebuild), packages the chart at that version, and opens a draft release;
+     `release.yml` builds the daemon and the TUI for five platforms and the desktop app
+     for three and attaches them; `publish` adds one `SHA256SUMS` and publishes. A push to
+     `main` that does not change `VERSION` publishes images and releases nothing. A tag
+     pushed by hand is not a release. It all happens in one run because a tag pushed with
+     the workflow's own token starts no other workflow, which is also what keeps it from
+     running twice.
+
+     *Deploying it.* The `deploy` job runs `scripts/deploy` against the `production`
+     environment: the chart's CRDs server-side (Helm never upgrades them), `helm upgrade
+     --wait` rolling back on failure, `rollout status`, and then `/.well-known/troupe` must
+     report the release's version and commit, which the images now carry because CI
+     passes `BUILD_COMMIT` — it never had, so every CI-built plane said `dev`. Pushing an
+     image and changing production are still two decisions, as the GUI's workflow insisted;
+     the second is now a reviewed merge instead of a laptop session. A release candidate
+     (`-rc.N`) runs everything and deploys as a server-side dry run, which is #37's "tag
+     something before it matters". `deploy.yml` stays for what the automatic path does
+     not do: roll an earlier release back, or render one, through the same script. The
+     environment's deployments are the record of what ran where and when, from which
+     merge (#37 item 6).
+
+     *Credentials.* `production` holds `KUBECONFIG` and `DEPLOY_VALUES` and the variable
+     `PLANE_URL`, and should allow `main` alone. The kubeconfig is the `troupe-deployer`
+     service account's (`deploy/ci-deployer.yaml`, `scripts/ci-kubeconfig`), not a person's
+     `scw` login. It is not the one-namespace Role the GUI's deployer had: the chart creates
+     CRDs, ClusterRoles and an admission policy, and granting a ClusterRole takes
+     `escalate` and `bind`, which is cluster-admin in principle. That is said in the
+     manifest rather than hidden, and the rules list what the chart touches so the
+     account's everyday reach is a deploy's. A required reviewer on the environment is left
+     to the team: the bump pull request's review is the approval this design assumes.
+
+     *Worker images* are the part a chart cannot roll, because each profile names its own
+     and service principals may not administer (`admin.ex:77-82`); a profile whose image is
+     `release` follows the chart's worker image (below).
+
+     *What CI checks on a pull request* is decided per job by `changes`, under one required
+     check, `ci-ok`: the server suite for the platform, `mix check` in `clients/tui` with the
+     lock-agreement step, the GUI's build and tests, the GUI's end-to-end suite against a
+     plane built from the same commit, the version copies, and the native builds when a
+     pull request touches them. Proof: every workflow parses and `actionlint` reports only
+     the `macos-15-intel` label it does not know; `scripts/deploy --dry-run` is accepted by
+     a kind cluster's API server both as a cluster admin and as the `troupe-deployer`
+     account applied from `deploy/ci-deployer.yaml` (then deleted); the GUI's end-to-end
+     suite passes 8 of 8 against a plane built from this checkout; `scripts/version.exs`
+     sets and checks a release candidate and a release.
+
+670. **`charts/troupe` serves the GUI, on by default, and `plane.appUrl` follows it.** The
+     GUI had a chart of its own, installed as a second release onto the plane's host and
+     linked from the plane's index by a hand-set `/app`. It is now `gui:` in this chart:
+     a Deployment, a Service, a NetworkPolicy that admits the ingress namespace on 8080
+     and nothing else, and an Ingress on `plane.host` at `gui.basePath` that shares the
+     plane's TLS secret and asks cert-manager for nothing. The templates are the GUI
+     chart's, moved, not rethought — the security context, the probes, the rewrite that
+     strips the base path — and `charts/troupe-gui` goes with the move, never having been
+     released. `gui.enabled` is true because the defaults are the product: one `helm
+     install` is a plane and a client to use it with. Bringing your own is
+     `gui.enabled: false` and `plane.appUrl` set, and `plane.appUrl` now defaults to empty
+     meaning *the chart's GUI if there is one*, so turning the GUI off no longer leaves
+     the index linking to a 404 at `/app`. The chart refuses `gui.basePath: /`, because the
+     root of that host is the plane's. The GUI needs `plane.enabled`: a workers-only
+     cluster has no host to mount it on. `scripts/build-images` builds the GUI image from
+     `clients/gui` and `scripts/remote-up` loads and restarts it, so the kind cluster
+     serves it at `http://plane.localtest.me:30080/app`. Proof: `helm lint` with each values
+     file; `kubeconform` passes 29 resources with the GUI (25 without); the refusal
+     renders as an error; `plane.appUrl` renders `/app`, empty, and a BYO URL in the three
+     cases; and `scripts/deploy charts/troupe --dry-run` is accepted by a kind cluster's API
+     server.
+
+671. **The installers put the TUI and the daemon on a machine, from the latest release.**
+     `install.sh` and `install.ps1` came with the umbrella repository and installed the
+     daemon alone, at a version written into them (`0.1.0`) that nothing kept current. They
+     now install `troupe` beside `troupe-daemon` — the daemon for the desktop app, which
+     spawns it from the `PATH`, and for `troupe daemon run`; the TUI embeds the same harness
+     when no daemon is running — both from one release and both checked
+     against its `SHA256SUMS` before anything on the machine is replaced, with
+     `--no-tui` / `-NoTui` for a machine that only runs the desktop app. With no
+     `TROUPE_VERSION` they install the release GitHub calls latest — the newest that is not
+     a release candidate — so the script on `main` needs no version of its own and there is
+     no ninth copy of `VERSION` to keep in step. A private repository answers
+     `/releases/latest` only to somebody signed in, and the installers say so and ask for
+     `TROUPE_VERSION` (and `TROUPE_RELEASE_URL` for a mirror) rather than guessing; making
+     releases reachable without a GitHub account is the team's call, and until then
+     `plane.cliUrl` stays empty (670). The TUI binary a new one replaces is kept as
+     `troupe.previous`, as the daemon's release directory already was. Proof: `install.sh`
+     against a local `file://` release — install, reinstall keeping the previous release, a
+     tampered binary refused with nothing installed, `--no-tui`, uninstall, and the latest
+     lookup refused with that message against this private repository. `install.ps1` has
+     the same changes and is untested here: this machine has no PowerShell, and no release
+     exists yet for the Windows runner to install.
+
+672. **A profile's image may be `release`, and such profiles move with the platform.** A
+     release rolls the plane, the operator, the A2A facade and the GUI, but a worker's image
+     is its profile's, and nothing had ever moved one: the live plane ran 0.2.17 against
+     0.2.1 workers (#37 item 5). CI cannot move them through the admin API, because a
+     service principal is refused administration on purpose (`admin.ex:77-82`), and writing
+     the custom resources behind the plane would be a change its own record never saw. So
+     the plane does it. The chart names this release's worker image (`worker.image`,
+     defaulting to the chart's appVersion) and hands it to the plane as
+     `TROUPE_WORKER_IMAGE`; a profile whose image is the word `release` keeps the word in
+     its row, and `Provision` resolves it wherever a manifest is rendered and checked, so
+     the policy judges the resolved image exactly as it judges a typed one.
+     `admin.profile.put` refuses `release` on a plane deployed without a worker image,
+     rather than writing a WorkerProfile with none. `Fleet.ReleaseImage` runs once as each
+     replica starts: every `release` profile whose resource carries another image is
+     written again through `Provision.apply/2`, the path an administrator's edit ends in,
+     audited as `profile.put` by `system:release` with the image's move as the diff. It runs
+     on every replica rather than as a singleton, because a `:global` singleton can live on
+     a replica of the release being replaced and would write the old image back; the
+     replica that started last has the last word. It never blocks boot, backs off to ten
+     minutes while the cluster or the database will not answer, and does not give up. In
+     GitOps mode it compares against what it last committed, not the live resource, so a
+     Flux that has not caught up does not cause a commit on every restart. What it does not
+     do: move a running pod. Worker StatefulSets roll `OnDelete`, so the resource says
+     `UpgradePending` until the pods are drained and replaced — the routine-tasks page says
+     so — and `profile.get` still reports `release` rather than what it resolves to; the
+     console shows the resolution. `values.small.yaml` and `values.scaleway.yaml` name the
+     worker and GUI images in the same registry as the rest, so the policy they carry
+     admits `release`. Proof: `Troupe.Plane.ReleaseImageTest` (13) and the panel test; the
+     whole plane suite, 674 tests, cluster-tagged included, against a kind cluster;
+     `helm template` renders `TROUPE_WORKER_IMAGE` as the worker repository at the chart's
+     version.
+
+673. **The clients in this repository get no private door, and four checks say so.**
+     Decision 320 gave up the TUI as a mechanical proof that built-in clients had no
+     private access and replaced it with where the code lived: with no client inside the
+     boundary, "no private door" was a property of the tree. Bringing the clients back
+     (666) gives that up, so it is a rule again, and each part of it fails CI. The GUI's
+     image is built with `clients/gui` as its whole Docker context, so a reach into the
+     rest of the repository fails the build. The TUI's `mix troupe.xref` keeps its rule
+     that the UI calls only `Troupe.Client`, and gains one for the whole project: it may
+     call into `troupe_core`, `troupe_gateway` and `troupe_protocol` only through the seven
+     modules it uses today — `Troupe.Protocol.{Client,Daemon,Endpoint}`, `Troupe.Config`,
+     `Troupe.Paths`, `Troupe.Reaper` and `Troupe.LLM.Catalog.Store` — measured from its
+     beams, so that a path dependency does not become a way around the protocol. It cannot
+     see a module named as an atom, and there is one: the child spec that embeds
+     `Troupe.Gateway.Daemon` when no daemon is running, which is the TUI hosting the
+     harness rather than calling it. The direction the umbrella's `troupe.boundaries`
+     cannot see — an umbrella app depending on a client — is a step in `check` that fails
+     on a dependency path into `clients/`. And `conformance.py`, a client written against
+     `PROTOCOL.md` in another language with no access to this source, stays the proof that
+     the protocol alone is enough, because that is what a client somebody else writes
+     relies on. Proof: `mix troupe.xref` passes, and fails naming the call when a module
+     calls `Troupe.Log.Fold.witnessed_types/0`; the grep passes on the tree and matches
+     `{:troupe, path: "../../clients/tui"}`.

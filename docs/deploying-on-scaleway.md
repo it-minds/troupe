@@ -116,9 +116,10 @@ Registry namespace. Build and push:
 TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe TROUPE_IMAGE_TAG=0.2.0 scripts/build-images
 ```
 
-`scripts/build-images` builds all four images from one Dockerfile and pushes nothing — it
-loads into kind. For Scaleway, push them. There is nothing else to build: this repository
-produces images and the chart, and no client.
+`scripts/build-images` builds all five images — the four servers from one Dockerfile, the
+GUI from `clients/gui` — and pushes nothing unless told to; it loads into kind. For
+Scaleway, push them, or let a release do it: CI promotes the images of every release to
+its version in the registry these secrets name.
 
 ### 2. Ingress, DNS and certificates
 
@@ -211,6 +212,17 @@ helm upgrade --install troupe charts/troupe \
 Migrations run as a pre-upgrade hook before the new pods start — not from the
 application's own boot, because two replicas starting at once would both migrate and a
 failure would look like a plane that would not start.
+
+This first install is the only one done by hand. After it, an upgrade is a release: a
+merged change to `VERSION` makes CI promote the images, publish the chart and run
+`scripts/deploy` against the repository's `production` environment (Decision 669). For
+that, apply `deploy/ci-deployer.yaml` to this cluster, turn its account into a
+kubeconfig with `scripts/ci-kubeconfig` — a Scaleway kubeconfig shells out to `scw`, which
+a runner does not have — and give the `production` environment that kubeconfig as
+`KUBECONFIG`, this values file as `DEPLOY_VALUES`, and the plane's URL as `PLANE_URL`.
+A cluster that already runs the GUI from its old `troupe-gui` chart has to
+`helm uninstall troupe-gui -n troupe-system` before the first deploy of this one: both
+name their objects `troupe-gui`, and Helm will not take over another release's.
 
 **Label the ingress namespace.** A worker's NetworkPolicy admits traffic only from
 namespaces carrying `troupe.dev/ingress=true`. That is how "only the ingress may reach a
@@ -332,11 +344,11 @@ Touching the profile, or waiting for the resync, is the whole fix.
 
 Honest list, all of it known:
 
-- **Nothing in CI runs an image.** `check`, `chart`, `protocol` and the four image builds
-  are green, and the image jobs publish. What no job does is start one of those images,
-  run a command through a worker, or bring a plane and a worker up together — and the
-  smoke-testing that used to exist was for the client binary, which is gone. A cluster
-  job is the next thing the pipeline needs.
+- **CI runs the images on kind, not on Kapsule.** The `cluster` job brings the chart up
+  on kind with all five images and runs the cluster suite, `gui-e2e` runs the GUI against
+  a plane built from the same commit, and a release's `deploy` job checks that the plane
+  it rolled reports its version and commit. None of that is Scaleway's network, storage
+  or load balancer.
 - **The operator's liveness probe is an exec of `bin/troupe_operator pid`**, because the
   operator serves no HTTP. It spawns a short-lived BEAM every thirty seconds to ask the
   running node for its pid. It is cheap and it is correct, and it has not been watched

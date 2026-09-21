@@ -2,6 +2,11 @@
 
 > Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
 
+> **2026-09-21:** production is deployed by CI now. A merged change to `VERSION` cuts a
+> release, and the release's `deploy` job rolls it with [`scripts/deploy`](../../scripts/deploy)
+> (Decision 669; [ci-cd.md](ci-cd.md) §3). The procedure below is what that script does,
+> and what a first install still does by hand.
+
 How a build reaches a cluster. Values and their meanings are in
 [../admin/configuration.md](../admin/configuration.md); OpenBao, the identity provider
 and the object store are set up per [../admin/integrations.md](../admin/integrations.md);
@@ -10,14 +15,15 @@ document covers the mechanics only.
 
 ## 1. What "staging" and "production" mean here
 
-There is no staging environment in the repository, and no CI job that deploys anywhere
-([ci-cd.md](ci-cd.md)). What exists:
+There is no staging environment. Production is the `production` environment of the
+repository, which the `deploy` job rolls when a release is cut ([ci-cd.md](ci-cd.md) §3).
+What exists:
 
 | Name used here | What it is | Values | Brought up by |
 |---|---|---|---|
 | dev | a kind cluster on one machine, single replicas on `emptyDir`, Dex as the IdP, static OpenBao token | `dev/kind/values.yaml` + `dev/kind/dependencies.yaml` | `scripts/remote-up` |
-| prod (small) | one plane with distribution off, one operator, a policy capped at three pods | `charts/troupe/values.small.yaml` | `helm upgrade --install` by hand |
-| prod | two clustered plane replicas, otherwise the same | `charts/troupe/values.scaleway.yaml` | `helm upgrade --install` by hand |
+| prod (small) | one plane with distribution off, one operator, the GUI, a policy capped at three pods | `charts/troupe/values.small.yaml` | the first install by hand; then `scripts/deploy`, from the `deploy` job on every release |
+| prod | two clustered plane replicas, otherwise the same | `charts/troupe/values.scaleway.yaml` | the same |
 
 Whether a live deployment exists, and on which values, is [../AUDIT.md](../AUDIT.md) open
 question 1; everything about it is under gitignored `.local/` (`.gitignore:10-13`).
@@ -26,8 +32,9 @@ question 1; everything about it is under gitignored `.local/` (`.gitignore:10-13
 
 ### Images
 
-Either CI's `images` job (push events; `sha-<7>` on every push, the version on `v*`
-tags; [ci-cd.md](ci-cd.md) §2) or, by hand:
+CI's `images` job pushes all five as `sha-<7>` on every push to `main`, and a release
+adds the version tag to those same images rather than building new ones
+([ci-cd.md](ci-cd.md) §3). By hand, for a cluster CI does not deploy:
 
 ```bash
 TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe TROUPE_IMAGE_TAG=0.2.0 TROUPE_PUSH=true scripts/build-images
@@ -136,7 +143,7 @@ in the document's order. Cluster-side prerequisites and their values are the adm
 track's; this is the sequence a developer runs to put a build on it.
 
 1. Kapsule cluster in `fr-par` with Cilium; a Container Registry namespace
-   (`docs/deploying-on-scaleway.md:110-113`). Push the four images:
+   (`docs/deploying-on-scaleway.md:110-113`). Push the five images:
    `TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe TROUPE_IMAGE_TAG=<tag> TROUPE_PUSH=true scripts/build-images`,
    or let the `images` job push with the registry secrets set ([ci-cd.md](ci-cd.md) §2).
 2. ingress-nginx: `helm upgrade --install ingress-nginx ingress-nginx/ingress-nginx --namespace ingress-nginx --create-namespace --values deploy/scaleway/ingress-nginx.values.yaml`
@@ -174,15 +181,24 @@ track's; this is the sequence a developer runs to put a build on it.
    ([../AUDIT.md](../AUDIT.md) §3.1, open question 3). `scripts/remote-up` sidesteps
    this by applying the `WorkerProfile` with `kubectl` (`:158-188`).
 
-Upgrading an existing installation is step 1 (new tag), step 6 (CRDs first, then helm),
-and the manual steps below.
+Upgrading an existing installation is a release: `scripts/release <version>`, merge, and
+the `deploy` job runs `scripts/deploy` with the release's chart — the CRDs server-side,
+`helm upgrade --wait` rolling back on failure, `rollout status`, and a check that
+`/.well-known/troupe` reports the new version and commit. Before the first one, the
+`production` environment needs its `KUBECONFIG` (from `deploy/ci-deployer.yaml` and
+`scripts/ci-kubeconfig`), `DEPLOY_VALUES` and `PLANE_URL`. And on a cluster that ran the
+GUI from its old chart, `helm uninstall troupe-gui -n troupe-system` first: that release
+owns a Deployment, Service and Ingress named `troupe-gui`, the names `charts/troupe` now
+uses, and Helm will not adopt objects another release owns, so the first deploy with
+`gui.enabled` fails until it is gone. The second manual step below still applies.
 
 ## 5. Post-upgrade manual steps
 
 From `docs/deploying-on-scaleway.md:322-327`, "Two things to do by hand after upgrading":
 
 1. `kubectl apply -f charts/troupe/crds/` first — the `WorkerProfile` CRD gained a
-   `storage` field and Helm does not upgrade CRDs.
+   `storage` field and Helm does not upgrade CRDs. `scripts/deploy` does this on every
+   deploy now, from the chart it is rolling.
 2. A worker namespace created by an older operator gets its `troupe.dev/workers=true`
    label on the next reconcile, not before; until then its pods cannot reach the plane's
    control port (the plane's NetworkPolicy admits the control port from namespaces with
@@ -197,6 +213,7 @@ the operator reports `UpgradePending` and deletes nothing.
 
 | Option | What it does | Exists where |
 |---|---|---|
+| The `deploy` workflow with an earlier version | rolls that release's published chart through `scripts/deploy`, in the `production` environment, one roll at a time; a dry run renders it first | `.github/workflows/deploy.yml` |
 | `helm rollback troupe <revision>` | reverts the release to a previous revision; the pre-upgrade hook Job runs `migrate()` again, which is `:up, all: true` and does not undo migrations | Helm; `revisionHistoryLimit: 3` keeps three old ReplicaSets per Deployment (`plane-deployment.yaml:128-130`, `operator-deployment.yaml:12`, `a2a-deployment.yaml:38`) |
 | `Troupe.Plane.Release.rollback(repo, version)` | `Ecto.Migrator.run(repo, :down, to: version)`; "For an operator with a problem, not for a deploy" | `apps/troupe_plane/lib/troupe/plane/release.ex:27-32`. Nothing in the chart or scripts invokes it; run it by hand as `kubectl exec <plane pod> -- /app/bin/troupe_plane eval 'Troupe.Plane.Release.rollback(Troupe.Plane.Repo, <version>)'` with `TROUPE_PLANE_AUTOSTART=false` semantics in mind (the running pod has it `true`; a one-off Job modelled on the migrate hook is the shape that matches) |
 | Re-point the image tag | `helm upgrade` with the previous `image.tag`; equivalent to a rollback without Helm's revision bookkeeping | values |

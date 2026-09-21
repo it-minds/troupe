@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
-# Build the four server images, and either load them into the local kind cluster or push
-# them to a registry.
+# Build the five images — the four servers and the GUI — and either load them into the
+# local kind cluster or push them to a registry.
 #
 #   scripts/build-images                                   # kind
 #   TROUPE_REGISTRY=rg.fr-par.scw.cloud/troupe \
@@ -26,7 +26,7 @@ push="${TROUPE_PUSH:-false}"
 # a CI checkout without history — and an image with no stamp reports `dev`, which is true.
 commit="${TROUPE_BUILD_COMMIT:-$(git rev-parse HEAD 2>/dev/null || true)}"
 built_at="${TROUPE_BUILD_TIME:-$(date -u +%Y-%m-%dT%H:%M:%SZ)}"
-releases=("${@:-troupe_operator troupe_plane troupe_worker troupe_a2a}")
+releases=("${@:-troupe_operator troupe_plane troupe_worker troupe_a2a troupe_gui}")
 
 for release in ${releases[@]}; do
   image="${registry}/${release//_/-}:${tag}"
@@ -34,12 +34,21 @@ for release in ${releases[@]}; do
   # linux/amd64 explicitly: a laptop that is not amd64 would otherwise build an image
   # the node pool cannot run, and the failure arrives as `exec format error` in a
   # CrashLoopBackOff rather than as anything about architecture.
-  docker build --platform linux/amd64 \
-    --file docker/Dockerfile \
-    --build-arg "RELEASE=${release}" \
-    --build-arg "BUILD_COMMIT=${commit}" \
-    --build-arg "BUILD_TIME=${built_at}" \
-    --tag "$image" .
+  if [ "$release" = "troupe_gui" ]; then
+    # The GUI is built from its own directory, as CI builds it, with the path the chart
+    # mounts it at baked into its asset URLs.
+    docker build --platform linux/amd64 \
+      --file clients/gui/Dockerfile \
+      --build-arg "TROUPE_GUI_BASE=${TROUPE_GUI_BASE:-/app}" \
+      --tag "$image" clients/gui
+  else
+    docker build --platform linux/amd64 \
+      --file docker/Dockerfile \
+      --build-arg "RELEASE=${release}" \
+      --build-arg "BUILD_COMMIT=${commit}" \
+      --build-arg "BUILD_TIME=${built_at}" \
+      --tag "$image" .
+  fi
 
   if [ "$push" = "true" ]; then
     echo "build-images: pushing $image"

@@ -1,8 +1,16 @@
 # The daemon — phase 0: does it boot?
 
-*2026-09-19. The spike named in `../troupe/docs/brief-daemon.md` §4, phase 0. What ran,
+*2026-09-19. The spike named in `docs/program/brief-daemon.md` §4, phase 0. What ran,
 what it proved, and every place the harness still assumes a pod. This list is the input
 to phase 1 and to the brief's section 7.*
+
+> **Since then (2026-09-21).** Items 1–3 below are settled. There is a release:
+> `apps/troupe_daemon`, the `troupe_daemon` release built from that directory, one per
+> platform, with the host's `reaper` built into it (Decisions 667, 669). And something can
+> spawn it: `Troupe.Protocol.Daemon` falls back to a `troupe-daemon` on the `PATH` when
+> `TROUPE_DAEMON_COMMAND` is unset, and the installers at the repository root put it
+> there, beside the TUI (671). The spike itself now finds the GUI's client in
+> `clients/gui` without being told. The rest of the list is as it was found.
 
 ## What ran
 
@@ -11,7 +19,7 @@ checkout as a local daemon and drives it with `@troupe/client`, the GUI's TypeSc
 client, over the loopback WebSocket the daemon publishes in `daemon.json`:
 
 ```
-$ scripts/daemon-spike ../troupe-gui/packages/client
+$ scripts/daemon-spike clients/gui/packages/client
 daemon: unix:/tmp/troupe-spike-EMLb/run/troupe/daemon.sock
 {"path":".../daemon.sock","transport":"unix","ws":{"port":40613,"token":"…"}}
 initialize: {"instance_id":"cAKYSgYQNNY","name":"troupe-daemon","version":"0.2.0"}
