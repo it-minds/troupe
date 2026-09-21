@@ -1,0 +1,46 @@
+#!/usr/bin/env sh
+# Builds the Burrito binary for the current host and installs it as `troupe`
+# in $TROUPE_INSTALL_DIR (default ~/.local/bin).
+# Requires the toolchain pinned in .tool-versions (erlang, elixir, zig).
+set -eu
+cd "$(dirname "$0")/.."
+
+case "$(uname -s)-$(uname -m)" in
+  Linux-x86_64)   TARGET=linux_x86_64;   export TARGET_ABI=musl ;;
+  Linux-aarch64)  TARGET=linux_aarch64;  export TARGET_ABI=musl ;;
+  Darwin-x86_64)  TARGET=macos_x86_64 ;;
+  Darwin-arm64)   TARGET=macos_aarch64 ;;
+  *) echo "unsupported host: $(uname -s)-$(uname -m)" >&2; exit 1 ;;
+esac
+
+export MIX_ENV=prod
+export BURRITO_TARGET="$TARGET"
+export TROUPE_REAPER_TARGETS=all
+
+INSTALL_DIR="${TROUPE_INSTALL_DIR:-$HOME/.local/bin}"
+
+mix deps.get
+mix release --overwrite
+
+mkdir -p "$INSTALL_DIR"
+mv "burrito_out/troupe_$TARGET" "$INSTALL_DIR/troupe"
+chmod +x "$INSTALL_DIR/troupe"
+
+# Burrito extracts its payload once per version, so without this a rebuild at
+# the same version keeps running the previous build. The data dir it extracts
+# into is the platform's, not always XDG's: macOS unpacks into
+# ~/Library/Application Support/.burrito, so sweep every location install.sh does.
+for base in "$HOME/.local/share/.burrito" "${XDG_DATA_HOME:-}/.burrito" "$HOME/Library/Application Support/.burrito"; do
+  [ -n "$base" ] && [ -d "$base" ] || continue
+  for d in "$base"/troupe_*; do
+    [ -d "$d" ] || continue
+    echo "removing payload cache $d"
+    rm -rf "$d"
+  done
+done
+
+echo "installed $INSTALL_DIR/troupe"
+case ":$PATH:" in
+  *":$INSTALL_DIR:"*) ;;
+  *) echo "warning: $INSTALL_DIR is not on your PATH" >&2 ;;
+esac
