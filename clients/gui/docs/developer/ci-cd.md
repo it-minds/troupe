@@ -6,8 +6,9 @@ workflows, beside everything else the repository ships.
 
 | workflow | the GUI's part | when |
 |---|---|---|
-| [`ci.yml`](../../../../.github/workflows/ci.yml) | `gui` (tokens, typecheck, build, test), `gui-e2e` (the client against a plane built from the same commit), the `troupe-gui` image, and the release that promotes and deploys it | a pull request that touches it; every push to `main` |
-| [`release.yml`](../../../../.github/workflows/release.yml) | `desktop`: the installers for macOS, Windows and Linux | a pull request that touches the app or the client, nightly, and every release |
+| [`ci.yml`](../../../../.github/workflows/ci.yml) | `gui` (tokens, typecheck, build, test), `gui-e2e` (the client against a plane built from the same commit), and the `troupe-gui` image on `main` (through `images.yml`) | a pull request or push to `main` that touches it; every job, whatever changed, in the nightly and in a release |
+| [`native.yml`](../../../../.github/workflows/native.yml) | `desktop`: the installers for macOS, Windows and Linux | a pull request that touches the app or the client, nightly, every pre-release and every release |
+| [`release.yml`](../../../../.github/workflows/release.yml) / [`prerelease.yml`](../../../../.github/workflows/prerelease.yml) | the release that tags, publishes and deploys it, after the full suite; an untested pre-release by hand | a merged VERSION change; by hand |
 | [`deploy.yml`](../../../../.github/workflows/deploy.yml) | nothing of its own: it rolls back, or renders, a whole release | only when a person starts it |
 
 **A release deploys itself** (root Decision 669). That replaces "CI builds; a person
@@ -101,10 +102,10 @@ at once.
 
 ## `desktop` — installers
 
-A job of the root `release.yml`, which also builds the daemon and the TUI. It runs when a
+A job of the root `native.yml`, which also builds the daemon and the TUI. It runs when a
 pull request touches `clients/gui/apps/desktop` or `clients/gui/packages/client` (as
-`ci.yml`'s `native` job), nightly on `main`, and when a release is cut, when its installers
-are attached to the release. One runner per platform; slow, so it is separate from the
+`ci.yml`'s `native` job), nightly on `main`, and for a pre-release or a release, when its
+installers are attached to it. One runner per platform; slow, so it is separate from the
 tests and does not repeat them.
 
 Ubuntu **22.04** is deliberate: it is the glibc floor, the oldest Ubuntu carrying

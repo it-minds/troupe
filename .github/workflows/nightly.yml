@@ -1,0 +1,26 @@
+# Every night, on `main`: the full suite — every job whatever changed, the soak and the
+# cluster suite — and the native builds, so a race, a cluster regression or a broken
+# Windows build is found the next morning rather than by the next release. Nothing is
+# published. `.github/CI.md` has the picture.
+name: nightly
+
+on:
+  schedule:
+    - cron: "17 2 * * *"
+  workflow_dispatch:
+
+jobs:
+  suite:
+    name: the full suite
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+      pull-requests: read
+    with:
+      full: true
+      soak: 9
+      cluster: true
+
+  native:
+    name: native builds
+    uses: ./.github/workflows/native.yml

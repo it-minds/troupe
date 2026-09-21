@@ -1,0 +1,136 @@
+# The five container images, built from one commit and pushed as `sha-<short>` — and,
+# when a caller names one, as a version too.
+#
+# One definition for the three callers that need images: `ci.yml` on every push to `main`
+# (so every merged commit is pullable by a name that can only mean one build),
+# `prerelease.yml` (a version like `0.3.1-pre.7`, untested), and `release.yml` (the
+# version, after the full suite). See `.github/CI.md`.
+name: images
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: >-
+          Also tag every image with this version, and build with it written into VERSION so
+          the plane reports it at /.well-known/troupe. Empty: `sha-<short>` only, built with
+          VERSION as committed.
+        type: string
+        default: ""
+      ref:
+        description: The commit to build; empty is the caller's.
+        type: string
+        default: ""
+
+jobs:
+  image:
+    name: image ${{ matrix.image }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - {image: troupe-operator, release: troupe_operator, context: ., file: docker/Dockerfile}
+          - {image: troupe-plane, release: troupe_plane, context: ., file: docker/Dockerfile}
+          - {image: troupe-worker, release: troupe_worker, context: ., file: docker/Dockerfile}
+          - {image: troupe-a2a, release: troupe_a2a, context: ., file: docker/Dockerfile}
+          # The GUI is built from its own directory, which is also the proof that nothing
+          # in it reaches into the rest of the repository.
+          - {image: troupe-gui, release: "", context: clients/gui, file: clients/gui/Dockerfile}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      # Where the images go. Four secrets: `REGISTRY` and `REGISTRY_NAMESPACE` name it
+      # and the path under it (Scaleway's registry wants its namespace there, not the
+      # GitHub owner), `REGISTRY_USERNAME` and `REGISTRY_PASSWORD` are how to log in.
+      #
+      # All four, or none. A registry *password* set on its own once paired itself with a
+      # defaulted ghcr.io and answered `denied: denied` — a credential for one registry
+      # offered to another. A half-configured registry is not a state worth guessing
+      # about, so publishing requires the pair, and the summary says which are missing.
+      # A caller that names a version needs the images, so there it is an error.
+      - name: Resolve the registry and the tags
+        id: registry
+        env:
+          REGISTRY: ${{ secrets.REGISTRY }}
+          REGISTRY_NAMESPACE: ${{ secrets.REGISTRY_NAMESPACE }}
+          REGISTRY_PASSWORD: ${{ secrets.REGISTRY_PASSWORD }}
+          IMAGE: ${{ matrix.image }}
+          VERSION: ${{ inputs.version }}
+        run: |
+          if [ -z "${REGISTRY}" ] || [ -z "${REGISTRY_PASSWORD}" ]; then
+            if [ -n "${VERSION}" ]; then
+              echo "::error title=No registry::${VERSION} needs its images, and no registry is configured. Set REGISTRY, REGISTRY_NAMESPACE, REGISTRY_USERNAME and REGISTRY_PASSWORD."
+              exit 1
+            fi
+            echo "publish=false" >> "$GITHUB_OUTPUT"
+            {
+              echo "### ${IMAGE}: not published"
+              echo
+              echo "No registry is configured. Set the repository secrets \`REGISTRY\`,"
+              echo "\`REGISTRY_NAMESPACE\`, \`REGISTRY_USERNAME\` and \`REGISTRY_PASSWORD\`,"
+              echo "and this job will build and push the image."
+            } >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          namespace="${REGISTRY_NAMESPACE:-${GITHUB_REPOSITORY_OWNER}}"
+          # Registries want lower case, and a GitHub owner need not be.
+          image=$(echo "${REGISTRY}/${namespace}/${IMAGE}" | tr '[:upper:]' '[:lower:]')
+          sha=$(git rev-parse --short=7 HEAD)
+          tags="${image}:sha-${sha}"
+          [ -z "${VERSION}" ] || tags="${tags},${image}:${VERSION}"
+
+          echo "publish=true" >> "$GITHUB_OUTPUT"
+          echo "registry=${REGISTRY}" >> "$GITHUB_OUTPUT"
+          echo "tags=${tags}" >> "$GITHUB_OUTPUT"
+          echo "commit=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+          echo "built_at=$(date -u +%Y-%m-%dT%H:%M:%SZ)" >> "$GITHUB_OUTPUT"
+          echo "- \`${tags//,/\`, \`}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      # A pre-release is the committed code under a version VERSION does not say. Written
+      # into the build context, so the release inside the image reports it.
+      - name: Build as ${{ inputs.version }}
+        if: inputs.version != '' && steps.registry.outputs.publish == 'true'
+        env:
+          VERSION: ${{ inputs.version }}
+        run: echo "$VERSION" > VERSION
+
+      - uses: docker/setup-buildx-action@v3
+        if: steps.registry.outputs.publish == 'true'
+
+      - uses: docker/login-action@v3
+        if: steps.registry.outputs.publish == 'true'
+        with:
+          registry: ${{ steps.registry.outputs.registry }}
+          username: ${{ secrets.REGISTRY_USERNAME }}
+          password: ${{ secrets.REGISTRY_PASSWORD }}
+
+      # linux/amd64 only: that is what the node pool is, and an arm64 build of the
+      # umbrella under emulation is an hour nobody has asked for. The four server images
+      # share every layer up to `mix release`, so one cache serves them.
+      #
+      # `BUILD_COMMIT` and `BUILD_TIME` are what the plane reports at `/.well-known/troupe`,
+      # which is how a deploy proves it is running what it rolled. `TROUPE_GUI_BASE` is
+      # baked into the GUI's asset URLs and must match the chart's `gui.basePath`; the
+      # `GUI_BASE` variable changes both for a deployment that mounts it elsewhere.
+      - uses: docker/build-push-action@v6
+        if: steps.registry.outputs.publish == 'true'
+        with:
+          context: ${{ matrix.context }}
+          file: ${{ matrix.file }}
+          build-args: |
+            RELEASE=${{ matrix.release }}
+            BUILD_COMMIT=${{ steps.registry.outputs.commit }}
+            BUILD_TIME=${{ steps.registry.outputs.built_at }}
+            TROUPE_GUI_BASE=${{ vars.GUI_BASE || 'app' }}
+          platforms: linux/amd64
+          push: true
+          tags: ${{ steps.registry.outputs.tags }}
+          cache-from: type=gha,scope=${{ matrix.image }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.image }}

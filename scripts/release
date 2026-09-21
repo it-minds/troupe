@@ -4,10 +4,10 @@
 #     scripts/release 0.3.1          # a release
 #     scripts/release 0.4.0-rc.1     # a release candidate: published, deployed as a dry run
 #
-# Merging that pull request is the release (Decision 669). The run on `main` that follows
-# sees a VERSION with no tag, tags it, promotes the images it has just built and tested to
-# that version, packages the chart, builds the daemon, the TUI and the desktop app for
-# every platform, and deploys to production. There is no other way to cut one: a tag
+# Merging that pull request is the release (Decisions 669, 676): `release.yml` runs the
+# full suite on it, builds the images at that version, tags it, packages the chart, builds
+# the daemon, the TUI and the desktop app for every platform, and deploys to production.
+# For an untested build to try out instead, run the `pre-release` workflow. There is no other way to cut one: a tag
 # pushed by hand is not a release, and nothing deploys from a laptop.
 #
 # Needs a clean checkout, `gh` signed in, and Elixir (for scripts/version.exs).

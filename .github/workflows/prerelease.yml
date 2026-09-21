@@ -1,0 +1,167 @@
+# A pre-release: any commit, built and published as `<VERSION>-pre.<run>` without the
+# test suite (Decision 676). `.github/CI.md` has the picture.
+#
+# For trying a build before it is a release — on a laptop with the installers, or on a
+# cluster by pulling its images — at the cost of the twenty-odd minutes of builds and
+# none of the hour of tests. What it does check is what building checks: the native
+# jobs' own smoke tests (`--version`, a headless run in the embedded daemon) still run,
+# because a binary that cannot start is not a build.
+#
+# Published as a GitHub *pre-release*, so `/releases/latest` — and so the installers'
+# default — never picks one up: `TROUPE_VERSION=0.3.1-pre.12 sh install.sh` does. Nothing
+# is deployed. The newest `keep` pre-releases are kept; older ones, and their tags, are
+# deleted, so the releases page stays a list of releases.
+name: pre-release
+
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: The branch, tag or commit to build
+        type: string
+        default: main
+      native:
+        description: Build troupe, troupe-daemon and the desktop app
+        type: boolean
+        default: true
+      images:
+        description: Build and push the five images
+        type: boolean
+        default: true
+      keep:
+        description: Pre-releases to keep (older ones are deleted)
+        type: number
+        default: 5
+
+concurrency:
+  group: prerelease-${{ inputs.ref }}
+  cancel-in-progress: false
+
+jobs:
+  plan:
+    name: name it
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.name.outputs.version }}
+      tag: ${{ steps.name.outputs.tag }}
+      sha: ${{ steps.name.outputs.sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.ref }}
+
+      # Numbered from VERSION as committed and this workflow's run number, which only
+      # goes up: `0.3.1-pre.12`. SemVer orders it before `0.3.1`, and every tool that
+      # reads a version — Mix, Helm, the registries — takes it.
+      - name: Name it
+        id: name
+        run: |
+          version="$(tr -d '[:space:]' < VERSION)-pre.${GITHUB_RUN_NUMBER}"
+          sha="$(git rev-parse HEAD)"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=v${version}" >> "$GITHUB_OUTPUT"
+          echo "sha=${sha}" >> "$GITHUB_OUTPUT"
+          echo "### v${version} from \`${sha::7}\` (${{ inputs.ref }}) — untested" >> "$GITHUB_STEP_SUMMARY"
+
+  images:
+    name: images at ${{ needs.plan.outputs.version }}
+    needs: [plan]
+    if: inputs.images
+    uses: ./.github/workflows/images.yml
+    permissions:
+      contents: read
+      packages: write
+    with:
+      version: ${{ needs.plan.outputs.version }}
+      ref: ${{ needs.plan.outputs.sha }}
+    secrets: inherit
+
+  # The tag, the chart, and a draft for the native builds to attach to.
+  draft:
+    name: tag ${{ needs.plan.outputs.tag }}
+    needs: [plan]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.plan.outputs.sha }}
+
+      - uses: azure/setup-helm@v4
+
+      - name: Package the chart
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: helm package charts/troupe --version "$VERSION" --app-version "$VERSION" --destination dist
+
+      - name: Tag it, and open a draft pre-release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+          VERSION: ${{ needs.plan.outputs.version }}
+          SHA: ${{ needs.plan.outputs.sha }}
+          REF: ${{ inputs.ref }}
+          IMAGES: ${{ inputs.images }}
+        run: |
+          git tag "$TAG" "$SHA"
+          git push origin "refs/tags/${TAG}"
+          images="Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`."
+          [ "$IMAGES" = true ] || images="No images were built for this one."
+          cat > notes.md <<NOTES
+          **Untested.** \`${REF}\` at \`${SHA::7}\`, built without running the test suite — for trying out, not for production. A release (\`scripts/release\`) runs the full suite; this did not.
+
+          On a machine: \`TROUPE_VERSION=${VERSION} sh install.sh\` (or \`\$env:TROUPE_VERSION = "${VERSION}"; .\\install.ps1\`).
+
+          ${images}
+          NOTES
+          gh release create "$TAG" --draft --prerelease --verify-tag --title "$TAG (untested)" --notes-file notes.md dist/troupe-*.tgz
+
+  native:
+    name: native builds
+    needs: [plan, draft]
+    if: inputs.native
+    uses: ./.github/workflows/native.yml
+    permissions:
+      contents: write
+    with:
+      tag: ${{ needs.plan.outputs.tag }}
+      version: ${{ needs.plan.outputs.version }}
+      ref: ${{ needs.plan.outputs.sha }}
+    secrets: inherit
+
+  publish:
+    name: publish ${{ needs.plan.outputs.tag }}
+    needs: [plan, draft, images, native]
+    # Whatever was asked for has to have worked; what was not asked for was skipped.
+    if: ${{ !cancelled() && needs.draft.result == 'success' && !contains(needs.*.result, 'failure') }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checksums, then publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: |
+          mkdir dist && cd dist
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
+          rm -f SHA256SUMS
+          sha256sum -- * > SHA256SUMS
+          gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
+          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+
+      # Only this workflow's own: a tag ending `-pre.<n>`. A release candidate
+      # (`0.4.0-rc.1`) is a release and is never touched.
+      - name: Keep the newest ${{ inputs.keep }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          KEEP: ${{ inputs.keep }}
+        run: |
+          gh release list --repo "$GITHUB_REPOSITORY" --limit 200 --json tagName,isPrerelease,createdAt \
+            --jq '[.[] | select(.isPrerelease and (.tagName | test("-pre\\.[0-9]+$")))] | sort_by(.createdAt) | reverse | .[].tagName' \
+            | tail -n +"$((KEEP + 1))" \
+            | while read -r old; do
+                echo "deleting ${old}"
+                gh release delete "$old" --repo "$GITHUB_REPOSITORY" --cleanup-tag --yes
+              done
