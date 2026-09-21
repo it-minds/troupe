@@ -13,8 +13,8 @@ defmodule Troupe.Remote.Translate do
   contract requires; the same goes for unknown fields, which are simply not read.
   """
 
+  alias Troupe.Client.Message
   alias Troupe.Event
-  alias Troupe.LLM.Message
 
   require Logger
 

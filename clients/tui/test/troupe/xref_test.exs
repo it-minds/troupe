@@ -23,7 +23,7 @@ defmodule Troupe.XrefTest do
   test "the rule catches a UI module that reaches past the client" do
     alias Troupe.XrefFixtures.Offender
 
-    assert [{Offender, {Troupe.Session.Dispatcher, :windows, 1}}] =
+    assert [{Offender, {Troupe.Remote.Worker, :whereis, 1}}] =
              Xref.offending_calls(Offender)
   end
 

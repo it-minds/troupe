@@ -123,14 +123,13 @@ defmodule Troupe.TUISelectionTest do
 
   defp open_pane(context_reply \\ @reply) do
     ws = tmp_workspace()
-    scripts = %{"code-1" => [{:text, context_reply}, {:finish, "done"}]}
-    {sid, _, _} = start_session!(workspace: ws, scripts: scripts)
-    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "do the thing")
-    await_state("code-1", :done_unread)
+    {sid, _, _} = start_session!(workspace: ws, script: [{:text, context_reply}, {:finish, "done"}])
+    say!(sid, "do the thing")
+    await_done()
 
     {pid, session} = start_tui(sid)
     press(pid, "1")
-    eventually(fn -> match?({:window, "code-1"}, user_state(pid).focus) end)
+    eventually(fn -> match?({:window, "root"}, user_state(pid).focus) end)
     {pid, session}
   end
 
@@ -229,7 +228,7 @@ defmodule Troupe.TUISelectionTest do
 
     press(pid, "esc")
     assert user_state(pid).selection == nil
-    assert user_state(pid).focus == {:window, "code-1"}
+    assert user_state(pid).focus == {:window, "root"}
 
     press(pid, "esc")
     assert user_state(pid).focus == :command

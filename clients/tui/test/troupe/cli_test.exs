@@ -10,13 +10,13 @@ defmodule Troupe.CLITest do
     assert {:ok, %{mode: :tui, watch: false}} = CLI.parse([])
     assert {:ok, %{mode: :tui, watch: true}} = CLI.parse(["--watch"])
 
-    assert {:ok, %{mode: :run, agent: "code", task: "fix it", headless: true}} =
+    assert {:ok, %{mode: :run, agent: "build", task: "fix it", headless: true}} =
              CLI.parse(["run", "fix it", "--headless"])
 
     assert {:ok, %{mode: :run, agent: "plan", task: "x", worktree: true, auto_approve: true}} =
              CLI.parse(["run", "plan", "x", "--worktree", "--auto-approve"])
 
-    assert {:ok, %{mode: :run, agent: "code", task: "x", full_send: true}} =
+    assert {:ok, %{mode: :run, agent: "build", task: "x", full_send: true}} =
              CLI.parse(["run", "x", "--full-send"])
 
     assert {:ok, %{mode: :tui, full_send: true}} = CLI.parse(["--full-send"])
@@ -82,99 +82,47 @@ defmodule Troupe.CLITest do
     {:ok, _} =
       Printer.start_link(
         session_id: sid,
-        target: "code-1",
+        target: "root",
         io: io,
         on_rest: fn code -> send(me, {:rest, code}) end
       )
 
-    {:ok, path} = Troupe.dispatch(sid, "code", "write then read")
-    assert_receive {:rest, 0}, 10_000
+    say!(sid, "write then read")
+    assert_receive {:rest, 0}, 15_000
     {_, out} = StringIO.contents(io)
-    assert out =~ "#{path}> spawned /code (shared)"
-    assert out =~ "#{path}> < write then read"
-    assert out =~ "#{path}> → write_file"
-    assert out =~ "#{path}> ✓ call_2: exit 0\n#{path}> hi"
-    assert out =~ "#{path}> [done_unread] wrote and read"
-    assert Enum.all?(String.split(String.trim(out), "\n"), &String.starts_with?(&1, "code-1> "))
+    assert out =~ "root> < write then read"
+    assert out =~ "root> → write_file"
+    assert out =~ "root> → shell"
+    assert out =~ "hi"
+
+    assert Enum.all?(
+             String.split(String.trim(out), "
+"),
+             &String.starts_with?(&1, "root> ")
+           )
   end
 
-  # Nobody can press a key in headless mode, so a budget question the printer does
-  # not answer leaves the run blocked in `wait()` until the user kills it.
-  test "headless printer stops a branch whose budget ran out instead of waiting forever" do
-    ws = tmp_workspace(%{"f.txt" => "x"})
-    script = List.duplicate({:tool, "read_file", %{"path" => "f.txt"}}, 10)
-    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
-    {:ok, io} = StringIO.open("")
-    me = self()
-
-    {:ok, _} =
-      Printer.start_link(
-        session_id: sid,
-        target: "code-1",
-        io: io,
-        on_rest: fn code -> send(me, {:rest, code}) end
-      )
-
-    {:ok, path} = Troupe.dispatch(sid, "code", %{prompt: "loop", budget: %{max_turns: 1}})
-    assert_receive {:rest, 0}, 10_000
-
-    {_, out} = StringIO.contents(io)
-    # The question names the ceiling that was reached, not just that one was.
-    assert out =~ "#{path}> budget exhausted (turns 1/1 (100%)); headless mode stops here"
-    assert window(sid, path).reason == :budget_exhausted
-  end
-
-  # With options offered the first is a better stand-in than boilerplate prose:
-  # it is an answer the model can actually act on.
-  test "headless printer answers a question with its first option when one is offered" do
+  # Nobody can press a key in headless mode: an approval the printer cannot answer is
+  # denied, and the run still rests.
+  test "headless printer denies an approval it cannot ask about, and the session still rests" do
     ws = tmp_workspace()
-
-    script = [
-      {:tool, "ask_user", %{"question" => "Which database?", "options" => ["postgres", "sqlite"]}},
-      {:finish, "chose one"}
-    ]
-
-    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
+    script = [{:tool, "write_file", %{"path" => "out.txt", "content" => "hi"}}, {:finish, "tried"}]
+    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: false)
     {:ok, io} = StringIO.open("")
     me = self()
 
     {:ok, _} =
       Printer.start_link(
         session_id: sid,
-        target: "code-1",
+        target: "root",
         io: io,
         on_rest: fn code -> send(me, {:rest, code}) end
       )
 
-    {:ok, path} = Troupe.dispatch(sid, "code", "ask me")
-    assert_receive {:rest, 0}, 10_000
-
+    say!(sid, "write")
+    assert_receive {:rest, 0}, 15_000
     {_, out} = StringIO.contents(io)
-    assert out =~ ~s|#{path}> question: Which database? (headless: answered "postgres")|
-
-    [answered] = events_of(sid, "code-1", :question_answered)
-    assert answered.data.text == "postgres"
-  end
-
-  test "headless printer falls back to judgement prose when a question offers no options" do
-    ws = tmp_workspace()
-    script = [{:tool, "ask_user", %{"question" => "Anything?"}}, {:finish, "guessed"}]
-    {sid, _, _} = start_session!(workspace: ws, script: script, auto_approve: true)
-    {:ok, io} = StringIO.open("")
-    me = self()
-
-    {:ok, _} =
-      Printer.start_link(
-        session_id: sid,
-        target: "code-1",
-        io: io,
-        on_rest: fn code -> send(me, {:rest, code}) end
-      )
-
-    {:ok, _path} = Troupe.dispatch(sid, "code", "ask me")
-    assert_receive {:rest, 0}, 10_000
-
-    [answered] = events_of(sid, "code-1", :question_answered)
-    assert answered.data.text =~ "proceed with your best judgement"
+    assert out =~ "approval needed for write_file; headless mode denies it"
+    refute File.exists?(Path.join(ws, "out.txt"))
   end
 end

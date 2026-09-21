@@ -11,13 +11,13 @@ defmodule Troupe.XrefFixtures do
 
   defmodule Offender do
     @moduledoc false
-    def windows(sid), do: Troupe.Session.Dispatcher.windows(sid)
+    def windows(sid), do: Troupe.Remote.Worker.whereis(sid)
     def fine(sid), do: Troupe.Client.events(sid)
   end
 
   defmodule Renderer do
     @moduledoc false
-    def text(blocks), do: Troupe.LLM.Message.text(blocks)
+    def text(blocks), do: Troupe.Client.Message.text(blocks)
     def fields, do: Troupe.Settings.fields()
     def events(sid), do: Troupe.Client.events(sid)
   end

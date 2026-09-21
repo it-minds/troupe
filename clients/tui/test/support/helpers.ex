@@ -1,10 +1,24 @@
 defmodule Troupe.TestHelpers do
-  @moduledoc "Shared test helpers: temp workspaces, sessions with a Fake, event waits."
+  @moduledoc """
+  Shared test helpers: temp workspaces, daemon sessions with a scripted model, event
+  waits.
+
+  A session is the daemon's — the one this VM embeds (`Troupe.Client.Daemon.Link`) — and
+  the test reaches it exactly as the TUI does, through `Troupe.Client`. The model is
+  deterministic because the *workspace* says so: `start_session!/1` writes
+  `provider: fake` and a JSON script into the workspace's `.troupe/config.yaml`, which the
+  daemon reads when it creates the session. A test never hands the harness a fake process,
+  because a client cannot.
+
+  Events reach the test as the TUI sees them: `{:troupe_event, %Troupe.Event{}}`, the
+  protocol's events translated at the edge (`Troupe.Remote.Translate`). A session's one
+  agent is the window `"root"`.
+  """
 
   import ExUnit.Assertions
   import ExUnit.Callbacks, only: [on_exit: 1]
 
-  alias Troupe.LLM.Fake
+  alias Troupe.Client
 
   @doc "Creates an empty temporary workspace, removed on exit."
   def tmp_workspace(files \\ %{}) do
@@ -37,61 +51,125 @@ defmodule Troupe.TestHelpers do
     out
   end
 
-  @doc "Starts a session with a Fake provider and subscribes the caller. Returns `{sid, fake, ws}`."
+  @doc """
+  Starts a daemon session in a workspace whose model answers from a script, and
+  subscribes the caller. Returns `{sid, :fake, ws}` — the middle element is a placeholder
+  where the in-process fake used to be, so call sites read the same.
+
+  Options: `:workspace`; `:script` (steps for the root agent) or `:scripts` (a map of
+  agent name → steps, `"root"` for the root; the old `"code-1"` spelling is read as the
+  root); `:auto_approve` (default true, because most tests are about the transcript, not
+  the gate); `:profile`; `:prompt`; `:config` (extra YAML keys as a map).
+
+  Steps are the old spellings: `{:text, t}`, `{:tool, name, input}`, `{:tools, [{n, i}]}`,
+  `{:finish, summary}`, `{:error, reason}`, plus `{:text_and_tools, t, calls}`.
+  """
   def start_session!(opts \\ []) do
     ws = Keyword.get_lazy(opts, :workspace, fn -> tmp_workspace() end)
+    routes = routes(Keyword.get(opts, :script), Keyword.get(opts, :scripts))
 
-    fake =
-      Keyword.get_lazy(opts, :fake, fn ->
-        Fake.start!(Keyword.get(opts, :script, []), Keyword.take(opts, [:scripts, :fallback]))
-      end)
+    write_fake_config!(
+      ws,
+      routes,
+      Keyword.get(opts, :auto_approve, true),
+      Keyword.get(opts, :config, %{})
+    )
 
-    session_opts =
-      opts
-      |> Keyword.drop([:workspace, :fake, :script, :scripts, :fallback])
-      |> Keyword.merge(workspace: ws, provider: {Fake, fake})
+    params =
+      %{worktree: "never"}
+      |> put_present(:profile, Keyword.get(opts, :profile))
+      |> put_present(:prompt, Keyword.get(opts, :prompt))
 
-    # Every temp workspace lacks a brief, so a session would dispatch a librarian
-    # into the Fake's script. Tests that want one pass `auto_refresh: true`.
-    session_opts =
-      Keyword.update(session_opts, :config, %{memory: %{auto_refresh: false}}, &no_auto_refresh/1)
-
-    {:ok, sid} = Troupe.start_session(session_opts)
-    :ok = Troupe.subscribe(sid)
-    on_exit(fn -> Troupe.stop_session(sid) end)
-    {sid, fake, ws}
+    {:ok, sid} = Client.create_session({:local, ws}, params)
+    :ok = Client.subscribe(sid)
+    on_exit(fn -> Client.stop_session(sid) end)
+    {sid, :fake, ws}
   end
 
-  defp no_auto_refresh(config) do
-    config
-    |> Map.new()
-    |> Map.update(:memory, %{auto_refresh: false}, &Map.put_new(&1, :auto_refresh, false))
+  @doc "Sends input to the session's agent, as typing in its window does."
+  def say!(sid, text), do: :ok = Client.send_input(sid, "root", text)
+
+  defp put_present(map, _key, nil), do: map
+  defp put_present(map, key, value), do: Map.put(map, key, value)
+
+  defp routes(nil, nil), do: %{"root" => []}
+  defp routes(script, nil) when is_list(script), do: %{"root" => script}
+
+  defp routes(_script, scripts) when is_map(scripts) do
+    Map.new(scripts, fn {agent, steps} -> {route_name(agent), steps} end)
   end
 
-  @doc """
-  The per-turn context a request carries: the task list and workspace context,
-  which live in a volatile block after the last cache breakpoint rather than in
-  the system prompt, so the cached prefix stays byte-identical between turns.
-  """
-  def volatile_text(request) do
-    request.messages
-    |> Enum.flat_map(& &1.content)
-    |> Enum.filter(&Troupe.LLM.Message.volatile?/1)
-    |> Enum.map_join("\n", & &1.text)
+  # The old fake read a text-only step as an implicit finish; the daemon's model ends the
+  # turn on one and waits for input. So a text step becomes text plus `finish` — with the
+  # summary of a `{:finish, _}` that follows it, when one does — and a test that wants a
+  # reply *without* the agent finishing spells `{:text_and_tools, text, []}`.
+  defp finishing([{:text, text}, {:finish, summary} | rest]),
+    do: [{:text_and_tools, text, [{"finish", %{"summary" => summary}}]} | finishing(rest)]
+
+  defp finishing([{:text, text} | rest]),
+    do: [{:text_and_tools, text, [{"finish", %{"summary" => text}}]} | finishing(rest)]
+
+  defp finishing([step | rest]), do: [step | finishing(rest)]
+  defp finishing([]), do: []
+
+  # `code-1` was the first branch of the `code` profile; there is one agent per session
+  # now and it is the root. A subagent keeps its own name.
+  defp route_name(agent) do
+    cond do
+      agent == "root" -> "root"
+      Regex.match?(~r/^[a-z_]+-1$/, agent) -> "root"
+      true -> String.replace(agent, ~r/-\d+$/, "")
+    end
   end
 
-  @doc "Waits for the window `path` to publish `branch_state` = `state`."
-  def await_state(path, state, timeout \\ 5_000)
+  defp write_fake_config!(ws, routes, auto_approve?, extra) do
+    File.mkdir_p!(Path.join(ws, ".troupe"))
+    script = Path.join(ws, ".troupe/fake.json")
 
-  def await_state(path, :failed_unread, timeout) do
-    assert_receive {:troupe_event, %{type: :branch_failed, agent_path: ^path}}, timeout
+    File.write!(
+      script,
+      Jason.encode!(%{
+        "routes" =>
+          Map.new(routes, fn {a, steps} -> {a, steps |> finishing() |> Enum.map(&json_step/1)} end)
+      })
+    )
+
+    yaml =
+      Map.merge(
+        %{
+          "provider" => "fake",
+          "model" => "fake-model",
+          "auto_approve" => auto_approve?,
+          "fake_script" => script
+        },
+        Map.new(extra, fn {k, v} -> {to_string(k), v} end)
+      )
+
+    File.write!(Path.join(ws, ".troupe/config.yaml"), Troupe.Settings.encode_yaml(yaml))
   end
 
-  def await_state(path, state, timeout) do
-    assert_receive {:troupe_event,
-                    %{type: :branch_state, agent_path: ^path, data: %{state: ^state}}},
+  defp json_step({:text, text}), do: %{"text" => text}
+  defp json_step({:tool, name, input}), do: %{"tools" => [%{"name" => name, "input" => input}]}
+
+  defp json_step({:tools, calls}),
+    do: %{"tools" => Enum.map(calls, fn {n, i} -> %{"name" => n, "input" => i} end)}
+
+  defp json_step({:text_and_tools, text, calls}),
+    do: Map.put(json_step({:tools, calls}), "text", text)
+
+  defp json_step({:finish, summary}),
+    do: %{"tools" => [%{"name" => "finish", "input" => %{"summary" => summary}}]}
+
+  defp json_step({:error, reason}), do: %{"error" => to_string(reason)}
+
+  @doc "Waits for the window `path` to reach `state`: `:done`, `:thinking`, `:idle`, `:acting`."
+  def await_state(path, state, timeout \\ 5_000) do
+    assert_receive {:troupe_event, %{type: :agent_state, agent_path: ^path, data: %{to: ^state}}},
                    timeout
   end
+
+  @doc "Waits for the root agent to be done."
+  def await_done(timeout \\ 10_000), do: await_state("root", :done, timeout)
 
   @doc "Waits for any event of `type` for `path`; returns it."
   def await_event(path, type, timeout \\ 5_000) do
@@ -124,10 +202,9 @@ defmodule Troupe.TestHelpers do
     end
   end
 
-  def window(sid, path), do: sid |> Troupe.windows() |> Enum.find(&(&1.agent_path == path))
-
+  @doc "The translated events of one type for a window, from the client's journal."
   def events_of(sid, path, type),
-    do: sid |> Troupe.events() |> Enum.filter(&(&1.agent_path == path and &1.type == type))
+    do: sid |> Client.events() |> Enum.filter(&(&1.agent_path == path and &1.type == type))
 
   def flush_events do
     receive do

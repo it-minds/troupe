@@ -473,18 +473,21 @@ Pinned toolchain in `.tool-versions` / `mise.toml`: Erlang 28.5, Elixir
 1.20.4, Zig 0.16.0 (Burrito 1.6 requires exactly that Zig).
 
 ```sh
-mix deps.get
+mix deps.get              # the harness apps come from it-minds/troupe-remote (see mix.exs)
 mix check                 # compile --warnings-as-errors, format, credo --strict, test
 scripts/dev [args]        # run the CLI/TUI from source without a build (dev loop)
 scripts/build-local       # Burrito binary for this host into burrito_out/
-TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT=fixtures/fake_scripts/smoke.json \
-  burrito_out/troupe_linux_x86_64 run code smoke --headless --auto-approve
+printf 'provider: fake\nfake_script: %s\n' "$PWD/fixtures/fake_scripts/smoke.json" > .troupe/config.yaml
+burrito_out/troupe_linux_x86_64 run build smoke --headless --auto-approve
 ```
 
-`mix compile` cross-compiles the `reaper` helper (`native/reaper/reaper.zig`)
-for the host; `TROUPE_REAPER_TARGETS=all` builds every target (the release
-does this). Every OS process the harness starts runs under reaper, which kills
-the whole process tree when its owner dies.
+The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a
+dependency pinned to one `troupe-remote` commit (`@harness_ref` in `mix.exs`);
+`troupe_core`'s compile cross-compiles the `reaper` helper for the host, and
+`TROUPE_REAPER_TARGETS=all` builds every target (the release does this). Every
+OS process a session starts runs under reaper, which kills the whole process
+tree when its owner dies. The model is the workspace's business: `provider:
+fake` and `fake_script:` in its `.troupe/config.yaml` give a deterministic one.
 
 See `ARCHITECTURE.md` for the supervision tree, state machines, message
 protocol and failure matrix, and `DECISIONS.md` for every deviation from the

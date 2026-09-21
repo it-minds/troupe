@@ -8,7 +8,7 @@ defmodule Troupe.UI.Headless.Printer do
   use GenServer
 
   alias Troupe.Client
-  alias Troupe.LLM.Message
+  alias Troupe.Client.Message
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -40,7 +40,13 @@ defmodule Troupe.UI.Headless.Printer do
   def handle_info({:troupe_event, event}, state) do
     state = print(event, state)
 
+    # A session rests when its agent is done (`agent_done`, folded to `agent_state
+    # :done`) or fails. `branch_state` is the older local spelling and still read.
     case event do
+      %{type: :agent_state, agent_path: path, data: %{to: :done}} when path == state.target ->
+        if state.on_rest, do: state.on_rest.(0)
+        {:noreply, state}
+
       %{type: t, agent_path: path}
       when t in [:branch_state, :branch_failed] and path == state.target ->
         rest? = t == :branch_failed or event.data.state in [:done_unread]
@@ -73,13 +79,18 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :input, agent_path: p, data: d}, state),
     do: say(state, p, "< #{d.content}")
 
+  # The protocol says a tool started as its own event; the message that asked for it
+  # carries text only (Decision 98).
+  defp print(%{type: :tool_started, agent_path: p, data: d}, state),
+    do: say(state, p, "→ #{d.name} #{Jason.encode!(d.input)}")
+
   defp print(%{type: :tool_call_completed, agent_path: p, data: d}, state) do
     say(state, p, "#{if d.ok, do: "✓", else: "✗"} #{d.call_id}: #{String.slice(d.content, 0, 400)}")
   end
 
   defp print(%{type: :approval_requested, agent_path: p, data: d}, state) do
     line(state, p, "approval needed for #{d.name}; headless mode denies it (use --auto-approve)")
-    Troupe.approve(state.session_id, d.call_id, :deny)
+    Client.approve(state.session_id, d.call_id, :deny)
     state
   end
 
@@ -94,7 +105,7 @@ defmodule Troupe.UI.Headless.Printer do
       end
 
     line(state, p, "question: #{d.question} (headless: answered #{inspect(answer)})")
-    Troupe.answer(state.session_id, d.call_id, answer)
+    Client.answer(state.session_id, d.call_id, answer)
     state
   end
 
@@ -109,7 +120,7 @@ defmodule Troupe.UI.Headless.Printer do
       "budget exhausted#{detail}; headless mode stops here (raise the budget to go further)"
     )
 
-    Troupe.approve(state.session_id, d.call_id, :deny)
+    Client.approve(state.session_id, d.call_id, :deny)
     state
   end
 

@@ -1,8 +1,10 @@
 name: Release
 
-# One native runner per target (the precompiled ExRatatui NIF and file_system's
-# macOS backend resolve against the build host). Produces five binaries plus
-# SHA256SUMS. GitHub Actions syntax; Forgejo Actions runs it unchanged.
+# One native runner per target (the precompiled ExRatatui NIF resolves against the
+# build host). Produces five binaries plus SHA256SUMS. GitHub Actions syntax; Forgejo
+# Actions runs it unchanged. The harness comes from the private `it-minds/troupe-remote`
+# repository as sparse git dependencies, so `HARNESS_TOKEN` — a fine-grained token with
+# read access to that repository's contents — is what lets `mix deps.get` fetch them.
 
 on:
   push:
@@ -54,6 +56,9 @@ jobs:
           if [[ "$RUNNER_OS" == "Linux" ]]; then sudo apt-get update && sudo apt-get install -y xz-utils p7zip-full; fi
           if [[ "$RUNNER_OS" == "macOS" ]]; then brew install xz p7zip || true; fi
 
+      - name: Reach the harness repository
+        run: git config --global url."https://x-access-token:${{ secrets.HARNESS_TOKEN }}@github.com/".insteadOf "https://github.com/"
+
       - name: Get deps
         run: mix deps.get
 
@@ -75,10 +80,8 @@ jobs:
           mv "burrito_out/troupe_${{ matrix.target }}${EXT}" "burrito_out/${NAME}"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Smoke test (--version and a headless Fake run through reaper)
-        env:
-          TROUPE_PROVIDER: fake
-          TROUPE_FAKE_SCRIPT: ${{ github.workspace }}/fixtures/fake_scripts/smoke.json
+      # The daemon reads the model from the workspace, so the fake is configured there.
+      - name: Smoke test (--version and a headless Fake run in the embedded daemon)
         run: |
           BIN="burrito_out/${{ steps.art.outputs.name }}"
           chmod +x "$BIN" || true
@@ -87,8 +90,9 @@ jobs:
           START=$(date +%s%N); "$BIN" --version; END=$(date +%s%N)
           echo "warm --version: $(( (END-START)/1000000 )) ms"
           ls -la "$BIN"
-          mkdir -p /tmp/smoke && cd /tmp/smoke
-          "$GITHUB_WORKSPACE/$BIN" run code "smoke" --headless --auto-approve
+          mkdir -p /tmp/smoke/.troupe && cd /tmp/smoke
+          printf 'provider: fake\nmodel: fake-model\nfake_script: %s\n' "$GITHUB_WORKSPACE/fixtures/fake_scripts/smoke.json" > .troupe/config.yaml
+          "$GITHUB_WORKSPACE/$BIN" run build "smoke" --headless --auto-approve
           test -f hello.txt && cat hello.txt
 
       - uses: actions/upload-artifact@v4
@@ -111,10 +115,11 @@ jobs:
         run: |
           chmod +x dist/troupe-*-linux_x86_64
           for img in ubuntu:24.04 alpine:3.20; do
-            docker run --rm -v "$PWD/dist:/dist" -v "$PWD/fixtures:/fixtures" -e TROUPE_PROVIDER=fake -e TROUPE_FAKE_SCRIPT=/fixtures/fake_scripts/smoke.json "$img" sh -c '
-              set -e; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work && cd /work
+            docker run --rm -v "$PWD/dist:/dist" -v "$PWD/fixtures:/fixtures" "$img" sh -c '
+              set -e; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work/.troupe && cd /work
+              printf "provider: fake\nmodel: fake-model\nfake_script: /fixtures/fake_scripts/smoke.json\n" > .troupe/config.yaml
               $BIN --version
-              $BIN run code "smoke" --headless --auto-approve --watch 2>&1 | tee out.log
+              $BIN run build "smoke" --headless --auto-approve --watch 2>&1 | tee out.log
               grep -q polling out.log && echo "watch fell back to polling"
               test -f hello.txt'
           done

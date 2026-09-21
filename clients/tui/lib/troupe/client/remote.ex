@@ -14,7 +14,8 @@ defmodule Troupe.Client.Remote do
 
   @behaviour Troupe.Client
 
-  alias Troupe.{Config, Events}
+  alias Troupe.Client.Events
+  alias Troupe.Config
   alias Troupe.Remote.{Capability, Credentials, Discovery, Journal, Plane, RPC, Tokens, Worker}
 
   ## Session-scoped
@@ -370,7 +371,7 @@ defmodule Troupe.Client.Remote do
   @doc "The sessions this client has worker connections for, as HQ rows."
   @spec attached(Troupe.Client.origin()) :: [Troupe.Client.summary()]
   def attached({:remote, plane} = origin) do
-    Troupe.Registry
+    Troupe.Client.Registry
     |> Registry.select([{{{:remote_worker, :"$1"}, :_, :_}, [], [:"$1"]}])
     |> Enum.flat_map(fn sid ->
       case Worker.attachment(sid) do

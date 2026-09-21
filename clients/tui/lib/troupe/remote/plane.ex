@@ -59,11 +59,11 @@ defmodule Troupe.Remote.Plane do
 
   @doc "Registry name for a plane connection."
   @spec via(String.t()) :: GenServer.name()
-  def via(plane_url), do: {:via, Registry, {Troupe.Registry, {:plane, plane_url}}}
+  def via(plane_url), do: {:via, Registry, {Troupe.Client.Registry, {:plane, plane_url}}}
 
   @spec whereis(String.t()) :: pid() | nil
   def whereis(plane_url) do
-    case Registry.lookup(Troupe.Registry, {:plane, plane_url}) do
+    case Registry.lookup(Troupe.Client.Registry, {:plane, plane_url}) do
       [{pid, _}] -> pid
       [] -> nil
     end

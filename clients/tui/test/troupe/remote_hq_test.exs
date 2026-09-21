@@ -60,12 +60,12 @@ defmodule Troupe.RemoteHQTest do
     {sid, _fake, _ws} =
       start_session!(
         workspace: ws,
-        scripts: %{"code-1" => [{:finish, "did the local thing"}]},
+        script: [{:text, "did the local thing"}, {:finish, "did the local thing"}],
         auto_approve: true
       )
 
-    {:ok, "code-1"} = Troupe.dispatch(sid, "code", "a local errand")
-    await_state("code-1", :done_unread)
+    say!(sid, "a local errand")
+    await_done()
     {sid, ws}
   end
 
@@ -79,7 +79,7 @@ defmodule Troupe.RemoteHQTest do
         )
 
       login!(remote, url)
-      {sid, _ws} = local_session!()
+      {sid, ws} = local_session!()
 
       {pid, screen} = start_tui(sid, page: :hq, plane: url)
       text = screen_text(pid, screen)
@@ -103,7 +103,7 @@ defmodule Troupe.RemoteHQTest do
       assert text =~ "dormant"
 
       # and this machine's own session, clearly labelled
-      assert text =~ "a local errand"
+      assert text =~ Path.basename(ws)
       assert text =~ "local"
       assert text =~ "remote"
 
