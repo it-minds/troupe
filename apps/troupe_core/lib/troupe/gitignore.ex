@@ -26,28 +26,55 @@ defmodule Troupe.Gitignore do
 
   Loading is eager because the alternative — checking for a `.gitignore` in every
   ancestor of every path — turns one scan into thousands of stat calls.
+
+  The walk does not enter a directory the rules found so far ignore, which is git's own
+  rule: a file cannot be re-included once its parent directory is excluded, so no
+  `.gitignore` under `deps/`, `_build/` or `node_modules/` can change the answer. It is
+  also what keeps loading cheap — an unpruned walk of a compiled project over a slow
+  mount (`/mnt/c` from WSL) took nine seconds, and a session loads this more than once.
+  Symlinked directories are not followed, as git does not follow them.
   """
   @spec load(Path.t()) :: t()
   def load(root) do
-    # `match_dot: true` matters: `.gitignore` is itself a dotfile, and the default
-    # wildcard would silently find none of them.
-    files =
-      [
-        Path.join(root, ".git/info/exclude")
-        | Path.wildcard(Path.join(root, "**/.gitignore"), match_dot: true)
-      ]
-      |> Enum.filter(&File.regular?/1)
+    exclude = read_rules(Path.join(root, ".git/info/exclude"), "")
+    %__MODULE__{rules: walk(root, "", exclude)}
+  end
 
-    rules =
-      Enum.flat_map(files, fn file ->
-        base = file |> Path.dirname() |> Path.relative_to(root) |> normalize_base()
+  # Pre-order, so a directory's rules come after its parent's and win over them, as a
+  # deeper `.gitignore` does in git. `acc` is every rule so far, in order, and is also
+  # what decides whether a subdirectory is entered.
+  defp walk(root, rel, acc) do
+    dir = if rel == "", do: root, else: Path.join(root, rel)
+    acc = acc ++ read_rules(Path.join(dir, ".gitignore"), rel)
+    matcher = %__MODULE__{rules: acc}
 
-        file
-        |> File.read!()
-        |> parse(base)
-      end)
+    case File.ls(dir) do
+      {:ok, names} ->
+        names
+        |> Enum.sort()
+        |> Enum.map(&child(rel, &1))
+        |> Enum.filter(&enter?(root, &1, matcher))
+        |> Enum.reduce(acc, &walk(root, &1, &2))
 
-    %__MODULE__{rules: rules}
+      {:error, _} ->
+        acc
+    end
+  end
+
+  defp child("", name), do: name
+  defp child(rel, name), do: rel <> "/" <> name
+
+  defp enter?(root, rel, matcher) do
+    Path.basename(rel) != ".git" and
+      match?({:ok, %File.Stat{type: :directory}}, File.lstat(Path.join(root, rel))) and
+      not ignored?(matcher, rel)
+  end
+
+  defp read_rules(file, base) do
+    case File.read(file) do
+      {:ok, contents} -> parse(contents, base)
+      {:error, _} -> []
+    end
   end
 
   @doc "An empty matcher that still hides `.git/`."
@@ -90,9 +117,6 @@ defmodule Troupe.Gitignore do
   defp relative_to_base(path, base) do
     binary_part(path, byte_size(base) + 1, byte_size(path) - byte_size(base) - 1)
   end
-
-  defp normalize_base("."), do: ""
-  defp normalize_base(base), do: normalize(base)
 
   defp normalize(path) do
     path |> String.replace("\\", "/") |> String.trim_leading("./") |> String.trim_trailing("/")
