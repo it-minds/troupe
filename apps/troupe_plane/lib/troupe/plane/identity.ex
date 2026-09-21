@@ -265,6 +265,11 @@ defmodule Troupe.Plane.Identity do
     |> String.downcase()
     |> String.replace(~r/[^a-z0-9]+/, "-")
     |> String.trim("-")
+    # Inside `Team`'s rule, so a long group name becomes a long team name rather than a
+    # refused one. A name that is empty afterwards — a display name with no letters or
+    # digits in it — is still refused, and the connector leaves that group for a person.
+    |> String.slice(0, 58)
+    |> String.trim("-")
   end
 
   @doc "Stop a group being a team. Its grants go with it; its sessions do not."

@@ -493,12 +493,42 @@ defmodule Troupe.Plane.Admin do
           {:ok, team_detail(team)}
 
         {:error, changeset} ->
-          {:error, Error.new(:invalid_params, %{reason: inspect(changeset.errors)})}
+          {:error, Error.new(:invalid_params, changeset_reason(changeset))}
       end
     else
       nil -> {:error, Error.new(:not_found, %{group: group_id})}
       other -> other
     end
+  end
+
+  @doc """
+  What a team name must be, in words, for a form to show beside the field.
+
+  Here rather than read off `Identity.Team` by the screen, because a LiveView reaches the
+  plane through this module and nowhere else. Zero arity, so it is a fact rather than an
+  action and needs no API method of its own: every rendering that wants it already has the
+  refusal, which carries the same sentence.
+  """
+  @spec team_name_rule() :: String.t()
+  def team_name_rule, do: Identity.Team.name_rule()
+
+  # A refused changeset as a sentence per field rather than an inspected keyword list. A
+  # console shows `reason` beside the form, and `[name: {"must be…", [validation:
+  # :format]}]` is a thing to be decoded before it is a thing to be fixed.
+  defp changeset_reason(changeset) do
+    errors =
+      Ecto.Changeset.traverse_errors(changeset, fn {message, opts} ->
+        Enum.reduce(opts, message, fn {key, value}, acc ->
+          String.replace(acc, "%{#{key}}", to_string(value))
+        end)
+      end)
+
+    reason =
+      Enum.map_join(errors, "; ", fn {field, messages} ->
+        "#{field}: #{Enum.join(messages, ", ")}"
+      end)
+
+    %{reason: reason, fields: Map.keys(errors)}
   end
 
   # What a team starts with, from the platform's settings rather than from the schema's
