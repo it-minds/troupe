@@ -4843,3 +4843,41 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      format is only checked when the name changes, so a team named before this rule can
      still have its budget edited and can still be removed with `team.disable`, which is
      the way out for it. Proof: `Troupe.Plane.TeamNameTest`.
+
+## One repository
+
+666. **This repository is the monorepo: the platform, the daemon, and the default GUI and
+     TUI.** Decided by the team on 2026-09-21, and it supersedes 319–321 and the
+     2026-09-19 answers 1 and 2 in `docs/program/brief-daemon.md` §7. Those said a client
+     is a separate release from a separate repository and the daemon is built elsewhere
+     by pinning this one by git ref. What that produced was four repositories and three
+     pins: the TUI and the daemon each named a `troupe-remote` commit by hand, seventeen
+     commits behind main by the time anybody looked, and a protocol change was three or
+     four pull requests in three repositories with a version bump in the middle. The GUI
+     and TUI are now the defaults; a client somebody else writes against `PROTOCOL.md`
+     is exactly as supported as it was.
+
+     Three repositories came in with their history, each rewritten by `git filter-repo`
+     under its new prefix and merged as unrelated history, so every import merge changes
+     nothing but a path prefix and every adaptation after it is a commit of its own:
+     `it-minds/troupe-gui` main at `2c86ccd` under `clients/gui`, `it-minds/troupe-tui`
+     main at `5cf5be2` under `clients/tui`, and `it-minds/troupe` main at `de07e9c` —
+     `daemon/`, the installers, and its documents under `docs/program/`. Only `main` was
+     imported. The GitHub-generated references to a repository's own pull requests,
+     "Merge pull request #N" and a squash title's "(#N)", were rewritten to name that
+     repository, because a bare `#N` here links to this repository's #N; every other
+     `#N` in those messages already meant a `troupe-remote` pull request, which is this
+     one. The umbrella repository's are written as `it-minds/troupe-program#N`, the name
+     it takes when this repository is renamed `it-minds/troupe`, so that rename has to use
+     that name. `docs/history/` keeps the three commit maps, because every imported SHA
+     changed and the documents quote them.
+
+     The clients sit under `clients/`, not `apps/`. Mix treats every directory in
+     `apps/` as an umbrella application and warns about any without a `mix.exs`, which
+     the GUI's pnpm workspace would be; and the TUI as an umbrella application would put
+     ExRatatui, Burrito and `rustler_precompiled` into the shared lock, into every image
+     build and into `mix check` — the cost 319 was right to name. As its own Mix project it
+     costs the server nothing. The daemon is the opposite case: its dependencies are three
+     umbrella applications and nothing else, so it becomes one (below). The plan this
+     follows is the *Troupe monorepo adoption plan*; issue #37 is its brief for release and
+     deployment.
