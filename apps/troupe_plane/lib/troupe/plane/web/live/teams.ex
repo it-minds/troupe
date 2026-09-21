@@ -375,7 +375,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
             autocomplete="off"
           />
           <p class="field-help">
-            {Troupe.Plane.Identity.Team.name_rule() |> String.capitalize()}. Blank takes one
+            {Admin.team_name_rule() |> String.capitalize()}. Blank takes one
             from the group's display name.
           </p>
 

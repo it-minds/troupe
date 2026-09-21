@@ -501,6 +501,17 @@ defmodule Troupe.Plane.Admin do
     end
   end
 
+  @doc """
+  What a team name must be, in words, for a form to show beside the field.
+
+  Here rather than read off `Identity.Team` by the screen, because a LiveView reaches the
+  plane through this module and nowhere else. Zero arity, so it is a fact rather than an
+  action and needs no API method of its own: every rendering that wants it already has the
+  refusal, which carries the same sentence.
+  """
+  @spec team_name_rule() :: String.t()
+  def team_name_rule, do: Identity.Team.name_rule()
+
   # A refused changeset as a sentence per field rather than an inspected keyword list. A
   # console shows `reason` beside the form, and `[name: {"must be…", [validation:
   # :format]}]` is a thing to be decoded before it is a thing to be fixed.
