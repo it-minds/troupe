@@ -65,11 +65,11 @@ defmodule Troupe.Daemon.Release do
     release
   end
 
-  # The sibling app's source. The release is assembled from the umbrella root, where
-  # `apps_paths/0` names every app it has.
+  # The sibling app's source: an `in_umbrella` dependency of this project, so its path
+  # is among the dependencies' paths.
   defp source! do
     path =
-      Mix.Project.apps_paths()
+      Mix.Project.deps_paths()
       |> Map.fetch!(:troupe_core)
       |> Path.join("native/reaper/reaper.zig")
       |> Path.expand()

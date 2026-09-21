@@ -76,7 +76,7 @@ from what a reader would expect. The harness's own decisions are in
    Entry 3 pinned the three harness apps to one `troupe-remote` commit and gave the daemon
    a version of its own. With `troupe-remote` now the monorepo (its DECISIONS.md 666 and
    667), the daemon is `apps/troupe_daemon`: its harness is the checkout it is built in, its
-   version is the umbrella's `VERSION`, and the release is the fifth in the root `mix.exs`.
+   version is the umbrella's `VERSION`, and the release is still defined in this directory.
    What entries 1, 2, 4 and 5 decided is unchanged — a plain release per platform, the
    reaper built for the host into the release, `ezstd` from the fork. Numbering here
    stops; later decisions about the daemon go in the root `DECISIONS.md`.

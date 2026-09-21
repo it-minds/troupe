@@ -4882,25 +4882,28 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      follows is the *Troupe monorepo adoption plan*; issue #37 is its brief for release and
      deployment.
 
-667. **The daemon is the fifth release of this umbrella, and its tests run here.**
+667. **The daemon is an application of this umbrella, released from its own directory.**
      `apps/troupe_daemon` is the `daemon/` project from the umbrella repository, moved rather
      than rewritten: three modules (`Application`, `CLI`, `Release`) and a test. Its
      `mix.exs` is an umbrella application's, with `troupe_protocol`, `troupe_core` and
      `troupe_gateway` as `in_umbrella` dependencies in place of the sparse git pins, and
      the pin constants, `HARNESS_TOKEN`, its own lock, `VERSION` and `.tool-versions` are
-     gone. The release is `troupe_daemon` in the root `mix.exs` with the same steps it had —
-     the host-triple reaper and the `troupe-daemon` wrapper — and two options it did not
-     need as a project of its own: `runtime_config_path` names
-     `apps/troupe_daemon/config/runtime.exs`, because the platform's `config/runtime.exs`
-     reads a pod's environment and the daemon must boot without it, and
-     `rel_templates_path` names its `rel/`, which turns distribution off. `mix
-     troupe.boundaries` holds it to the three harness apps. The one test that failed on the
-     way was not about the move: `config describes providers` read the developer's own
+     gone. The `troupe_daemon` release stays in that `mix.exs`, with the steps it had —
+     the host-triple reaper and the `troupe-daemon` wrapper — and is built from that
+     directory rather than from the root: a release defined at the root compiles every
+     umbrella application first, and on a Windows or macOS runner that is the plane's
+     Postgres and Kubernetes clients built for a machine that will never run them. Built
+     from its own directory it compiles the harness and nothing else, and its `lib/` holds
+     none of the platform's applications. Its runtime configuration is its own
+     `config/runtime.exs`, because the platform's reads a pod's environment and the daemon
+     must boot without it; its `rel/` turns distribution off. `mix troupe.boundaries`
+     holds it to the three harness apps. The one test that failed on the way was not
+     about the move: `config describes providers` read the developer's own
      `~/.config/troupe`, so it now points `TROUPE_CONFIG_HOME` at its scratch directory
-     like the state and runtime directories beside it. Proof: `mix release troupe_daemon`
-     unpacked and smoked — `version` prints 0.2.0 for daemon and harness alike, `status`
-     says not running, `run` serves, a second `run` names the running one and exits 0,
-     `eval` answers — and the release's `lib/` holds none of the platform's applications.
+     like the state and runtime directories beside it. Proof: `MIX_ENV=prod mix release`
+     in `apps/troupe_daemon`, unpacked and smoked — `version` prints 0.2.0 for daemon and
+     harness alike, `status` says not running, `run` serves, a second `run` names the
+     running one and exits 0, `eval` answers.
 
 668. **One `VERSION` for everything this repository releases, and the TUI builds against
      the harness of its own commit.** The TUI was at 0.1.0, the daemon at 0.1.0, the

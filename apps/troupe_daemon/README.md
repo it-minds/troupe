@@ -77,22 +77,23 @@ The daemon is not a distributed Erlang node (`rel/env.sh.eex` sets
 
 ## Building
 
-From the umbrella root:
+From this directory, so that only the harness is compiled:
 
 ```sh
-cd apps/troupe_daemon && mix test && cd -     # the daemon's own tests
+cd apps/troupe_daemon
+mix test
 MIX_ENV=prod mix release troupe_daemon
-tar -xzf _build/prod/troupe_daemon-*.tar.gz -C /some/dir
+tar -xzf ../../_build/prod/troupe_daemon-*.tar.gz -C /some/dir
 /some/dir/bin/troupe-daemon version
 /some/dir/bin/troupe_daemon eval 'IO.puts(Troupe.Version.version())'
 ```
 
 `zig` must be on the `PATH`: the release step builds the `reaper` helper for the host
-triple into the release, and a daemon without it fails every `shell` call. The release's
-runtime configuration is [`config/runtime.exs`](config/runtime.exs) here, not the
-platform's, and `rel/` holds its `env.sh.eex` and `env.bat.eex`; both are named in the root
-`mix.exs`. The version is the umbrella's `VERSION`, and so is the harness's: they are one
-commit.
+triple into the release, and a daemon without it fails every `shell` call. The release is
+defined in this directory's `mix.exs`; its runtime configuration is
+[`config/runtime.exs`](config/runtime.exs) here, not the platform's, and `rel/` holds its
+`env.sh.eex` and `env.bat.eex`. The version is the umbrella's `VERSION`, and so is the
+harness's: they are one commit.
 
 `.github/workflows/release.yml` builds the Linux, macOS and Windows targets on native
 runners — nightly, at every release, and on a pull request that touches the daemon or the
