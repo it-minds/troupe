@@ -100,10 +100,10 @@ defmodule Troupe.Client.Daemon do
   # window `build-1`. `/worktree …` is the default agent, always in a worktree.
   @impl true
   def dispatch(sid, name, args) do
-    with {:ok, profile, mode} <- branch_profile(sid, name),
-         prompt = prompt_of(args),
+    with {:ok, profile, mode, kind} <- branch_profile(sid, name),
+         {workflow, prompt} = workflow_and_prompt(sid, kind, prompt_of(args)),
          window = Branch.next_name(window_names(sid), name),
-         {:ok, child} <- create_branch(sid, profile, prompt, mode),
+         {:ok, child} <- create_branch(sid, profile, prompt, mode, workflow),
          {:ok, _} <- open_branch(sid, child, window, profile, prompt) do
       {:ok, window}
     end
@@ -562,7 +562,11 @@ defmodule Troupe.Client.Daemon do
   end
 
   defp branch_profile(sid, "worktree"),
-    do: {:ok, Config.load(workspace(sid)).default_agent, "always"}
+    do: {:ok, Config.load(workspace(sid)).default_agent, "always", :agent}
+
+  # A workflow's subagents write, so it always gets a worktree of its own; the daemon
+  # renders the plan (troupe-remote Decision 648).
+  defp branch_profile(_sid, "workflow"), do: {:ok, "workflow", "always", :workflow}
 
   defp branch_profile(sid, name) do
     primaries =
@@ -572,11 +576,36 @@ defmodule Troupe.Client.Daemon do
       end
 
     if name in primaries do
-      {:ok, name, "auto"}
+      {:ok, name, "auto", :agent}
     else
       {:error,
        "unknown command /#{name}; available: " <>
-         Enum.map_join(primaries ++ ["worktree"], ", ", &("/" <> &1))}
+         Enum.map_join(Enum.uniq(primaries ++ ["worktree"]), ", ", &("/" <> &1))}
+    end
+  end
+
+  # `/workflow release: cut 1.2` names the workflow; so does a leading word that is one
+  # of the workspace's (`/workflow release cut 1.2`); anything else is the default
+  # pipeline with the whole line as the task.
+  defp workflow_and_prompt(_sid, :agent, prompt), do: {nil, prompt}
+
+  defp workflow_and_prompt(sid, :workflow, prompt) do
+    names =
+      case Link.call("workflows.list", %{workspace: workspace(sid)}) do
+        {:ok, %{"workflows" => names}} when is_list(names) -> names
+        _ -> ["default"]
+      end
+
+    case String.split(prompt, ~r/\s+/, parts: 2) do
+      [word, rest] when word != "" ->
+        cond do
+          String.ends_with?(word, ":") -> {String.trim_trailing(word, ":"), String.trim(rest)}
+          word in names -> {word, String.trim(rest)}
+          true -> {"default", prompt}
+        end
+
+      _ ->
+        {"default", prompt}
     end
   end
 
@@ -584,7 +613,7 @@ defmodule Troupe.Client.Daemon do
   defp prompt_of(%{} = args), do: prompt_of(args[:prompt] || args["prompt"] || "")
   defp prompt_of(_args), do: ""
 
-  defp create_branch(sid, profile, prompt, mode) do
+  defp create_branch(sid, profile, prompt, mode, workflow) do
     body =
       %{
         workspace: workspace(sid),
@@ -592,6 +621,7 @@ defmodule Troupe.Client.Daemon do
         prompt: blank_to_nil(prompt),
         worktree: mode,
         parent: sid,
+        workflow: workflow,
         config: %{},
         command_id: Troupe.Remote.RPC.command_id()
       }
