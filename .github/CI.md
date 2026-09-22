@@ -106,3 +106,17 @@ The full suite and the native builds on `main` at 02:17 UTC, publishing nothing 
 | `release.yml` | full suite → tag → publish → deploy | a VERSION change on `main`; by hand to retry |
 | `nightly.yml` | full suite + native builds | schedule; by hand |
 | `deploy.yml` | roll back to, or render, a published release | by hand |
+
+## Secrets and variables
+
+| Name | Kind | Used by |
+|---|---|---|
+| `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | repository secrets | `images.yml`: all four or none. Without them nothing is published and the run says which are missing; a release fails, because a release is its images |
+| `GUI_BASE` | repository variable | `images.yml`: the GUI's mount path baked into its assets, default `app` |
+| `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../clients/gui/docs/install.md)) |
+| `KUBECONFIG`, `DEPLOY_VALUES` | `production` environment secrets | `release.yml`, `deploy.yml`: the `troupe-deployer` account's kubeconfig (`deploy/ci-deployer.yaml`, then `scripts/ci-kubeconfig`) and the deployment's Helm values |
+| `PLANE_URL` | `production` environment variable | where `scripts/deploy` asks `/.well-known/troupe` which version and commit is running |
+
+`production` should allow `main` alone, so no pull request reaches its secrets. The review
+of the pull request that changed `VERSION` is the approval, unless the environment adds a
+required reviewer.

@@ -5,10 +5,10 @@ as one Burrito binary per platform, that runs every session in `troupe_core`
 behind `troupe_gateway` — a daemon it embeds when none is running on the
 machine, or a plane's worker pod — and talks to over `PROTOCOL.md`. The harness
 itself (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a path dependency on
-`../../apps/` — the umbrella this project sits in, at the same commit. The spec is `elixir-prmpt.md`; read
-`ARCHITECTURE.md` (contract the code implements) and `DECISIONS.md` (every
-deviation, numbered; append one line per new deviation) before changing
-behaviour. `FINAL_REPORT.md` maps each done item to the test that proves it.
+`../../apps/` — the umbrella this project sits in, at the same commit. Read the root
+`ARCHITECTURE.md` (the harness, and §6 of `docs/developer/architecture.md` for this
+client) and `DECISIONS.md` here (every deviation, numbered; append one line per new
+deviation) before changing behaviour.
 
 ## Toolchain and commands
 
@@ -78,7 +78,6 @@ assertion failure mid-script leaves earlier files changed and later ones not.
 
 ## What is not verified locally
 
-CI on the non-Linux native runners, and the two acceptance items that need a real model
-(35, 36 in the spec). The installers are `install.sh` / `install.ps1` at the repository
+CI on the non-Linux native runners, and anything that needs a real model. The installers are `install.sh` / `install.ps1` at the repository
 root and install this binary beside `troupe-daemon`. A `feature/` directory is somebody's
 own git worktree; leave it out of the index.

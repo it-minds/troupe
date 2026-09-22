@@ -313,14 +313,3 @@ Stated plainly, because the rest of this document reads like it has been.
 - **How many real people exist on the live plane today**, which is what makes the fresh
   start cheap or expensive. The decision was taken on the understanding that it is
   test-era data.
-
----
-
-## What to read next
-
-- [integrations.md §1](integrations.md#1-identity-provider-oidc) — everything this plane
-  requires of an identity provider, with the file and line that decides each one.
-- [integrations.md §8](integrations.md#8-scim) — the endpoint table.
-- [roles-and-permissions.md](roles-and-permissions.md) — what a platform admin, a team
-  admin and a person may each do once they are in.
-- [routine-tasks.md](routine-tasks.md) — the step lists these sections are drawn from.

@@ -145,13 +145,3 @@ refusing one.
 
 **Be reached by the plane.** Every operation is the worker dialling out. There is no
 `ensure` that creates a machine, because there is no machine to create.
-
----
-
-## What to read next
-
-* [installing.md](installing.md) — the cluster half, on a cluster with nothing on it.
-* [profiles-and-policy.md](profiles-and-policy.md) — what a profile decides.
-* [../egress-allowlist.md](../egress-allowlist.md) — what a worker dials, generated from
-  the code. On a machine there is no NetworkPolicy to enforce it, which is the first row of
-  the table at the top of this page.
