@@ -1,6 +1,6 @@
 {
   "name": "@troupe/client",
-  "version": "0.3.1",
+  "version": "0.3.2",
   "description": "Troupe protocol v1 client: JSON-RPC 2.0 over WebSocket, usable from a browser or Node",
   "type": "module",
   "main": "./dist/index.js",
