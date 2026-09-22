@@ -108,6 +108,16 @@ if ($Rollback) {
   exit 0
 }
 
+# Where the toolchain script puts them. Its PATH change reaches only terminals opened
+# after it ran, and an agent's shell is usually older than that.
+$toolDirs = @(
+  (Join-Path $env:LOCALAPPDATA "Programs\erlang\bin"),
+  (Join-Path $env:LOCALAPPDATA "Programs\elixir\bin")
+) + @(Get-ChildItem (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\zig.zig_*\zig-x86_64-windows-*") -Directory -ErrorAction SilentlyContinue | ForEach-Object { $_.FullName })
+foreach ($dir in $toolDirs) {
+  if ((Test-Path $dir) -and (($env:Path -split ";") -notcontains $dir)) { $env:Path = "$dir;$env:Path" }
+}
+
 foreach ($tool in "mix", "zig") {
   if (-not (Get-Command $tool -ErrorAction SilentlyContinue)) {
     throw "$tool is not on the PATH. Run scripts\setup-windows-toolchain.ps1, then open a new terminal."
