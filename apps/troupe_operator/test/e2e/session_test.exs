@@ -64,7 +64,15 @@ defmodule Troupe.E2E.SessionTest do
     assert before["head_hash"], "nothing sealed: #{inspect(before)}"
 
     namespace = World.worker_namespace(context.profile)
-    [pod | _] = World.pods(namespace, "app.kubernetes.io/name=troupe-worker")
+
+    # The pod the plane placed the session on — never the first pod in a listing. The
+    # profile has two pods by this point in the suite (the capacity tests scale it), and
+    # placement picks the emptier one, so the first listed was the wrong pod one run in
+    # three: it was deleted, the session on the other pod stayed active as it should, and
+    # "the plane never noticed" was the verdict on a pod the session was never on.
+    pod = created["pod"]
+    assert pod in World.pods(namespace, "app.kubernetes.io/name=troupe-worker"),
+           "the plane placed #{id} on #{inspect(pod)}, which the cluster does not list"
 
     # The fault. Not a supervisor child killed in-process: the whole pod, its BEAM, its
     # disk and its connection to the plane, all at once.
