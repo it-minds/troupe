@@ -26,28 +26,57 @@ defmodule Troupe.Gitignore do
 
   Loading is eager because the alternative — checking for a `.gitignore` in every
   ancestor of every path — turns one scan into thousands of stat calls.
+
+  The walk prunes as it goes, as git does: a directory that is already ignored is not
+  entered, `.git/` is not entered, and a symlink is not followed. It used to be
+  `Path.wildcard("**/.gitignore")`, which descends into everything — on Windows a pnpm
+  `node_modules` alone took 29 seconds, twice per session start, and the client's
+  `session.create` timed out waiting.
   """
   @spec load(Path.t()) :: t()
   def load(root) do
-    # `match_dot: true` matters: `.gitignore` is itself a dotfile, and the default
-    # wildcard would silently find none of them.
-    files =
-      [
-        Path.join(root, ".git/info/exclude")
-        | Path.wildcard(Path.join(root, "**/.gitignore"), match_dot: true)
-      ]
-      |> Enum.filter(&File.regular?/1)
+    exclude = read_rules(Path.join(root, ".git/info/exclude"), "")
+    %__MODULE__{rules: exclude ++ walk(root, "", exclude)}
+  end
 
-    rules =
-      Enum.flat_map(files, fn file ->
-        base = file |> Path.dirname() |> Path.relative_to(root) |> normalize_base()
+  # The rules found at and under `rel`, parents before children so later (deeper) rules
+  # win. `seen` is every rule that applies above this directory, used only to prune.
+  defp walk(root, rel, seen) do
+    dir = if rel == "", do: root, else: Path.join(root, rel)
+    own = read_rules(Path.join(dir, ".gitignore"), rel)
+    matcher = %__MODULE__{rules: seen ++ own}
 
-        file
-        |> File.read!()
-        |> parse(base)
-      end)
+    nested =
+      case File.ls(dir) do
+        {:ok, names} ->
+          names
+          |> Enum.sort()
+          |> Enum.map(&join_rel(rel, &1))
+          |> Enum.filter(&descend?(root, &1, matcher))
+          |> Enum.flat_map(&walk(root, &1, matcher.rules))
 
-    %__MODULE__{rules: rules}
+        {:error, _} ->
+          []
+      end
+
+    own ++ nested
+  end
+
+  # A real directory — `lstat`, so a symlink or junction is not followed — that no rule
+  # hides. `ignored?/2` also answers true for `.git`.
+  defp descend?(root, rel, matcher) do
+    match?({:ok, %File.Stat{type: :directory}}, File.lstat(Path.join(root, rel))) and
+      not ignored?(matcher, rel)
+  end
+
+  defp join_rel("", name), do: name
+  defp join_rel(rel, name), do: rel <> "/" <> name
+
+  defp read_rules(file, base) do
+    case File.read(file) do
+      {:ok, contents} -> parse(contents, base)
+      {:error, _} -> []
+    end
   end
 
   @doc "An empty matcher that still hides `.git/`."
@@ -90,9 +119,6 @@ defmodule Troupe.Gitignore do
   defp relative_to_base(path, base) do
     binary_part(path, byte_size(base) + 1, byte_size(path) - byte_size(base) - 1)
   end
-
-  defp normalize_base("."), do: ""
-  defp normalize_base(base), do: normalize(base)
 
   defp normalize(path) do
     path |> String.replace("\\", "/") |> String.trim_leading("./") |> String.trim_trailing("/")
