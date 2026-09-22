@@ -69,7 +69,13 @@ crds="$(helm show crds "$chart")"
 [ -z "$crds" ] || printf '%s\n' "$crds" | k apply --server-side --force-conflicts -f -
 
 echo "deploy: ${release} ${version}"
-helm "${upgrade[@]}" --wait --timeout 10m "${rollback[@]}"
+# `--force-conflicts`: a resource somebody fixed by hand with `kubectl apply` carries that
+# apply's field manager, and server-side apply refuses to overwrite fields another manager
+# owns. The release's rendering is what production is meant to run, so a roll takes those
+# fields over rather than failing on them — as it already does for the CRDs above. The
+# 0.3.2 roll failed and rolled back on exactly this, with the GUI applied by hand while
+# 0.3.1's chart could not.
+helm "${upgrade[@]}" --wait --timeout 10m --force-conflicts "${rollback[@]}"
 
 k -n "$namespace" rollout status deployment -l "app.kubernetes.io/instance=${release}" --timeout=5m
 
