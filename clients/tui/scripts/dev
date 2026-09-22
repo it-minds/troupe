@@ -1,7 +1,7 @@
 #!/usr/bin/env sh
 # Run troupe from source, no Burrito build: scripts/dev [troupe args...]
 #   scripts/dev                      # TUI in the current directory
-#   scripts/dev run code "task" --headless --auto-approve
+#   scripts/dev run build "task" --headless --auto-approve
 #   scripts/dev config
 # Uses the real providers/config unless TROUPE_PROVIDER=fake is set.
 set -eu
