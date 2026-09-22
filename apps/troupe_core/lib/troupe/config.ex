@@ -241,6 +241,8 @@ defmodule Troupe.Config do
   """
   @spec context_window(t(), String.t()) :: pos_integer()
   def context_window(%__MODULE__{} = config, model) when is_binary(model) do
+    model = resolve_model(config, model)
+
     declared =
       case model_spec(config, model) do
         %{context: context} when is_integer(context) -> context
@@ -288,7 +290,7 @@ defmodule Troupe.Config do
   """
   @spec target(t(), String.t() | nil) :: target()
   def target(%__MODULE__{} = config, model) do
-    model = model || config.model
+    model = resolve_model(config, model || config.model)
 
     case split_model(config, model) do
       {nil, bare} ->
