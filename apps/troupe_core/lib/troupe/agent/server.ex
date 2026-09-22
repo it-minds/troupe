@@ -49,6 +49,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.Protocol.Event
   alias Troupe.Protocol.Principal
   alias Troupe.Session.{Approvals, Blobs, Log, Memory, Questions}
+  alias Troupe.Sessions.Index
   alias Troupe.Tool.{Ctx, Result}
   alias Troupe.Watch.Trigger
 
@@ -935,14 +936,24 @@ defmodule Troupe.Agent.Server do
 
   defp record_response(state, %Response{} = response) do
     message = Response.to_message(response)
+    gateway = gateway_json(response.gateway, state, response)
 
     log(state, :llm_response, %{
       "message" => Message.to_json(message),
       "usage" => Usage.to_json(response.usage),
       "stop_reason" => Atom.to_string(response.stop_reason),
       "model" => response.model || state.llm_model,
-      "gateway" => gateway_json(response.gateway, state, response)
+      "gateway" => gateway
     })
+
+    # The same numbers the log just took, added to what a listing reports. The index has
+    # carried `tokens` and `cost` from the start and only `pin_session/2` ever wrote to
+    # it, so every session showed 0 tokens and $0.00 for as long as it ran.
+    Index.observe(
+      state.session_id,
+      response.usage.input_tokens + response.usage.output_tokens,
+      gateway && gateway["cost_micros"]
+    )
 
     :telemetry.execute(
       [:troupe, :llm, :stop],

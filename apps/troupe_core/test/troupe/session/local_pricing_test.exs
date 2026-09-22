@@ -40,6 +40,40 @@ defmodule Troupe.Session.LocalPricingTest do
     assert cost > 0
   end
 
+  # The index has carried `tokens` and `cost` from the start, and only `pin_session/2`
+  # ever wrote to the entry: every listing said 0 tokens and $0.00 however long a session
+  # had been working.
+  test "reaches the listing, so a session says what it has spent", context do
+    %{session: session} =
+      start_session(context,
+        steps: [{:text, "done"}],
+        cost_micros: nil,
+        config_overrides: [
+          catalog: %{"fake-model" => %Catalog{id: "fake-model", input: 1.0e-6, output: 2.0e-6}}
+        ]
+      )
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "say something")
+    await_event(session.id, :llm_response)
+
+    # The totals are added by a cast from the agent, so they land just after the event
+    # the test waited for.
+    assert %{tokens: tokens, cost: cost} = eventually_listed(session.id)
+    assert tokens > 0
+    assert cost > 0.0
+  end
+
+  defp eventually_listed(session_id, tries \\ 50) do
+    listed = Enum.find(Troupe.list_live_sessions(%{}), &(&1.id == session_id))
+
+    cond do
+      listed && listed.tokens > 0 -> listed
+      tries == 0 -> listed
+      true -> Process.sleep(20) && eventually_listed(session_id, tries - 1)
+    end
+  end
+
   test "is nothing, rather than a guess, for a model with no price", context do
     response = priced(context, %{"fake-model" => %Catalog{id: "fake-model", context: 200_000}})
 
