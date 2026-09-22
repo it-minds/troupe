@@ -57,6 +57,7 @@ The GUI reads no runtime configuration. What it stores in the browser:
 | `troupe.auth.pending` | `sessionStorage` | `packages/client/src/pkce.ts:115` | [configuration.md](configuration.md); [identity-provider.md](identity-provider.md) |
 | `troupe.pref.planeUrl` | `localStorage` | `apps/desktop/src/shell.ts:115, 122`; `views/SignIn.tsx:26, 75` | [configuration.md](configuration.md) "The plane URL" |
 | `troupe.pref.theme` | `localStorage` | `apps/desktop/src/views/bits.tsx:131, 138` | [configuration.md](configuration.md) "Theme" |
+| `troupe.pref.localOnly` | `localStorage` | `apps/desktop/src/mode.ts` | `DECISIONS.md` #46 — `yes` means the app never contacts a plane; it moves to shared settings with issue #57 |
 
 Held in memory only, never stored: the plane token (`auth.ts:153`) and pod tokens
 (`packages/client/src/attach.ts:49`) — [configuration.md](configuration.md).

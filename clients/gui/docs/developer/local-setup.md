@@ -34,9 +34,10 @@ The lockfile is `pnpm-lock.yaml`; the image and CI use `--frozen-lockfile`
 | Command | Runs | What it does |
 |---|---|---|
 | `pnpm build` | `pnpm -r build` | `tsc` for the client (`packages/client/package.json:18`); `tsc --noEmit && vite build` for the desktop app (`apps/desktop/package.json:8`). The bench has no `build` script |
-| `pnpm test` | `pnpm -r test` | Only the client has a `test` script: `node --test --import tsx "test/**/*.test.ts"` (`packages/client/package.json:20`). 33 tests (AUDIT §0) |
+| `pnpm test` | `pnpm -r test` | The client: `node --test --import tsx "test/**/*.test.ts"` (`packages/client/package.json:20`). The desktop app: `vitest run`, the app rendered in jsdom against the fake daemon ([testing.md](testing.md) "The app's tests") |
 | `pnpm typecheck` | `pnpm -r typecheck` | Client: `tsc --noEmit` on `src` and on `tsconfig.test.json` (`packages/client/package.json:19`); bench: `tsc --noEmit` (`packages/bench/package.json:8`); desktop: `tsc --noEmit` (`apps/desktop/package.json:9`). See the ordering caveat under [ci-cd.md](ci-cd.md): the bench resolves `@troupe/client` through `dist/`, so run `pnpm build` once first in a clean checkout |
 | `pnpm dev` | `pnpm --filter @troupe/desktop dev` | Vite on `http://localhost:5173`, `strictPort` (`apps/desktop/vite.config.ts:30`) |
+| `pnpm dev:local` | `tsx scripts/dev-local.ts` | A daemon of its own with the scripted `fake` model, and Vite in local-only mode against it; see below |
 | `pnpm fake` | `tsx scripts/fake-deployment.ts` | A fake IdP, plane and worker on loopback; see below |
 | `pnpm bench` | `pnpm --filter @troupe/bench start` | `tsx src/main.ts` (`packages/bench/package.json:7`) |
 | `pnpm tokens` | `tsx scripts/tokens.ts` | Regenerates `apps/desktop/src/tokens.css` |
@@ -56,6 +57,25 @@ pnpm test
 ```bash
 pnpm typecheck
 ```
+
+## `pnpm dev:local` — this computer alone
+
+The default way to develop the GUI: no plane, no identity provider, no key
+(`DECISIONS.md` #46). `scripts/dev-local.ts` finds `troupe-daemon` the way the desktop
+shell does (`TROUPE_DAEMON_BIN`, the `PATH`, the installers' directories), starts it with
+`TROUPE_PROVIDER=fake` and a `script.json`, and gives it its own state, config and
+`daemon.json` under `TROUPE_DEV_HOME` — by default `troupe-dev-local` in the system's temp
+directory — so it is a second daemon beside yours. A development daemon that is already
+answering there is reused. Then it runs `pnpm dev` with `VITE_TROUPE_DAEMON` set to that
+daemon's WebSocket and `VITE_TROUPE_LOCAL_ONLY=1`, so the app opens on the session list;
+anything after `pnpm dev:local` goes to Vite (`--port 5185 --strictPort`).
+
+| Variable | Read at | Meaning |
+|---|---|---|
+| `TROUPE_DEV_HOME` | `scripts/dev-local.ts` | Where the development daemon keeps its state, config, `daemon.json`, `script.json` and the `demo` workspace |
+| `TROUPE_DAEMON_BIN` | `scripts/dev-local.ts` | The daemon to start, instead of the one on the `PATH` |
+| `VITE_TROUPE_LOCAL_ONLY` | `apps/desktop/src/mode.ts` | `1`: local-only is the mode a browser that has not chosen starts in |
+| `VITE_TROUPE_DAEMON` | `apps/desktop/src/shell.ts` | `<port>:<token>` of a daemon's WebSocket, for a browser build (`DECISIONS.md` #41) |
 
 ## `pnpm fake` — the fake deployment
 

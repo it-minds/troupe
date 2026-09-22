@@ -61,6 +61,7 @@ There is no `.env`, no `.env.example`, and no `VITE_*` variable (AUDIT §1.4).
 | `TROUPE_GUI_BASE` | `apps/desktop/vite.config.ts:16`; `Dockerfile:38-39`; the root `ci.yml`'s `images` job | [build.md](build.md) "The base path"; [deployment.md](deployment.md) "The base-path contract"; [local-setup.md](local-setup.md) table |
 | `import.meta.env.BASE_URL` (derived) | `apps/desktop/src/shell.ts:93, 107` | [architecture.md](architecture.md) §3 `shell.ts`; [build.md](build.md) |
 | `ORIGINS` | `scripts/fake-deployment.ts:14` | [local-setup.md](local-setup.md) "pnpm fake" |
+| `TROUPE_DEV_HOME`, `TROUPE_DAEMON_BIN`, `VITE_TROUPE_LOCAL_ONLY`, `VITE_TROUPE_DAEMON` | `scripts/dev-local.ts`; `apps/desktop/src/mode.ts`, `shell.ts` | [local-setup.md](local-setup.md) "pnpm dev:local" |
 | `RUNS` | `scripts/first-token.ts:15` | [local-setup.md](local-setup.md) "pnpm first-token" |
 | `BENCH_MODE`, `BENCH_CLIENTS`, `BENCH_PROMPTS`, `BENCH_WORKSPACE`, `BENCH_OUT` | `packages/bench/src/main.ts:27-31` | [local-setup.md](local-setup.md) "Every development variable" |
 | `BENCH_SIGNING_KEY`, `BENCH_POD_ID`, `BENCH_WS` | `main.ts:42-44`; `trace.ts:13-15` | [local-setup.md](local-setup.md) |
