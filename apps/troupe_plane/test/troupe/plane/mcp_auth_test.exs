@@ -97,7 +97,14 @@ defmodule Troupe.Plane.MCPAuthTest do
       # under any other name is a pair the provider refuses — Entra says AADSTS9010010 —
       # and the failure lands in a browser, after consent, where it reads as the client's
       # fault.
-      assert document["scopes_supported"] == [document["resource"] <> "/admin", "offline_access"]
+      # First, and followed by the sign-in's own scopes: a client asks for what is
+      # advertised and nothing else, and a token minted without `groups` carried no groups
+      # claim — which the plane once read as a person in no groups (Decision 679).
+      mcp_scope = document["resource"] <> "/admin"
+      assert [^mcp_scope | rest] = document["scopes_supported"]
+      assert "offline_access" in rest
+      assert "openid" in rest
+      assert rest == Enum.uniq(rest)
     end
 
     test "a registration that exposes it elsewhere can say so" do
@@ -112,7 +119,8 @@ defmodule Troupe.Plane.MCPAuthTest do
       on_exit(fn -> Application.put_env(:troupe_plane, :oidc, oidc) end)
 
       document = metadata("/.well-known/oauth-protected-resource")
-      assert document["scopes_supported"] == ["api://other/admin", "offline_access"]
+      assert ["api://other/admin" | rest] = document["scopes_supported"]
+      assert "offline_access" in rest
     end
   end
 
