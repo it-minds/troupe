@@ -34,6 +34,7 @@ defmodule Troupe.Agent.Server do
   alias Troupe.{Budget, Config, Events, Registry, Skills, Todo, Tools}
 
   alias Troupe.LLM.{
+    Catalog,
     Delta,
     Gateway,
     Message,
@@ -940,7 +941,7 @@ defmodule Troupe.Agent.Server do
       "usage" => Usage.to_json(response.usage),
       "stop_reason" => Atom.to_string(response.stop_reason),
       "model" => response.model || state.llm_model,
-      "gateway" => gateway_json(response.gateway)
+      "gateway" => gateway_json(response.gateway, state, response)
     })
 
     :telemetry.execute(
@@ -998,12 +999,43 @@ defmodule Troupe.Agent.Server do
   # object rather than two flat keys so that a reader can tell "the gateway said nothing"
   # from "the gateway said this call was free", which are different facts and reconcile
   # differently. Keys the gateway did not answer are left out rather than sent as null.
-  defp gateway_json(%Gateway{request_id: nil, cost_micros: nil}), do: nil
+  defp gateway_json(%Gateway{} = gateway, state, response) do
+    ours = is_nil(gateway.cost_micros) and priced_here(state, response)
 
-  defp gateway_json(%Gateway{} = gateway) do
-    %{"request_id" => gateway.request_id, "cost_micros" => gateway.cost_micros}
+    %{
+      "request_id" => gateway.request_id,
+      "cost_micros" => gateway.cost_micros || ours || nil,
+      "priced_locally" => (is_integer(ours) and true) || nil
+    }
     |> Enum.reject(fn {_key, value} -> is_nil(value) end)
     |> Map.new()
+    |> case do
+      empty when map_size(empty) == 0 -> nil
+      json -> json
+    end
+  end
+
+  # What this call cost, worked out from the catalog, when the gateway did not say.
+  #
+  # A streamed response cannot carry a cost header: the headers are sent before a token
+  # is generated, so LiteLLM's `x-litellm-response-cost` is simply absent and its
+  # breakdown headers all read `0.0` (`docs/AUDIT.md` §3.17, which assumed otherwise).
+  # Streaming is how the harness talks to a model, so on a gateway that prices this way
+  # every session's cost was zero.
+  #
+  # `priced_locally` marks the difference for whoever reconciles later: the gateway's own
+  # number, when there is one, still wins, and a model the catalog has no price for is
+  # still nothing rather than a guess.
+  defp priced_here(%State{} = state, %Response{} = response) do
+    model = response.model || state.llm_model
+
+    with model when is_binary(model) <- model,
+         %Catalog{} = entry <- Map.get(state.config.catalog, model),
+         dollars when is_float(dollars) <- Catalog.cost(entry, Map.from_struct(response.usage)) do
+      trunc(dollars * 1_000_000)
+    else
+      _ -> nil
+    end
   end
 
   # A turn that produced no tool calls ends the turn. A subagent that answered without

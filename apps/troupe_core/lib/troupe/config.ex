@@ -601,6 +601,9 @@ defmodule Troupe.Config do
 
   defp first_model(_provider, name), do: name <> "/"
 
+  # The cached catalog, unless the caller passed one: an explicit option wins over every
+  # file, here as everywhere else.
+  defp apply_catalog(%__MODULE__{catalog: catalog} = config) when map_size(catalog) > 0, do: config
   defp apply_catalog(%__MODULE__{} = config), do: %{config | catalog: Store.load()}
 
   # The block-shaped keys a laptop config carries, then everything flat.
