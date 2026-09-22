@@ -66,6 +66,19 @@ defmodule Troupe.Sessions.Index do
   @spec forget(String.t()) :: :ok
   def forget(session_id), do: GenServer.cast(__MODULE__, {:forget, session_id})
 
+  @doc """
+  Add one response's tokens and cost to a live session's running totals.
+
+  The entry has carried `tokens` and `cost` since it was first written and nothing ever
+  added to them, so every listing said 0 tokens and $0.00 however long a session had
+  been working. `cost_micros` is `nil` for a response nobody priced, which adds tokens
+  and leaves the cost where it was.
+  """
+  @spec observe(String.t(), non_neg_integer(), non_neg_integer() | nil) :: :ok
+  def observe(session_id, tokens, cost_micros) do
+    GenServer.cast(__MODULE__, {:observe, session_id, tokens, cost_micros})
+  end
+
   @doc "One session's metadata, live or dormant, or `nil`."
   @spec get(String.t()) :: meta() | nil
   def get(session_id), do: GenServer.call(__MODULE__, {:get, session_id})
@@ -146,6 +159,25 @@ defmodule Troupe.Sessions.Index do
     case Map.fetch(state.live, session_id) do
       {:ok, entry} ->
         merged = entry |> Map.merge(changes) |> Map.put(:last_active_at, timestamp())
+        {:noreply, put_in(state.live[session_id], merged)}
+
+      :error ->
+        {:noreply, state}
+    end
+  end
+
+  def handle_cast({:observe, session_id, tokens, cost_micros}, state) do
+    case Map.fetch(state.live, session_id) do
+      {:ok, entry} ->
+        added = (cost_micros || 0) / 1_000_000
+
+        merged = %{
+          entry
+          | tokens: Map.get(entry, :tokens, 0) + tokens,
+            cost: Map.get(entry, :cost, 0.0) + added,
+            last_active_at: timestamp()
+        }
+
         {:noreply, put_in(state.live[session_id], merged)}
 
       :error ->
@@ -325,7 +357,7 @@ defmodule Troupe.Sessions.Index do
             state: :dormant,
             status: status_from_log(events),
             tokens: total_tokens(events),
-            cost: 0.0,
+            cost: total_cost(events),
             created_at: first.ts,
             last_active_at: last.ts,
             pinned: false
@@ -379,6 +411,20 @@ defmodule Troupe.Sessions.Index do
     Enum.reduce(events, 0, fn
       %Event{type: "llm_response", data: %{"usage" => usage}}, acc ->
         acc + Map.get(usage, "input_tokens", 0) + Map.get(usage, "output_tokens", 0)
+
+      _event, acc ->
+        acc
+    end)
+  end
+
+  # What a dormant session cost, from its log rather than from a running total nobody
+  # kept. A response the gateway did not price and this machine could not price either
+  # adds nothing, which is why a listing can show tokens against no cost.
+  defp total_cost(events) do
+    Enum.reduce(events, 0.0, fn
+      %Event{type: "llm_response", data: %{"gateway" => %{"cost_micros" => micros}}}, acc
+      when is_integer(micros) ->
+        acc + micros / 1_000_000
 
       _event, acc ->
         acc

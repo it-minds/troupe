@@ -180,10 +180,63 @@ defmodule Troupe.LLM.Gateway do
   def to_micros(nil), do: nil
 
   def to_micros(amount) when is_binary(amount) do
-    case String.split(String.trim(amount), ".", parts: 2) do
+    case amount |> String.trim() |> expand() do
+      nil -> nil
+      plain -> split(plain)
+    end
+  end
+
+  defp split(plain) do
+    case String.split(plain, ".", parts: 2) do
       [""] -> nil
       [whole] -> micros(whole, "")
       [whole, fraction] -> micros(whole, fraction)
+    end
+  end
+
+  # A cost small enough is written in scientific notation — LiteLLM sends `1.05e-05` for
+  # a cent's worth of tokens — and the digit arithmetic below reads only plain decimals,
+  # so every such header was `nil` and every call recorded as free. Moving the point
+  # rather than going through a float keeps the exactness that is the whole point of it.
+  defp expand(amount) do
+    case String.split(String.downcase(amount), "e", parts: 2) do
+      [plain] -> plain
+      [mantissa, exponent] -> shift(mantissa, Integer.parse(exponent))
+    end
+  end
+
+  defp shift(_mantissa, :error), do: nil
+  defp shift(_mantissa, {_places, rest}) when rest != "", do: nil
+
+  defp shift(mantissa, {places, ""}) do
+    {sign, digits} = unsign(mantissa)
+
+    moved =
+      case String.split(digits, ".", parts: 2) do
+        [whole] -> point(whole, "", places)
+        [whole, fraction] -> point(whole, fraction, places)
+      end
+
+    moved && sign <> moved
+  end
+
+  defp unsign("-" <> rest), do: {"-", rest}
+  defp unsign("+" <> rest), do: {"", rest}
+  defp unsign(digits), do: {"", digits}
+
+  # `places` moves the point right (positive) or left (negative) through the digits,
+  # padding with zeros when it runs off either end.
+  defp point(whole, fraction, places) do
+    digits = whole <> fraction
+    at = String.length(whole) + places
+
+    cond do
+      # An exponent with no digits in front of it is not a number, and padding it with
+      # zeros would turn a header that said nothing into a cost of zero.
+      digits == "" -> nil
+      at <= 0 -> "0." <> String.duplicate("0", -at) <> digits
+      at >= String.length(digits) -> digits <> String.duplicate("0", at - String.length(digits))
+      true -> String.slice(digits, 0, at) <> "." <> String.slice(digits, at..-1//1)
     end
   end
 

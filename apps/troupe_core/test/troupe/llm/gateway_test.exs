@@ -64,7 +64,23 @@ defmodule Troupe.LLM.GatewayTest do
       assert Gateway.to_micros("2.") == 2_000_000
     end
 
+    # What a real LiteLLM sends for a cheap call: `x-litellm-response-cost:
+    # 1.0500000000000001e-05`. The digit arithmetic read that as nil, so every session
+    # on that gateway showed a cost of zero.
+    test "scientific notation, which is how a small cost arrives" do
+      assert Gateway.to_micros("1.0500000000000001e-05") == 10
+      assert Gateway.to_micros("1.05e-05") == 10
+      assert Gateway.to_micros("9e-07") == 0
+      assert Gateway.to_micros("5E-01") == 500_000
+      assert Gateway.to_micros("1.5e2") == 150_000_000
+      assert Gateway.to_micros("2e+1") == 20_000_000
+      assert Gateway.to_micros("-1.5e-3") == 0
+    end
+
     test "nothing sensible is nothing rather than zero" do
+      assert Gateway.to_micros("1e") == nil
+      assert Gateway.to_micros("1e1.5") == nil
+      assert Gateway.to_micros("e-05") == nil
       assert Gateway.to_micros(nil) == nil
       assert Gateway.to_micros("free") == nil
       assert Gateway.to_micros("1.2.3") == nil

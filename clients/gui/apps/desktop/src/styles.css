@@ -734,8 +734,14 @@ main {
   display: flex;
   flex-direction: column;
 }
+/* `nowrap` is what makes the wide layout's height definite. A wrapping flex container
+   is multi-line, and a multi-line container sizes its line to its content instead of
+   to itself — so once a transcript grew past the window, `.conversation` was stretched
+   to the height of the whole transcript, `.stream` had nothing left to scroll, and the
+   composer was pushed out of an `overflow: hidden` box with no way to scroll it back. */
 @media (min-width: 720px) {
   .stagearea {
+    flex-wrap: nowrap;
     overflow: hidden;
   }
   .conversation {
@@ -1010,6 +1016,8 @@ details.advanced > summary {
 /* -- composer --------------------------------------------------------------- */
 
 .composer {
+  /* Never squeezed by a long transcript: the stream above it takes the leftover. */
+  flex: none;
   border-top: var(--bw-hairline) solid var(--border-hairline);
   background: var(--bg-stage);
   padding: var(--space-3) var(--space-4);

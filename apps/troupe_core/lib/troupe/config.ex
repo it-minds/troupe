@@ -241,6 +241,8 @@ defmodule Troupe.Config do
   """
   @spec context_window(t(), String.t()) :: pos_integer()
   def context_window(%__MODULE__{} = config, model) when is_binary(model) do
+    model = resolve_model(config, model)
+
     declared =
       case model_spec(config, model) do
         %{context: context} when is_integer(context) -> context
@@ -288,7 +290,7 @@ defmodule Troupe.Config do
   """
   @spec target(t(), String.t() | nil) :: target()
   def target(%__MODULE__{} = config, model) do
-    model = model || config.model
+    model = resolve_model(config, model || config.model)
 
     case split_model(config, model) do
       {nil, bare} ->
@@ -599,6 +601,9 @@ defmodule Troupe.Config do
 
   defp first_model(_provider, name), do: name <> "/"
 
+  # The cached catalog, unless the caller passed one: an explicit option wins over every
+  # file, here as everywhere else.
+  defp apply_catalog(%__MODULE__{catalog: catalog} = config) when map_size(catalog) > 0, do: config
   defp apply_catalog(%__MODULE__{} = config), do: %{config | catalog: Store.load()}
 
   # The block-shaped keys a laptop config carries, then everything flat.

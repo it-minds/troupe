@@ -108,4 +108,53 @@ defmodule Troupe.ConfigTest do
       assert %Config{} = Config.load(root)
     end
   end
+
+  # Seven of the shipped profiles name a model by alias — `cheap` for the librarian, the
+  # answerer and `quick`, `expensive` for a workflow. `resolve_model/2` knew what those
+  # meant and nothing called it, so the alias went out as the model id: LiteLLM answered
+  # 401 ("the provider rejected the credentials") and Anthropic would answer 404, while
+  # the root agent, which names no model, worked.
+  describe "a model alias" do
+    setup do
+      %{
+        config: %Config{
+          provider: "openai",
+          model: "big-model",
+          small_model: "small-model",
+          expensive_model: "premium-model"
+        }
+      }
+    end
+
+    test "is resolved before the request is aimed", %{config: config} do
+      assert Config.target(config, "cheap").model == "small-model"
+      assert Config.target(config, "small").model == "small-model"
+      assert Config.target(config, "default").model == "big-model"
+      assert Config.target(config, "expensive").model == "premium-model"
+    end
+
+    test "that is really a model id is itself, and no model is the default", %{config: config} do
+      assert Config.target(config, "qwen3-235b").model == "qwen3-235b"
+      assert Config.target(config, nil).model == "big-model"
+    end
+
+    test "falls back to the default model when that tier is unset" do
+      config = %Config{provider: "openai", model: "only-model"}
+
+      assert Config.target(config, "cheap").model == "only-model"
+      assert Config.target(config, "expensive").model == "only-model"
+    end
+
+    test "is resolved for the context window too, so compaction plans against the right one" do
+      config = %Config{
+        provider: "openai",
+        model: "big-model",
+        small_model: "small-model",
+        windows: %{"small-model" => 32_000, "big-model" => 400_000}
+      }
+
+      assert Config.context_window(config, "cheap") == 32_000
+      assert Config.context_window(config, "default") == 400_000
+    end
+  end
 end
