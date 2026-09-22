@@ -407,8 +407,17 @@ jobs:
     # `ci.yml` calls this with `contents: write`. Declaring it here would make every other
     # caller — a pull request's `native` job — fail validation for a job it never runs.
     steps:
+      # Only what this workflow built. A release's run also holds the image builds'
+      # `*.dockerbuild` records, and downloading everything meant one of those failing
+      # after five retries stopped v0.3.1's publish — and would have attached them.
       - uses: actions/download-artifact@v4
         with:
+          pattern: troupe-*
+          path: dist
+          merge-multiple: true
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: desktop-*
           path: dist
           merge-multiple: true
       - name: Upload every artifact to the draft release

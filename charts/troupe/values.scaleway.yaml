@@ -12,6 +12,12 @@
 
 namespace: troupe-system
 
+# Scaleway's registry needs a credential to pull from: the secret's name, which must exist
+# in `troupe-system` and in every worker namespace (`docs/deploying-on-scaleway.md`). Set
+# here rather than left empty so that CI renders every deployment with one and the API
+# server's shape for it is checked — the GUI's was wrong for a release and nothing saw it.
+imagePullSecrets: [troupe-registry]
+
 operator:
   image:
     repository: rg.fr-par.scw.cloud/troupe/troupe-operator   # CHANGE ME: your registry

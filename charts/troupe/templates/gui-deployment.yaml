@@ -57,7 +57,13 @@ spec:
         app.kubernetes.io/component: gui
     spec:
       {{- with .Values.imagePullSecrets }}
-      imagePullSecrets: {{- toYaml . | nindent 8 }}
+      # Names, as every other deployment here renders them. The standalone GUI chart
+      # this came from took maps, and `toYaml` over names produced bare strings, which
+      # the API server refuses at apply time and nothing in CI rendered with a name set.
+      imagePullSecrets:
+        {{- range . }}
+        - name: {{ . | quote }}
+        {{- end }}
       {{- end }}
       # Nothing here reads a file it did not ship with, so the whole filesystem can be
       # read-only bar the two directories nginx writes its own scratch into.
