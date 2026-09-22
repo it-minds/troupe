@@ -89,7 +89,9 @@ worker, ordinal, container or cluster (`DESIGN.md:269`).
   old entry — append a new one that supersedes it.
 - **`REPORT.md`** is the stage report the spec asks for (`spec.md:92-93`): what was
   built, the command output that proves each done item, what was found against the
-  live plane, and known limitations. Update the limitations when you remove one.
+  live plane, and known limitations. It stopped with the move into the Troupe
+  repository and is kept as
+  [docs/history/gui-REPORT.md](../../../../docs/history/gui-REPORT.md).
 - Both files are untracked at audit time; the practice is in the working tree, not in
   the history.
 
@@ -147,8 +149,7 @@ server change that answers it goes in the same pull request (`spec.md:61`; Decis
    all three files under `docs/design/themes/` (see above). Check the screen at 380 px
    wide (`DESIGN.md:262`), that every status is a glyph and a word, and that it reads in
    all three themes in both modes — Appearance is the fastest way to look.
-6. Record any arguable choice in `DECISIONS.md`, and if the view closes a gap listed in
-   `REPORT.md` "Known limitations", remove the line.
+6. Record any arguable choice in `DECISIONS.md`.
 
 ## Related
 

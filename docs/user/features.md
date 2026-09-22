@@ -1,4 +1,4 @@
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > ## Deprecated — kept as an artifact
 >
@@ -89,7 +89,7 @@ Sources:
 - apps/troupe_plane/lib/troupe/plane/admin.ex:366-378
 - apps/troupe_worker/lib/troupe/worker/session/manager.ex:51
 - PROTOCOL.md:369-373, 468-486
-- docs/AUDIT.md §3 finding 5
+- docs/history/AUDIT.md §3 finding 5
 
 ## Remote sessions and profiles
 
@@ -201,7 +201,7 @@ Sources:
 - apps/troupe_tui/lib/troupe/ui/tui/server.ex:106-108, 114-120, 279-291, 444-449, 467-480
 - apps/troupe_plane/lib/troupe/plane/harness.ex:278-289
 - README.md:97-98
-- docs/AUDIT.md §1.7 (agent definition fields), §2 (Enter on agent row)
+- docs/history/AUDIT.md §1.7 (agent definition fields), §2 (Enter on agent row)
 
 ## Plan and build
 
@@ -347,7 +347,7 @@ mounts beyond its own workspace, `shell` runs in a restricted namespace.
 
 Team and organisation volumes are mounted on pods but are not yet handed to sessions,
 so on a pod `publish` and `import` have nowhere to go today. See
-[AUDIT.md](../AUDIT.md) §3 finding 2.
+[AUDIT.md](../history/AUDIT.md) §3 finding 2.
 
 Sources:
 - apps/troupe_core/lib/troupe/tools.ex:16-32, 46-61, 72-78, 114-131, 152-169
@@ -366,7 +366,7 @@ Sources:
 - apps/troupe_protocol/lib/troupe/mcp/server.ex:25-28, 62-73
 - apps/troupe_core/lib/troupe/session/client_tools.ex:36
 - apps/troupe_core/lib/troupe/config.ex:32-33
-- docs/AUDIT.md §1.7, §3 finding 2 (sandbox and mounts summarised from the core audit)
+- docs/history/AUDIT.md §1.7, §3 finding 2 (sandbox and mounts summarised from the core audit)
 
 ## Watch mode
 
@@ -534,7 +534,7 @@ Sources:
 - apps/troupe_plane/lib/troupe/plane/harness.ex:29-45, 315-346, 476-491, 624-638
 - apps/troupe_plane/lib/troupe/plane/triggers.ex:396-425
 - apps/troupe_gateway/lib/troupe/gateway/connection.ex:33
-- docs/AUDIT.md §1.7, §2 (budget period), core audit (request timeout 300 s, tool timeout, frame 16 MiB)
+- docs/history/AUDIT.md §1.7, §2 (budget period), core audit (request timeout 300 s, tool timeout, frame 16 MiB)
 
 ## Compaction
 
@@ -617,7 +617,7 @@ shows the preview; the GUI shows "large result" and fetches on demand. Locally b
 are erased when the session is erased. On a pod they live on the pod's disk for the
 life of the activation and are not uploaded to object storage today, so a dormant
 remote session's large outputs may be gone after it wakes elsewhere (see
-[AUDIT.md](../AUDIT.md) §4 question 12).
+[AUDIT.md](../history/AUDIT.md) §4 question 12).
 
 Discrepancy: the blobs module says "any event field over 16 KiB"; only tool-result
 content is spilled.
@@ -627,7 +627,7 @@ Sources:
 - apps/troupe_core/lib/troupe/agent/server.ex:1124
 - apps/troupe_gateway/lib/troupe/gateway/dispatch.ex:212-227
 - PROTOCOL.md:406-413
-- docs/AUDIT.md §2 (blobs), §4 question 12
+- docs/history/AUDIT.md §2 (blobs), §4 question 12
 
 ## Presence and several people on one session
 
@@ -695,7 +695,7 @@ Sources:
 - apps/troupe_protocol/lib/troupe/mcp/server.ex:25-28, 62-73
 - apps/troupe_plane/lib/troupe/plane/harness.ex:870-882
 - apps/troupe_ctl/lib/troupe/ctl/admin.ex:48
-- docs/AUDIT.md §1.7 (MCP discovery, `_meta`)
+- docs/history/AUDIT.md §1.7 (MCP discovery, `_meta`)
 
 ## Personal MCP connectors
 
@@ -808,7 +808,7 @@ Sources:
 - apps/troupe_plane/lib/troupe/plane/harness.ex:685-689, 977
 - PROTOCOL.md:360-365
 - ../../clients/gui/docs/AUDIT.md §1.2
-- docs/AUDIT.md §1.7 (usage sink, ledger)
+- docs/history/AUDIT.md §1.7 (usage sink, ledger)
 
 ## Dormancy and what wakes a session
 
@@ -941,7 +941,7 @@ Sources:
 - apps/troupe_tui/lib/troupe/ui/hq/view.ex:66
 - apps/troupe_ctl/lib/troupe/cli.ex:170-186
 - README.md:303-305
-- docs/AUDIT.md §2
+- docs/history/AUDIT.md §2
 
 ## Headless and run mode
 
@@ -1061,7 +1061,7 @@ Exit codes: 0 success, 1 the plane refused or could not be reached, 2 usage erro
 unreadable file.
 
 Note: `troupe admin audit` returns every team's changes to a team admin; the filter is
-by actor, kind, subject and time, not by team (see [AUDIT.md](../AUDIT.md) §3 finding
+by actor, kind, subject and time, not by team (see [AUDIT.md](../history/AUDIT.md) §3 finding
 6). `troupe admin sessions` is scoped to your teams.
 
 Sources:
@@ -1070,7 +1070,7 @@ Sources:
 - apps/troupe_plane/lib/troupe/plane/admin/api.ex:99-145, 307-321, 390-419, 581-707
 - apps/troupe_plane/lib/troupe/plane/triggers.ex:501-507
 - PROTOCOL.md:656-705, 772-777
-- docs/AUDIT.md §3 findings 6 and 7
+- docs/history/AUDIT.md §3 findings 6 and 7
 
 ## Scripts and other clients
 
@@ -1096,4 +1096,4 @@ Sources:
 - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:112-130
 - PROTOCOL.md:14-47, 329-339, 507-520, 864-875
 - apps/troupe_ctl/lib/troupe/cli.ex:633-661
-- docs/AUDIT.md §2
+- docs/history/AUDIT.md §2

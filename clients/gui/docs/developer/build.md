@@ -100,8 +100,8 @@ not made at audit time. Since the move the deploy credentials live in the reposi
 root's `.local/`, which the root `scripts/deploy` reads and which is outside this build
 context, so the gap only matters for a `clients/gui/.local/` somebody makes by hand.
 
-It also does not exclude `docs/`, `REPORT.md` or `spec.md`; they are copied into the
-build stage and discarded with it.
+It also does not exclude `docs/` or `spec.md`; they are copied into the build stage and
+discarded with it.
 
 ## Building locally
 

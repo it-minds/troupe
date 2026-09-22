@@ -22,17 +22,18 @@ them; start with the one that matches what you are trying to do.
 |---|---|
 | [developer/](developer/README.md) | How the code is organised, how to build and test it, what CI does, how a build reaches a cluster, and the conventions the gate enforces. |
 | [user/](user/README.md) | **Deprecated.** What Troupe does from the user's seat, written when the terminal client lived in `apps/`: signing in, running sessions, every feature, end-to-end workflows, troubleshooting. Kept as an artifact; the TUI's current documentation is [`clients/tui`](../clients/tui/README.md). |
-| [program/](program/README.md) | The plan the separate repositories were built to — the handoff, the briefs, the release plan — kept as it was written. |
-| [history/](history/README.md) | The commit maps for the three imported repositories, for a SHA an imported document quotes. |
+| [program/](program/README.md) | The plan the separate repositories were built to — the handoff, the release plan, the reviews — kept as it was written. |
+| [history/](history/README.md) | Point-in-time records nobody updates: the stage reports, the audit below, the briefs; and the commit maps for the three imported repositories, for a SHA an imported document quotes. |
 | [admin/](admin/README.md) | Operating a deployment: every environment variable and Helm value, roles and permissions, profiles and policy, bundles and triggers, integrations, backup and restore, monitoring, routine tasks. |
 | [whitepaper.md](whitepaper.md) | How the subsystems fit together and why: the event log, the daemon, the plane, worker pods, the operator, cost accounting, with architecture and flow diagrams and the trade-offs each decision carries. |
-| [AUDIT.md](AUDIT.md) | The Phase 1 inventory this suite was written from: what exists, where the older prose contradicts the code, findings that need a caveat, and the open questions the docs mark as unconfirmed. |
+| [history/AUDIT.md](history/AUDIT.md) | The Phase 1 inventory this suite was written from: what exists, where the older prose contradicts the code, findings that need a caveat, and the open questions the docs mark as unconfirmed. |
 
 Older documents at the repository root and under `docs/` remain the design record:
-`ARCHITECTURE.md`, `DECISIONS.md`, `PROTOCOL.md` (normative for clients), `REPORT.md`,
-`spec.md`, [a2a.md](a2a.md), [deploying-on-scaleway.md](deploying-on-scaleway.md) and
-[plans/](plans/README.md). Where one of them disagrees with the code, [AUDIT.md](AUDIT.md) §2
-says so and the track documents follow the code.
+`ARCHITECTURE.md`, `DECISIONS.md`, `PROTOCOL.md` (normative for clients), `spec.md`,
+[a2a.md](a2a.md), [deploying-on-scaleway.md](deploying-on-scaleway.md),
+[plans/](plans/README.md) and the stage reports in [history/](history/README.md). Where one
+of them disagrees with the code, [AUDIT.md](history/AUDIT.md) §2 says so and the track
+documents follow the code.
 
 The clients keep their own documentation beside their code: the graphical one's is
 [`clients/gui/docs`](../clients/gui/docs/README.md), the terminal one's
@@ -51,7 +52,7 @@ Each track's `README.md` ends with a coverage table for its own scope:
   command a user may issue, plane harness method and A2A route.
 
 There is no `.env.example` in this repository, so the variable inventory was derived from the
-configuration code rather than from a template; [AUDIT.md](AUDIT.md) §1.5 explains the method.
+configuration code rather than from a template; [AUDIT.md](history/AUDIT.md) §1.5 explains the method.
 The consolidated result of the three checks, run against the finished documents, is recorded
 at the end of this file.
 
@@ -66,5 +67,5 @@ A script checked the finished documents against commit `4083b1f`:
 | Every plane `/rpc` harness method, every `admin.*` method, every protocol command in the gateway dispatch table, every plane HTTP route, every worker and A2A route | `apps/troupe_plane`, `apps/troupe_gateway`, `apps/troupe_a2a` | all present in [user/](user/README.md) or [admin/](admin/README.md). The CLI and TUI commands the original check also covered are no longer in this repository. Three names the pattern matched in `harness.ex` (`session.activate`, `session.read`, `acl.changed`) are pushes from the plane to a pod, not client methods; they are described in [whitepaper.md](whitepaper.md) §6.3 |
 
 Nothing was found missing. There is no `.env.example`; the variable inventory was derived
-from the code as described in [AUDIT.md](AUDIT.md) §1.5.
+from the code as described in [AUDIT.md](history/AUDIT.md) §1.5.
 

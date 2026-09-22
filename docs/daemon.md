@@ -1,6 +1,6 @@
 # The daemon — phase 0: does it boot?
 
-*2026-09-19. The spike named in `docs/program/brief-daemon.md` §4, phase 0. What ran,
+*2026-09-19. The spike named in `docs/history/brief-daemon.md` §4, phase 0. What ran,
 what it proved, and every place the harness still assumes a pod. This list is the input
 to phase 1 and to the brief's section 7.*
 

@@ -19,7 +19,7 @@ RFC 9728 document from `api://<client_id>/admin` to `<base_url>/mcp/admin`, adde
 `charts/troupe/templates/plane-deployment.yaml`, `apps/troupe_plane/lib/troupe/plane/web/router.ex`,
 `apps/troupe_plane/lib/troupe/plane/oidc.ex`). Line citations in every track were re-based
 on `4083b1f`; the variable counts in §1.5 below were taken before it and are one short for
-the plane — [admin/configuration.md](admin/configuration.md) is the authoritative list.
+the plane — [admin/configuration.md](../admin/configuration.md) is the authoritative list.
 
 This file is the Phase 1 output: what the repository actually contains, what could not be
 confirmed from code, and where the existing prose disagrees with the code. The four
@@ -55,7 +55,7 @@ Boundaries are enforced by `mix troupe.boundaries`
 `Troupe.Plane.*`.
 
 Detailed module inventories, per app, are in the track documents:
-[developer/architecture.md](developer/architecture.md) and [whitepaper.md](whitepaper.md).
+[developer/architecture.md](../developer/architecture.md) and [whitepaper.md](../whitepaper.md).
 
 ### 1.2 HTTP and socket surfaces
 
@@ -109,7 +109,7 @@ Plane `/rpc` harness methods (`apps/troupe_plane/lib/troupe/plane/harness.ex:49-
 `session.create`, `session.pin`, `session.unpin`, `session.erase`, `session.grant`,
 `session.review`, `trigger.fire`. Admin methods: 38 entries in
 `apps/troupe_plane/lib/troupe/plane/admin/api.ex:185-707`, listed in
-[admin/roles-and-permissions.md](admin/roles-and-permissions.md).
+[admin/roles-and-permissions.md](../admin/roles-and-permissions.md).
 
 Event types: 32 durable types are emitted by code; six schema entries have no emitter in this
 repository (`session_resumed`, `session_read_only`, `session_archived`, `session_erased`,
@@ -143,8 +143,8 @@ Local daemon: JSONL logs and blobs under `$XDG_STATE_HOME/troupe/sessions/`.
 ### 1.5 Configuration inputs
 
 Every environment variable, its default and what it controls is tabulated in
-[admin/configuration.md](admin/configuration.md) (runtime) and
-[developer/local-setup.md](developer/local-setup.md) (development). Every Helm value is
+[admin/configuration.md](../admin/configuration.md) (runtime) and
+[developer/local-setup.md](../developer/local-setup.md) (development). Every Helm value is
 mapped to the template and variable it feeds in the same admin document. Counts: 26 operator
 variables, 47 plane variables, 30 worker variables, 6 A2A variables, 1 daemon variable;
 82 values in `charts/troupe/values.yaml`.
@@ -171,11 +171,11 @@ freshness, Python conformance client), `images` (four server images to a registr
 only), `build` (five Burrito targets on native runners with a smoke test), `containers`
 (clean ubuntu + alpine run), `installer-sh`, `installer-ps1`, `release` (GitHub release on
 `v*` tags). **There is no deployment step to any environment.** Every step is listed in
-[developer/ci-cd.md](developer/ci-cd.md).
+[developer/ci-cd.md](../developer/ci-cd.md).
 
 ### 1.7 User-facing features confirmed from code
 
-Listed with the implementing file in [user/features.md](user/features.md). In short: sessions
+Listed with the implementing file in [user/features.md](../user/features.md). In short: sessions
 on a team's worker pods or the local daemon; streaming transcripts; approvals with
 allow / deny / allow-for-session, first answer wins; plan and build agents plus subagents;
 task lists a person can edit; watch mode (`AI!`, `AI?`, `AI` comments); worktrees for a
@@ -189,7 +189,7 @@ callers; token accounting per session.
 Two roles (`platform_admin` from an identity-provider group; `team_admin` assigned per team),
 break-glass, service principals, provisioning modes `direct` and `gitops`, `TroupePolicy`
 limits with admission and operator enforcement, bundle publish/retire, triggers, platform
-settings, audit trail, SCIM. All in [admin/](admin/README.md).
+settings, audit trail, SCIM. All in [admin/](../admin/README.md).
 
 ---
 

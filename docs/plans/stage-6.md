@@ -13,10 +13,11 @@ of their tables we already have as a log, and which of their loops we already ha
 process.
 
 Parts 1, 2 and 4 are **built** — `ARCHITECTURE.md` §15 and §16 describe what landed and
-`REPORT.md`'s stage 6 and R1 sections prove them. They stay here as the record of what was
-intended, including the places where the build deviated (`DECISIONS.md` 287–303 for part
-1, 330–343 for parts 2 and 4 — including the generalisation of a revision beyond cron that
-`docs/brief-remote.md` R1 asks for). Parts 3 and 5 are not built.
+[`REPORT.md`](../history/REPORT.md)'s stage 6 and R1 sections prove them. They stay here
+as the record of what was intended, including the places where the build deviated
+(`DECISIONS.md` 287–303 for part 1, 330–343 for parts 2 and 4 — including the
+generalisation of a revision beyond cron that
+[`brief-remote.md`](../history/brief-remote.md) R1 asks for). Parts 3 and 5 are not built.
 
 | Part | One line | Size |
 | --- | --- | --- |

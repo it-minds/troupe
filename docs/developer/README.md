@@ -1,6 +1,6 @@
 # Developer track
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -101,11 +101,11 @@ Every variable the track was asked to cover, and where it is documented.
 ## What could not be covered from code
 
 - Whether the operator's cluster suites and the plane's enrolment tests leave CI's
-  `check` job green without a cluster (testing.md §3; [../AUDIT.md](../AUDIT.md) §3.14).
+  `check` job green without a cluster (testing.md §3; [../history/AUDIT.md](../history/AUDIT.md) §3.14).
 - Whether `apps/troupe_protocol`'s suite runs from its own directory given
   `policy_test.exs`'s import of an operator test module (testing.md §2).
 - Whether the worker image contains a `reaper` binary, given that the Dockerfile
   installs no Zig (build.md §1).
 - Whether CI has ever run, on which forge, and which jobs are required
-  ([../AUDIT.md](../AUDIT.md) open questions 1-2; ci-cd.md, opening).
+  ([../history/AUDIT.md](../history/AUDIT.md) open questions 1-2; ci-cd.md, opening).
 - Which values a live deployment uses, if one exists (deployment.md §1).

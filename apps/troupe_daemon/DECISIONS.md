@@ -1,7 +1,7 @@
 # Decisions — troupe-daemon
 
-Numbered, one per deviation from the plan that named it (`../docs/brief-daemon.md`) or
-from what a reader would expect. The harness's own decisions are in
+Numbered, one per deviation from the plan that named it
+(`../../docs/history/brief-daemon.md`) or from what a reader would expect. The harness's own decisions are in
 `troupe-remote/DECISIONS.md`; this file is about packaging it.
 
 1. **A plain Mix release per platform, not a Burrito binary.** The brief said "one

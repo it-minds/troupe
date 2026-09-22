@@ -1030,9 +1030,9 @@ defmodule Troupe.Agent.Server do
   #
   # A streamed response cannot carry a cost header: the headers are sent before a token
   # is generated, so LiteLLM's `x-litellm-response-cost` is simply absent and its
-  # breakdown headers all read `0.0` (`docs/AUDIT.md` §3.17, which assumed otherwise).
-  # Streaming is how the harness talks to a model, so on a gateway that prices this way
-  # every session's cost was zero.
+  # breakdown headers all read `0.0` (`docs/history/AUDIT.md` §3.17, which assumed
+  # otherwise). Streaming is how the harness talks to a model, so on a gateway that prices
+  # this way every session's cost was zero.
   #
   # `priced_locally` marks the difference for whoever reconciles later: the gateway's own
   # number, when there is one, still wins, and a model the catalog has no price for is

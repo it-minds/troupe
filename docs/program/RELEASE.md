@@ -164,7 +164,7 @@ computed.
 | The plane has no `session.register`, `session.seal-report` or `session.presign` | `Troupe.Plane.Harness` |
 | The GUI's **Keep it private** control is gated on a `private_sessions` capability no daemon reports | `clients/gui` stage 3 |
 | Client-hosted MCP servers are implemented in `Troupe.Session.ClientTools` and offered by no client | `apps/troupe_core/lib/troupe/session/client_tools.ex` |
-| Nothing has run on a cluster | `../../REPORT.md` |
+| Nothing has run on a cluster | `../history/REPORT.md` |
 
 ### Design
 
@@ -232,7 +232,7 @@ Two additions to §5's table, both from things this plan adds:
    started.
 6. A personal MCP server from `mcp.json` is registered after the consent challenge, served
    through `tool.invoke`, and shows as `session_tainted` to a second client.
-7. `../../REPORT.md`'s "nothing has run on a cluster" paragraph is deleted and
+7. `../history/REPORT.md`'s "nothing has run on a cluster" paragraph is deleted and
    replaced by command output.
 
 ---

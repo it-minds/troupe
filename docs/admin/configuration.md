@@ -1,6 +1,6 @@
 # Configuration reference
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; every line number below is from that tree, whose working copy was otherwise clean.
 
@@ -12,7 +12,7 @@
 
 This is the one place every knob is listed. Four layers, lowest first:
 
-1. **Environment variables**, read at boot by `config/runtime.exs` (Part A). There is no `.env.example` in the repository ([AUDIT.md §1.5](../AUDIT.md)); the list was derived from `config/runtime.exs`, `config/config.exs` and every `System.get_env` call under `apps/*/lib`.
+1. **Environment variables**, read at boot by `config/runtime.exs` (Part A). There is no `.env.example` in the repository ([AUDIT.md §1.5](../history/AUDIT.md)); the list was derived from `config/runtime.exs`, `config/config.exs` and every `System.get_env` call under `apps/*/lib`.
 2. **Helm values** in `charts/troupe/values.yaml`, which render most of those variables into the plane, operator and A2A pods (Part B). Worker pods get theirs from the operator, not from the chart.
 3. **Platform settings** a platform admin changes at runtime, stored in PostgreSQL and layered over the deployed value (Part C).
 4. **Secrets** the chart references but never creates (Part D), and the ports and labels the network depends on (Part E).
@@ -116,7 +116,7 @@ The module paths above are `apps/troupe_operator/lib/troupe/operator/`. `Troupe.
 | `TROUPE_KUBE_CONTEXT`, `KUBECONFIG` | unset / `~/.kube/config` | no | used by enrolment's TokenReview connection only outside a pod | no Helm value | `enrolment.ex:169-185` |
 | `TROUPE_SCHEDULERS`, `ERL_FLAGS` | set by chart | — | `+S` from `limits.cpu`, `+Q` from `plane.maxPorts`, and `inet_dist_listen_min/max` pinned to `plane.distPort` when clustered | `plane-deployment.yaml:195-206`; Job `:85-86` | — |
 
-Module paths above are `apps/troupe_plane/lib/troupe/plane/`. Application-environment keys that nothing in `config/` sets — `:k8s_conn`, `:gitops`, `:policy`, `:egress_allowed`, `:namespace`, `:namespace_prefix`, `:lease_timeout_ms`, `:disk_high_watermark`, `:disk_low_watermark`, `:gateway`, `:reconcile_threshold_micros`, `:transit[:mount]`, `:transit[:key]`, `:oidc[:plane_name]` — are listed in [AUDIT.md §3.1](../AUDIT.md) and the plane audit notes; the consequences of `:k8s_conn` and `:gateway` being unset are in [profiles-and-policy.md](profiles-and-policy.md) and [integrations.md](integrations.md).
+Module paths above are `apps/troupe_plane/lib/troupe/plane/`. Application-environment keys that nothing in `config/` sets — `:k8s_conn`, `:gitops`, `:policy`, `:egress_allowed`, `:namespace`, `:namespace_prefix`, `:lease_timeout_ms`, `:disk_high_watermark`, `:disk_low_watermark`, `:gateway`, `:reconcile_threshold_micros`, `:transit[:mount]`, `:transit[:key]`, `:oidc[:plane_name]` — are listed in [AUDIT.md §3.1](../history/AUDIT.md) and the plane audit notes; the consequences of `:k8s_conn` and `:gateway` being unset are in [profiles-and-policy.md](profiles-and-policy.md) and [integrations.md](integrations.md).
 
 ### A.3 Worker release (`troupe_worker`)
 
@@ -206,12 +206,12 @@ See [../developer/ci-cd.md](../developer/ci-cd.md) for the CI matrix.
 
 ### A.7 Variables with two meanings, and variables nobody reads
 
-- **`TROUPE_BASE_URL` means two things.** On the plane it is the public URL and token issuer (`runtime.exs:255-257,313-314`). On a worker it is the LLM endpoint the operator copies from `llm.endpoint` (`resources.ex:623`; `config.ex:141`). Never set it on a plane to a model gateway or on a worker to the plane ([AUDIT.md §3.4](../AUDIT.md)).
-- **`TROUPE_BASE_URL` is effectively mandatory on a plane.** With only `TROUPE_HOST`, `:base_url` stays `nil`, the RFC 9728 document's `resource` becomes `/mcp` and its `scopes_supported` empty (`web/router.ex:294-338`), the third accepted audience is missing (`oidc.ex:115-120`), and the console redirect URI falls back to `http://localhost:4000/admin/callback` (`web/admin_auth.ex:338-341`). The chart always renders it (`plane-deployment.yaml:215-216`), so this only bites hand-written manifests ([AUDIT.md §3.10](../AUDIT.md)).
-- **Injected but unread:** `TROUPE_SMALL_MODEL`, `TROUPE_NAMESPACE`, `TROUPE_CONFIG_CHANNEL` (`resources.ex:560-574,627`). Nothing under `apps/*/lib` reads them; `Troupe.Config.merge_env/1` reads only the five variables at `config.ex:139-145`. A profile's `llm.smallModel` therefore has no effect on a pod ([AUDIT.md §3.3](../AUDIT.md)).
+- **`TROUPE_BASE_URL` means two things.** On the plane it is the public URL and token issuer (`runtime.exs:255-257,313-314`). On a worker it is the LLM endpoint the operator copies from `llm.endpoint` (`resources.ex:623`; `config.ex:141`). Never set it on a plane to a model gateway or on a worker to the plane ([AUDIT.md §3.4](../history/AUDIT.md)).
+- **`TROUPE_BASE_URL` is effectively mandatory on a plane.** With only `TROUPE_HOST`, `:base_url` stays `nil`, the RFC 9728 document's `resource` becomes `/mcp` and its `scopes_supported` empty (`web/router.ex:294-338`), the third accepted audience is missing (`oidc.ex:115-120`), and the console redirect URI falls back to `http://localhost:4000/admin/callback` (`web/admin_auth.ex:338-341`). The chart always renders it (`plane-deployment.yaml:215-216`), so this only bites hand-written manifests ([AUDIT.md §3.10](../history/AUDIT.md)).
+- **Injected but unread:** `TROUPE_SMALL_MODEL`, `TROUPE_NAMESPACE`, `TROUPE_CONFIG_CHANNEL` (`resources.ex:560-574,627`). Nothing under `apps/*/lib` reads them; `Troupe.Config.merge_env/1` reads only the five variables at `config.ex:139-145`. A profile's `llm.smallModel` therefore has no effect on a pod ([AUDIT.md §3.3](../history/AUDIT.md)).
 - **`TROUPE_DRAIN_TIMEOUT_SECONDS` is not passed to pods.** The operator uses it for `terminationGracePeriodSeconds` (`resources.ex:493`) but does not put it in the container env, so a worker's own drain timeout is always its default 300 s (`runtime.exs:368-369`). Raising `operator.drainTimeoutSeconds` lengthens the grace period without lengthening the worker's wait.
 - **`TROUPE_POLICY_NAME` has no Helm value.** `policy.name` (`values.yaml:234`) names the `TroupePolicy` the chart installs and binds to the admission policy (`policy-default.yaml:7`; `admission-policy.yaml:138`), but neither the operator nor the plane deployment sets `TROUPE_POLICY_NAME`, so both read `default` (`reconciler.ex:310`; `cluster_policy.ex:94-97`). A `policy.name` other than `default` leaves the operator reporting `PolicyViolation: NoPolicy` on every profile (`reconciler.ex:320-331`).
-- **`TROUPE_OBJECT_REGION` never reaches workers** (A.3). On Scaleway the plane signs for `fr-par` and the pods for `us-east-1`. Unconfirmed whether Scaleway accepts a mismatched region; see [AUDIT.md §4](../AUDIT.md) (infra note 14).
+- **`TROUPE_OBJECT_REGION` never reaches workers** (A.3). On Scaleway the plane signs for `fr-par` and the pods for `us-east-1`. Unconfirmed whether Scaleway accepts a mismatched region; see [AUDIT.md §4](../history/AUDIT.md) (infra note 14).
 - **`TROUPE_OIDC_SCOPES`** was uncommitted at audit time and is now commit `6c29471`. Its default no longer includes `groups`, because Entra refuses a scope of that name with `AADSTS650053` (`web/router.ex:48-59`). **`TROUPE_OIDC_MCP_SCOPE`** followed in `4083b1f`: the MCP scope is now named after the resource (`<base_url>/mcp/admin`) because a client must send that URL as RFC 8707's `resource` and Entra refused the old `api://<client-id>/admin` pairing with `AADSTS9010010` (`web/router.ex:311-320`); the app registration has to expose that name (`values.yaml:150-154`).
 
 ---
@@ -352,11 +352,11 @@ Only values that differ from `values.yaml` are listed. Line numbers are within e
 | `policy.allowedEgress` | `*.anthropic.com`, `github.com` | `llm-gw.itmindsinternal.dk`, `github.com`, `*.github.com` (157-159) | same (142-144) | those three plus `*.anthropic.com` (70-76) |
 | `policy.allowedStorageClasses` | `standard` | `scw-bssd`, `scw-sfs` (165-166) | same (150-151) | `standard` (78) |
 | `policy.workersDomain` | `workers.example.test` | `workers.example.com` (169) | same (154) | `workers.localtest.me` (80) |
-| `networkPolicy.enabled` | `true` | `true` (24) | default | default — kind's CNI does not enforce it ([AUDIT.md §4.16](../AUDIT.md)) |
+| `networkPolicy.enabled` | `true` | `true` (24) | default | default — kind's CNI does not enforce it ([AUDIT.md §4.16](../history/AUDIT.md)) |
 
 Three notes on the overlays:
 
-- **Nothing in the repository issues `troupe-plane-tls`.** Both Scaleway files set `plane.tlsSecretName: troupe-plane-tls` with `plane.certIssuer: ""`, and `deploy/scaleway/cluster-issuer.yaml` is HTTP-01 only. Discrepancy: `docs/deploying-on-scaleway.md:127-137,180` describes a DNS-01 wildcard and lists `troupe-workers-tls` and `troupe-plane-tls` as "written by cert-manager"; the values files instead use `operator.certIssuer: letsencrypt` (per-pod HTTP-01) and leave the plane's certificate to somebody ([AUDIT.md §2](../AUDIT.md)).
+- **Nothing in the repository issues `troupe-plane-tls`.** Both Scaleway files set `plane.tlsSecretName: troupe-plane-tls` with `plane.certIssuer: ""`, and `deploy/scaleway/cluster-issuer.yaml` is HTTP-01 only. Discrepancy: `docs/deploying-on-scaleway.md:127-137,180` describes a DNS-01 wildcard and lists `troupe-workers-tls` and `troupe-plane-tls` as "written by cert-manager"; the values files instead use `operator.certIssuer: letsencrypt` (per-pod HTTP-01) and leave the plane's certificate to somebody ([AUDIT.md §2](../history/AUDIT.md)).
 - The small and Scaleway `plane.scim` blocks omit `secretName`; Helm merges with the default, so `troupe-plane-scim` still applies if `enabled` is flipped on.
 - `plane.distribution: none` with `replicas: 1` rolls by `Recreate`, so an upgrade is a few seconds without a plane (`plane-deployment.yaml:131-138`; `values.small.yaml:55-62`).
 
@@ -392,8 +392,8 @@ Effect wording as the console prints it: `immediate` = "Takes effect on the next
 
 Discrepancies and caveats:
 
-- `default_budget_period` offers `monthly` or `daily` (`settings.ex:97`), the API describes "monthly or daily" (`admin/api.ex:107`) and the Teams page offers both (`web/live/teams.ex:207-208`), but `Identity.Team` accepts only `monthly` or `never` (`identity/team.ex:69`) and the ledger never windows spend by period (`ledger.ex:69-78`). Enabling a team while the default is `daily` will fail the changeset. [AUDIT.md §2, §4.9](../AUDIT.md).
-- `default_bundle_channel` has no reader beyond the registry ([AUDIT.md §4.10](../AUDIT.md)); a profile's channel is `configBundleChannel` on the CR (default `stable`, `charts/troupe/crds/workerprofile.yaml:99`).
+- `default_budget_period` offers `monthly` or `daily` (`settings.ex:97`), the API describes "monthly or daily" (`admin/api.ex:107`) and the Teams page offers both (`web/live/teams.ex:207-208`), but `Identity.Team` accepts only `monthly` or `never` (`identity/team.ex:69`) and the ledger never windows spend by period (`ledger.ex:69-78`). Enabling a team while the default is `daily` will fail the changeset. [AUDIT.md §2, §4.9](../history/AUDIT.md).
+- `default_bundle_channel` has no reader beyond the registry ([AUDIT.md §4.10](../history/AUDIT.md)); a profile's channel is `configBundleChannel` on the CR (default `stable`, `charts/troupe/crds/workerprofile.yaml:99`).
 - `platform_admin_group` and `groups_claim` are what `Admin.actor_for/1` and `Login.from_claims/1` read (`login.ex:63-71`), so a wrong value locks everyone out at their next request; the console will not save `platform_admin_group` until `admin.identity.check` has passed for the value in the field (`web/live/settings.ex:38,90`).
 
 **How to change one** (all four surfaces reach the same `Settings.put/3`):
@@ -429,7 +429,7 @@ Troupe creates no Secrets (`values.yaml:11-16,126-130`). Every one below must ex
 | `a2a.tlsSecretName` | `troupe-system` | `tls.crt`, `tls.key` | a2a Ingress, `a2a-deployment.yaml:130-134` | with the facade |
 | worker TLS: `<profile>-<ordinal>-tls` per pod, or `TROUPE_WORKERS_TLS_SECRET` shared | `troupe-w-<profile>` | `tls.crt`, `tls.key` | per-pod Ingress, `resources.ex:229-237` | per pod is written by cert-manager when `operator.certIssuer` is set; the shared one is yours |
 
-**Caveat on `SecretMissing`.** The operator's reconciler checks whether a profile's LLM and MCP secrets exist in `settings.plane_namespace` — `troupe-system` — (`apps/troupe_operator/lib/troupe/operator/reconciler.ex:184-195`), while the pods resolve every `secretKeyRef` in their own namespace `troupe-w-<profile>`. In addition the operator's ClusterRole grants no verb on `secrets` (`charts/troupe/templates/operator-rbac.yaml:15-46`), so the in-cluster `get` is expected to be Forbidden and the condition to read `SecretMissing: True` regardless. Discrepancy: `ARCHITECTURE.md:693-697` and `docs/deploying-on-scaleway.md:182-197` say the condition clears when the secret exists in the worker namespace. Put the secrets where the pods read them (`troupe-w-<profile>`); treat the condition as unreliable until the reconciler changes. [AUDIT.md §2, §4.4](../AUDIT.md).
+**Caveat on `SecretMissing`.** The operator's reconciler checks whether a profile's LLM and MCP secrets exist in `settings.plane_namespace` — `troupe-system` — (`apps/troupe_operator/lib/troupe/operator/reconciler.ex:184-195`), while the pods resolve every `secretKeyRef` in their own namespace `troupe-w-<profile>`. In addition the operator's ClusterRole grants no verb on `secrets` (`charts/troupe/templates/operator-rbac.yaml:15-46`), so the in-cluster `get` is expected to be Forbidden and the condition to read `SecretMissing: True` regardless. Discrepancy: `ARCHITECTURE.md:693-697` and `docs/deploying-on-scaleway.md:182-197` say the condition clears when the secret exists in the worker namespace. Put the secrets where the pods read them (`troupe-w-<profile>`); treat the condition as unreliable until the reconciler changes. [AUDIT.md §2, §4.4](../history/AUDIT.md).
 
 ---
 

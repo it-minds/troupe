@@ -1,6 +1,6 @@
 # Monitoring and troubleshooting
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers are from that tree. Unprefixed plane modules are under `apps/troupe_plane/lib/troupe/plane/`.
 
@@ -115,7 +115,7 @@ These fire on worker pods (and the local daemon). Attaching a handler means a re
 | Worker heartbeat | every **5 s** over the control channel, carrying `capacity`, `bundle_hash`, `version`, `active_sessions`, `disk_used_bytes`, `disk_total_bytes` | `apps/troupe_worker/lib/troupe/worker/plane/link.ex:38,180-181,379-388` |
 | Lease | a pod with no heartbeat for **15 s** is unhealthy and not placed on; `Fleet.Sweeper` runs every lease/3 (5 s) on every replica and logs each pod it marks | `fleet.ex:16-22,110-150`; `fleet/sweeper.ex:25-60` |
 | Placement filters | healthy, not draining, heartbeat inside the lease, disk below **0.80** | `fleet.ex:110-130,152-154` |
-| Worker disk | `Disk.Watch` every 30 s evicts encrypted caches above **0.70** until under it; `Disk` reports `:high` at 0.80 and `:critical` at 0.90. Discrepancy: `disk.ex:10-14` promises sleeping sessions and refusing placements above the watermarks; only cache eviction is implemented ([AUDIT.md §2](../AUDIT.md)) | `apps/troupe_worker/lib/troupe/worker/disk.ex:16-17`; `disk/watch.ex:27,106-140` |
+| Worker disk | `Disk.Watch` every 30 s evicts encrypted caches above **0.70** until under it; `Disk` reports `:high` at 0.80 and `:critical` at 0.90. Discrepancy: `disk.ex:10-14` promises sleeping sessions and refusing placements above the watermarks; only cache eviction is implemented ([AUDIT.md §2](../history/AUDIT.md)) | `apps/troupe_worker/lib/troupe/worker/disk.ex:16-17`; `disk/watch.ex:27,106-140` |
 | Session dormancy | after 10 min idle on the pod; seal every 60 s and at turn end; snapshot every 500 events | `worker/session/manager.ex:51`; `worker/session/sealer.ex:28-31` |
 | Ledger cache | spend sums cached 60 s per node | `application.ex:44-46` |
 | Trigger scheduler | 30 s tick; a never-fired trigger only within 120 s of its minute | `triggers/scheduler.ex:34-38` |
@@ -142,8 +142,8 @@ The table from `docs/deploying-on-scaleway.md:357-373`, kept as written, then ex
 | Workers enrol, then go quiet | the worker namespace lacks `troupe.dev/workers=true`; an older operator's namespace gets it on the next reconcile | `:371`; `network-policy.yaml:42-48` |
 | `429` from the plane behind one office address | `plane.ingress.rateLimit` is per client IP; raise `connections` first | `:372`; `values.yaml:93-100` |
 | Image pull fails with `unauthorized` in a worker namespace | the pull secret exists in `troupe-system` but not in `troupe-w-<profile>` | `:373`; `resources.ex:497-501` |
-| **`SecretMissing: True` on every profile, secrets present** | the reconciler checks `troupe-system`, not the worker namespace, with a `get` its ClusterRole does not grant | `reconciler.ex:184-195`; `operator-rbac.yaml:15-46`; [AUDIT.md §2, §4.4](../AUDIT.md) |
-| **`profile put` succeeds but no `WorkerProfile` appears; answer says `not_applied`, `no_cluster`** | the plane's `:k8s_conn` is never configured; direct provisioning has no connection. Apply the CR yourself | `provision.ex:242-250`; [AUDIT.md §3.1](../AUDIT.md) |
+| **`SecretMissing: True` on every profile, secrets present** | the reconciler checks `troupe-system`, not the worker namespace, with a `get` its ClusterRole does not grant | `reconciler.ex:184-195`; `operator-rbac.yaml:15-46`; [AUDIT.md §2, §4.4](../history/AUDIT.md) |
+| **`profile put` succeeds but no `WorkerProfile` appears; answer says `not_applied`, `no_cluster`** | the plane's `:k8s_conn` is never configured; direct provisioning has no connection. Apply the CR yourself | `provision.ex:242-250`; [AUDIT.md §3.1](../history/AUDIT.md) |
 | **Every bundle publishes, even with an MCP host outside `allowedEgress`**, one warning in the log | same cause: no `:k8s_conn`, so `ClusterPolicy` allows every host | `cluster_policy.ex:57-60,99-107` |
 | **`PolicyViolation: NoPolicy` on every profile** | `policy.name` is not `default` and nothing sets `TROUPE_POLICY_NAME` | `reconciler.ex:310,320-331` |
 | **Console login lands on `/admin/denied` with "administer nothing here" listing the groups carried** | the `platform_admin_group` id is not among them, or `groups_claim` names the wrong claim | `web/admin_auth.ex:99-116`; `settings.ex:50-70` |
@@ -154,9 +154,9 @@ The table from `docs/deploying-on-scaleway.md:357-373`, kept as written, then ex
 | **MCP OAuth fails in the browser after consent, Entra says `AADSTS9010010`** | the advertised scope and the client's `resource` name different resources; a plane before `4083b1f` advertised `api://<client-id>/admin`. Upgrade, and make the registration expose `<base_url>/mcp/admin` (or set `plane.oidc.mcpScope`) | `web/router.ex:311-338`; `values.yaml:150-154` |
 | **Console redirect URI is `http://localhost:4000/admin/callback`** | `TROUPE_BASE_URL` unset in a hand-written manifest | `web/admin_auth.ex:338-341` |
 | **`troupe.ledger.reconcile` says `:no_gateway_configured`** | `:troupe_plane, :gateway` is not set by anything in the repository | `reconcile.ex:194-205` |
-| **Pods stay on the old image after a profile change; `UpgradePending: True`** | `OnDelete`; nothing deletes the pod. Drain with `troupe admin pod drain`, then `kubectl delete pod` | `reconciler.ex:211-222`; [AUDIT.md §3.13](../AUDIT.md) |
+| **Pods stay on the old image after a profile change; `UpgradePending: True`** | `OnDelete`; nothing deletes the pod. Drain with `troupe admin pod drain`, then `kubectl delete pod` | `reconciler.ex:211-222`; [AUDIT.md §3.13](../history/AUDIT.md) |
 | **Worker pod `CreateContainerConfigError`** | the LLM Secret named by `llm.secretRef` is missing in `troupe-w-<profile>`; that `secretKeyRef` is not optional | `resources.ex:629-644` |
 | **Worker cannot write to object storage on Scaleway, plane can** | region mismatch: the plane signs for `fr-par`, workers for `us-east-1`. Unconfirmed whether Scaleway rejects it | `plane-deployment.yaml:259-260`; `resources.ex:532-585` |
 | **Team enable fails with a changeset error on `budget_period`** | `default_budget_period` set to `daily`; the team schema accepts `monthly` or `never` | `identity/team.ex:69`; `settings.ex:97` |
-| **Plane replicas do not cluster after a rolling image upgrade** | the Erlang cookie is generated per build and not pinned; two image builds may not share one | [AUDIT.md §3.15](../AUDIT.md) |
-| **Two profiles' team volumes never appear inside sessions** | mounted on the pod, not passed to the session's mount table | [AUDIT.md §3.2](../AUDIT.md) |
+| **Plane replicas do not cluster after a rolling image upgrade** | the Erlang cookie is generated per build and not pinned; two image builds may not share one | [AUDIT.md §3.15](../history/AUDIT.md) |
+| **Two profiles' team volumes never appear inside sessions** | mounted on the pod, not passed to the session's mount table | [AUDIT.md §3.2](../history/AUDIT.md) |

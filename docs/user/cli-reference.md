@@ -1,4 +1,4 @@
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > ## Deprecated — kept as an artifact
 >
@@ -103,7 +103,7 @@ follows the session as plain lines instead.
 
 List sessions recorded for this workspace: `  <id>  <state>  <last_active_at>`.
 `No sessions recorded for <path>.` when empty. (Listing can start the daemon; see
-[AUDIT.md](../AUDIT.md) §3 finding 19.)
+[AUDIT.md](../history/AUDIT.md) §3 finding 19.)
 
 ### `troupe hq`
 
@@ -352,4 +352,4 @@ Sources:
 - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:27-31, 112-130
 - apps/troupe_protocol/lib/troupe/protocol/daemon.ex:11-28, 214-225, 234-243
 - apps/troupe_tui/lib/troupe/ui/tui/connectors.ex:32-74
-- docs/AUDIT.md §1.7 (provider key fallbacks)
+- docs/history/AUDIT.md §1.7 (provider key fallbacks)

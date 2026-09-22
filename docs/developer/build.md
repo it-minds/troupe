@@ -1,6 +1,6 @@
 # Build
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -53,9 +53,10 @@ Zig, so on a plain reading `mix compile.reaper` prints "zig not found on PATH, s
 native build" (`compile.reaper.ex:45-53`), `build_reapers/1` finds no `priv/reaper` to
 copy (`release.ex:62-69`), and the worker image carries no reaper — after which
 `Troupe.Reaper.path/0` returns `{:error, :reaper_missing}` for every `shell` call
-(`apps/troupe_core/lib/troupe/reaper.ex:20-25`). Nothing in `REPORT.md`, `DECISIONS.md`
-or `ARCHITECTURE.md` mentions the reaper in the image build. The image was not built for
-this audit; Unconfirmed, and worth a check before relying on `shell` in a pod.
+(`apps/troupe_core/lib/troupe/reaper.ex:20-25`). Nothing in `docs/history/REPORT.md`,
+`DECISIONS.md` or `ARCHITECTURE.md` mentions the reaper in the image build. The image was
+not built for this audit; Unconfirmed, and worth a check before relying on `shell` in a
+pod.
 
 ### scripts/build-images
 
@@ -206,7 +207,7 @@ Every `mix.exs` and the chart say `0.2.0`; the CI `build` job reads
 `Mix.Project.config()[:version]` to name artefacts (`ci.yml:309`) and the `images` job
 tags `sha-<7>` on every push plus the bare version on a `v*` tag (`ci.yml:165-170`). The
 repository has no `v*` tags ("there are no release tags: 0.2.0 is the in-development
-set", `DECISIONS.md:1877`; [../AUDIT.md](../AUDIT.md) open question 15). Bumping means editing `mix.exs:4`, each `apps/*/mix.exs:7`,
+set", `DECISIONS.md:1877`; [../history/AUDIT.md](../history/AUDIT.md) open question 15). Bumping means editing `mix.exs:4`, each `apps/*/mix.exs:7`,
 `charts/troupe/Chart.yaml` (`version` and `appVersion`), the image tags in
 `charts/troupe/values.small.yaml` and `values.scaleway.yaml`, and recording a new fixture
 set with `mix troupe.fixtures.record <version>` if the fold changed meaning.

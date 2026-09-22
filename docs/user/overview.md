@@ -1,4 +1,4 @@
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > ## Deprecated — kept as an artifact
 >
@@ -133,4 +133,4 @@ Sources:
 - apps/troupe_core/lib/troupe/agent/definition.ex:11-12
 - apps/troupe_core/priv/agents/build.md, plan.md, general.md, explore.md
 - README.md:318-322
-- docs/AUDIT.md §1.7
+- docs/history/AUDIT.md §1.7

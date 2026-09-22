@@ -4,8 +4,8 @@ What was decided, what to read, and how the two repositories work while this lan
 
 Two briefs come out of this document and are what the teams actually work from:
 
-* **[`docs/brief-remote.md`](brief-remote.md)** — nine work packages for `troupe-remote`.
-* **[`docs/brief-gui.md`](brief-gui.md)** — six for `troupe-gui`.
+* **[`docs/history/brief-remote.md`](../history/brief-remote.md)** — nine work packages for `troupe-remote`.
+* **[`docs/history/brief-gui.md`](../history/brief-gui.md)** — six for `troupe-gui`.
 
 Read this page once. Then read your brief, then the documents it names, then start.
 

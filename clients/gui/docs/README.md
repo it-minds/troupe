@@ -10,7 +10,9 @@
 > it is deployed as the `gui:` block of the root `charts/troupe` and built, tested and
 > released by the root workflows (root Decisions 669 and 670). The pages that described
 > those have been brought in line; SHAs quoted from the old repository are mapped in
-> [docs/history](../../../docs/history/README.md).
+> [docs/history](../../../docs/history/README.md). The `REPORT.md` these pages cite is
+> kept there too, as [gui-REPORT.md](../../../docs/history/gui-REPORT.md); their line
+> numbers are the audit's, and the report grew after it.
 
 Four tracks, one audit, one deep dive, the same shape as the platform's
 [`docs/README.md`](../../../docs/README.md) at the repository root. Server-side concepts
@@ -26,8 +28,9 @@ rather than restated.
 | [AUDIT.md](AUDIT.md) | The Phase 1 inventory: what exists in the working tree, where README, spec and design docs disagree with the code, caveats, open questions. |
 
 Older documents remain the design record: `README.md`, `spec.md`, `DECISIONS.md`,
-`REPORT.md`, [design/DESIGN.md](design/DESIGN.md), [bench.md](bench.md) and
-[plans/](plans/). Where one of them disagrees with the code, [AUDIT.md](AUDIT.md) §2 says so.
+[`REPORT.md`](../../../docs/history/gui-REPORT.md), [design/DESIGN.md](design/DESIGN.md),
+[bench.md](bench.md) and [plans/](plans/). Where one of them disagrees with the code,
+[AUDIT.md](AUDIT.md) §2 says so.
 
 ## Self-check
 

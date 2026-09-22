@@ -4848,7 +4848,7 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
 
 666. **This repository is the monorepo: the platform, the daemon, and the default GUI and
      TUI.** Decided by the team on 2026-09-21, and it supersedes 319–321 and the
-     2026-09-19 answers 1 and 2 in `docs/program/brief-daemon.md` §7. Those said a client
+     2026-09-19 answers 1 and 2 in `docs/history/brief-daemon.md` §7. Those said a client
      is a separate release from a separate repository and the daemon is built elsewhere
      by pinning this one by git ref. What that produced was four repositories and three
      pins: the TUI and the daemon each named a `troupe-remote` commit by hand, seventeen

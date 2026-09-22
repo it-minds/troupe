@@ -1,4 +1,4 @@
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > ## Deprecated — kept as an artifact
 >
@@ -33,7 +33,7 @@ aarch64, Windows x86_64). There is nothing to install alongside it.
 > release workflow exists but the audit found no evidence it has run, and the default
 > download location in the installers is a GitHub project that may not carry
 > artifacts. Ask your administrator where your organisation publishes the binary and
-> set `TROUPE_RELEASE_URL` (or `-ReleaseUrl`) to it. See [AUDIT.md](../AUDIT.md) §4,
+> set `TROUPE_RELEASE_URL` (or `-ReleaseUrl`) to it. See [AUDIT.md](../history/AUDIT.md) §4,
 > open question 2.
 
 Linux and macOS:
@@ -84,8 +84,8 @@ Sources:
 - install.sh:7-9, 17-18, 26-48, 70, 136-152, 182-194, 207-209
 - install.ps1:7-31, 38-44, 68, 85-89, 130-131
 - README.md:41-77
-- mix.exs release targets (see docs/AUDIT.md §1.1)
-- docs/AUDIT.md §4 question 2
+- mix.exs release targets (see docs/history/AUDIT.md §1.1)
+- docs/history/AUDIT.md §4 question 2
 
 ## 2. Sign in to the plane
 
@@ -309,4 +309,4 @@ Sources:
 - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:112-130
 - apps/troupe_protocol/lib/troupe/protocol/daemon.ex:11-28
 - README.md:83-95, 250-258
-- docs/AUDIT.md §1.7 (fake provider, ANTHROPIC_API_KEY / OPENAI_API_KEY fallbacks)
+- docs/history/AUDIT.md §1.7 (fake provider, ANTHROPIC_API_KEY / OPENAI_API_KEY fallbacks)

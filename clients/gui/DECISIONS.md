@@ -136,7 +136,8 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     token expiry and refresh, blob caps, first-answer-wins approvals — rather than
     imitating a screen. What they cannot prove is the *server's* half: that a real worker
     replays without a gap, that a real plane's allowlist is spelled the way this assumes.
-    That is a kind run, and it is listed in REPORT.md as not done.
+    That is a kind run, and it is listed in REPORT.md (now
+    `../../docs/history/gui-REPORT.md`) as not done.
 
 ## Against the live plane (troupe.itmindsinternal.dk)
 

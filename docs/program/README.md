@@ -4,8 +4,9 @@ These came from the umbrella repository, `it-minds/troupe`, which held the docum
 spanned the separate repositories and built the daemon. Everything it held is in this
 repository now (Decision 666): the daemon is [`apps/troupe_daemon`](../../apps/troupe_daemon/README.md),
 the installers are `install.sh` and `install.ps1` at the root, and the documents are here,
-unchanged but for their links. Where they say "the other repositories", read the
-directories:
+unchanged but for their links. The three briefs, each a hand-off as of the day it was
+written, are in [../history/](../history/README.md). Where they say "the other
+repositories", read the directories:
 
 | was | is | what it is |
 | --- | --- | --- |
@@ -19,9 +20,9 @@ directories:
 | document | what it answers |
 | --- | --- |
 | [`HANDOFF.md`](HANDOFF.md) | **Start here.** What was decided, the five spec revisions, the contract between the two repositories, what neither team may do without coming back, and the open questions that need a human. |
-| [`brief-remote.md`](brief-remote.md) | Nine work packages for `troupe-remote`, in order, with their done items. Written to be picked up cold. |
-| [`brief-gui.md`](brief-gui.md) | Six for `troupe-gui`. Three of them start today and depend on no server change. |
-| [`brief-daemon.md`](brief-daemon.md) | The daemon: one harness (`troupe_core` + gateway + protocol) as a laptop binary under the TUI, the GUI and the worker pod. Five phases, the repository question, and the prompt to start the session with. Section 7's decisions are answered in place. |
+| [`brief-remote.md`](../history/brief-remote.md) | Nine work packages for `troupe-remote`, in order, with their done items. Written to be picked up cold. |
+| [`brief-gui.md`](../history/brief-gui.md) | Six for `troupe-gui`. Three of them start today and depend on no server change. |
+| [`brief-daemon.md`](../history/brief-daemon.md) | The daemon: one harness (`troupe_core` + gateway + protocol) as a laptop binary under the TUI, the GUI and the worker pod. Five phases, the repository question, and the prompt to start the session with. Section 7's decisions are answered in place. |
 | [`apps/troupe_daemon`](../../apps/troupe_daemon/README.md) | **`troupe-daemon`, the binary.** Now the umbrella's fifth release, built from the harness in the same commit, one Mix release per platform. `install.sh` / `install.ps1` at the root install it. |
 | [`RELEASE.md`](RELEASE.md) | What is left between where the two repositories stand and a 1.0, in seven workstreams, each with what it brings, what is already in place, what is missing with file and line, the design, and the done items that prove it. |
 | [`orchestration-review.md`](orchestration-review.md) | A review of the architecture against one admin's morning and one organisation's scale: why the StatefulSet is right and "pod" as an admin word is not, why scale-to-zero matters more than scale-up at eight profiles, and the seven capacity fields that should leave the admin surface. |

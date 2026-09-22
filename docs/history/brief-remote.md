@@ -5,7 +5,7 @@ finished and green. Same rules apply: work autonomously, do not ask questions th
 answer, record every judgment call in `DECISIONS.md`, and prove every done item with command
 output in `REPORT.md`.
 
-Read [`../HANDOFF.md`](HANDOFF.md) first — the five spec revisions and the list of things
+Read [`../HANDOFF.md`](../program/HANDOFF.md) first — the five spec revisions and the list of things
 not to do are there and are binding.
 
 Nine packages. R1 first; after that the order is a recommendation and the dependencies are
@@ -135,7 +135,7 @@ of exactly this check. Prove it by the request failing from inside the pod.
 
 ## R3 — Capacity without a capacity question
 
-[`orchestration-review.md`](orchestration-review.md) in full. This is the package the
+[`orchestration-review.md`](../program/orchestration-review.md) in full. This is the package the
 customer asked for by name and the one with the clearest payoff at their scale.
 
 ### What leaves the admin surface
@@ -205,7 +205,7 @@ capacity. The looser reading would forbid something harmless.
 
 ## R4 — Teams link to groups
 
-[`orchestration-review.md`](orchestration-review.md) finding 8. Spec revision 5.
+[`orchestration-review.md`](../program/orchestration-review.md) finding 8. Spec revision 5.
 
 ```
 teams              id, name, display_name, budget, retention, default_visibility, …
@@ -315,7 +315,7 @@ disk and nothing else; `session_resumed` already says so.
 
 ## R8 — The console
 
-[`control-panel.md`](control-panel.md) in full. **A package's console screen lands with the
+[`control-panel.md`](../program/control-panel.md) in full. **A package's console screen lands with the
 package, not after it.**
 
 Eleven screens become fifteen, grouped by what an administrator is doing:

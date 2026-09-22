@@ -356,5 +356,5 @@ Helpers: `rootState`, `isBusy` (`thinking|acting|compacting|busy`), `openApprova
 - [testing.md](testing.md) — what the 33 tests prove about the modules above.
 - [conventions.md](conventions.md) — where a new protocol method or view goes.
 - [../user/features.md](../user/features.md) — the same modules from the person's side.
-- Server: [docs/AUDIT.md](../../../../docs/AUDIT.md) and
+- Server: [docs/history/AUDIT.md](../../../../docs/history/AUDIT.md) and
   [PROTOCOL.md](../../../../PROTOCOL.md) at the repository root.

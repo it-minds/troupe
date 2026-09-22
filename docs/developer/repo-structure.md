@@ -1,6 +1,6 @@
 # Repository structure
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -35,7 +35,6 @@ of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Rea
 ├── DECISIONS.md             every deviation from spec.md, numbered, newest at the bottom (:1-4)
 ├── PROTOCOL.md              the normative wire document for client authors
 ├── README.md                what it ships, deploy, the front door, the console, build
-├── REPORT.md                per-stage evidence that done items are done
 ├── spec.md                  the specification DECISIONS.md deviates from
 ├── VERSION                  the one version of everything released (Decision 668)
 ├── apps/                    eight Mix projects (below)
@@ -46,7 +45,7 @@ of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Rea
 ├── deploy/                  ci-deployer.yaml (the account CI deploys as); scaleway/ values for Kapsule
 ├── dev/                     docker-compose.yml; kind/dependencies.yaml and kind/values.yaml
 ├── docker/Dockerfile        one two-stage Dockerfile for the four server releases
-├── docs/                    AUDIT.md, a2a.md, deploying-on-scaleway.md, design/admin/, plans/, program/, history/, and the four tracks
+├── docs/                    a2a.md, deploying-on-scaleway.md, design/admin/, plans/, program/, history/ (the stage reports, AUDIT.md, the briefs), and the four tracks
 ├── fixtures/sample_repo/    a small Elixir project the core's workspace tests read
 ├── install.sh, install.ps1  install troupe and troupe-daemon from a release
 ├── mix.exs, mix.lock        the umbrella: aliases (check), releases, umbrella-wide deps

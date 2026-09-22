@@ -1,6 +1,6 @@
 # Architecture, for someone changing the code
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -257,7 +257,7 @@ protocol; the code has three transports, and remote clients use the WebSocket.
 
 The local daemon does not serve a WebSocket: `Troupe.Gateway.Daemon` has no `Gateway.Web`
 child (`daemon.ex:61-66`). `docs/plans/README.md:52` lists that as still to do (see
-[../AUDIT.md](../AUDIT.md) §1.2).
+[../history/AUDIT.md](../history/AUDIT.md) §1.2).
 
 ## 5. Rules the code states about itself
 
@@ -304,7 +304,7 @@ child (`daemon.ex:61-66`). `docs/plans/README.md:52` lists that as still to do (
 | `WorkerProfile` (write), `TroupePolicy` (read), `TokenReview` | Kubernetes API | plane | `apps/troupe_plane/lib/troupe/plane/provision.ex`, `cluster_policy.ex`, `enrolment.ex` |
 | Everything in `troupe-w-<profile>` | Kubernetes API | operator, SSA field manager `troupe-operator` | `apps/troupe_operator/lib/troupe/operator/resources.ex` |
 
-Caveat from [../AUDIT.md](../AUDIT.md) §3.1: nothing under `config/` or `apps/*/lib`
+Caveat from [../history/AUDIT.md](../history/AUDIT.md) §3.1: nothing under `config/` or `apps/*/lib`
 sets `:troupe_plane, :k8s_conn`, which `Provision` and `ClusterPolicy` read; only
 enrolment builds its own connection (`apps/troupe_plane/lib/troupe/plane/enrolment.ex:169-185`).
 

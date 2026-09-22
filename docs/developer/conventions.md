@@ -1,6 +1,6 @@
 # Conventions
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -88,7 +88,7 @@ low-priority checks to failures. Notable enabled checks:
 | `Warning.WrongTestFilename` | test files end in `_test.exs` | `:164` |
 | `Warning.IoInspect`, `Warning.Dbg`, `Warning.IExPry` | none left in | `:144-147` |
 | `Refactor.Apply` | `apply/3` is flagged; the one deliberate use is marked `credo:disable-for-next-line` with the reason (`apps/troupe_core/lib/troupe/release.ex:21-25`) | `:122` |
-| `Warning.UnsafeToAtom` | disabled — and `String.to_atom/1` on a provider name is in the audit's caveats ([../AUDIT.md](../AUDIT.md) §3.18) | `:209` |
+| `Warning.UnsafeToAtom` | disabled — and `String.to_atom/1` on a provider name is in the audit's caveats ([../history/AUDIT.md](../history/AUDIT.md) §3.18) | `:209` |
 
 ## 5. Rules the code states and tests check
 
@@ -118,14 +118,17 @@ Three habits are visible everywhere and stated in the prose:
   resolved, numbered, newest at the bottom** (`DECISIONS.md:1-4`). Entries are a bold
   one-sentence decision followed by the reasoning. When a change departs from the spec
   or from an earlier decision, it gets a number.
-- **`REPORT.md` proves done items**: per stage, the criteria, the command that
-  demonstrates each and its output (`REPORT.md:1-30`). Numbers in it are from real
-  runs and are dated by stage rather than by calendar.
+- **A done item is proved with command output.** Up to R9 that was `REPORT.md`: per
+  stage, the criteria, the command that demonstrates each and its output
+  (`docs/history/REPORT.md:1-30`), with numbers from real runs, dated by stage rather
+  than by calendar. It stopped before the repositories merged and is kept in
+  [../history/](../history/README.md); a change now carries its proof in its pull
+  request ([fixing-issues.md](fixing-issues.md) §2.5).
 
-The prose documents drift; [../AUDIT.md](../AUDIT.md) §2 lists 35 places where
-`README.md`, `ARCHITECTURE.md`, `PROTOCOL.md`, `DECISIONS.md` or a moduledoc disagrees
-with the code. When you change behaviour, the moduledoc is the one that must move with
-it.
+The prose documents drift; [../history/AUDIT.md](../history/AUDIT.md) §2 lists 35 places
+where `README.md`, `ARCHITECTURE.md`, `PROTOCOL.md`, `DECISIONS.md` or a moduledoc
+disagrees with the code. When you change behaviour, the moduledoc is the one that must
+move with it.
 
 ## 7. Commit messages
 
@@ -153,7 +156,7 @@ enforces any of this.
 | Pod hostname | `<ordinal>-<profile>.<workersDomain>` — one DNS label, hyphenated, so one wildcard covers every profile | `names.ex:31-50`; `config/runtime.exs:50-64` |
 | Client endpoint | `<scheme>://<ordinal>-<profile>.<domain>[:port]/v1/socket` | `config/runtime.exs:59-64` |
 | Session id | `YYYYMMDDTHHMMSS-<4 random bytes, url-safe base64>` | `apps/troupe_core/lib/troupe/session.ex:188-197` |
-| Service principal subject | `svc:<team>/<name>` | [../AUDIT.md](../AUDIT.md) §1 (plane note) |
+| Service principal subject | `svc:<team>/<name>` | [../history/AUDIT.md](../history/AUDIT.md) §1 (plane note) |
 | Images | `troupe-operator`, `troupe-plane`, `troupe-worker`, `troupe-a2a` (release name with `_` as `-`) | `scripts/build-images:26`; `ci.yml` `images` matrix |
 | Chart tarball | `troupe-<version>.tgz`, version and app-version both the tag without its `v` | `ci.yml` `release` |
 | Team and org PVCs | `team-<team>`, `org`; the pod's own volume `data` | `names.ex:62-72` |
@@ -203,7 +206,7 @@ method with dots replaced by underscores (`mcp.ex:211-216`).
    and the `git diff --exit-code` step will otherwise fail CI (`ci.yml:229-236`).
 5. Run `apps/troupe_core/test/troupe/session/log_schema_test.exs` if a real session
    emits it, and update the event table in `PROTOCOL.md:196-227` — which the audit
-   found already missing eight emitted types ([../AUDIT.md](../AUDIT.md) §2), so treat the
+   found already missing eight emitted types ([../history/AUDIT.md](../history/AUDIT.md) §2), so treat the
    table as documentation debt rather than as a check.
 
 ### Adding a platform setting
@@ -227,7 +230,7 @@ method with dots replaced by underscores (`mcp.ex:211-216`).
    `config/runtime.exs` and the value to `charts/troupe/values.yaml` and the plane
    Deployment, and document it in [../admin/configuration.md](../admin/configuration.md).
    A `fallback` with no reader is what `default_bundle_channel` is today
-   ([../AUDIT.md](../AUDIT.md) open question 10); add the reader in the same change.
+   ([../history/AUDIT.md](../history/AUDIT.md) open question 10); add the reader in the same change.
 
 ### Adding a protocol command
 

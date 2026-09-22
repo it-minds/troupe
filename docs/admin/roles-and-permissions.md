@@ -1,6 +1,6 @@
 # Roles and permissions
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers are from that tree. Module paths without a prefix are under `apps/troupe_plane/lib/troupe/plane/`.
 
@@ -39,7 +39,7 @@ Membership is never editable in Troupe; there is no admin method for it (`PROTOC
 
 A `platform_admin` sees every team and every profile (`admin.ex:1032-1037`); a `team_admin` sees only their own teams and only the profiles those teams are granted (`admin.ex:1033,1039-1047`). Asking about a team you may not see is `not_found`, not `forbidden`, so that whether a team exists is not itself leaked (`admin.ex:944-963`; `PROTOCOL.md:775-778`). A refusal on role carries `data.required_role` (`admin.ex:932-943`).
 
-Neither role can read session content: no function in `Admin` returns events, and the parity test would fail one that did (`admin.ex:20-25`; `admin/mcp.ex:25-29`). Discrepancy: `admin.ex:24-25` and `ARCHITECTURE.md:673` say "there is no break-glass"; the emergency console login exists (§4) and grants a platform admin, which still cannot read content ([AUDIT.md §2](../AUDIT.md)).
+Neither role can read session content: no function in `Admin` returns events, and the parity test would fail one that did (`admin.ex:20-25`; `admin/mcp.ex:25-29`). Discrepancy: `admin.ex:24-25` and `ARCHITECTURE.md:673` say "there is no break-glass"; the emergency console login exists (§4) and grants a platform admin, which still cannot read content ([AUDIT.md §2](../history/AUDIT.md)).
 
 ---
 
@@ -95,7 +95,7 @@ Session access is separate from administration. A plane token's `scopes` claim i
 | Console (`/admin/*`) | signed cookie `_troupe_plane` carrying the **subject only** — never the role | `Admin.actor_for_session/1` on every LiveView mount: a live break-glass session, else `actor_for_subject/1`, which returns `nil` unless the actor is an admin | `web/admin_auth.ex:11-15,66-70`; `admin.ex:101-142`; `web/live/auth.ex:21-41` |
 | Console login routes | `GET /admin/login` redirects to the provider's authorize endpoint, `GET /admin/callback` redeems the code and sets the cookie, `GET /admin/denied` explains a refusal, `GET /admin/logout` drops the cookie; `GET`/`POST /admin/breakglass` answer 404 unless a token is configured | authorization-code flow with the client secret; nothing is stored in the cookie but the subject | `web/admin_router.ex:28-40`; `web/admin_auth.ex:92-306` |
 | `/admin/profile/*` | same cookie | `on_mount :platform_admin` redirects a team admin to `/admin` | `web/admin_router.ex:58-61`; `web/live/auth.ex:35-41` |
-| `POST /rpc` | `Authorization: Bearer <plane token>` with `aud` = `TROUPE_PLANE_AUDIENCE`; JWKS fetched from OpenBao **on every request** | subject resolved to a user row each call; `admin.*` methods go to `Admin.API` with `actor_for(user)`, everything else to `Harness` as the person | `web/router.ex:122-134,185-202,222-238`; [AUDIT.md §3.9](../AUDIT.md) |
+| `POST /rpc` | `Authorization: Bearer <plane token>` with `aud` = `TROUPE_PLANE_AUDIENCE`; JWKS fetched from OpenBao **on every request** | subject resolved to a user row each call; `admin.*` methods go to `Admin.API` with `actor_for(user)`, everything else to `Harness` as the person | `web/router.ex:122-134,185-202,222-238`; [AUDIT.md §3.9](../history/AUDIT.md) |
 | `POST /mcp` | a plane token, **or** the provider's own token with `aud` in `[client_id, "api://" <> client_id, "<base_url>/mcp"]` and `iss` = the configured issuer | plane token tried first; then `OIDC.authenticate/2`; a 401 carries `WWW-Authenticate: Bearer realm="troupe-plane", resource_metadata=<base>/.well-known/oauth-protected-resource` | `web/router.ex:142-158,250-287`; `oidc.ex:70-120` |
 | Control channel (TCP 4001) | projected ServiceAccount token, audience `troupe-plane` | `TokenReview`; the ServiceAccount must be `troupe-worker` and the namespace `<prefix><profile>` decides the profile; the pod name comes from the token's `authentication.kubernetes.io/pod-name` claim where present | `enrolment.ex:24-25,46-131` |
 | `/scim/v2/*` | static bearer `TROUPE_SCIM_TOKEN` | constant-time compare; no user identity involved | `web/router.ex:165-177,410-422` |
@@ -118,8 +118,8 @@ Worker identity in one line: the **namespace decides the profile**, the ServiceA
 
 What is deliberately **not** granted, and what follows from it:
 
-- **No verb on `secrets` for anyone.** The plane never holds a secret value (`plane-rbac.yaml:1-3`), which is the intended property. The side effect is that the operator's `SecretMissing` check — a `get` on a Secret in `troupe-system` (`apps/troupe_operator/lib/troupe/operator/reconciler.ex:184-195`) — has no permission to succeed, so the condition cannot be relied on. See [configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects) and [AUDIT.md §2, §4.1](../AUDIT.md).
-- **The plane cannot delete pods**, and the operator, which can, never does (`reconciler.ex:224-257` only reports `UpgradePending`). `admin.pod.drain` empties a pod but nothing in the repository restarts it; who does is unanswered ([AUDIT.md §3.13](../AUDIT.md); [profiles-and-policy.md](profiles-and-policy.md)).
+- **No verb on `secrets` for anyone.** The plane never holds a secret value (`plane-rbac.yaml:1-3`), which is the intended property. The side effect is that the operator's `SecretMissing` check — a `get` on a Secret in `troupe-system` (`apps/troupe_operator/lib/troupe/operator/reconciler.ex:184-195`) — has no permission to succeed, so the condition cannot be relied on. See [configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects) and [AUDIT.md §2, §4.1](../history/AUDIT.md).
+- **The plane cannot delete pods**, and the operator, which can, never does (`reconciler.ex:224-257` only reports `UpgradePending`). `admin.pod.drain` empties a pod but nothing in the repository restarts it; who does is unanswered ([AUDIT.md §3.13](../history/AUDIT.md); [profiles-and-policy.md](profiles-and-policy.md)).
 - The plane cannot write `TroupePolicy`, so a compromised plane can only submit profiles that still have to pass admission and the operator (`crds/troupepolicy.yaml:1-5`). Discrepancy: `provision.ex:5-7` and `ARCHITECTURE.md:292-293,678-680` say the plane writes `TeamVolume`; only `WorkerProfile` is written (`provision.ex:166-185,204-238`), though the Role allows both.
 
 ---
@@ -186,7 +186,7 @@ Role column: *platform* = `require_platform_admin`; *any* = `require_admin` (pla
 
 Sources for the role column: `admin.ex:110,131,145,160,224,237,257,271,308,326,339,359,367,390,402,431,447,465,510,581,595,616,625,649,672,710,727,741,755,782,792,804,818,839,857,876,893`. Risk and `confirm` are in the `%Method{}` entries at `admin/api.ex:185-707`; MCP `idempotentHint` is false for `admin.principal.create`, `admin.trigger.run` and `admin.bundle.publish` (`admin/mcp.ex:252-254`). The console pages are the LiveViews routed at `web/admin_router.ex:42-61`.
 
-Two caveats a team admin should know ([AUDIT.md §3.6, §3.7](../AUDIT.md)):
+Two caveats a team admin should know ([AUDIT.md §3.6, §3.7](../history/AUDIT.md)):
 
 - **`admin.audit.list` is not team-scoped.** `audit_list/2` calls `Audit.list/1` with the caller's filter and no team restriction (`admin.ex:893-897`), so a team admin reads every team's changes.
 - **`admin.sessions.list` ignores the `team` filter** it documents: `Sessions.filter/2` has no `:team` clause and drops unknown keys (`sessions.ex:454-484`). The listing is still restricted to the teams the actor may see (`sessions.ex:514-516`).

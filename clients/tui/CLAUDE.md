@@ -8,7 +8,8 @@ itself (`troupe_core`, `troupe_gateway`, `troupe_protocol`) is a path dependency
 `../../apps/` — the umbrella this project sits in, at the same commit. The spec is `elixir-prmpt.md`; read
 `ARCHITECTURE.md` (contract the code implements) and `DECISIONS.md` (every
 deviation, numbered; append one line per new deviation) before changing
-behaviour. `FINAL_REPORT.md` maps each done item to the test that proves it.
+behaviour. `../../docs/history/tui-FINAL_REPORT.md` maps each done item, up to the
+repository merge, to the test that proves it.
 
 ## Toolchain and commands
 

@@ -1,6 +1,6 @@
 # Deployment, from a developer's side
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **2026-09-21:** production is deployed by CI now. A merged change to `VERSION` cuts a
 > release, and the release's `deploy` job rolls it with [`scripts/deploy`](../../scripts/deploy)
@@ -25,7 +25,7 @@ What exists:
 | prod (small) | one plane with distribution off, one operator, the GUI, a policy capped at three pods | `charts/troupe/values.small.yaml` | the first install by hand; then `scripts/deploy`, from the `deploy` job on every release |
 | prod | two clustered plane replicas, otherwise the same | `charts/troupe/values.scaleway.yaml` | the same |
 
-Whether a live deployment exists, and on which values, is [../AUDIT.md](../AUDIT.md) open
+Whether a live deployment exists, and on which values, is [../history/AUDIT.md](../history/AUDIT.md) open
 question 1; everything about it is under gitignored `.local/` (`.gitignore:10-13`).
 
 ## 2. The pieces
@@ -105,7 +105,7 @@ Job can reach the repo while serving nothing.
 | `troupe-plane` | startup probe `GET /.well-known/troupe` every 2 s, 30 failures (60 s grace); readiness every 5 s; liveness every 10 s | | `:343-357` |
 | `troupe-operator` Deployment | default `RollingUpdate`; `revisionHistoryLimit: 3`; liveness `exec /app/bin/troupe_operator pid` every 30 s after 30 s | more than one replica is allowed; a `Lease` elects the leader | `charts/troupe/templates/operator-deployment.yaml:8-12,110-121` |
 | `troupe-a2a` Deployment | default `RollingUpdate`; `revisionHistoryLimit: 3`; probes on `/healthz` | off by default (`a2a.enabled: false`) | `charts/troupe/templates/a2a-deployment.yaml:37-38,101-107` |
-| worker StatefulSets | `updateStrategy: OnDelete`; the operator "never deletes a pod" and reports `UpgradePending` | who restarts a drained pod is not answered by code ([../AUDIT.md](../AUDIT.md) §3.13) | `apps/troupe_operator/lib/troupe/operator/resources.ex:450` |
+| worker StatefulSets | `updateStrategy: OnDelete`; the operator "never deletes a pod" and reports `UpgradePending` | who restarts a drained pod is not answered by code ([../history/AUDIT.md](../history/AUDIT.md) §3.13) | `apps/troupe_operator/lib/troupe/operator/resources.ex:450` |
 
 With `plane.distribution: name`, `RELEASE_NODE` is `troupe-plane@$(POD_IP)`, the
 distribution port is pinned to `plane.distPort` (9100) and `TROUPE_PLANE_SELECTOR` is
@@ -113,7 +113,7 @@ distribution port is pinned to `plane.distPort` (9100) and `TROUPE_PLANE_SELECTO
 (`plane-deployment.yaml:201-206,263-276`; `config/runtime.exs:293-309`). The Erlang
 cookie "comes baked into the release" (`plane-deployment.yaml:265-266`); `mix release`
 generates one per build and no `rel/` overlay pins it, so two image builds may not
-cluster with each other during a rolling update ([../AUDIT.md](../AUDIT.md) §3.15).
+cluster with each other during a rolling update ([../history/AUDIT.md](../history/AUDIT.md) §3.15).
 
 ## 3. The kind flow (dev)
 
@@ -134,7 +134,7 @@ The rollout restart is not optional after a rebuild under the same tag
 (`scripts/remote-up:148-153`). NetworkPolicies are rendered (`networkPolicy.enabled: true`
 is the default and `dev/kind/values.yaml` does not change it) but kind's default CNI
 does not enforce them, "and silently" (`charts/troupe/values.yaml:18-23`;
-[../AUDIT.md](../AUDIT.md) open question 16).
+[../history/AUDIT.md](../history/AUDIT.md) open question 16).
 
 ## 4. The Scaleway flow (prod)
 
@@ -156,7 +156,7 @@ track's; this is the sequence a developer runs to put a build on it.
    (per-pod HTTP-01) and the issuer file says why a wildcard is not possible on this DNS
    host (`cluster-issuer.yaml:5-16`). Nothing in the repository issues `troupe-plane-tls`
    (`plane.certIssuer: ""`, `plane.tlsSecretName: troupe-plane-tls` in both files);
-   [../AUDIT.md](../AUDIT.md) open question 5.
+   [../history/AUDIT.md](../history/AUDIT.md) open question 5.
 3. Managed PostgreSQL with PITR, an Object Storage bucket with versioning on, confirm
    `scw-sfs` exists as a StorageClass (`docs/deploying-on-scaleway.md:147-152`).
 4. OpenBao: `helm upgrade --install openbao openbao/openbao --namespace troupe-system --values deploy/scaleway/openbao.values.yaml`
@@ -178,7 +178,7 @@ track's; this is the sequence a developer runs to put a build on it.
    (`docs/deploying-on-scaleway.md:227-243`). Caveat: with `provisioningMode: direct`,
    `admin.profile.put` reports `state: :not_applied, reason: :no_cluster` unless
    `:troupe_plane, :k8s_conn` is set somewhere, and nothing in the repository sets it
-   ([../AUDIT.md](../AUDIT.md) §3.1, open question 3). `scripts/remote-up` sidesteps
+   ([../history/AUDIT.md](../history/AUDIT.md) §3.1, open question 3). `scripts/remote-up` sidesteps
    this by applying the `WorkerProfile` with `kubectl` (`:158-188`).
 
 Upgrading an existing installation is a release: `scripts/release <version>`, merge, and
@@ -221,7 +221,7 @@ the operator reports `UpgradePending` and deletes nothing.
 
 Nothing rolls back a CRD change; removing a CRD removes every object of that kind
 (`charts/troupe/values.yaml:7-9`). Triggers, principals and runs are not rebuildable
-from object storage ([../AUDIT.md](../AUDIT.md) §3.12).
+from object storage ([../history/AUDIT.md](../history/AUDIT.md) §3.12).
 
 ## 7. Checking a deployment from the outside
 
@@ -229,7 +229,7 @@ from object storage ([../AUDIT.md](../AUDIT.md) §3.12).
 |---|---|---|
 | plane liveness | `GET https://<host>/healthz` | 200 |
 | plane discovery | `GET https://<host>/.well-known/troupe` | JSON with `issuer`, `client_id`, endpoints, `plane.rpc`, `plane.jwks`, `protocol_version` (also the probe path, `plane-deployment.yaml:353-362`) |
-| plane keys | `GET https://<host>/.well-known/jwks.json` | 200; 503 means OpenBao is unreachable ([../AUDIT.md](../AUDIT.md) §1.2) |
+| plane keys | `GET https://<host>/.well-known/jwks.json` | 200; 503 means OpenBao is unreachable ([../history/AUDIT.md](../history/AUDIT.md) §1.2) |
 | a worker pod | `GET https://<ordinal>-<profile>.<workersDomain>/health/ready` | 200 `ready`; 503 `draining` while draining (`apps/troupe_gateway/lib/troupe/gateway/web.ex:29-35`) |
 | the profile | `kubectl get workerprofile -n troupe-system` | printer columns Replicas, Ready, Violation, Age; conditions `Ready`, `PolicyViolation`, `SecretMissing`, `UpgradePending` |
 | a2a | `GET https://<a2a host>/healthz` and `/a2a/<profile>/.well-known/agent-card.json` | when `a2a.enabled: true` |

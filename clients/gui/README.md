@@ -142,7 +142,8 @@ is the other half: one token for the whole machine, several sessions live on one
 directories it owns, an actor that changes when an identity is linked, and model settings
 it keeps without ever answering with the key.
 
-What none of it proves is the *server's* half. See [REPORT.md](REPORT.md), and
+What none of it proves is the *server's* half. See the stage report, now
+[docs/history/gui-REPORT.md](../../docs/history/gui-REPORT.md), and
 [docs/e2e.md](docs/e2e.md) for the suites that run against a real plane and a real
 worker; CI runs the plane suite against a plane built from the same commit.
 

@@ -1,6 +1,6 @@
 # Troupe Remote — a technical deep dive
 
-> Audited against troupe-remote commit `4083b1f` (branch `main`), 2026-09-13. See [AUDIT.md](AUDIT.md) for what could not be
+> Audited against troupe-remote commit `4083b1f` (branch `main`), 2026-09-13. See [AUDIT.md](history/AUDIT.md) for what could not be
 > confirmed. Companion documents: [developer/](developer/README.md), [user/](user/README.md),
 > [admin/](admin/README.md).
 
@@ -219,7 +219,7 @@ backend, and ignores the agent's own writes by content hash
 bind list — the same table the file tools check — when `sandbox: :auto` finds bubblewrap
 *and* non-session mounts (`apps/troupe_core/lib/troupe/sandbox.ex:44-131`; `DECISIONS.md`
 #102). Today a restored pod session has no team mounts (§7.5), so `:auto` does not engage;
-this is recorded in [AUDIT.md](AUDIT.md) §3.2 and §4.11.
+this is recorded in [AUDIT.md](history/AUDIT.md) §3.2 and §4.11.
 
 ---
 
@@ -300,7 +300,7 @@ Break-glass is a separate, audited console login with a configured token that la
 and acts as a platform admin with no teams; when no token is configured its routes answer 404
 (`apps/troupe_plane/lib/troupe/plane/breakglass.ex`). The design documents use the word
 "break-glass" for two different things — this login, and (as something that does not exist)
-access to session content — which [AUDIT.md](AUDIT.md) §2 notes.
+access to session content — which [AUDIT.md](history/AUDIT.md) §2 notes.
 
 ### 6.2 The harness API
 
@@ -415,7 +415,7 @@ in `direct` mode or as a commit to a git checkout in `gitops` mode
 against `TroupePolicy` for fast feedback, but admission and the operator remain authoritative
 (`ARCHITECTURE.md:686-690`). **Caveat**: nothing in `config/` sets the `:k8s_conn` this code
 reads, so a deployed plane in `direct` mode answers `state: not_applied, reason: no_cluster`
-until that is resolved ([AUDIT.md](AUDIT.md) §3.1).
+until that is resolved ([AUDIT.md](history/AUDIT.md) §3.1).
 
 **Platform settings** (`Troupe.Plane.Settings`) are an *override* over the deployment, never
 a replacement: a stored row wins, absent means the environment variable, and reset deletes
@@ -509,7 +509,7 @@ A session's file tools, `fs.*` commands and the sandbox all resolve paths throug
 table (`session:/`, `team:<name>/`, `org:/`, `skills:/`) recorded as `mounts_resolved`
 (`apps/troupe_core/lib/troupe/mounts.ex`). The operator mounts team volumes at
 `/mnt/teams/<name>`; the worker's restore path does not yet pass them into the session
-([AUDIT.md](AUDIT.md) §3.2), so `publish` and `import` — the only tools that cross mounts —
+([AUDIT.md](history/AUDIT.md) §3.2), so `publish` and `import` — the only tools that cross mounts —
 have nowhere to go on a pod today.
 
 ---
@@ -554,9 +554,9 @@ label, not owner reference, because owner references cannot cross namespaces;
 `DECISIONS.md` #39). Leadership is a Kubernetes `Lease`. The operator writes conditions
 `Ready`, `PolicyViolation`, `SecretMissing`, `UpgradePending`
 (`reconciler.ex:152-257`). It never deletes a pod; an `OnDelete` upgrade is reported, not
-performed ([AUDIT.md](AUDIT.md) §3.13). The `SecretMissing` check reads `troupe-system`
+performed ([AUDIT.md](history/AUDIT.md) §3.13). The `SecretMissing` check reads `troupe-system`
 while pods resolve their `secretKeyRef` in their own namespace, and the operator's ClusterRole
-grants no verb on secrets; [AUDIT.md](AUDIT.md) §2 and §4.4 record this.
+grants no verb on secrets; [AUDIT.md](history/AUDIT.md) §2 and §4.4 record this.
 
 ---
 
@@ -655,7 +655,7 @@ number never jumps a gap.
 `(team_id, occurred_at)` index and a one-minute cache answer every question at the small
 release's volume; `DECISIONS.md` #301); reservations are a separate table from spend and a
 team budget of zero means no limit (`DECISIONS.md` #49-#50); and the budget *period* is not
-yet applied to the spent sum ([AUDIT.md](AUDIT.md) §2, budget period row).
+yet applied to the spent sum ([AUDIT.md](history/AUDIT.md) §2, budget period row).
 
 ---
 
@@ -727,7 +727,7 @@ with the cost of each choice written beside it) and `values.scaleway.yaml` (two 
 replicas). The Scaleway guide and the values files disagree on worker TLS (wildcard over
 DNS-01 in the prose, per-pod HTTP-01 in the values) and on OpenBao (three auto-unsealed
 replicas in the prose, one Shamir-sealed replica in `deploy/scaleway/openbao.values.yaml`);
-the docs here follow the values files and [AUDIT.md](AUDIT.md) §2 lists both.
+the docs here follow the values files and [AUDIT.md](history/AUDIT.md) §2 lists both.
 
 CI runs the quality gate for the platform and both clients, builds the five images, and —
 when a merged change to `VERSION` cuts a release — publishes the chart and the daemon, TUI
@@ -739,14 +739,14 @@ and desktop builds and deploys to production ([developer/ci-cd.md](developer/ci-
 
 | Decision | Bought | Paid | Where |
 |---|---|---|---|
-| Log is the session; every view is a fold | verifiable history, replay as recovery, several clients in one order | schema discipline, blobs for big payloads, replay cost on activation (~300 ms warm/cold measured on kind, `REPORT.md:742-763`) | `DECISIONS.md` #7, #11, #25 |
+| Log is the session; every view is a fold | verifiable history, replay as recovery, several clients in one order | schema discipline, blobs for big payloads, replay cost on activation (~300 ms warm/cold measured on kind, `docs/history/REPORT.md:742-763`) | `DECISIONS.md` #7, #11, #25 |
 | Ack, not effect; `command_id` ledger | safe retries after disconnect | every client must reconcile optimistically from events | `DECISIONS.md` #13 |
 | Two backpressure budgets | bounded memory per client, no lost durable events | a slow client gets `resync_required` and must replay | `DECISIONS.md` #23 |
 | Mechanical boundaries | clients provably use only the protocol | shared helpers migrate into `troupe_protocol` | `DECISIONS.md` #3 |
 | Plane out of the data path | plane sizing independent of session load; a plane outage does not stop live sessions | every pod is internet-facing and needs a name, a certificate and a NetworkPolicy | `ARCHITECTURE.md:415-421`, `docs/deploying-on-scaleway.md:341-344` |
 | Token `aud` = worker id | a leaked token is useless on any other pod | `token.mint` + `auth.refresh` every 15 min | `DECISIONS.md` #81 |
 | Role at mint, ACL per command | revocation takes effect on the next command | an ACL mirror pushed to every pod | `DECISIONS.md` #83 |
-| Transit signing in OpenBao | the plane cannot export or leak a signing key | OpenBao is a hard dependency of login and of every `/rpc` call (per-request key fetch today) | `DECISIONS.md` #79, [AUDIT.md](AUDIT.md) §3.9 |
+| Transit signing in OpenBao | the plane cannot export or leak a signing key | OpenBao is a hard dependency of login and of every `/rpc` call (per-request key fetch today) | `DECISIONS.md` #79, [AUDIT.md](history/AUDIT.md) §3.9 |
 | Per-session data keys, plane has none | admins and the plane cannot read content; erasure is key destruction | key manager durability decides session durability; single-replica Shamir in the reference deployment | `DECISIONS.md` #89, #117-#119 |
 | Dormant = no process; state in object storage | tens of thousands of idle sessions per pod; relocation is free | ≤ 60 s unsealed tail at risk; activation needs storage | `DECISIONS.md` #64-#67 |
 | Epoch fencing minted by the plane | one live copy of a session | a fenced pod discards work since its last seal | `DECISIONS.md` #61, #70 |
@@ -763,11 +763,11 @@ and desktop builds and deploys to production ([developer/ci-cd.md](developer/ci-
 
 ## 13. Known gaps the code itself states
 
-Collected from module docs, `REPORT.md` and the audit so the reader does not discover them
+Collected from module docs, [REPORT.md](history/REPORT.md) and the audit so the reader does not discover them
 from a stack trace: no push channel from plane to harness clients (`sessions.list` is a poll);
 no Hatchet or webhook receiver in this repository; the daemon serves no WebSocket yet, so the
 GUI cannot reach local sessions; team volumes are not wired into pod sessions; stage-6 parts
 2–5 (entitlements below the profile, per-person MCP credentials, trigger revisions, the kind
 end-to-end suite) are designed in `docs/plans/stage-6.md` and not built; no metrics exporter;
-no backup schedule in the repo. Each is either in [AUDIT.md](AUDIT.md) §3–§4 or in the plan
+no backup schedule in the repo. Each is either in [AUDIT.md](history/AUDIT.md) §3–§4 or in the plan
 that owns it.

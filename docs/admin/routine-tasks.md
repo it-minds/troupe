@@ -1,6 +1,6 @@
 # Routine tasks
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers are from that tree.
 
@@ -117,7 +117,7 @@ Prerequisites: a cluster with a `NetworkPolicy`-enforcing CNI (Cilium on Kapsule
    troupe admin team grant <team> <profile>
    ```
 
-   The JSON shape is in [profiles-and-policy.md §9](profiles-and-policy.md#9-troupe-admin-profile-). **Caveat**: if the answer says `state: not_applied, reason: no_cluster`, the plane has no Kubernetes connection ([AUDIT.md §3.1](../AUDIT.md)); apply the `WorkerProfile` yourself from `troupe admin profile show <profile>` with `kubectl apply`.
+   The JSON shape is in [profiles-and-policy.md §9](profiles-and-policy.md#9-troupe-admin-profile-). **Caveat**: if the answer says `state: not_applied, reason: no_cluster`, the plane has no Kubernetes connection ([AUDIT.md §3.1](../history/AUDIT.md)); apply the `WorkerProfile` yourself from `troupe admin profile show <profile>` with `kubectl apply`.
 
 9. Secrets in the worker namespace the operator created:
 
@@ -309,7 +309,7 @@ troupe admin profiles
 troupe admin pod drain <worker id from the listing>
 ```
 
-Nothing in the repository deletes the pod afterwards ([AUDIT.md §3.13](../AUDIT.md)), and a drained pod that is left running stays out of its Service — its readiness probe answers 503 until it is deleted, so the Ingress answers 503 to every client. **Always follow a drain with the delete below**, even when there is no new revision. While it waits, the plane lists the pod as `draining` and neither places on it nor reads from it (Decision 633); the recreated pod lowers the flag itself by enrolling. To pick up a new image or env (`UpgradePending: True`), the same delete:
+Nothing in the repository deletes the pod afterwards ([AUDIT.md §3.13](../history/AUDIT.md)), and a drained pod that is left running stays out of its Service — its readiness probe answers 503 until it is deleted, so the Ingress answers 503 to every client. **Always follow a drain with the delete below**, even when there is no new revision. While it waits, the plane lists the pod as `draining` and neither places on it nor reads from it (Decision 633); the recreated pod lowers the flag itself by enrolling. To pick up a new image or env (`UpgradePending: True`), the same delete:
 
 ```bash
 kubectl -n troupe-w-<profile> delete pod troupe-w-<profile>-<ordinal>

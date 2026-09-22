@@ -1,6 +1,6 @@
 # Bundles, principals, triggers and the A2A facade
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers are from that tree. Unprefixed module paths are under `apps/troupe_plane/lib/troupe/plane/`.
 
@@ -152,11 +152,11 @@ The row stores only what the plane decided at firing: `created`, `skipped` (conc
 
 ### Webhooks and Hatchet
 
-`source.kind: webhook` is accepted (`triggers/trigger.ex:24,94-95`) but **there is no webhook endpoint in this repository**: an executor outside the plane terminates the webhook and calls `trigger.fire` (`triggers/trigger.ex:5-8`; [AUDIT.md §3.11](../AUDIT.md)). Hatchet is named as that executor throughout the prose and is **not in this repository** — no client code, no chart ([AUDIT.md §4.18](../AUDIT.md)). A plane without it has schedules from the in-plane scheduler and nothing else.
+`source.kind: webhook` is accepted (`triggers/trigger.ex:24,94-95`) but **there is no webhook endpoint in this repository**: an executor outside the plane terminates the webhook and calls `trigger.fire` (`triggers/trigger.ex:5-8`; [AUDIT.md §3.11](../history/AUDIT.md)). Hatchet is named as that executor throughout the prose and is **not in this repository** — no client code, no chart ([AUDIT.md §4.18](../history/AUDIT.md)). A plane without it has schedules from the in-plane scheduler and nothing else.
 
 ### Where triggers live
 
-Triggers, principals and runs are rows in PostgreSQL only; unlike the session index they are **not rebuildable from object storage** ([backup-restore.md](backup-restore.md); [AUDIT.md §3.12](../AUDIT.md)).
+Triggers, principals and runs are rows in PostgreSQL only; unlike the session index they are **not rebuildable from object storage** ([backup-restore.md](backup-restore.md); [AUDIT.md §3.12](../history/AUDIT.md)).
 
 ---
 
@@ -183,12 +183,12 @@ A session with `origin.kind` of `trigger` or `a2a` that nobody has marked review
 
 `apps/troupe_a2a` makes every profile an A2A agent at `/a2a/<profile>`; it is a client of `/rpc` and of worker sockets with no database and no credential of its own. The protocol mapping and routes are in [../a2a.md](../a2a.md); what an operator has to do:
 
-- **Enable it in the chart**: `a2a.enabled: true`, `a2a.host`, and a TLS secret or terminate elsewhere (`values.yaml:179-211`). The Deployment, Service, Ingress and NetworkPolicy are all in `templates/a2a-deployment.yaml`; the plane's NetworkPolicy admits facade pods on the HTTP port when enabled (`network-policy.yaml:29-34`). Discrepancy: the comment at `values.yaml:192-195` says you must admit the facade yourself; the template already does ([AUDIT.md §2](../AUDIT.md)).
+- **Enable it in the chart**: `a2a.enabled: true`, `a2a.host`, and a TLS secret or terminate elsewhere (`values.yaml:179-211`). The Deployment, Service, Ingress and NetworkPolicy are all in `templates/a2a-deployment.yaml`; the plane's NetworkPolicy admits facade pods on the HTTP port when enabled (`network-policy.yaml:29-34`). Discrepancy: the comment at `values.yaml:192-195` says you must admit the facade yourself; the template already does ([AUDIT.md §2](../history/AUDIT.md)).
 - **`TROUPE_A2A_PUBLIC_URL`** (`a2a.publicUrl`, default `https://<a2a.host>`) is required and is the origin in every card and artifact URI (`runtime.exs:415-427`).
 - **What a caller needs**: a service principal of a team granted the profile — `Bearer svc:<team>/<name>:<secret>` or `Basic` — or a person's `id_token`; the facade exchanges it at `/auth/exchange` and caches the plane token by a digest of the credential until a minute before expiry (`docs/a2a.md:25-45`). LiteLLM's A2A gateway is one caller with one principal (`docs/a2a.md:44-45`).
 - **Visibility** of task sessions: `a2a.visibility` → `TROUPE_A2A_VISIBILITY`, `private` (the principal only) or `team` (`values.yaml:201-204`).
 - **Limits**: `a2a.maxStreams` open SSE streams per replica, 429 beyond; a finished task's history or artifact opens a reader on a pod, so a polling caller pays for it (`docs/a2a.md:117-126`).
-- The LiteLLM A2A conformance run lives outside this repository and has not been run ([AUDIT.md §4.18](../AUDIT.md)).
+- The LiteLLM A2A conformance run lives outside this repository and has not been run ([AUDIT.md §4.18](../history/AUDIT.md)).
 
 ---
 
@@ -198,9 +198,9 @@ A session with `origin.kind` of `trigger` or `a2a` that nobody has marked review
 
 When a group is enabled as a team, four settings seed the row: `default_budget_micros` (0), `default_budget_period` (`monthly`), `default_idle_timeout_seconds` (1800), `default_erase_after_days` (365) ([configuration.md Part C](configuration.md#part-c--platform-settings)). Afterwards each team's values are edited with `admin.team.update` (`identity.ex:301`).
 
-- **Period caveat**: `Identity.Team` accepts `budget_period` of `monthly` or `never` only (`identity/team.ex:69`), while the setting, the API description and the Teams page offer `daily` (`settings.ex:97`; `admin/api.ex:107`; `web/live/teams.ex:207-208`), and `Ledger.spent_micros/1` never windows spend by period (`ledger.ex:62-78`). Today the period is a label; the ceiling is against all-time recorded spend. [AUDIT.md §2, §4.9](../AUDIT.md).
+- **Period caveat**: `Identity.Team` accepts `budget_period` of `monthly` or `never` only (`identity/team.ex:69`), while the setting, the API description and the Teams page offer `daily` (`settings.ex:97`; `admin/api.ex:107`; `web/live/teams.ex:207-208`), and `Ledger.spent_micros/1` never windows spend by period (`ledger.ex:62-78`). Today the period is a label; the ceiling is against all-time recorded spend. [AUDIT.md §2, §4.9](../history/AUDIT.md).
 - `idle_timeout_seconds` must be > 0 (`identity/team.ex:70`). On a pod a session goes dormant after 10 minutes idle regardless (`apps/troupe_worker/lib/troupe/worker/session/manager.ex:51`); unconfirmed whether the team value reaches the pod.
-- `erase_after_days`: no retention code was found in the worker or the plane that acts on it ([AUDIT.md §3.5](../AUDIT.md)); treat it as recorded intent.
+- `erase_after_days`: no retention code was found in the worker or the plane that acts on it ([AUDIT.md §3.5](../history/AUDIT.md)); treat it as recorded intent.
 
 ### Budget model (`team_budget.ex`, `ledger.ex`)
 
@@ -208,5 +208,5 @@ When a group is enabled as a team, four settings seed the row: `default_budget_m
 - **Zero or nil budget is unlimited** (`team_budget.ex:203`; `settings.ex:89-91`).
 - **Released on dormancy**: `release/2` marks the reservation `released_at` and frees the slice (`team_budget.ex:118-128`; `ledger.ex:150-158`); `ARCHITECTURE.md:868-869`.
 - One `TeamBudget` actor per team, registered with `:global`, which is why plane replicas must be clustered (`plane-deployment.yaml:131-138`; `_helpers.tpl:22-35`). Spend sums are cached for a minute per node (`apps/troupe_plane/lib/troupe/plane/application.ex:44-46`).
-- What the console's Overview shows per team is `budget_micros`, `budget_period`, `spent_micros` and the sum of open reservations (`admin.ex:1136-1147`). Caveat: `team_spend/1` maps `&1.amount_micros` over what `Ledger.open_reservations/1` returns; from reading only, the shapes may not agree ([AUDIT.md §3.8](../AUDIT.md)).
+- What the console's Overview shows per team is `budget_micros`, `budget_period`, `spent_micros` and the sum of open reservations (`admin.ex:1136-1147`). Caveat: `team_spend/1` maps `&1.amount_micros` over what `Ledger.open_reservations/1` returns; from reading only, the shapes may not agree ([AUDIT.md §3.8](../history/AUDIT.md)).
 - Costs come from the gateway's `x-litellm-response-cost` header; where none is sent, tokens are recorded at zero cost with a synthetic request id `seq:<session>:<n>`, which the nightly reconcile counts as *unmetered* ([integrations.md](integrations.md); `ARCHITECTURE.md:915-930`).

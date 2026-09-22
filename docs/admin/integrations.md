@@ -1,6 +1,6 @@
 # Integrations
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers are from that tree. Unprefixed plane modules are under `apps/troupe_plane/lib/troupe/plane/`.
 
@@ -51,7 +51,7 @@ Two engines, three policies, two auth roles.
 | Role `troupe-plane`: bound SA `troupe-plane` in `troupe-system`, the plane policy plus signing | the plane logs in with the projected `bao-token` (audience `troupe-kms`, 3600 s) and caches the client token until 60 s before its lease ends; a 403 is retried once after a fresh login | `dependencies.yaml:268-272`; `tokens/credential.ex:1-24,32-33,116-141`; `plane-deployment.yaml:373-382` |
 | Policies | `Troupe.KMS.Policy.worker/2`, `plane/1`, `signing/2` — see [roles-and-permissions.md §8](roles-and-permissions.md#8-openbao-policies) | `apps/troupe_protocol/lib/troupe/kms/policy.ex` |
 
-The dev role for the plane at `dependencies.yaml:268-272` attaches only the `troupe-plane` KV policy; the signing policy on `transit/*` is not attached there because the dev root token is used. A production role for the plane needs **both** `Troupe.KMS.Policy.plane/1` and `Troupe.KMS.Policy.signing/2`. The dev manifest also installs one wide worker policy over `teams/+/` rather than the per-profile policy the code renders; nothing in the repository installs per-profile policies in a cluster — that is a manual or external step. Unconfirmed how the live deployment does it ([AUDIT.md §4.7](../AUDIT.md)).
+The dev role for the plane at `dependencies.yaml:268-272` attaches only the `troupe-plane` KV policy; the signing policy on `transit/*` is not attached there because the dev root token is used. A production role for the plane needs **both** `Troupe.KMS.Policy.plane/1` and `Troupe.KMS.Policy.signing/2`. The dev manifest also installs one wide worker policy over `teams/+/` rather than the per-profile policy the code renders; nothing in the repository installs per-profile policies in a cluster — that is a manual or external step. Unconfirmed how the live deployment does it ([AUDIT.md §4.7](../history/AUDIT.md)).
 
 **Static token** (`TROUPE_BAO_TOKEN`, `bao.tokenSecretName`): development only (`values.yaml:220-223`). A plane with neither a static token nor a readable projected JWT logs one error naming both options and answers `/.well-known/jwks.json` with 503 (`tokens/credential.ex:19-23,128-140`; `web/router.ex:93-98`).
 
@@ -70,9 +70,9 @@ Install command: `openbao.values.yaml:3-5`.
 | Pool | `TROUPE_POOL_SIZE`, 10 **per replica** plus the migration Job's; a small managed instance that allows 25 needs it lowered. **No Helm value** | `runtime.exs:171-178` |
 | Migrations | a Helm `pre-install,pre-upgrade` hook Job `troupe-plane-migrate` (weight −5, `backoffLimit: 1`, kept on failure) runs `/app/bin/troupe_plane eval "Troupe.Plane.Release.migrate()"`; never from application boot | `plane-deployment.yaml:35-118`; `release.ex:1-25` |
 | Rollback | `Troupe.Plane.Release.rollback(Troupe.Plane.Repo, <version>)` via `bin/troupe_plane eval`; nothing calls it | `release.ex:27-32` |
-| Schema | 20 tables from 11 migrations under `apps/troupe_plane/priv/repo/migrations/` (identity, fleet, sessions, ledger and audit, team admins, bundle summary, session status, service principals, triggers, usage watermark, platform settings); primary keys `binary_id`, timestamps `utc_datetime_usec` | `config/config.exs:57-59`; [AUDIT.md §1.4](../AUDIT.md) |
+| Schema | 20 tables from 11 migrations under `apps/troupe_plane/priv/repo/migrations/` (identity, fleet, sessions, ledger and audit, team admins, bundle summary, session status, service principals, triggers, usage watermark, platform settings); primary keys `binary_id`, timestamps `utc_datetime_usec` | `config/config.exs:57-59`; [AUDIT.md §1.4](../history/AUDIT.md) |
 | Extensions | none — no migration runs `CREATE EXTENSION` | grep of `priv/repo/migrations/*.exs` |
-| Versions | CI and docker-compose use `postgres:16`; the kind manifest `postgres:18.1-bookworm`. Unconfirmed which major the live plane runs | `dev/kind/dependencies.yaml:77`; [AUDIT.md §4](../AUDIT.md) |
+| Versions | CI and docker-compose use `postgres:16`; the kind manifest `postgres:18.1-bookworm`. Unconfirmed which major the live plane runs | `dev/kind/dependencies.yaml:77`; [AUDIT.md §4](../history/AUDIT.md) |
 | Never stored | session content (`repo.ex:5-8`) | |
 
 What the database is authoritative for, and what it is not, is in [backup-restore.md](backup-restore.md). Managed PostgreSQL with PITR is the guide's recommendation (`docs/deploying-on-scaleway.md:19,149`).
@@ -84,12 +84,12 @@ What the database is authoritative for, and what it is not, is in [backup-restor
 | Item | Detail | Source |
 |---|---|---|
 | Protocol | S3 with SigV4 (`Troupe.ObjectStore`); endpoint, bucket, key id, secret, region from `TROUPE_OBJECT_*` | `runtime.exs:73-89`; `apps/troupe_protocol/lib/troupe/object_store.ex` |
-| Layout | `sessions/<id>/{manifest.json, segments/<epoch>-<first>-<last>.seg, snapshots/<seq>.snap, workspace/<seq>.<ext>, blobs/<sha>}`; segments are AES-256-GCM under a per-session key, manifests plaintext | [AUDIT.md §1.4](../AUDIT.md); `apps/troupe_protocol/lib/troupe/sessions/storage.ex` |
+| Layout | `sessions/<id>/{manifest.json, segments/<epoch>-<first>-<last>.seg, snapshots/<seq>.snap, workspace/<seq>.<ext>, blobs/<sha>}`; segments are AES-256-GCM under a per-session key, manifests plaintext | [AUDIT.md §1.4](../history/AUDIT.md); `apps/troupe_protocol/lib/troupe/sessions/storage.ex` |
 | Who writes | workers (seal every 60 s and at turn end, snapshot every 500 events, archive workspace at dormancy); the plane reads manifests only in `mix troupe.index.rebuild` | `apps/troupe_worker/lib/troupe/worker/session/sealer.ex:28-31`; `apps/troupe_plane/lib/mix/tasks/troupe.index.rebuild.ex` |
 | **Versioning must be on** | erasure destroys the key first, then deletes every version; a bucket without versioning makes "every version" vacuous rather than false | `values.scaleway.yaml:118-121`; `docs/deploying-on-scaleway.md:71-76`; `erasure.ex:5-11`; `dev/kind/dependencies.yaml:129-150` |
 | Credentials in **two namespaces** | Secret `troupe-object-store` with `access-key-id` and `secret-access-key` in `troupe-system` (plane, optional) **and in every `troupe-w-<profile>`** (workers, optional in the spec but required to work) | `plane-deployment.yaml:317-330`; `resources.ex:595-610` |
 | Region | `TROUPE_OBJECT_REGION` reaches the plane only; workers always sign for `us-east-1` | `plane-deployment.yaml:259-260`; `resources.ex:532-585` |
-| Lifecycle, replication | nothing in the repository | [AUDIT.md §4.8](../AUDIT.md) |
+| Lifecycle, replication | nothing in the repository | [AUDIT.md §4.8](../history/AUDIT.md) |
 
 Scaleway: `https://s3.fr-par.scw.cloud`, region `fr-par` (`values.scaleway.yaml:122-126`).
 
@@ -105,8 +105,8 @@ Troupe has no price table and calls whatever OpenAI-compatible or Anthropic endp
 | Request | `openai`: `POST <endpoint>/v1/chat/completions` with `Authorization: Bearer`, `stream_options.include_usage`, `user` = the session owner; `anthropic`: `POST /v1/messages` with `x-api-key`. `/v1` is not doubled if already present | core/worker audit notes; `apps/troupe_core/lib/troupe/llm/providers/{openai,anthropic}.ex` |
 | Cost and request id | read from response **headers** once in the shared HTTP path: `x-litellm-call-id` or `x-request-id` → `request_id`; `x-litellm-response-cost` → `cost_micros`. Absent → cost 0 and synthetic id `seq:<session>:<n>` | `apps/troupe_core/lib/troupe/llm/message.ex:57-60`; `ARCHITECTURE.md:915-930` |
 | Egress | the endpoint's host must be in `TroupePolicy.allowedEgress` (`llm-gw.itmindsinternal.dk` in both Scaleway files) and, with Cilium, is an FQDN rule | `values.scaleway.yaml:141-144`; `apps/troupe_protocol/lib/troupe/worker_profile.ex:171-179` |
-| Reconciliation | `mix troupe.ledger.reconcile` fetches `GET <base_url>/spend/logs?start_date&end_date` with `Authorization: Bearer <key>` and compares by request id. It reads `Application.get_env(:troupe_plane, :gateway)` — `%{base_url or spend_url, key}` — **which nothing in the repository sets**, so the task answers `could not reach the gateway: :no_gateway_configured` until it is configured by hand (a release config overlay or `bin/troupe_plane eval`) | `reconcile.ex:185-222`; `lib/mix/tasks/troupe.ledger.reconcile.ex:37-40`; [AUDIT.md §3](../AUDIT.md) (plane note) |
-| Unverified | `x-litellm-response-cost` on **streamed** responses is assumed present; not tested against a gateway | [AUDIT.md §3.17](../AUDIT.md) |
+| Reconciliation | `mix troupe.ledger.reconcile` fetches `GET <base_url>/spend/logs?start_date&end_date` with `Authorization: Bearer <key>` and compares by request id. It reads `Application.get_env(:troupe_plane, :gateway)` — `%{base_url or spend_url, key}` — **which nothing in the repository sets**, so the task answers `could not reach the gateway: :no_gateway_configured` until it is configured by hand (a release config overlay or `bin/troupe_plane eval`) | `reconcile.ex:185-222`; `lib/mix/tasks/troupe.ledger.reconcile.ex:37-40`; [AUDIT.md §3](../history/AUDIT.md) (plane note) |
+| Unverified | `x-litellm-response-cost` on **streamed** responses is assumed present; not tested against a gateway | [AUDIT.md §3.17](../history/AUDIT.md) |
 
 The kind bring-up uses `TROUPE_GATEWAY_URL` default `https://llm-gw.itmindsinternal.dk/v1`, model `code-default` and a Secret `llm-credentials` filled from `ITM_LLM_GW_KEY` (`scripts/remote-up`; `dev/kind/dependencies.yaml:44-52`).
 
@@ -161,7 +161,7 @@ The first does OAuth against the identity provider — the app registration must
 
 ## 9. Hatchet and webhooks
 
-Not in this repository. Webhook triggers (`source.kind: webhook`) expect an external executor to receive the webhook and call `trigger.fire` with an idempotency key; Hatchet is the executor the prose names, and no client, chart or manifest for it exists here ([bundles-and-triggers.md §3](bundles-and-triggers.md#3-triggers); [AUDIT.md §3.11, §4.18](../AUDIT.md)).
+Not in this repository. Webhook triggers (`source.kind: webhook`) expect an external executor to receive the webhook and call `trigger.fire` with an idempotency key; Hatchet is the executor the prose names, and no client, chart or manifest for it exists here ([bundles-and-triggers.md §3](bundles-and-triggers.md#3-triggers); [AUDIT.md §3.11, §4.18](../history/AUDIT.md)).
 
 ---
 

@@ -26,7 +26,6 @@ clients/gui/
 ├── Dockerfile                    build stage (Node 24) + runtime (nginx-unprivileged)
 ├── README.md                     226 lines; overview, run, ship, design rules
 ├── DECISIONS.md                  35 numbered judgment calls
-├── REPORT.md                     stage-1 report and the live-deployment log
 ├── spec.md                       the four-stage brief this repository builds against
 ├── .claude/launch.json           dev server definition for the Claude Code browser pane
 ├── .local/                       ignored; nothing reads it any more (below)

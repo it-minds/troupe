@@ -2,7 +2,7 @@
 
 > Rewritten 2026-09-21 for the monorepo (Decisions 666–671). The previous version of this
 > page — one workflow, five jobs, delivery ending at images and a chart on a tag, and no
-> deploy step — is in git history; [AUDIT.md](../AUDIT.md) still describes the tree it was
+> deploy step — is in git history; [AUDIT.md](../history/AUDIT.md) still describes the tree it was
 > audited against.
 
 Three workflows. `ci.yml` is the gate on every pull request, and on `main` it publishes

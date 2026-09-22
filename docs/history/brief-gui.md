@@ -4,8 +4,8 @@ This extends `spec.md` and assumes stages 1, 2 and 4 are built and deployed. Sam
 apply: work autonomously, do not ask questions the documents answer, record every judgment
 call in `DECISIONS.md`, and prove every done item with command output in `REPORT.md`.
 
-Read [`../HANDOFF.md`](HANDOFF.md) first. The binding document for everything below is
-[`client-ux.md`](client-ux.md); `docs/design/DESIGN.md` remains the authority on how it
+Read [`../HANDOFF.md`](../program/HANDOFF.md) first. The binding document for everything below is
+[`client-ux.md`](../program/client-ux.md); `docs/design/DESIGN.md` remains the authority on how it
 looks.
 
 Six packages. **G0, G1 and G2 depend on no server change and start immediately.**
@@ -162,7 +162,7 @@ Connections   credentials of yours that org tools are using        (needs R2)
 This machine  the daemon, storage, worktrees, watch mode
 ```
 
-Details in [`client-ux.md`](client-ux.md). Four rules that are easy to lose:
+Details in [`client-ux.md`](../program/client-ux.md). Four rules that are easy to lose:
 
 * **A panel the platform has switched off is present and says why**, not hidden. With
   `managed_mcp_servers_only`, **My tools** shows the reason where the list would be. A
@@ -270,7 +270,7 @@ That is actionable. `at_capacity` is not, and must never reach a person.
 
 ## G6 — Stretch goals
 
-Eight, specified in [`client-ux.md`](client-ux.md). **None is client-only except S3 and S6**,
+Eight, specified in [`client-ux.md`](../program/client-ux.md). **None is client-only except S3 and S6**,
 so none starts before its server half is agreed.
 
 | | what | needs |

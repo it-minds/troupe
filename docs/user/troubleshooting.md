@@ -1,4 +1,4 @@
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > ## Deprecated — kept as an artifact
 >
@@ -46,7 +46,7 @@ still send `groups`.
 **Do.** Nothing on your side fixes it. Ask the admin to set the plane's OIDC scope
 override (`TROUPE_OIDC_SCOPES`) to the four scopes above, or to remove `groups`. Note
 the override is uncommitted in the working tree at this audit
-([AUDIT.md](../AUDIT.md) §4 question 14).
+([AUDIT.md](../history/AUDIT.md) §4 question 14).
 
 ### `this plane does not publish a device authorization endpoint`
 
@@ -82,7 +82,7 @@ Sources:
 - apps/troupe_ctl/lib/troupe/ctl/login.ex:48-73, 126-132, 137-150
 - config/runtime.exs:259-263, 328-331
 - apps/troupe_plane/lib/troupe/plane/web/router.ex (discovery scopes default; see docs/admin/configuration.md)
-- docs/AUDIT.md preamble, §4 question 14
+- docs/history/AUDIT.md preamble, §4 question 14
 
 ## After login
 
@@ -355,7 +355,7 @@ Sources:
 - apps/troupe_core/lib/troupe/config.ex:27-30
 - apps/troupe_plane/lib/troupe/plane/harness.ex:29-35, 461-491, 540-557, 624-638, 840-852
 - apps/troupe_protocol/lib/troupe/protocol/error.ex:14-38
-- docs/AUDIT.md §1.7 (retries, request timeout)
+- docs/history/AUDIT.md §1.7 (retries, request timeout)
 
 ## The GUI
 
@@ -433,4 +433,4 @@ Sources:
 - apps/troupe_protocol/lib/troupe/protocol/daemon.ex:11-28, 132-147, 214-243
 - apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:112-130
 - apps/troupe_tui/lib/troupe/ui/tui.ex:55-67
-- PROTOCOL.md:516; docs/AUDIT.md §2
+- PROTOCOL.md:516; docs/history/AUDIT.md §2

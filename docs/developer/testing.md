@@ -1,6 +1,6 @@
 # Testing
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -206,8 +206,8 @@ state is isolated through config; worker, gateway harness and cluster suites are
 
 `.github/workflows/ci.yml:87-90`: "Ten runs, because the suite is concurrent and a race
 that shows up one time in five is a bug this project cares about." The step is
-`for i in $(seq 10); do mix test || exit 1; done`. `REPORT.md:6-7` records five
-consecutive green runs as the stage 1 bar.
+`for i in $(seq 10); do mix test || exit 1; done`. `docs/history/REPORT.md:6-7` records
+five consecutive green runs as the stage 1 bar.
 
 ## 8. The PITR drill
 

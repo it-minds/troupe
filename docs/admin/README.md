@@ -1,6 +1,6 @@
 # Troupe — administrator documentation
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 >
 > Commit `4083b1f` (`TROUPE_OIDC_MCP_SCOPE`, `plane.oidc.mcpScope`) landed while this track was being written and is covered; line numbers in this tree are from that commit.
 
@@ -15,7 +15,7 @@
 
 ## Who this is for
 
-You operate a Troupe deployment: you install the Helm chart, run PostgreSQL, object storage, OpenBao and an identity provider beside it, set its configuration, and manage teams, worker profiles, policy, bundles, triggers, principals, backups and monitoring. Every claim in this tree names the file and line that decides it. Where prose in the repository disagrees with the code, the code is documented and the stale text is named as a `Discrepancy`; where the code could not settle a question, it is marked `Unconfirmed` with a pointer into [AUDIT.md](../AUDIT.md).
+You operate a Troupe deployment: you install the Helm chart, run PostgreSQL, object storage, OpenBao and an identity provider beside it, set its configuration, and manage teams, worker profiles, policy, bundles, triggers, principals, backups and monitoring. Every claim in this tree names the file and line that decides it. Where prose in the repository disagrees with the code, the code is documented and the stale text is named as a `Discrepancy`; where the code could not settle a question, it is marked `Unconfirmed` with a pointer into [AUDIT.md](../history/AUDIT.md).
 
 Other tracks: [developer](../developer/README.md) (build, deploy, CI, architecture), [user](../user/README.md) (the CLI and what a session can do — deprecated), the [whitepaper](../whitepaper.md) (why it is built this way), and the [A2A facade](../a2a.md).
 
@@ -40,7 +40,7 @@ Other tracks: [developer](../developer/README.md) (build, deploy, CI, architectu
 3. **Label the ingress namespace** `troupe.dev/ingress=true`, or every worker Ingress answers 503 ([configuration.md Part E](configuration.md#part-e--ports-and-network-policy)).
 4. **Platform admin comes from an identity-provider group**, read from a token claim — never from a scope. Ask for `groups` as a scope and Entra refuses every sign-in ([roles-and-permissions.md §2](roles-and-permissions.md#2-the-three-admin-roles); [integrations.md §1](integrations.md#1-identity-provider-oidc)).
 5. **Bucket versioning must be on**, or erasure's promise is vacuous ([integrations.md §4](integrations.md#4-object-storage-s3)).
-6. **The plane's Kubernetes connection for provisioning (`:k8s_conn`) is set by nothing in the repository.** Direct-mode `profile put` saves the row and reports `not_applied`; apply the CR yourself until that is resolved ([profiles-and-policy.md §7](profiles-and-policy.md#7-provisioning-how-the-planes-row-becomes-a-cr); [AUDIT.md §3.1](../AUDIT.md)).
+6. **The plane's Kubernetes connection for provisioning (`:k8s_conn`) is set by nothing in the repository.** Direct-mode `profile put` saves the row and reports `not_applied`; apply the CR yourself until that is resolved ([profiles-and-policy.md §7](profiles-and-policy.md#7-provisioning-how-the-planes-row-becomes-a-cr); [AUDIT.md §3.1](../history/AUDIT.md)).
 7. **`SecretMissing` looks in the wrong namespace with a permission it does not have**; do not trust it ([configuration.md Part D](configuration.md#part-d--secrets-the-chart-expects)).
 8. **Nothing restarts a drained worker pod.** The StatefulSet is `OnDelete`; after `troupe admin pod drain`, `kubectl delete pod` yourself ([profiles-and-policy.md §4](profiles-and-policy.md#4-how-an-upgrade-works)).
 9. **Triggers, principals, settings and the audit trail live only in PostgreSQL.** The session index is rebuildable from object storage; those are not ([backup-restore.md §1](backup-restore.md#1-where-state-lives-and-which-copy-is-authoritative)).
@@ -50,7 +50,7 @@ Other tracks: [developer](../developer/README.md) (build, deploy, CI, architectu
 
 ## Self-check
 
-There is **no `.env.example` in the repository**, so the variable list below was derived from `config/runtime.exs`, `config/config.exs` and every `System.get_env` call under `apps/*/lib` ([AUDIT.md §1.5](../AUDIT.md)). Markdown tables have no per-row anchors; each name links to the section of [configuration.md](configuration.md) whose table holds its row.
+There is **no `.env.example` in the repository**, so the variable list below was derived from `config/runtime.exs`, `config/config.exs` and every `System.get_env` call under `apps/*/lib` ([AUDIT.md §1.5](../history/AUDIT.md)). Markdown tables have no per-row anchors; each name links to the section of [configuration.md](configuration.md) whose table holds its row.
 
 ### (a) Every environment variable
 
@@ -101,7 +101,7 @@ The three overlays (`charts/troupe/values.small.yaml`, `charts/troupe/values.sca
 - **The GUI's admin guide** is [`clients/gui/docs/admin/README.md`](../../clients/gui/docs/admin/README.md); what the plane must provide for the GUI is in [integrations.md §10](integrations.md#10-the-gui).
 - **Hatchet** and any webhook receiver: not in this repository ([bundles-and-triggers.md §3](bundles-and-triggers.md#3-triggers)).
 - **Installing per-profile OpenBao worker policies in a cluster**: the code renders them, nothing installs them; the dev manifest installs one wide policy ([integrations.md §2](integrations.md#2-openbao)).
-- **The live deployment's actual values, image tags and secrets**: all under the gitignored `.local/` ([AUDIT.md §4.1](../AUDIT.md)).
+- **The live deployment's actual values, image tags and secrets**: all under the gitignored `.local/` ([AUDIT.md §4.1](../history/AUDIT.md)).
 - **Who consumes `POD_NAME`** on the operator, **whether `admin.team.update`'s advertised `cache_eviction_days`, `pins_allowed`, `volume_size`, `volume_storage_class` are persisted**, and **who restarts a drained pod**: marked Unconfirmed where they appear.
-- **`erase_after_days` retention**: recorded on the team, acted on by nothing found ([AUDIT.md §3.5](../AUDIT.md)).
-- Every open item in [AUDIT.md §4](../AUDIT.md) that the code could not settle is referenced from the document where it matters rather than answered here.
+- **`erase_after_days` retention**: recorded on the team, acted on by nothing found ([AUDIT.md §3.5](../history/AUDIT.md)).
+- Every open item in [AUDIT.md §4](../history/AUDIT.md) that the code could not settle is referenced from the document where it matters rather than answered here.

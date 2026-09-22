@@ -1,6 +1,6 @@
 # Local setup
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../history/AUDIT.md).
 
 > **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
 > Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
@@ -17,7 +17,7 @@
 > repository ships no client or no binary, that was true of the tree it was audited
 > against and is not now.
 
-There is no `.env.example` in this repository ([../AUDIT.md](../AUDIT.md) §1.5). The
+There is no `.env.example` in this repository ([../history/AUDIT.md](../history/AUDIT.md) §1.5). The
 variables a developer may set are tabulated in §7 of this document; every runtime
 variable a deployment sets is in [../admin/configuration.md](../admin/configuration.md).
 
@@ -285,7 +285,7 @@ in [../admin/configuration.md](../admin/configuration.md).
 | `TROUPE_PROFILE_NAME` | `scripts/remote-up:20` | the dev `WorkerProfile` name; default `dev` |
 | `TROUPE_GATEWAY_URL` | `scripts/remote-up:181` | `llm.endpoint` of the dev profile; default `https://llm-gw.itmindsinternal.dk/v1` |
 | `TROUPE_GATEWAY_MODEL` | `scripts/remote-up:183` | `llm.model`; default `code-default` |
-| `TROUPE_GATEWAY_SMALL_MODEL` | `scripts/remote-up:184` | `llm.smallModel`; default `chat-fast`. Caveat: nothing under `apps/*/lib` reads the resulting `TROUPE_SMALL_MODEL` ([../AUDIT.md](../AUDIT.md) §3.3) |
+| `TROUPE_GATEWAY_SMALL_MODEL` | `scripts/remote-up:184` | `llm.smallModel`; default `chat-fast`. Caveat: nothing under `apps/*/lib` reads the resulting `TROUPE_SMALL_MODEL` ([../history/AUDIT.md](../history/AUDIT.md) §3.3) |
 | `ITM_LLM_GW_KEY` | `scripts/remote-up:103-111,200-205` | written into secret `llm-credentials` (`api-key`) in `troupe-system` and `troupe-w-<profile>`; "the one secret that is never written to a file in this repository" |
 | `TROUPE_KIND_CLUSTER` | `scripts/kind-up:8`, `kind-down:4`, `remote-up:17`, `build-images:21` | kind cluster name; default `troupe-dev` |
 | `TROUPE_REGISTRY` | `scripts/build-images:19` | image prefix; default `ghcr.io/objective-mj` |
@@ -296,7 +296,7 @@ in [../admin/configuration.md](../admin/configuration.md).
 | `TROUPE_REAPER_TARGETS` | `apps/troupe_core/lib/mix/tasks/compile.reaper.ex` | a comma-separated list of triples, or `all`; the default is the host triple. `Troupe.Release.build_reapers/1` sets the two Linux triples when it packs a release (`releasild-local:62`, `ci.yml:289`); unset builds the host triple; a comma-separated list builds those |
 | `ZIG_LOCAL_CACHE_DIR`, `ZIG_GLOBAL_CACHE_DIR` | Zig | worth pointing at a plain local filesystem: Zig 0.16's `renameat2` flags fail with `EINVAL` on ecryptfs and some network mounts, and Zig treats that as a programmer bug and aborts |
 | `TROUPE_PROVIDER` | `apps/troupe_core/lib/troupe/config.ex:141` | `anthropic`, `openai`, `fake` |
-| `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL` | `config.ex:142-144` | provider endpoint, key, model. `TROUPE_BASE_URL` means the LLM endpoint here and the plane's public URL on a plane ([../AUDIT.md](../AUDIT.md) §3.4) |
+| `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL` | `config.ex:142-144` | provider endpoint, key, model. `TROUPE_BASE_URL` means the LLM endpoint here and the plane's public URL on a plane ([../history/AUDIT.md](../history/AUDIT.md) §3.4) |
 | `TROUPE_FAKE_SCRIPT` | `config.ex:145`; `apps/troupe_core/lib/troupe/session.ex:114-122` | path to a JSON script for the fake provider; raises if the file is missing. Used by the CI smoke tests (`ci.yml:333-334`) |
 | `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` | `apps/troupe_core/lib/troupe/llm/providers/anthropic.ex:264`, `openai.ex:312` | fallback when `api_key` is unset |
 | `TROUPE_STATE_HOME` | `apps/troupe_core/lib/troupe/paths.ex:33-38` | overrides the state directory (`sessions/`); test helpers delete it and case templates pass `state_dir` through config instead (`apps/troupe_core/test/test_helper.exs:9`, `test/support/session_case.ex:35-38`) |
