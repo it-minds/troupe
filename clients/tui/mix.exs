@@ -79,14 +79,30 @@ defmodule Troupe.MixProject do
         steps: [:assemble, &ExRatatui.Burrito.verify_linux_nif/1, &Burrito.wrap/1],
         burrito: [
           targets: [
-            linux_x86_64: [os: :linux, cpu: :x86_64],
-            linux_aarch64: [os: :linux, cpu: :aarch64],
-            macos_x86_64: [os: :darwin, cpu: :x86_64],
-            macos_aarch64: [os: :darwin, cpu: :aarch64],
-            windows_x86_64: [os: :windows, cpu: :x86_64]
+            linux_x86_64: [os: :linux, cpu: :x86_64] ++ custom_erts(),
+            linux_aarch64: [os: :linux, cpu: :aarch64] ++ custom_erts(),
+            macos_x86_64: [os: :darwin, cpu: :x86_64] ++ custom_erts(),
+            macos_aarch64: [os: :darwin, cpu: :aarch64] ++ custom_erts(),
+            windows_x86_64: [os: :windows, cpu: :x86_64] ++ custom_erts()
           ]
         ]
       ]
     ]
+  end
+
+  # An ERTS already on this machine, instead of the one Burrito downloads for the target.
+  # `BURRITO_CUSTOM_ERTS` is a directory holding an unpacked OTP tree; CI never sets it
+  # and builds exactly as before.
+  #
+  # It is what makes a build from source possible on Windows, where the precompiled ERTS
+  # is an NSIS installer and unpacking one needs 7-Zip — which the GitHub runners have
+  # and a laptop, without administrator rights, may not. Whoever sets it is saying this
+  # tree is the right ERTS for the target being built, so set it only for the host's own
+  # target (`scripts\install-local.ps1` does).
+  defp custom_erts do
+    case System.get_env("BURRITO_CUSTOM_ERTS") do
+      path when is_binary(path) and path != "" -> [custom_erts: path]
+      _ -> []
+    end
   end
 end
