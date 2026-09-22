@@ -108,6 +108,17 @@ defmodule Troupe.Agent.Server do
     :ok
   end
 
+  @doc """
+  Set the session's goal, or clear it with `nil`. Taken in any state rather than at the
+  next turn boundary: it changes what the next request's prompt says and never the one
+  already in flight. `:command_id` in `opts` is echoed in the event.
+  """
+  @spec set_goal(pid(), String.t() | nil, Event.Actor.t() | nil, keyword()) :: :ok
+  def set_goal(pid, text, actor \\ nil, opts \\ []) do
+    send(pid, {:goal, text, actor, Keyword.get(opts, :command_id)})
+    :ok
+  end
+
   @doc "A snapshot for the UI and for tests. Read-only; never used inside the loop."
   @spec snapshot(pid()) :: map()
   def snapshot(pid), do: :gen_statem.call(pid, :snapshot, 5_000)
@@ -218,6 +229,12 @@ defmodule Troupe.Agent.Server do
         data
     end
   end
+
+  # The goal replaces itself whole and belongs to the root alone. Heads of their own rather
+  # than two more arms of the case below, which is as long as one function should be;
+  # `FoldTest` reads both forms.
+  defp fold_event(%Event{type: "goal_set", data: data}, state), do: %{state | goal: data["text"]}
+  defp fold_event(%Event{type: "goal_cleared"}, state), do: %{state | goal: nil}
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -636,6 +653,12 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # The goal is taken in every state, `:done` included: a finished agent woken by the next
+  # input should find the goal it was given while it rested.
+  defp common(:info, {:goal, text, actor, command_id}, _state_name, state) do
+    {:keep_state, put_goal(state, text, actor, command_id)}
+  end
+
   defp common(:info, message, state_name, state) do
     Logger.debug(
       "troupe agent #{State.label(state)} dropped #{inspect(message)} in #{state_name}"
@@ -897,12 +920,17 @@ defmodule Troupe.Agent.Server do
   # environment: what earlier agents learned about this repository is the first thing
   # a new one should read, and it is read fresh at every prompt so a `remember` made in
   # this session reaches the next agent to start.
+  #
+  # The goal comes after everything that describes the agent and its surroundings and
+  # before the task list: it is what the list is for, and it changes less often than the
+  # list does, which keeps more of the prompt the same from one request to the next.
   defp system_prompt(state, definition) do
     [
       definition.prompt,
       Memory.prompt_section(state.workspace.root_real, state.config),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition),
+      goal_section(state),
       todo_section(state)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -926,6 +954,22 @@ defmodule Troupe.Agent.Server do
       {:win32, _} -> "Windows"
       _ -> "Linux"
     end
+  end
+
+  # Every turn, not only the one after it was set: a goal is what the whole session is
+  # working towards, and it stays until a person clears or replaces it.
+  defp goal_section(%State{goal: nil}), do: ""
+
+  defp goal_section(%State{goal: goal}) do
+    """
+    <goal>
+    The goal the person set for this session. Keep working towards it across turns; it
+    stays until they clear or replace it.
+
+    #{goal}
+    </goal>
+    """
+    |> String.trim()
   end
 
   defp todo_section(%State{todos: []}), do: ""
@@ -2017,6 +2061,25 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # -- goal -------------------------------------------------------------------
+
+  # Setting the goal the session already has, or clearing one it does not, writes
+  # nothing: the log records changes, and a client saying the same thing twice is not one.
+  defp put_goal(%State{goal: goal} = state, goal, _actor, _command_id), do: state
+
+  defp put_goal(state, nil, actor, command_id) do
+    log(state, :goal_cleared, command_data(command_id), actor)
+    %{state | goal: nil}
+  end
+
+  defp put_goal(state, text, actor, command_id) when is_binary(text) do
+    log(state, :goal_set, Map.put(command_data(command_id), "text", text), actor)
+    %{state | goal: text}
+  end
+
+  defp command_data(nil), do: %{}
+  defp command_data(command_id), do: %{"command_id" => command_id}
+
   # -- reruns -----------------------------------------------------------------
 
   defp dispatch_reruns(state, calls) do
@@ -2098,6 +2161,7 @@ defmodule Troupe.Agent.Server do
       profile: state.definition.name,
       conversation: state.conversation,
       todos: state.todos,
+      goal: state.goal,
       budget: state.budget,
       done_reason: state.done_reason,
       outstanding: Enum.map(State.outstanding(state), & &1.name)

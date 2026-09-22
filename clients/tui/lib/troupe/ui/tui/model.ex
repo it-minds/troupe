@@ -97,6 +97,7 @@ defmodule Troupe.UI.TUI.Model do
           summary: String.t() | nil,
           message: String.t() | nil,
           diff_stat: String.t() | nil,
+          goal: String.t() | nil,
           worktree: map() | nil,
           unconfirmed: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()}
@@ -152,6 +153,7 @@ defmodule Troupe.UI.TUI.Model do
           summary: nil,
           message: nil,
           diff_stat: nil,
+          goal: nil,
           worktree: nil,
           unconfirmed: %{},
           warnings: %{}
@@ -430,6 +432,17 @@ defmodule Troupe.UI.TUI.Model do
       :profile_switched ->
         w |> push(path, {:system, "profile switched to #{d.name}"}) |> Map.put(:profile, d.name)
 
+      # Said once in the transcript, where it happened, and kept on the window for the
+      # status line, which shows it for as long as it is set.
+      :goal_set ->
+        w
+        |> ensure_agent(path)
+        |> push(path, {:system, "goal: " <> d.text})
+        |> Map.put(:goal, d.text)
+
+      :goal_cleared ->
+        w |> ensure_agent(path) |> push(path, {:system, "goal cleared"}) |> Map.put(:goal, nil)
+
       :worktree_created ->
         %{
           w
@@ -671,6 +684,19 @@ defmodule Troupe.UI.TUI.Model do
 
   @spec windows(t()) :: [window()]
   def windows(%__MODULE__{} = m), do: Enum.map(m.order, &Map.fetch!(m.windows, &1))
+
+  @doc """
+  The goal this screen's session has, as its events say, for the status line: the one on
+  the session's own window, `"root"`. A branch is a session of its own and keeps its goal
+  on its own window.
+  """
+  @spec goal(t()) :: String.t() | nil
+  def goal(%__MODULE__{windows: windows}) do
+    case Map.get(windows, "root") do
+      %{goal: goal} -> goal
+      _ -> nil
+    end
+  end
 
   @doc """
   MCP servers as the `/mcp` page and the status line read them: the latest

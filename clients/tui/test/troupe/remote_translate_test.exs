@@ -358,4 +358,15 @@ defmodule Troupe.RemoteTranslateTest do
     assert odd.data.dimension == :other
     assert odd.data.detail == "moon"
   end
+
+  test "the session's goal is set and cleared as events of its own, not as notes" do
+    [set] = translate(durable("goal_set", %{"text" => "ship it", "command_id" => "c-1"}))
+    assert set.type == :goal_set
+    assert set.agent_path == "root"
+    assert set.data == %{text: "ship it"}
+    assert set.seq == 7
+
+    assert [%{type: :goal_cleared, agent_path: "root"}] =
+             translate(durable("goal_cleared", %{"command_id" => "c-2"}))
+  end
 end

@@ -83,6 +83,14 @@ defmodule Troupe.Remote.Worker do
   @spec switch_profile(String.t(), String.t()) :: :ok | {:error, term()}
   def switch_profile(session_id, name), do: call(session_id, {:profile, name})
 
+  @doc "The session's goal as the server reads it from the log; wakes nothing."
+  @spec goal(String.t()) :: {:ok, term()} | {:error, term()}
+  def goal(session_id), do: call(session_id, {:rpc, "session.goal.get", %{}})
+
+  @doc "Sets the session's goal, or clears it with `nil`. Activating, like a profile switch."
+  @spec set_goal(String.t(), String.t() | nil) :: :ok | {:error, term()}
+  def set_goal(session_id, text), do: call(session_id, {:goal, text})
+
   @spec fs_list(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   def fs_list(session_id, path), do: call(session_id, {:rpc, "fs.list", %{path: path}})
 
@@ -270,6 +278,12 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:profile, name}, from, state),
     do: activating(state, from, "profile.switch", %{name: name, command_id: RPC.command_id()})
+
+  def handle_call({:goal, nil}, from, state),
+    do: activating(state, from, "session.goal.clear", %{command_id: RPC.command_id()})
+
+  def handle_call({:goal, text}, from, state),
+    do: activating(state, from, "session.goal.set", %{text: text, command_id: RPC.command_id()})
 
   def handle_call({:upload, path, content}, from, state) do
     activating(state, from, "fs.upload", %{

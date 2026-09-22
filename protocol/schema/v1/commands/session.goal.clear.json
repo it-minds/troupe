@@ -1,0 +1,19 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/session.goal.clear.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "session_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "session_id"
+  ],
+  "title": "session.goal.clear",
+  "type": "object"
+}

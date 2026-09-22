@@ -27,11 +27,15 @@ defmodule Troupe.Session.LogSchemaTest do
       )
 
     Troupe.subscribe(session.id)
+    Troupe.set_goal(session.id, "the notes exist", nil, command_id: "c-goal")
     Troupe.send_input(session.id, "make some notes")
     await_state(session.id, [:idle, :done], 10_000)
+    Troupe.clear_goal(session.id)
+    await_event(session.id, :goal_cleared)
 
     events = Troupe.events(session.id)
     assert length(events) > 5, "the session produced too little to be worth checking"
+    assert Enum.any?(events, &(&1.type == "goal_set" and &1.data["command_id"] == "c-goal"))
 
     for event <- events do
       assert Schema.validate_event(event.type, event.data) == :ok,

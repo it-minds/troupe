@@ -219,6 +219,13 @@ root uses from its next turn; the conversation and task list carry over.
 A `profile_switched` event lands in the log and the UI shows `profile → build`. Any
 primary agent name works, not only the two built-ins.
 
+**A goal.** `/goal <text>` in the terminal UI (`session.goal.set` in the protocol) gives
+the session a goal: a `goal_set` event, and a `<goal>` section in the root agent's prompt
+on every turn after it until `/goal clear` (`session.goal.clear`, a `goal_cleared` event)
+or a new goal replaces it. `/goal` on its own (`session.goal.get`) shows it, and the
+terminal UI keeps it on the status line. It is part of the session's folded state, so it
+survives a restart and dormancy.
+
 Sources:
 - apps/troupe_tui/lib/troupe/ui/tui/server.ex:91-95, 310-328
 - apps/troupe_tui/lib/troupe/ui/tui/state.ex:216-218

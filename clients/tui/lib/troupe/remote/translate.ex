@@ -314,6 +314,14 @@ defmodule Troupe.Remote.Translate do
       "profile_switched" ->
         {[emit.(:remote_note, %{text: "profile switched" <> switch(data)})], memory}
 
+      # The session's goal (issue #59): its own events, because the window keeps it and the
+      # status line shows it for as long as it is set, not only when it is announced.
+      "goal_set" ->
+        {[emit.(:goal_set, %{text: to_string(data["text"] || "")})], memory}
+
+      "goal_cleared" ->
+        {[emit.(:goal_cleared, %{})], memory}
+
       "delegation_started" ->
         {[emit.(:remote_note, %{text: "delegated" <> to_child(data)})], memory}
 

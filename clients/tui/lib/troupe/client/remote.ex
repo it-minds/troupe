@@ -77,6 +77,23 @@ defmodule Troupe.Client.Remote do
   @impl true
   def switch_profile(sid, _path, name), do: describe(Worker.switch_profile(sid, name))
 
+  # The same `session.goal.*` a daemon session answers: the harness keeps the goal, so a
+  # pod's session has one exactly as a laptop's does.
+  @impl true
+  def goal(sid) do
+    case Worker.goal(sid) do
+      {:ok, %{"goal" => goal}} -> {:ok, goal}
+      {:ok, other} -> {:error, "unexpected session.goal.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @impl true
+  def set_goal(sid, text), do: describe(Worker.set_goal(sid, text))
+
+  @impl true
+  def clear_goal(sid), do: describe(Worker.set_goal(sid, nil))
+
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
