@@ -45,10 +45,11 @@ Sources:
 
 **Cause:** the saved sign-in is gone or refused. Common reasons: a private window (nothing is saved — the sign-in screen said "Nothing can be saved here, so you will be asked to sign in again next time."); site data cleared; a different browser or browser profile; your organisation's policy expired or revoked the sign-in; your password was changed.
 
-**Do:** press **Sign out** if you are on the list, then **Sign in**. Pick your account. It takes a few seconds. If it happens every time you open the page, check whether the browser is blocking storage for this site.
+**Do:** press **Sign out** if you are on the list, then **Sign in**. Pick your account. It takes a few seconds. If it happens every time you open the page, check whether the browser is blocking storage for this site, and send your administrator the line starting `troupe:` from the browser's console: it says whether your organisation refused the saved sign-in and in its own words (`invalid_grant`, `invalid_client`), or never issued one to save.
 
 Sources:
-- `packages/client/src/auth.ts:248-260, 283-287`
+- `packages/client/src/auth.ts:301-375` — a refusal is logged with the provider's reason
+- `packages/client/src/auth.ts:377-391` — a sign-in with no refresh token is logged
 - `apps/desktop/src/views/SignIn.tsx:22, 37-64`
 - `packages/client/src/auth.ts:40-64` — a browser that blocks storage keeps nothing
 

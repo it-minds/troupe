@@ -102,6 +102,51 @@ export function currentOrigin(): string | null {
 }
 
 /**
+ * One caller at a time per name, then the next.
+ *
+ * Web Locks where the host has them, because they hold across every tab on the origin:
+ * a browser that has just restarted brings two tabs back at the same moment. A host
+ * without them — an origin that is not a secure context — still gets one at a time
+ * within the page, which is what StrictMode's second effect and a remount need.
+ */
+const queues = new Map<string, Promise<unknown>>();
+
+function exclusively<T>(name: string, f: () => Promise<T>): Promise<T> {
+  const locks = (globalThis as { navigator?: { locks?: LockManager } }).navigator?.locks;
+  if (locks?.request) return locks.request(name, () => f()) as Promise<T>;
+  const mine = (queues.get(name) ?? Promise.resolve()).then(() => f());
+  const settled = mine.then(
+    () => undefined,
+    () => undefined,
+  );
+  queues.set(name, settled);
+  void settled.then(() => {
+    if (queues.get(name) === settled) queues.delete(name);
+  });
+  return mine;
+}
+
+/**
+ * Whether the token endpoint refused the token, as opposed to failing to answer. OAuth
+ * says no with a 400 (`invalid_grant`) or a 401 (`invalid_client`); a 5xx or a 429 is
+ * the provider having a bad minute, and the token is still good once it has passed.
+ */
+function refused(e: unknown): e is PlaneHttpError {
+  return e instanceof PlaneHttpError && (e.status === 400 || e.status === 401);
+}
+
+/** What a token endpoint said, in its own words: the status, `error` and `error_description`. */
+function providerSaid(e: PlaneHttpError): string {
+  try {
+    const { error, error_description: description } = JSON.parse(e.body) as { error?: unknown; error_description?: unknown };
+    if (typeof error === "string") return `HTTP ${e.status} ${error}${typeof description === "string" ? `: ${description}` : ""}`;
+  } catch {
+    /* not JSON; the body as it came */
+  }
+  return `HTTP ${e.status}${e.body ? `: ${e.body.slice(0, 200)}` : ""}`;
+}
+
+/**
  * A `fetch` that fails before producing a response — the shape of a blocked
  * cross-origin request — is reported as one. An HTTP error is the plane answering, so
  * it is passed through untouched.
@@ -161,6 +206,7 @@ export class AuthSession {
   private discovery: Discovery | null = null;
   private credential: PlaneCredential | null = null;
   private renewing: Promise<PlaneCredential> | null = null;
+  private refusal: string | null = null;
   private readonly forcedFlow: "redirect" | "device" | null;
 
   constructor(opts: AuthSessionOptions) {
@@ -256,19 +302,48 @@ export class AuthSession {
    * Sign in from what the store already holds. Returns null when there is nothing
    * stored or the provider has stopped honouring it — in which case the stored token
    * is thrown away, because a refresh token that has been refused will not recover.
+   * A provider that fails to answer has refused nothing, so that throws and the token
+   * stays for the next attempt.
    */
   async restore(): Promise<PlaneCredential | null> {
-    const refresh = await this.store.read(this.key);
-    if (!refresh) return null;
-    const d = await this.discover();
-    try {
-      const tokens = await reachable(this.planeUrl, this.origin, () => this.plane.refreshIdp(d, refresh));
-      return await this.adopt(tokens);
-    } catch (e) {
-      if (e instanceof PlaneUnreachableError) throw e; // the plane, not the token
-      await this.store.clear(this.key);
-      return null;
-    }
+    const tokens = await this.refreshStored();
+    return tokens ? this.enter(tokens) : null;
+  }
+
+  /**
+   * Trade the stored refresh token for fresh tokens, and store the one it rotated to.
+   *
+   * One caller at a time per plane. The provider rotates the token on every use and
+   * refuses the old one from then on, so two callers that read the same token — React's
+   * StrictMode running the load effect twice, a remount, two tabs coming back at once —
+   * would have one of them refused, and the refused one would clear the store, taking
+   * the token the other had just been given with it: a reload that signs the person out
+   * (`DECISIONS.md` #46). Inside the lock the token is read afresh, so whoever goes
+   * second spends the one the first was given.
+   */
+  private refreshStored(): Promise<IdpTokens | null> {
+    return exclusively(`troupe.auth.${this.key}`, async () => {
+      const refresh = await this.store.read(this.key);
+      if (!refresh) return null;
+      const d = await this.discover();
+      let tokens: IdpTokens;
+      try {
+        tokens = await reachable(this.planeUrl, this.origin, () => this.plane.refreshIdp(d, refresh));
+      } catch (e) {
+        if (!refused(e)) throw e; // the plane, the network, or a provider that did not answer
+        // Said out loud, because the only other trace is the sign-in screen, and that
+        // looks the same whatever the provider's reason was.
+        this.refusal = providerSaid(e);
+        console.warn(`troupe: the identity provider refused the stored sign-in for ${this.planeUrl}, so it has been forgotten (${this.refusal})`);
+        // Only the token that was refused: anything else in the store now was put there
+        // since, by a sign-in or a tab that does not share this lock.
+        if ((await this.store.read(this.key)) === refresh) await this.store.clear(this.key);
+        return null;
+      }
+      this.refusal = null;
+      if (tokens.refresh_token) await this.store.write(this.key, tokens.refresh_token);
+      return tokens;
+    });
   }
 
   /** Forget the refresh token and the plane token. The provider's session is its own. */
@@ -295,16 +370,30 @@ export class AuthSession {
   private async renew(): Promise<PlaneCredential> {
     const restored = await this.restore();
     if (restored) return restored;
-    throw new Error("signed out: the identity provider would not renew this session");
+    const why = this.refusal ? ` (${this.refusal})` : "";
+    throw new Error(`signed out: the identity provider would not renew this session${why}`);
   }
 
-  /** Exchange the provider's id token for a plane token, and persist the rotation. */
+  /** A sign-in's tokens: persist the refresh token, then exchange for a plane token. */
   private async adopt(tokens: IdpTokens): Promise<PlaneCredential> {
-    const idToken = tokens.id_token ?? tokens.access_token;
-    if (!idToken) throw new Error("the identity provider returned no id token");
+    if (!(tokens.id_token ?? tokens.access_token)) throw new Error("the identity provider returned no id token");
     // Persisted before the exchange: a rotated refresh token that is dropped because
     // the exchange failed would lock the person out until they signed in again.
-    if (tokens.refresh_token) await this.store.write(this.key, tokens.refresh_token);
+    if (tokens.refresh_token) {
+      await this.store.write(this.key, tokens.refresh_token);
+    } else {
+      // A sign-in that ends at the next reload, and nothing else would say so. Entra
+      // and Authentik issue a refresh token only for `offline_access`, and Authentik
+      // only when the provider's own scope list carries it as well.
+      console.warn(`troupe: the identity provider issued no refresh token for ${this.planeUrl}, so a reload will ask for a sign-in again. Its scopes need "offline_access", allowed for this client.`);
+    }
+    return this.enter(tokens);
+  }
+
+  /** Exchange the provider's id token for a plane token. */
+  private async enter(tokens: IdpTokens): Promise<PlaneCredential> {
+    const idToken = tokens.id_token ?? tokens.access_token;
+    if (!idToken) throw new Error("the identity provider returned no id token");
     const credential = await reachable(this.planeUrl, this.origin, () => this.plane.exchange(idToken));
     this.credential = credential;
     return credential;
