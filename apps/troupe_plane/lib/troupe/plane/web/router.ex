@@ -467,9 +467,13 @@ defmodule Troupe.Plane.Web.Router do
         []
 
       scope ->
+        # Plus the scopes a sign-in asks for, so the token an MCP client is minted carries
+        # what a login's does — the groups claim above all. A client asks for what is
+        # advertised and nothing else; advertised without `groups`, the token carried no
+        # groups claim, and the plane read that as a person in no groups (`Login`).
         # `offline_access` so the client is given a refresh token: without it a session
         # ends in an hour and the operator is sent back to a browser mid-task.
-        [scope, "offline_access"]
+        Enum.uniq([scope | List.wrap(config(:scopes))] ++ ["offline_access"])
     end
   end
 
