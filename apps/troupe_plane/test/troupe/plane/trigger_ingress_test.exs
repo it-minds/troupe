@@ -161,6 +161,11 @@ defmodule Troupe.Plane.TriggerIngressTest do
       trigger = trigger!(context, %{"name" => "triage"})
       {:ok, key} = Admin.trigger_key_rotate(context.actor, "engineering", "triage")
 
+      # The window the plane supplies is the minute, so two POSTs either side of :00 are
+      # two runs by design — and the second is then `skipped` under the cap, with no
+      # session. It happened once in a release's soak. Both have to land in one minute.
+      same_minute!()
+
       assert {:ok, first} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
       assert {:ok, again} = fire(context, trigger, key.key, %{"k" => "OPS-12"})
 
@@ -234,5 +239,12 @@ defmodule Troupe.Plane.TriggerIngressTest do
 
     {:ok, trigger} = Triggers.put(context.team, Map.merge(base, attrs), "root@example.test")
     trigger
+  end
+
+  # Waits out the last seconds of a minute, so a pair of requests made right after this
+  # cannot straddle the boundary the plane's idempotency window is drawn on.
+  defp same_minute! do
+    second = DateTime.utc_now().second
+    if second >= 55, do: Process.sleep((61 - second) * 1_000)
   end
 end
