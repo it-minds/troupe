@@ -194,6 +194,15 @@ defmodule Troupe.LLM.Provider do
   defp detail(""), do: ""
   defp detail(detail), do: " (" <> String.slice(text(detail), 0, 200) <> ")"
 
+  @doc """
+  Every provider name a config may use.
+
+  Short on purpose: an OpenAI-compatible gateway — LiteLLM, vLLM, OpenRouter — is
+  `openai` with a `base_url`, not a name of its own.
+  """
+  @spec known() :: [atom()]
+  def known, do: [:anthropic, :openai, :fake]
+
   @doc "Resolve a provider name from config to its adapter module."
   @spec adapter(String.t() | atom()) :: {:ok, module()} | {:error, {:unknown_provider, term()}}
   def adapter(name) when is_binary(name), do: adapter(String.to_atom(name))

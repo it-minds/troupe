@@ -16,6 +16,7 @@ defmodule Troupe.Session do
   alias Troupe.Agent.Definitions
   alias Troupe.{Config, Mounts, Registry, Skills, Workspace}
   alias Troupe.LLM.Fake
+  alias Troupe.LLM.Provider
 
   @root_path ["root"]
 
@@ -150,8 +151,9 @@ defmodule Troupe.Session do
     workspace_path = Keyword.get(opts, :workspace, File.cwd!())
     bundle = Keyword.get(opts, :bundle)
 
-    with {:ok, workspace} <- open_workspace(workspace_path, opts) do
-      config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, []))
+    with {:ok, workspace} <- open_workspace(workspace_path, opts),
+         config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, [])),
+         :ok <- known_provider(config) do
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
       # already gave it. A session on a pod arrives with its team volume and possibly
@@ -190,6 +192,17 @@ defmodule Troupe.Session do
          # another (Decision 646). Recorded, listed, filtered on; nothing else.
          parent: Keyword.get(opts, :parent)
        ]}
+    end
+  end
+
+  # A provider name nobody implements is a config mistake, and it used to be found by the
+  # root agent, where `{:ok, adapter} = Provider.adapter(...)` crashed the tree on its way
+  # up and the client was handed a supervisor shutdown blob. Answered here instead, before
+  # anything starts, so `session.create` can say which name is wrong.
+  defp known_provider(config) do
+    case Provider.adapter(config.provider) do
+      {:ok, _adapter} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 

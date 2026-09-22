@@ -19,6 +19,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Gateway.{ClientTool, Commands, Plane, Presence, Private, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
+  alias Troupe.LLM.Provider
   alias Troupe.Mounts
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
@@ -770,7 +771,14 @@ defmodule Troupe.Gateway.Dispatch do
     do: {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
 
   defp start_error({:not_a_directory, path}), do: "#{path} is not a directory"
-  defp start_error({:unknown_provider, name}), do: "unknown provider #{inspect(name)}"
+  # Naming the alternatives, because the name people reach for is the gateway they talk
+  # to — `litellm`, `vllm`, `openrouter` — and every one of those is `openai` plus a
+  # `base_url`.
+  defp start_error({:unknown_provider, name}) do
+    "config sets provider #{inspect(to_string(name))}; it must be one of " <>
+      Enum.map_join(Provider.known(), ", ", &to_string/1) <>
+      " — an OpenAI-compatible gateway is `provider: openai` with a `base_url`"
+  end
   defp start_error(other), do: inspect(other)
 
   defp pin(params, pinned?) do
