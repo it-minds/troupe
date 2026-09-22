@@ -5144,3 +5144,14 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      outlived its connection reached whatever was registered under the name by then,
      which in the suite was the next test's pod. Proof: `Troupe.Plane.ControlTest` "replaced under its own name
      before its old connection closed", which fails on `main`, and the cluster suite.
+
+678. **The chart's render check runs with a pull secret named.** The GUI Deployment
+     rendered `imagePullSecrets` as bare names — `toYaml` over a list of strings, carried
+     over from the standalone GUI chart whose values were maps — and the API server
+     refused it at apply time: v0.3.1's deploy failed and rolled back with the GUI's
+     resources already handed over, which is to say with no GUI at all. `helm lint`,
+     `helm template` and kubeconform had all passed, because every values file CI renders
+     with left `imagePullSecrets: []` and the wrong shape was never produced. Now
+     `values.scaleway.yaml` names one, as a Scaleway deployment has to anyway, and the
+     same check fails on the old template and passes on the new. A values file that
+     exercises the branch is the difference between a check and a decoration.
