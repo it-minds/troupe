@@ -26,6 +26,8 @@ defmodule Troupe.GitignoreTest do
     write(root, ".gitignore", "node_modules/\n")
     write(root, "node_modules/pkg/.gitignore", "*.ex\n")
     write(root, ".git/.gitignore", "*.ex\n")
+    # A repository vendored inside this one: its .git is as uninteresting as the root's.
+    write(root, "vendor/repo/.git/.gitignore", "*.ex\n")
 
     ignore = Gitignore.load(root)
 

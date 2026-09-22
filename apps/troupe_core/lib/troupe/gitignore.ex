@@ -63,9 +63,11 @@ defmodule Troupe.Gitignore do
   end
 
   # A real directory — `lstat`, so a symlink or junction is not followed — that no rule
-  # hides. `ignored?/2` also answers true for `.git`.
+  # hides. `.git` by name at any depth, not only at the root, because a repository
+  # vendored inside this one has one too and nothing in it is ours to read.
   defp descend?(root, rel, matcher) do
-    match?({:ok, %File.Stat{type: :directory}}, File.lstat(Path.join(root, rel))) and
+    Path.basename(rel) != ".git" and
+      match?({:ok, %File.Stat{type: :directory}}, File.lstat(Path.join(root, rel))) and
       not ignored?(matcher, rel)
   end
 
