@@ -121,6 +121,10 @@ jobs:
       # `GUI_BASE` variable changes both for a deployment that mounts it elsewhere.
       - uses: docker/build-push-action@v6
         if: steps.registry.outputs.publish == 'true'
+        # No build-record artifact: nothing reads them, and a release's attach step
+        # downloads the run's artifacts.
+        env:
+          DOCKER_BUILD_RECORD_UPLOAD: false
         with:
           context: ${{ matrix.context }}
           file: ${{ matrix.file }}
