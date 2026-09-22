@@ -33,7 +33,12 @@ on:
   workflow_dispatch:
 
 env:
-  OTP_VERSION: "28.5"
+  # The patch level, the same one `.tool-versions` and `ci.yml` pin, and not `28.5`:
+  # Burrito fetches a precompiled ERTS for the target from its mirror at exactly the
+  # running OTP's version, and the mirror lags OTP's patch releases by days. On the
+  # morning 28.5.0.7 was published, `28.5` resolved to it, the mirror had no macOS build
+  # of it yet, and every macOS build of the 0.3.2 release failed with a 404.
+  OTP_VERSION: "28.5.0.5"
   ELIXIR_VERSION: "1.20.4"
   ZIG_VERSION: "0.16.0"
 
