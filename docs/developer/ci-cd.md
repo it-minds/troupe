@@ -56,7 +56,7 @@ of. `versions` runs on every pull request because it is cheap.
 | `tui` | In `clients/tui`: `scripts/locks-agree.exs` from the root, then `mix check` — compile with warnings as errors, format, credo, `troupe.xref`, test. |
 | `gui` | In `clients/gui`: `pnpm install --frozen-lockfile`, `tokens:check`, `typecheck`, `build`, `test`. |
 | `gui-e2e` | `clients/gui/dev/plane-stack.yml` brought up with `--build` — the plane built from this commit's `docker/Dockerfile`, with Postgres, OpenBao and Dex — then the client's `e2e.plane.test.ts` against it, which drives Dex's device flow headlessly. |
-| `versions` | `elixir scripts/version.exs check`: the chart, the GUI's packages and the desktop app carry the same version as `VERSION`. |
+| `versions` | `elixir scripts/version.exs check`: the chart, the GUI's packages and the desktop app carry the same version as `VERSION`. Then `elixir scripts/doc-links.exs`: every relative link in the repository's Markdown names a file that is there. |
 | `native` | `release.yml` without a tag: build and smoke-test every native artifact, attach nothing. |
 | `ci-ok` | `if: always()`, needs all of the above; fails when any of them failed or was cancelled. |
 

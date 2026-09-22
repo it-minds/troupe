@@ -51,12 +51,18 @@ defmodule DocLinks do
   # Tracked, plus untracked and not ignored, so a new document is checked before it is added.
   defp git_files(pathspec) do
     args = ["ls-files", "--cached", "--others", "--exclude-standard", "-z", "--" | pathspec]
-    {out, 0} = System.cmd("git", args, cd: @root)
 
-    out
-    |> String.split(<<0>>, trim: true)
-    |> Enum.uniq()
-    |> Enum.filter(&File.regular?(Path.join(@root, &1)))
+    case System.cmd("git", args, cd: @root) do
+      {out, 0} ->
+        out
+        |> String.split(<<0>>, trim: true)
+        |> Enum.uniq()
+        |> Enum.filter(&File.regular?(Path.join(@root, &1)))
+
+      {_out, status} ->
+        IO.puts(:stderr, "git ls-files exited #{status} in #{@root}; this needs a git checkout")
+        System.halt(2)
+    end
   end
 
   defp markdown_files, do: git_files(["*.md"]) |> Enum.sort()

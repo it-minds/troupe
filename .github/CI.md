@@ -40,7 +40,7 @@ Arrows point at what an app depends on; a change flows back along them. So:
 | `apps/troupe_protocol`, `config/`, `mix.lock` | all eight | TUI, protocol, GUI-e2e |
 | `charts/`, `docker/` | — | chart (lint, render, kubeconform), GUI-e2e |
 | `PROTOCOL.md`, `protocol/`, `VERSION`, `.tool-versions`, `.github/workflows/` | everything | |
-| anything else (docs) | — | only `versions` |
+| anything else (docs) | — | only `versions`: the version copies agree and every Markdown link resolves |
 
 Each umbrella app is its own parallel leg (`test <app>`), and one `lint` job compiles the whole umbrella with warnings as errors and runs format, credo, the generated-asset checks and the boundaries whenever any app is under test.
 
@@ -49,7 +49,7 @@ flowchart LR
   changes[what changed] --> lint[compile, format, credo, boundaries]
   changes --> test["test &lt;app&gt; × N"]
   changes --> chart & protocol[schema + Python client] & tui[TUI] & gui[GUI] & e2e[GUI vs a plane] & native[native builds · PR only]
-  versions[versions agree] --> ok
+  versions[versions agree · doc links resolve] --> ok
   lint & test & chart & protocol & tui & gui & e2e & native --> ok{{ci-ok}}
   ok -->|push to main, changed an image| images[images · sha-&lt;short&gt;]
 ```

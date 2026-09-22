@@ -51,7 +51,7 @@ of its own: the two things the root `mix.exs` references, `Mix.Tasks.Compile.Rea
 ├── mix.exs, mix.lock        the umbrella: aliases (check), releases, umbrella-wide deps
 ├── native/reaper/reaper.zig the process-tree reaper, one source for every triple
 ├── protocol/schema/v1/      GENERATED JSON Schema (commands/, events/, index.json)
-├── scripts/                 dev-up, dev-down, kind-up, kind-down, build-images, remote-up, pitr-drill, release, deploy, ci-kubeconfig, version.exs, locks-agree.exs, …
+├── scripts/                 dev-up, dev-down, kind-up, kind-down, build-images, remote-up, pitr-drill, release, deploy, ci-kubeconfig, version.exs, locks-agree.exs, doc-links.exs, …
 └── test/fixtures/logs/      recorded log fixtures per released version (0.2.0/)
 ```
 
