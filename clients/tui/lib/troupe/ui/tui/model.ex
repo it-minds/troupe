@@ -791,25 +791,33 @@ defmodule Troupe.UI.TUI.Model do
           state in [nil, :idle] and is_map_key(Map.get(w, :model_errors, %{}), path) ->
             "model error: #{w.model_errors[path]}"
 
-          state in [nil, :idle] ->
+          # An agent that has said it is resting is not doing anything, and saying
+          # "starting" about it — forever, with a spinner — was the root agent's normal
+          # appearance while the user chatted with it. `nil` still means starting,
+          # because then nothing has been heard from the agent at all.
+          state == :idle ->
+            nil
+
+          state == nil ->
             "#{spinner} starting"
 
           true ->
             "#{spinner} #{state}"
         end
 
-      case children do
-        [] ->
-          main
-
-        list ->
-          main <>
-            " · " <>
-            Enum.map_join(list, ", ", fn {p, s} ->
-              "#{p |> String.split("/") |> List.last()} #{s}"
-            end)
+      # An idle agent has no line of its own, but a subagent still working under it does.
+      case {main, children} do
+        {main, []} -> main
+        {nil, list} -> child_summary(list)
+        {main, list} -> main <> " · " <> child_summary(list)
       end
     end
+  end
+
+  defp child_summary(children) do
+    Enum.map_join(children, ", ", fn {p, s} ->
+      "#{p |> String.split("/") |> List.last()} #{s}"
+    end)
   end
 
   ## Observer

@@ -94,6 +94,49 @@ defmodule Troupe.ModelConfigTest do
       [window] = Model.windows(model)
       assert Model.activity_line(window, "root", 0, 10) =~ "thinking"
     end
+
+    # A root agent ends a text-only turn with an ephemeral `agent_state: idle` and no
+    # durable marker, and idle was folded in with "nothing heard from this agent yet" —
+    # so a session the user was happily chatting with spun on "starting" forever.
+    test "an agent that has gone idle has no line, rather than spinning on starting" do
+      model =
+        Model.rebuild("s-1", "/w", [
+          event(:branch_spawned, %{name: "build", isolation: :shared}),
+          event(:agent_state, %{to: :thinking}),
+          event(:agent_state, %{to: :idle})
+        ])
+
+      [window] = Model.windows(model)
+      refute Model.activity_line(window, "root", 0, 10)
+    end
+
+    test "an agent nothing has been heard from yet is still starting" do
+      model =
+        Model.rebuild("s-1", "/w", [event(:branch_spawned, %{name: "build", isolation: :shared})])
+
+      [window] = Model.windows(model)
+
+      assert Model.activity_line(window, "root", 0, 10) =~ "starting"
+    end
+
+    test "a subagent still working is reported under an idle root" do
+      model =
+        Model.rebuild("s-1", "/w", [
+          event(:branch_spawned, %{name: "build", isolation: :shared}),
+          event(:agent_state, %{to: :idle}),
+          %Event{
+            session_id: "s-1",
+            agent_path: "root/librarian",
+            type: :agent_state,
+            data: %{to: :thinking},
+            ts: 1
+          }
+        ])
+
+      [window] = Model.windows(model)
+
+      assert Model.activity_line(window, "root", 0, 10) == "librarian thinking"
+    end
   end
 
   defp event(type, data),
