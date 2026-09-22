@@ -639,6 +639,13 @@ defmodule Troupe.Plane.Control.Connection do
   #
   # Only ever on an answer. A pod that cannot be reached has said nothing about what it
   # holds, and reading silence as "holding none" would dormant a healthy fleet.
+  #
+  # Asked once, and not again on failure. This is the only thing that rescues the
+  # sessions of a pod that came back under its own name — the sweeper cannot, because the
+  # row they point at is that pod's row, healthy again — which is why `register/1` makes
+  # sure the question reaches the pod that just enrolled. A retry from this task would
+  # outlive the connection it was asked on and could reach whatever was registered under
+  # the name by then, which in the suite was the next test's pod.
   defp reconcile_index(worker) do
     # In a task because the answer arrives on this socket, which this process is the one
     # reading: asking from inside the handler would deadlock waiting on its own reply.
@@ -693,9 +700,31 @@ defmodule Troupe.Plane.Control.Connection do
     end
   end
 
+  # A pod name is one pod at a time, so a connection already registered under this one
+  # belongs to a pod that is gone: killed and replaced under its own name faster than its
+  # socket closed, which a StatefulSet does in seconds, and a kill sends no FIN, so the
+  # socket stays open for the whole lease. Left registered, it made `for_pod` answer
+  # nobody, the index question after enrolment went unanswered, and every session the
+  # plane believed on the old pod stayed `active` for good — the sweeper never looks at a
+  # row that is healthy again. Dropping it costs nothing: the fence in
+  # `Fleet.disconnected/3` keeps its teardown off the row this enrolment just wrote.
+  #
+  # The value carries when this connection enrolled, which is how `for_pod` picks the
+  # newest in the moment both are still here.
   defp register(worker) do
     registry = Connections.registry()
-    Registry.register(registry, {:pod, worker.namespace, worker.pod_name}, worker.id)
+    key = {:pod, worker.namespace, worker.pod_name}
+
+    for {pid, _value} <- Registry.lookup(registry, key), pid != self() do
+      Logger.info(
+        "troupe plane: #{worker.namespace}/#{worker.pod_name} enrolled again; " <>
+          "dropping the connection its predecessor left open"
+      )
+
+      Process.exit(pid, :shutdown)
+    end
+
+    Registry.register(registry, key, {worker.id, System.monotonic_time()})
     Registry.register(registry, {:profile, worker.profile}, worker.id)
   end
 
