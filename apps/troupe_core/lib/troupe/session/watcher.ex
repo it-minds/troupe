@@ -15,7 +15,7 @@ defmodule Troupe.Session.Watcher do
   use GenServer
 
   alias Troupe.Agent
-  alias Troupe.{Events, Gitignore, Registry, Watch, Workspace}
+  alias Troupe.{Events, Gitignore, Paths, Registry, Watch, Workspace}
   alias Troupe.Watch.{FileSystemBackend, Marker, PollBackend, Trigger}
 
   require Logger
@@ -260,6 +260,7 @@ defmodule Troupe.Session.Watcher do
     triggering_locations = MapSet.new(triggering, &{&1.file, &1.line})
 
     state.workspace.root_real
+    |> Paths.glob_escape()
     |> Path.join("**/*")
     |> Path.wildcard(match_dot: false)
     |> Enum.filter(&interesting?(state, &1))

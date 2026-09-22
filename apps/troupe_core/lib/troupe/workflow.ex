@@ -39,6 +39,8 @@ defmodule Troupe.Workflow do
   default rather than failing the run.
   """
 
+  alias Troupe.Paths
+
   @type step :: %{
           name: String.t(),
           prompt: String.t(),
@@ -127,6 +129,7 @@ defmodule Troupe.Workflow do
   def available(workspace) do
     on_disk =
       workspace
+      |> Paths.glob_escape()
       |> Path.join(".troupe/workflows/*.json")
       |> Path.wildcard()
       |> Enum.map(&Path.basename(&1, ".json"))

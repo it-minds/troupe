@@ -3,7 +3,7 @@ defmodule Troupe.Tools.FileToolsTest do
 
   alias Troupe.Tool.Ctx
   alias Troupe.Tools
-  alias Troupe.Tools.{EditFile, ListFiles, ReadFile, WriteFile}
+  alias Troupe.Tools.{EditFile, Glob, ListFiles, ReadFile, WriteFile}
   alias Troupe.Workspace
 
   setup do
@@ -175,6 +175,19 @@ defmodule Troupe.Tools.FileToolsTest do
       assert output =~ "lib/a.ex"
       refute output =~ "b.beam"
       refute output =~ "_build"
+    end
+
+    # The workspace path starts the glob, and only the pattern after it may be read as
+    # one: a checkout at `app[1]` must not be searched as `app1`.
+    test "a workspace path with glob characters in it is searched literally", %{root: root, ctx: ctx} do
+      odd = Path.join(root, "app[1]{a,b}")
+      File.mkdir_p!(Path.join(odd, "lib"))
+      File.write!(Path.join(odd, "lib/a.ex"), "def hello, do: :world\n")
+      ctx = %{ctx | workspace: Workspace.new!(odd)}
+
+      assert {:ok, "lib/a.ex"} = ListFiles.run(%{"pattern" => "**/*.ex"}, ctx)
+      assert {:ok, "lib/a.ex"} = Glob.run(%{"pattern" => "**/*.ex"}, ctx)
+      assert Tools.execute(Troupe.Tools.Grep, %{"pattern" => "def hello"}, ctx).content =~ "lib/a.ex:1:"
     end
   end
 
