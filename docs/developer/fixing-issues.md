@@ -21,11 +21,22 @@ The per-harness entry points are thin and all point here:
 | Claude Code | `.claude/skills/fix-issues/SKILL.md` (`/fix-issues`) | `.claude/agents/issue-fixer.md` |
 | anything that reads `AGENTS.md` | `AGENTS.md` -> this page | this page, section 2 |
 
-## Why one at a time
+## What may run at once
 
 `install-local.ps1` installs to one place per machine (`%LOCALAPPDATA%\Programs\troupe*`)
-and stops the daemon running from there. Two fixers verifying at once would test each
-other's builds. Triage is read-only and can fan out; fixing and verifying are serial.
+and stops the daemon running from there, so two fixers that install or use the installed
+daemon at the same time would test each other's builds. **That is the one thing that is
+serial.** Fixers that never touch the install (GUI, docs, server-only) run alongside.
+
+The coordinator hands the install out with a lock: a file `install-lock.txt` in its
+scratch directory, reading `free` or `held by #N`. A fixer that needs the install does
+its code and tests first, then waits for `free`, writes `held by #N`, and writes `free`
+back when it has verified or rolled back.
+
+Scratch directories may be shared between fixers. Each fixer writes only under a
+subfolder named for its issue (`fix-<N>/`), and reads its pull request body back just
+before `gh pr create --body-file`. Once, two fixers wrote the same `pr-body.md` and one
+pull request briefly carried the other's text.
 
 GitHub is the ledger. An issue with an open pull request is in progress, a merged one is
 done, so a run can stop anywhere and the next picks up from what GitHub says. Nothing
@@ -45,8 +56,11 @@ else keeps state.
    - **size**: `bug` (a defect with a reproduction), `small` (a contained change, one
      pull request), `epic` (several pull requests, or open design/product questions)
    - **verification** it will get, from the table in section 2.4
-   - for an epic: the smallest first slice that is useful on its own and needs no
-     undecided product question - or "none without a decision: <the question>"
+   - for an epic: a first slice that delivers what the issue is *for*, with a measurable
+     target, and needs no undecided product question - or "none without a decision:
+     <the question>". A slice that avoids the hard part delivers nothing: #54 asked for
+     less documentation, and a slice that moved reports into `docs/history/` and added
+     an index was rightly rejected. Git history is the archive; delete rather than move.
 
    With many issues, split the read-only code search across parallel helpers if the
    harness has them.
@@ -68,8 +82,9 @@ installed (`%LOCALAPPDATA%\Programs\erlang\bin\erl.exe`, `...\elixir\bin\mix.ps1
 `scripts/verify-local.ps1` is on `origin/main` - fixers branch from there.
 
 For each issue, in order: hand it to a fixer with the issue number, its triage row, the
-slice for an epic, and anything the person said about it. Wait for the fixer's report
-before starting the next one. Tell the person `#N -> <status> <pr url>`. Then, by status:
+slice for an epic, and anything the person said about it. Fixers that do not install can
+start at once; one that installs takes the lock (see above). Tell the person
+`#N -> <status> <pr url>` as each report arrives. Then, by status:
 
 | Status | Coordinator does |
 | --- | --- |
@@ -78,7 +93,9 @@ before starting the next one. Tell the person `#N -> <status> <pr url>`. Then, b
 | `cannot-reproduce`, `too-large`, `duplicate` | note it; next issue |
 | `verify-failed` | make sure the install was rolled back (`.\scripts\install-local.ps1 -Rollback`); next issue. Two in a row means the machine or the toolchain is wrong, not the issues: stop and report |
 
-`noticed` items are collected and offered for filing at the end, not filed unasked.
+`noticed` items that are defects go into [defects.md](defects.md), with where, what,
+a severity and who found them. The ones worth an issue are offered for filing at the
+end, not filed unasked.
 `learned` items - a new trap about this machine or repo - are worth writing down where
 the harness keeps durable notes (Troupe's project brief, Claude's memory), or in this
 page if they are about the process.
