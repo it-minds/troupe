@@ -14,9 +14,11 @@ What is specific to running under Claude Code:
 - **Agreeing the queue:** show the table, then ask with AskUserQuestion (multi-select
   for the issues and the epic slices). With the argument `triage`, stop after the table.
 - **Handing out an issue:** spawn the `issue-fixer` agent with `isolation: "worktree"`
-  and `run_in_background: false` - the next one must not start until this one's install
-  has settled. Put the issue number, its triage row, the slice for an epic and anything
-  the user said about it in the prompt.
+  and `run_in_background: true`; you are notified when it reports. Put the issue number,
+  its triage row, the slice for an epic, anything the user said about it, the install
+  lock's path if it will install, and its own scratch subfolder in the prompt. Agent types
+  register when a session starts: if `issue-fixer` is not found, use `general-purpose`
+  and tell it to read `.claude/agents/issue-fixer.md` first.
 - **Progress:** one line to the user per finished issue: `#N -> <status> <pr url>`.
 - **`learned` items** go to memory: update the matching memory file (for example
   `troupe-build-from-source-windows.md`) rather than adding a duplicate.

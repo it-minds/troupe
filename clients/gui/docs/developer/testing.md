@@ -124,9 +124,27 @@ imitate screens (`stage1.test.ts:3-7`). `pnpm fake` runs the same three
 | `plane.ts` | `FakePlane`: `/.well-known/troupe` with `client_id: "troupe-gui"` and five scopes including `groups` (`:120-129`); `/auth/exchange` reading `sub`/`name` from the unsigned id token (`:133-148`); `/rpc` with `me`, `teams.list`, `profiles.list`, `sessions.list` (filters `profile`, `state`, `status`, `origin`, `needs_review`), `session.get`, `session.create` (validates profile and agent), `session.open` (`read`/`activate`), `token.mint`, `session.review`, `session.pin`/`unpin` (`:171-267`); CORS only on browser routes, exact match, never `*` (`:96-113`); `browserFetch(origin)` wraps Node's `fetch` with a same-origin check (`:327-338`) | The row shape of `sessions.list` (`SessionRow`), the `Attachment` shape, that `/auth/exchange` takes `{id_token}`. Discrepancy: the fake still advertises `groups` as a scope; the live plane no longer does (`REPORT.md:222-226`; `DECISIONS.md` #27) |
 | `worker.ts` | `FakeWorker`: `initialize` checks `aud` and `exp` (`:178-199`); `auth.expiring` `expiringLeadMs` before `exp` (default 120 000 ms) and close with 4401 at `exp` (`:220-236`); `auth.refresh` re-arms (`:244-257`); `subscribe` replays from `from_seq` with the live boundary closed (`:259-282`); `unsubscribe`, `session.get`, `input.send` (needs `control`), `approval.respond` first-answer-wins with `approval_resolved` (`:315-337`), `turn.cancel`, `profile.switch`, `presence.set` (answers `ok`, emits nothing), `blob.get` capped at 64 KiB (`:357-375`), `fs.list`/`fs.read` refusing `..` (`:377-408`); the scripted agent (`:446-521`) | The closed replay boundary; `auth.expiring` two minutes ahead (`PROTOCOL.md:556-563` says so); the 64 KiB cap (PROTOCOL.md says "may cap", not a number); the `approval_resolved` shape; `session.get` answered over the worker socket; that `presence` ephemerals exist (`REPORT.md:296-298`: written but never exercised) |
 
+## The app's tests (`apps/desktop/test/`)
+
+Added with local-only mode (`DECISIONS.md` #46). `vitest run` renders `<App />` in jsdom
+on the app's own Vite configuration (`apps/desktop/vitest.config.ts`), against the fake
+daemon above on a real socket and, where a plane is wanted, the fake deployment's plane
+and identity provider. `test/support.ts` records every `fetch`, WebSocket, XHR, beacon and
+event source the page opens, and drives the app by what its buttons say. The page's
+WebSocket is `ws`'s: jsdom's and Node's are both undici's, whose events are built from the
+global `Event` — jsdom's, in that environment — and Node's EventTarget refuses them.
+
+| `it` | Proves |
+|---|---|
+| makes no request to any plane, with a plane sign-in stored and every screen visited | Local-only from a stored choice: straight to the list, Review not offered, a local session started, sent to and answered; every request is the daemon's WebSocket, the markup loads nothing external, and the stored refresh token is untouched |
+| is the third door on the sign-in screen, and the next launch remembers it | "Use this computer only" from a fresh start, remembered across a remount with no sign-in screen in between |
+| keeps the stored plane sign-in, and goes back to it without asking | Signed in to the fake plane; the switch on *This computer* turns local-only on (no plane traffic for a poll interval, the token kept) and off (signed back in from the kept token, which rotates, with no device code) |
+| offers this computer instead of a dead sign-in, and goes back when the plane does | A plane refusing every request: "Continue on this computer", the offline banner, nothing remembered; the plane back and *Try now* signs in with both halves of the list |
+
 ## What is not tested
 
-- **No browser tests.** Nothing renders `apps/desktop`; the views were driven by hand
+- **No browser tests.** Apart from the app's tests above, which run in jsdom, nothing
+  renders `apps/desktop` in a browser; the views were driven by hand
   (`REPORT.md:288-291`). Playwright in CI is in the spec (`spec.md:62`) and not present.
 - **The server's half.** Every assumption in the right-hand column above; a kind or
   Kapsule run is what would check it (`REPORT.md:282-287`; `DECISIONS.md` #19). The

@@ -1,0 +1,9 @@
+{
+  // The tests, with Node's types beside the DOM's: they start the client's fake daemon
+  // and fake deployment, which are servers. The app itself is built without them.
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "types": ["vite/client", "node"]
+  },
+  "include": ["src", "test"]
+}
