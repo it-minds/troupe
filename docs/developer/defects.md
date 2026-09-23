@@ -59,20 +59,12 @@ Against the daemon these would fail with `invalid_params`. Read, not reproduced.
 confirm, do each of the three in the TUI against an installed daemon. Found by the #59
 fixer (PR #86), 2026-09-22.
 
-### D4 - The Authentik runbook makes a public client confidential (unconfirmed, medium)
-
-`docs/admin/authentik.md` step 1b creates a **Confidential** provider. The GUI (PKCE, no
-secret) and the TUI refresh without a client secret. If Authentik demands the secret on
-the code and refresh grants for a confidential client, those fail with
-`invalid_client`, and the clients need a **Public** provider. To confirm, sign in to
-`/app` against the live Authentik and reload: PR #84 logs the provider's reason. Found
-by the #53 fixer (PR #84), 2026-09-22.
-
 ### D5 - A long refresh token may not fit the Windows keychain (unconfirmed, medium)
 
 The Tauri build keeps the refresh token in Windows Credential Manager, which caps a secret
 at 2560 bytes (about 1280 UTF-16 characters). A long Entra refresh token could exceed
-that, and then nothing is stored. To confirm, sign in with Entra in the desktop app and
+that, and then nothing is stored. Authentik's tokens are 128 characters, so this only
+matters for Entra. To confirm, sign in with Entra in the desktop app and
 restart it. Found by the #53 fixer (PR #84), 2026-09-22.
 
 ### D6 - Plane mode opens a just-created local session as a team session (low)
@@ -103,3 +95,11 @@ Found by the #59 and #87 fixers, 2026-09-22.
 | Defect | Taken by |
 | --- | --- |
 | On Windows, dormant sessions vanish after a daemon restart (`Path.wildcard` on backslashes) | #87, PR #89 |
+
+## Checked and not a defect
+
+- **The Authentik provider is Confidential, but the clients are public.** This was D4.
+  Checked on 2026-09-23 against the live plane: the GUI's code exchange (PKCE, no
+  secret) and its refresh grant both return 200, so Authentik does not ask a public
+  client for the secret. The live sign-in loss (#53) was the provider missing the
+  `offline_access` scope mapping, so no refresh token was issued. Martin added the mapping.
