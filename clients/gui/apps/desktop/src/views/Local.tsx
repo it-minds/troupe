@@ -16,6 +16,7 @@ import { useCallback, useState } from "react";
 import type { JSX } from "react";
 import type { AuthSession, DaemonClient, DaemonEndpoint, DaemonIdentity, RecentWorkspace, Worktree } from "@troupe/client";
 import { useAdminQuery } from "../hooks";
+import type { MachineUser } from "../hooks";
 import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
 import { Models } from "./Models";
 
@@ -24,6 +25,7 @@ export interface DaemonState {
   endpoint: DaemonEndpoint | null;
   status: "unsupported" | "searching" | "absent" | "connected" | "error";
   identity: DaemonIdentity | null;
+  user: MachineUser | null;
   error: string | null;
   canFind: boolean;
   connectTo: (endpoint: DaemonEndpoint) => void;
@@ -38,12 +40,17 @@ export function Local({
   auth,
   me,
   planeUrl,
+  localOnly,
+  onLocalOnly,
 }: {
   daemon: DaemonState;
   /** For the organisation's model defaults. Null when nobody is signed in to a plane. */
   auth: AuthSession | null;
+  /** Who is signed in to a plane, for linking. Null in local mode. */
   me: { subject: string; display_name?: string | undefined } | null;
   planeUrl: string;
+  localOnly: boolean;
+  onLocalOnly: (on: boolean) => void;
 }): JSX.Element {
   return (
     <>
@@ -54,6 +61,7 @@ export function Local({
       </header>
 
       <div className="listing">
+        <LocalOnly on={localOnly} onChange={onLocalOnly} />
         <Connect daemon={daemon} />
         {daemon.client && <WhoAmI daemon={daemon} me={me} planeUrl={planeUrl} />}
         {daemon.client && <Models client={daemon.client} auth={auth} />}
@@ -70,6 +78,31 @@ function DaemonStatus({ daemon }: { daemon: DaemonState }): JSX.Element {
   if (daemon.status === "error") return <Pill status="error">Not answering</Pill>;
   if (daemon.status === "absent") return <Pill status="dormant">Not running</Pill>;
   return <Pill status="offline">No way to find it</Pill>;
+}
+
+/**
+ * The switch between the two modes, for someone who normally signs in and is about to be
+ * offline, or who has no organisation at all.
+ *
+ * Turning it on lets go of the plane without signing out of it: the stored sign-in is
+ * kept, so turning it off again goes straight back, with no provider page in between
+ * for as long as that sign-in is good.
+ */
+function LocalOnly({ on, onChange }: { on: boolean; onChange: (on: boolean) => void }): JSX.Element {
+  return (
+    <section className="group">
+      <h3>Local only</h3>
+      <label className="inline">
+        <input type="checkbox" checked={on} onChange={(e) => onChange(e.target.checked)} />
+        Local only — never contact a plane
+      </label>
+      <p className="note">
+        {on
+          ? "Troupe talks to the daemon on this computer and nothing else. The one thing that leaves the machine is the daemon's own call to your model provider. A sign-in you already had is kept, so turning this off goes back to it."
+          : "Turn this on to work offline, or with no organisation at all. Your sign-in is kept while it is on, and used again when you turn it off."}
+      </p>
+    </section>
+  );
 }
 
 function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
@@ -115,8 +148,9 @@ function Connect({ daemon }: { daemon: DaemonState }): JSX.Element {
             A page cannot read the file the daemon publishes itself in, and cannot start a program. So it has to be told where the daemon
             is. Run <code className="mono">troupe-daemon run</code> and read the port and token out of{" "}
             <code className="mono">daemon.json</code> — the desktop application does this part for you. In development,{" "}
+            <code className="mono">pnpm dev:local</code> starts a daemon of its own and fills this in, and{" "}
             <code className="mono">VITE_TROUPE_DAEMON=&lt;port&gt;:&lt;token&gt;</code> in <code className="mono">apps/desktop/.env.local</code>{" "}
-            fills this in.
+            does the same for one you started yourself.
           </p>
           <form
             className="inline-form"
@@ -207,14 +241,21 @@ function WhoAmI({
             {busy ? "Working…" : "Stop using my account here"}
           </button>
         </>
+      ) : !me ? (
+        // No plane, so no account to offer. Not a disabled button: there is nothing
+        // this screen could do to make it work.
+        <p className="copy">
+          Sessions started here are recorded as <strong>{daemon.user?.name ?? "this computer's login"}</strong>, this computer&apos;s
+          login. Recording them under an account instead needs a sign-in to a platform, and this app is not signed in to one.
+        </p>
       ) : (
         <>
           <p className="copy">
             Sessions started here are recorded under this computer&apos;s login, which means nothing anywhere else. Using your account
             instead is what lets a session on this machine be listed by the platform and opened from another device.
           </p>
-          <button className="primary" onClick={() => void act(true)} disabled={busy || !me}>
-            {busy ? "Working…" : `Use my account${me ? ` (${me.display_name ?? me.subject})` : ""}`}
+          <button className="primary" onClick={() => void act(true)} disabled={busy}>
+            {busy ? "Working…" : `Use my account (${me.display_name ?? me.subject})`}
           </button>
           <p className="note">
             This is a label, not a sign-in. Anything that can already reach the daemon can already do everything on it; what changes is the

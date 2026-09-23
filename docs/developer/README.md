@@ -33,6 +33,7 @@ it, which is identical to `3f7c91f` plus that change.
 | [ci-cd.md](ci-cd.md) | The three workflows: what a pull request runs under `ci-ok`, what `main` publishes, how a merged `VERSION` change releases and deploys |
 | [deployment.md](deployment.md) | Images, CRDs, the chart, the migration hook, rollout behaviour, the kind and Scaleway flows, rollback |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter blind spot, credo, stated rules, commit style, naming, recipes |
+| [fixing-issues.md](fixing-issues.md) | How an agent, in any harness, works through the GitHub issues one at a time: triage, the queue, fix, install locally, verify, pull request |
 
 The other tracks: [../user/README.md](../user/README.md),
 [../admin/README.md](../admin/README.md), [../whitepaper.md](../whitepaper.md).

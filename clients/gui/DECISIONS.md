@@ -403,3 +403,62 @@ differently, with the reason. Numbered, append-only. The remote's own decisions 
     still tests a published plane. Node is pinned once, in the root `.tool-versions`.
     Rule 1 of the working contract — the protocol first, then the server, then the client
     — holds; it is now one pull request instead of three.
+
+46. **Spending the stored refresh token is one caller at a time.** Found as "a reload
+    signs you out" (issue #53), and it is #28's sibling. StrictMode runs the load effect
+    twice in development, so a reload made two `AuthSession`s and both called
+    `restore()` with the same token. The provider rotates on every use: it honoured one
+    and refused the other, and the refused one cleared the store — taking with it the
+    token the first had just been given. The person was signed out, and the next reload
+    had nothing to restore. A remount, or two tabs a restarted browser brings back
+    together, does the same without StrictMode's help.
+
+    Sharing the answer, as #28 does for a code, would not do: each caller needs its own
+    exchange, and a second tab is a different page. So the refresh takes a lock named
+    for the plane — Web Locks, which hold across every tab on the origin, and a queue
+    within the page where the origin is not a secure context and there are none — and
+    reads the token inside it, so whoever goes second spends the token the first was
+    given. A refusal clears the store only if it still holds the token that was refused.
+    Two smaller things came with it. A refusal says why, in the console and in the
+    renewal's error, with the provider's own `error`, because the sign-in screen looks
+    the same whatever the reason was. And only a 400 or 401 is a refusal: a provider
+    answering 503 while it restarts has refused nothing, so that is an error and the
+    token stays for the next attempt.
+
+47. **Local-only is a mode the app is in, not a sign-in it skips, and the setting lives in
+    this browser until shared settings exist.** The app used to render the sign-in
+    screen until there was an `AuthSession`, and every screen took one, so a person with
+    a daemon and no organisation could not get in at all. There is now an app-level mode
+    (`mode.ts`), `local` or `plane`, and `auth` is optional: each screen says in its
+    props what it needs and does without what it does not have. Review is the plane's
+    record of unattended runs and is not offered without a plane; the session header's
+    profile control is the plane's profiles and is not drawn when there are none; the
+    rail names *This computer* and the operating system's user the daemon reported at
+    `initialize` (`DaemonClient.principal`), which is also who "you" is in a local
+    transcript. Local mode is reached two ways that differ on purpose. *Local only* is a
+    setting — the third door on the sign-in screen, or the switch on *This computer* —
+    and it is remembered, so the next launch goes straight to the list. *Offline* is
+    plane mode with a plane that did not answer: the sign-in screen offers "Continue on
+    this computer" beside the error, nothing is remembered, and the app asks the plane
+    again every fifteen seconds (or at *Try now*) and goes back to it when it answers,
+    with the local sessions still in the one list. Neither signs out. Turning local-only
+    on drops the `AuthSession` and leaves the refresh token in its store, so turning it
+    off restores it with no provider page in between. Both doors are offered only where
+    the host can reach a daemon; a browser served by the plane has nothing behind them.
+    The setting is `troupe.pref.localOnly`, beside the theme, because the shared
+    settings that should own it (issue #57) do not exist yet; a build can choose the
+    default for a browser that has not chosen (`VITE_TROUPE_LOCAL_ONLY=1`, which
+    `pnpm dev:local` sets).
+
+    The promise that nothing reaches a plane is tested on the page's traffic, not on
+    which functions ran. `apps/desktop/test` renders the app in jsdom under Vitest — the
+    app is a Vite bundle, and its `import.meta.env` and `@troupe/client` alias are
+    Vite's — against the client's fake daemon on a real socket, with a plane sign-in
+    stored, and records every `fetch`, WebSocket, XHR, beacon and event source the page
+    opens: in local mode the only one is the daemon's. The same recorder sees the plane
+    in plane mode, which is what makes an empty list mean something. The client's tests
+    stay on Node's runner. `pnpm dev:local` is the development recipe that goes with it:
+    a second instance of the developer's installed daemon, isolated under
+    `TROUPE_DEV_HOME` with the daemon's scripted `fake` provider, and the GUI told where
+    it is — no plane, no identity provider, no key. `pnpm fake` stays for the plane path.
+    

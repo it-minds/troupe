@@ -108,6 +108,12 @@ if ($Rollback) {
   exit 0
 }
 
+# Where the toolchain script puts Erlang and Elixir. Its PATH change reaches only
+# terminals opened after it ran, and an agent's shell is usually older than that.
+foreach ($dir in (Join-Path $env:LOCALAPPDATA "Programs\erlang\bin"), (Join-Path $env:LOCALAPPDATA "Programs\elixir\bin")) {
+  if ((Test-Path $dir) -and (($env:Path -split ";") -notcontains $dir)) { $env:Path = "$dir;$env:Path" }
+}
+
 # Burrito wants `zig` and `xz`, and refuses before it says which one is missing. Rather
 # than depend on what a particular terminal happens to carry, each is looked for where it
 # is actually installed and put on the PATH for this build only: winget keeps zig in a
@@ -133,13 +139,15 @@ if (-not (Get-Command mix -ErrorAction SilentlyContinue)) {
   throw "mix is not on the PATH. Run scripts\setup-windows-toolchain.ps1, then open a new terminal."
 }
 
-if (-not $NoTui) {
-  $zig = Find-Tool "zig" @(
-    (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\zig.zig_*\zig-*\zig.exe"),
-    (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\zig.exe")
-  )
-  if (-not $zig) { throw "zig is not installed. Run scripts\setup-windows-toolchain.ps1." }
+# zig for the daemon as well as the TUI: `troupe_core` builds the reaper with it, and a
+# daemon built without one runs no shell command.
+$zig = Find-Tool "zig" @(
+  (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Packages\zig.zig_*\zig-*\zig.exe"),
+  (Join-Path $env:LOCALAPPDATA "Microsoft\WinGet\Links\zig.exe")
+)
+if (-not $zig) { throw "zig is not installed. Run scripts\setup-windows-toolchain.ps1." }
 
+if (-not $NoTui) {
   $xz = Find-Tool "xz" @(
     (Join-Path $env:ProgramFiles "Git\mingw64\bin\xz.exe"),
     (Join-Path $env:ProgramFiles "Git\usr\bin\xz.exe"),

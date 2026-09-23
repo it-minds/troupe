@@ -23,20 +23,21 @@ export function StartSession({
   onClose,
   onCreated,
 }: {
-  auth: AuthSession;
+  /** Null in local mode: there is no platform to start one on, so the question is not asked. */
+  auth: AuthSession | null;
   daemon: DaemonClient | null;
   linked: boolean;
   onClose: () => void;
   onCreated: (id: string) => void;
 }): JSX.Element {
-  const [where, setWhere] = useState<"team" | "local">("team");
+  const [where, setWhere] = useState<"team" | "local">(auth ? "team" : "local");
 
   return (
     <div className="scrim" onClick={onClose}>
       <div className="dialog" role="dialog" aria-modal="true" aria-label="Start a session" onClick={(e) => e.stopPropagation()}>
         <h1>Start a session</h1>
 
-        {daemon && (
+        {auth && daemon && (
           <div className="stack" style={{ gap: "var(--space-2)" }}>
             <h3>Where it runs</h3>
             <div className="options">
@@ -54,10 +55,20 @@ export function StartSession({
           </div>
         )}
 
-        {where === "team" || !daemon ? (
+        {auth && (where === "team" || !daemon) ? (
           <TeamSession auth={auth} onClose={onClose} onCreated={onCreated} />
-        ) : (
+        ) : daemon ? (
           <LocalSession daemon={daemon} linked={linked} onClose={onClose} onCreated={onCreated} />
+        ) : (
+          <>
+            <p className="note">
+              There is nowhere to start one yet: the daemon on this computer is not connected. Connect it on This computer, then come
+              back.
+            </p>
+            <div className="actions">
+              <button onClick={onClose}>Close</button>
+            </div>
+          </>
         )}
       </div>
     </div>

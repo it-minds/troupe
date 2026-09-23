@@ -12,3 +12,6 @@ erl_crash.dump
 /.local/
 .remote-up-*
 /.e2e/
+
+# Worktrees a harness makes inside the workspace, for docs/developer/fixing-issues.md.
+/.worktrees/

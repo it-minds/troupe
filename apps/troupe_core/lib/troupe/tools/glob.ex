@@ -10,6 +10,7 @@ defmodule Troupe.Tools.Glob do
 
   @behaviour Troupe.Tool
 
+  alias Troupe.Paths
   alias Troupe.Tool
   alias Troupe.Workspace
 
@@ -52,6 +53,7 @@ defmodule Troupe.Tools.Glob do
 
       files =
         dir
+        |> Paths.glob_escape()
         |> Path.join(pattern)
         |> Path.wildcard(match_dot: true)
         |> Enum.reject(&excluded?(&1, ctx))

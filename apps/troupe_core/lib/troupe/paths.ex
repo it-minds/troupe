@@ -70,6 +70,25 @@ defmodule Troupe.Paths do
   @spec project_dir(Path.t()) :: Path.t()
   def project_dir(workspace_root), do: Path.join(workspace_root, ".troupe")
 
+  @doc """
+  A directory written so that a glob built on it matches that directory and no other.
+
+  `Path.wildcard/2` reads `\\` as an escape and `*`, `?`, `[` and `{` as wildcards, so a
+  runtime path cannot start a pattern as it is. The state directory on Windows is
+  `C:\\Users\\me\\AppData\\Local\\troupe`, which matched nothing at all, so every dormant
+  session vanished from the listing when the daemon restarted; a workspace at
+  `C:/src/app[1]` is read as `C:/src/app1`. So `\\` becomes `/`, the separator a glob
+  expects, and the wildcard characters are escaped: only what is joined on after this is
+  a pattern. A backslash is a separator on every host here, as it is in
+  `Troupe.Workspace`; a glob could not match one inside a name anyway.
+  """
+  @spec glob_escape(Path.t()) :: String.t()
+  def glob_escape(path) do
+    path
+    |> String.replace("\\", "/")
+    |> String.replace(["*", "?", "[", "{"], &("\\" <> &1))
+  end
+
   defp override(var) do
     case System.get_env(var) do
       nil -> nil
