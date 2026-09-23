@@ -1,0 +1,160 @@
+# The light check for a pull request into a `development-*` branch: one issue of a
+# chunked run (docs/developer/fixing-issues.md).
+#
+# It catches what breaks the chunk for the next fixer. That means code that does not
+# compile, a credo failure, a protocol schema nobody regenerated, a client that no longer
+# builds. It runs no test suite: the fixer ran the tests on its own machine, and
+# `ci.yml` runs the whole gate once, on the chunk's pull request into `main`, with every
+# issue of the run together. That is what `main` is protected by.
+name: dev-check
+
+on:
+  pull_request:
+    branches: ["development-*"]
+
+concurrency:
+  group: dev-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  ELIXIR_VERSION: "1.20.4"
+  OTP_VERSION: "28.5.0.5"
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  changes:
+    name: what changed
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      elixir: ${{ steps.filter.outputs.elixir }}
+      protocol: ${{ steps.filter.outputs.protocol }}
+      tui: ${{ steps.filter.outputs.tui }}
+      gui: ${{ steps.filter.outputs.gui }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            elixir:
+              - apps/**
+              - config/**
+              - mix.exs
+              - mix.lock
+              - .credo.exs
+              - protocol/**
+            protocol:
+              - apps/troupe_protocol/**
+              - apps/troupe_gateway/**
+              - protocol/**
+            tui:
+              - clients/tui/**
+              - apps/troupe_core/**
+              - apps/troupe_gateway/**
+              - apps/troupe_protocol/**
+            gui:
+              - clients/gui/**
+              - protocol/**
+
+  elixir:
+    name: umbrella - compile, credo, schema
+    needs: [changes]
+    if: needs.changes.outputs.elixir == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      # The same cache `ci.yml` fills on `main`, so an unchanged app is not rebuilt.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build
+          key: ${{ runner.os }}-mix-${{ hashFiles('mix.lock') }}
+          restore-keys: ${{ runner.os }}-mix-
+      - run: mix deps.get
+      - name: Compile with warnings as errors
+        run: MIX_ENV=test mix compile --warnings-as-errors
+      - run: mix credo --strict
+      - name: The committed protocol schema is compatible and current
+        if: needs.changes.outputs.protocol == 'true'
+        run: |
+          mix troupe.schema.diff
+          mix troupe.schema.gen
+          git diff --exit-code protocol/schema/v1 \
+            || { echo "protocol/schema/v1 is stale: run mix troupe.schema.gen and commit"; exit 1; }
+
+  tui:
+    name: the TUI - compile
+    needs: [changes]
+    if: needs.changes.outputs.tui == 'true'
+    runs-on: ubuntu-24.04
+    defaults:
+      run:
+        working-directory: clients/tui
+    env:
+      MIX_ENV: test
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+          otp-version: ${{ env.OTP_VERSION }}
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+      - uses: actions/cache@v4
+        with:
+          path: |
+            clients/tui/deps
+            clients/tui/_build
+          key: ${{ runner.os }}-tui-${{ hashFiles('clients/tui/mix.lock', 'mix.lock') }}
+          restore-keys: ${{ runner.os }}-tui-
+      - name: The two Mix locks agree
+        working-directory: .
+        run: elixir scripts/locks-agree.exs
+      - run: mix deps.get
+      - run: mix compile --warnings-as-errors
+
+  gui:
+    name: the GUI - build and typecheck
+    needs: [changes]
+    if: needs.changes.outputs.gui == 'true'
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: clients/gui
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v6
+        with:
+          package_json_file: clients/gui/package.json
+      - uses: actions/setup-node@v7
+        with:
+          node-version-file: .tool-versions
+          cache: pnpm
+          cache-dependency-path: clients/gui/pnpm-lock.yaml
+      - run: pnpm install --frozen-lockfile
+      # `build` typechecks the desktop app against the freshly built protocol client.
+      - run: pnpm build
+
+  dev-ok:
+    name: dev-ok
+    if: always()
+    needs: [changes, elixir, tui, gui]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Every job that ran passed
+        run: |
+          for r in "${{ needs.changes.result }}" "${{ needs.elixir.result }}" "${{ needs.tui.result }}" "${{ needs.gui.result }}"; do
+            case "$r" in success|skipped) ;; *) echo "a job ended $r"; exit 1 ;; esac
+          done
