@@ -585,7 +585,7 @@ defmodule Troupe.Client.Remote do
     %{
       name: entry["name"] || Path.basename(entry["path"] || ""),
       path: entry["path"] || entry["name"],
-      dir?: entry["dir"] == true or entry["type"] == "dir",
+      dir?: entry["kind"] == "directory",
       size: entry["size"] || 0,
       workspace: nil
     }
@@ -605,7 +605,7 @@ defmodule Troupe.Client.Remote do
   # if fetching the rest fails.
   defp fetch_blob(sid, blob, preview) do
     case Worker.blob(sid, blob) do
-      {:ok, %{"content_base64" => encoded}} ->
+      {:ok, %{"data" => encoded}} ->
         case Base.decode64(encoded) do
           {:ok, content} -> content
           :error -> preview || ""

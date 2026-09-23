@@ -135,7 +135,7 @@ defmodule Troupe.RemoteUITest do
 
       assert [params] = for({"fs.upload", p} <- FakeRemote.calls(remote), do: p)
       assert params["path"] == "session:/" <> Path.basename(path)
-      assert Base.decode64!(params["content_base64"]) == "from this machine"
+      assert params["content"] == "from this machine"
 
       GenServer.stop(pid, :normal)
     end

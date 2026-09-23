@@ -387,7 +387,7 @@ defmodule Troupe.UI.TUI.View do
   defp todo_block(%{todos: []}), do: []
 
   defp todo_block(%{todos: todos}),
-    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.content}" end)
+    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.text}" end)
 
   defp pending_block(w, path) do
     case Enum.filter(w.pending, &(&1.agent_path == path)) do
@@ -1220,11 +1220,12 @@ defmodule Troupe.UI.TUI.View do
       agents ++ pending
   end
 
+  # An item as `Troupe.Remote.Translate` spells it: `text`, `status`, `id`.
   defp todo_lines(w, path, indent) do
     w.agents
     |> Map.get(path, %{todos: []})
     |> Map.get(:todos, [])
-    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.content}"} end)
+    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.text}"} end)
   end
 
   defp glyph(:completed), do: "x"

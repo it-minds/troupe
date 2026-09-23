@@ -893,7 +893,7 @@ defmodule Troupe.Client.Daemon do
     %{
       name: e["name"],
       path: e["path"],
-      dir?: e["type"] == "dir" or e["dir"] == true,
+      dir?: e["kind"] == "directory",
       size: e["size"] || 0,
       workspace: nil
     }
