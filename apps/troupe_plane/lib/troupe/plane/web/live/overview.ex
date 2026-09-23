@@ -127,8 +127,18 @@ defmodule Troupe.Plane.Web.Live.Overview do
     end
   end
 
+  # A ceiling whose period is `never` is lifted only by raising it, so its sentences name
+  # no period and promise no new one.
+  defp budget_sentence(:broken, %{budget_period: "never"} = team) do
+    "#{team.name} is at its ceiling, which never turns over. New sessions are refused until it is raised."
+  end
+
   defp budget_sentence(:broken, team) do
     "#{team.name} is at its #{team.budget_period} ceiling. New sessions are refused until it is raised or the period turns over."
+  end
+
+  defp budget_sentence(_degraded, %{budget_period: "never"} = team) do
+    "#{team.name} has spent #{percent(team)} of its budget."
   end
 
   defp budget_sentence(_degraded, team) do

@@ -540,6 +540,15 @@ defmodule Troupe.Plane.Admin do
   @spec team_name_rule() :: String.t()
   def team_name_rule, do: Identity.Team.name_rule()
 
+  @doc """
+  The periods a team's budget may be measured over, for a form to offer.
+
+  The list the team's own changeset accepts, so a screen cannot offer a period that saving
+  then refuses. Zero arity for the same reason as `team_name_rule/0`.
+  """
+  @spec budget_periods() :: [String.t()]
+  def budget_periods, do: Identity.Team.budget_periods()
+
   # A refused changeset as a sentence per field rather than an inspected keyword list. A
   # console shows `reason` beside the form, and `[name: {"must be…", [validation:
   # :format]}]` is a thing to be decoded before it is a thing to be fixed.
