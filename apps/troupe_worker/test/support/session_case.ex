@@ -54,7 +54,8 @@ defmodule Troupe.Worker.SessionCase do
       File.mkdir_p!(workspace)
       File.mkdir_p!(state_dir)
 
-      session_id = "s-#{unique}"
+      # The shape the plane generates: the harness refuses any other at the protocol edge.
+      session_id = Troupe.Session.generate_id()
       team = "team-#{unique}"
 
       # In a pod this is set, and it is what the core falls back to when a session has

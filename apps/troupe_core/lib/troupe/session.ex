@@ -285,6 +285,20 @@ defmodule Troupe.Session do
     suffix = 4 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
     stamp <> "-" <> suffix
   end
+
+  @id_shape ~r/\A\d{8}T\d{6}-[A-Za-z0-9_-]{6}\z/
+
+  @doc """
+  Whether a string has the shape `generate_id/0` gives it.
+
+  A session id names a directory under the state root, and a dormant session is found by
+  a glob built on it, so an id that comes from outside is held to this before anything
+  looks for it (#97). Everything the harness generates passes, and a wildcard, a `..` or
+  a separator cannot.
+  """
+  @spec valid_id?(term()) :: boolean()
+  def valid_id?(id) when is_binary(id), do: Regex.match?(@id_shape, id)
+  def valid_id?(_id), do: false
 end
 
 defmodule Troupe.Sessions do

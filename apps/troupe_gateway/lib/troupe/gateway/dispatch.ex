@@ -130,13 +130,20 @@ defmodule Troupe.Gateway.Dispatch do
   @doc "Dispatch one request."
   @spec call(String.t(), map(), Context.t()) :: outcome()
   def call(method, params, %Context{} = context) do
+    with :ok <- permitted(method, context),
+         :ok <- session_ids(params) do
+      idempotent(method, params, context)
+    end
+  end
+
+  defp permitted(method, context) do
     case Map.fetch(@scopes, method) do
       :error ->
         {:error, Error.new(:method_not_found, %{method: method})}
 
       {:ok, required} ->
         if required in context.scopes do
-          idempotent(method, params, context)
+          :ok
         else
           {:error, Error.new(:forbidden, %{required_scope: Atom.to_string(required)})}
         end
@@ -164,6 +171,35 @@ defmodule Troupe.Gateway.Dispatch do
   # new connection from the same person.
   defp ledger_key(%Context{principal: principal}, command_id) do
     {principal["subject"] || principal[:subject], command_id}
+  end
+
+  # A session id names a directory under the state root, and a dormant session is found
+  # by a glob built on it. So every id a request carries — as `session_id`, as a branch's
+  # `parent`, in a topic — is held to the shape the harness generates before any handler
+  # sees it (#97): `*` found another session's log, and `..` or a separator a path
+  # outside the one the id names. An absent or empty id is left for the handler to
+  # report as the field it needed.
+  defp session_ids(params) do
+    case Enum.find(named_sessions(params), &malformed?/1) do
+      nil -> :ok
+      {field, _id} -> {:error, Error.new(:invalid_params, %{field: field, reason: "not a session id"})}
+    end
+  end
+
+  defp malformed?({_field, id}), do: not Troupe.Session.valid_id?(id)
+
+  defp named_sessions(params) do
+    named =
+      params
+      |> Map.take(["session_id", "parent"])
+      |> Enum.filter(fn {_field, id} -> is_binary(id) and id != "" end)
+
+    with topic when is_binary(topic) <- Map.get(params, "topic"),
+         {:ok, _kind, id} when is_binary(id) <- Session.parse_topic(topic) do
+      [{"topic", id} | named]
+    else
+      _no_session -> named
+    end
   end
 
   # -- reads ------------------------------------------------------------------
