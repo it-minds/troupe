@@ -176,7 +176,7 @@ defmodule Troupe.Gateway.PresenceTest do
       _ = start_session(context, default: {:text, "ok"})
       bob = attach(context, @bob)
 
-      assert {:error, error} = Client.subscribe(bob, "presence:s-does-not-exist")
+      assert {:error, error} = Client.subscribe(bob, "presence:" <> Troupe.Session.generate_id())
       assert error.message in ["not_found", "invalid_params"]
     end
   end

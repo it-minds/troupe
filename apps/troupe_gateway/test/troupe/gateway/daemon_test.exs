@@ -12,6 +12,10 @@ defmodule Troupe.Gateway.DaemonTest do
   alias Troupe.Gateway.{Daemon, Session}
   alias Troupe.Protocol.{Client, Endpoint, Error, Event}
 
+  # A session id of the right shape that no session has. Any other shape is refused as
+  # malformed before the daemon looks for it (`session_ids_test.exs`).
+  @unknown "20000101T000000-nobody"
+
   setup do
     base = Path.join(System.tmp_dir!(), "troupe-daemon-#{System.unique_integer([:positive])}")
     workspace = Path.join(base, "workspace")
@@ -196,10 +200,10 @@ defmodule Troupe.Gateway.DaemonTest do
       client = connect(context)
 
       assert {:error, %Error{message: "not_found", data: data}} =
-               Client.call(client, "session.get", %{"session_id" => "s-nope"})
+               Client.call(client, "session.get", %{"session_id" => @unknown})
 
       assert data["kind"] == "session"
-      assert data["id"] == "s-nope"
+      assert data["id"] == @unknown
     end
 
     test "a missing parameter names the field", context do
@@ -305,7 +309,7 @@ defmodule Troupe.Gateway.DaemonTest do
 
     test "subscribing to an unknown session is not_found", context do
       client = connect(context)
-      assert {:error, %Error{message: "not_found"}} = Client.subscribe(client, "session:s-nope")
+      assert {:error, %Error{message: "not_found"}} = Client.subscribe(client, "session:" <> @unknown)
     end
 
     test "a malformed topic names the field", context do
@@ -462,7 +466,7 @@ defmodule Troupe.Gateway.DaemonTest do
                  "text" => "   "
                })
 
-      assert {:error, %Error{message: "not_found"}} = goal(client, "s-nope")
+      assert {:error, %Error{message: "not_found"}} = goal(client, @unknown)
     end
 
     test "a dormant session's goal is read from its log without waking it", context do

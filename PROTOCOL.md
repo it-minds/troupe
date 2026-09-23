@@ -451,6 +451,13 @@ originating `command_id`, which is how a client reconciles an optimistic render.
 **Replaying a `command_id` is a no-op** that returns the original acknowledgement.
 This makes every command safe to retry after a disconnect.
 
+**A session id is the one the server generated**: a UTC timestamp and six characters
+of URL-safe base64, `20260923T101112-q3Vx_A`, which the examples here shorten to
+`s-9f`. The daemon and a worker refuse any other shape with `invalid_params`, naming
+the field — `session_id`, a branch's `parent`, or the `topic` of a `subscribe` —
+before they look for a session: an id names a place on disk, and a pattern or a path
+in its place would reach sessions it does not name.
+
 ### Session lifecycle
 
 #### `session.create`
