@@ -283,11 +283,15 @@ defmodule Troupe.Plane.Web.Live.Layout do
         <span class="budget__fill" style={"width: #{min(round(@fraction * 100), 100)}%"}></span>
       </span>
       <span class="budget__figures">
-        {figure(@committed)} / {money(@team.budget_micros)} {@team.budget_period}
+        {figure(@committed)} / {money(@team.budget_micros)} {per(@team.budget_period)}
       </span>
     </div>
     """
   end
+
+  # A ceiling that never turns over is a total, and `500.00 never` reads as a refusal.
+  defp per("never"), do: "in total"
+  defp per(period), do: period
 
   defp fraction(_committed, 0), do: 0.0
   defp fraction(committed, budget), do: committed / budget

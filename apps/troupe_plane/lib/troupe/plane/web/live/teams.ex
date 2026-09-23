@@ -379,7 +379,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
             from the group's display name.
           </p>
 
-          <label for="enable-team-budget">Monthly ceiling, in micros</label>
+          <label for="enable-team-budget">Ceiling, in micros</label>
           <input
             id="enable-team-budget"
             name="budget_micros"
@@ -514,8 +514,13 @@ defmodule Troupe.Plane.Web.Live.Teams do
             <label>
               period
               <select name="budget_period">
-                <option value="monthly" selected={team.budget_period == "monthly"}>monthly</option>
-                <option value="daily" selected={team.budget_period == "daily"}>daily</option>
+                <option
+                  :for={period <- Admin.budget_periods()}
+                  value={period}
+                  selected={team.budget_period == period}
+                >
+                  {period}
+                </option>
               </select>
             </label>
             <p class="field-help">When the total goes back to zero.</p>

@@ -38,6 +38,7 @@ defmodule Troupe.Plane.Admin.API do
 
   alias Troupe.Plane.Admin
   alias Troupe.Plane.Admin.API.{Argument, Method}
+  alias Troupe.Plane.Identity.Team
   alias Troupe.Protocol.Error
 
   # -- the shapes that appear in more than one method -------------------------
@@ -113,7 +114,13 @@ defmodule Troupe.Plane.Admin.API do
       description:
         "The team's spend ceiling per period, in millionths of a currency unit. 0 is unlimited."
     },
-    %Argument{name: "budget_period", type: :string, description: "monthly or daily."},
+    %Argument{
+      name: "budget_period",
+      type: :string,
+      values: Team.budget_periods(),
+      description:
+        "What the ceiling is measured over: monthly, or never for one that does not turn over."
+    },
     %Argument{
       name: "idle_timeout_seconds",
       type: :integer,

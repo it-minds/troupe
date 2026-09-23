@@ -40,6 +40,15 @@ defmodule Troupe.Plane.Identity.Team do
   @spec name_rule() :: String.t()
   def name_rule, do: @name_rule
 
+  # What a budget is measured over: a month, or nothing — a ceiling that never turns over.
+  # The one list: the Teams page and the admin API offer it, and the platform's default
+  # period is tested against it. `daily` was offered by all three and refused here.
+  @budget_periods ~w(monthly never)
+
+  @doc "The periods a team's budget may be measured over."
+  @spec budget_periods() :: [String.t()]
+  def budget_periods, do: @budget_periods
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
@@ -98,7 +107,7 @@ defmodule Troupe.Plane.Identity.Team do
     |> cast(attrs, @fields)
     |> validate_required([:group_id, :name])
     |> validate_format(:name, @name_format, message: @name_rule)
-    |> validate_inclusion(:budget_period, ["monthly", "never"])
+    |> validate_inclusion(:budget_period, @budget_periods)
     |> validate_number(:idle_timeout_seconds, greater_than: 0)
     # The name, not the group. A team is addressed by name everywhere — a grant, a
     # session's team, an audit row — so two called `engineering` would be two answers to
