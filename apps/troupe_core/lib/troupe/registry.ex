@@ -33,6 +33,10 @@ defmodule Troupe.Registry do
   @spec watcher(String.t()) :: GenServer.name()
   def watcher(session_id), do: via({:watcher, session_id})
 
+  @doc "The process that runs the session's `/loop` (Decision 681)."
+  @spec loop(String.t()) :: GenServer.name()
+  def loop(session_id), do: via({:loop, session_id})
+
   @doc "The process that turns filesystem changes into durable `fs_changed` events."
   @spec files(String.t()) :: GenServer.name()
   def files(session_id), do: via({:files, session_id})

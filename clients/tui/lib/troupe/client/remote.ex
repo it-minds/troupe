@@ -94,6 +94,23 @@ defmodule Troupe.Client.Remote do
   @impl true
   def clear_goal(sid), do: describe(Worker.set_goal(sid, nil))
 
+  # A loop is the harness's too (`session.loop.*`): this asks, and the window follows the
+  # session's own `loop_*` events.
+  @impl true
+  def loop(sid) do
+    case Worker.loop(sid) do
+      {:ok, %{"loop" => loop}} -> {:ok, loop}
+      {:ok, other} -> {:error, "unexpected session.loop.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @impl true
+  def start_loop(sid, n), do: describe(Worker.start_loop(sid, n))
+
+  @impl true
+  def stop_loop(sid), do: describe(Worker.stop_loop(sid))
+
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 

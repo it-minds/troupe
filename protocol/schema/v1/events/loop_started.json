@@ -1,0 +1,30 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/loop_started.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "goal": {
+      "type": "string"
+    },
+    "loop_id": {
+      "type": "string"
+    },
+    "max_failures": {
+      "type": "integer"
+    },
+    "max_iterations": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "goal",
+    "loop_id",
+    "max_failures",
+    "max_iterations"
+  ],
+  "title": "loop_started",
+  "type": "object"
+}

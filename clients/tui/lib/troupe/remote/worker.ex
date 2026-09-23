@@ -94,6 +94,18 @@ defmodule Troupe.Remote.Worker do
   @spec set_goal(String.t(), String.t() | nil) :: :ok | {:error, term()}
   def set_goal(session_id, text), do: call(session_id, {:goal, text})
 
+  @doc "The session's latest loop as the server reads it from the log; wakes nothing."
+  @spec loop(String.t()) :: {:ok, term()} | {:error, term()}
+  def loop(session_id), do: call(session_id, {:rpc, "session.loop.get", %{}})
+
+  @doc "Starts a loop towards the goal, of `n` iterations or the session's own cap."
+  @spec start_loop(String.t(), pos_integer() | nil) :: :ok | {:error, term()}
+  def start_loop(session_id, n), do: call(session_id, {:loop, n})
+
+  @doc "Stops the session's loop. Not activating: a dormant session's loop is not running."
+  @spec stop_loop(String.t()) :: :ok | {:error, term()}
+  def stop_loop(session_id), do: call(session_id, :stop_loop)
+
   @spec fs_list(String.t(), String.t()) :: {:ok, term()} | {:error, term()}
   def fs_list(session_id, path), do: call(session_id, {:rpc, "fs.list", %{path: path}})
 
@@ -289,6 +301,16 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:goal, text}, from, state),
     do: activating(state, from, "session.goal.set", %{text: text, command_id: RPC.command_id()})
+
+  # A loop sends the session input, so starting one activates it; stopping one does not.
+  def handle_call({:loop, n}, from, state) do
+    params = %{command_id: RPC.command_id()}
+    params = if n, do: Map.put(params, :max_iterations, n), else: params
+    activating(state, from, "session.loop.start", params)
+  end
+
+  def handle_call(:stop_loop, from, state),
+    do: command(state, from, "session.loop.stop", %{command_id: RPC.command_id()})
 
   # The contract carries the file as a JSON string (PROTOCOL.md §6), so bytes that are
   # not UTF-8 have no spelling in it; they are refused here rather than crashing this

@@ -71,6 +71,7 @@ Session.MCP          the workspace's own MCP servers
 Agent.Node           the root agent: Agent.Tasks, Agent.Children, Agent.Server (one_for_all)
 Session.Watcher      watch mode; after the agent, so its crash restarts nothing above
 Session.Files        fs_changed events
+Session.Loop         /loop: one root turn per iteration, loop_* events (Decision 681)
 Session.Summary      the summary projection, last on purpose
 ```
 

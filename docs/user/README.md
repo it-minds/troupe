@@ -41,6 +41,12 @@ your team's bundle or your own config can add more.
 **Goal.** What a session is working towards: `/goal <text>` in the terminal UI. The agent
 sees it on every later turn until `/goal clear`, and it survives a restart.
 
+**Loop.** `/loop [n]` lets the session work towards its goal on its own, for up to `n`
+turns (10 unless you say, `loop_max_iterations` in the config). Each turn ends with the
+agent saying whether the goal is met, and the loop stops when it is, at the limit, after
+three failed turns in a row, when the budget asks you, or on `/loop stop`. The status line
+shows how far it has got, and you can keep typing while it runs.
+
 **Approval.** Writing or editing a file and running a shell command ask first. The session
 stops that one call and waits for allow, deny or allow-for-this-session. Anyone attached
 with control rights can answer; the first answer wins and everyone is told who gave it.

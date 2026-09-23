@@ -72,6 +72,11 @@ defmodule Troupe.Gateway.Dispatch do
     "session.goal.set" => :control,
     "session.goal.clear" => :control,
     "session.goal.get" => :observe,
+    # A loop sends the session input, one iteration after another, so it takes what input
+    # does; so does stopping one. Reading it is reading the log.
+    "session.loop.start" => :control,
+    "session.loop.stop" => :control,
+    "session.loop.get" => :observe,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -494,6 +499,57 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # A loop towards the goal (Decision 681). Starting one activates the session, since its
+  # iterations are the root agent's turns; the answer names the loop and its cap, and the
+  # effect is `loop_started`, carrying this `command_id`, then the iterations. A session
+  # with no goal, or with a loop already running, is refused with what to do instead.
+  defp handle("session.loop.start", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, max} <- loop_iterations(params),
+         :ok <- activate(session_id) do
+      opts = [max_iterations: max] ++ command_opts(params)
+
+      case Troupe.start_loop(session_id, actor(context), opts) do
+        {:ok, loop} ->
+          {:ok, %{"accepted" => true, "loop_id" => loop.id, "max_iterations" => loop.max_iterations}}
+
+        {:error, :no_goal} ->
+          {:error,
+           Error.new(:conflict, %{
+             needs: "goal",
+             reason: "the session has no goal to loop towards: set one with session.goal.set"
+           })}
+
+        {:error, {:already_running, loop_id}} ->
+          {:error,
+           Error.new(:conflict, %{
+             loop_id: loop_id,
+             reason: "a loop is already running: session.loop.stop stops it"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
+    end
+  end
+
+  # Not activating: a dormant session's loop is not running, so there is nothing to stop,
+  # and the log already reads it as interrupted.
+  defp handle("session.loop.stop", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      :ok = Troupe.stop_loop(session_id, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.loop.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      {:ok, %{"loop" => Troupe.loop(session_id)}}
+    end
+  end
+
   defp handle("approval.respond", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, call_id} <- fetch(params, "call_id"),
@@ -878,6 +934,15 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp trimmed(text) when is_binary(text), do: String.trim(text)
   defp trimmed(_text), do: ""
+
+  # Absent is the config's cap; present, it is a whole number of iterations, at least one.
+  defp loop_iterations(params) do
+    case Map.get(params, "max_iterations") do
+      nil -> {:ok, nil}
+      n when is_integer(n) and n > 0 -> {:ok, n}
+      _ -> {:error, Error.new(:invalid_params, %{field: "max_iterations", reason: "a positive integer"})}
+    end
+  end
 
   defp command_opts(params) do
     case Map.get(params, "command_id") do

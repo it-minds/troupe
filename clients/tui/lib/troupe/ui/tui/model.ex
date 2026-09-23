@@ -98,6 +98,7 @@ defmodule Troupe.UI.TUI.Model do
           message: String.t() | nil,
           diff_stat: String.t() | nil,
           goal: String.t() | nil,
+          loop: %{iteration: non_neg_integer(), max: pos_integer() | nil} | nil,
           worktree: map() | nil,
           unconfirmed: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()}
@@ -154,6 +155,7 @@ defmodule Troupe.UI.TUI.Model do
           message: nil,
           diff_stat: nil,
           goal: nil,
+          loop: nil,
           worktree: nil,
           unconfirmed: %{},
           warnings: %{}
@@ -217,6 +219,16 @@ defmodule Troupe.UI.TUI.Model do
 
   defp apply_to_window(w, %Event{type: type, agent_path: path, data: d, ts: ts}) do
     case type do
+      # A loop's iteration starts the agent's turn like any input, but nobody typed it: the
+      # transcript says which iteration it is (`:loop_iteration`) rather than printing the
+      # words the loop gave the model.
+      :input when d.source == :loop ->
+        w
+        |> ensure_agent(path)
+        |> update_agent(path, fn a -> %{a | ended_at: nil} end)
+        |> Map.put(:ended_at, nil)
+        |> set_state(:running, ts)
+
       :input when d.source in [:user, :watch] ->
         w
         |> ensure_agent(path)
@@ -442,6 +454,32 @@ defmodule Troupe.UI.TUI.Model do
 
       :goal_cleared ->
         w |> ensure_agent(path) |> push(path, {:system, "goal cleared"}) |> Map.put(:goal, nil)
+
+      # A loop towards the goal (issue #59): said in the transcript as it goes, and kept on
+      # the window while it runs, for the status line's "loop 2/10".
+      :loop_started ->
+        w
+        |> ensure_agent(path)
+        |> push(path, {:system, "loop: up to #{d.max_iterations} iterations towards the goal"})
+        |> Map.put(:loop, %{iteration: 0, max: d.max_iterations})
+
+      :loop_iteration ->
+        %{max: max} = Map.get(w, :loop) || %{max: nil}
+
+        w
+        |> ensure_agent(path)
+        |> push(path, {:system, "loop iteration #{d.iteration}#{if max, do: "/#{max}", else: ""}"})
+        |> Map.put(:loop, %{iteration: d.iteration, max: max})
+
+      :loop_iteration_finished when d.outcome == "failed" ->
+        push(
+          ensure_agent(w, path),
+          path,
+          {:system, "loop iteration #{d.iteration} failed" <> said(d.detail)}
+        )
+
+      :loop_stopped ->
+        w |> ensure_agent(path) |> push(path, {:system, loop_stopped(d)}) |> Map.put(:loop, nil)
 
       :worktree_created ->
         %{
@@ -686,6 +724,18 @@ defmodule Troupe.UI.TUI.Model do
   def windows(%__MODULE__{} = m), do: Enum.map(m.order, &Map.fetch!(m.windows, &1))
 
   @doc """
+  The loop this screen's session is running, `%{iteration, max}`, as its events say, or
+  `nil` when none runs: the session's own window's, like `goal/1`.
+  """
+  @spec loop(t()) :: %{iteration: non_neg_integer(), max: pos_integer() | nil} | nil
+  def loop(%__MODULE__{windows: windows}) do
+    case Map.get(windows, "root") do
+      %{loop: %{} = loop} -> loop
+      _ -> nil
+    end
+  end
+
+  @doc """
   The goal this screen's session has, as its events say, for the status line: the one on
   the session's own window, `"root"`. A branch is a session of its own and keeps its goal
   on its own window.
@@ -697,6 +747,30 @@ defmodule Troupe.UI.TUI.Model do
       _ -> nil
     end
   end
+
+  # How a loop ended, in the transcript: the evidence when the goal is met, the reason
+  # otherwise, in words rather than the log's tokens.
+  defp loop_stopped(%{reason: "goal_complete"} = d),
+    do: "loop done after #{iterations(d.iterations)}: the goal is met" <> said(d.summary)
+
+  defp loop_stopped(d),
+    do: "loop stopped after #{iterations(d.iterations)}: #{loop_reason(d.reason)}" <> said(d.detail)
+
+  defp loop_reason("max_iterations"), do: "it reached its limit"
+  defp loop_reason("failures"), do: "too many iterations failed in a row"
+  defp loop_reason("budget"), do: "the budget is spent and asks you first"
+  defp loop_reason("requested"), do: "stopped on request"
+  defp loop_reason("cancelled"), do: "the turn was cancelled"
+  defp loop_reason("goal_cleared"), do: "the goal was cleared"
+  defp loop_reason("interrupted"), do: "the session stopped while it ran"
+  defp loop_reason("agent_done"), do: "the agent takes no more input"
+  defp loop_reason(other), do: other
+
+  defp iterations(1), do: "1 iteration"
+  defp iterations(n), do: "#{n} iterations"
+
+  defp said(text) when is_binary(text) and text != "", do: " — " <> text
+  defp said(_text), do: ""
 
   @doc """
   MCP servers as the `/mcp` page and the status line read them: the latest

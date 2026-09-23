@@ -322,6 +322,36 @@ defmodule Troupe.Remote.Translate do
       "goal_cleared" ->
         {[emit.(:goal_cleared, %{})], memory}
 
+      # A loop towards the goal (issue #59): its own events, because the window keeps where
+      # it is and the status line shows it while it runs.
+      "loop_started" ->
+        {[
+           emit.(:loop_started, %{loop_id: data["loop_id"], max_iterations: data["max_iterations"]})
+         ], memory}
+
+      "loop_iteration_started" ->
+        {[emit.(:loop_iteration, %{loop_id: data["loop_id"], iteration: data["iteration"]})],
+         memory}
+
+      "loop_iteration_finished" ->
+        {[
+           emit.(:loop_iteration_finished, %{
+             iteration: data["iteration"],
+             outcome: to_string(data["outcome"]),
+             detail: data["detail"]
+           })
+         ], memory}
+
+      "loop_stopped" ->
+        {[
+           emit.(:loop_stopped, %{
+             reason: to_string(data["reason"]),
+             iterations: data["iterations"] || 0,
+             detail: data["detail"],
+             summary: data["summary"]
+           })
+         ], memory}
+
       "delegation_started" ->
         {[emit.(:remote_note, %{text: "delegated" <> to_child(data)})], memory}
 
@@ -430,6 +460,7 @@ defmodule Troupe.Remote.Translate do
   defp block(_block), do: []
 
   defp source_atom("watch"), do: :watch
+  defp source_atom("loop"), do: :loop
   defp source_atom(_source), do: :user
 
   defp done_note(emit, %{"summary" => summary}) when is_binary(summary) and summary != "",

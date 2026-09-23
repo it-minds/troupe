@@ -51,10 +51,10 @@ defmodule Troupe.Gateway.DaemonTest do
     client
   end
 
-  defp start_session(context, steps) do
+  defp start_session(context, steps, opts \\ []) do
     fake =
       start_supervised!(
-        {Troupe.LLM.Fake, steps: steps},
+        {Troupe.LLM.Fake, [steps: steps] ++ opts},
         id: {Troupe.LLM.Fake, System.unique_integer([:positive])}
       )
 
@@ -489,9 +489,131 @@ defmodule Troupe.Gateway.DaemonTest do
     end
   end
 
+  describe "a loop towards the goal" do
+    test "without a goal it is refused with where to go instead, and nothing runs", context do
+      %{session: session} = start_session(context, [{:text, "hi"}])
+      client = connect(context)
+
+      assert {:error, %Error{message: "conflict", data: %{"needs" => "goal"} = data}} =
+               start_loop(client, session.id)
+
+      assert data["reason"] =~ "session.goal.set"
+      assert {:ok, %{"loop" => nil}} = loop(client, session.id)
+
+      assert {:error, %Error{message: "invalid_params", data: %{"field" => "max_iterations"}}} =
+               start_loop(client, session.id, %{"max_iterations" => 0})
+    end
+
+    test "start is acknowledged with the loop and its cap, and its effects are loop events carrying the command id",
+         context do
+      %{session: session} = start_session(context, [{:text, "one"}, {:text, "two"}])
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+      set_goal(client, session.id, "the notes build")
+      collect_until(&(&1.type == "goal_set"))
+
+      command_id = Client.command_id()
+
+      assert {:ok, %{"accepted" => true, "loop_id" => "loop-1", "max_iterations" => 2}} =
+               Client.call(client, "session.loop.start", %{
+                 "command_id" => command_id,
+                 "session_id" => session.id,
+                 "max_iterations" => 2
+               })
+
+      events = collect_until(&(&1.type == "loop_stopped"))
+      loop_events = Enum.filter(events, &String.starts_with?(&1.type, "loop_"))
+
+      assert [%{type: "loop_started", data: started} | _] = loop_events
+      assert started["command_id"] == command_id
+      assert started["goal"] == "the notes build"
+      assert List.last(loop_events).data["reason"] == "max_iterations"
+      assert Enum.count(loop_events, &(&1.type == "loop_iteration_started")) == 2
+
+      assert {:ok, %{"loop" => %{"loop_id" => "loop-1", "state" => "stopped", "iteration" => 2} = answer}} =
+               loop(client, session.id)
+
+      assert answer["reason"] == "max_iterations"
+      assert answer["started_by"] =~ "local:"
+    end
+
+    test "any client can stop it mid-iteration", context do
+      %{session: session} = start_session(context, [{:tools, [{"todo_read", %{}}]}], delay_ms: 300)
+      starter = connect(context)
+      stopper = connect(context)
+      {:ok, _} = Client.subscribe(starter, "session:#{session.id}")
+      set_goal(starter, session.id, "keep going")
+      collect_until(&(&1.type == "goal_set"))
+
+      {:ok, %{"accepted" => true}} = start_loop(starter, session.id)
+      collect_until(&(&1.type == "llm_request"))
+
+      command_id = Client.command_id()
+
+      assert {:ok, %{"accepted" => true}} =
+               Client.call(stopper, "session.loop.stop", %{"command_id" => command_id, "session_id" => session.id})
+
+      events = collect_until(&(&1.type == "cancelled"))
+      stopped = Enum.find(events, &(&1.type == "loop_stopped"))
+      assert stopped.data["reason"] == "requested"
+      assert stopped.data["command_id"] == command_id
+      assert {:ok, %{"loop" => %{"state" => "stopped", "reason" => "requested"}}} = loop(starter, session.id)
+    end
+
+    test "a dormant session's loop reads as interrupted without waking it, and activating it records that",
+         context do
+      %{session: session} = start_session(context, [{:text, "slow"}], delay_ms: 300)
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+      set_goal(client, session.id, "keep going")
+      collect_until(&(&1.type == "goal_set"))
+      {:ok, _} = start_loop(client, session.id)
+      collect_until(&(&1.type == "llm_request"))
+
+      :ok = Troupe.stop_session(session.id)
+
+      assert {:ok, %{"loop" => %{"state" => "stopped", "reason" => "interrupted"}}} = loop(client, session.id)
+      assert Troupe.snapshot(session.id) == {:error, :no_agent}
+
+      # Nothing is running to stop, and asking wakes nothing.
+      assert {:ok, %{"accepted" => true}} =
+               Client.call(client, "session.loop.stop", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => session.id
+               })
+
+      assert Troupe.snapshot(session.id) == {:error, :no_agent}
+      refute Enum.any?(Troupe.events(session.id), &(&1.type == "loop_stopped"))
+
+      # Starting a new loop activates the session, which first records how the old one ended.
+      assert {:ok, %{"loop_id" => "loop-2"}} = start_loop(client, session.id, %{"max_iterations" => 1})
+
+      assert [%{data: %{"loop_id" => "loop-1", "reason" => "interrupted"}} | _] =
+               session.id |> Troupe.events() |> Enum.filter(&(&1.type == "loop_stopped"))
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp goal(client, session_id), do: Client.call(client, "session.goal.get", %{"session_id" => session_id})
+  defp loop(client, session_id), do: Client.call(client, "session.loop.get", %{"session_id" => session_id})
+
+  defp set_goal(client, session_id, text) do
+    {:ok, _} =
+      Client.call(client, "session.goal.set", %{
+        "command_id" => Client.command_id(),
+        "session_id" => session_id,
+        "text" => text
+      })
+  end
+
+  defp start_loop(client, session_id, params \\ %{}) do
+    Client.call(
+      client,
+      "session.loop.start",
+      Map.merge(%{"command_id" => Client.command_id(), "session_id" => session_id}, params)
+    )
+  end
 
   defp raw_initialize(address, port, params) do
     {:ok, socket} = :gen_tcp.connect(address, port, [:binary, active: false, packet: :raw])
