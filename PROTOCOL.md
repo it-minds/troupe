@@ -456,7 +456,8 @@ of URL-safe base64, `20260923T101112-q3Vx_A`, which the examples here shorten to
 `s-9f`. The daemon and a worker refuse any other shape with `invalid_params`, naming
 the field — `session_id`, a branch's `parent`, or the `topic` of a `subscribe` —
 before they look for a session: an id names a place on disk, and a pattern or a path
-in its place would reach sessions it does not name.
+in its place would reach sessions it does not name. The plane holds an id a caller
+brings to the same shape, in `session.create` and in a first `session.register`.
 
 ### Session lifecycle
 
@@ -904,6 +905,13 @@ The role in a token is a claim about the moment it was minted. **Access is check
 on every command** against the ACL the plane has pushed to the pod, so a collaborator
 whose access is revoked is refused on their next command with `forbidden` and
 `data.reason` of `access revoked` — even though the token in their hand still verifies.
+
+**A token is for its session and no other.** A pod holds several people's sessions, so a
+request that names another — as `session_id`, a branch's `parent`, or the id in a
+`session:` or `presence:` topic — is refused with `forbidden` and `data.field` saying
+which, and so is a subscription to `fleet`. `session.list` and `fleet.get` answer with the
+token's own session and none of the others. A token with no `session_id` is held to the
+ACL of each session a request names.
 
 ### `auth.expiring` (notification, server → client)
 

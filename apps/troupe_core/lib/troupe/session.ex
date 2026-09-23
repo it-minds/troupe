@@ -275,18 +275,13 @@ defmodule Troupe.Session do
 
   defp with_skills(mounts, _bundle), do: mounts
 
-  @doc "A sortable, readable session id: a timestamp plus enough randomness to be unique."
+  @doc """
+  A sortable, readable session id: a timestamp plus enough randomness to be unique.
+
+  The shape is `Troupe.Protocol.SessionId`'s, because the plane hands out ids too.
+  """
   @spec generate_id() :: String.t()
-  def generate_id do
-    stamp =
-      DateTime.utc_now()
-      |> Calendar.strftime("%Y%m%dT%H%M%S")
-
-    suffix = 4 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
-    stamp <> "-" <> suffix
-  end
-
-  @id_shape ~r/\A\d{8}T\d{6}-[A-Za-z0-9_-]{6}\z/
+  defdelegate generate_id(), to: Troupe.Protocol.SessionId, as: :generate
 
   @doc """
   Whether a string has the shape `generate_id/0` gives it.
@@ -297,8 +292,7 @@ defmodule Troupe.Session do
   a separator cannot.
   """
   @spec valid_id?(term()) :: boolean()
-  def valid_id?(id) when is_binary(id), do: Regex.match?(@id_shape, id)
-  def valid_id?(_id), do: false
+  defdelegate valid_id?(id), to: Troupe.Protocol.SessionId, as: :valid?
 end
 
 defmodule Troupe.Sessions do
