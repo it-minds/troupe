@@ -759,10 +759,10 @@ every other MCP tool.
 
 The machine's own model settings — the provider, key and models every local session
 starts from — for a settings screen. **The daemon's only**: a worker answers
-`method_not_found`, because a pod's provider is its profile's business. They edit one
-file, the user's `config.yaml` in the daemon's config directory; a client never names a
-path, because the daemon is the process whose environment decides which file a session
-reads.
+`method_not_found`, because a pod's provider is its profile's business — or `forbidden` to
+a token for one session, like every method not about its session (§7). They edit one file,
+the user's `config.yaml` in the daemon's config directory; a client never names a path,
+because the daemon is the process whose environment decides which file a session reads.
 
 ```json
 {"workspace": "/home/me/project"}
@@ -934,7 +934,7 @@ data path of a live session, so a pod that cannot reach it still decides who may
 | --- | --- |
 | `sub` | the subject, as the IdP knows them |
 | `aud` | **the pod's worker id**, not the profile and not the plane |
-| `session_id` | the session this token is for, or absent for a create grant |
+| `session_id` | the session this token is for; the plane always sets it (a token without one is below) |
 | `role` | `owner`, `collaborator`, or `viewer` |
 | `scopes` | the scopes the role carries, so a client need not know the mapping |
 | `team` | the team the session is billed to |
@@ -963,6 +963,22 @@ request that names another — as `session_id`, a branch's `parent`, or the id i
 which, and so is a subscription to `fleet`. `session.list` and `fleet.get` answer with the
 token's own session and none of the others. A token with no `session_id` is held to the
 ACL of each session a request names.
+
+**It calls the methods about its session, and no others.** Those are `subscribe` and
+`unsubscribe` on its own topics, the two listings above, and every command whose params
+require `session_id` (§6): `session.get`, `session.archive`, `session.pin`,
+`session.unpin`, `session.erase`, `input.send`, `turn.cancel`, `profile.switch`,
+`session.goal.*`, `session.loop.*`, `approval.respond`, `question.answer`, `todo.edit`,
+`fs.list`, `fs.read`, `fs.upload`, `blob.get`, `mcp.status`, `presence.set`,
+`tools.register` and `tools.unregister`. Everything else a worker serves is about the pod
+or a path on it — `session.create`, `agents.list`, `workflows.list`, `memory.get`,
+`memory.forget`, `workspace.recent`, `workspace.search`, `worktree.*`, `watch.set`,
+`identity.*` and `config.*` — and a token for one session is refused it with `forbidden`
+and `data.method` naming it. A method a worker does not have is `method_not_found`,
+whatever the token, and `initialize` and `auth.refresh` belong to the connection. The
+plane mints every token for a pod with a `session_id`; one without is signed only by
+tooling that runs its own pod (the end-to-end tests, the benchmark), and keeps the whole
+table.
 
 ### `auth.expiring` (notification, server → client)
 

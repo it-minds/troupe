@@ -14,6 +14,7 @@ defmodule Troupe.Worker.HarnessAuthTest do
   alias Troupe.Plane.Tokens
   alias Troupe.Protocol.Client
   alias Troupe.Protocol.Endpoint
+  alias Troupe.Session.Memory
   alias Troupe.Worker.Auth
 
   @moduletag timeout: 180_000
@@ -216,6 +217,75 @@ defmodule Troupe.Worker.HarnessAuthTest do
     end
   end
 
+  describe "one session, not the pod" do
+    setup context do
+      assert {:ok, _} = activate(context)
+      context
+    end
+
+    test "a session's token is refused the pod's methods, and none of them runs", context do
+      jwt = token(context, role: "owner", session_id: context.session_id)
+
+      # Somewhere on the pod that is not the session's, with a brief in it to forget.
+      elsewhere = Path.join(context.base, "elsewhere")
+      brief = Memory.path(elsewhere)
+      File.mkdir_p!(Path.dirname(brief))
+      File.write!(brief, "# Project brief\n\n## Overview\n\nNot the session's.\n")
+
+      requests = [
+        {"session.create", %{"workspace" => elsewhere}},
+        {"config.get", %{}},
+        {"config.models", %{"provider" => "openai", "base_url" => "http://127.0.0.1:9"}},
+        {"config.set", %{"provider" => "openai", "base_url" => "http://127.0.0.1:9"}},
+        {"identity.get", %{}},
+        {"identity.link", %{"subject" => "someone@example.test"}},
+        {"identity.unlink", %{}},
+        {"watch.set", %{"workspace" => elsewhere, "enabled" => true}},
+        {"memory.get", %{"workspace" => elsewhere}},
+        {"memory.forget", %{"workspace" => elsewhere}},
+        {"agents.list", %{"workspace" => elsewhere}},
+        {"workflows.list", %{"workspace" => elsewhere}},
+        {"workspace.recent", %{}},
+        {"workspace.search", %{"query" => ""}},
+        {"worktree.list", %{"workspace" => elsewhere}},
+        {"worktree.remove", %{"path" => elsewhere}},
+        {"worktree.merge", %{"workspace" => context.workspace, "path" => elsewhere}},
+        {"worktree.discard", %{"workspace" => context.workspace, "path" => elsewhere}}
+      ]
+
+      # A connection each, so one that a request takes down does not hide the rest.
+      answered =
+        for {method, params} <- requests,
+            answer = call_once(context, jwt, method, params),
+            not match?({:error, %{message: "forbidden", data: %{"method" => ^method}}}, answer),
+            do: {method, answer}
+
+      assert answered == []
+
+      assert File.exists?(brief)
+      assert Troupe.Identity.get() == nil
+      assert Sessions.active_ids() == [context.session_id]
+
+      # A method no worker has is still `method_not_found`, and the session's own still
+      # answer on the same token.
+      {:ok, client} = connect(context, jwt)
+      assert {:error, %{message: "method_not_found"}} = Client.call(client, "no.such.method", %{})
+
+      mine = context.session_id
+      assert {:ok, %{"id" => ^mine}} = Client.call(client, "session.get", %{"session_id" => mine})
+      assert {:ok, %{"servers" => _}} = Client.call(client, "mcp.status", %{"session_id" => mine})
+    end
+
+    test "a token with no session in it still has the pod's methods", context do
+      {:ok, client} = connect(context, token(context, role: "owner"))
+
+      assert {:ok, %{"workspaces" => _}} = Client.call(client, "workspace.recent", %{})
+
+      assert {:ok, %{"workflows" => _}} =
+               Client.call(client, "workflows.list", %{"workspace" => context.workspace})
+    end
+  end
+
   describe "expiry" do
     test "a connection is warned before exp and refreshes on the same connection", context do
       # A second past the warning threshold, so this is a test of the warning rather
@@ -293,6 +363,18 @@ defmodule Troupe.Worker.HarnessAuthTest do
 
   defp refused?({:error, %{message: "forbidden", data: %{"field" => field}}}, field), do: true
   defp refused?(_answer, _field), do: false
+
+  defp call_once(context, jwt, method, params) do
+    {:ok, client} = connect(context, jwt)
+
+    try do
+      Client.call(client, method, params)
+    catch
+      :exit, reason -> {:exit, reason}
+    after
+      Client.close(client)
+    end
+  end
 
   defp connect(context, jwt) do
     Client.connect(

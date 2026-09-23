@@ -11,8 +11,8 @@ defmodule Troupe.Worker.Auth do
 
   **The token** says what was true when it was minted: who the subject is, which session,
   and what role. It is checked once, at `initialize`, and again at every `auth.refresh`.
-  It is good for that session alone: a request naming another is refused, and a listing
-  of the pod shows only that one.
+  It is good for that session alone: a request naming another is refused, so is a method
+  about the pod rather than a session, and a listing of the pod shows only that one.
 
   **The ACL mirror** says what is true now. A collaborator whose access was revoked
   still holds a token that verifies perfectly, so the role in it is a claim about the
@@ -23,13 +23,29 @@ defmodule Troupe.Worker.Auth do
 
   use GenServer
 
-  alias Troupe.Gateway.Session
+  alias Troupe.Gateway.{Dispatch, Session}
   alias Troupe.Protocol.{Error, Token}
 
   require Logger
 
   # The answers that are about every session on the pod rather than one.
   @listings ["session.list", "fleet.get"]
+
+  # What a token for one session may ask of a pod: every command that names a session as
+  # `session_id`, which the guard then holds to the token's; that session's topics; and the
+  # listings, narrowed to it. Everything else a pod serves is about the pod rather than a
+  # session — a session created in any workspace, the brief, agents or workflows of a
+  # path, the workspaces and worktrees the pod has seen, the machine's settings and
+  # identity. `initialize` and `auth.refresh` are the connection's own and never get here.
+  @session_methods ~w(
+    subscribe unsubscribe session.list fleet.get
+    session.get session.archive session.pin session.unpin session.erase
+    input.send turn.cancel profile.switch approval.respond question.answer todo.edit
+    session.goal.set session.goal.get session.goal.clear
+    session.loop.start session.loop.stop session.loop.get
+    fs.list fs.read fs.upload blob.get mcp.status presence.set
+    tools.register tools.unregister
+  )
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]
@@ -225,23 +241,34 @@ defmodule Troupe.Worker.Auth do
 
   # A token that names a session is good for that session and no other. A pod holds
   # several people's sessions, and the role in a token is a role on one of them — so
-  # every session a request names must be the token's, and the ACL is then asked about
-  # that one. A token with no session in it — a create grant, or an admin listing — is
-  # held to the ACL of each session the request names.
-  defp do_check(state, claims, _method, params) do
+  # every session a request names must be the token's, the method must be one about a
+  # session, and the ACL is then asked about that one. A token with no session in it —
+  # which the plane never mints for a pod, and tooling that runs its own pod signs — keeps
+  # every method and is held to the ACL of each session the request names.
+  defp do_check(state, claims, method, params) do
     named = named_sessions(params)
 
     case claims["session_id"] do
       nil -> Enum.find_value(named, :ok, &acl_refusal(state, claims["sub"], &1))
-      session_id -> confined(state, claims["sub"], session_id, named)
+      session_id -> confined(state, claims["sub"], session_id, method, named)
     end
   end
 
-  defp confined(state, subject, session_id, named) do
+  defp confined(state, subject, session_id, method, named) do
     case Enum.find(named, fn {_field, id} -> id != session_id end) do
-      nil -> acl_refusal(state, subject, {"session_id", session_id}) || :ok
-      {field, _other} -> another_session(field)
+      nil ->
+        method_refusal(method) || acl_refusal(state, subject, {"session_id", session_id}) || :ok
+
+      {field, _other} ->
+        another_session(field)
     end
+  end
+
+  # A method this server does not have is left to the dispatcher, which answers
+  # `method_not_found` to everybody and runs nothing.
+  defp method_refusal(method) do
+    if method not in @session_methods and Map.has_key?(Dispatch.methods(), method),
+      do: not_about_the_session(method)
   end
 
   defp acl_refusal(state, subject, {_field, session_id}) do
@@ -286,5 +313,9 @@ defmodule Troupe.Worker.Auth do
 
   defp another_session(field) do
     {:error, Error.new(:forbidden, %{reason: "the token is for another session", field: field})}
+  end
+
+  defp not_about_the_session(method) do
+    {:error, Error.new(:forbidden, %{reason: "not about the token's session", method: method})}
   end
 end
