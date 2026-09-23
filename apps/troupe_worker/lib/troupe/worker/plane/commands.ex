@@ -14,6 +14,7 @@ defmodule Troupe.Worker.Plane.Commands do
   alias Troupe.ObjectStore
   alias Troupe.Protocol.Error
   alias Troupe.Protocol.Event
+  alias Troupe.Protocol.SessionId
   alias Troupe.Session.Log
   alias Troupe.Sessions.Context
   alias Troupe.Sessions.Fork
@@ -49,7 +50,8 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("session.activate", params) do
     session_id = params["session_id"]
 
-    with {:ok, inherited} <- forked(params),
+    with :ok <- shaped(session_id),
+         {:ok, inherited} <- forked(params),
          {:ok, bundle} <- bundle_of(narrow(params, inherited)) do
       from_plane =
         Enum.reject(
@@ -255,6 +257,16 @@ defmodule Troupe.Worker.Plane.Commands do
   defp dispatch("ping", _params), do: {:ok, %{"pong" => true}}
 
   defp dispatch(method, _params), do: {:error, Error.new(:method_not_found, %{method: method})}
+
+  # The plane generates every id it activates, in the one shape `SessionId` describes. The
+  # id becomes a directory on this pod and a prefix in object storage, so one in any other
+  # shape — a path, a pattern — is not the plane's, and is refused before either exists.
+  defp shaped(session_id) do
+    if SessionId.valid?(session_id),
+      do: :ok,
+      else:
+        {:error, Error.new(:invalid_params, %{field: "session_id", reason: "not a session id"})}
+  end
 
   # -- shares ------------------------------------------------------------------
 
