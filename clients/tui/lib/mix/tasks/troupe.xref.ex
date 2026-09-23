@@ -18,6 +18,7 @@ defmodule Mix.Tasks.Troupe.Xref do
       Troupe.Event     the struct the model folds
       Troupe.Client.Message  content blocks, for the text of an assistant message
       Troupe.Codec     decoding events the client hands over
+      Troupe.Protocol.Glob   escaping the workspace for `@file` completion
 
   The second rule is about the whole TUI and the harness under it. `troupe_core`,
   `troupe_gateway` and `troupe_protocol` are path dependencies on the umbrella beside this
@@ -26,6 +27,7 @@ defmodule Mix.Tasks.Troupe.Xref do
   harness through these and nothing else, which is what it calls today:
 
       Troupe.Protocol.Client, .Daemon, .Endpoint   finding, starting and talking to a daemon
+      Troupe.Protocol.Glob                          escaping a path a glob starts from
       Troupe.Config                                 the configuration the daemon reads too
       Troupe.Paths                                  where state and config live
       Troupe.Reaper                                 the helper every OS process runs under
@@ -49,7 +51,8 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Settings,
     Troupe.Event,
     Troupe.Client.Message,
-    Troupe.Codec
+    Troupe.Codec,
+    Troupe.Protocol.Glob
   ]
 
   @harness_apps [:troupe_core, :troupe_gateway, :troupe_protocol]
@@ -58,6 +61,7 @@ defmodule Mix.Tasks.Troupe.Xref do
     Troupe.Protocol.Client,
     Troupe.Protocol.Daemon,
     Troupe.Protocol.Endpoint,
+    Troupe.Protocol.Glob,
     Troupe.Config,
     Troupe.Paths,
     Troupe.Reaper,
