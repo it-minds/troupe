@@ -10,7 +10,8 @@
 | [build.md](build.md) | The images, the native builds, the reaper, generated files, `VERSION` |
 | [deployment.md](deployment.md) | How a release deploys itself, what a roll does, rolling back |
 | [conventions.md](conventions.md) | The gate, boundaries, the formatter's blind spot, commit style, naming, recipes |
-| [fixing-issues.md](fixing-issues.md) | Working through GitHub issues one at a time: triage, fix, install locally, verify, pull request |
+| [fixing-issues.md](fixing-issues.md) | Working through GitHub issues in chunks: triage, fix, install locally, verify, pull request |
+| [defects.md](defects.md) | Defects found in passing and not fixed yet |
 
 CI and releases: [../../.github/CI.md](../../.github/CI.md). The design:
 [../../ARCHITECTURE.md](../../ARCHITECTURE.md), [../../DECISIONS.md](../../DECISIONS.md),

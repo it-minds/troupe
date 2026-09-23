@@ -21,7 +21,8 @@ export function Approvals({
   onOpen,
   onAnswered,
 }: {
-  auth: AuthSession;
+  /** Null in local mode, where everything waiting is on this computer. */
+  auth: AuthSession | null;
   daemon: DaemonClient | null;
   rows: FleetRow[];
   onOpen: (id: string) => void;
@@ -60,7 +61,7 @@ function Waiting({
   onOpen,
   onAnswered,
 }: {
-  auth: AuthSession;
+  auth: AuthSession | null;
   daemon: DaemonClient | null;
   row: FleetRow;
   onOpen: (id: string) => void;
@@ -99,7 +100,7 @@ export function InlineApprovals({
   row,
   onAnswered,
 }: {
-  auth: AuthSession;
+  auth: AuthSession | null;
   daemon: DaemonClient | null;
   row: FleetRow;
   onAnswered: () => void;

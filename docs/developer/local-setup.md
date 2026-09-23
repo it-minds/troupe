@@ -103,9 +103,13 @@ model.
 
 `clients/tui`: `mise exec -- mix check` there, `scripts/dev` to run it from source,
 `scripts/build-local` for a binary ([clients/tui/CLAUDE.md](../../clients/tui/CLAUDE.md)).
-`clients/gui`: `pnpm install`, `pnpm fake` (an identity provider, plane and worker on
-loopback) and `pnpm dev`, as the [GUI README](../../clients/gui/README.md) shows, and
-[e2e.md](../../clients/gui/docs/e2e.md) for its suites against a real plane and worker.
+`clients/gui`: `pnpm install`, then `pnpm dev:local` - the default. It runs a second
+instance of the installed `troupe-daemon` with the scripted `fake` provider, under
+`TROUPE_DEV_HOME` (default: `troupe-dev-local` in the temp directory), and the GUI in
+local-only mode against it: no plane, no identity provider, no key. `pnpm fake` (an
+identity provider, plane and worker on loopback) and `pnpm dev` are for the plane path,
+as the [GUI README](../../clients/gui/README.md) shows, and
+[e2e.md](../../clients/gui/docs/e2e.md) covers the suites against a real plane and worker.
 
 On this Windows machine the whole install is `scripts/install-local.ps1`, checked by
 `scripts/verify-local.ps1` ([fixing-issues.md](fixing-issues.md)).

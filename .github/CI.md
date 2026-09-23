@@ -99,7 +99,8 @@ The full suite and the native builds on `main` at 02:17 UTC, publishing nothing 
 
 | workflow | what | called by |
 |---|---|---|
-| `ci.yml` | every check; focused or full | pull requests, pushes to `main`, `nightly.yml`, `release.yml` |
+| `ci.yml` | every check; focused or full | pull requests (not into `development-*`), pushes to `main`, `nightly.yml`, `release.yml` |
+| `dev-check.yml` | compile, credo, schema, client builds; no tests | pull requests into a `development-*` chunk ([fixing-issues.md](../docs/developer/fixing-issues.md)) |
 | `images.yml` | the five images, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
 | `native.yml` | `troupe-daemon` ×5, `troupe` ×5, desktop ×3; optionally attached to a release | `ci.yml` (PRs that touch them), `nightly.yml`, `prerelease.yml`, `release.yml` |
 | `prerelease.yml` | an untested pre-release of any commit | by hand |

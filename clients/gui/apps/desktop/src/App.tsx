@@ -1,15 +1,23 @@
-// The shell. Sign in, then one list and the things you reach from it.
+// The shell. Sign in, or use this computer only, then one list and the things you reach
+// from it.
 //
 // There is no router and no session state: which screen is showing is a local
 // variable, and every screen rebuilds itself from the platform and the machine running
 // the work. Closing the window loses a scroll position.
+//
+// Which of the two the app is talking to is its mode (`mode.ts`), and the screens are
+// handed what the mode gives them rather than guessing from whether somebody happens to
+// be signed in: in local mode there is no `auth`, the screens that only a plane can fill
+// are not offered, and nothing here calls a plane.
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
 import { awaitingApproval } from "@troupe/client";
 import type { AuthSession } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
-import { capabilities } from "./shell";
+import { chooseLocalOnly, storedLocalOnly } from "./mode";
+import type { AppMode } from "./mode";
+import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
 import { Local } from "./views/Local";
@@ -17,7 +25,7 @@ import { AppearanceSettings, Onboarding } from "./views/Appearance";
 import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
-import { SignIn } from "./views/SignIn";
+import { newSession, SignIn } from "./views/SignIn";
 import { Eye, Wordmark } from "./views/brand";
 
 type Where =
@@ -28,8 +36,20 @@ type Where =
   | { screen: "appearance" }
   | { screen: "session"; id: string };
 
+/** How often an app working offline asks whether the plane is back. */
+const OFFLINE_RETRY_MS = 15_000;
+
 export function App(): JSX.Element {
+  const [localOnly, setLocalOnlyState] = useState(storedLocalOnly);
+  // Plane mode with the plane not answering, and the person carrying on here meanwhile.
+  // Not remembered: the next launch asks the plane first, which is the point of it.
+  const [offline, setOffline] = useState(false);
+  // Offline, and the plane has answered again but no longer honours the stored sign-in.
+  const [expired, setExpired] = useState(false);
+  const [asking, setAsking] = useState(0);
+  const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState<AuthSession | null>(null);
+  const mode: AppMode = localOnly || offline ? "local" : "plane";
   const [where, setWhere] = useState<Where>({ screen: "sessions" });
   const daemon = useDaemon();
   const { snapshot, refresh } = useFleet(auth, daemon.client);
@@ -41,6 +61,7 @@ export function App(): JSX.Element {
   // two people on one computer are two first sign-ins, and the second should not
   // inherit an answer the first one gave.
   const [chosen, setChosen] = useState(false);
+  const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
 
   const signOut = useCallback(async () => {
     await auth?.signOut();
@@ -51,9 +72,56 @@ export function App(): JSX.Element {
     setChosen(false);
   }, [auth]);
 
-  if (!auth) return <SignIn onSignedIn={setAuth} />;
+  const setLocalOnly = useCallback((on: boolean) => {
+    chooseLocalOnly(on);
+    setLocalOnlyState(on);
+    setOffline(false);
+    setExpired(false);
+    // Let go of, not signed out of: the refresh token stays in its store, so turning
+    // this off again signs straight back in. Signing out is a different button.
+    if (on) setAuth(null);
+  }, []);
 
-  if (!chosen && !hasChosen(auth.me?.subject)) {
+  // Offline, the plane is asked again every so often, and the app goes back to it the
+  // moment it answers — with the sessions that ran here still in the one list, because
+  // they were never the plane's to take away. "Try now" asks at once.
+  useEffect(() => {
+    if (!offline || expired || !planeUrl) return;
+    let live = true;
+    const ask = (): void => {
+      const session = newSession(planeUrl);
+      setChecking(true);
+      // Discovery first, because it is the question "is it there?": a stored sign-in
+      // that is missing answers `null` without asking anybody, which is not the plane
+      // coming back.
+      session
+        .discover()
+        .then(() => session.restore())
+        .then((signedIn) => {
+          if (!live) return;
+          if (signedIn) {
+            setAuth(session);
+            setOffline(false);
+          } else {
+            setExpired(true);
+          }
+        })
+        .catch(() => undefined) // still not answering
+        .finally(() => live && setChecking(false));
+    };
+    if (asking > 0) ask();
+    const timer = setInterval(ask, OFFLINE_RETRY_MS);
+    return () => {
+      live = false;
+      clearInterval(timer);
+    };
+  }, [offline, expired, planeUrl, asking]);
+
+  if (mode === "plane" && !auth) {
+    return <SignIn onSignedIn={setAuth} onLocalOnly={() => setLocalOnly(true)} onOffline={() => setOffline(true)} />;
+  }
+
+  if (auth && !chosen && !hasChosen(auth.me?.subject)) {
     return (
       <Onboarding
         name={auth.me?.display_name ?? null}
@@ -89,9 +157,13 @@ export function App(): JSX.Element {
               </span>
             )}
           </button>
-          <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
-            Review
-          </button>
+          {/* Review reads the plane's record of unattended runs. There is none without
+              a plane, so it is not offered, rather than offered and empty. */}
+          {auth && (
+            <button aria-current={where.screen === "review" ? "page" : undefined} onClick={() => setWhere({ screen: "review" })}>
+              Review
+            </button>
+          )}
           <button aria-current={where.screen === "local" ? "page" : undefined} onClick={() => setWhere({ screen: "local" })}>
             This computer
             {daemon.status === "connected" && <span className="count muted">{local}</span>}
@@ -101,19 +173,58 @@ export function App(): JSX.Element {
           </button>
         </nav>
         <span className="spacer" />
-        <div className="me">
-          <div className="name">{auth.me?.display_name ?? auth.me?.subject ?? "Signed in"}</div>
-          <div className="teams muted">{auth.me?.teams.join(", ") || "no team"}</div>
-          <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
-            {caps.shellName ?? "browser"}
+        {auth ? (
+          <div className="me">
+            <div className="name">{auth.me?.display_name ?? auth.me?.subject ?? "Signed in"}</div>
+            <div className="teams muted">{auth.me?.teams.join(", ") || "no team"}</div>
+            <div className="host muted micro" title={`Your sign-in is kept in: ${caps.secrets.replace("-", " ")}`}>
+              {caps.shellName ?? "browser"}
+            </div>
+            <button className="link" onClick={() => void signOut()}>
+              Sign out
+            </button>
           </div>
-          <button className="link" onClick={() => void signOut()}>
-            Sign out
-          </button>
-        </div>
+        ) : (
+          // Nobody is signed in, and nobody needs to be: the sessions here belong to
+          // this computer's user, so that is who is named.
+          <div className="me">
+            <div className="name">This computer</div>
+            <div className="teams muted">{daemon.user?.name ?? "the daemon is not connected"}</div>
+            <div className="host muted micro">
+              {!offline ? "local only" : expired ? "not signed in to the platform" : "the platform is not answering"} ·{" "}
+              {caps.shellName ?? "browser"}
+            </div>
+          </div>
+        )}
       </div>
 
       <main>
+        {offline && (
+          <div className="banner offline">
+            <p>
+              {expired
+                ? "The platform is answering again. Sign in to see your team's sessions beside these; the ones here carry on either way."
+                : "The platform is not answering, so this is the sessions on this computer. Troupe goes back to it by itself when it answers."}
+            </p>
+            <span className="micro">{planeUrl}</span>
+            {expired ? (
+              <button
+                className="link"
+                onClick={() => {
+                  setOffline(false);
+                  setExpired(false);
+                }}
+              >
+                Sign in
+              </button>
+            ) : (
+              <button className="link" disabled={checking} onClick={() => setAsking((n) => n + 1)}>
+                {checking ? "Asking…" : "Try now"}
+              </button>
+            )}
+          </div>
+        )}
+
         {where.screen === "sessions" && (
           <Sessions
             auth={auth}
@@ -134,12 +245,14 @@ export function App(): JSX.Element {
           <Local
             daemon={daemon}
             auth={auth}
-            me={auth.me ? { subject: auth.me.subject, display_name: auth.me.display_name } : null}
-            planeUrl={auth.planeUrl}
+            me={auth?.me ? { subject: auth.me.subject, display_name: auth.me.display_name } : null}
+            planeUrl={auth?.planeUrl ?? ""}
+            localOnly={localOnly}
+            onLocalOnly={setLocalOnly}
           />
         )}
 
-        {where.screen === "review" && (
+        {where.screen === "review" && auth && (
           <Review auth={auth} admin={adminApi} daemon={daemon.client} teams={auth.me?.teams ?? []} onOpen={(id) => setWhere({ screen: "session", id })} />
         )}
 
@@ -159,6 +272,7 @@ export function App(): JSX.Element {
           <Session
             auth={auth}
             daemon={daemon.client}
+            machineUser={daemon.user?.subject ?? null}
             row={row}
             sessionId={where.id}
             onBack={() => setWhere({ screen: "sessions" })}

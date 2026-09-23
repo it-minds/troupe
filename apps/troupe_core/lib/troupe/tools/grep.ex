@@ -10,7 +10,7 @@ defmodule Troupe.Tools.Grep do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Gitignore, Reaper, Tool, Workspace}
+  alias Troupe.{Gitignore, Paths, Reaper, Tool, Workspace}
   alias Troupe.Tools.Output
 
   @max_matches 200
@@ -119,6 +119,7 @@ defmodule Troupe.Tools.Grep do
         glob = opts.glob || "**/*"
 
         root
+        |> Paths.glob_escape()
         |> Path.join(glob)
         |> Path.wildcard(match_dot: false)
         |> Enum.filter(&File.regular?/1)

@@ -22,6 +22,7 @@ import type {
   DaemonEndpoint,
   DaemonIdentity,
   FleetSnapshot,
+  Principal,
   ProfileOffering,
   SessionKind,
   SessionView,
@@ -69,6 +70,23 @@ export function useFleet(
   return { snapshot, store, refresh: useCallback(() => void store?.refresh(), [store]) };
 }
 
+/** Who sessions on this computer are recorded as, and what to call them. */
+export interface MachineUser {
+  subject: string;
+  name: string;
+}
+
+/**
+ * The linked account when there is one, and otherwise the operating system's user the
+ * daemon admitted at `initialize` — the principal a linked daemon reports carries
+ * `linked`, and is not believed once the link is gone.
+ */
+function machineUser(identity: DaemonIdentity | null, principal: Principal | null): MachineUser | null {
+  if (identity?.linked && identity.subject) return { subject: identity.subject, name: identity.display_name ?? identity.subject };
+  if (principal && !principal["linked"]) return { subject: principal.subject, name: principal.display_name ?? principal.subject };
+  return null;
+}
+
 /**
  * The daemon on this computer, if there is one and this host can find it.
  *
@@ -86,6 +104,7 @@ export function useDaemon(): {
   endpoint: DaemonEndpoint | null;
   status: "unsupported" | "searching" | "absent" | "connected" | "error";
   identity: DaemonIdentity | null;
+  user: MachineUser | null;
   error: string | null;
   canFind: boolean;
   connectTo: (endpoint: DaemonEndpoint) => void;
@@ -98,6 +117,7 @@ export function useDaemon(): {
   const [endpoint, setEndpoint] = useState<DaemonEndpoint | null>(null);
   const [client, setClient] = useState<DaemonClient | null>(null);
   const [identity, setIdentity] = useState<DaemonIdentity | null>(null);
+  const [principal, setPrincipal] = useState<Principal | null>(null);
   const [status, setStatus] = useState<"unsupported" | "searching" | "absent" | "connected" | "error">(
     canFind ? "searching" : "unsupported",
   );
@@ -146,6 +166,7 @@ export function useDaemon(): {
       .then((who) => {
         if (!live) return;
         setIdentity(who);
+        setPrincipal(next.principal);
         setClient(next);
         setStatus("connected");
         setError(null);
@@ -168,6 +189,7 @@ export function useDaemon(): {
     endpoint,
     status,
     identity,
+    user: machineUser(identity, principal),
     error,
     canFind,
     connectTo: useCallback((e: DaemonEndpoint) => {
@@ -177,6 +199,7 @@ export function useDaemon(): {
     forget: useCallback(() => {
       setEndpoint(null);
       setIdentity(null);
+      setPrincipal(null);
       setStatus(shell()?.findDaemon ? "absent" : "unsupported");
     }, []),
     find: useCallback(() => setRound((n) => n + 1), []),

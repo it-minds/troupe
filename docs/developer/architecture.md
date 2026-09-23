@@ -178,6 +178,22 @@ settles:
   (`localStorage` `troupe.auth.refresh:<planeUrl>`, or the desktop shell's credential
   store); the PKCE verifier sits in `sessionStorage` `troupe.auth.pending` between leaving
   and coming back; preferences are `troupe.pref.*`. Plane and pod tokens live in memory.
+- **The stored refresh token is spent one caller at a time** (#53). A Web Lock is held per
+  plane, across tabs, or a queue within the page where there are no locks, and the token
+  is read inside it. So StrictMode's double effect, or two tabs, never spend a rotating
+  token twice. A 400 or 401 is a refusal: its reason is logged, and the store is cleared
+  only if it still holds the refused token. A 5xx keeps the token. A sign-in that brings
+  no refresh token is warned about, because the provider lacks `offline_access` and the
+  next reload will ask again.
+- **Two modes, `local` and `plane`** (`mode.ts`, #85). `auth` is optional, and each screen
+  says what it needs. In local mode Review and the plane's profiles are hidden, and the
+  rail shows *This computer* and the OS user the daemon reported. *Local only* is a
+  remembered setting (`troupe.pref.localOnly`, until shared settings, #57). It is reached
+  from the sign-in screen's third door or the switch on *This computer*. Turning it on
+  keeps the stored sign-in. *Offline* is plane mode with a plane that does not answer:
+  "Continue on this computer", nothing remembered, and the plane retried every 15 s. The
+  promise that nothing reaches a plane is tested on traffic: `apps/desktop/test` (Vitest,
+  jsdom) records every request the page opens.
 - **The fleet** is one list from several sources (the plane's `sessions.list`, polled
   every 4 s because the plane does not push, and the daemon), merged by id with the
   daemon's copy winning. A source that fails keeps its last rows and reports an error.

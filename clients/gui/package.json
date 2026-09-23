@@ -9,6 +9,7 @@
     "typecheck": "pnpm -r typecheck",
     "bench": "pnpm --filter @troupe/bench start",
     "dev": "pnpm --filter @troupe/desktop dev",
+    "dev:local": "tsx scripts/dev-local.ts",
     "fake": "tsx scripts/fake-deployment.ts",
     "tokens": "tsx scripts/tokens.ts",
     "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts",

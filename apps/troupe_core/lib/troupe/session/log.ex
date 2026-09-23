@@ -106,7 +106,7 @@ defmodule Troupe.Session.Log do
   """
   @spec locate(String.t(), Path.t() | nil) :: Path.t() | nil
   def locate(session_id, state_dir \\ nil) do
-    [Paths.state_dir(state_dir), "sessions", "*", session_id, "events.jsonl"]
+    [Paths.glob_escape(Paths.state_dir(state_dir)), "sessions", "*", session_id, "events.jsonl"]
     |> Path.join()
     |> Path.wildcard()
     |> List.first()

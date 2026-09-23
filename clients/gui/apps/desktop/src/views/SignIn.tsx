@@ -8,6 +8,11 @@
 // from shows a code to type somewhere else (the device grant). The difference is not a
 // preference — Microsoft Entra refuses a browser's request for a device code outright,
 // and a page cannot even be told why.
+//
+// And a door that is not a sign-in at all. Where this host can reach the daemon on this
+// computer, "Use this computer only" skips the plane for good (until the setting says
+// otherwise), and a plane that does not answer is offered the same way out for now,
+// rather than a sign-in screen that can only fail.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
@@ -21,7 +26,7 @@ import { Wordmark } from "./brand";
  * store, HTTP from outside the webview, and which sign-in it can actually complete —
  * a webview looks like a browser to the inference and has no redirect to come back to.
  */
-function newSession(planeUrl: string): AuthSession {
+export function newSession(planeUrl: string): AuthSession {
   const host = shell();
   return new AuthSession({
     planeUrl,
@@ -38,12 +43,25 @@ const SECRETS: Record<string, string> = {
   memory: "Nothing can be saved here, so you will be asked to sign in again next time.",
 };
 
-export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void }): JSX.Element {
+export function SignIn({
+  onSignedIn,
+  onLocalOnly,
+  onOffline,
+}: {
+  onSignedIn: (auth: AuthSession) => void;
+  /** "Use this computer only": turn the setting on, and never ask about a plane again. */
+  onLocalOnly: () => void;
+  /** The plane did not answer: work on this computer until it does. */
+  onOffline: () => void;
+}): JSX.Element {
   const [planeUrl, setPlaneUrl] = useState(() => prefs.get("planeUrl", likelyPlaneUrl()));
   const [device, setDevice] = useState<DeviceAuthorization | null>(null);
   const [discovery, setDiscovery] = useState<Discovery | null>(null);
   const [status, setStatus] = useState("");
   const [error, setError] = useState<string | null>(null);
+  // Not the same as an error: a plane that answered "no" wants a different sign-in, and
+  // one that did not answer at all wants somewhere else to work in the meantime.
+  const [unreachable, setUnreachable] = useState(false);
   const [busy, setBusy] = useState(false);
   const [restoring, setRestoring] = useState(true);
   const caps = capabilities();
@@ -76,6 +94,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
       .catch((e: unknown) => {
         if (!live) return;
         setError(describe(e));
+        setUnreachable(e instanceof PlaneUnreachableError);
         setRestoring(false);
       });
 
@@ -87,6 +106,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
   const signIn = async (): Promise<void> => {
     setBusy(true);
     setError(null);
+    setUnreachable(false);
     setDevice(null);
     prefs.set("planeUrl", planeUrl);
     const auth = newSession(planeUrl);
@@ -107,6 +127,7 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
       onSignedIn(auth);
     } catch (e) {
       setError(describe(e));
+      setUnreachable(e instanceof PlaneUnreachableError);
       setDevice(null);
     } finally {
       setBusy(false);
@@ -171,6 +192,30 @@ export function SignIn({ onSignedIn }: { onSignedIn: (auth: AuthSession) => void
       )}
 
       {error && <SignInError message={error} />}
+
+      {/* Only where this host can reach the daemon: a door into a room with nothing in
+          it is not a door. A browser served by the plane has none; a desktop shell, or a
+          development build that was told where the daemon is, has one. */}
+      {caps.localSessions && (
+        <div className="options">
+          {unreachable && (
+            <button type="button" className="option" onClick={onOffline}>
+              <span className="label">Continue on this computer</span>
+              <span className="consequence">
+                For now. The sessions here keep working, and Troupe goes back to {hostOf(planeUrl)} by itself when it answers again, with
+                your sign-in as it was.
+              </span>
+            </button>
+          )}
+          <button type="button" className="option" onClick={onLocalOnly}>
+            <span className="label">Use this computer only</span>
+            <span className="consequence">
+              No sign-in and no platform. Sessions run here, on your own model keys, and nothing is sent to a plane. You can change it on
+              This computer.
+            </span>
+          </button>
+        </div>
+      )}
 
       <footer>
         {discovery && <p>You will sign in with {hostOf(discovery.issuer)}.</p>}

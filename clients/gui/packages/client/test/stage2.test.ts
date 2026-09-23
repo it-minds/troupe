@@ -206,7 +206,13 @@ describe("stage 2, done item 3: who the daemon records", () => {
   });
 
   it("goes from the machine's login to the person, and back", async () => {
+    const before = client.principal;
+    assert.equal(before, null, "nothing is known before the socket is open");
     assert.deepEqual(await client.identity(), { linked: false });
+    // Unlinked, "you" is the operating system's user, as the daemon said at `initialize`:
+    // the only name a person with no plane has.
+    assert.equal(client.principal?.subject, "local:ada");
+    assert.equal(client.principal?.display_name, "ada");
 
     const linked = await client.linkIdentity({
       subject: "ada@example.test",
