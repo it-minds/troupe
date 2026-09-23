@@ -191,6 +191,31 @@ defmodule Troupe.Protocol.BundleTest do
     assert [%{name: "review-checklist", description: "How we review a pull request"}] =
              Bundle.list_skills(dir)
   end
+
+  # A materialised bundle's skills are found by globbing its directory. On Windows that
+  # directory is written with backslashes, which a glob reads as escapes, and a `[` or a
+  # `{` in it is read as a wildcard: either way a bundle had no skills (#98).
+  for name <- ["bundle[1]", "bundle{a,b}"] do
+    test "a bundle directory called #{name}, written with backslashes, lists and reads its skills" do
+      base = Path.join(System.tmp_dir!(), "troupe-bundle-#{System.unique_integer([:positive])}")
+      on_exit(fn -> File.rm_rf(base) end)
+      dir = Path.join(base, unquote(name))
+
+      {:ok, bundle} = Bundle.validate(document())
+      assert :ok = Bundle.materialize(bundle, document(), dir)
+
+      # The directory as Windows spells it. A glob reads a backslash as a separator on
+      # every host, as `Troupe.Paths` does, so under Linux this is the same directory.
+      windows = String.replace(dir, "/", "\\")
+
+      assert {:ok, %{name: "review-checklist", files: ["SKILL.md", "checklist.md"]}} =
+               Bundle.read_skill(windows, "review-checklist")
+
+      assert [%{name: "review-checklist", description: "How we review a pull request"}] =
+               Bundle.list_skills(windows)
+    end
+  end
+
   describe "whose credential an MCP server uses" do
     test "profile is the default, and is what every bundle meant before there was a mode" do
       content = %{

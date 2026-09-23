@@ -12,6 +12,7 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
   alias Troupe.Client
+  alias Troupe.Protocol.Glob
   alias Troupe.Settings
   alias Troupe.UI.HQ
   alias Troupe.UI.TUI.{Input, Model, View}
@@ -1945,11 +1946,18 @@ defmodule Troupe.UI.TUI.Server do
   def complete_file(text, workspace) do
     case Regex.run(~r/@([^\s@]*)$/, text) do
       [full, partial] ->
+        # Neither the workspace nor what was typed is a pattern: a Windows workspace is
+        # written with backslashes, and a `[` or a `{` in either is part of a name. Only the
+        # trailing `*` is a wildcard, and the matches are relative to the workspace as the
+        # glob reads it, with forward slashes.
+        root = String.replace(workspace, "\\", "/")
+
         matches =
-          workspace
-          |> Path.join(partial <> "*")
+          root
+          |> Glob.escape()
+          |> Path.join(Glob.escape(partial) <> "*")
           |> Path.wildcard()
-          |> Enum.map(&Path.relative_to(&1, workspace))
+          |> Enum.map(&Path.relative_to(&1, root))
           |> Enum.sort()
 
         case matches do
@@ -1957,7 +1965,7 @@ defmodule Troupe.UI.TUI.Server do
             String.replace_suffix(
               text,
               full,
-              "@" <> first <> if(File.dir?(Path.join(workspace, first)), do: "/", else: "")
+              "@" <> first <> if(File.dir?(Path.join(root, first)), do: "/", else: "")
             )
 
           [] ->
