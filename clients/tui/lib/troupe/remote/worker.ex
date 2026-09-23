@@ -77,8 +77,11 @@ defmodule Troupe.Remote.Worker do
   @spec answer(String.t(), String.t(), String.t()) :: :ok | {:error, term()}
   def answer(session_id, call_id, text), do: call(session_id, {:answer, call_id, text})
 
-  @spec edit_todo(String.t(), term()) :: :ok | {:error, term()}
-  def edit_todo(session_id, change), do: call(session_id, {:todo, change})
+  @doc "Adds an item to the task list by its text, or cancels or completes one by its id."
+  @spec edit_todo(String.t(), {:add | :cancel | :complete, String.t()}) :: :ok | {:error, term()}
+  def edit_todo(session_id, {action, _text_or_id} = change)
+      when action in [:add, :cancel, :complete],
+      do: call(session_id, {:todo, change})
 
   @spec switch_profile(String.t(), String.t()) :: :ok | {:error, term()}
   def switch_profile(session_id, name), do: call(session_id, {:profile, name})
@@ -107,7 +110,7 @@ defmodule Troupe.Remote.Worker do
   @spec blob(String.t(), String.t(), non_neg_integer(), non_neg_integer()) ::
           {:ok, term()} | {:error, term()}
   def blob(session_id, blob, offset \\ 0, length \\ 1_000_000),
-    do: call(session_id, {:rpc, "blob.get", %{blob: blob, offset: offset, length: length}})
+    do: call(session_id, {:rpc, "blob.get", %{blob: blob, range: [offset, offset + length - 1]}})
 
   @doc "What the connection and the session look like right now."
   @spec status(String.t()) :: map()
@@ -271,13 +274,15 @@ defmodule Troupe.Remote.Worker do
 
   def handle_call({:todo, change}, from, state),
     do:
-      activating(state, from, "todo.edit", %{
-        change: todo_change(change),
-        command_id: RPC.command_id()
-      })
+      activating(
+        state,
+        from,
+        "todo.edit",
+        Map.put(todo_change(change), :command_id, RPC.command_id())
+      )
 
   def handle_call({:profile, name}, from, state),
-    do: activating(state, from, "profile.switch", %{name: name, command_id: RPC.command_id()})
+    do: activating(state, from, "profile.switch", %{profile: name, command_id: RPC.command_id()})
 
   def handle_call({:goal, nil}, from, state),
     do: activating(state, from, "session.goal.clear", %{command_id: RPC.command_id()})
@@ -285,12 +290,20 @@ defmodule Troupe.Remote.Worker do
   def handle_call({:goal, text}, from, state),
     do: activating(state, from, "session.goal.set", %{text: text, command_id: RPC.command_id()})
 
+  # The contract carries the file as a JSON string (PROTOCOL.md §6), so bytes that are
+  # not UTF-8 have no spelling in it; they are refused here rather than crashing this
+  # process on the frame that could not encode them.
   def handle_call({:upload, path, content}, from, state) do
-    activating(state, from, "fs.upload", %{
-      path: path,
-      content_base64: Base.encode64(content),
-      command_id: RPC.command_id()
-    })
+    if String.valid?(content) do
+      activating(state, from, "fs.upload", %{
+        path: path,
+        content: content,
+        command_id: RPC.command_id()
+      })
+    else
+      {:reply, {:error, "the file for #{path} is not UTF-8 text; an upload carries text only"},
+       state}
+    end
   end
 
   def handle_call({:rpc, method, params}, from, state), do: command(state, from, method, params)
@@ -716,7 +729,7 @@ defmodule Troupe.Remote.Worker do
   defp refresh_auth(state) do
     case mint(state) do
       {:ok, token, state} ->
-        send_request(state, {:internal, :auth}, "auth.refresh", %{token: token})
+        send_request(state, {:internal, :auth}, "auth.refresh", %{auth: %{token: token}})
 
       {:error, reason, state} ->
         publish_note(
@@ -809,10 +822,11 @@ defmodule Troupe.Remote.Worker do
     %{state | agent: root, memory: Translate.remember(state.memory, root)}
   end
 
-  defp todo_change({:add, text}), do: %{action: "add", text: text}
-  defp todo_change({:cancel, text}), do: %{action: "cancel", text: text}
-  defp todo_change(%{} = change), do: change
-  defp todo_change(other), do: %{action: "set", value: to_string(other)}
+  # The contract's three edits (PROTOCOL.md §6): `add` carries the item's text as
+  # `content`; `cancel` and `complete` name an item by its `id`.
+  defp todo_change({:add, text}), do: %{action: "add", content: text}
+  defp todo_change({:cancel, id}), do: %{action: "cancel", id: id}
+  defp todo_change({:complete, id}), do: %{action: "complete", id: id}
 
   defp drop_socket(state, opts \\ []) do
     _ = state.socket && Socket.close(state.socket)
