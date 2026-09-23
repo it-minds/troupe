@@ -6,8 +6,9 @@ this adds only what an agent working in the repository must not miss.
 
 - **Fixing GitHub issues.** Follow [docs/developer/fixing-issues.md](docs/developer/fixing-issues.md):
   one issue at a time, each reproduced, fixed, installed with `scripts/install-local.ps1`,
-  checked with `scripts/verify-local.ps1`, and put up as a pull request. It has a
-  coordinator role (triage and the queue) and a fixer role (one issue).
+  checked with `scripts/verify-local.ps1`, and put up as a pull request into the run's
+  `development-<date>` branch, never straight into `main`. It has a coordinator role
+  (triage, the queue, the chunk) and a fixer role (one issue).
 - **Defects found in passing** go in [docs/developer/defects.md](docs/developer/defects.md)
   (where, what, severity, who found it). Read it before touching code it names.
 - **No attribution** in commits or pull requests: no `Co-Authored-By:` trailer, no
