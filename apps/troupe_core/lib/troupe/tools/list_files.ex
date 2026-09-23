@@ -3,7 +3,7 @@ defmodule Troupe.Tools.ListFiles do
 
   @behaviour Troupe.Tool
 
-  alias Troupe.{Gitignore, Workspace}
+  alias Troupe.{Gitignore, Paths, Workspace}
 
   @limit 1_000
 
@@ -44,6 +44,7 @@ defmodule Troupe.Tools.ListFiles do
 
       matches =
         root
+        |> Paths.glob_escape()
         |> Path.join(pattern)
         |> Path.wildcard(match_dot: false)
         |> Enum.filter(&File.regular?/1)

@@ -60,6 +60,12 @@ defmodule Troupe.WorkflowTest do
     assert Workflow.available(ws) == ["default", "audit", "release"]
   end
 
+  test "available reads a workspace whose path has glob characters in it literally", %{ws: ws} do
+    ws = Path.join(ws, "app[1]{a,b}")
+    write!(ws, ".troupe/workflows/release.json", ~s|[{"name":"a","prompt":"p"}]|)
+    assert Workflow.available(ws) == ["default", "release"]
+  end
+
   test "load reads a named workflow's owners and parallel flags", %{ws: ws} do
     write!(ws, ".troupe/workflows/custom.json", """
     [{"name":"build","agent":"implementer","prompt":"build it"},
