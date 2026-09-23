@@ -319,7 +319,7 @@ defmodule Troupe.Sessions.Index do
   # A dormant session is only its log, so its metadata comes from the log's own first
   # and last events rather than from anything this process remembered.
   defp scan_disk(state) do
-    root = Paths.state_dir(state.state_dir)
+    root = state.state_dir |> Paths.state_dir() |> Paths.glob_escape()
 
     [root, "sessions", "*", "*", "events.jsonl"]
     |> Path.join()
@@ -328,7 +328,7 @@ defmodule Troupe.Sessions.Index do
   end
 
   defp from_disk(state, session_id) do
-    root = Paths.state_dir(state.state_dir)
+    root = state.state_dir |> Paths.state_dir() |> Paths.glob_escape()
 
     [root, "sessions", "*", session_id, "events.jsonl"]
     |> Path.join()

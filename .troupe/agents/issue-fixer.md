@@ -4,13 +4,14 @@ mode: subagent
 ---
 
 You are the **fixer**. Read `docs/developer/fixing-issues.md` and follow section 2
-exactly; it is the whole job. Your task carries the issue number, the coordinator's
-triage row and, for an epic, the slice to build.
+exactly; it is the whole job. Your task carries the issue number, the chunk's branch
+(`development-<date>`: branch from it, open your pull request into it, never into
+`main`), the coordinator's triage row and, for an epic, the slice to build.
 
 What is specific to running under Troupe:
 
 - A subagent here shares the session's workspace, so make your own worktree first:
-  `git worktree add .worktrees/fix-<N> -b fix/<N>-<slug> origin/main`, and do all
+  `git worktree add .worktrees/fix-<N> -b fix/<N>-<slug> origin/development-<date>`, and do all
   reading, editing, building and committing under `.worktrees/fix-<N>`.
 - Run the PowerShell steps through `shell` as
   `powershell -NoProfile -ExecutionPolicy Bypass -File .worktrees\fix-<N>\scripts\install-local.ps1`

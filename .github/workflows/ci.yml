@@ -26,10 +26,15 @@ name: ci
 
 # A push to a branch runs nothing: the pull request for that branch runs the gate, and
 # running it twice for every push measured the same thing twice.
+#
+# A pull request into a `development-*` branch - one issue of a chunked run
+# (docs/developer/fixing-issues.md) - gets the light `dev-check.yml` instead. This gate
+# runs once for the whole chunk, on the chunk's pull request into `main`.
 on:
   push:
     branches: [main]
   pull_request:
+    branches-ignore: ["development-*"]
   workflow_call:
     inputs:
       full:
@@ -595,10 +600,11 @@ jobs:
           docker compose -f dev/plane-stack.yml logs --no-color plane-migrate | tail -20
 
   # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
-  # read it; a copy nobody checks is how four numbers came to have no relation. Cheap, so
-  # it runs whatever the change touched.
+  # read it; a copy nobody checks is how four numbers came to have no relation. And a
+  # Markdown link goes dead when any file moves, whatever the change was, so it is checked
+  # here too. Both cheap, so this runs whatever the change touched.
   versions:
-    name: every copy of the version agrees
+    name: every copy of the version agrees, every doc link resolves
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -607,6 +613,7 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
       - run: elixir scripts/version.exs check
+      - run: elixir scripts/doc-links.exs
 
   native:
     name: native builds

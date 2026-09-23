@@ -34,23 +34,29 @@ import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits
 export function Session({
   auth,
   daemon,
+  machineUser,
   row,
   sessionId,
   onBack,
 }: {
-  auth: AuthSession;
+  /** The plane, for a team session and its profiles. Null in local mode. */
+  auth: AuthSession | null;
   daemon: DaemonClient | null;
+  /** Who the daemon records this person as, which is "you" in a session on this computer. */
+  machineUser: string | null;
   row: FleetRow | undefined;
   sessionId: string;
   onBack: () => void;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
-  // way, which is the whole point of the client library.
-  const view = useSessionView(auth, sessionId, { daemon, kind: row?.kind ?? "team" });
+  // way, which is the whole point of the client library. A session the list has not
+  // caught up with yet is a team session only where there is a team to have one.
+  const kind = row?.kind ?? (auth ? "team" : "local");
+  const view = useSessionView(auth, sessionId, { daemon, kind });
   const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
-  const self = auth.me?.subject;
+  const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer";
   const dormant = row?.state === "dormant";
@@ -156,13 +162,17 @@ function Header({
         <Pill status="queued">Idle</Pill>
       )}
 
-      <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
-        {profiles.map((p) => (
-          <option key={p.name} value={p.name}>
-            {p.name}
-          </option>
-        ))}
-      </select>
+      {/* The profiles are the plane's. With no plane there are none to switch to, and an
+          empty control is a broken one. */}
+      {profiles.length > 0 && (
+        <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
+          {profiles.map((p) => (
+            <option key={p.name} value={p.name}>
+              {p.name}
+            </option>
+          ))}
+        </select>
+      )}
 
       <button onClick={onToggleBackstage} aria-pressed={backstage}>
         {backstage ? "Hide backstage" : "Show backstage"}
@@ -549,7 +559,9 @@ function Backstage({
             <When iso={row?.lastActiveAt ?? null} />
           </dd>
           <dt>Owner</dt>
-          <dd>{row?.owner === self ? "you" : (row?.owner ?? "—")}</dd>
+          {/* A session on this computer with no owner on record is this computer's user's,
+              which is the person looking at it. */}
+          <dd>{row?.owner === self || (row && row.kind !== "team" && !row.owner) ? "you" : (row?.owner ?? "—")}</dd>
           <dt>Configuration</dt>
           <dd>bundle {view.state.bundleVersion ?? "—"}</dd>
         </dl>

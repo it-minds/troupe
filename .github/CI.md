@@ -99,10 +99,25 @@ The full suite and the native builds on `main` at 02:17 UTC, publishing nothing 
 
 | workflow | what | called by |
 |---|---|---|
-| `ci.yml` | every check; focused or full | pull requests, pushes to `main`, `nightly.yml`, `release.yml` |
+| `ci.yml` | every check; focused or full | pull requests (not into `development-*`), pushes to `main`, `nightly.yml`, `release.yml` |
+| `dev-check.yml` | compile, credo, schema, client builds; no tests | pull requests into a `development-*` chunk ([fixing-issues.md](../docs/developer/fixing-issues.md)) |
 | `images.yml` | the five images, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
 | `native.yml` | `troupe-daemon` ×5, `troupe` ×5, desktop ×3; optionally attached to a release | `ci.yml` (PRs that touch them), `nightly.yml`, `prerelease.yml`, `release.yml` |
 | `prerelease.yml` | an untested pre-release of any commit | by hand |
 | `release.yml` | full suite → tag → publish → deploy | a VERSION change on `main`; by hand to retry |
 | `nightly.yml` | full suite + native builds | schedule; by hand |
 | `deploy.yml` | roll back to, or render, a published release | by hand |
+
+## Secrets and variables
+
+| Name | Kind | Used by |
+|---|---|---|
+| `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | repository secrets | `images.yml`: all four or none. Without them nothing is published and the run says which are missing; a release fails, because a release is its images |
+| `GUI_BASE` | repository variable | `images.yml`: the GUI's mount path baked into its assets, default `app` |
+| `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../clients/gui/docs/install.md)) |
+| `KUBECONFIG`, `DEPLOY_VALUES` | `production` environment secrets | `release.yml`, `deploy.yml`: the `troupe-deployer` account's kubeconfig (`deploy/ci-deployer.yaml`, then `scripts/ci-kubeconfig`) and the deployment's Helm values |
+| `PLANE_URL` | `production` environment variable | where `scripts/deploy` asks `/.well-known/troupe` which version and commit is running |
+
+`production` should allow `main` alone, so no pull request reaches its secrets. The review
+of the pull request that changed `VERSION` is the approval, unless the environment adds a
+required reviewer.

@@ -11,11 +11,16 @@ What is specific to running under Troupe:
 
 - **Agreeing the queue:** show the triage table, then ask with `ask_user`. Nothing is
   pushed before that answer.
+- **Cutting the chunk:** before the first issue, push `development-<date>` from
+  `origin/main` (section "A run is a chunk").
 - **Handing out an issue:** `delegate` to `issue-fixer`, one call at a time - never
   several in the same turn, because each one installs to the same place. Put the issue
-  number, its triage row, the slice for an epic and anything the person said about it
-  in the task.
+  number, the chunk's branch, its triage row, the slice for an epic and anything the
+  person said about it in the task.
+- **Closing the chunk:** once the person has merged the fixers' pull requests, install
+  and verify the chunk's tip, then open its pull request into `main`.
 - **`learned` items** go in the project brief with `remember` when they are about the
   repository, or in `docs/developer/fixing-issues.md` when they are about the process.
 
-Never merge, approve or close anything, and never force-push.
+Never merge, approve or close anything, and never force-push. The person merges the
+fixers' pull requests into the chunk and the chunk into `main`.

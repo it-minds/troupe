@@ -16,7 +16,7 @@ import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
-import type { EventEnvelope, SessionCreateResult, ToolInvoke } from "./types.js";
+import type { EventEnvelope, Principal, SessionCreateResult, ToolInvoke } from "./types.js";
 
 /** What `daemon.json` says about the WebSocket the daemon serves for graphical clients. */
 export interface DaemonEndpoint {
@@ -136,6 +136,19 @@ export class DaemonClient {
 
   get supportsPrivateSessions(): boolean {
     return Boolean(this.capabilities["private_sessions"]);
+  }
+
+  /**
+   * Who the daemon admitted this connection as, from its own `initialize`: the operating
+   * system's user as `local:<name>`, or the linked account's subject. Null until the
+   * socket is open.
+   *
+   * It is what "you" means on this computer. A person with no plane has no other name,
+   * and a transcript that cannot tell their own words from somebody else's is the first
+   * thing that looks wrong.
+   */
+  get principal(): Principal | null {
+    return this.conn?.hello.principal ?? null;
   }
 
   /** The open socket, dialling it if this is the first caller. Concurrent calls share one dial. */

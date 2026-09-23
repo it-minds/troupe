@@ -117,9 +117,9 @@ use names on both sides.
 | **Signing key** | any certificate. Not optional |
 | Subject mode | Based on the User's UUID |
 | Issuer mode | Per provider |
-| Scopes | the shipped `openid`, `profile`, `email`, plus `troupe groups` from 1a |
+| Scopes | the shipped `openid`, `profile`, `email`, **`offline_access`**, plus `troupe groups` from 1a |
 
-Four of those are load-bearing and each fails in its own way:
+Five of those are load-bearing and each fails in its own way:
 
 - **Grant types are explicit and the default is empty.** Leave them and the authorize
   endpoint answers `The request is otherwise malformed`, while only the server log says
@@ -135,6 +135,12 @@ Four of those are load-bearing and each fails in its own way:
   answers 404.
 - **Redirect URIs are matched exactly.** The value above is `base_url` plus
   `/admin/callback` and nothing else (`web/admin_auth.ex`, `redirect_uri/0`).
+- **Without `offline_access` on the provider there is no refresh token.** The plane
+  asks for it (section 2), but Authentik drops a requested scope the provider does not
+  carry, and issues a refresh token only for this one. Sign-in still works; staying
+  signed in does not. The GUI loses its session at every reload and says so in the
+  browser console ("issued no refresh token"), and the CLI and the TUI have nothing to
+  renew with once their first token expires.
 
 ### 1c. The application
 
@@ -285,14 +291,16 @@ Each of these is a thing somebody watched happen, not a thing that ought to work
 2. Their groups arrived: the groups claim carries the UUIDs, and the Identity screen
    lists them.
 3. The CLI's device grant completes.
-4. SCIM dry-run output read by a person before the first real sync.
-5. First real sync, with the counts recorded.
-6. Group membership arrived for the named groups, and a team drawn from one has the
+4. The GUI at `/app` is still signed in after a reload, and the browser console has no
+   line starting `troupe:`.
+5. SCIM dry-run output read by a person before the first real sync.
+6. First real sync, with the counts recorded.
+7. Group membership arrived for the named groups, and a team drawn from one has the
    people in it.
-7. A removal, end to end: the person is deactivated here, their next request is refused,
+8. A removal, end to end: the person is deactivated here, their next request is refused,
    and any principal they sponsored has stopped firing.
-8. Break-glass still works.
-9. Service principals still work. They do not touch the identity provider, so this should
+9. Break-glass still works.
+10. Service principals still work. They do not touch the identity provider, so this should
    be uneventful, and it is the check that proves triggers survived the switch.
 
 ---
@@ -313,14 +321,3 @@ Stated plainly, because the rest of this document reads like it has been.
 - **How many real people exist on the live plane today**, which is what makes the fresh
   start cheap or expensive. The decision was taken on the understanding that it is
   test-era data.
-
----
-
-## What to read next
-
-- [integrations.md §1](integrations.md#1-identity-provider-oidc) — everything this plane
-  requires of an identity provider, with the file and line that decides each one.
-- [integrations.md §8](integrations.md#8-scim) — the endpoint table.
-- [roles-and-permissions.md](roles-and-permissions.md) — what a platform admin, a team
-  admin and a person may each do once they are in.
-- [routine-tasks.md](routine-tasks.md) — the step lists these sections are drawn from.

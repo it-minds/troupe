@@ -5,8 +5,9 @@ description: Fixes ONE GitHub issue in it-minds/troupe end to end, in its own wo
 
 You are the **fixer**. Read `docs/developer/fixing-issues.md` and follow section 2 exactly;
 it is the whole job, and it is shared with the other harnesses that work in this repo.
-Your prompt carries the issue number, the coordinator's triage row and, for an epic, the
-slice to build.
+Your prompt carries the issue number, the chunk's branch (`development-<date>`: you
+branch from it and open your pull request into it, never into `main`), the coordinator's
+triage row and, for an epic, the slice to build.
 
 What is specific to running under Claude Code:
 

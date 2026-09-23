@@ -12,7 +12,7 @@ Three packages in one pnpm workspace:
 | --- | --- |
 | `packages/client` | `@troupe/client` — the protocol in TypeScript. JSON-RPC 2.0 over WebSocket, the plane's HTTP surface (discovery, device-grant login, `/auth/exchange`, `/rpc`), and a `SessionView` that folds events and turns "send a prompt, wait for the turn" into a promise. Runs in a browser or Node; no dependencies. |
 | `packages/bench` | `@troupe/bench` — the throughput test. N clients, one session each, K prompts each, every milestone timed. |
-| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane, shows one list of every session — the team's on worker pods and the person's own on the daemon in front of them — streams a session, answers approvals, reviews what ran unattended, and administers the platform for whoever may. The bundle is plain web; the Tauri shell in [`src-tauri/`](apps/desktop/src-tauri) loads it unchanged and adds the things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
+| `apps/desktop` | The GUI. Vite + React, on the design system in [`docs/design/`](docs/design/DESIGN.md). Signs in through the plane (or, in local-only mode, talks to the daemon on this computer and nothing else), shows one list of every session — the team's on worker pods and the person's own on the daemon in front of them — streams a session, answers approvals, reviews what ran unattended, and administers the platform for whoever may. The bundle is plain web; the Tauri shell in [`src-tauri/`](apps/desktop/src-tauri) loads it unchanged and adds the things a browser cannot do — see [`src/shell.ts`](apps/desktop/src/shell.ts). |
 
 ## The path a client takes
 
@@ -48,8 +48,33 @@ Things the client library knows that the protocol document does not say loudly:
 ```sh
 pnpm install
 pnpm build                       # builds @troupe/client, typechecks the rest
-pnpm dev                         # the GUI on http://localhost:5173
+pnpm dev:local                   # the GUI on this computer's daemon alone: no plane, no sign-in
 ```
+
+### On this computer alone — the default way to develop
+
+```sh
+pnpm dev:local                   # then open the address Vite prints
+pnpm dev:local --port 5185       # anything after the name goes to Vite
+```
+
+`pnpm dev:local` starts a daemon and the GUI in *local-only* mode against it: no plane,
+no identity provider, no key, and nothing sent anywhere. The app opens on the session
+list; start a session in the `demo` directory it prints, and the answers come from the
+daemon's scripted `fake` provider reading `script.json` in the same place — one step per
+model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each new
+session.
+
+It needs `troupe-daemon` installed (`install.ps1`/`install.sh` at the repository root,
+or `scripts/install-local.ps1` from a checkout); `TROUPE_DAEMON_BIN` names another. The
+daemon it starts is a second instance of that install, with its own state, config and
+`daemon.json` under `TROUPE_DEV_HOME` (a directory in the system's temp by default), so
+it never touches the daemon you work with, its sessions or its keys. It stops by itself
+ten minutes after the last client leaves, and the next `pnpm dev:local` starts it again.
+
+The *Local only* switch is on *This computer*. Turning it off puts the sign-in screen
+back, with "Use this computer only" as its third door; a stored plane sign-in survives
+the round trip.
 
 ### Against a fake deployment, with nothing else installed
 
@@ -68,12 +93,13 @@ streaming. The plane answers `me.client_defaults` with an organisation gateway, 
 organisation defaults* on the models panel has something to fill in;
 `NO_CLIENT_DEFAULTS=1 pnpm fake` is an organisation that has set nothing.
 
-### Against the real daemon, with a fake model
+### Your own daemon beside the fake plane
 
-The fake deployment has no daemon. To see a session on this computer — questions, the
-budget question, streamed reasoning, the harness's notes — run the real `troupe-daemon`
-with its scripted model, which is how its own smoke tests and the TUI's client tests
-drive it:
+The fake deployment has no daemon, and `pnpm dev:local` has no plane. To see both halves
+of the one list — a team session and a session on this computer, with questions, the
+budget question, streamed reasoning and the harness's notes — run the real
+`troupe-daemon` with its scripted model, which is how its own smoke tests and the TUI's
+client tests drive it:
 
 ```sh
 # 1. the daemon: install it (install.sh / install.ps1 at the repository root; --no-tui
@@ -127,10 +153,18 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # 77 tests: stage 1 and 2's done items, PKCE, the fold, the fleet store, model settings
+pnpm test                        # the client's 77 and the app's 4, below
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
 ```
+
+The client's tests cover stage 1 and 2's done items, PKCE, the fold, the fleet store and
+model settings, on Node's runner. The app's, in `apps/desktop/test`, render the app
+itself in jsdom under Vitest against the fake daemon on a real socket, and record every
+request the page makes: in local-only mode, with a plane sign-in stored and every screen
+visited, the daemon is the only thing it talks to. They also walk the third door,
+switch local-only off and on without losing the stored sign-in, and fall back to this
+computer when the plane does not answer.
 
 `packages/client/test/support` is a deployment that implements the protocol rather than
 imitating a screen: a real WebSocket, a hash-chained log, replay from a cursor with a

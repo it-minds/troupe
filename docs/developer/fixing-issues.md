@@ -10,8 +10,39 @@ person running it, and hands out one issue at a time. The **fixer** takes one is
 reproduction to an open pull request. A harness that can run a subagent in its own git
 worktree gives the fixer section to that subagent; one that cannot makes the worktree
 itself, inside the workspace so its file tools can reach it, with
-`git worktree add .worktrees/fix-<N> -b fix/<N>-<slug> origin/main` (`/.worktrees/` is
+`git worktree add .worktrees/fix-<N> -b fix/<N>-<slug> origin/<chunk>` (`/.worktrees/` is
 ignored), and removes it once the pull request is open.
+
+## A run is a chunk
+
+A run works on its own branch, `development-<date>` (`development-2026-09-23`, with `-2`
+and so on for a second run that day), cut from `main` by the coordinator. The fixers'
+pull requests go into that branch, not into `main`:
+
+```mermaid
+flowchart LR
+  main -->|"coordinator cuts"| chunk["development-date"]
+  chunk -->|"each fixer branches from the tip"| fix["fix/N-slug"]
+  fix -->|"PR, light check, person merges"| chunk
+  chunk -->|"one PR, full CI, person merges"| main
+```
+
+- **A pull request into a chunk runs the light check** (`.github/workflows/dev-check.yml`):
+  compile with warnings as errors, credo, the committed protocol schema, the TUI's
+  compile, the GUI's build and typecheck, and only for what changed. No test suite runs
+  there. The fixer has run the tests on this machine, and the full suite runs once, on
+  the chunk's pull request into `main`. `ci.yml` ignores pull requests into
+  `development-*`.
+- **The person merges each fixer's pull request into the chunk.** The coordinator never
+  does. A fixer that starts after another's merge branches from the newer tip, and a
+  fixer whose pull request falls behind is brought up to date by merging the chunk into
+  it, not by a rebase and a force-push.
+- **When every pull request of the run is merged**, the coordinator installs and verifies
+  the chunk's tip (section 2.4, from a worktree of the chunk), then opens one pull request
+  from the chunk into `main`. It says which issues the chunk contains, with a
+  `Fixes #N` line for each. GitHub closes an issue only from a pull request into the
+  default branch, so a fixer's `Fixes #N` into the chunk closes nothing. That pull request
+  runs the full CI, and the person merges it.
 
 The per-harness entry points are thin and all point here:
 
@@ -21,11 +52,22 @@ The per-harness entry points are thin and all point here:
 | Claude Code | `.claude/skills/fix-issues/SKILL.md` (`/fix-issues`) | `.claude/agents/issue-fixer.md` |
 | anything that reads `AGENTS.md` | `AGENTS.md` -> this page | this page, section 2 |
 
-## Why one at a time
+## What may run at once
 
 `install-local.ps1` installs to one place per machine (`%LOCALAPPDATA%\Programs\troupe*`)
-and stops the daemon running from there. Two fixers verifying at once would test each
-other's builds. Triage is read-only and can fan out; fixing and verifying are serial.
+and stops the daemon running from there, so two fixers that install or use the installed
+daemon at the same time would test each other's builds. **That is the one thing that is
+serial.** Fixers that never touch the install (GUI, docs, server-only) run alongside.
+
+The coordinator hands the install out with a lock: a file `install-lock.txt` in its
+scratch directory, reading `free` or `held by #N`. A fixer that needs the install does
+its code and tests first, then waits for `free`, writes `held by #N`, and writes `free`
+back when it has verified or rolled back.
+
+Scratch directories may be shared between fixers. Each fixer writes only under a
+subfolder named for its issue (`fix-<N>/`), and reads its pull request body back just
+before `gh pr create --body-file`. Once, two fixers wrote the same `pr-body.md` and one
+pull request briefly carried the other's text.
 
 GitHub is the ledger. An issue with an open pull request is in progress, a merged one is
 done, so a run can stop anywhere and the next picks up from what GitHub says. Nothing
@@ -45,8 +87,11 @@ else keeps state.
    - **size**: `bug` (a defect with a reproduction), `small` (a contained change, one
      pull request), `epic` (several pull requests, or open design/product questions)
    - **verification** it will get, from the table in section 2.4
-   - for an epic: the smallest first slice that is useful on its own and needs no
-     undecided product question - or "none without a decision: <the question>"
+   - for an epic: a first slice that delivers what the issue is *for*, with a measurable
+     target, and needs no undecided product question - or "none without a decision:
+     <the question>". A slice that avoids the hard part delivers nothing: #54 asked for
+     less documentation, and a slice that moved reports into `docs/history/` and added
+     an index was rightly rejected. Git history is the archive; delete rather than move.
 
    With many issues, split the read-only code search across parallel helpers if the
    harness has them.
@@ -58,18 +103,19 @@ else keeps state.
 
 Show the triage as one table - `# | title | area | size | plan | verification` - and ask
 the person which issues and which epic slices to run, plus any decision triage surfaced.
-That answer is what authorises pushing branches and opening pull requests for those
-issues in this run. It does not cover issues added later, and it never covers merging.
+That answer is what authorises cutting the chunk, pushing branches and opening pull
+requests for those issues in this run. It does not cover issues added later, and it never covers merging.
 
 ### Run the queue
 
 Before the first issue: the toolchain from `scripts\setup-windows-toolchain.ps1` is
-installed (`%LOCALAPPDATA%\Programs\erlang\bin\erl.exe`, `...\elixir\bin\mix.ps1`), and
-`scripts/verify-local.ps1` is on `origin/main` - fixers branch from there.
+installed (`%LOCALAPPDATA%\Programs\erlang\bin\erl.exe`, `...\elixir\bin\mix.ps1`). Then
+cut the chunk: `git fetch origin && git push origin origin/main:refs/heads/development-<date>`.
 
-For each issue, in order: hand it to a fixer with the issue number, its triage row, the
-slice for an epic, and anything the person said about it. Wait for the fixer's report
-before starting the next one. Tell the person `#N -> <status> <pr url>`. Then, by status:
+For each issue, in order: hand it to a fixer with the issue number, the chunk's branch,
+its triage row, the slice for an epic, and anything the person said about it. Fixers that do not install can
+start at once; one that installs takes the lock (see above). Tell the person
+`#N -> <status> <pr url>` as each report arrives. Then, by status:
 
 | Status | Coordinator does |
 | --- | --- |
@@ -78,7 +124,9 @@ before starting the next one. Tell the person `#N -> <status> <pr url>`. Then, b
 | `cannot-reproduce`, `too-large`, `duplicate` | note it; next issue |
 | `verify-failed` | make sure the install was rolled back (`.\scripts\install-local.ps1 -Rollback`); next issue. Two in a row means the machine or the toolchain is wrong, not the issues: stop and report |
 
-`noticed` items are collected and offered for filing at the end, not filed unasked.
+`noticed` items that are defects go into [defects.md](defects.md), with where, what,
+a severity and who found them. The ones worth an issue are offered for filing at the
+end, not filed unasked.
 `learned` items - a new trap about this machine or repo - are worth writing down where
 the harness keeps durable notes (Troupe's project brief, Claude's memory), or in this
 page if they are about the process.
@@ -88,6 +136,12 @@ page if they are about the process.
 One table: `# | status | PR | verified | not verified`. Then the collected decisions,
 each with a recommendation, and the `noticed` list. Say which build is installed now,
 and that `.\scripts\install-local.ps1 -Rollback` goes back one step.
+
+When the person has merged every pull request of the run into the chunk: install and
+verify the chunk's tip, then open the chunk's pull request into `main` (see "A run is a
+chunk"). Its body is the table above, with a `Fixes #N` or `Part of #N` line per issue,
+and the chunk install's `verify-local.ps1` output. If the person merges only some, ask
+before opening it; the rest can move to the next chunk.
 
 ## 2. Fixer
 
@@ -100,7 +154,8 @@ your worktree; never touch the main checkout or another worktree.
 1. `gh issue view <N> --repo it-minds/troupe --comments`; read linked issues and PRs.
 2. `gh pr list --repo it-minds/troupe --state open --search "<N> in:body"` - an open
    pull request for it means stop with `duplicate`.
-3. Branch from a fresh main: `git fetch origin && git checkout -b fix/<N>-<slug> origin/main`.
+3. Branch from the chunk's tip, which the coordinator names:
+   `git fetch origin && git checkout -b fix/<N>-<slug> origin/development-<date>`.
 4. Read the code. Find symbols with `rg`, `ast-grep --lang elixir`, or
    `mixw xref callers Some.Module` from inside the owning `apps/<app>`.
 5. Read the pages of this track you have not read for the part you touch
@@ -112,8 +167,8 @@ If the coordinator's triage and the issue disagree, the issue wins, and the repo
 
 ### 2.2 Reproduce first
 
-Write the failing test, or the exact command sequence, that shows the bug on
-`origin/main` before changing code, and keep it for the pull request. If a real attempt
+Write the failing test, or the exact command sequence, that shows the bug on the
+chunk's tip before changing code, and keep it for the pull request. If a real attempt
 does not reproduce it, stop with `cannot-reproduce` and what was tried.
 
 ### 2.3 Fix
@@ -166,8 +221,10 @@ The machine is always left with a working install: the verified build or the pre
 - Never force-push (push a new branch name instead), never merge, never close the issue
   by hand, never enable auto-merge, never use a bare `git stash` (the stash is shared
   between worktrees).
-- `git push -u origin <branch>`, then `gh pr create --repo it-minds/troupe --base main`.
-  The body is short paragraphs, each opening with a bold sentence saying what changed:
+- `git push -u origin <branch>`, then
+  `gh pr create --repo it-minds/troupe --base development-<date>`, never `--base main`.
+  Wait for the light check (`gh pr checks <n> --watch`); fix what it finds before
+  reporting `pr-opened`. The body is short paragraphs, each opening with a bold sentence saying what changed:
   what was wrong and the reproduction; what changed; **Verified:** the exact commands and
   results, including `verify-local.ps1` and the reproduction against the installed build;
   what was not verified and why; and `Fixes #<N>` (or `Part of #<N>` for a slice) last.

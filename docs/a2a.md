@@ -125,18 +125,10 @@ it is fetched through the session's own access checks.
   `auth.refresh` on the open socket.
 * **No push notifications** in this release.
 
-## Configuration
+## Running it
 
-| variable | default | meaning |
-| --- | --- | --- |
-| `TROUPE_A2A_AUTOSTART` | `false` | start the listener |
-| `TROUPE_A2A_PORT` | `4002` | where it listens |
-| `TROUPE_A2A_PLANE_URL` | `http://troupe-plane.troupe-system.svc:4000` | the plane's `/rpc` and `/auth/exchange` |
-| `TROUPE_A2A_PUBLIC_URL` | required | the origin in cards and artifact URIs |
-| `TROUPE_A2A_MAX_STREAMS` | `200` | open streams per replica |
-| `TROUPE_A2A_VISIBILITY` | `private` | the visibility a task's session is created with |
-
-In the chart it is the `a2a` block of `values.yaml`, off by default. The plane's
-NetworkPolicy admits HTTP from the ingress namespace only, so a cluster that enforces
-NetworkPolicy either admits the facade's pods on the plane's HTTP port or sets
-`a2a.planeUrl` to the plane's public URL.
+The chart's `a2a` block, off by default: `a2a.enabled: true`, `a2a.host`, a TLS secret or
+`a2a.publicUrl`, and `a2a.visibility: team` if tasks should be visible to the caller's team.
+Enabling it also admits the facade's pods to the plane's HTTP port. Each caller is a
+service principal of a team granted the profiles it may call. Variables:
+[admin/configuration.md A.4](admin/configuration.md#a4-a2a-facade-troupe_a2a).

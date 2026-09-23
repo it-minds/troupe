@@ -26,7 +26,8 @@ export function Sessions({
   onOpen,
   onCreated,
 }: {
-  auth: AuthSession;
+  /** The plane, for team sessions. Null in local mode, which lists this computer's alone. */
+  auth: AuthSession | null;
   daemon: DaemonClient | null;
   /** Whether the daemon records this person by name, which a private session needs. */
   linked: boolean;

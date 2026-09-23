@@ -1,11 +1,7 @@
 # End to end, against real servers
 
-[testing.md](developer/testing.md) lists, under *What is not tested*:
-
-> **The server's half.** Every assumption in the right-hand column above; a kind or
-> Kapsule run is what would check it.
-
-This is that, without a cluster. `test/support` is a plane, a worker and an identity
+What the unit suite cannot test is the server's half. This is that, without a cluster.
+`test/support` is a plane, a worker and an identity
 provider written in this repository: they prove the client behaves correctly when a
 server behaves as `PROTOCOL.md` says, and they agree with the client by construction. A
 real server does not, and what it can disagree about is what matters — event shapes, what
@@ -68,23 +64,11 @@ a plane onto a real pod still wants a cluster.
 
 A worker verifies session tokens offline against a JWKS on disk, so a JWKS whose private
 half you hold is accepted exactly as the plane's would be. For testing only; a client
-never signs its own token against a deployment.
+never signs its own token against a deployment. Make the key pair and JWKS in `keys/` as
+in [bench.md §1](bench.md#1-a-key-pair-and-a-jwks), then the model's script:
 
 ```sh
-mkdir -p keys && cd keys
-node -e '
-const { generateKeyPairSync, createHash } = require("crypto");
-const fs = require("fs");
-const { privateKey, publicKey } = generateKeyPairSync("ec", { namedCurve: "P-256" });
-const pub = publicKey.export({ format: "jwk" });
-const priv = privateKey.export({ format: "jwk" });
-const canonical = JSON.stringify({ crv: pub.crv, kty: pub.kty, x: pub.x, y: pub.y });
-const kid = createHash("sha256").update(canonical).digest("base64url");
-fs.writeFileSync("jwks.json", JSON.stringify({ keys: [{ ...pub, kid, use: "sig", alg: "ES256" }] }));
-fs.writeFileSync("signing-key.json", JSON.stringify({ ...priv, kid }));
-'
-printf '{"steps":[{"text":"Hello from the fake model, in a few words."}]}' > fake.json
-cd ..
+printf '{"steps":[{"text":"Hello from the fake model, in a few words."}]}' > keys/fake.json
 ```
 
 ```sh
