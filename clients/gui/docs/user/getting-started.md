@@ -103,3 +103,31 @@ Sources:
 - `apps/desktop/src/App.tsx:23, 39-69` — the first screen is Sessions; the rail's contents
 - `apps/desktop/src/views/Sessions.tsx:50-80` — the toolbar
 - `apps/desktop/src/views/Sessions.tsx:90-100` — the "No sessions yet" state
+
+## 7. Without a platform: this computer only
+
+Where the app can reach the Troupe daemon on your own computer — the desktop app does
+this by itself — the sign-in screen has a third choice under the form: **Use this
+computer only**. It skips sign-in and goes straight to the session list, with the
+sessions on this computer and your own model keys, and Troupe never contacts a platform:
+no sign-in, no renewal, nothing. It is remembered, so the next launch skips the sign-in
+screen too. The rail says **This computer** and your computer's user name where your
+name and teams would be, and **Review** is not there, because it reads the platform's
+record.
+
+To change it, open **This computer** and use the **Local only — never contact a plane**
+switch at the top. Turning it on while signed in does not sign you out: your saved
+sign-in is kept, and turning it off signs you straight back in while your organisation
+still honours it.
+
+**If the platform does not answer** when you open the app, the sign-in screen offers
+**Continue on this computer** beside the error. That is for now, not a setting: a
+banner says the platform is not answering, the app asks it again every fifteen seconds
+(or when you press **Try now**), and it goes back to the platform by itself when it
+answers, with the sessions that ran here still in the list.
+
+Sources:
+- `apps/desktop/src/mode.ts` — the two modes, and where the setting is kept
+- `apps/desktop/src/views/SignIn.tsx` — the third door, and "Continue on this computer"
+- `apps/desktop/src/views/Local.tsx` — the switch
+- `apps/desktop/src/App.tsx` — the rail in local mode, and asking the platform again
