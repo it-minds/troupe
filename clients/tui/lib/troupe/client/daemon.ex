@@ -139,6 +139,23 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def switch_profile(sid, path, name), do: route(sid, path, &Worker.switch_profile(&1, name))
 
+  # The session's goal is the daemon's: the root agent writes it as an event and reads it
+  # into every later prompt, so this only asks, and the window hears the event.
+  @impl true
+  def goal(sid) do
+    case Worker.goal(sid) do
+      {:ok, %{"goal" => goal}} -> {:ok, goal}
+      {:ok, other} -> {:error, "unexpected session.goal.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @impl true
+  def set_goal(sid, text), do: describe(Worker.set_goal(sid, text))
+
+  @impl true
+  def clear_goal(sid), do: describe(Worker.set_goal(sid, nil))
+
   @impl true
   def cancel_branch(sid, path), do: route(sid, path, &Worker.cancel/1)
 

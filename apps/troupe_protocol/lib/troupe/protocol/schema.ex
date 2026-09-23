@@ -137,6 +137,10 @@ defmodule Troupe.Protocol.Schema do
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
       "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
+      # The session's goal, written by the root agent under whoever set or cleared it, and
+      # carrying the `command_id` of the `session.goal.*` call that asked.
+      "goal_set" => %{"text" => required(:string), "command_id" => optional(:string)},
+      "goal_cleared" => %{"command_id" => optional(:string)},
       "delegation_started" => %{
         "call_id" => required(:string),
         "agent" => required(:string),
@@ -398,6 +402,18 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "session_id" => required(:string),
         "profile" => required(:string)
+      },
+      # Setting and clearing activate a dormant session, like `profile.switch`; reading
+      # the goal is answered from the log and wakes nothing.
+      "session.goal.set" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "text" => required(:string)
+      },
+      "session.goal.get" => %{"session_id" => required(:string)},
+      "session.goal.clear" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
       },
       "approval.respond" => %{
         "command_id" => required(:string),

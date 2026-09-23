@@ -258,6 +258,8 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
+| `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
+| `goal_cleared` | `command_id` |
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
@@ -516,6 +518,27 @@ writes `input_after_done` instead.
 
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
+
+#### `session.goal.set`, `session.goal.get`, `session.goal.clear`
+```json
+{"command_id": "c-6", "session_id": "s-9f", "text": "the release notes build on Windows"}
+```
+→ `{"accepted": true}`. The effect is a durable `goal_set` carrying `text` (trimmed) and
+the `command_id`, written by the root agent under the actor who sent it;
+`session.goal.clear {command_id, session_id}` writes `goal_cleared`. Setting the goal a
+session already has, or clearing one it does not have, writes nothing. A `text` that is
+empty or only whitespace is `invalid_params` with `field: "text"`.
+
+The goal is part of the root agent's folded state, so it survives a restart and a
+dormancy, and it is read into the root agent's context on **every** turn after it is set —
+not only the next — until it is cleared or replaced. It is taken at once, not at the next
+turn boundary: it changes the next request's prompt and never the one in flight. A
+subagent is given its task by the root agent and does not carry the goal. Both commands
+activate a dormant session, like `profile.switch`.
+
+`session.goal.get {session_id}` → `{"goal": "…", "set_by": "<subject>", "set_at": "<ts>"}`,
+or all three `null` when no goal is set. It is read from the log, so it answers for a
+dormant session and wakes nothing.
 
 #### `approval.respond`
 ```json
@@ -787,7 +810,7 @@ nothing. That is deliberate — a session that woke up because somebody looked a
 would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
+`session.goal.set`, `session.goal.clear`, `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
 
 #### Activation is about the session, not about the pod
@@ -830,8 +853,8 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
-| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

@@ -410,7 +410,84 @@ defmodule Troupe.Gateway.DaemonTest do
     end
   end
 
+  describe "the session's goal" do
+    test "set is acknowledged, its effect is a goal_set carrying the command id, and get and clear follow",
+         context do
+      %{session: session} = start_session(context, [{:text, "hi"}])
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+
+      assert {:ok, %{"goal" => nil}} = goal(client, session.id)
+
+      command_id = Client.command_id()
+
+      assert {:ok, %{"accepted" => true}} =
+               Client.call(client, "session.goal.set", %{
+                 "command_id" => command_id,
+                 "session_id" => session.id,
+                 "text" => "  the release notes build on Windows \n"
+               })
+
+      # Trimmed, and written by the root agent under whoever set it.
+      set = collect_until(&(&1.type == "goal_set")) |> List.last()
+      assert set.type == "goal_set"
+      assert set.data == %{"text" => "the release notes build on Windows", "command_id" => command_id}
+      assert set.agent == ["root"]
+      assert set.actor.subject =~ "local:"
+
+      assert {:ok, %{"goal" => "the release notes build on Windows"} = answer} = goal(client, session.id)
+      assert answer["set_by"] =~ "local:"
+      assert is_binary(answer["set_at"])
+
+      assert {:ok, %{"accepted" => true}} =
+               Client.call(client, "session.goal.clear", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => session.id
+               })
+
+      assert collect_until(&(&1.type == "goal_cleared")) |> List.last() |> Map.get(:type) ==
+               "goal_cleared"
+
+      assert {:ok, %{"goal" => nil}} = goal(client, session.id)
+    end
+
+    test "a blank goal names the field, and an unknown session is not_found", context do
+      %{session: session} = start_session(context, [{:text, "hi"}])
+      client = connect(context)
+
+      assert {:error, %Error{message: "invalid_params", data: %{"field" => "text"}}} =
+               Client.call(client, "session.goal.set", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => session.id,
+                 "text" => "   "
+               })
+
+      assert {:error, %Error{message: "not_found"}} = goal(client, "s-nope")
+    end
+
+    test "a dormant session's goal is read from its log without waking it", context do
+      %{session: session} = start_session(context, [{:text, "hi"}])
+      client = connect(context)
+      {:ok, _} = Client.subscribe(client, "session:#{session.id}")
+
+      {:ok, _} =
+        Client.call(client, "session.goal.set", %{
+          "command_id" => Client.command_id(),
+          "session_id" => session.id,
+          "text" => "keep going"
+        })
+
+      collect_until(&(&1.type == "goal_set"))
+      :ok = Troupe.stop_session(session.id)
+
+      assert {:ok, %{"goal" => "keep going"}} = goal(client, session.id)
+      assert Troupe.snapshot(session.id) == {:error, :no_agent}
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  defp goal(client, session_id), do: Client.call(client, "session.goal.get", %{"session_id" => session_id})
 
   defp raw_initialize(address, port, params) do
     {:ok, socket} = :gen_tcp.connect(address, port, [:binary, active: false, packet: :raw])

@@ -60,6 +60,10 @@ defmodule Troupe.Agent.State do
     budget: %Budget{},
     conversation: [],
     todos: [],
+    # What the session is for, in a person's words (`goal_set`, `goal_cleared`). Folded,
+    # and read into every prompt the root agent makes; a subagent is handed a task
+    # instead and never carries one.
+    goal: nil,
     llm_text: "",
     llm_tool_names: %{},
     pending: %{},
@@ -116,6 +120,7 @@ defmodule Troupe.Agent.State do
           budget: Budget.t(),
           conversation: [Message.t()],
           todos: [Troupe.Todo.t()],
+          goal: String.t() | nil,
           llm_text: String.t(),
           llm_tool_names: %{optional(String.t()) => String.t()},
           pending: %{optional(String.t()) => Call.t()},

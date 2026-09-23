@@ -1,220 +1,87 @@
 # Testing
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
-
-> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
-> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
-> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
-> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
-> `installer-ps1` CI jobs, and moved `clients/python` to
-> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
-> that; line citations that predate it refer to the tree at commit `20fe871`.
-
-> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
-> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
-> installers are back at the root, installing the TUI and the daemon (671). A merged
-> `VERSION` change releases and deploys everything (669). Where this page says the
-> repository ships no client or no binary, that was true of the tree it was audited
-> against and is not now.
-
-## 1. Layout
-
-Every app keeps its tests under `apps/<app>/test/troupe/**/*_test.exs` with case
-templates and stubs in `apps/<app>/test/support/` (compiled only in the test environment
-by `elixirc_paths(:test)` in each `apps/*/mix.exs`). File counts on 2026-09-13:
-protocol 8, core 28, gateway 11, worker 21, plane 26, operator 4, a2a 5 — nine fewer than
-on 2026-09-13, which is the TUI's four, the CLI's five, and the core's `wrapper_test.exs`.
-
-The test environment differs from dev in three ways set at compile time:
-
-- `config :troupe_core, :extra_tools` registers four misbehaving tools —
-  `Troupe.Test.RaisingTool`, `ExitingTool`, `AskingTool`, `CountingTool` —
-  "through the same extension point a future MCP adapter would use" (`config/config.exs:12-21`;
-  defined in `apps/troupe_core/test/support/misbehaving_tools.ex`).
-- The plane repo uses `Ecto.Adapters.SQL.Sandbox` with `pool_size: 30`, because "the
-  placement test makes fifty creates at once" (`config/config.exs:72-81`).
-- `mix check` itself runs in `:test` (`mix.exs:18-21`).
-
-## 2. Running the suite
-
-From the umbrella root, every app:
+## 1. Running
 
 ```bash
-mix test
-```
-
-One file, from the root (this is how CI runs the conformance test, `.github/workflows/ci.yml:242`):
-
-```bash
+mix test                                                     # every app, from the root
 mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs
+cd apps/troupe_plane && mix test                             # one app
 ```
 
-One app, from its directory:
+Tests live in `apps/<app>/test/troupe/**/*_test.exs`, with case templates and stubs in
+`test/support/`. The test environment registers four misbehaving tools (raising, exiting,
+asking, counting) through the same extension point an MCP adapter uses, and gives the
+plane's sandboxed repo a pool of 30 because a placement test makes fifty creates at once.
+Run the protocol suite from the root: its `policy_test.exs` imports the operator's test
+fixtures without declaring the dependency.
 
-```bash
-cd apps/troupe_plane && mix test
-```
+CI runs each app's suite as its own job; the nightly and a release run every suite nine
+more times, because the suite is concurrent and a race that shows one time in five is a
+bug this project cares about.
 
-Tasks that locate the repository root do so from `Mix.Project.build_path()` so they work
-from either place (`apps/troupe_protocol/lib/mix/tasks/troupe.schema.gen.ex:60-64`,
-`apps/troupe_gateway/test/troupe/gateway/python_client_test.exs:134-138`,
-`apps/troupe_core/test/troupe/log/fold_test.exs:20`).
+## 2. What each suite needs
 
-One exception is not confirmable from the code alone. `apps/troupe_protocol/test/troupe/policy_test.exs:12`
-does `import Troupe.Operator.Fixtures`, defined in `apps/troupe_operator/test/support/fixtures.ex`,
-and `apps/troupe_protocol/mix.exs:29-56` declares no dependency on `troupe_operator`
-(test-only or otherwise). Whether that file compiles when `mix test` is run from
-`apps/troupe_protocol/` alone, rather than from the umbrella root where every app's
-`ebin` is present in `_build/test/lib`, was not executed for this audit. Unconfirmed;
-run the protocol suite from the root until someone checks. `mix troupe.boundaries` does
-not flag it because it inspects `lib/` beams only (`apps/troupe_core/lib/mix/tasks/troupe.boundaries.ex:212-217`).
+The policy is to skip loudly: a `SKIPPED:` block naming the command that brings the
+dependency up, never silence.
 
-## 3. What each suite needs, and what happens without it
+| Dependency | Suites | Without it |
+|---|---|---|
+| PostgreSQL on 55432, `troupe_plane_test` migrated | all of the plane's | every test excluded, with the two commands to run |
+| PostgreSQL | the worker's control-channel failover test | skipped, flunks |
+| OpenBao on 58200 | plane tokens, protocol KMS, every `Troupe.Worker.SessionCase` suite | `setup_all` says so; each test flunks |
+| MinIO on 59000 | protocol object store and storage, worker sessions | same |
+| a kubeconfig with the CRDs | the operator's `:cluster` tests, the plane's enrolment test | excluded; `--include cluster` runs them |
+| a second BEAM node | the plane's cluster test | skipped, flunks |
+| `bubblewrap` | the sandbox tests | skipped, flunks |
+| `python3` | the conformance test | skipped, passes |
+| `inotifywait` / `mac_listener` | the native half of the watcher tests | passes without asserting; polling is always tested |
+| `zig` | anything that runs `shell` | `:reaper_missing` |
 
-The repository's stated policy is to skip "loudly": print a `SKIPPED:` block naming
-the command that brings the dependency up, never silently
-(`apps/troupe_plane/test/test_helper.exs:16-18`, `apps/troupe_operator/test/support/cluster_case.ex:5-7`,
-`python_client_test.exs:11-12`). How that is implemented differs per suite, and in most
-cases a missing dependency makes the tests fail with a named reason rather than
-disappear from the count. The two that are excluded properly are the plane's database
-and the `:cluster` tag; everything else in the table still flunks.
+`scripts/dev-up` provides the first four; [local-setup.md](local-setup.md). Suites isolate
+themselves from the developer's machine: the core points `TROUPE_CONFIG_HOME` at a
+temporary directory once per run and passes `state_dir` through config, because
+`System.put_env/2` is global; worker tests set `TROUPE_STATE_HOME` per test and are
+`async: false`. Suites assert on events and telemetry, never on log lines.
 
-| Dependency | Suites | Behaviour when absent | Code |
-|---|---|---|---|
-| PostgreSQL on `localhost:55432`, database `troupe_plane_test` migrated | all of `apps/troupe_plane/test` | `Repo.start_link` fails; `ExUnit.start(exclude: [:test])` excludes every test and prints the two commands to run. This is the only suite that is truly excluded | `apps/troupe_plane/test/test_helper.exs:19-34` |
-| PostgreSQL | `apps/troupe_worker/test/troupe/worker/failover_test.exs` (the control-channel end-to-end test, which starts a real plane) | `test_helper.exs` starts the plane repo if it can and is quiet otherwise; the test prints `SKIPPED` and `requires_peer/1` flunks | `apps/troupe_worker/test/test_helper.exs:3-10`; `failover_test.exs:38-55,185-186` |
-| OpenBao on `localhost:58200` | `apps/troupe_plane/test/troupe/plane/tokens_test.exs`; `apps/troupe_protocol/test/troupe/kms/open_bao_test.exs`; every worker test on `Troupe.Worker.SessionCase` | `setup_all` prints `SKIPPED` and marks the context; each test's `requires_*` then flunks with "see the message from setup_all" | `tokens_test.exs:20-28`; `open_bao_test.exs:27-36,47`; `apps/troupe_worker/test/support/session_case.ex:33-41,91-93` |
-| MinIO on `localhost:59000`, bucket `troupe-sessions` | protocol `object_store_test.exs`, `sessions/storage_test.exs`; worker `SessionCase` suites | same pattern; `requires_store/1` flunks | `apps/troupe_protocol/test/support/object_store_case.ex:25-59` |
-| a kubeconfig (`KUBECONFIG` or `~/.kube/config`, context from `TROUPE_KUBE_CONTEXT`) with the Troupe CRDs installed | `apps/troupe_operator/test/troupe/operator/{cluster,admin_cluster,latency_cluster}_test.exs` | `test_helper.exs` probes once for a cluster; without one it prints `SKIPPED` with `scripts/kind-up` and the `helm upgrade` line, and starts ExUnit with `exclude: [:cluster]`. The tests are excluded, not run and not failed. `--include cluster` overrides | `apps/troupe_operator/test/test_helper.exs:11-29`; `cluster_test.exs:39-41` |
-| a cluster with `ghcr.io/objective-mj/troupe-worker:dev` loadable | `apps/troupe_operator/test/troupe/operator/latency_cluster_test.exs` | `@moduletag :cluster`, so it is excluded with the rest when there is no cluster; with one, `setup_all` prints `SKIPPED` if the worker image is not loadable | `latency_cluster_test.exs:31,55-72` |
-| a real API server (for `TokenReview`) | `apps/troupe_plane/test/troupe/plane/enrolment_test.exs` | `@moduletag :cluster`; the plane's `test_helper.exs` probes for a cluster and excludes the tag without one, printing `SKIPPED` and `scripts/kind-up`. `requires_cluster/1` still flunks under `--include cluster` | `apps/troupe_plane/test/test_helper.exs:27-56`; `enrolment_test.exs:15,146-147` |
-| the ability to start a second BEAM node (`Replica`) | `apps/troupe_plane/test/troupe/plane/cluster_test.exs` | prints `SKIPPED`; `requires_peer/1` flunks | `cluster_test.exs:25-45,171-172` |
-| `bubblewrap` | `apps/troupe_core/test/troupe/sandbox_test.exs` | prints `SKIPPED`; `setup` flunks every test | `sandbox_test.exs:20-30` |
-| `python3` | `apps/troupe_gateway/test/troupe/gateway/python_client_test.exs` | prints `SKIPPED` and the single test passes with `assert true` | `python_client_test.exs:23-25,59-62` |
-| `inotifywait` (Linux), `mac_listener` (macOS), `inotifywait.exe` (Windows) | the `native backend` half of `apps/troupe_core/test/troupe/watch/watcher_test.exs` | `Backend.usable?/2` is false; each test runs through `run_if_available/2` and passes without asserting; the polling backend is exercised regardless | `watcher_test.exs:36-62`; `apps/troupe_core/lib/troupe/watch/file_system_backend.ex:41-48` |
-| `zig` | the `shell` tool and anything that runs a process through `reaper` | `mix compile.reaper` prints a warning and skips; tests that run `shell` then fail with `:reaper_missing` | `apps/troupe_core/lib/mix/tasks/compile.reaper.ex:45-53`; `apps/troupe_core/lib/troupe/reaper.ex:20-25` |
+## 3. Fixtures
 
-Every suite that touches the developer's environment isolates itself: the core helper
-points `TROUPE_CONFIG_HOME` at a fresh temp directory once per run and unsets
-`TROUPE_STATE_HOME`, because `System.put_env/2` is process-global and would leak across
-`async: true` tests; per-test state goes through `state_dir` in config instead
-(`apps/troupe_core/test/test_helper.exs:1-10`, `test/support/session_case.ex:27-41`).
-Worker tests set `TROUPE_STATE_HOME` per test and are all `async: false` for that reason
-(`apps/troupe_worker/test/support/session_case.ex:58-62`).
-
-Logger output is set to `:critical` (core, a2a) or `:warning` (worker, operator) in each
-`test_helper.exs` because the suites "assert on events and telemetry, never on log lines"
-(`apps/troupe_core/test/test_helper.exs:12-14`).
-
-## 4. Fixtures
-
-### Recorded logs
-
-`test/fixtures/logs/0.2.0/` holds six JSONL logs — `simple_turn`, `metered_turn`,
-`tool_use`, `approval`, `subagents`, `error_and_recovery` — and `hashes.json` with the
-fold hash each produces. `mix troupe.fixtures.record <version>` writes them, refuses to
-overwrite an existing version, and is meant to run "once per release, and never again
-for a version already recorded" (`apps/troupe_core/lib/mix/tasks/troupe.fixtures.record.ex:5-37`).
-The scenarios are chosen "to cover the fold rather than to look like real sessions"
-(`:60-75`).
-
-```bash
-mix troupe.fixtures.record 0.3.0
-```
-
-`apps/troupe_core/test/troupe/log/fold_test.exs` replays every version's logs through
-`Troupe.Log.Upcast` and compares against the recorded hash (`:1-30`); it also reads
-`apps/troupe_core/lib/troupe/agent/server.ex` as text and asserts every event type the
-agent's replay clauses handle is in `Fold.witnessed_types/0` (`fold_test.exs:72-75,176`;
-`apps/troupe_core/lib/troupe/log/fold.ex:59-70`). A moving hash "is not a test to
-update" (`fold_test.exs:10-12`).
-
-### Other fixtures
-
+- `test/fixtures/logs/<version>/` — six recorded logs per released version and the fold
+  hash each produces. `mix troupe.fixtures.record <version>` writes them once per release
+  and refuses to overwrite. `fold_test.exs` replays every version through the upcaster
+  and compares hashes, and reads `agent/server.ex` to assert every event type the replay
+  handles is witnessed. A moving hash is not a test to update.
 - `fixtures/sample_repo/` — a small Mix project the core's workspace and tool suites read.
-- `apps/troupe_gateway/test/conformance/` — `troupe.py` and `conformance.py`, the Python
-  client described below. It moved here from `clients/` when the client apps were deleted:
-  it is a fixture belonging to the suite that runs it, and this repository publishes no
-  Python package.
-- `apps/troupe_operator/test/support/fixtures.ex` — `WorkerProfile` and `TroupePolicy`
-  maps "as the API server would hand them over" (`:1-8`), used by the operator's
-  `resources_test.exs` and the protocol's `policy_test.exs`.
-- `apps/troupe_plane/test/support/{fake_pod,enrolment_stub,replica}.ex` — a fake worker
-  on the control channel, an enrolment verifier that needs no API server, and a second
-  plane node.
-- `apps/troupe_a2a/test/support/{stub_plane,fake_worker}.ex` — the two things the facade
-  talks to.
+- `apps/troupe_gateway/test/conformance/` — `troupe.py` and `conformance.py`.
+- Fakes: a pod on the control channel, an enrolment verifier with no API server and a
+  second plane node (plane); a stub plane and a fake worker (A2A); `WorkerProfile` and
+  `TroupePolicy` maps as the API server hands them over (operator).
 
-## 5. Checks that are tests in all but name
+## 4. Checks that are tests in all but name
 
-### The Python conformance client
+- **The Python conformance client** is a client written against `PROTOCOL.md` in the
+  standard library alone. The test starts a daemon on a Unix socket with the fake
+  provider, runs `conformance.py` against it, and asserts on its report: contiguous replay
+  from `seq` 1, an accepted `input.send`, an answered approval, a verified hash chain. It is
+  what proves a client needs no private access.
+- **The admin parity test** asserts every public function of `Troupe.Plane.Admin` has an
+  API method and an MCP tool, every method a summary and described arguments, every
+  destructive one a `confirm`, and that nothing returns session content.
+- **The schema tests**: a real session's every event validates against
+  `Troupe.Protocol.Schema`, and the compatibility rules `mix troupe.schema.diff` enforces.
+- **The asset tests**: every asset the console's and the front page's documents name
+  exists, is allowlisted and is served, and the front page spends the reserved colour once.
+- **The egress test**: `docs/egress-allowlist.md` names every host the components declare.
+- **`mix troupe.boundaries`** is part of `mix check`, not `mix test`.
 
-`apps/troupe_gateway/test/conformance/conformance.py` is "a client written against
-`PROTOCOL.md` in the Python standard library and nothing else … the only check that
-actually proves the claim this repository rests on: that a client gets no private access,
-because every client is outside it". That claim used to be carried by two boundary rules
-holding the TUI and the CLI to `troupe_protocol`; with both apps gone, this test is what
-is left of it, and it matters more rather than less. The test starts a daemon on a Unix
-socket with the fake provider, warms the session so `from_seq: 0` has something to replay,
-runs `python3 conformance.py --socket <path> --session <id>` with `PYTHONPATH` set to the
-fixture directory and `PYTHONDONTWRITEBYTECODE=1`, and asserts on the JSON report it
-prints: server name `troupe-daemon`, principal `user`, all three scopes, the session in
-the fleet, `replayed == head_seq` (`python_client_test.exs:64-84,117-132`). The script
-itself checks a contiguous replay from `seq` 1, an accepted `input.send`, an answered
-approval and the hash chain (`conformance.py:1-14,42-60`).
+## 5. Beyond the unit suites
 
-### The admin parity test
-
-`apps/troupe_plane/test/troupe/plane/admin_parity_test.exs` enumerates the public
-functions of `Troupe.Plane.Admin` (minus `actor_for/1`, `actor_for_session/1`,
-`actor_for_subject/1`, `admin?/1`, `:31`) and asserts: each has a method in
-`Troupe.Plane.Admin.API` and a tool in `Troupe.Plane.Admin.MCP`; no method names
-something that does not exist; every method has a summary ending in a full stop and every
-argument a description; every `:destructive` method names a `confirm` argument that
-exists; and nothing in the context returns session content. It used to assert a fourth
-surface — a `troupe admin` command per function — and that half went with the CLI, along
-with the plane's test-only dependency on `troupe_ctl`. Three surfaces, one context.
-
-### The boundaries task
-
-`mix troupe.boundaries` is part of `mix check` and CI rather than of `mix test`; see
-[architecture.md](architecture.md) §2 and [conventions.md](conventions.md) §2.
-
-### The schema tests
-
-`apps/troupe_core/test/troupe/session/log_schema_test.exs` runs a real session and
-validates every event it wrote against `Troupe.Protocol.Schema.validate_event/2`
-(`:1-40`). `apps/troupe_protocol/test/troupe/protocol/schema_test.exs` covers the
-compatibility rules the `troupe.schema.diff` task enforces.
-
-### The console assets test
-
-`apps/troupe_plane/test/troupe/plane/console_assets_test.exs` reads the rendered root
-document, extracts every asset it names, and checks each against `Plug.Static`'s
-allowlist and the disk — a "missing kind of assertion" that `panel_test.exs`'s in-process
-LiveView mounts cannot make (`:1-19`).
-
-## 6. Timeouts and concurrency
-
-Most files raise the default timeout with `@moduletag timeout:` — 60 s for plane and
-core suites, 120-300 s for gateway and worker suites, 600 s for
-`dormant_scale_test.exs` and `latency_cluster_test.exs`. Suites are `async: true` where
-state is isolated through config; worker, gateway harness and cluster suites are
-`async: false`.
-
-## 7. Why CI runs the suite ten times
-
-`.github/workflows/ci.yml:87-90`: "Ten runs, because the suite is concurrent and a race
-that shows up one time in five is a bug this project cares about." The step is
-`for i in $(seq 10); do mix test || exit 1; done`. `REPORT.md:6-7` records five
-consecutive green runs as the stage 1 bar.
-
-## 8. The PITR drill
-
-`scripts/pitr-drill` is not part of the suite. It takes a base backup of the compose
-PostgreSQL, seeds a session after a restore point, restores to that point on port 5433,
-rebuilds the index from object storage with `MIX_ENV=test mix troupe.index.rebuild --database-url`,
-and asserts the lost row came back (`scripts/pitr-drill:9-19,122-150`). Its closing note
-names the two tests that cover the other halves under `mix check`:
-`Troupe.Worker.IndexRebuildTest` and `Troupe.Plane.ReconcileTest` (`:171-176`). See
-[../admin/backup-restore.md](../admin/backup-restore.md).
+- `mix troupe.e2e` (operator): the cluster suite, against `scripts/remote-up`'s kind
+  cluster; CI's `cluster` job.
+- `scripts/pitr-drill`: restores the compose PostgreSQL to a point, rebuilds the index and
+  asserts the lost session came back ([../admin/backup-restore.md](../admin/backup-restore.md)).
+- The TUI's suite (`mix check` in `clients/tui`) and the GUI's (`pnpm test`), whose
+  `test/support` is a protocol-accurate identity provider, plane, worker and daemon; the
+  GUI's plane end-to-end suite runs in CI against a plane built from the same commit
+  ([e2e.md](../../clients/gui/docs/e2e.md)).
+- `scripts/verify-local.ps1` checks an install made by `scripts/install-local.ps1` on this
+  Windows machine.

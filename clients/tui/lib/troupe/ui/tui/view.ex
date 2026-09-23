@@ -1262,7 +1262,8 @@ defmodule Troupe.UI.TUI.View do
       end
 
     text =
-      "#{Model.attention_summary(state.model)}#{hint} · #{watch}#{mcp} · #{state.session_id}" <>
+      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)} · #{watch}#{mcp}" <>
+        " · #{state.session_id}" <>
         remote_note(state) <>
         if(notice, do: " · #{notice}", else: "")
 
@@ -1272,6 +1273,27 @@ defmodule Troupe.UI.TUI.View do
         else: text <> " · /help for settings and help · /quit or Ctrl-C twice exits"
 
     {%Paragraph{text: text, style: %Style{fg: :dark_gray}}, rect}
+  end
+
+  # The session's goal, for as long as it has one, near the front of the line where a
+  # narrow terminal still shows it. Clipped: `/goal` prints the whole of it.
+  @goal_width 60
+
+  defp goal_note(model) do
+    case Model.goal(model) do
+      nil ->
+        ""
+
+      goal ->
+        line = goal |> String.split("\n", trim: true) |> Enum.join(" ")
+
+        clipped =
+          if String.length(line) > @goal_width,
+            do: String.slice(line, 0, @goal_width - 1) <> "…",
+            else: line
+
+        " · goal: " <> clipped
+    end
   end
 
   # A remote session says what it is and what it will not let you do; a local

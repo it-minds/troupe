@@ -1,328 +1,219 @@
 # Architecture, for someone changing the code
 
-> Audited against troupe-remote commit 4083b1f (branch main), 2026-09-13. See [AUDIT.md](../AUDIT.md).
+Where things are and which rules the build enforces. The design and its reasons are in
+[../../ARCHITECTURE.md](../../ARCHITECTURE.md); the wire is [../../PROTOCOL.md](../../PROTOCOL.md);
+runtime configuration is [../admin/configuration.md](../admin/configuration.md).
 
-> **Re-audited 2026-09-14.** This repository is the remote and ships no client. The
-> Kubernetes-only change removed `apps/troupe_tui`, `apps/troupe_ctl`, the `troupe`
-> Burrito release, `install.sh`, `install.ps1`, `scripts/build-local`,
-> `scripts/test-install.*` and the `build`, `containers`, `installer-sh` and
-> `installer-ps1` CI jobs, and moved `clients/python` to
-> `apps/troupe_gateway/test/conformance/`. Statements below have been brought in line with
-> that; line citations that predate it refer to the tree at commit `20fe871`.
+## 1. Apps and releases
 
-> **2026-09-21: the monorepo** (Decision 666). The TUI, the GUI and the daemon are in this
-> repository again — `clients/tui`, `clients/gui`, `apps/troupe_daemon` — and the
-> installers are back at the root, installing the TUI and the daemon (671). A merged
-> `VERSION` change releases and deploys everything (669). Where this page says the
-> repository ships no client or no binary, that was true of the tree it was audited
-> against and is not now.
+Eight Mix projects under `apps/`. The root `mix.exs` releases four of them as container
+images; `apps/troupe_daemon` releases the fifth from its own directory, one build per
+platform, so a Windows or macOS runner compiles the harness and nothing of the platform.
 
-This document says where things are and which rules the build enforces. Data flows and
-the reasons behind the design are in [../whitepaper.md](../whitepaper.md); runtime
-configuration is in [../admin/configuration.md](../admin/configuration.md). Where the
-prose in `ARCHITECTURE.md` disagrees with the code, the code is quoted and the stale
-line is named.
+| App | What | Umbrella deps |
+|---|---|---|
+| `troupe_protocol` | the wire (JSON-RPC, events, schemas, errors, tokens) and the contracts plane and workers share: OpenBao, S3, MCP clients, the sealer, `TroupePolicy` and `WorkerProfile` parsing | none |
+| `troupe_core` | sessions: agents, tools, providers, the log, the index | protocol |
+| `troupe_gateway` | the daemon: transports, connections, subscriptions, scopes, idempotency | core, protocol |
+| `troupe_daemon` | the harness and a command line, released as `troupe-daemon` | core, gateway, protocol |
+| `troupe_worker` | a worker pod: plane link, sealing, restore, auth, bundles | core, gateway, protocol (plane in tests) |
+| `troupe_plane` | the control plane: identity, placement, budgets, `/rpc`, `/mcp`, the console | protocol |
+| `troupe_operator` | the Kubernetes reconciler (Bonny) | protocol |
+| `troupe_a2a` | the A2A facade | protocol |
 
-## 1. One umbrella, seven apps, four releases
+| Release | Applications | Packaging |
+|---|---|---|
+| `troupe_operator`, `troupe_plane`, `troupe_a2a` | protocol + the app | image, `docker/Dockerfile` |
+| `troupe_worker` | core, protocol, gateway, worker; `Troupe.Release.build_reapers/1` builds the two Linux `reaper`s | image |
+| `troupe_daemon` | the harness | a tarball per platform, `apps/troupe_daemon` |
 
-`mix.exs:8` sets `apps_path: "apps"`. Seven Mix projects live there, and `mix.exs`
-declares four releases from them — every one of them a container image.
+The clients are outside the umbrella: `clients/tui` is its own Mix project depending on
+the three harness apps by path, and `clients/gui` a pnpm workspace depending on nothing
+here but the protocol. One `VERSION` versions everything ([build.md §4](build.md#4-version)).
 
-| App | Description (from its `mix.exs`) | Umbrella deps (runtime) | Test-only umbrella deps |
-|---|---|---|---|
-| `troupe_protocol` | "Wire format: JSON-RPC messages, events, schemas, and a client" (`apps/troupe_protocol/mix.exs:15`) | none | none declared; see §7 |
-| `troupe_core` | "Session actor trees: agents, tools, providers, and the log" (`apps/troupe_core/mix.exs:17`) | `troupe_protocol` (`:33`) | — |
-| `troupe_gateway` | "The daemon: transports, connections, subscriptions, scopes" (`apps/troupe_gateway/mix.exs:15`) | `troupe_core`, `troupe_protocol` (`:31-32`) | — |
-| `troupe_worker` | "Remote worker runtime (stage 2)" (`apps/troupe_worker/mix.exs:15`) | `troupe_core`, `troupe_protocol`, `troupe_gateway` (`:31-33`) | `troupe_plane` (`:38`) |
-| `troupe_plane` | "Control plane: identity, placement, budgets, admin (stage 2)" (`apps/troupe_plane/mix.exs:15`) | `troupe_protocol` (`:31`) | — |
-| `troupe_operator` | "Kubernetes operator (stage 2)" (`apps/troupe_operator/mix.exs:15`) | `troupe_protocol` (`:31`) | — |
-| `troupe_a2a` | "The A2A facade: a profile as an agent other agents can call" (`apps/troupe_a2a/mix.exs:15`) | `troupe_protocol` (`:35`) | — |
+## 2. Boundaries
 
-The "(stage 2)" descriptions in `apps/troupe_worker/mix.exs:15`,
-`apps/troupe_plane/mix.exs:15` and `apps/troupe_operator/mix.exs:15` predate stages 3-6.
+`mix troupe.boundaries` reads the `imports` chunk of every compiled beam and fails on:
 
-Releases:
-
-| Release | Applications | Steps | Packaging |
-|---|---|---|---|
-| `troupe_operator` | `troupe_protocol`, `troupe_operator` | `:assemble`, `:tar` | OCI image, `docker/Dockerfile` |
-| `troupe_plane` | `troupe_protocol`, `troupe_plane` | `:assemble`, `:tar` | OCI image |
-| `troupe_a2a` | `troupe_protocol`, `troupe_a2a` | `:assemble`, `:tar` | OCI image |
-| `troupe_worker` | `troupe_core`, `troupe_protocol`, `troupe_gateway`, `troupe_worker` | `:assemble`, `Troupe.Release.build_reapers/1`, `:tar` | OCI image |
-
-There used to be a fifth, `troupe`: the TUI, the CLI and the local daemon wrapped by
-Burrito into one executable per platform, with `verify_linux_nif/1` and five build
-targets behind it. It is gone, and so are the two apps it packaged. The comment that
-replaced its own says why: this repository is deployed by `charts/troupe` and installed
-on nobody's machine, so each release is "a plain Mix release that runs where an Erlang
-runtime is the container's business rather than the user's".
-
-`Troupe.Release.build_reapers/1` follows from that. It sets `TROUPE_REAPER_TARGETS` to
-`x86_64-linux-musl,aarch64-linux-musl` rather than `all`, because a pod cannot execute a
-macOS or Windows binary and cross-compiling three of them cost a Zig build each.
-
-Every app and the chart are version `0.2.0` (`mix.exs:4`, each `apps/*/mix.exs:7`,
-`charts/troupe/Chart.yaml`).
-
-## 2. Boundaries and how they are enforced
-
-`mix troupe.boundaries` (`apps/troupe_core/lib/mix/tasks/troupe.boundaries.ex`) reads the
-`imports` chunk of every compiled beam and compares it against the app rules at `:29-39`
-and the module rule at `:48-51`:
-
-| Rule | Text in the task |
+| Rule | Reason in the task |
 |---|---|
-| `troupe_a2a` may call only `troupe_protocol` | "the A2A facade is a protocol client and gets no private access" |
-| `troupe_plane` never calls `troupe_core` or `troupe_gateway` | "the plane does not run agents" (`:36`) |
-| `troupe_operator` never calls `troupe_core`, `troupe_gateway` or `troupe_plane` | "the operator holds cluster privileges and has no public surface" (`:37-38`) |
-| Every `Troupe.Plane.Web.Live.*` module may call only `Troupe.Plane.Admin` among `Troupe.Plane.*` | "a LiveView is an admin API client and gets no private access" (`:49-50`) |
+| `troupe_a2a` calls only `troupe_protocol` | "the A2A facade is a protocol client and gets no private access" |
+| `troupe_plane` never calls `troupe_core` or `troupe_gateway` | "the plane does not run agents" |
+| `troupe_operator` never calls core, gateway or plane | "the operator holds cluster privileges and has no public surface" |
+| `troupe_daemon` calls only protocol, core and gateway | "the daemon is the harness and a command line, and nothing of the platform" |
+| `Troupe.Plane.Web.Live.*` calls only `Troupe.Plane.Admin` among `Troupe.Plane.*` | "a LiveView is an admin API client and gets no private access" |
 
-Two further checks run in the same task: every cross-app call must be declared as
-`{:app, in_umbrella: true}` in the caller's `mix.exs` (`:128-139`, regex at `:224`), and
-the task raises on the first violation (`:179-188`). It runs as part of `mix check`
-(`mix.exs:34-40`) and in CI (`.github/workflows/ci.yml:79-80`).
+Every cross-app call must also be declared `in_umbrella` in the caller's `mix.exs`.
+Test-only reverse dependencies pass because only `lib/` beams are read. The TUI has its own
+check, `mix troupe.xref` in `clients/tui`: UI modules call only `Troupe.Client` and pure
+data modules, and the whole TUI reaches the harness only through `Troupe.Protocol.{Client,
+Daemon,Endpoint}`, `Troupe.Config`, `Troupe.Paths`, `Troupe.Reaper` and
+`Troupe.LLM.Catalog.Store` (Decision 673). The Python conformance client in
+`apps/troupe_gateway/test/conformance/` is the check that the protocol alone is enough.
 
-The rules used to have two more — the TUI and the CLI, each held to `troupe_protocol`
-alone. That was the check that made "our own clients have no private access" a fact, and
-with both apps gone the fact is now structural instead: every client is in another
-repository, and the only thing that proves the protocol is sufficient is the Python
-conformance client CI runs against a real daemon.
-
-Test-only umbrella dependencies do not violate the rules because the task reads beams
-under `_build/<env>/lib/<app>/ebin` (`:212-217`) and `lib/` never calls them; the comment
-at `apps/troupe_worker/mix.exs:34-37` says so. The plane's test-only dependency on
-`troupe_ctl`, which existed for the admin parity test, went with the CLI.
-
-Runtime seams that keep the rules true without a compile-time dependency:
-
-- The operator and the worker both compose the pod hostname
-  `<ordinal>-<profile>.<domain>`; `apps/troupe_operator/lib/troupe/operator/names.ex:45-50`
-  and `config/runtime.exs:50-64` each say the two "cannot share a function across the app
-  boundary".
+The operator and the worker both compose a pod's hostname `<ordinal>-<profile>.<domain>`;
+the two cannot share a function across the boundary, and both say so.
 
 ## 3. Supervision trees
 
-### 3.1 The core (`troupe_core`)
-
-`Troupe.Application` (`apps/troupe_core/lib/troupe/application.ex:17-27`), `one_for_one`:
-
-```
-Troupe.Supervisor
-├── Troupe.Registry
-├── Troupe.Events                 duplicate-key Registry; internal pub/sub (events.ex:1-14)
-├── Troupe.Sessions.Index
-├── Troupe.Sessions               DynamicSupervisor, :transient children (session.ex:200-244)
-│   └── Troupe.Session            per session, rest_for_one, max_restarts 3 / 10 s (session.ex:54-88)
-│       ├── Session.Log           the JSONL log and hash chain
-│       ├── Session.Approvals
-│       ├── Session.ClientTools
-│       ├── [Troupe.LLM.Fake]     only when provider is "fake" and no fake was injected
-│       ├── Agent.Node            the root agent
-│       ├── Session.Watcher       watch mode
-│       ├── Session.Files         fs_changed events
-│       └── Session.Summary       the summary projection, last on purpose
-```
-
-`Troupe.Wrapper` used to hang off that root: a watchdog that halted the VM when Burrito's
-launcher process went away, so a `kill -9` on the binary a user could see did not leave an
-orphaned BEAM holding the reaper pipes open. There is no launcher now — a pod's VM is
-PID 1 of its container and Kubernetes kills the whole thing — so the watchdog went with
-the binary.
-
-The ordering argument is in the moduledoc at `apps/troupe_core/lib/troupe/session.ex:2-12`:
-`Log` first because everything persists through it; `Approvals` and `ClientTools` above
-the agent so a restarted agent finds the same answers and registrations; `Watcher` after
-the agent so a watch-mode crash restarts nothing above it; `Summary` last because "a
-projection that could restart an agent by crashing would be worse than no projection"
-(`:83-85`).
-
-### 3.2 The local daemon (`troupe_gateway`)
-
-`Troupe.Gateway.Application` starts `Troupe.Gateway.Daemon` only when
-`:troupe_gateway, :autostart` is set (`apps/troupe_gateway/lib/troupe/gateway/application.ex:13-22`);
-`config/runtime.exs:411` sets it from `TROUPE_DAEMON_AUTOSTART`. The tree
-(`daemon.ex:10-16`, `:61-70`), `rest_for_one`, max_restarts 5 / 10 s:
+**Core** (`Troupe.Application`, `one_for_one`): `Troupe.Registry`, `Troupe.Events`
+(internal pub/sub), `Troupe.Sessions.Index`, and `Troupe.Sessions`, a `DynamicSupervisor`
+of `:transient` sessions. One session (`Troupe.Session`, `rest_for_one`, 3 restarts in
+10 s), in dependency order:
 
 ```
-Troupe.Gateway.Daemon
-├── Gateway.Commands          idempotency ledger, command_id -> acknowledgement
-├── Gateway.Connections       DynamicSupervisor, max_children 256 (daemon.ex:83)
-│   └── Gateway.Connection    one per attached client
-├── Gateway.Listener          Unix socket or loopback TCP
-└── Gateway.Idle              stops the daemon after a quiet period
+Session.Log          the log and hash chain; everything persists through it
+Session.Approvals    the permission gate
+Session.Questions    what the agent asks a person
+Session.ClientTools  tools a connected client offered
+Session.MCP          the workspace's own MCP servers
+[LLM.Fake]           only for provider: fake
+Agent.Node           the root agent: Agent.Tasks, Agent.Children, Agent.Server (one_for_all)
+Session.Watcher      watch mode; after the agent, so its crash restarts nothing above
+Session.Files        fs_changed events
+Session.Summary      the summary projection, last on purpose
 ```
 
-Sessions are not in this tree; they live in `Troupe.Application` "so the daemon can
-restart its listener without disturbing a running agent" (`daemon.ex:18-20`).
+**Daemon** (`Troupe.Gateway.Daemon`, `rest_for_one`, started only under
+`TROUPE_DAEMON_AUTOSTART`): `Commands` (idempotency ledger), `Plane` (where the plane is,
+if anybody linked one), `Private.Sealers` (a sealer per private session), `Connections`
+(one process per client, at most 256), `Listener` (Unix socket or loopback TCP),
+`Loopback` (a WebSocket on 127.0.0.1, the only door a browser has) and `Idle`. Sessions
+are not in this tree, so the daemon can lose its listener without disturbing an agent.
 
-### 3.3 A worker pod (`troupe_worker`)
+**Worker** (`Troupe.Worker.Supervisor`, empty unless `TROUPE_WORKER_AUTOSTART`):
+`Sessions` (a `Session.Manager` per active session), `Auth`, `Connections`, `MCP`,
+`Bundles` (before the link: enrolment claims the bundle hash), `Usage`, `Disk.Watch`,
+`Plane.Link` (only with
+`TROUPE_PLANE_CONTROL`), and `Harness` — the gateway's `Commands`, `Connections`, a raw
+NDJSON `Listener` on 4100 and `Gateway.Web` (Bandit on 4000: `/health/live`,
+`/health/ready`, `/v1/socket`).
 
-`Troupe.Worker.Application` is empty unless `:troupe_worker, :autostart`
-(`apps/troupe_worker/lib/troupe/worker/application.ex:16-21`), which
-`config/runtime.exs:347-356` sets from `TROUPE_WORKER_AUTOSTART`. Children, `one_for_one`
-(`application.ex:26-46`):
+**Plane** (`Troupe.Plane.Supervisor`, empty unless `TROUPE_PLANE_AUTOSTART`): `Repo`,
+`Settings` (5 s cache), PubSub, `Singleton` (a `DynamicSupervisor` for the `:global`
+actors: one `Placement` per profile, one `TeamBudget` per team), `Fleet.Sweeper`, the
+keepers of the trigger scheduler and the fleet scaler, `Fleet.ReleaseImage` (rewrites
+`release` profiles after an upgrade), the control channel's registry, connections and `:gen_tcp`
+listener on 4001, `Ledger.Cache`, `Tokens.Credential` (the OpenBao login), the Phoenix
+endpoint on 4000, and libcluster when `RELEASE_DISTRIBUTION=name`. The `:global` actors
+are why the chart refuses more than one replica without distribution.
 
-```
-Troupe.Worker.Supervisor
-├── Worker.Sessions              Registry + DynamicSupervisor of Session.Manager (sessions.ex:22-30)
-├── Worker.Auth
-├── Worker.MCP                   before Bundles: a bundle hands its servers to the registry
-├── Worker.Bundles               before the link: enrolment claims the bundle hash
-├── Worker.Usage
-├── Worker.Disk.Watch
-├── [Worker.Plane.Link]          only when :plane is configured (TROUPE_PLANE_CONTROL)
-└── Worker.Harness               Supervisor, one_for_one (harness.ex:56-73)
-    ├── Gateway.Commands
-    ├── Gateway.Connections
-    ├── Gateway.Listener         raw NDJSON on TROUPE_HARNESS_PORT (4100)
-    └── Gateway.Web              Bandit on TROUPE_HTTP_PORT (4000): /health/live, /health/ready, /v1/socket
-```
+**Operator** (`rest_for_one`, under `TROUPE_OPERATOR_AUTOSTART`): `Reconcilers` (one per
+resource), `Watch` (Bonny: watch, resync, `Lease` leadership), `Descendants`. **A2A**:
+a plane-token cache, the stream registry, and Bandit when autostarted.
 
-A pod without `TROUPE_PLANE_CONTROL` does not start the link at all
-(`application.ex:37-40`, `config/runtime.exs:381-383`). The harness owns its own
-`Commands` and `Connections` because "a pod never runs the local daemon, so there is
-exactly one owner either way" (`harness.ex:26-30`).
+## 4. Transports
 
-### 3.4 The plane (`troupe_plane`)
+One JSON-RPC framing, three transports: a Unix socket (NDJSON, mode 0600, authenticated
+by file permissions), loopback TCP (NDJSON, a random token in a user-only file; chosen by
+*trying* `AF_UNIX`), and WebSocket (one message per text frame): a pod's `/v1/socket`
+with a session token whose audience is the pod, and the daemon's loopback WebSocket
+published in `daemon.json`. `TROUPE_DAEMON_SOCKET=tcp` forces loopback TCP; any other
+value is a socket path. `Troupe.Protocol.Daemon` finds or starts the local daemon —
+`TROUPE_DAEMON_COMMAND`, else `troupe-daemon` on the `PATH` — serialising concurrent
+starts with an `O_EXCL` lock.
 
-`Troupe.Plane.Application` is empty unless `:troupe_plane, :autostart`
-(`apps/troupe_plane/lib/troupe/plane/application.ex:18-23`; `config/config.exs:33-37`
-sets it `false`, `config/runtime.exs:182,311-312` sets it `true` under
-`TROUPE_PLANE_AUTOSTART=true`). Children, `one_for_one` (`application.ex:25-59`):
+## 5. Where state lives
 
-```
-Troupe.Plane.Supervisor
-├── Plane.Repo                        Ecto, PostgreSQL
-├── Plane.Settings                    5 s ETS cache over platform_settings (settings.ex:37-45)
-├── Phoenix.PubSub  (Troupe.Plane.PubSub)
-├── Plane.Singleton                   DynamicSupervisor for :global actors (singleton.ex:1-27)
-├── Plane.Fleet.Sweeper
-├── Plane.Triggers.Scheduler.Keeper
-├── Registry  (Plane.Control.Registry, :duplicate)
-├── Plane.Control.Connections         DynamicSupervisor, max_children 512 (control/listener.ex:141)
-├── Plane.Control.Listener            :gen_tcp on TROUPE_PLANE_CONTROL_PORT (4001)
-├── Plane.Ledger.Cache                60 s cache of ledger sums
-├── Plane.Tokens.Credential           the plane's OpenBao credential
-├── Plane.Web.Endpoint                Phoenix + Bandit on TROUPE_HTTP_PORT (4000)
-└── [Cluster.Supervisor]              libcluster, only when :topologies is set (RELEASE_DISTRIBUTION=name)
-```
+| State | Where |
+|---|---|
+| A local session's log | `<state>/sessions/<workspace-hash>/<session-id>/events.jsonl`; `<state>` is `TROUPE_STATE_HOME`, else `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\troupe`; blobs beside it |
+| Local config | `TROUPE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/troupe` or `%APPDATA%\troupe`: `config.yaml`, `agents/`, `models.json` |
+| The project brief | `<repository root>/.troupe/memory.md` |
+| Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock`, or `daemon.json` (TCP port and token, loopback WebSocket) |
+| A pod's working copies | the `data` volume at `/var/lib/troupe` |
+| Sealed sessions | S3 `sessions/<id>/…`, written by workers and by daemons for private sessions |
+| Session keys | OpenBao KV v2, `troupe/teams/<team>/…` for pods, `troupe/people/<subject>/…` for a person |
+| Index, identity, ledger, audit, settings, triggers | PostgreSQL, never session content |
+| `WorkerProfile` (written), `TroupePolicy` (read), `TokenReview` | the plane, through the Kubernetes API |
+| Everything in `troupe-w-<profile>` | the operator, server-side apply as `troupe-operator` |
 
-The cluster-unique actors — one `Placement` per profile, one `TeamBudget` per team — are
-started on demand under `Singleton` and registered with `:global`
-(`application.ex:9-12`, `singleton.ex:4-17`). This is why the chart refuses
-`plane.replicas > 1` without `plane.distribution: name`
-(`charts/troupe/templates/_helpers.tpl:22-35`).
+## 6. The TUI (`clients/tui`)
 
-### 3.5 The operator (`troupe_operator`)
-
-`Troupe.Operator.Application` starts `Troupe.Operator.Supervisor` only under
-`:troupe_operator, :autostart` (`apps/troupe_operator/lib/troupe/operator/application.ex:17-26`;
-`config/runtime.exs:97-98`). The supervisor is `rest_for_one`, max_restarts 5 / 30 s
-(`supervisor.ex:25-44`):
+The TUI and its HQ page call one module, `Troupe.Client`, a behaviour with two
+implementations routed by session id through `Troupe.Client.Registry`:
+`Troupe.Client.Daemon` (the `troupe-daemon` on the machine, or a `Troupe.Gateway.Daemon`
+the TUI embeds when none answers, reached over its loopback WebSocket) and
+`Troupe.Client.Remote` (a plane and its pods). Both attach a session through the same
+`Troupe.Remote.Worker`, so a local session and a pod's look identical on screen. Fleet
+calls take an origin, `{:local, workspace}` or `{:remote, plane_url}`.
 
 ```
-Troupe.Operator.Supervisor
-├── Operator.Reconcilers      Registry + DynamicSupervisor, one Reconciler per resource (reconcilers.ex:29-34)
-├── Operator.Watch            Bonny: watch WorkerProfile/TeamVolume, resync, Lease-based leader election
-└── Operator.Descendants      watches the objects the operator created
+Troupe.Remote.Supervisor (one_for_one)
+├── Remote.Tokens        refresh, plane and session tokens
+├── Remote.Connections   one Remote.Plane per plane
+└── Remote.Sessions      a Remote.Journal (JSONL + cursor) and a Remote.Worker (the WebSocket) per attached session
 ```
 
-The Kubernetes connection is built once in `init/1` (`supervisor.ex:28`) by
-`Troupe.Operator.Conn` — in-cluster ServiceAccount, or `KUBECONFIG` /
-`TROUPE_KUBE_CONTEXT` outside a pod (`conn.ex:1-11`, `:49-57`). The watch namespace
-defaults to `TROUPE_PLANE_NAMESPACE` or `troupe-system` (`supervisor.ex:46`).
+`one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.
+A worker connection subscribes from the journal's cursor + 1; the journal drops a batch it
+already has, so a reconnect, `resync_required` or `-32012` all produce the same transcript.
+Deltas are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns
+protocol events into the harness's own at the edge — the model and view never branch on
+"is this remote". Browsing opens with `session.open read`; the first activating action
+calls `session.open activate` once and reconnects to whatever endpoint comes back.
+Merge, discard, watch mode, the brief and settings are local-only and answer a remote
+session with a sentence rather than failing silently.
 
-### 3.6 The A2A facade
+## 7. The GUI (`clients/gui`)
 
-`Troupe.A2A.Application` always starts `Troupe.A2A.Plane.Cache` and `Troupe.A2A.Streams`;
-Bandit on `Troupe.A2A.Router` is added only when `Troupe.A2A.autostart?/0`
-(`apps/troupe_a2a/lib/troupe/a2a/application.ex:14-30`; `config/runtime.exs:415-442`).
+The package layout is in the [GUI README](../../clients/gui/README.md). What its code
+settles:
 
-## 4. The three transports
+- **The fold is in `@troupe/client`**, a pure function of the event stream, tested without
+  a DOM — two clients agreeing is a property of that function. The React layer is an
+  adapter over the client's stores and holds nothing. `@troupe/client` has no runtime
+  dependencies; every protocol type is an open object, because v1 is additive.
+- **The view owns the cursor**; `SessionAttachment` swaps the socket underneath it. On
+  `auth.expiring` it mints (`token.mint`) and hands the token over with `auth.refresh` on
+  the same socket; on a drop it reconnects with backoff (250 ms to 10 s) and resubscribes
+  from the last `seq` it processed.
+- **Sign-in**: a browser uses authorization code + PKCE (Entra's `devicecode` endpoint
+  sends no CORS headers), with `prompt=select_account` and, for a tenant-scoped Microsoft
+  issuer, `domain_hint=organizations`; anything else uses the device grant. Redeeming a
+  code is idempotent, and the code comes off the address bar either way. The redirect URI
+  is the origin plus the base path with no trailing slash, registered as a single-page
+  application.
+- **Storage**: the provider's refresh token is the only persisted secret
+  (`localStorage` `troupe.auth.refresh:<planeUrl>`, or the desktop shell's credential
+  store); the PKCE verifier sits in `sessionStorage` `troupe.auth.pending` between leaving
+  and coming back; preferences are `troupe.pref.*`. Plane and pod tokens live in memory.
+- **The stored refresh token is spent one caller at a time** (#53). A Web Lock is held per
+  plane, across tabs, or a queue within the page where there are no locks, and the token
+  is read inside it. So StrictMode's double effect, or two tabs, never spend a rotating
+  token twice. A 400 or 401 is a refusal: its reason is logged, and the store is cleared
+  only if it still holds the refused token. A 5xx keeps the token. A sign-in that brings
+  no refresh token is warned about, because the provider lacks `offline_access` and the
+  next reload will ask again.
+- **Two modes, `local` and `plane`** (`mode.ts`, #85). `auth` is optional, and each screen
+  says what it needs. In local mode Review and the plane's profiles are hidden, and the
+  rail shows *This computer* and the OS user the daemon reported. *Local only* is a
+  remembered setting (`troupe.pref.localOnly`, until shared settings, #57). It is reached
+  from the sign-in screen's third door or the switch on *This computer*. Turning it on
+  keeps the stored sign-in. *Offline* is plane mode with a plane that does not answer:
+  "Continue on this computer", nothing remembered, and the plane retried every 15 s. The
+  promise that nothing reaches a plane is tested on traffic: `apps/desktop/test` (Vitest,
+  jsdom) records every request the page opens.
+- **The fleet** is one list from several sources (the plane's `sessions.list`, polled
+  every 4 s because the plane does not push, and the daemon), merged by id with the
+  daemon's copy winning. A source that fails keeps its last rows and reports an error.
+- **An input is shown as queued**, below the stream, until `input_accepted` names its
+  command id — never inserted optimistically. Approvals are a sticky panel; the inbox
+  opens each waiting session in `read` mode.
+- **The base path is baked into the image** (`TROUPE_GUI_BASE`), the Ingress strips it,
+  and a GUI mounted at a sub-path prefills the plane URL with its own origin.
+- **Design tokens are generated**: `pnpm tokens` writes `tokens.css` and `mark.ts` from
+  `docs/design/themes/*.tokens.json` and refuses a theme whose token names differ. Theme
+  and mode are `data-theme` and `data-mode` on the root, kept in the browser; Signal is the
+  default.
 
-One JSON-RPC framing, three transports (`ARCHITECTURE.md:131-143` matches the code):
+## 8. Things a reader will trip over
 
-| Transport | Code | Authentication |
-|---|---|---|
-| Unix socket, NDJSON, mode 0600 | `Troupe.Protocol.Endpoint.unix/1`, `apps/troupe_protocol/lib/troupe/protocol/endpoint.ex:4-12,44` | file permissions |
-| Loopback TCP, NDJSON, random token in a user-only file | `Endpoint.tcp/1`, `endpoint.ex:47-50`; chosen when `AF_UNIX` is unavailable (`:37-39`) | the token |
-| WebSocket, one message per text frame | `Troupe.Gateway.Web` `GET /v1/socket`, `apps/troupe_gateway/lib/troupe/gateway/web.ex:1-13,36` | a plane-minted session token with the pod as audience (`apps/troupe_worker/lib/troupe/worker/harness.ex:4-8`) |
-
-`TROUPE_DAEMON_SOCKET` overrides the local choice: `tcp` forces loopback TCP, any other
-value is a Unix socket path (`endpoint.ex:27-33`). The pod also serves raw NDJSON on port
-4100 for in-cluster callers (`harness.ex:20-23`, `config/runtime.exs:358-362`).
-
-Discrepancy: `README.md:9` and `:262` describe "JSON-RPC over a Unix socket" as the
-protocol; the code has three transports, and remote clients use the WebSocket.
-
-The local daemon does not serve a WebSocket: `Troupe.Gateway.Daemon` has no `Gateway.Web`
-child (`daemon.ex:61-66`). `docs/plans/README.md:52` lists that as still to do (see
-[../AUDIT.md](../AUDIT.md) §1.2).
-
-## 5. Rules the code states about itself
-
-- **`Session.Log` is the only publisher of durable events.** The log appends, fsyncs and
-  publishes in one mailbox (`apps/troupe_core/lib/troupe/session/log.ex:2-17`,
-  `:44-55`). `Troupe.Events` is "internal to core" and clients subscribe only through the
-  protocol (`events.ex:2-9`).
-- **Ephemeral events are never persisted.** `Troupe.Protocol.Event` moduledoc,
-  `apps/troupe_protocol/lib/troupe/protocol/event.ex:5-11`.
-- **The response is an acknowledgement, never the effect**, and **replaying a
-  `command_id` is a no-op** returning the original acknowledgement
-  (`apps/troupe_gateway/lib/troupe/gateway/dispatch.ex:7-14`; the ledger is
-  `Troupe.Gateway.Commands`, keyed by subject plus `command_id`, TTL 30 minutes,
-  `commands.ex:1-31`).
-- **Scopes** `observe`, `control`, `admin` are checked per method against the table at
-  `dispatch.ex:41-74`.
-- **Old logs are upcast one version at a time and never lose a field**
-  (`apps/troupe_core/lib/troupe/log/upcast.ex:1-19`; `@current 1` at `:23`). The fold
-  hash over a witness of durable types is what fixtures check
-  (`apps/troupe_core/lib/troupe/log/fold.ex:1-27,59-70`).
-- **Schema compatibility is add-only** within major version 1
-  (`apps/troupe_protocol/lib/troupe/protocol/schema.ex:9-12`; enforced by
-  `mix troupe.schema.diff`, `apps/troupe_protocol/lib/mix/tasks/troupe.schema.diff.ex:8-14`).
-- **Admin parity**: the console, `/rpc`, `troupe admin` and the MCP tool list are four
-  renderings of `Troupe.Plane.Admin`, enumerated by
-  `apps/troupe_plane/test/troupe/plane/admin_parity_test.exs`. Discrepancy: the
-  moduledocs at `apps/troupe_plane/lib/troupe/plane/admin.ex:5` and
-  `admin_parity_test.exs:3` still say "three"; `apps/troupe_plane/lib/troupe/plane/admin/api.ex:16-17`
-  says four, and the test checks four (`admin_parity_test.exs:87-134`).
-
-## 6. Where state lives
-
-| State | Where | Written by | Code |
-|---|---|---|---|
-| Local session log | `<state>/sessions/<workspace-hash>/<session-id>/events.jsonl`; `<state>` is `TROUPE_STATE_HOME`, else `$XDG_STATE_HOME/troupe` or `%LOCALAPPDATA%\troupe` | `Session.Log` | `apps/troupe_core/lib/troupe/paths.ex:29-47,88-93`; `session/log.ex:109,190` |
-| Local blobs | `<session dir>/blobs/<digest>` | `Session.Blobs` | `apps/troupe_core/lib/troupe/session/blobs.ex:119-123` |
-| Local config | `TROUPE_CONFIG_HOME`, else `$XDG_CONFIG_HOME/troupe` or `%APPDATA%\troupe`; `config.yaml`, `agents/` | the profile's bundle, in a pod | `paths.ex:13-20,81-86` |
-| Daemon discovery | `$XDG_RUNTIME_DIR/troupe/daemon.sock` or a `daemon.json` with a TCP token; `O_EXCL` lock, stale after 30 s | the daemon | `apps/troupe_protocol/lib/troupe/protocol/daemon.ex:1-29` |
-| Pod working copies | PVC `data` at `/var/lib/troupe` | worker | `apps/troupe_operator/lib/troupe/operator/resources.ex:756` |
-| Sealed session data | S3 `sessions/<id>/{manifest.json, segments/, snapshots/, workspace/, blobs/}` | workers; the plane reads manifests only in `mix troupe.index.rebuild` | `apps/troupe_protocol/lib/troupe/sessions/storage.ex`; `apps/troupe_plane/lib/mix/tasks/troupe.index.rebuild.ex:4-17` |
-| Per-session data keys | OpenBao KV v2 `troupe/teams/<team>/sessions/<id>` | workers | `apps/troupe_protocol/lib/troupe/kms/open_bao.ex` |
-| Token signing key | OpenBao transit `troupe-session-tokens` | created out of band (`dev/docker-compose.yml:116-117`, `dev/kind/dependencies.yaml:231-232`) | `apps/troupe_plane/lib/troupe/plane/tokens.ex` |
-| Index, identity, ledger, audit, settings | PostgreSQL, 20 tables from 11 migrations; never session content | plane | `apps/troupe_plane/priv/repo/migrations/`, `apps/troupe_plane/lib/troupe/plane/repo.ex:5-8` |
-| `WorkerProfile` (write), `TroupePolicy` (read), `TokenReview` | Kubernetes API | plane | `apps/troupe_plane/lib/troupe/plane/provision.ex`, `cluster_policy.ex`, `enrolment.ex` |
-| Everything in `troupe-w-<profile>` | Kubernetes API | operator, SSA field manager `troupe-operator` | `apps/troupe_operator/lib/troupe/operator/resources.ex` |
-
-Caveat from [../AUDIT.md](../AUDIT.md) §3.1: nothing under `config/` or `apps/*/lib`
-sets `:troupe_plane, :k8s_conn`, which `Provision` and `ClusterPolicy` read; only
-enrolment builds its own connection (`apps/troupe_plane/lib/troupe/plane/enrolment.ex:169-185`).
-
-## 7. Things a reader will trip over
-
-- `troupe_protocol` is not "no I/O beyond a socket" (`ARCHITECTURE.md:23`): it holds the
-  OpenBao client (`lib/troupe/kms/open_bao.ex`), the SigV4 S3 client
-  (`lib/troupe/object_store.ex`), the MCP client (`lib/troupe/mcp/client.ex`), and the
-  `TroupePolicy` / `WorkerProfile` parsers (`lib/troupe/policy.ex`, `lib/troupe/worker_profile.ex`).
-  The reason is in its `mix.exs:40-42`: these are "contracts both the plane and the
-  workers hold".
-- `apps/troupe_protocol/test/troupe/policy_test.exs:12` does `import Troupe.Operator.Fixtures`,
-  a module under `apps/troupe_operator/test/support/fixtures.ex`, although
-  `apps/troupe_protocol/mix.exs` declares no dependency on `troupe_operator`. See
-  [testing.md](testing.md) §6 for what that means for running the suite.
-- `config/runtime.exs:237` names `Troupe.Plane.Web.Breakglass`; the module is
-  `Troupe.Plane.Breakglass` (`apps/troupe_plane/lib/troupe/plane/breakglass.ex`).
-- `apps/troupe_plane/lib/troupe/plane/web/live/status.ex:9` says the states are read from
-  `docs/design/admin/tokens.json` at compile time; they are read from
-  `apps/troupe_plane/priv/design/statuses.json`, which `mix troupe.admin.tokens` writes
-  (`apps/troupe_plane/lib/mix/tasks/troupe.admin.tokens.ex:38-43`).
+- `troupe_protocol` is not "no I/O beyond a socket": it holds the OpenBao, S3 and MCP
+  clients and the CRD parsers, because they are contracts the plane and workers both hold.
+- `apps/troupe_protocol/test/troupe/policy_test.exs` imports `Troupe.Operator.Fixtures`
+  from the operator's test support without declaring the dependency; run the protocol
+  suite from the root.
+- `troupe_plane`'s `web/live/status.ex` reads its states from `priv/design/statuses.json`,
+  which `mix troupe.admin.tokens` writes, not from `docs/design/admin/tokens.json`
+  directly: the image build does not see `docs/`.

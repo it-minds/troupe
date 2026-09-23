@@ -67,6 +67,11 @@ defmodule Troupe.Gateway.Dispatch do
     "input.send" => :control,
     "turn.cancel" => :control,
     "profile.switch" => :control,
+    # The goal steers every later turn, so setting and clearing it take what input does;
+    # reading it is reading the log.
+    "session.goal.set" => :control,
+    "session.goal.clear" => :control,
+    "session.goal.get" => :observe,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -419,6 +424,37 @@ defmodule Troupe.Gateway.Dispatch do
          :ok <- activate(session_id) do
       Troupe.switch_profile(session_id, profile)
       {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # The session's goal. Setting and clearing are activating, like a profile switch: the
+  # root agent is what writes `goal_set` and `goal_cleared` and reads the goal into its
+  # prompt. The answer is the acknowledgement; the event, carrying this `command_id`, is
+  # the effect. Reading answers from the log, so a dormant session stays dormant.
+  defp handle("session.goal.set", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, text} <- goal_text(params),
+         :ok <- activate(session_id) do
+      Troupe.set_goal(session_id, text, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.goal.clear", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- activate(session_id) do
+      Troupe.clear_goal(session_id, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.goal.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      case Troupe.goal(session_id) do
+        nil -> {:ok, %{"goal" => nil, "set_by" => nil, "set_at" => nil}}
+        goal -> {:ok, %{"goal" => goal.text, "set_by" => goal.set_by, "set_at" => goal.set_at}}
+      end
     end
   end
 
@@ -792,6 +828,25 @@ defmodule Troupe.Gateway.Dispatch do
     case Map.get(params, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, Error.new(:invalid_params, %{missing: key})}
+    end
+  end
+
+  # Trimmed, because a goal typed at a prompt arrives with the newline that sent it, and
+  # one that is only whitespace is no goal at all rather than an empty one.
+  defp goal_text(params) do
+    case params |> Map.get("text") |> trimmed() do
+      "" -> {:error, Error.new(:invalid_params, %{field: "text", reason: "a goal needs some text"})}
+      text -> {:ok, text}
+    end
+  end
+
+  defp trimmed(text) when is_binary(text), do: String.trim(text)
+  defp trimmed(_text), do: ""
+
+  defp command_opts(params) do
+    case Map.get(params, "command_id") do
+      command_id when is_binary(command_id) -> [command_id: command_id]
+      _ -> []
     end
   end
 

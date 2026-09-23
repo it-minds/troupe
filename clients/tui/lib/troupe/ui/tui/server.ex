@@ -668,6 +668,9 @@ defmodule Troupe.UI.TUI.Server do
         "memory" ->
           notice_of(Client.memory(sid, String.trim(args)))
 
+        "goal" ->
+          goal_command(sid, String.trim(args))
+
         "upload" ->
           notice_of(upload(sid, String.trim(args)))
 
@@ -772,6 +775,33 @@ defmodule Troupe.UI.TUI.Server do
   defp notice_of({:ok, text}), do: {:notice, text}
   defp notice_of({:error, reason}) when is_binary(reason), do: {:error, reason}
   defp notice_of({:error, reason}), do: {:error, inspect(reason)}
+
+  ## The session's goal
+
+  # `/goal` says what it is, `/goal clear` clears it, and anything else sets it. The status
+  # line follows the session's own `goal_set` and `goal_cleared`, so these only answer on
+  # the notice line.
+  defp goal_command(sid, "") do
+    case Client.goal(sid) do
+      {:ok, nil} -> {:notice, "no goal set; /goal <text> sets one"}
+      {:ok, goal} -> {:notice, "goal: " <> goal}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp goal_command(sid, "clear") do
+    case Client.clear_goal(sid) do
+      :ok -> {:notice, "goal cleared"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp goal_command(sid, text) do
+    case Client.set_goal(sid, text) do
+      :ok -> {:notice, "goal set"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
 
   ## Observer page
 
@@ -1827,7 +1857,7 @@ defmodule Troupe.UI.TUI.Server do
           text,
           state.commands ++
             @path_commands ++
-            ~w(settings help observer models watch agents sessions resume memory mcp quit)
+            ~w(settings help observer models watch agents sessions resume memory mcp goal quit)
         )
 
       true ->

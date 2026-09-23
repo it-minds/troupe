@@ -187,8 +187,12 @@ defmodule Troupe.Log.FoldTest do
 
     [clauses, _rest] = String.split(body, "\n  end\n", parts: 2)
 
+    # A type can also have a head of its own, ahead of the case (the goal's two do).
+    heads = Regex.scan(~r/^  defp fold_event\(%Event\{type: "([a-z_]+)"/m, source)
+
     ~r/^      "([a-z_]+)" ->$/m
     |> Regex.scan(clauses)
+    |> Enum.concat(heads)
     |> Enum.map(fn [_line, type] -> type end)
     |> MapSet.new()
   end

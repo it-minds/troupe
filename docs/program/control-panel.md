@@ -5,7 +5,7 @@ The admin surface was built once already and the record of it is
 That work was right and this is not a rewrite of it: the context underneath, the four
 renderings, the parity test, the diff keyed by path, the settings registry and the
 `console.css` discipline all stand. What follows is what the console has to become for
-[`../RELEASE.md`](RELEASE.md) to be a product rather than a platform.
+the 1.0 plan to be a product rather than a platform.
 
 ---
 
@@ -27,7 +27,7 @@ leaving it:
 | See who has connected a personal credential to which server | nothing; there is no such thing |
 | Prove the audit trail has not been altered | nothing; the integrity tab is drawn and not built |
 
-Eight rows, and six of them are objects that [`../RELEASE.md`](RELEASE.md) creates. The
+Eight rows, and six of them are objects the 1.0 plan creates. The
 console is not behind because somebody neglected it; it is behind because the product grew
 underneath it and the surface is where growth shows.
 
