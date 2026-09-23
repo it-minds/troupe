@@ -53,10 +53,12 @@ apps in the same pull request as the client change that needs it. A LiveView cal
 
 - **Comments say why.** Every module opens with a `@moduledoc` that argues for the design
   rather than restating the code. When behaviour changes, the moduledoc moves with it.
-- **`DECISIONS.md`** records every judgment call a reader could have made differently,
-  numbered, newest at the bottom: a bold one-sentence decision, then the reasoning. Code
-  cites decisions by number. `clients/tui/DECISIONS.md` and
-  `apps/troupe_daemon/DECISIONS.md` hold those two projects' own.
+- **`DECISIONS.md`** records the judgment calls that still hold and that a reader could
+  have made differently, numbered, newest at the bottom: a bold one-sentence decision, then
+  the reasoning. Code cites decisions by number. One that is superseded, or whose reasoning
+  the code's own comments now carry, is deleted, and its number is never reused.
+  `clients/tui/DECISIONS.md` and `apps/troupe_daemon/DECISIONS.md` hold those two
+  projects' own.
 - **Commit messages and pull request titles** state the behaviour that is now true, in
   plain prose — "A session's listing says what it has actually spent" — with a body saying
   what was wrong, what changed and why. No conventional-commit prefixes, no ticket numbers,
