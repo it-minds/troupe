@@ -246,7 +246,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`harness` — the last is the note the harness gives a model whose reply was cut or empty), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
@@ -260,6 +260,10 @@ Durable:
 | `profile_switched` | `from`, `to` |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
+| `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
+| `loop_iteration_started` | `loop_id`, `iteration`, `command_id` — the command id the iteration's input carries, which the root's `input_accepted` echoes |
+| `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
+| `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
@@ -547,6 +551,51 @@ activate a dormant session, like `profile.switch`.
 or all three `null` when no goal is set. It is read from the log, so it answers for a
 dormant session and wakes nothing.
 
+#### `session.loop.start`, `session.loop.stop`, `session.loop.get`
+```json
+{"command_id": "c-7", "session_id": "s-9f", "max_iterations": 5}
+```
+→ `{"accepted": true, "loop_id": "loop-1", "max_iterations": 5}`. The session works
+towards its goal on its own, one iteration at a time: `loop_started` carrying the
+`command_id`, then for each iteration `loop_iteration_started`, a turn of the root agent
+(an `input_accepted` echoing the iteration's `command_id` and a `user_input` from `loop`,
+then the turn as usual) and `loop_iteration_finished`, and at the end `loop_stopped`.
+`max_iterations` is optional and the session's `loop_max_iterations` (10) when absent; it
+is otherwise a positive integer, or `invalid_params` with `field: "max_iterations"`. A
+session with no goal answers `conflict` with `needs: "goal"`, and one with a loop already
+running answers `conflict` with its `loop_id`. It activates a dormant session.
+
+Each iteration ends with the agent's own verdict, given as a tool call and never read
+from its prose: on the loop's turns, and only there, the agent is offered
+`goal_complete {summary}`, and an iteration in which it completes that call ends the
+loop with reason `goal_complete`. An iteration that ends without one is followed by
+the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
+(3) iterations in a row fail (the model request failed, or the agent ended short or
+crashed); when the budget question is asked (`budget`: the question stays with whoever
+answers it, and the loop does not resume after an `allow`); when somebody cancels the
+turn with `turn.cancel` (`cancelled`) or clears the goal (`goal_cleared`, and the turn in
+flight finishes); and when the root agent has ended in a way input does not wake
+(`agent_done`). Input a person sends meanwhile is taken between iterations.
+
+`session.loop.stop {command_id, session_id}` → `{"accepted": true}`; the effect is
+`loop_stopped` with reason `requested` and the `command_id`, written under the actor who
+sent it. Any client with `control` may send it, at any point in an iteration: if the root
+agent's turn is the loop's, it is cancelled (`cancelled` follows), and a person's own turn
+is left to finish. Stopping when no loop runs writes nothing. It does not activate a
+dormant session, whose loop is not running.
+
+`session.loop.get {session_id}` → `{"loop": null}`, or `{"loop": {"loop_id", "state"
+(`running` or `stopped`), "iteration", "max_iterations", "failures", "reason",
+"detail", "summary", "goal", "started_by", "started_at"}}` for the session's latest
+loop. It is read from the log and wakes nothing.
+
+A loop is written down the way everything else is, so it survives what the session
+survives. If the session stops mid-loop — a daemon that died, a session made dormant —
+the loop does **not** carry on by itself when the session comes back: the first thing
+the activated session writes about it is `loop_stopped` with reason `interrupted`, and
+`session.loop.get` already answers `stopped` / `interrupted` while the session is
+dormant. A daemon configured to resume (`resume_on_restart`) resumes the loop too.
+
 #### `approval.respond`
 ```json
 {"command_id": "c-4", "session_id": "s-9f", "call_id": "call_3",
@@ -817,7 +866,7 @@ nothing. That is deliberate — a session that woke up because somebody looked a
 would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.set`, `session.goal.clear`, `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
 
 #### Activation is about the session, not about the pod
@@ -848,7 +897,9 @@ What a client sees is this:
 - **no model call is made.** A session comes back interrupted and stays that way until
   an activating command arrives. Resuming instead would mean a crash loop spends money
   and re-runs shell commands nobody is watching. A daemon may be configured to resume,
-  and then it re-runs unfinished tool calls and takes the turn it owed.
+  and then it re-runs unfinished tool calls and takes the turn it owed;
+- a loop that was running is stopped, `interrupted`, for the same reason: it is
+  reported so while the session is dormant and written so when it is activated.
 
 When an interrupted session is activated, the tool calls that never finished are
 closed off as errors naming the interruption, so the conversation the model sees has a
@@ -860,8 +911,8 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
-| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all

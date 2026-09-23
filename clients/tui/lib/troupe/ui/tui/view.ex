@@ -1263,7 +1263,8 @@ defmodule Troupe.UI.TUI.View do
       end
 
     text =
-      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)} · #{watch}#{mcp}" <>
+      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)}#{loop_note(state.model)}" <>
+        " · #{watch}#{mcp}" <>
         " · #{state.session_id}" <>
         remote_note(state) <>
         if(notice, do: " · #{notice}", else: "")
@@ -1294,6 +1295,16 @@ defmodule Troupe.UI.TUI.View do
             else: line
 
         " · goal: " <> clipped
+    end
+  end
+
+  # Where a running loop is, beside the goal it works towards. It runs on its own, so the
+  # line is all it takes of the screen: the input box stays yours.
+  defp loop_note(model) do
+    case Model.loop(model) do
+      nil -> ""
+      %{iteration: n, max: nil} -> " · loop #{n}"
+      %{iteration: n, max: max} -> " · loop #{n}/#{max}"
     end
   end
 

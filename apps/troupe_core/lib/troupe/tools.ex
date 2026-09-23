@@ -113,7 +113,14 @@ defmodule Troupe.Tools do
     |> for_definition(ctx.session_id)
     |> entitled_servers(ctx.bundle)
     |> Kernel.++(Skills.tools(ctx.bundle, definition))
+    |> Kernel.++(loop_tools(ctx))
   end
+
+  # A loop's structured verdict (Decision 681), on the turns a running loop started and
+  # no others, and outside the profile's list: it changes nothing but whether the loop
+  # goes on, and a loop whose agent could not say "done" would only ever stop at its cap.
+  defp loop_tools(%Ctx{loop: loop}) when is_binary(loop), do: [Troupe.Tools.GoalComplete]
+  defp loop_tools(%Ctx{}), do: []
 
   defp entitled_servers(tools, %{entitlements: %{"mcp_servers" => names}}) when is_list(names) do
     entitled = MapSet.new(names)
@@ -191,6 +198,13 @@ defmodule Troupe.Tools do
   @spec authorize(String.t(), Definition.t(), Ctx.t()) ::
           {:run, Tool.handle(), :task | :inline} | {:reject, Result.t()}
   def authorize(name, %Definition{} = definition, %Ctx{} = ctx) do
+    case Enum.find(loop_tools(ctx), &(Tool.name(&1) == name)) do
+      nil -> authorize_listed(name, definition, ctx)
+      tool -> {:run, tool, Tool.mode(tool)}
+    end
+  end
+
+  defp authorize_listed(name, definition, ctx) do
     case fetch(name, ctx.session_id) |> or_scoped(name, definition, ctx) do
       {:error, reason} ->
         {:reject, Result.error(ctx.call_id, name, reason)}

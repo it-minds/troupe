@@ -208,6 +208,7 @@ Inside the TUI, everything starts with `/`:
 | `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
 | `/mcp` | MCP servers: each one's state, tools and errors |
 | `/goal <text>` | set the session's goal: every later turn works towards it and the status line shows it; `/goal` shows it, `/goal clear` clears it |
+| `/loop [n]` | work towards the goal on its own, up to `n` turns (the config's `loop_max_iterations` without one), until the agent says the goal is met; the status line shows `loop 2/10`, and `/loop stop` stops it |
 | `/upload <path>` | send a local file into the session's own mount |
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |

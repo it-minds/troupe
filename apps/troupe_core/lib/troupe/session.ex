@@ -9,6 +9,7 @@ defmodule Troupe.Session do
   silently losing them. Then the root `Agent.Node`. Then `Session.Watcher` **last**, so a
   watch-mode crash restarts nothing above it — the guarantee that file watching can never
   disturb a running agent comes from this ordering, not from care inside the watcher.
+  `Session.Loop`, which runs `/loop`, is below the agent for the same reason.
   """
 
   use Supervisor
@@ -92,6 +93,9 @@ defmodule Troupe.Session do
            agent_path: @root_path,
            enabled: config.fs_events,
            debounce_ms: config.fs_debounce_ms},
+          # `/loop` (Decision 681): after the agent it drives, and after the watchers, so
+          # a loop that crashes restarts none of them.
+          {Troupe.Session.Loop, session_id: session_id, config: config},
           # Last, and deliberately so: a projection is a subscriber, and one that could
           # restart an agent by crashing would be worse than no projection at all.
           {Troupe.Session.Summary, session_id: session_id}
