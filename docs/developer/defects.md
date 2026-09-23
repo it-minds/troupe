@@ -58,11 +58,16 @@ the wrong person, or to none. To confirm: find whether the setting lives in the 
 `troupe-remote` or the live plane's image; otherwise the docs are wrong. Found by the #54
 fixer (PR #101), 2026-09-23.
 
-### D10 - PROTOCOL.md and the gateway disagree on two answers (low)
+### D10 - The protocol's documents and the gateway disagree (low)
 
-PROTOCOL.md says `fs.upload` answers `{path, size, hash}`; `Troupe.Gateway.Dispatch`
-answers `{path, bytes}`. PROTOCOL.md's `blob.get` answer has a `range` that Dispatch never
-sends. Found by the #99 fixer (PR #102), 2026-09-23.
+- PROTOCOL.md says `fs.upload` answers `{path, size, hash}`; `Troupe.Gateway.Dispatch`
+  answers `{path, bytes}`. PROTOCOL.md's `blob.get` answer has a `range` that Dispatch
+  never sends. Found by the #99 fixer (PR #102).
+- Dispatch serves `agents.list`, `identity.get`, `identity.link` and `identity.unlink`, but
+  `Troupe.Protocol.Schema.commands/0` has no entry for them, so `protocol/schema/v1/`
+  has no JSON Schema for them. Found by the fixer of PR #110.
+
+2026-09-23.
 
 ### D11 - `/todo cancel <id>` needs an id the TUI never shows (medium)
 
