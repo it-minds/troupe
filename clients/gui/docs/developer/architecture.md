@@ -122,10 +122,15 @@ Signing in and staying signed in for one plane.
 - **`beginRedirectSignIn(opts)`** (`:202-209`) / **`completeRedirectSignIn()`**
   (`:221-230`): the PKCE flow; the caller navigates, so a shell could open a system
   browser (`:198-201`). The URL is scrubbed in a `finally` (`:227-229`).
-- **`adopt(tokens)`** (`:290-299`): persists the rotated refresh token *before* the
-  exchange, then `POST /auth/exchange` with `id_token ?? access_token`.
-- **`restore()`** (`:248-260`): refresh at the IdP → exchange; on refusal the stored
-  token is cleared. A `PlaneUnreachableError` is rethrown, not treated as a bad token.
+- **`adopt(tokens)`** (`:377-400`): persists the refresh token *before* the exchange,
+  then `POST /auth/exchange` with `id_token ?? access_token`. A sign-in that brings no
+  refresh token is warned about in the console: the next reload will ask again.
+- **`restore()`** (`:301-347`): refresh at the IdP → exchange, one caller at a time per
+  plane — Web Locks across tabs, a queue within the page — with the token read inside
+  the lock, so StrictMode's double effect or two tabs never spend one rotating token
+  twice (`DECISIONS.md` #46). On a 400 or 401 the provider's reason is logged and the
+  stored token cleared if it is still the one refused. Anything else — a
+  `PlaneUnreachableError`, a 5xx — is rethrown and the token kept.
 - **`token()`** (`:273-281`): renews when fewer than `renewMarginSeconds` (default 120,
   `:160`) remain, sharing one in-flight renewal. Renewal is `restore()` — an IdP
   refresh plus a new exchange; there is no plane-side refresh endpoint (`:283-287`).
