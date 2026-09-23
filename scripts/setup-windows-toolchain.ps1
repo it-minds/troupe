@@ -104,11 +104,25 @@ Write-Host "Hex and rebar3"
 & (Join-Path $ElixirDir "bin\mix.bat") local.hex --force --if-missing | Out-Null
 & (Join-Path $ElixirDir "bin\mix.bat") local.rebar --force --if-missing | Out-Null
 
+# Burrito packs the TUI with xz as well as zig. Nobody ships it for Windows on its own,
+# and Git for Windows carries one, so this reports rather than installs: the build script
+# finds it there without anything being put on the PATH.
+$xz =
+  Get-Command xz -ErrorAction SilentlyContinue |
+  Select-Object -ExpandProperty Source -ErrorAction SilentlyContinue
+
+if (-not $xz) {
+  $xz =
+    Get-ChildItem (Join-Path $env:ProgramFiles "Git\mingw64\bin\xz.exe"), (Join-Path $env:ProgramFiles "Git\usr\bin\xz.exe") -ErrorAction SilentlyContinue |
+    Select-Object -First 1 -ExpandProperty FullName
+}
+
 Write-Host ""
 Write-Host "toolchain ready:"
 foreach ($c in "erl", "elixir", "mix", "zig") {
   $found = Get-Command $c -ErrorAction SilentlyContinue
   Write-Host ("  {0,-6} {1}" -f $c, $(if ($found) { $found.Source } else { "NOT ON PATH -- open a new terminal" }))
 }
+Write-Host ("  {0,-6} {1}" -f "xz", $(if ($xz) { $xz } else { "NOT FOUND -- install Git for Windows, or build with -NoTui (the TUI needs it)" }))
 Write-Host ""
 Write-Host "now build and install from this checkout:  .\scripts\install-local.ps1"
