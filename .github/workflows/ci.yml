@@ -26,10 +26,15 @@ name: ci
 
 # A push to a branch runs nothing: the pull request for that branch runs the gate, and
 # running it twice for every push measured the same thing twice.
+#
+# A pull request into a `development-*` branch - one issue of a chunked run
+# (docs/developer/fixing-issues.md) - gets the light `dev-check.yml` instead. This gate
+# runs once for the whole chunk, on the chunk's pull request into `main`.
 on:
   push:
     branches: [main]
   pull_request:
+    branches-ignore: ["development-*"]
   workflow_call:
     inputs:
       full:

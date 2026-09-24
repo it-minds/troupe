@@ -15,7 +15,7 @@ What is specific to running under Claude Code:
   for the issues and the epic slices). With the argument `triage`, stop after the table.
 - **Handing out an issue:** spawn the `issue-fixer` agent with `isolation: "worktree"`
   and `run_in_background: true`; you are notified when it reports. Put the issue number,
-  its triage row, the slice for an epic, anything the user said about it, the install
+  the chunk's branch (`development-<date>`, which you cut first), its triage row, the slice for an epic, anything the user said about it, the install
   lock's path if it will install, and its own scratch subfolder in the prompt. Agent types
   register when a session starts: if `issue-fixer` is not found, use `general-purpose`
   and tell it to read `.claude/agents/issue-fixer.md` first.
@@ -23,5 +23,9 @@ What is specific to running under Claude Code:
 - **`learned` items** go to memory: update the matching memory file (for example
   `troupe-build-from-source-windows.md`) rather than adding a duplicate.
 - **End:** the collected decisions go in one AskUserQuestion, recommendation first.
+  Once the user says the chunk's pull requests are merged, install and verify the
+  chunk's tip from a worktree of it (`EnterWorktree` or `git worktree add`), then open
+  the chunk's pull request into `main`.
 
-Never merge, approve or close anything, and never force-push.
+Never merge, approve or close anything, and never force-push. The user merges fixers'
+pull requests into the chunk and the chunk into `main`.

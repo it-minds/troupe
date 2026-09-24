@@ -41,6 +41,12 @@ export class FakeIdp {
   corsOrigins: string[] = [];
   /** Who `/authorize` signs in as. There is no page to choose on. */
   redirectSubject = { subject: "alice@example.com", displayName: "Alice" };
+  /**
+   * Whether this client may have a refresh token at all. A real provider issues one
+   * only for `offline_access`, and Authentik only when the provider carries that scope
+   * too; turned off, this is one configured without it.
+   */
+  offlineAccess = true;
 
   private readonly grants = new Map<string, Grant>();
   private readonly codes = new Map<string, { subject: string; displayName: string; challenge: string | null }>();
@@ -197,14 +203,16 @@ export class FakeIdp {
   }
 
   private mint(subject: string, displayName: string): Record<string, unknown> {
-    const refresh = `rt-${subject}-${this.issued.length + 1}`;
-    this.refreshTokens.set(refresh, { subject, displayName });
-    this.issued.push(refresh);
     // An id token the fake plane can read. Not signed: the plane in these tests verifies
     // nothing, because what is under test is the client, and a real plane's verification
     // is tested where it lives.
     const id = Buffer.from(JSON.stringify({ sub: subject, name: displayName })).toString("base64url");
-    return { id_token: `fake.${id}.sig`, refresh_token: refresh, expires_in: 300, token_type: "Bearer" };
+    const tokens = { id_token: `fake.${id}.sig`, expires_in: 300, token_type: "Bearer" };
+    if (!this.offlineAccess) return tokens;
+    const refresh = `rt-${subject}-${this.issued.length + 1}`;
+    this.refreshTokens.set(refresh, { subject, displayName });
+    this.issued.push(refresh);
+    return { ...tokens, refresh_token: refresh };
   }
 }
 
