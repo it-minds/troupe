@@ -15,7 +15,9 @@ defmodule Troupe.Config.ModelSettingsTest do
            TROUPE_API_KEY TROUPE_AUTH_TOKEN TROUPE_AUTH TROUPE_MODEL TROUPE_SMALL_MODEL TROUPE_EXPENSIVE_MODEL)
 
   setup do
-    base = Path.join(System.tmp_dir!(), "troupe-model-settings-#{System.unique_integer([:positive])}")
+    base =
+      Path.join(System.tmp_dir!(), "troupe-model-settings-#{System.unique_integer([:positive])}")
+
     config_home = Path.join(base, "config")
     workspace = Path.join(base, "workspace")
     File.mkdir_p!(config_home)
@@ -29,7 +31,10 @@ defmodule Troupe.Config.ModelSettingsTest do
     System.put_env("TROUPE_OPENCODE_AUTH", Path.join(base, "opencode/auth.json"))
 
     on_exit(fn ->
-      Enum.each(previous, fn {k, v} -> if v, do: System.put_env(k, v), else: System.delete_env(k) end)
+      Enum.each(previous, fn {k, v} ->
+        if v, do: System.put_env(k, v), else: System.delete_env(k)
+      end)
+
       File.rm_rf!(base)
     end)
 
@@ -64,7 +69,12 @@ defmodule Troupe.Config.ModelSettingsTest do
 
       described = ModelSettings.describe()
 
-      assert described["models"] == %{"default" => "flat-default", "cheap" => "flat-cheap", "expensive" => "big-one"}
+      assert described["models"] == %{
+               "default" => "flat-default",
+               "cheap" => "flat-cheap",
+               "expensive" => "big-one"
+             }
+
       assert described["auth"] == "bearer"
       assert described["api_key_source"] == "file"
       refute described |> inspect() |> String.contains?("secret-token-value")
@@ -73,13 +83,21 @@ defmodule Troupe.Config.ModelSettingsTest do
     test "names everything that beats the file", %{path: path, workspace: workspace} do
       File.write!(path, "provider: anthropic\napi_key: k\n")
       File.mkdir_p!(Path.join(workspace, ".troupe"))
-      File.write!(Path.join(workspace, ".troupe/config.yaml"), "model: project-model\nmax_turns: 3\n")
+
+      File.write!(
+        Path.join(workspace, ".troupe/config.yaml"),
+        "model: project-model\nmax_turns: 3\n"
+      )
+
       System.put_env("TROUPE_API_KEY", "from-env")
 
       described = ModelSettings.describe(workspace)
 
       assert described["api_key_source"] == "env"
-      assert [%{"source" => "project", "detail" => detail}, %{"source" => "env"}] = described["overrides"]
+
+      assert [%{"source" => "project", "detail" => detail}, %{"source" => "env"}] =
+               described["overrides"]
+
       assert detail =~ "sets model"
       refute detail =~ "max_turns"
     end
@@ -143,23 +161,37 @@ defmodule Troupe.Config.ModelSettingsTest do
       File.write!(path, "auth_token: old\n")
       {:ok, described} = ModelSettings.write(%{"provider" => "anthropic", "api_key" => "new"})
       assert described["auth"] == "bearer"
-      assert {:ok, %{"api_key" => "new", "auth" => "bearer"} = written} = YamlElixir.read_from_file(path)
+
+      assert {:ok, %{"api_key" => "new", "auth" => "bearer"} = written} =
+               YamlElixir.read_from_file(path)
+
       refute Map.has_key?(written, "auth_token")
     end
 
     test "a role set to nothing is removed, and an empty base URL removes it", %{path: path} do
       File.write!(path, "base_url: https://old\nmodels: {default: a, cheap: b}\n")
-      {:ok, _} = ModelSettings.write(%{"provider" => "anthropic", "base_url" => "", "models" => %{"cheap" => nil}})
+
+      {:ok, _} =
+        ModelSettings.write(%{
+          "provider" => "anthropic",
+          "base_url" => "",
+          "models" => %{"cheap" => nil}
+        })
+
       assert {:ok, written} = YamlElixir.read_from_file(path)
       refute Map.has_key?(written, "base_url")
       assert written["models"] == %{"default" => "a"}
     end
 
-    test "refuses what it does not understand, and never overwrites a file it cannot parse", %{path: path} do
+    test "refuses what it does not understand, and never overwrites a file it cannot parse", %{
+      path: path
+    } do
       assert {:error, reason} = ModelSettings.write(%{"provider" => "gemini"})
       assert reason =~ "provider must be one of"
       assert {:error, _} = ModelSettings.write(%{"provider" => "openai", "auth" => "basic"})
-      assert {:error, _} = ModelSettings.write(%{"provider" => "openai", "models" => %{"huge" => "x"}})
+
+      assert {:error, _} =
+               ModelSettings.write(%{"provider" => "openai", "models" => %{"huge" => "x"}})
 
       File.write!(path, "models: [unclosed\n")
       assert {:error, reason} = ModelSettings.write(%{"provider" => "openai"})
@@ -175,10 +207,129 @@ defmodule Troupe.Config.ModelSettingsTest do
     end
   end
 
+  describe "import_opencode/1" do
+    setup do
+      config = System.get_env("TROUPE_OPENCODE_CONFIG")
+      File.mkdir_p!(Path.dirname(config))
+
+      File.write!(config, """
+      {
+        // opencode's own comments are fine: it is JSONC
+        "model": "gateway/claude-opus-5",
+        "provider": {
+          "gateway": {
+            "npm": "@ai-sdk/anthropic",
+            "options": { "baseURL": "https://gw.example/anthropic/v1", "authToken": "{env:GW_TOKEN}" },
+            "models": {
+              "claude-opus-5": { "id": "eu.anthropic.claude-opus-5", "limit": { "context": 400000, "output": 64000 } }
+            }
+          },
+          "portal": {
+            "options": { "baseURL": "https://portal.example/v1" },
+            "models": { "qwen3-235b": {} }
+          }
+        }
+      }
+      """)
+
+      File.write!(
+        System.get_env("TROUPE_OPENCODE_AUTH"),
+        Jason.encode!(%{"portal" => %{"type" => "api", "key" => "portal-key-from-auth"}})
+      )
+
+      :ok
+    end
+
+    test "copies every provider as opencode declares it, and the result loads the same", %{
+      path: path
+    } do
+      before = Config.load(nil).providers
+
+      assert {:ok, %{"imported" => imported} = described} = ModelSettings.import_opencode()
+
+      assert imported["providers"] == ["gateway", "portal"]
+      assert imported["kept"] == []
+      assert imported["default"] == "gateway/claude-opus-5"
+      assert described["exists"]
+      # The keys now come from the file, and opencode no longer stands in for anything.
+      assert described["api_key_source"] == "file"
+      assert described["overrides"] == []
+
+      {:ok, written} = YamlElixir.read_from_file(path)
+      # A reference stays a reference; a key from auth.json is what was asked for.
+      assert written["providers"]["gateway"]["api_key"] == "{env:GW_TOKEN}"
+      assert written["providers"]["gateway"]["auth"] == "bearer"
+      assert written["providers"]["portal"]["api_key"] == "portal-key-from-auth"
+      assert written["models"] == %{"default" => "gateway/claude-opus-5"}
+
+      System.put_env("GW_TOKEN", "gw-token-from-env")
+      on_exit(fn -> System.delete_env("GW_TOKEN") end)
+      config = Config.load(nil)
+      assert config.model == "gateway/claude-opus-5"
+
+      for {name, provider} <- before do
+        assert Map.drop(provider, [:source, :api_key]) ==
+                 Map.drop(config.providers[name], [:source, :api_key])
+
+        assert config.providers[name].source == :yaml
+      end
+
+      # Read from the file, the reference is looked up; opencode's fallback never did.
+      assert config.providers["gateway"].api_key == "gw-token-from-env"
+      assert config.providers["portal"].api_key == "portal-key-from-auth"
+    end
+
+    test "keeps what the file already has, and writes nothing when nothing is new", %{path: path} do
+      File.write!(path, """
+      models:
+        default: mine/some-model
+      providers:
+        gateway:
+          type: openai
+          base_url: https://mine.example/v1
+      """)
+
+      assert {:ok, %{"imported" => imported}} = ModelSettings.import_opencode()
+      assert imported["providers"] == ["portal"]
+      assert imported["kept"] == ["gateway"]
+      assert imported["default"] == nil
+
+      {:ok, written} = YamlElixir.read_from_file(path)
+
+      assert written["providers"]["gateway"] == %{
+               "type" => "openai",
+               "base_url" => "https://mine.example/v1"
+             }
+
+      assert written["models"]["default"] == "mine/some-model"
+
+      File.rm!(path <> ".previous")
+
+      assert {:ok, %{"imported" => %{"providers" => [], "default" => nil}}} =
+               ModelSettings.import_opencode()
+
+      refute File.exists?(path <> ".previous")
+    end
+
+    test "with nothing in opencode there is nothing to copy", %{path: path} do
+      File.rm!(System.get_env("TROUPE_OPENCODE_CONFIG"))
+
+      assert {:error, reason} = ModelSettings.import_opencode()
+      assert reason =~ "no providers"
+      refute File.exists?(path)
+    end
+  end
+
   describe "discover/1" do
     setup do
       {:ok, listener} =
-        :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true, ip: {127, 0, 0, 1}])
+        :gen_tcp.listen(0, [
+          :binary,
+          active: false,
+          packet: :raw,
+          reuseaddr: true,
+          ip: {127, 0, 0, 1}
+        ])
 
       {:ok, port} = :inet.port(listener)
       spawn_link(fn -> serve(listener) end)
@@ -186,22 +337,36 @@ defmodule Troupe.Config.ModelSettingsTest do
       %{base_url: "http://127.0.0.1:#{port}"}
     end
 
-    test "lists an unsaved provider's models with the typed key, and writes nothing", %{base_url: url, path: path} do
+    test "lists an unsaved provider's models with the typed key, and writes nothing", %{
+      base_url: url,
+      path: path
+    } do
       assert {:ok, %{"models" => models, "failures" => []}} =
-               ModelSettings.discover(%{"provider" => "anthropic", "base_url" => url, "api_key" => "good-key"})
+               ModelSettings.discover(%{
+                 "provider" => "anthropic",
+                 "base_url" => url,
+                 "api_key" => "good-key"
+               })
 
-      assert [%{"id" => "claude-haiku-4-5", "context" => 200_000}, %{"id" => "claude-opus-5", "max_output" => 64_000}] =
+      assert [
+               %{"id" => "claude-haiku-4-5", "context" => 200_000},
+               %{"id" => "claude-opus-5", "max_output" => 64_000}
+             ] =
                models
 
       refute File.exists?(path)
       refute File.exists?(Store.path())
     end
 
-    test "falls back to the saved key, and says why a refused key failed", %{base_url: url, path: path} do
+    test "falls back to the saved key, and says why a refused key failed", %{
+      base_url: url,
+      path: path
+    } do
       File.write!(path, "provider: anthropic\nbase_url: #{url}\napi_key: good-key\n")
       assert {:ok, %{"models" => [_, _]}} = ModelSettings.discover(%{})
 
-      assert {:ok, %{"models" => [], "failures" => [%{"provider" => "anthropic", "reason" => reason}]}} =
+      assert {:ok,
+              %{"models" => [], "failures" => [%{"provider" => "anthropic", "reason" => reason}]}} =
                ModelSettings.discover(%{"api_key" => "wrong"})
 
       assert reason =~ "401"

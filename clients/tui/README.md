@@ -31,16 +31,18 @@ desktop app when asked (`--tui`, `--gui`; `-Tui`, `-Gui` on Windows), and check 
 against `SHA256SUMS` before replacing anything:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh -s -- --tui --gui
+curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
+sh install.sh --tui
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1))) -Tui -Gui
+irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 ```
 
-They install the latest release, and `TROUPE_VERSION=0.3.0` pins one. The daemon is
-always installed; with neither flag they install it alone after asking (`-y` / `-Yes`
-skips the question). A private repository answers
+The copy attached to a release installs that release, and `TROUPE_VERSION=0.3.0` names
+another. The daemon is always installed; in a terminal, with neither flag, they ask which
+clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `/releases/latest` only to somebody signed in, so there the installers ask for
 `TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. To build a binary yourself,
 `scripts/build-local` builds one for this host and installs it as `troupe` in
@@ -169,6 +171,14 @@ and per model `id`, `limit.context`, `limit.output` and
 `options.reasoningEffort`. `variants`, `agent` and `permission` are not read;
 agents are files (see below). `troupe config` prints what was resolved with keys
 masked.
+
+On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
+With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
+opencode has them written. Otherwise it offers three choices: take your organisation's
+settings from a plane (`troupe login`, then `troupe config pull`), set up a provider here
+(provider, URL, key and a model from what the provider lists), or not now. Without a
+terminal it prints those choices and asks nothing. The installers end with the same
+check.
 
 ## Use
 

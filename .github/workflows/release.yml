@@ -113,6 +113,13 @@ jobs:
           VERSION: ${{ needs.version.outputs.version }}
         run: helm package charts/troupe --version "$VERSION" --app-version "$VERSION" --destination dist
 
+      # install.sh and install.ps1 as the release page offers them: pinned to this release,
+      # and in its SHA256SUMS with everything else.
+      - name: The installers
+        env:
+          VERSION: ${{ needs.version.outputs.version }}
+        run: bash scripts/release-installers "$VERSION" dist
+
       # The tag is pushed with this workflow's own token, which starts no other workflow:
       # everything this release needs happens in this run. The release is a draft until
       # the native builds have attached their artifacts (`publish`, below).
@@ -136,17 +143,29 @@ jobs:
 
           Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`.
 
-          **On a machine** — the installers from this tag, installing this release. The daemon always; \`--tui\` / \`-Tui\` adds the TUI, \`--gui\` / \`-Gui\` the desktop app, and with neither it asks before installing the daemon alone (\`-y\` / \`-Yes\`).
+          **On a machine** — download the installer attached below, read it if you like, and run it. It installs this release: the daemon always, and it asks about the TUI and the desktop app.
 
-              curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.sh | TROUPE_VERSION=${VERSION} sh -s -- --tui --gui
+          Linux and macOS:
 
-              \$env:TROUPE_VERSION = "${VERSION}"; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.ps1))) -Tui -Gui
+          \`\`\`sh
+          curl -fsSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh
+          less install.sh      # optional: read it first
+          sh install.sh
+          \`\`\`
 
-          The desktop app's installers are attached as well.
+          Windows (PowerShell):
+
+          \`\`\`powershell
+          irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.ps1 -OutFile install.ps1
+          notepad install.ps1  # optional: read it first
+          powershell -ExecutionPolicy Bypass -File .\\install.ps1
+          \`\`\`
+
+          No questions: \`--tui --gui -y\` (\`-Tui -Gui -Yes\`). Start over: \`--clean-install\` (\`-CleanInstall\`). Remove: \`--uninstall\` (\`-Uninstall\`). The desktop app's own installers are attached as well.
           NOTES
           flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
           [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
-          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz
+          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1
 
       - uses: actions/upload-artifact@v4
         with:

@@ -5,6 +5,7 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon [run]               serve on this machine until idle or stopped
       troupe-daemon status              say whether one is running, and where
       troupe-daemon config              the resolved providers and models (keys masked)
+      troupe-daemon config import-opencode   copy opencode's providers into config.yaml
       troupe-daemon models [--refresh]  every model this machine can address
       troupe-daemon version
       troupe-daemon help
@@ -23,6 +24,7 @@ defmodule Troupe.Daemon.CLI do
   """
 
   alias Troupe.Config
+  alias Troupe.Config.ModelSettings
   alias Troupe.LLM.Catalog
   alias Troupe.Protocol.Daemon
   alias Troupe.Protocol.Endpoint
@@ -30,6 +32,7 @@ defmodule Troupe.Daemon.CLI do
   @type command ::
           :status
           | :config
+          | :config_import_opencode
           | {:models, refresh: boolean()}
           | :version
           | :help
@@ -65,6 +68,7 @@ defmodule Troupe.Daemon.CLI do
   @spec parse([String.t()]) :: command()
   def parse(["status"]), do: :status
   def parse(["config"]), do: :config
+  def parse(["config", "import-opencode"]), do: :config_import_opencode
   def parse(["models"]), do: {:models, refresh: false}
   def parse(["models", "--refresh"]), do: {:models, refresh: true}
   def parse(["version"]), do: :version
@@ -92,6 +96,20 @@ defmodule Troupe.Daemon.CLI do
   def main(:config) do
     IO.puts(File.cwd!() |> Config.load() |> Config.describe())
     0
+  end
+
+  # What the installers run when a person says yes to copying opencode's config: the same
+  # write `config.import` makes, from a VM that has the daemon's environment.
+  def main(:config_import_opencode) do
+    case ModelSettings.import_opencode() do
+      {:ok, %{"imported" => imported, "path" => path}} ->
+        Enum.each(import_report(imported, path), &IO.puts/1)
+        0
+
+      {:error, reason} ->
+        IO.puts(:stderr, reason)
+        1
+    end
   end
 
   def main({:models, refresh: refresh?}) do
@@ -167,6 +185,24 @@ defmodule Troupe.Daemon.CLI do
     System.halt(code)
   end
 
+  @doc "The lines that say what an opencode import did."
+  @spec import_report(map(), String.t()) :: [String.t()]
+  def import_report(%{"providers" => [], "default" => nil} = imported, path),
+    do: ["nothing to copy: every provider in #{imported["from"]} is already in #{path}"]
+
+  def import_report(imported, path) do
+    ["copied opencode's config (#{imported["from"]}) into #{path}"] ++
+      if(imported["providers"] == [],
+        do: [],
+        else: ["  providers  #{Enum.join(imported["providers"], ", ")}"]
+      ) ++
+      if(imported["kept"] == [],
+        do: [],
+        else: ["  kept       #{Enum.join(imported["kept"], ", ")} (already there)"]
+      ) ++
+      if(imported["default"], do: ["  default    #{imported["default"]}"], else: [])
+  end
+
   defp running do
     with {:ok, endpoint} <- Endpoint.discover(),
          true <- Daemon.running?(endpoint: endpoint),
@@ -183,6 +219,7 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon [run]               serve on this machine until idle or stopped
     troupe-daemon status              say whether one is running, and where
     troupe-daemon config              the resolved providers and models (keys masked)
+    troupe-daemon config import-opencode   copy opencode's providers into config.yaml
     troupe-daemon models [--refresh]  every model this machine can address
     troupe-daemon version
 

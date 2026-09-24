@@ -11,6 +11,7 @@ Unix socket, loopback TCP or a loopback WebSocket, and emits the same events a p
 troupe-daemon [run]               serve on this machine until idle or stopped
 troupe-daemon status              say whether one is running, and where
 troupe-daemon config              the resolved providers and models (keys masked)
+troupe-daemon config import-opencode   copy opencode's providers into config.yaml
 troupe-daemon models [--refresh]  every model this machine can address
 troupe-daemon version
 ```
@@ -24,16 +25,19 @@ a second one on a machine with a daemon already up says where it is and exits 0.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh -s -- --tui --gui
+curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
+sh install.sh
 ```
 
 ```powershell
-& ([scriptblock]::Create((irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1))) -Tui -Gui
+irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
 ```
 
-The daemon is always installed; `--tui` and `--gui` (`-Tui`, `-Gui`) add the TUI and the
-desktop app from the same release, and with neither the installer asks before installing
-the daemon alone (`-y` / `-Yes` skips that).
+The daemon is always installed. In a terminal the installer asks whether to add the TUI
+and the desktop app, shows what it is about to do, and asks before doing it; `--tui` and
+`--gui` (`-Tui`, `-Gui`) name them, and `-y` (`-Yes`) asks nothing, installing the daemon
+alone when neither is named. The copy attached to a release installs that release.
 
 The Windows release builds the harness's zstd NIF (`ezstd`) from an it-minds fork that
 compiles it with Zig ([DECISIONS.md](DECISIONS.md) 5); the release itself needs nothing

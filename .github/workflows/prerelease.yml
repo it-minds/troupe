@@ -8,7 +8,8 @@
 # because a binary that cannot start is not a build.
 #
 # Published as a GitHub *pre-release*, so `/releases/latest` — and so the installers'
-# default — never picks one up: `TROUPE_VERSION=0.3.1-pre.12 sh install.sh --tui` does. Nothing
+# default — never picks one up: the installer attached to it does, and so does
+# `TROUPE_VERSION=0.3.1-pre.12 sh install.sh`. Nothing
 # is deployed. The newest `keep` pre-releases are kept; older ones, and their tags, are
 # deleted, so the releases page stays a list of releases.
 name: pre-release
@@ -95,6 +96,13 @@ jobs:
           VERSION: ${{ needs.plan.outputs.version }}
         run: helm package charts/troupe --version "$VERSION" --app-version "$VERSION" --destination dist
 
+      # install.sh and install.ps1 as the release page offers them: pinned to this
+      # pre-release, which /releases/latest never names, and in its SHA256SUMS.
+      - name: The installers
+        env:
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: bash scripts/release-installers "$VERSION" dist
+
       - name: Tag it, and open a draft pre-release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -111,15 +119,29 @@ jobs:
           cat > notes.md <<NOTES
           **Untested.** \`${REF}\` at \`${SHA::7}\`, built without running the test suite — for trying out, not for production. A release (\`scripts/release\`) runs the full suite; this did not.
 
-          **On a machine** — the installers from this tag, installing this release. The daemon always; \`--tui\` / \`-Tui\` adds the TUI, \`--gui\` / \`-Gui\` the desktop app, and with neither it asks before installing the daemon alone (\`-y\` / \`-Yes\`).
+          **On a machine** — download the installer attached below, read it if you like, and run it. It installs this pre-release: the daemon always, and it asks about the TUI and the desktop app.
 
-              curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.sh | TROUPE_VERSION=${VERSION} sh -s -- --tui --gui
+          Linux and macOS:
 
-              \$env:TROUPE_VERSION = "${VERSION}"; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.ps1))) -Tui -Gui
+          \`\`\`sh
+          curl -fsSLO https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.sh
+          less install.sh      # optional: read it first
+          sh install.sh
+          \`\`\`
+
+          Windows (PowerShell):
+
+          \`\`\`powershell
+          irm https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/install.ps1 -OutFile install.ps1
+          notepad install.ps1  # optional: read it first
+          powershell -ExecutionPolicy Bypass -File .\\install.ps1
+          \`\`\`
+
+          No questions: \`--tui --gui -y\` (\`-Tui -Gui -Yes\`). Start over: \`--clean-install\` (\`-CleanInstall\`). Remove: \`--uninstall\` (\`-Uninstall\`).
 
           ${images}
           NOTES
-          gh release create "$TAG" --draft --prerelease --verify-tag --title "$TAG (untested)" --notes-file notes.md dist/troupe-*.tgz
+          gh release create "$TAG" --draft --prerelease --verify-tag --title "$TAG (untested)" --notes-file notes.md dist/troupe-*.tgz dist/install.sh dist/install.ps1
 
   native:
     name: native builds
