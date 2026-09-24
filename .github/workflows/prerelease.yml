@@ -111,7 +111,11 @@ jobs:
           cat > notes.md <<NOTES
           **Untested.** \`${REF}\` at \`${SHA::7}\`, built without running the test suite — for trying out, not for production. A release (\`scripts/release\`) runs the full suite; this did not.
 
-          On a machine: \`TROUPE_VERSION=${VERSION} sh install.sh --tui --gui\` (or \`\$env:TROUPE_VERSION = "${VERSION}"; .\\install.ps1 -Tui -Gui\`).
+          **On a machine** — the installers from this tag, installing this release. The daemon always; \`--tui\` / \`-Tui\` adds the TUI, \`--gui\` / \`-Gui\` the desktop app, and with neither it asks before installing the daemon alone (\`-y\` / \`-Yes\`).
+
+              curl -fsSL https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.sh | TROUPE_VERSION=${VERSION} sh -s -- --tui --gui
+
+              \$env:TROUPE_VERSION = "${VERSION}"; & ([scriptblock]::Create((irm https://raw.githubusercontent.com/${GITHUB_REPOSITORY}/${TAG}/install.ps1))) -Tui -Gui
 
           ${images}
           NOTES

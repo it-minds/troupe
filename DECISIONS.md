@@ -5183,7 +5183,10 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      is stopped first, as `install-local` does, so an update reaches the next session
      rather than the one after a reboot. `irm | iex` cannot pass switches, so the Windows
      one-liner is the scriptblock form, and the script uses `return` where it used `exit`,
-     which closes the terminal it was piped into. Proof: `install.sh` against
+     which closes the terminal it was piped into. A release's notes give both one-liners
+     against the scripts at its own tag, with `TROUPE_VERSION` set to it: the script on
+     `main` may have moved on, and without the version it would install the latest
+     release, which a release candidate or a pre-release never is. Proof: `install.sh` against
      `v0.3.3-pre.1` in a scratch home on Linux x86_64: `--tui --gui` installed all three
      with the AppImage's icon, a reinstall kept every `.previous` and stopped the running
      daemon, a tampered TUI was refused with nothing replaced, no flags without a terminal
