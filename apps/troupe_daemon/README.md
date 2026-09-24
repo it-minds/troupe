@@ -24,12 +24,16 @@ a second one on a machine with a daemon already up says where it is and exits 0.
 ## Install
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh -s -- --tui --gui
 ```
 
 ```powershell
-irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1))) -Tui -Gui
 ```
+
+The daemon is always installed; `--tui` and `--gui` (`-Tui`, `-Gui`) add the TUI and the
+desktop app from the same release, and with neither the installer asks before installing
+the daemon alone (`-y` / `-Yes` skips that).
 
 The Windows release builds the harness's zstd NIF (`ezstd`) from an it-minds fork that
 compiles it with Zig ([DECISIONS.md](DECISIONS.md) 5); the release itself needs nothing

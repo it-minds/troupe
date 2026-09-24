@@ -8,7 +8,7 @@
 # because a binary that cannot start is not a build.
 #
 # Published as a GitHub *pre-release*, so `/releases/latest` — and so the installers'
-# default — never picks one up: `TROUPE_VERSION=0.3.1-pre.12 sh install.sh` does. Nothing
+# default — never picks one up: `TROUPE_VERSION=0.3.1-pre.12 sh install.sh --tui` does. Nothing
 # is deployed. The newest `keep` pre-releases are kept; older ones, and their tags, are
 # deleted, so the releases page stays a list of releases.
 name: pre-release
@@ -111,7 +111,7 @@ jobs:
           cat > notes.md <<NOTES
           **Untested.** \`${REF}\` at \`${SHA::7}\`, built without running the test suite — for trying out, not for production. A release (\`scripts/release\`) runs the full suite; this did not.
 
-          On a machine: \`TROUPE_VERSION=${VERSION} sh install.sh\` (or \`\$env:TROUPE_VERSION = "${VERSION}"; .\\install.ps1\`).
+          On a machine: \`TROUPE_VERSION=${VERSION} sh install.sh --tui --gui\` (or \`\$env:TROUPE_VERSION = "${VERSION}"; .\\install.ps1 -Tui -Gui\`).
 
           ${images}
           NOTES

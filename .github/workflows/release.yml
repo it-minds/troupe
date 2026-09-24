@@ -136,7 +136,7 @@ jobs:
 
           Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`.
 
-          **On a machine** — \`install.sh\` / \`install.ps1\` install \`troupe\` (the TUI) and \`troupe-daemon\` from here. The desktop app's installers are attached as well.
+          **On a machine** — \`install.sh --tui --gui\` / \`install.ps1 -Tui -Gui\` install \`troupe-daemon\`, \`troupe\` (the TUI) and the desktop app from here; the daemon alone with \`-y\` / \`-Yes\`. The desktop app's installers are attached as well.
           NOTES
           flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
           [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)

@@ -5167,3 +5167,25 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      same. Now an absent claim leaves memberships alone, a present and empty one still
      clears them, and the MCP resource metadata advertises the sign-in's scopes beside the
      MCP one, so the token carries what a login's does. Proof: `Troupe.Plane.LoginGroupsTest`.
+
+680. **The installers take the same flags as `scripts/install-local`, and install the desktop
+     app too.** `install.sh` and `install.ps1` installed `troupe` and `troupe-daemon`, with
+     `--no-tui` for the daemon alone (671), while `scripts/install-local` built the same
+     things from a checkout and asked for them by name: `--tui`, `--gui`. A person handed
+     both had two vocabularies, and no remote way to get the desktop app without
+     choosing among six installers on the releases page. Now the release installers speak
+     the local one's: the daemon always, `--tui` / `-Tui` and `--gui` / `-Gui` for the
+     clients, and neither asks before installing the daemon alone (`-y` / `-Yes`; `--no-tui`
+     still means that). `--gui` installs the release's AppImage on Linux x86_64 as
+     `~/.local/bin/troupe-desktop` with a menu entry, where `install-local --gui` puts its
+     build; `Troupe.app` from the `.dmg` in `~/Applications` on macOS; and the per-user NSIS
+     setup, run silently, on Windows. A daemon running from the directory being replaced
+     is stopped first, as `install-local` does, so an update reaches the next session
+     rather than the one after a reboot. `irm | iex` cannot pass switches, so the Windows
+     one-liner is the scriptblock form, and the script uses `return` where it used `exit`,
+     which closes the terminal it was piped into. Proof: `install.sh` against
+     `v0.3.3-pre.1` in a scratch home on Linux x86_64: `--tui --gui` installed all three
+     with the AppImage's icon, a reinstall kept every `.previous` and stopped the running
+     daemon, a tampered TUI was refused with nothing replaced, no flags without a terminal
+     refused, `--no-tui` installed the daemon alone, and `--uninstall --purge` left no file.
+     The macOS branch and `install.ps1` are untested here: no Mac and no PowerShell.

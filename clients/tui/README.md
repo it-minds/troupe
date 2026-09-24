@@ -26,20 +26,21 @@ truly idle: zero LLM calls, zero tokens.
 `troupe` is released with the rest of the repository: every release on this repository's
 GitHub releases page carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
 Windows), beside `troupe-daemon-<version>-<target>.tar.gz` and one `SHA256SUMS`. The
-installers at the repository root put both on the machine — `troupe`, and the
-`troupe-daemon` it stands on — and check them against `SHA256SUMS` before replacing
-anything:
+installers at the repository root put `troupe-daemon` on the machine, and `troupe` and the
+desktop app when asked (`--tui`, `--gui`; `-Tui`, `-Gui` on Windows), and check them
+against `SHA256SUMS` before replacing anything:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh
+curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh -s -- --tui --gui
 ```
 
 ```powershell
-irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1))) -Tui -Gui
 ```
 
-They install the latest release; `TROUPE_VERSION=0.3.0` pins one, and `--no-tui`
-(`-NoTui` on Windows) installs the daemon alone. A private repository answers
+They install the latest release, and `TROUPE_VERSION=0.3.0` pins one. The daemon is
+always installed; with neither flag they install it alone after asking (`-y` / `-Yes`
+skips the question). A private repository answers
 `/releases/latest` only to somebody signed in, so there the installers ask for
 `TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. To build a binary yourself,
 `scripts/build-local` builds one for this host and installs it as `troupe` in

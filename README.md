@@ -55,8 +55,16 @@ On a cluster:
 Plus [`charts/troupe`](charts/troupe), which deploys the lot.
 
 On a machine, from the same release: `troupe` (the TUI) and `troupe-daemon` for Linux,
-macOS and Windows, which `install.sh` and `install.ps1` install, and the desktop app's
-installers.
+macOS and Windows, and the desktop app's installers. `install.sh` and `install.ps1` install
+the daemon and, with `--tui` / `--gui`, the others:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh -s -- --tui --gui
+```
+
+```powershell
+& ([scriptblock]::Create((irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1))) -Tui -Gui
+```
 
 ## Deploy
 
