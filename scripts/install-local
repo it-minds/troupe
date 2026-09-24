@@ -1,0 +1,255 @@
+#!/bin/sh
+# Build troupe-daemon, and the clients asked for, from this checkout and install them, as a
+# release would.
+#   scripts/install-local --tui --gui     # daemon, TUI and desktop app
+#   scripts/install-local --tui           # daemon and TUI
+#   scripts/install-local --gui           # daemon and desktop app (Linux)
+#   scripts/install-local                 # the daemon alone; asks first (-y skips that)
+#   scripts/install-local --rollback      # put the kept previous install back
+#
+# The Linux and macOS counterpart of install-local.ps1: the same two artifacts `install.sh`
+# downloads, built here instead -- the daemon release and the TUI's Burrito binary. They
+# land exactly where `install.sh` puts them (~/.local/lib/troupe-daemon, with `troupe` and
+# the `troupe-daemon` link in ~/.local/bin, or the TROUPE_* overrides it honours), so the
+# desktop app and the TUI pick the build up with no further arrangement, and `install.sh`
+# can put a real release back over it at any time.
+#
+# A running daemon from the directory being replaced is stopped first. Nothing starts it
+# again here: the desktop app starts one when a session needs it, and the TUI embeds the
+# harness when none is running.
+#
+# With --gui the desktop app is built too, unbundled -- the Tauri binary, which carries its
+# frontend inside it -- and installed as ~/.local/bin/troupe-desktop with a menu entry. It
+# finds the daemon installed here on its own. A release's .deb installs /usr/bin/troupe-desktop;
+# with both, the menu entry here names the local build.
+#
+# The previous install is kept as `<dir>.previous`, `troupe.previous` and
+# `troupe-desktop.previous`, as `install.sh` does. Needs mix and zig on the PATH (versions in
+# .tool-versions) and 7z or 7zz, which Burrito uses to unpack the precompiled ERTS it
+# downloads. The GUI also needs cargo, pnpm (or corepack) and the WebKitGTK headers:
+#   sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libssl-dev build-essential pkg-config
+set -eu
+
+ROOT=$(cd "$(dirname "$0")/.." && pwd)
+BIN_DIR="${TROUPE_INSTALL_DIR:-$HOME/.local/bin}"
+LIB_DIR="${TROUPE_LIB_DIR:-$HOME/.local/lib/troupe-daemon}"
+BIN="$BIN_DIR/troupe-daemon"
+TUI="$BIN_DIR/troupe"
+GUI="$BIN_DIR/troupe-desktop"
+DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
+DESKTOP_FILE="$DATA_DIR/applications/troupe-local.desktop"
+ICON="$DATA_DIR/icons/hicolor/128x128/apps/troupe-local.png"
+
+say() { printf '%s\n' "$*"; }
+die() { printf 'error: %s\n' "$*" >&2; exit 1; }
+
+detect_target() {
+  os=$(uname -s); arch=$(uname -m)
+  case "$os" in
+    Linux) os=linux ;;
+    Darwin) os=macos ;;
+    *) die "unsupported OS: $os" ;;
+  esac
+  case "$arch" in
+    x86_64|amd64) arch=x86_64 ;;
+    aarch64|arm64) arch=aarch64 ;;
+    *) die "unsupported architecture: $arch" ;;
+  esac
+  printf '%s_%s' "$os" "$arch"
+}
+
+# A daemon serving from the directory about to be replaced. Only that one: another BEAM
+# on this machine is somebody else's work.
+stop_running_daemon() {
+  pids=$(pgrep -f "$LIB_DIR/" 2>/dev/null || true)
+  [ -n "$pids" ] || return 0
+  for pid in $pids; do
+    [ "$pid" = "$$" ] && continue
+    say "stopping the running daemon (pid $pid)"
+    kill "$pid" 2>/dev/null || true
+  done
+  sleep 1
+}
+
+rollback() {
+  stop_running_daemon
+  if [ -d "$LIB_DIR.previous" ]; then
+    rm -rf "$LIB_DIR"
+    mv "$LIB_DIR.previous" "$LIB_DIR"
+    say "restored $LIB_DIR from .previous"
+  else
+    say "no $LIB_DIR.previous to restore"
+  fi
+  for f in "$TUI" "$GUI"; do
+    if [ -e "$f.previous" ]; then
+      mv -f "$f.previous" "$f"
+      say "restored $f from .previous"
+    fi
+  done
+}
+
+with_tui=0; with_gui=0; yes=0; mode=install
+for arg in "$@"; do
+  case "$arg" in
+    --tui) with_tui=1 ;;
+    --gui) with_gui=1 ;;
+    -y|--yes) yes=1 ;;
+    --rollback) mode=rollback ;;
+    --help|-h) say "usage: scripts/install-local [--tui] [--gui] [-y] | --rollback"; exit 0 ;;
+    *) die "unknown argument $arg" ;;
+  esac
+done
+
+if [ "$mode" = rollback ]; then rollback; exit 0; fi
+
+# The daemon is always built, the clients only when named. Naming neither is more often a
+# forgotten flag than a wish, so it is confirmed -- from the terminal, when there is one.
+if [ "$with_tui" = 0 ] && [ "$with_gui" = 0 ] && [ "$yes" = 0 ]; then
+  say "warning: neither --tui nor --gui given; this installs the daemon only."
+  if (: < /dev/tty) 2>/dev/null; then
+    printf 'continue? (y/n) '
+    read -r answer < /dev/tty || answer=
+    case "$answer" in y|Y|yes|YES) ;; *) say "nothing installed"; exit 1 ;; esac
+  else
+    die "no terminal to ask on; pass -y to install the daemon only"
+  fi
+fi
+
+command -v mix >/dev/null 2>&1 || die "mix is not on the PATH"
+if [ "$with_tui" = 1 ]; then
+  command -v zig >/dev/null 2>&1 || die "zig is not on the PATH (the TUI's Burrito build needs it)"
+  command -v 7z >/dev/null 2>&1 || command -v 7zz >/dev/null 2>&1 || die "7z is not on the PATH (Burrito unpacks the ERTS with it)"
+fi
+if [ "$with_gui" = 1 ]; then
+  [ "$(uname -s)" = Linux ] || die "--gui is Linux only here; the macOS app is a bundle (pnpm tauri build)"
+  [ -x "$HOME/.cargo/bin/cargo" ] && PATH="$HOME/.cargo/bin:$PATH"
+  command -v cargo >/dev/null 2>&1 || die "cargo is not on the PATH (the GUI is Rust; https://rustup.rs)"
+  pkg-config --exists webkit2gtk-4.1 2>/dev/null \
+    || die "no WebKitGTK 4.1 headers: sudo apt install libwebkit2gtk-4.1-dev libgtk-3-dev librsvg2-dev libssl-dev build-essential pkg-config"
+  # Tauri runs `pnpm build` itself, so without pnpm a shim for corepack's goes on the PATH
+  # for this run: `corepack pnpm` would reach only the commands written here.
+  if ! command -v pnpm >/dev/null 2>&1; then
+    command -v corepack >/dev/null 2>&1 || die "neither pnpm nor corepack is on the PATH"
+    shim_dir=$(mktemp -d)
+    trap 'rm -rf "$shim_dir"' EXIT
+    printf '#!/bin/sh\nexec corepack pnpm "$@"\n' > "$shim_dir/pnpm"
+    chmod +x "$shim_dir/pnpm"
+    PATH="$shim_dir:$PATH"
+    export COREPACK_ENABLE_DOWNLOAD_PROMPT=0
+  fi
+fi
+
+VERSION=$(tr -d '[:space:]' < "$ROOT/VERSION")
+TARGET=$(detect_target)
+say "building troupe $VERSION ($TARGET) from $ROOT"
+say ""
+
+export MIX_ENV=prod
+
+# -- the daemon --------------------------------------------------------------
+# Built from its own directory, so this compiles the harness and not the plane's
+# database and Kubernetes clients (Decision 667), exactly as native.yml does.
+(cd "$ROOT/apps/troupe_daemon" && mix deps.get && mix release troupe_daemon --overwrite) \
+  || die "the daemon release failed"
+
+TARBALL="$ROOT/_build/prod/troupe_daemon-$VERSION.tar.gz"
+[ -f "$TARBALL" ] || die "expected $TARBALL; the release did not produce it"
+
+# -- the TUI -----------------------------------------------------------------
+TUI_BUILT=
+if [ "$with_tui" = 1 ]; then
+  # Zig's caches go outside the home directory unless told otherwise. Zig 0.16 moves
+  # files into its cache with renameat2(RENAME_NOREPLACE), which an eCryptfs home (an
+  # encrypted Ubuntu home) refuses with EINVAL, and the build aborts on it.
+  zig_cache="${TMPDIR:-/tmp}/troupe-zig-$(id -u)"
+  export ZIG_GLOBAL_CACHE_DIR="${ZIG_GLOBAL_CACHE_DIR:-$zig_cache/global}"
+  export ZIG_LOCAL_CACHE_DIR="${ZIG_LOCAL_CACHE_DIR:-$zig_cache/local}"
+
+  (cd "$ROOT/clients/tui" && BURRITO_TARGET="$TARGET" mix deps.get && BURRITO_TARGET="$TARGET" mix release --overwrite) \
+    || die "the TUI release failed"
+  TUI_BUILT="$ROOT/clients/tui/burrito_out/troupe_$TARGET"
+  [ -f "$TUI_BUILT" ] || die "expected $TUI_BUILT; the Burrito build did not produce it"
+fi
+
+# -- the GUI -----------------------------------------------------------------
+# Unbundled: the binary is the app, and a .deb or AppImage would only wrap it. Built
+# against this machine's WebKitGTK, so it runs here and is not for handing on.
+GUI_BUILT=
+if [ "$with_gui" = 1 ]; then
+  (cd "$ROOT/clients/gui" && pnpm install --frozen-lockfile \
+    && pnpm --filter @troupe/desktop tauri build --no-bundle) \
+    || die "the GUI build failed"
+  GUI_BUILT="$ROOT/clients/gui/apps/desktop/src-tauri/target/release/troupe-desktop"
+  [ -f "$GUI_BUILT" ] || die "expected $GUI_BUILT; the Tauri build did not produce it"
+fi
+
+say ""
+stop_running_daemon
+
+# Unpacked beside the current install and then swapped, so the link never points at a
+# half-extracted tree.
+staging="$LIB_DIR.new"
+rm -rf "$staging"; mkdir -p "$staging"
+tar -xzf "$TARBALL" -C "$staging" || die "could not unpack $TARBALL"
+[ -x "$staging/bin/troupe-daemon" ] || die "the release does not contain bin/troupe-daemon"
+if [ -d "$LIB_DIR" ]; then
+  rm -rf "$LIB_DIR.previous"
+  mv "$LIB_DIR" "$LIB_DIR.previous"
+  say "keeping the previous install as $LIB_DIR.previous"
+fi
+mv "$staging" "$LIB_DIR"
+
+mkdir -p "$BIN_DIR"
+ln -sf "$LIB_DIR/bin/troupe-daemon" "$BIN"
+say "installed troupe-daemon $VERSION to $LIB_DIR ($BIN)"
+
+if [ -n "$TUI_BUILT" ]; then
+  [ -e "$TUI" ] && mv -f "$TUI" "$TUI.previous"
+  cp "$TUI_BUILT" "$TUI"
+  chmod +x "$TUI"
+  say "installed troupe $VERSION to $TUI"
+
+  # Burrito extracts its payload once per version, so without this a rebuild at the same
+  # version keeps running the previous build.
+  for base in "${XDG_DATA_HOME:-$HOME/.local/share}/.burrito" "$HOME/Library/Application Support/.burrito"; do
+    [ -d "$base" ] || continue
+    for dir in "$base"/troupe_*; do
+      [ -d "$dir" ] || continue
+      say "removing payload cache $dir"
+      rm -rf "$dir"
+    done
+  done
+fi
+
+if [ -n "$GUI_BUILT" ]; then
+  [ -e "$GUI" ] && mv -f "$GUI" "$GUI.previous"
+  cp "$GUI_BUILT" "$GUI"
+  chmod +x "$GUI"
+  mkdir -p "$(dirname "$DESKTOP_FILE")" "$(dirname "$ICON")"
+  cp "$ROOT/clients/gui/apps/desktop/src-tauri/icons/128x128.png" "$ICON"
+  cat > "$DESKTOP_FILE" <<EOF
+[Desktop Entry]
+Type=Application
+Name=Troupe (local build)
+Comment=The Troupe GUI, built from $ROOT
+Exec=$GUI
+Icon=troupe-local
+Terminal=false
+Categories=Development;
+EOF
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database "$(dirname "$DESKTOP_FILE")" 2>/dev/null || true
+  say "installed troupe-desktop $VERSION to $GUI (menu entry: Troupe (local build))"
+fi
+
+case ":$PATH:" in
+  *":$BIN_DIR:"*) ;;
+  *) say "note: $BIN_DIR is not on your PATH (install.sh adds it; or add it yourself)" ;;
+esac
+
+say ""
+"$BIN" version || true
+if [ -n "$TUI_BUILT" ]; then "$TUI" --version || true; fi
+if [ -n "$GUI_BUILT" ]; then say "troupe-desktop $VERSION (launch from the menu, or: troupe-desktop)"; fi
+say ""
+say "done. The desktop app starts the daemon when it needs one; troupe in a workspace starts the TUI."
+say "to go back:  scripts/install-local --rollback"
