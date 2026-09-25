@@ -54,6 +54,9 @@ defmodule Troupe.Plane.UsageTest do
     %{port: Listener.port(), team: team}
   end
 
+  # Dated now unless a test says otherwise. A fixed date in September was fine while a
+  # team's spend was all time, and read as nothing from October once a `monthly` team
+  # counted only the month it is read in.
   defp usage(seq, cost, opts \\ []) do
     %{
       "seq" => seq,
@@ -62,7 +65,8 @@ defmodule Troupe.Plane.UsageTest do
       "input_tokens" => 100,
       "output_tokens" => 20,
       "cost_micros" => cost,
-      "occurred_at" => Keyword.get(opts, :at, "2026-09-01T10:00:00.000000Z")
+      "occurred_at" =>
+        Keyword.get_lazy(opts, :at, fn -> DateTime.to_iso8601(DateTime.utc_now()) end)
     }
   end
 
@@ -209,6 +213,33 @@ defmodule Troupe.Plane.UsageTest do
 
       # Had the write not invalidated it, this would still be the remembered zero.
       assert Ledger.spent_micros(team.id) == 700
+    end
+
+    test "a breakdown up to now is remembered, rather than asked again", %{
+      port: port,
+      team: team
+    } do
+      worker = enrolled(port)
+
+      {:ok, _} =
+        call(worker, "usage.batch", %{"session_id" => "s-1", "records" => [usage(1, 700)]})
+
+      assert [%{cost_micros: 700}] = Ledger.breakdown(team.id, :model)
+
+      # Written past the team's actor, so nothing throws the remembered answer away. A
+      # breakdown with no `:to` was remembered under the instant it was asked, so the next
+      # read was always a new key and a new aggregate, and saw this.
+      {:ok, _} =
+        Ledger.record(%{
+          session_id: "s-1",
+          team_id: team.id,
+          owner_subject: "idp|alice",
+          model: "anthropic/claude-opus-5",
+          cost_micros: 300,
+          gateway_request_id: "behind-the-cache"
+        })
+
+      assert [%{cost_micros: 700}] = Ledger.breakdown(team.id, :model)
     end
 
     test "clearing the cache changes no answer", %{port: port, team: team} do

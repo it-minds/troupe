@@ -361,9 +361,11 @@ citation keeps meaning what it meant.
      plane and a rolling thirty days. Nothing is written at midnight. The period's start is
      worked out on every read (`Ledger.period_start/1`) and the ledger's cache is keyed by
      it, so the first read of a month is a new sum and not last month's remembered one.
-     `never` counts everything. A person's cap and the platform's have no period and count
-     everything too: a person's follows them between teams (471), and following a team's
-     period would give somebody in a `monthly` team and a `never` one two answers.
+     `never` counts everything. A person's cap and the platform's (with the deployment's)
+     are that same month, always, decided for #132 over leaving them all-time: an all-time
+     cap refuses somebody for good once they reach it. They do not borrow a team's period,
+     because a person's cap follows them between teams (471) and somebody in a `monthly`
+     team and a `never` one would get two answers (`Ledger.month_start/0`).
 
 497. **The plane holds the prompt while a session waits.** It is the only piece of
      session content the plane ever holds, it is held for seconds, and it is cleared the

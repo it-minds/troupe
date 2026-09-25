@@ -1379,6 +1379,34 @@ You build."}
                html =~ "the platform's, or the deployment's"
     end
 
+    test "each ceiling says what its spend counts over", context do
+      # Every bar here said "this period", including the person's and the platform's,
+      # which then counted everything ever spent (#132). They are the month now, and the
+      # team's is the team's own, which for this one never turns over.
+      actor = Admin.actor_for_subject(context.root.subject)
+      {:ok, _} = Admin.person_budget(actor, context.lead.subject, 40_000)
+      {:ok, _} = Admin.team_update(actor, "engineering", %{budget_period: "never"})
+      {:ok, _} = Settings.put("platform_budget_micros", 5_000_000, context.root.subject)
+      on_exit(&Settings.invalidate/0)
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      view
+      |> element("#explain-budget")
+      |> render_submit(%{"team" => "engineering", "subject" => context.lead.subject})
+
+      figures =
+        Regex.scan(
+          ~r{<span class="budget__figures">(.*?)</span>}s,
+          view |> element(".ceilings") |> render()
+        )
+        |> Enum.map(&(&1 |> List.last() |> String.trim()))
+
+      # Narrowest first: the person's own, the team's, the platform's.
+      assert figures == ["0.00 / 0.04 monthly", "0.00 / 1.00 in total", "0.00 / 5.00 monthly"]
+    end
+
     test "and a rung with no ceiling is not reported as the reason", context do
       {:ok, view, _html} =
         context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")

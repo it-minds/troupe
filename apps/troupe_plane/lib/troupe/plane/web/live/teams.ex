@@ -282,7 +282,8 @@ defmodule Troupe.Plane.Web.Live.Teams do
   defp cap_note(micros), do: "a ceiling of #{money(micros)}"
 
   # Never `money/1` for what has been spent: that answers "unlimited" for zero, which is
-  # right for a ceiling and nonsense for a total.
+  # right for a ceiling and nonsense for a total. "This month" because a person's cap
+  # counts the calendar month in UTC, whatever this team's own period is.
   defp member_note(member) do
     spent = :erlang.float_to_binary(member.spent_micros / 1_000_000, decimals: 2)
 
@@ -292,7 +293,7 @@ defmodule Troupe.Plane.Web.Live.Teams do
           ", #{:erlang.float_to_binary(member.reserved_micros / 1_000_000, decimals: 2)} promised",
         else: ""
 
-    "#{spent} spent#{promised} · #{cap_note(member.budget_micros && positive(member.budget_micros))}"
+    "#{spent} spent this month#{promised} · #{cap_note(member.budget_micros && positive(member.budget_micros))}"
   end
 
   defp positive(micros) when micros > 0, do: micros
@@ -768,8 +769,8 @@ defmodule Troupe.Plane.Web.Live.Teams do
         <h3>Members</h3>
         <p class="hint">
           From the identity provider, and read-only here — except a person's own spend
-          ceiling, which is Troupe's and follows them into every team they are in.
-          Blank is no ceiling.
+          ceiling, which is Troupe's and follows them into every team they are in. It is
+          per calendar month and turns over on the 1st (UTC). Blank is no ceiling.
         </p>
         <ul class="members">
           <li :for={member <- team.members}>

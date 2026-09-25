@@ -7,7 +7,8 @@ defmodule Troupe.Plane.BudgetLadderTest do
   they are in" and "nobody may take this deployment past a number". Adding a rung is
   easy; what is worth testing is everything around it — that a refusal says *which*
   ceiling, that a rung which refuses does not leave the wider ones holding the money, and
-  that a scope nobody has set does not quietly become a ceiling of zero.
+  that a scope nobody has set does not quietly become a ceiling of zero. That "a month"
+  is the calendar month in UTC, and turns over on the 1st, is `BudgetPeriodTest`'s.
   """
 
   use Troupe.Plane.DataCase, async: false

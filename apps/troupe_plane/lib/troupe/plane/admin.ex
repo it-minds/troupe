@@ -2161,7 +2161,8 @@ defmodule Troupe.Plane.Admin do
   end
 
   @doc """
-  Set or clear a person's own spend ceiling, across every team they are in.
+  Set or clear a person's own spend ceiling, across every team they are in, per calendar
+  month in UTC.
 
   A platform admin's, not a team admin's. A cap that follows somebody between teams is a
   statement about the person rather than about any one team, and a team admin who could

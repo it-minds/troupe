@@ -217,12 +217,14 @@ defmodule Troupe.Plane.Web.Live.Budgets do
 
   # The bar component takes a team's shape, because a ceiling is a ceiling whichever rung
   # wrote it and two renderings of one bar would eventually disagree about what full is.
+  # Each rung says what its spend covers: a person's and the platform's are the month, a
+  # team's is whatever the team's period is, and "this period" was all three at once.
   defp as_bar(ceiling) do
     %{
       spent_micros: ceiling.spent_micros,
       reserved_micros: ceiling.reserved_micros,
       budget_micros: ceiling.budget_micros,
-      budget_period: "this period"
+      budget_period: ceiling.budget_period
     }
   end
 end
