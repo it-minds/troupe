@@ -316,11 +316,13 @@ defmodule Troupe.UI.TUI.Model do
           push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
         end)
 
-      # The call is over, and so is an approval it was still waiting for: a cancel closes
-      # each call it stops with one of these, and so does a tool that timed out waiting.
-      # Neither is ever answered.
+      # The call is over, and so is an approval or a question it was still waiting for: a
+      # cancel closes each call it stops with one of these, and so does a tool that timed
+      # out waiting. Neither is ever answered.
       :tool_call_completed ->
-        %{w | pending: Enum.reject(w.pending, &(&1.kind == :approval and &1.call_id == d.call_id))}
+        ended? = &(&1.kind in [:approval, :question] and &1.call_id == d.call_id)
+
+        %{w | pending: Enum.reject(w.pending, ended?)}
         |> ensure_agent(path)
         |> update_agent(path, fn a ->
           %{a | transcript: Enum.map(a.transcript, &complete_tool(&1, d))}

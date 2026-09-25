@@ -22,6 +22,7 @@ defmodule Troupe.Gateway.WaitingSessionsTest do
   alias Troupe.Paths
 
   @recorded Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))
+  @questions Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "questions"]))
 
   @ada "ada@example.test"
 
@@ -66,6 +67,39 @@ defmodule Troupe.Gateway.WaitingSessionsTest do
     for name <- ~w(decided cancelled timed_out subagent_cancelled) do
       assert rows[name] == dormant("idle", 0), "#{name}: #{inspect(rows[name])}"
     end
+  end
+
+  # The same rule for a question (#162), from `test/fixtures/questions/`. A budget question
+  # a cancel ended is still owed, and waits again once the next message asks it again.
+  test "a dormant session is listed as waiting on a question only while it still waits",
+       context do
+    names = ~w(open answered timed_out cancelled subagent_cancelled failures_cancelled
+               failures_unattended budget_cancelled budget_asked_again budget_unattended)
+
+    for name <- names do
+      dir = Paths.session_dir(context.workspace, "asked-" <> name, context.state_dir)
+      File.mkdir_p!(dir)
+      File.cp!(Path.join(@questions, name <> ".jsonl"), Path.join(dir, "events.jsonl"))
+    end
+
+    client = attach(context, @ada)
+    {:ok, %{"sessions" => sessions}} = Client.call(client, "session.list")
+
+    rows =
+      for %{"id" => "asked-" <> name} = row <- sessions,
+          into: %{},
+          do: {name, Map.take(row, ~w(state status pending_approvals))}
+
+    for name <- ~w(open budget_asked_again) do
+      assert rows[name] == dormant("waiting", 0), "#{name}: #{inspect(rows[name])}"
+    end
+
+    for name <- names -- ~w(open budget_asked_again budget_unattended) do
+      assert rows[name] == dormant("idle", 0), "#{name}: #{inspect(rows[name])}"
+    end
+
+    # Denied with nobody to ask, the budget ends the agent.
+    assert rows["budget_unattended"] == dormant("done", 0)
   end
 
   defp dormant(status, open) do

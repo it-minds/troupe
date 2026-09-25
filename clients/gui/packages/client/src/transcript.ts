@@ -78,8 +78,14 @@ export type Entry =
       options: QuestionOption[];
       multiple: boolean;
       asked: "agent" | "budget";
-      /** The answer's text — for the budget question `allow`, `always` or `deny` — once given. */
+      /**
+       * The answer's text once given: for the budget question `allow`, `always` or `deny`,
+       * and for the failure guard's `stop` or `continue`, which the harness says itself
+       * when nobody is there to ask.
+       */
       answer: string | undefined;
+      /** Set when it ended unanswered: a cancel reached it, or its call timed out while it waited. */
+      closed: boolean;
     }
   | { kind: "todo"; seq: number; agent: string[]; items: TodoItem[]; source: string }
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
@@ -323,8 +329,9 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         ],
       };
 
-    // The call is over, and so is an approval it was still waiting for: a cancel closes
-    // each call it stops with one of these, and so does a tool that timed out waiting.
+    // The call is over, and so is an approval or a question it was still waiting for: a
+    // cancel closes each call it stops with one of these, and so does a tool that timed
+    // out waiting.
     case "tool_call_completed": {
       const id = str(d.data["call_id"]);
       return {
@@ -332,21 +339,23 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         entries: state.entries.map((en) =>
           en.kind === "tool" && en.callId === id
             ? { ...en, ok: Boolean(d.data["ok"]), content: contentOf(d.data["content"]) }
-            : en.kind === "approval" && en.callId === id
-              ? closeApproval(en)
+            : (en.kind === "approval" || en.kind === "question") && en.callId === id
+              ? closeUnanswered(en)
               : en,
         ),
       };
     }
 
     // A cancel stops the agent it reached and every agent under it, and one it took down
-    // never logs another word, so an approval anywhere in that subtree ends here — the
-    // rule the TUI keeps. The entry saying the turn was cancelled goes in as before.
+    // never logs another word, so an approval or a question anywhere in that subtree ends
+    // here — the rule the TUI keeps. That includes the budget's and the failure guard's
+    // question, which no call closes. The entry saying the turn was cancelled goes in as
+    // before.
     case "cancelled":
       return {
         ...next,
         entries: [
-          ...state.entries.map((en) => (en.kind === "approval" && within(en.agent, d.agent) ? closeApproval(en) : en)),
+          ...state.entries.map((en) => ((en.kind === "approval" || en.kind === "question") && within(en.agent, d.agent) ? closeUnanswered(en) : en)),
           { kind: "system", ...base, type: d.type, text: systemText(d) },
         ],
       };
@@ -368,16 +377,19 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
 
     // A question for a person. The harness's budget question rides on the same path under
     // a `budget-<n>` id with an event of its own beside it, so the entry is made from
-    // whichever arrives first and the other only fills it in.
+    // whichever arrives first and the other only fills it in. A question the harness asks
+    // at the gate before a model call (the budget's, the failure guard's) is still owed
+    // after a cancel ended it, and is asked again under the same id at the next turn: the
+    // entry it had is open again.
     case "budget_ask_started": {
       const callId = str(d.data["call_id"]);
-      if (hasQuestion(state, callId)) return next;
+      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
       return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"))] };
     }
 
     case "question_asked": {
       const callId = str(d.data["call_id"]);
-      if (hasQuestion(state, callId)) return next;
+      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
       if (callId.startsWith("budget-")) {
         return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["question"], "budget exhausted"))] };
       }
@@ -394,13 +406,18 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             multiple: d.data["multiple"] === true,
             asked: "agent",
             answer: undefined,
+            closed: false,
           },
         ],
       };
     }
 
+    // The harness's own word on its question, beside the person's answer or instead of
+    // it: under `approvals: deny` nobody is asked, and the budget says `deny` and the
+    // failure guard `stop` without a `question_answered`.
     case "question_answered":
-    case "budget_ask_answered": {
+    case "budget_ask_answered":
+    case "tool_failures_ask_answered": {
       const callId = str(d.data["call_id"]);
       const answer = str(d.data["text"] ?? d.data["decision"]);
       return {
@@ -541,9 +558,9 @@ export function openApprovals(state: TranscriptState): Extract<Entry, { kind: "a
   return state.entries.filter((e): e is Extract<Entry, { kind: "approval" }> => e.kind === "approval" && e.decision === undefined && !e.closed);
 }
 
-/** Questions in this transcript nobody has answered yet — the agent's and the harness's. */
+/** Questions in this transcript nobody has answered yet, and that are still waiting — the agent's and the harness's. */
 export function openQuestions(state: TranscriptState): Extract<Entry, { kind: "question" }>[] {
-  return state.entries.filter((e): e is Extract<Entry, { kind: "question" }> => e.kind === "question" && e.answer === undefined);
+  return state.entries.filter((e): e is Extract<Entry, { kind: "question" }> => e.kind === "question" && e.answer === undefined && !e.closed);
 }
 
 /**
@@ -561,17 +578,23 @@ const BUDGET_OPTIONS: QuestionOption[] = [
   { label: "deny", description: "stop here" },
 ];
 
-/** An approval that ended without an answer. One somebody answered stays as it was. */
-function closeApproval(en: Extract<Entry, { kind: "approval" }>): Entry {
-  return en.decision === undefined ? { ...en, closed: true } : en;
+/** An approval or a question that ended without an answer. One somebody answered stays as it was. */
+function closeUnanswered(en: Extract<Entry, { kind: "approval" | "question" }>): Entry {
+  if (en.kind === "approval") return en.decision === undefined ? { ...en, closed: true } : en;
+  return en.answer === undefined ? { ...en, closed: true } : en;
 }
 
 function hasQuestion(state: TranscriptState, callId: string): boolean {
   return state.entries.some((en) => en.kind === "question" && en.callId === callId);
 }
 
+/** The question under `callId` asked again: open, unless somebody has answered it. */
+function reopen(entries: Entry[], callId: string): Entry[] {
+  return entries.map((en) => (en.kind === "question" && en.callId === callId && en.closed && en.answer === undefined ? { ...en, closed: false } : en));
+}
+
 function budgetQuestion(base: { seq: number; agent: string[] }, callId: string, detail: string): Entry {
-  return { kind: "question", ...base, callId, question: detail, options: BUDGET_OPTIONS, multiple: false, asked: "budget", answer: undefined };
+  return { kind: "question", ...base, callId, question: detail, options: BUDGET_OPTIONS, multiple: false, asked: "budget", answer: undefined, closed: false };
 }
 
 function optionsOf(v: unknown): QuestionOption[] {
