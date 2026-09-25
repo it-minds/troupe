@@ -217,6 +217,37 @@ defmodule Troupe.Worker.UnattendedSessionTest do
       assert Map.has_key?(dormant, "done_reason")
       assert Map.has_key?(dormant, "cost_micros")
     end
+
+    # A cancel closes the call it stopped and never decides the approval, so a plane that
+    # waited for a decision would list this session as waiting on somebody for good (#142).
+    test "a cancel while an approval waits takes the session out of waiting", context do
+      context = requires_tier(context)
+      ask = {:tools, [{"needs_approval", %{"note" => "wait for me"}}]}
+      fake = scripted([ask, {:text, "never asked"}])
+
+      assert {:ok, _} =
+               activate(context,
+                 fake: fake,
+                 report: reporter_to(self()),
+                 config_overrides: [auto_approve: false]
+               )
+
+      Troupe.subscribe(context.session_id)
+      Troupe.send_input(context.session_id, "ask me something")
+
+      waiting = await_status(&(&1["status"] == "waiting"))
+      assert waiting["pending_approvals"] == 1
+
+      Troupe.cancel(context.session_id)
+
+      idle = await_status(&(&1["status"] == "idle"))
+      assert idle["pending_approvals"] == 0
+
+      assert {:ok, _} = Sessions.dormant(context.session_id)
+      dormant = await_dormant()
+      assert dormant["status"] == "idle"
+      assert dormant["pending_approvals"] == 0
+    end
   end
 
   # -- helpers ----------------------------------------------------------------

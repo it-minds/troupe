@@ -40,6 +40,13 @@ defmodule Troupe.Session.Summary do
     "error" => nil
   }
 
+  # Which agent asked for each approval still open, by path, so that a cancel can find the
+  # ones in the subtree it took down. Bookkeeping rather than something a fleet view
+  # shows, so it is never in a diff. Present only while an approval is open, like `taint`
+  # below: a log whose approvals all ended folds to exactly the map it folded to before
+  # this was kept, and every recorded fixture hash still holds.
+  @approval_agents "approval_agents"
+
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
@@ -149,7 +156,10 @@ defmodule Troupe.Session.Summary do
   end
 
   defp diff(published, snapshot) do
-    for {key, value} <- snapshot, Map.get(published, key) != value, into: %{}, do: {key, value}
+    for {key, value} <- Map.delete(snapshot, @approval_agents),
+        Map.get(published, key) != value,
+        into: %{},
+        do: {key, value}
   end
 
   # -- the fold ---------------------------------------------------------------
@@ -184,7 +194,12 @@ defmodule Troupe.Session.Summary do
     Map.put(snapshot, "tool", data["name"])
   end
 
-  def fold(snapshot, %Event{type: "tool_call_completed"}), do: Map.put(snapshot, "tool", nil)
+  # The call is over, and so is any approval it was still waiting for: a cancel closes
+  # each call it stops with one of these, and so does a tool that timed out waiting, and
+  # neither is ever decided.
+  def fold(snapshot, %Event{type: "tool_call_completed", data: data}) do
+    snapshot |> Map.put("tool", nil) |> close_approvals([data["call_id"]])
+  end
 
   def fold(snapshot, %Event{type: "llm_response", data: data}) do
     usage = Map.get(data, "usage") || %{}
@@ -202,13 +217,34 @@ defmodule Troupe.Session.Summary do
     Map.put(snapshot, "error", data["reason"])
   end
 
-  def fold(snapshot, %Event{type: "approval_requested", data: data}) do
-    Map.update(snapshot, "approvals", [data["call_id"]], &Enum.uniq(&1 ++ [data["call_id"]]))
+  def fold(snapshot, %Event{type: "approval_requested", agent: path, data: data}) do
+    id = data["call_id"]
+    asked = Enum.join(path, "/")
+
+    snapshot
+    |> Map.update("approvals", [id], &Enum.uniq(&1 ++ [id]))
+    |> Map.update(@approval_agents, %{id => asked}, &Map.put(&1, id, asked))
   end
 
   def fold(snapshot, %Event{type: type, data: data})
       when type in ["approval_decided", "approval_resolved"] do
-    Map.update(snapshot, "approvals", [], &List.delete(&1, data["call_id"]))
+    snapshot
+    |> Map.update("approvals", [], &List.delete(&1, data["call_id"]))
+    |> forget_agents([data["call_id"]])
+  end
+
+  # A cancel stops the agent it reached and every agent under it, and one it took down
+  # never logs another word — so an approval anywhere in that subtree ends here. The same
+  # rule the TUI keeps for what it shows as pending.
+  def fold(snapshot, %Event{type: "cancelled", agent: path}) do
+    cancelled = Enum.join(path, "/")
+
+    ended =
+      for {id, asked} <- Map.get(snapshot, @approval_agents, %{}),
+          asked == cancelled or String.starts_with?(asked, cancelled <> "/"),
+          do: id
+
+    close_approvals(snapshot, ended)
   end
 
   # A tool running on somebody's laptop is something every other participant is entitled
@@ -229,4 +265,20 @@ defmodule Troupe.Session.Summary do
   end
 
   def fold(snapshot, %Event{}), do: snapshot
+
+  # Only where there is a list to close them in: `tool_call_completed` is in every log,
+  # and a projection that gained an empty `approvals` from it would be a different map
+  # from the one every recorded fixture hash was taken over.
+  defp close_approvals(%{"approvals" => open} = snapshot, ids) do
+    snapshot |> Map.put("approvals", open -- ids) |> forget_agents(ids)
+  end
+
+  defp close_approvals(snapshot, _ids), do: snapshot
+
+  defp forget_agents(snapshot, ids) do
+    case Map.drop(Map.get(snapshot, @approval_agents, %{}), ids) do
+      agents when map_size(agents) == 0 -> Map.delete(snapshot, @approval_agents)
+      agents -> Map.put(snapshot, @approval_agents, agents)
+    end
+  end
 end
