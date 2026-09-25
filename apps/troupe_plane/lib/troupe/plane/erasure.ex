@@ -55,8 +55,9 @@ defmodule Troupe.Plane.Erasure do
     # destruction leaves an erasure that will be finished; a crash the other way round
     # leaves data nobody believes exists.
     with {:ok, tombstone} <- write_tombstone(session, opts) do
-      Sessions.read_only(session.id)
+      # The slot before the row: read-only clears the `worker_id` it is found by.
       Placement.release(session.profile, session.id)
+      Sessions.read_only(session.id)
       destroy(session, tombstone)
     end
   end

@@ -579,6 +579,33 @@ defmodule Troupe.Plane.HarnessTest do
     end
   end
 
+  describe "session.erase" do
+    test "erasing a running session gives its pod slot back", context do
+      team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      %{worker_id: pod} = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      [erased, _kept] =
+        for _n <- 1..2 do
+          assert {:ok, %{"session_id" => id}} =
+                   Harness.call("session.create", %{"profile" => "dev"}, context(owner))
+
+          id
+        end
+
+      assert placement("dev").capacities[pod] == 2
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => erased}, context(owner))
+
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^erased}}, 5_000
+
+      # The row was made read-only first, which cleared the `worker_id` the release gives
+      # the slot back by.
+      assert placement("dev").capacities[pod] == 1
+    end
+  end
+
   describe "session.create carries the first turn" do
     test "prompt, terms and origin reach the pod; the row keeps all but the prompt", context do
       team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
@@ -1196,6 +1223,12 @@ defmodule Troupe.Plane.HarnessTest do
       capacity: Keyword.get(opts, :capacity, 4),
       disk_total_bytes: 1_000_000
     })
+  end
+
+  # What the placement actor holds, without the reload `Placement.inspect_state/1` does
+  # first, which would hide a slot that was never given back.
+  defp placement(profile) do
+    :sys.get_state(:global.whereis_name({Troupe.Plane.Placement, profile}))
   end
 
   # A worker that enrols for real over the control channel and forwards every push to
