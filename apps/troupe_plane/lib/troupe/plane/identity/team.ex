@@ -40,7 +40,8 @@ defmodule Troupe.Plane.Identity.Team do
   @spec name_rule() :: String.t()
   def name_rule, do: @name_rule
 
-  # What a budget is measured over: a month, or nothing — a ceiling that never turns over.
+  # What a budget is measured over: the calendar month in UTC, or nothing — a ceiling that
+  # never turns over. `Troupe.Plane.Ledger.period_start/1` is where that is read.
   # The one list: the Teams page and the admin API offer it, and the platform's default
   # period is tested against it. `daily` was offered by all three and refused here.
   @budget_periods ~w(monthly never)

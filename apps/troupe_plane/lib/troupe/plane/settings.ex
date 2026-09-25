@@ -132,7 +132,7 @@ defmodule Troupe.Plane.Settings do
       fallback: :monthly,
       summary: "The period that ceiling is measured over.",
       consequence:
-        "Only for teams enabled after the change. A period of never is a ceiling that does not turn over.",
+        "Only for teams enabled after the change. Monthly turns over on the 1st of the month (UTC); a period of never is a ceiling that does not turn over.",
       effect: :next_team
     },
     %Setting{

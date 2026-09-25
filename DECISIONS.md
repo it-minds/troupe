@@ -355,6 +355,16 @@ citation keeps meaning what it meant.
      team page because that is where somebody is standing when they wonder who is near
      theirs, and the flash says "in every team" so nobody mistakes it for a team setting.
 
+684. **A `monthly` budget is the calendar month in UTC, and it turns over because it is
+     asked, not because a job runs.** It resets at 00:00 UTC on the 1st, the same instant
+     on every replica whatever zone anybody is in; decided for #106 over a zone set on the
+     plane and a rolling thirty days. Nothing is written at midnight. The period's start is
+     worked out on every read (`Ledger.period_start/1`) and the ledger's cache is keyed by
+     it, so the first read of a month is a new sum and not last month's remembered one.
+     `never` counts everything. A person's cap and the platform's have no period and count
+     everything too: a person's follows them between teams (471), and following a team's
+     period would give somebody in a `monthly` team and a `never` one two answers.
+
 497. **The plane holds the prompt while a session waits.** It is the only piece of
      session content the plane ever holds, it is held for seconds, and it is cleared the
      moment the session is placed. The alternative is a session that starts and then
