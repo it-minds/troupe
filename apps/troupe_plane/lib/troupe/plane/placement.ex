@@ -41,7 +41,13 @@ defmodule Troupe.Plane.Placement do
     Singleton.call(__MODULE__, profile, {:reserve, session_id})
   end
 
-  @doc "Give a slot back, because the session went dormant, moved, or was erased."
+  @doc """
+  Give a slot back, because the session went dormant, moved, or was erased.
+
+  Asked before the row is marked, wherever the caller can: the slot is found by the row's
+  `worker_id`, which marking it dormant or read-only clears. Asked after, the slot still
+  comes back, but by counting the whole profile again.
+  """
   @spec release(String.t(), String.t()) :: :ok
   def release(profile, session_id) do
     Singleton.call(__MODULE__, profile, {:release, session_id})
@@ -87,17 +93,18 @@ defmodule Troupe.Plane.Placement do
       nil ->
         # Before refusing, count again.
         #
-        # This actor's own numbers are the authority between reloads, and a reload only
-        # happens when it meets a pod it has never seen. That is right on the happy path
+        # This actor's own numbers are the authority between reloads, and a reserve only
+        # reloads when it meets a pod it has never seen. That is right on the happy path
         # and wrong in exactly one place: a count that has drifted upward is a count that
         # never comes down, and the profile is then full for ever while the database says
-        # it is empty. It is not hypothetical — `release/2` gives a slot back only when it
-        # finds a `worker_id` to clear, and a caller that marked the session dormant first
-        # had already cleared it.
+        # it is empty. It is not hypothetical — `release/2` used to give a slot back only
+        # when it found a `worker_id` to clear, and a pod's own dormancy report, an erasure
+        # and an unrestorable session had each cleared it first (Decision 690). A grant
+        # taken away still takes sessions off their pods without a release at all.
         #
-        # So the refusal path, and only the refusal path, pays for a group-by. It is the
-        # one moment where being wrong is expensive and the one moment where the cost does
-        # not matter, because the alternative is a request that fails.
+        # So of a reserve's paths, the refusal and only the refusal pays for a group-by.
+        # It is the one moment where being wrong is expensive and the one moment where the
+        # cost does not matter, because the alternative is a request that fails.
         reloaded = load(state)
 
         case choose(reloaded, workers) do
@@ -112,8 +119,16 @@ defmodule Troupe.Plane.Placement do
 
   def handle_call({:release, session_id}, _from, state) do
     case Sessions.unplace(session_id) do
-      {:ok, worker_id} -> {:reply, :ok, charge(state, worker_id, -1)}
-      :ok -> {:reply, :ok, state}
+      {:ok, worker_id} ->
+        {:reply, :ok, charge(state, worker_id, -1)}
+
+      # Nothing to take off a pod: the session was never placed, was given back already,
+      # or its `worker_id` was cleared before this was asked — `Sessions.dormant/2`,
+      # `read_only/1` and `unrestorable/2` all clear it, and a pod's `unrestorable` report
+      # cannot release first because it is fenced on the epoch. Which pod it was on is
+      # gone with the column, so count again rather than keep a slot nobody holds.
+      :ok ->
+        {:reply, :ok, load(state)}
     end
   end
 

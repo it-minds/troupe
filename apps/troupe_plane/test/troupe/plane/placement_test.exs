@@ -41,6 +41,9 @@ defmodule Troupe.Plane.PlacementTest do
     s
   end
 
+  # The actor's own counts, without the reload `Placement.inspect_state/1` does first.
+  defp counted(profile), do: :sys.get_state(:global.whereis_name({Placement, profile})).capacities
+
   test "a session lands on a healthy pod, and the pod's count goes up" do
     [_first, _second] = profile("dev", 2)
     session("s-1", "dev")
@@ -106,19 +109,21 @@ defmodule Troupe.Plane.PlacementTest do
   end
 
   test "a slot given back by a session that was already unplaced is still given back" do
-    profile("dev", 1, per_pod: 1)
+    [pod] = profile("dev", 1, per_pod: 1)
     session("s-1", "dev")
     session("s-2", "dev")
 
     assert {:ok, _} = Placement.reserve("dev", "s-1")
 
     # The order `strand/2` used to do these in: dormant first, which clears `worker_id`,
-    # and then release — which gives a slot back only where it finds one to clear. The
+    # and then release — which gave a slot back only where it found one to clear. The
     # pod stayed charged for a session that was no longer on it, and a profile whose
     # count only ever goes up is full for ever while the database says it is empty.
     {:ok, _} = Sessions.dormant("s-1")
     :ok = Placement.release("dev", "s-1")
 
+    # Given back by the release, not by the recount a refused reserve would do.
+    assert Map.get(counted("dev"), pod.id, 0) == 0
     assert {:ok, _} = Placement.reserve("dev", "s-2")
   end
 
