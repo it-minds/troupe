@@ -26,20 +26,23 @@ truly idle: zero LLM calls, zero tokens.
 `troupe` is released with the rest of the repository: every release on this repository's
 GitHub releases page carries a binary per platform, `troupe-<version>-<target>` (`.exe` on
 Windows), beside `troupe-daemon-<version>-<target>.tar.gz` and one `SHA256SUMS`. The
-installers at the repository root put both on the machine — `troupe`, and the
-`troupe-daemon` it stands on — and check them against `SHA256SUMS` before replacing
-anything:
+installers at the repository root put `troupe-daemon` on the machine, and `troupe` and the
+desktop app when asked (`--tui`, `--gui`; `-Tui`, `-Gui` on Windows), and check them
+against `SHA256SUMS` before replacing anything:
 
 ```sh
-curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh
+curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
+sh install.sh --tui
 ```
 
 ```powershell
-irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex
+irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1 -Tui
 ```
 
-They install the latest release; `TROUPE_VERSION=0.3.0` pins one, and `--no-tui`
-(`-NoTui` on Windows) installs the daemon alone. A private repository answers
+The copy attached to a release installs that release, and `TROUPE_VERSION=0.3.0` names
+another. The daemon is always installed; in a terminal, with neither flag, they ask which
+clients to add, and `-y` / `-Yes` asks nothing. A private repository answers
 `/releases/latest` only to somebody signed in, so there the installers ask for
 `TROUPE_VERSION`, and `TROUPE_RELEASE_URL` names a mirror. To build a binary yourself,
 `scripts/build-local` builds one for this host and installs it as `troupe` in
@@ -169,6 +172,14 @@ and per model `id`, `limit.context`, `limit.output` and
 agents are files (see below). `troupe config` prints what was resolved with keys
 masked.
 
+On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
+With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
+opencode has them written. Otherwise it offers three choices: take your organisation's
+settings from a plane (`troupe login`, then `troupe config pull`), set up a provider here
+(provider, URL, key and a model from what the provider lists), or not now. Without a
+terminal it prints those choices and asks nothing. The installers end with the same
+check.
+
 ## Use
 
 ```
@@ -208,6 +219,7 @@ Inside the TUI, everything starts with `/`:
 | `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
 | `/mcp` | MCP servers: each one's state, tools and errors |
 | `/goal <text>` | set the session's goal: every later turn works towards it and the status line shows it; `/goal` shows it, `/goal clear` clears it |
+| `/loop [n]` | work towards the goal on its own, up to `n` turns (the config's `loop_max_iterations` without one), until the agent says the goal is met; the status line shows `loop 2/10`, and `/loop stop` stops it |
 | `/upload <path>` | send a local file into the session's own mount |
 | `/models` | pick the default model from every model Troupe detected |
 | `/observer` | agent tree: every branch and subagent, its state, worktree and tokens |

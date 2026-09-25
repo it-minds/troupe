@@ -12,6 +12,7 @@ defmodule Troupe.UI.TUI.Server do
 
   alias ExRatatui.Event.{Key, Mouse, Paste, Resize}
   alias Troupe.Client
+  alias Troupe.Protocol.Glob
   alias Troupe.Settings
   alias Troupe.UI.HQ
   alias Troupe.UI.TUI.{Input, Model, View}
@@ -671,6 +672,9 @@ defmodule Troupe.UI.TUI.Server do
         "goal" ->
           goal_command(sid, String.trim(args))
 
+        "loop" ->
+          loop_command(sid, String.trim(args))
+
         "upload" ->
           notice_of(upload(sid, String.trim(args)))
 
@@ -800,6 +804,64 @@ defmodule Troupe.UI.TUI.Server do
     case Client.set_goal(sid, text) do
       :ok -> {:notice, "goal set"}
       {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  ## A loop towards the goal
+
+  # `/loop` and `/loop <n>` start one and `/loop stop` stops it. The status line and the
+  # transcript follow the session's own `loop_*` events, so these answer on the notice line
+  # only, and the input box is free while the loop runs. Whether a loop runs is asked of
+  # the session, which knows one that a restart interrupted is not running, and what it
+  # would refuse is said here first, in terms of what to type instead.
+  defp loop_command(sid, "stop") do
+    with {:ok, %{"state" => "running"}} <- Client.loop(sid),
+         :ok <- Client.stop_loop(sid) do
+      {:notice, "loop stopping"}
+    else
+      {:ok, _none_running} -> {:notice, "no loop is running"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp loop_command(sid, args) do
+    with {:ok, n} <- loop_count(args),
+         :ok <- no_loop_running(sid),
+         :ok <- has_goal(sid),
+         :ok <- Client.start_loop(sid, n) do
+      {:notice, "loop started"}
+    else
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp loop_count(""), do: {:ok, nil}
+
+  defp loop_count(text) do
+    case Integer.parse(text) do
+      {n, ""} when n > 0 -> {:ok, n}
+      _ -> {:error, "/loop [n] runs up to n iterations towards the goal; /loop stop stops it"}
+    end
+  end
+
+  defp no_loop_running(sid) do
+    case Client.loop(sid) do
+      {:ok, %{"state" => "running", "iteration" => n}} ->
+        {:error, "a loop is already running (iteration #{n}); /loop stop stops it"}
+
+      {:ok, _none_running} ->
+        :ok
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  defp has_goal(sid) do
+    case Client.goal(sid) do
+      {:ok, nil} -> {:error, "no goal to loop towards; /goal <text> sets one"}
+      {:ok, _goal} -> :ok
+      {:error, reason} -> {:error, reason}
     end
   end
 
@@ -1857,7 +1919,7 @@ defmodule Troupe.UI.TUI.Server do
           text,
           state.commands ++
             @path_commands ++
-            ~w(settings help observer models watch agents sessions resume memory mcp goal quit)
+            ~w(settings help observer models watch agents sessions resume memory mcp goal loop quit)
         )
 
       true ->
@@ -1945,11 +2007,18 @@ defmodule Troupe.UI.TUI.Server do
   def complete_file(text, workspace) do
     case Regex.run(~r/@([^\s@]*)$/, text) do
       [full, partial] ->
+        # Neither the workspace nor what was typed is a pattern: a Windows workspace is
+        # written with backslashes, and a `[` or a `{` in either is part of a name. Only the
+        # trailing `*` is a wildcard, and the matches are relative to the workspace as the
+        # glob reads it, with forward slashes.
+        root = String.replace(workspace, "\\", "/")
+
         matches =
-          workspace
-          |> Path.join(partial <> "*")
+          root
+          |> Glob.escape()
+          |> Path.join(Glob.escape(partial) <> "*")
           |> Path.wildcard()
-          |> Enum.map(&Path.relative_to(&1, workspace))
+          |> Enum.map(&Path.relative_to(&1, root))
           |> Enum.sort()
 
         case matches do
@@ -1957,7 +2026,7 @@ defmodule Troupe.UI.TUI.Server do
             String.replace_suffix(
               text,
               full,
-              "@" <> first <> if(File.dir?(Path.join(workspace, first)), do: "/", else: "")
+              "@" <> first <> if(File.dir?(Path.join(root, first)), do: "/", else: "")
             )
 
           [] ->

@@ -123,6 +123,11 @@ defmodule Troupe.Config do
             # until someone asks it to carry on, because a crash loop that resumes
             # spends money and re-runs shell commands nobody is watching.
             resume_on_restart: false,
+            # `/loop` (Decision 681): how many iterations a loop runs when it is not told,
+            # and how many failed iterations in a row stop it. A loop is also bounded by
+            # the budget, which asks the person attached before it runs further.
+            loop_max_iterations: 10,
+            loop_max_failures: 3,
             default_agent: "build",
             # The project brief (`.troupe/memory.md`, Decision 649): whether agents read
             # and write it, whether a client should have the librarian refresh a missing

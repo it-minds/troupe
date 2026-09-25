@@ -4,7 +4,7 @@
 .
 ├── AGENTS.md                notes for coding agents; points at fixing-issues.md
 ├── ARCHITECTURE.md          the design, and the contract between daemon, plane and clients
-├── DECISIONS.md             every judgment call, numbered, newest at the bottom
+├── DECISIONS.md             the judgment calls that still hold, numbered, newest at the bottom
 ├── PROTOCOL.md              the normative wire document for client authors
 ├── README.md                the front door
 ├── VERSION                  the one version of everything released (Decision 668)

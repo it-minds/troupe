@@ -9,6 +9,7 @@ defmodule Troupe.Session do
   silently losing them. Then the root `Agent.Node`. Then `Session.Watcher` **last**, so a
   watch-mode crash restarts nothing above it — the guarantee that file watching can never
   disturb a running agent comes from this ordering, not from care inside the watcher.
+  `Session.Loop`, which runs `/loop`, is below the agent for the same reason.
   """
 
   use Supervisor
@@ -92,6 +93,9 @@ defmodule Troupe.Session do
            agent_path: @root_path,
            enabled: config.fs_events,
            debounce_ms: config.fs_debounce_ms},
+          # `/loop` (Decision 681): after the agent it drives, and after the watchers, so
+          # a loop that crashes restarts none of them.
+          {Troupe.Session.Loop, session_id: session_id, config: config},
           # Last, and deliberately so: a projection is a subscriber, and one that could
           # restart an agent by crashing would be worse than no projection at all.
           {Troupe.Session.Summary, session_id: session_id}
@@ -275,16 +279,24 @@ defmodule Troupe.Session do
 
   defp with_skills(mounts, _bundle), do: mounts
 
-  @doc "A sortable, readable session id: a timestamp plus enough randomness to be unique."
-  @spec generate_id() :: String.t()
-  def generate_id do
-    stamp =
-      DateTime.utc_now()
-      |> Calendar.strftime("%Y%m%dT%H%M%S")
+  @doc """
+  A sortable, readable session id: a timestamp plus enough randomness to be unique.
 
-    suffix = 4 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false)
-    stamp <> "-" <> suffix
-  end
+  The shape is `Troupe.Protocol.SessionId`'s, because the plane hands out ids too.
+  """
+  @spec generate_id() :: String.t()
+  defdelegate generate_id(), to: Troupe.Protocol.SessionId, as: :generate
+
+  @doc """
+  Whether a string has the shape `generate_id/0` gives it.
+
+  A session id names a directory under the state root, and a dormant session is found by
+  a glob built on it, so an id that comes from outside is held to this before anything
+  looks for it (#97). Everything the harness generates passes, and a wildcard, a `..` or
+  a separator cannot.
+  """
+  @spec valid_id?(term()) :: boolean()
+  defdelegate valid_id?(id), to: Troupe.Protocol.SessionId, as: :valid?
 end
 
 defmodule Troupe.Sessions do

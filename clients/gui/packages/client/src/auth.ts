@@ -317,9 +317,9 @@ export class AuthSession {
    * refuses the old one from then on, so two callers that read the same token — React's
    * StrictMode running the load effect twice, a remount, two tabs coming back at once —
    * would have one of them refused, and the refused one would clear the store, taking
-   * the token the other had just been given with it: a reload that signs the person out
-   * (`DECISIONS.md` #46). Inside the lock the token is read afresh, so whoever goes
-   * second spends the one the first was given.
+   * the token the other had just been given with it: a reload that signs the person out.
+   * Inside the lock the token is read afresh, so whoever goes second spends the one the
+   * first was given.
    */
   private refreshStored(): Promise<IdpTokens | null> {
     return exclusively(`troupe.auth.${this.key}`, async () => {

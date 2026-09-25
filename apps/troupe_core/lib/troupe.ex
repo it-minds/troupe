@@ -260,6 +260,43 @@ defmodule Troupe do
     end)
   end
 
+  @doc """
+  Start a loop towards the session's goal (`/loop`, Decision 681): up to `:max_iterations`
+  turns of the root agent (else the config's `loop_max_iterations`), each ending with the
+  agent's own verdict, `goal_complete` or not. Written as `loop_started` under `actor`;
+  `:command_id` rides along. A session with no goal has nothing to loop towards.
+  """
+  @spec start_loop(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
+          {:ok, Troupe.Loop.t()}
+          | {:error, :no_session | :no_goal | {:already_running, String.t()}}
+  def start_loop(session_id, actor \\ nil, opts \\ []) do
+    Troupe.Session.Loop.start(session_id, actor, opts)
+  end
+
+  @doc """
+  Stop the session's loop, written as `loop_stopped` (`requested`) under `actor`, and
+  cancel the root's turn if it is one of the loop's. Nothing is written when no loop runs.
+  """
+  @spec stop_loop(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) :: :ok
+  def stop_loop(session_id, actor \\ nil, opts \\ []) do
+    Troupe.Session.Loop.stop(session_id, actor, opts)
+  end
+
+  @doc """
+  The session's latest loop as its log has it, or `nil` if it never had one.
+
+  Read from the events, so a dormant session answers without waking; a loop the log says
+  is running in a session whose tree is not is reported as it will be recorded when the
+  session is next activated, stopped and `interrupted`.
+  """
+  @spec loop(String.t()) :: map() | nil
+  def loop(session_id) do
+    case session_id |> events() |> Troupe.Loop.fold() do
+      nil -> nil
+      loop -> Troupe.Loop.to_json(loop, Registry.whereis({:session, session_id}) != nil)
+    end
+  end
+
   @doc "Answer a question an agent asked with `ask_user`. First answer wins."
   @spec answer(String.t(), String.t(), String.t(), Troupe.Protocol.Event.Actor.t() | nil) :: :ok
   def answer(session_id, call_id, text, actor \\ nil) do

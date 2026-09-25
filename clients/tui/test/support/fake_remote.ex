@@ -302,7 +302,11 @@ defmodule Troupe.FakeRemote do
         {:reply, reply, state}
 
       {nil, _failures} ->
-        {reply, state} = dispatch(state, kind, method, params, pid)
+        {reply, state} =
+          if refused?(kind, method, params),
+            do: {{:error, -32_602, "invalid_params"}, state},
+            else: dispatch(state, kind, method, params, pid)
+
         {:reply, reply, state}
     end
   end
@@ -346,6 +350,33 @@ defmodule Troupe.FakeRemote do
   @addressed ~w(approval.respond blob.get fs.list fs.read fs.upload input.send presence.set
                 profile.switch session.archive session.erase session.get session.pin
                 session.unpin todo.edit tools.register tools.unregister turn.cancel)
+
+  # What `Troupe.Gateway.Dispatch` refuses a command without, beyond `session_id`, for the
+  # commands this client sends. Accepting any spelling is how `profile.switch`,
+  # `todo.edit` and `fs.upload` went out with names the worker does not know (issue #99).
+  @required %{
+    "profile.switch" => ~w(profile),
+    "todo.edit" => ~w(action),
+    "fs.read" => ~w(path),
+    "fs.upload" => ~w(path content),
+    "blob.get" => ~w(blob)
+  }
+
+  defp refused?(:worker, method, params) when is_map_key(@required, method),
+    do: not (Enum.all?(@required[method], &is_binary(params[&1])) and edit?(method, params))
+
+  # A refresh carries its token where `initialize` does, under `auth`.
+  defp refused?(:worker, "auth.refresh", params), do: not is_binary(params["auth"]["token"])
+  defp refused?(_kind, _method, _params), do: false
+
+  # `add` carries the item's text; `cancel` and `complete` name an item.
+  defp edit?("todo.edit", %{"action" => "add"} = params), do: is_binary(params["content"])
+
+  defp edit?("todo.edit", %{"action" => action} = params) when action in ["cancel", "complete"],
+    do: is_binary(params["id"])
+
+  defp edit?("todo.edit", _params), do: false
+  defp edit?(_method, _params), do: true
 
   defp dispatch(state, :worker, method, params, _pid)
        when method in @addressed and not is_map_key(params, "session_id") do
@@ -508,8 +539,8 @@ defmodule Troupe.FakeRemote do
       case params["path"] do
         "session:/" <> _ = _path ->
           [
-            %{"name" => "README.md", "path" => "README.md", "type" => "file", "size" => 12},
-            %{"name" => "lib", "path" => "lib", "type" => "dir", "size" => 0}
+            %{"name" => "README.md", "path" => "README.md", "kind" => "file", "size" => 12},
+            %{"name" => "lib", "path" => "lib", "kind" => "directory", "size" => 0}
           ]
 
         _ ->
@@ -531,11 +562,20 @@ defmodule Troupe.FakeRemote do
       )
 
     push(state, id, notification(id, event))
-    {{:ok, %{"accepted" => true}}, state}
+    {{:ok, %{"path" => params["path"], "bytes" => byte_size(params["content"])}}, state}
   end
 
-  defp dispatch(state, _kind, "blob.get", _params, _pid),
-    do: {{:ok, %{"content_base64" => Base.encode64("the whole blob")}}, state}
+  defp dispatch(state, _kind, "blob.get", params, _pid) do
+    bytes = "the whole blob"
+
+    {{:ok,
+      %{
+        "blob" => params["blob"],
+        "size" => byte_size(bytes),
+        "encoding" => "base64",
+        "data" => Base.encode64(bytes)
+      }}, state}
+  end
 
   defp dispatch(state, _kind, method, _params, _pid)
        when method in ["turn.cancel", "approval.respond", "todo.edit", "profile.switch"],

@@ -76,6 +76,9 @@ defmodule Troupe.Client do
   @callback goal(session_id()) :: {:ok, String.t() | nil} | {:error, term()}
   @callback set_goal(session_id(), String.t()) :: :ok | {:error, term()}
   @callback clear_goal(session_id()) :: :ok | {:error, term()}
+  @callback loop(session_id()) :: {:ok, map() | nil} | {:error, term()}
+  @callback start_loop(session_id(), pos_integer() | nil) :: :ok | {:error, term()}
+  @callback stop_loop(session_id()) :: :ok | {:error, term()}
   @callback cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   @callback compact(session_id(), String.t()) :: :ok | {:error, term()}
   @callback dismiss(session_id(), String.t()) :: :ok | {:error, term()}
@@ -186,6 +189,23 @@ defmodule Troupe.Client do
 
   @spec clear_goal(session_id()) :: :ok | {:error, term()}
   def clear_goal(sid), do: impl(sid).clear_goal(sid)
+
+  @doc """
+  The session's latest loop towards its goal as its log has it (`session.loop.get`), or
+  `nil` when it never had one.
+  """
+  @spec loop(session_id()) :: {:ok, map() | nil} | {:error, term()}
+  def loop(sid), do: impl(sid).loop(sid)
+
+  @doc """
+  Starts a loop towards the session's goal: up to `n` turns, or the session's own cap with
+  `nil`. What it does arrives as the session's `loop_*` events.
+  """
+  @spec start_loop(session_id(), pos_integer() | nil) :: :ok | {:error, term()}
+  def start_loop(sid, n), do: impl(sid).start_loop(sid, n)
+
+  @spec stop_loop(session_id()) :: :ok | {:error, term()}
+  def stop_loop(sid), do: impl(sid).stop_loop(sid)
 
   @spec cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   def cancel_branch(sid, path), do: impl(sid).cancel_branch(sid, path)

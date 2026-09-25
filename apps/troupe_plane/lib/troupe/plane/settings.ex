@@ -123,12 +123,16 @@ defmodule Troupe.Plane.Settings do
       key: "default_budget_period",
       group: :team_defaults,
       type: :enum,
-      values: [:monthly, :daily],
+      # `Identity.Team.budget_periods/0`, as atoms, and the settings test fails if the two
+      # part. `daily` was here once, and every team enabled after somebody chose it was
+      # refused, because a team has never accepted it.
+      values: [:monthly, :never],
       # An atom, like every other enum's fallback: a setting whose type depends on whether
       # anybody has changed it is a setting every caller has to handle twice.
       fallback: :monthly,
       summary: "The period that ceiling is measured over.",
-      consequence: "Only for teams enabled after the change.",
+      consequence:
+        "Only for teams enabled after the change. A period of never is a ceiling that does not turn over.",
       effect: :next_team
     },
     %Setting{

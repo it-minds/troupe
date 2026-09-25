@@ -387,7 +387,7 @@ defmodule Troupe.UI.TUI.View do
   defp todo_block(%{todos: []}), do: []
 
   defp todo_block(%{todos: todos}),
-    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.content}" end)
+    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.text}" end)
 
   defp pending_block(w, path) do
     case Enum.filter(w.pending, &(&1.agent_path == path)) do
@@ -1220,11 +1220,12 @@ defmodule Troupe.UI.TUI.View do
       agents ++ pending
   end
 
+  # An item as `Troupe.Remote.Translate` spells it: `text`, `status`, `id`.
   defp todo_lines(w, path, indent) do
     w.agents
     |> Map.get(path, %{todos: []})
     |> Map.get(:todos, [])
-    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.content}"} end)
+    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.text}"} end)
   end
 
   defp glyph(:completed), do: "x"
@@ -1262,7 +1263,8 @@ defmodule Troupe.UI.TUI.View do
       end
 
     text =
-      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)} · #{watch}#{mcp}" <>
+      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)}#{loop_note(state.model)}" <>
+        " · #{watch}#{mcp}" <>
         " · #{state.session_id}" <>
         remote_note(state) <>
         if(notice, do: " · #{notice}", else: "")
@@ -1293,6 +1295,16 @@ defmodule Troupe.UI.TUI.View do
             else: line
 
         " · goal: " <> clipped
+    end
+  end
+
+  # Where a running loop is, beside the goal it works towards. It runs on its own, so the
+  # line is all it takes of the screen: the input box stays yours.
+  defp loop_note(model) do
+    case Model.loop(model) do
+      nil -> ""
+      %{iteration: n, max: nil} -> " · loop #{n}"
+      %{iteration: n, max: max} -> " · loop #{n}/#{max}"
     end
   end
 

@@ -14,6 +14,6 @@ two plans open issues build on: [plans/admin-surface.md](plans/admin-surface.md)
 [program/control-panel.md](program/control-panel.md).
 
 At the root: [ARCHITECTURE.md](../ARCHITECTURE.md) (the design),
-[DECISIONS.md](../DECISIONS.md) (every judgment call, by number) and
+[DECISIONS.md](../DECISIONS.md) (the judgment calls that still hold, by number) and
 [.github/CI.md](../.github/CI.md) (CI and releases). The clients document themselves:
 [clients/tui](../clients/tui/README.md) and [clients/gui](../clients/gui/README.md).

@@ -11,6 +11,8 @@ defmodule Troupe.Worker.Auth do
 
   **The token** says what was true when it was minted: who the subject is, which session,
   and what role. It is checked once, at `initialize`, and again at every `auth.refresh`.
+  It is good for that session alone: a request naming another is refused, so is a method
+  about the pod rather than a session, and a listing of the pod shows only that one.
 
   **The ACL mirror** says what is true now. A collaborator whose access was revoked
   still holds a token that verifies perfectly, so the role in it is a claim about the
@@ -21,9 +23,29 @@ defmodule Troupe.Worker.Auth do
 
   use GenServer
 
+  alias Troupe.Gateway.{Dispatch, Session}
   alias Troupe.Protocol.{Error, Token}
 
   require Logger
+
+  # The answers that are about every session on the pod rather than one.
+  @listings ["session.list", "fleet.get"]
+
+  # What a token for one session may ask of a pod: every command that names a session as
+  # `session_id`, which the guard then holds to the token's; that session's topics; and the
+  # listings, narrowed to it. Everything else a pod serves is about the pod rather than a
+  # session — a session created in any workspace, the brief, agents or workflows of a
+  # path, the workspaces and worktrees the pod has seen, the machine's settings and
+  # identity. `initialize` and `auth.refresh` are the connection's own and never get here.
+  @session_methods ~w(
+    subscribe unsubscribe session.list fleet.get
+    session.get session.archive session.pin session.unpin session.erase
+    input.send turn.cancel profile.switch approval.respond question.answer todo.edit
+    session.goal.set session.goal.get session.goal.clear
+    session.loop.start session.loop.stop session.loop.get
+    fs.list fs.read fs.upload blob.get mcp.status presence.set
+    tools.register tools.unregister
+  )
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]
@@ -95,6 +117,21 @@ defmodule Troupe.Worker.Auth do
   def guard(server \\ __MODULE__) do
     fn claims, method, params -> check(server, claims, method, params) end
   end
+
+  @doc """
+  What a caller may see of an answer, for `Troupe.Protocol.Endpoint.remote/3`.
+
+  The guard refuses a request that names another session. A listing names none — it is
+  about the whole pod — so it is answered and then narrowed: a token for one session
+  finds that session in it, and nobody else's.
+  """
+  @spec narrow(map() | nil, String.t(), map()) :: map()
+  def narrow(%{"session_id" => session_id}, method, %{"sessions" => sessions} = result)
+      when method in @listings and is_binary(session_id) and is_list(sessions) do
+    %{result | "sessions" => Enum.filter(sessions, &(&1["id"] == session_id))}
+  end
+
+  def narrow(_claims, _method, result), do: result
 
   @doc "What a set of claims says the caller may do, before the ACL has its say."
   @spec scopes(map()) :: [atom()]
@@ -198,23 +235,87 @@ defmodule Troupe.Worker.Auth do
     GenServer.call(server, {:check, claims, method, params})
   end
 
-  # A token with no session in it — a create grant, or an admin listing — is not about
-  # one session's ACL and there is nothing here to check.
+  # No claims: nothing here vouched for the caller with a token, and there is nobody to
+  # hold to an ACL.
   defp do_check(_state, nil, _method, _params), do: :ok
 
-  defp do_check(state, claims, _method, params) do
-    session_id = claims["session_id"] || params["session_id"]
+  # A token that names a session is good for that session and no other. A pod holds
+  # several people's sessions, and the role in a token is a role on one of them — so
+  # every session a request names must be the token's, the method must be one about a
+  # session, and the ACL is then asked about that one. A token with no session in it —
+  # which the plane never mints for a pod, and tooling that runs its own pod signs — keeps
+  # every method and is held to the ACL of each session the request names.
+  defp do_check(state, claims, method, params) do
+    named = named_sessions(params)
 
-    case session_id && get_in(state.acl, [session_id, claims["sub"]]) do
-      # No mirrored entry: the token is the only word on the subject, and it verified.
-      nil -> :ok
-      :revoked -> revoked(session_id)
-      role when is_binary(role) -> :ok
-      _ -> revoked(session_id)
+    case claims["session_id"] do
+      nil -> Enum.find_value(named, :ok, &acl_refusal(state, claims["sub"], &1))
+      session_id -> confined(state, claims["sub"], session_id, method, named)
     end
   end
 
+  defp confined(state, subject, session_id, method, named) do
+    case Enum.find(named, fn {_field, id} -> id != session_id end) do
+      nil ->
+        method_refusal(method) || acl_refusal(state, subject, {"session_id", session_id}) || :ok
+
+      {field, _other} ->
+        another_session(field)
+    end
+  end
+
+  # A method this server does not have is left to the dispatcher, which answers
+  # `method_not_found` to everybody and runs nothing.
+  defp method_refusal(method) do
+    if method not in @session_methods and Map.has_key?(Dispatch.methods(), method),
+      do: not_about_the_session(method)
+  end
+
+  defp acl_refusal(state, subject, {_field, session_id}) do
+    case get_in(state.acl, [session_id, subject]) do
+      # No mirrored entry: the token is the only word on the subject, and it verified.
+      nil -> nil
+      role when is_binary(role) -> nil
+      _revoked -> revoked(session_id)
+    end
+  end
+
+  # Every place a request names a session: its `session_id`, a branch's `parent`, and the
+  # id in a `session:` or `presence:` topic. The `fleet` topic is every session on the pod
+  # at once, which is never one token's session, so only a token that names none may
+  # have it. A value that is not a string is no token's session either, and is kept so
+  # that it is refused rather than passed over.
+  defp named_sessions(params) do
+    named =
+      params
+      |> Map.take(["session_id", "parent"])
+      |> Enum.reject(fn {_field, id} -> id in [nil, ""] end)
+
+    case topic_session(params["topic"]) do
+      nil -> named
+      id -> [{"topic", id} | named]
+    end
+  end
+
+  defp topic_session(topic) when is_binary(topic) do
+    case Session.parse_topic(topic) do
+      {:ok, :fleet, nil} -> :fleet
+      {:ok, _kind, id} -> id
+      :error -> nil
+    end
+  end
+
+  defp topic_session(_topic), do: nil
+
   defp revoked(session_id) do
     {:error, Error.new(:forbidden, %{reason: "access revoked", session_id: session_id})}
+  end
+
+  defp another_session(field) do
+    {:error, Error.new(:forbidden, %{reason: "the token is for another session", field: field})}
+  end
+
+  defp not_about_the_session(method) do
+    {:error, Error.new(:forbidden, %{reason: "not about the token's session", method: method})}
   end
 end

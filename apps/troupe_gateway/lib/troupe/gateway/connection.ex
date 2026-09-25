@@ -394,7 +394,7 @@ defmodule Troupe.Gateway.Connection do
   defp dispatch_request(id, method, params, state, opts) do
     case Dispatch.call(method, params, context(state)) do
       {:ok, result} ->
-        answer(id, result, state, opts)
+        answer(id, narrow(state, method, result), state, opts)
 
       {:ok, result, {:subscribed, subscription}} ->
         state = send_control(state, {:result, id, result})
@@ -692,6 +692,15 @@ defmodule Troupe.Gateway.Connection do
   end
 
   defp guard(_state, _method, _params), do: :ok
+
+  # And after it, on the answer: a listing is about every session on a pod, and a token
+  # for one of them may see that one.
+  defp narrow(%{endpoint: %{narrow: narrow}} = state, method, result)
+       when is_function(narrow, 3) do
+    narrow.(state.auth && state.auth[:claims], method, result)
+  end
+
+  defp narrow(_state, _method, result), do: result
 
   defp as_error(%Error{} = error), do: error
   defp as_error(reason), do: Error.new(:forbidden, %{reason: to_string(reason)})

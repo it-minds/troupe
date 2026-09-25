@@ -94,6 +94,23 @@ defmodule Troupe.Client.Remote do
   @impl true
   def clear_goal(sid), do: describe(Worker.set_goal(sid, nil))
 
+  # A loop is the harness's too (`session.loop.*`): this asks, and the window follows the
+  # session's own `loop_*` events.
+  @impl true
+  def loop(sid) do
+    case Worker.loop(sid) do
+      {:ok, %{"loop" => loop}} -> {:ok, loop}
+      {:ok, other} -> {:error, "unexpected session.loop.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  @impl true
+  def start_loop(sid, n), do: describe(Worker.start_loop(sid, n))
+
+  @impl true
+  def stop_loop(sid), do: describe(Worker.stop_loop(sid))
+
   @impl true
   def cancel_branch(sid, _path), do: describe(Worker.cancel(sid))
 
@@ -585,7 +602,7 @@ defmodule Troupe.Client.Remote do
     %{
       name: entry["name"] || Path.basename(entry["path"] || ""),
       path: entry["path"] || entry["name"],
-      dir?: entry["dir"] == true or entry["type"] == "dir",
+      dir?: entry["kind"] == "directory",
       size: entry["size"] || 0,
       workspace: nil
     }
@@ -605,7 +622,7 @@ defmodule Troupe.Client.Remote do
   # if fetching the rest fails.
   defp fetch_blob(sid, blob, preview) do
     case Worker.blob(sid, blob) do
-      {:ok, %{"content_base64" => encoded}} ->
+      {:ok, %{"data" => encoded}} ->
         case Base.decode64(encoded) do
           {:ok, content} -> content
           :error -> preview || ""

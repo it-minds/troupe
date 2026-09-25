@@ -65,9 +65,9 @@ nothing and handle failure by supervision. A session is a `rest_for_one` supervi
 ordered by dependency: `Session.Log` first, because everything persists through it;
 `Approvals`, `Questions`, `ClientTools` and the workspace's MCP servers above the agent, so
 a restarted agent finds the same answers and registrations; the root `Agent.Node`; then
-`Watcher` and `Files`, so file watching can never disturb a running agent; and
-`Session.Summary` last, because a projection that could restart an agent by crashing would
-be worse than none. Sessions live in the core's own tree, not the daemon's, so a daemon can
+`Watcher` and `Files`, so file watching can never disturb a running agent; `Loop`, which
+runs `/loop` as turns of the root agent (Decision 681); and `Session.Summary` last,
+because a projection that could restart an agent by crashing would be worse than none. Sessions live in the core's own tree, not the daemon's, so a daemon can
 lose its listener and every client without an agent noticing.
 
 ### 2.2 The agent
@@ -130,7 +130,7 @@ breakpoint.
 | the model stream | nothing | the agent ends `llm_error` |
 | `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once) |
 | a subagent's node, past its restart limit | nothing; the parent gets `DOWN` | an error result for that delegation only |
-| `Watcher`, `Files`, `Summary` | that child and those after it | a notice |
+| `Watcher`, `Files`, `Loop`, `Summary` | that child and those after it | a notice; a loop carries on from its log |
 | `Approvals`, `Log`, or the session past 3 restarts in 10 s | everything below it; the whole session | a restarted tree replays; a stopped one comes back dormant from its log |
 | the VM | nothing | sessions come back dormant; one mid-turn is **interrupted** |
 | the reaper's Port | — | the reaper kills the process tree; an error result |

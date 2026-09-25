@@ -107,10 +107,12 @@ defmodule Troupe.Config.ModelSettings do
         {:ok,
          %{
            "models" => entries |> Enum.sort_by(& &1.id) |> Enum.map(&model_json/1),
-           "failures" => Enum.map(failures, fn {name, reason} -> failure(provider, name, reason) end)
+           "failures" =>
+             Enum.map(failures, fn {name, reason} -> failure(provider, name, reason) end)
          }}
       else
-        {:ok, %{"models" => [], "failures" => [%{"provider" => provider, "reason" => "no API key"}]}}
+        {:ok,
+         %{"models" => [], "failures" => [%{"provider" => provider, "reason" => "no API key"}]}}
       end
     end
   end
@@ -148,6 +150,93 @@ defmodule Troupe.Config.ModelSettings do
       end
     end
   end
+
+  @doc """
+  Copies opencode's providers into the user's file, so the machine keeps what it set up
+  in opencode without reading opencode's config at every session.
+
+  Each provider lands in `providers:` as opencode declares it (type, base URL, auth style
+  and models) with its key as it is written there. An `{env:VAR}` reference stays a
+  reference; a literal key, or one from opencode's `auth.json`, is copied, which is what
+  a person asking for the copy asked for. A provider the file already names is left as it
+  is, and opencode's default model becomes `models.default` only when the file has none.
+
+  The answer is `describe/1`'s plus `"imported"`: `"from"` (opencode's config),
+  `"providers"` (copied), `"kept"` (already in the file) and `"default"` (set, or nil).
+  Nothing is written when there is nothing to copy.
+  """
+  @spec import_opencode(Path.t() | nil) :: {:ok, description()} | {:error, String.t()}
+  def import_opencode(workspace \\ nil) do
+    path = Config.user_path()
+    providers = OpenCode.providers()
+
+    with :ok <- any_providers(providers),
+         {:ok, raw} <- parse_existing(path) do
+      existing = file_providers(raw)
+
+      {copied, kept} =
+        providers
+        |> Map.keys()
+        |> Enum.sort()
+        |> Enum.split_with(&(not Map.has_key?(existing, &1)))
+
+      default = if file_models(raw)["default"], do: nil, else: OpenCode.default_model()
+
+      imported = %{
+        "from" => OpenCode.config_path(),
+        "providers" => copied,
+        "kept" => kept,
+        "default" => default
+      }
+
+      updated =
+        raw
+        |> Map.put(
+          "providers",
+          Map.merge(existing, Map.new(copied, &{&1, provider_yaml(providers[&1])}))
+        )
+        |> put_models(if default, do: %{"default" => default}, else: %{})
+
+      with :ok <- save_unless(copied == [] and default == nil, path, updated) do
+        {:ok, Map.put(describe(workspace), "imported", imported)}
+      end
+    end
+  end
+
+  # An import that finds everything already there leaves the file, and its `.previous`,
+  # alone.
+  defp save_unless(true = _nothing_new, _path, _updated), do: :ok
+  defp save_unless(false, path, updated), do: save(path, updated)
+
+  defp any_providers(providers) when map_size(providers) == 0,
+    do: {:error, "there are no providers in #{OpenCode.config_path()} to copy"}
+
+  defp any_providers(_providers), do: :ok
+
+  # One opencode provider as `providers:` spells it, so it loads back to the same spec.
+  defp provider_yaml(provider) do
+    drop_empty(%{
+      "type" => Atom.to_string(provider.type),
+      "base_url" => provider.base_url,
+      "api_key" => provider.api_key,
+      "auth" => if(provider.auth == :bearer, do: "bearer"),
+      "models" =>
+        Map.new(provider.models, fn {name, model} -> {name, model_yaml(name, model)} end)
+    })
+  end
+
+  defp model_yaml(name, model) do
+    drop_empty(%{
+      "id" => if(model.id != name, do: model.id),
+      "context" => model.context,
+      "max_output" => model.max_output,
+      "reasoning_effort" => model.reasoning_effort
+    })
+  end
+
+  defp drop_empty(map),
+    do:
+      map |> Enum.reject(fn {_key, value} -> value in [nil, ""] or value == %{} end) |> Map.new()
 
   # A file that is there but does not parse is somebody's work in progress, not an
   # empty config: rewriting it from `%{}` would throw it away.
@@ -208,11 +297,27 @@ defmodule Troupe.Config.ModelSettings do
 
   defp key_source(file) do
     cond do
-      present(System.get_env("TROUPE_API_KEY")) || present(System.get_env("TROUPE_AUTH_TOKEN")) -> "env"
-      present(file["api_key"]) || present(file["auth_token"]) -> "file"
-      OpenCode.providers() != %{} -> "opencode"
-      true -> nil
+      present(System.get_env("TROUPE_API_KEY")) || present(System.get_env("TROUPE_AUTH_TOKEN")) ->
+        "env"
+
+      present(file["api_key"]) || present(file["auth_token"]) || keyed_provider?(file) ->
+        "file"
+
+      OpenCode.providers() != %{} ->
+        "opencode"
+
+      true ->
+        nil
     end
+  end
+
+  defp file_providers(file), do: if(is_map(file["providers"]), do: file["providers"], else: %{})
+
+  defp keyed_provider?(file) do
+    Enum.any?(file_providers(file), fn {_name, provider} ->
+      is_map(provider) and
+        (present(provider["api_key"]) || present(provider["auth_token"])) != nil
+    end)
   end
 
   defp overrides(file, workspace) do
@@ -236,10 +341,18 @@ defmodule Troupe.Config.ModelSettings do
     end
   end
 
-  # opencode is only consulted when the session has no key of its own.
+  # opencode is only consulted when the session has no key of its own, and a provider the
+  # file names (one copied from opencode, say) shadows opencode's of the same name.
   defp opencode(file) do
-    if saved_key(file) == nil and OpenCode.providers() != %{} do
-      [%{"source" => "opencode", "detail" => "no key is saved, so the providers in #{OpenCode.config_path()} are used"}]
+    unshadowed = Map.keys(OpenCode.providers()) -- Map.keys(file_providers(file))
+
+    if saved_key(file) == nil and unshadowed != [] do
+      [
+        %{
+          "source" => "opencode",
+          "detail" => "no key is saved, so the providers in #{OpenCode.config_path()} are used"
+        }
+      ]
     else
       []
     end
@@ -326,10 +439,14 @@ defmodule Troupe.Config.ModelSettings do
   # -- validation ---------------------------------------------------------------
 
   defp provider(value) when value in @providers, do: {:ok, value}
-  defp provider(value), do: {:error, "provider must be one of #{Enum.join(@providers, ", ")}, not #{inspect(value)}"}
+
+  defp provider(value),
+    do: {:error, "provider must be one of #{Enum.join(@providers, ", ")}, not #{inspect(value)}"}
 
   defp auth(value) when value in @auths, do: {:ok, value}
-  defp auth(value), do: {:error, "auth must be one of #{Enum.join(@auths, ", ")}, not #{inspect(value)}"}
+
+  defp auth(value),
+    do: {:error, "auth must be one of #{Enum.join(@auths, ", ")}, not #{inspect(value)}"}
 
   defp optional_auth(nil), do: {:ok, nil}
   defp optional_auth(value), do: auth(value)
@@ -343,7 +460,8 @@ defmodule Troupe.Config.ModelSettings do
         {:halt, {:error, "models.#{role} must be a model id or null"}}
 
       {role, _value}, _acc ->
-        {:halt, {:error, "unknown model role #{inspect(role)}; the roles are #{Enum.join(@roles, ", ")}"}}
+        {:halt,
+         {:error, "unknown model role #{inspect(role)}; the roles are #{Enum.join(@roles, ", ")}"}}
     end)
   end
 
@@ -352,7 +470,13 @@ defmodule Troupe.Config.ModelSettings do
   # -- shapes -------------------------------------------------------------------
 
   defp model_json(%Catalog{} = e) do
-    %{"id" => e.id, "context" => e.context, "max_output" => e.max_output, "input" => per_million(e.input), "output" => per_million(e.output)}
+    %{
+      "id" => e.id,
+      "context" => e.context,
+      "max_output" => e.max_output,
+      "input" => per_million(e.input),
+      "output" => per_million(e.output)
+    }
   end
 
   # The catalog prices per token; people compare prices per million.
@@ -360,7 +484,10 @@ defmodule Troupe.Config.ModelSettings do
   defp per_million(per_token), do: Float.round(per_token * 1_000_000, 4)
 
   defp failure(provider, name, reason) do
-    %{"provider" => if(name in [nil, "(session)"], do: provider, else: name), "reason" => reason(reason)}
+    %{
+      "provider" => if(name in [nil, "(session)"], do: provider, else: name),
+      "reason" => reason(reason)
+    }
   end
 
   defp reason({:http, 401}), do: "401 unauthorized: the key was refused"

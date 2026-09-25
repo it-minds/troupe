@@ -468,7 +468,7 @@ jobs:
       # A client written against PROTOCOL.md in another language, with no access to this
       # source. The TUI and the GUI live in this repository now, so this is the check that
       # proves the protocol alone is enough to be a client — the one that bring-your-own
-      # clients rely on (Decision 320).
+      # clients rely on (Decision 673).
       - name: Python reference client, end to end
         run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
 

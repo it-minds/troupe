@@ -11,6 +11,7 @@ defmodule Troupe.Plane.SettingsTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.{Admin, Identity, Provision, Settings}
+  alias Troupe.Plane.Identity.Team
 
   setup do
     Application.put_env(:troupe_plane, :platform_admin_group, "platform")
@@ -82,12 +83,21 @@ defmodule Troupe.Plane.SettingsTest do
       assert {:error, {:invalid, _}} = Settings.put("provisioning_mode", "sideways", "root")
     end
 
-    test "a declared choice is accepted even if the codebase never names it" do
-      # `daily` appears nowhere else, so converting the string to an atom raised rather
-      # than accepting a value the setting itself declares. Matched against the declared
-      # atoms now, never converted.
-      assert {:ok, %{value: :daily}} = Settings.put("default_budget_period", "daily", "root")
-      assert Settings.get("default_budget_period") == :daily
+    test "every declared choice is accepted" do
+      # `daily`, a choice here once, appeared nowhere else in the codebase, so converting
+      # the string to an atom raised rather than accepting a value the setting itself
+      # declared. Matched against the declared atoms now, never converted.
+      for %{type: :enum, key: key, values: values} <- Settings.definitions(), value <- values do
+        assert {:ok, %{value: ^value}} = Settings.put(key, to_string(value), "root")
+        assert Settings.get(key) == value
+      end
+    end
+
+    test "a budget period a team would refuse is refused here" do
+      assert {:error, {:invalid, message}} =
+               Settings.put("default_budget_period", "daily", "root")
+
+      assert message =~ "monthly, never"
     end
 
     test "a setting nobody declared is refused" do
@@ -136,6 +146,24 @@ defmodule Troupe.Plane.SettingsTest do
       assert team.budget_micros == 750_000
       assert team.erase_after_days == 30
       assert Identity.get_team(team.name).group_id == group.id
+    end
+
+    test "every period a new team can be given is one a team accepts", context do
+      # `daily` was offered here and refused by the team, so once somebody chose it every
+      # team enabled afterwards failed.
+      periods = Settings.definition("default_budget_period").values
+      assert Enum.map(periods, &to_string/1) == Team.budget_periods()
+
+      for period <- periods do
+        name = "period-#{period}"
+        {:ok, _} = Identity.upsert_group(%{external_id: name, display_name: name})
+
+        assert {:ok, _} =
+                 Admin.setting_put(context.root, "default_budget_period", to_string(period))
+
+        assert {:ok, team} = Admin.team_enable(context.root, name, %{})
+        assert team.budget_period == to_string(period)
+      end
     end
 
     test "enabling a team with attributes from the wire does not raise", context do

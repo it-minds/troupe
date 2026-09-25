@@ -100,7 +100,7 @@ defmodule Troupe.Plane.PersonCredentialsTest do
 
       plane = token_for(Policy.plane(mount()))
 
-      # `DECISIONS.md`'s "the plane never holds the value" is this, checked against
+      # "The plane never holds the value" (Decisions 375 and 377) is this, checked against
       # OpenBao rather than against our belief about our own code. The plane can destroy
       # a person's key metadata, because erasure has to work, and it can read nothing.
       assert {:error, :forbidden} = read_slot(plane, ada, "jira")

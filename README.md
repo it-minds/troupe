@@ -39,9 +39,25 @@ author's document and needs no checkout of this repository.
 | `troupe-a2a` | The A2A facade: every profile as an agent other agents can call ([docs/a2a.md](docs/a2a.md)). |
 | `troupe-gui` | The graphical client, served at `/app` on the plane's host. |
 
-Plus [`charts/troupe`](charts/troupe), which deploys the lot. On a machine, from the same
-release: `troupe` and `troupe-daemon` for Linux, macOS and Windows, which `install.sh` and
-`install.ps1` install, and the desktop app's installers.
+Plus [`charts/troupe`](charts/troupe), which deploys the lot.
+
+On a machine, from the same release: `troupe` (the TUI) and `troupe-daemon` for Linux,
+macOS and Windows, and the desktop app's installers. Each release attaches `install.sh`
+and `install.ps1`, which install that release: the daemon always, and they ask about the
+TUI and the desktop app. Download one, read it if you like, run it:
+
+```sh
+curl -fsSLO https://github.com/it-minds/troupe/releases/latest/download/install.sh
+sh install.sh
+```
+
+```powershell
+irm https://github.com/it-minds/troupe/releases/latest/download/install.ps1 -OutFile install.ps1
+powershell -ExecutionPolicy Bypass -File .\install.ps1
+```
+
+No questions: `--tui --gui -y` (`-Tui -Gui -Yes`). Start over: `--clean-install`
+(`-CleanInstall`). Remove: `--uninstall [--purge]` (`-Uninstall [-Purge]`).
 
 ## Deploy
 

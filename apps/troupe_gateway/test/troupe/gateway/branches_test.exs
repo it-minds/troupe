@@ -78,9 +78,10 @@ defmodule Troupe.Gateway.BranchesTest do
     client = connect(context)
 
     assert {:error, %Error{message: "invalid_params", data: data}} =
-             create(client, context.workspace, %{"parent" => "s-nobody"})
+             create(client, context.workspace, %{"parent" => Troupe.Session.generate_id()})
 
     assert data["field"] == "parent"
+    assert data["reason"] == "no such session"
   end
 
   test "worktree.merge commits the branch's work, lands it, and cleans up", context do

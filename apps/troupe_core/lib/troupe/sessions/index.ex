@@ -327,10 +327,12 @@ defmodule Troupe.Sessions.Index do
     |> Enum.flat_map(&meta_from_log/1)
   end
 
+  # The id is a name, not a pattern: escaped, so `*` finds no session rather than the
+  # first one on disk (#97).
   defp from_disk(state, session_id) do
     root = state.state_dir |> Paths.state_dir() |> Paths.glob_escape()
 
-    [root, "sessions", "*", session_id, "events.jsonl"]
+    [root, "sessions", "*", Paths.glob_escape(session_id), "events.jsonl"]
     |> Path.join()
     |> Path.wildcard()
     |> Enum.flat_map(&meta_from_log/1)

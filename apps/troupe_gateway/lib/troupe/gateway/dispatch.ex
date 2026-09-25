@@ -72,6 +72,11 @@ defmodule Troupe.Gateway.Dispatch do
     "session.goal.set" => :control,
     "session.goal.clear" => :control,
     "session.goal.get" => :observe,
+    # A loop sends the session input, one iteration after another, so it takes what input
+    # does; so does stopping one. Reading it is reading the log.
+    "session.loop.start" => :control,
+    "session.loop.stop" => :control,
+    "session.loop.get" => :observe,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -106,7 +111,8 @@ defmodule Troupe.Gateway.Dispatch do
     # changes what every later session on the machine talks to.
     "config.get" => :observe,
     "config.models" => :admin,
-    "config.set" => :admin
+    "config.set" => :admin,
+    "config.import" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -130,13 +136,20 @@ defmodule Troupe.Gateway.Dispatch do
   @doc "Dispatch one request."
   @spec call(String.t(), map(), Context.t()) :: outcome()
   def call(method, params, %Context{} = context) do
+    with :ok <- permitted(method, context),
+         :ok <- session_ids(params) do
+      idempotent(method, params, context)
+    end
+  end
+
+  defp permitted(method, context) do
     case Map.fetch(@scopes, method) do
       :error ->
         {:error, Error.new(:method_not_found, %{method: method})}
 
       {:ok, required} ->
         if required in context.scopes do
-          idempotent(method, params, context)
+          :ok
         else
           {:error, Error.new(:forbidden, %{required_scope: Atom.to_string(required)})}
         end
@@ -164,6 +177,35 @@ defmodule Troupe.Gateway.Dispatch do
   # new connection from the same person.
   defp ledger_key(%Context{principal: principal}, command_id) do
     {principal["subject"] || principal[:subject], command_id}
+  end
+
+  # A session id names a directory under the state root, and a dormant session is found
+  # by a glob built on it. So every id a request carries — as `session_id`, as a branch's
+  # `parent`, in a topic — is held to the shape the harness generates before any handler
+  # sees it (#97): `*` found another session's log, and `..` or a separator a path
+  # outside the one the id names. An absent or empty id is left for the handler to
+  # report as the field it needed.
+  defp session_ids(params) do
+    case Enum.find(named_sessions(params), &malformed?/1) do
+      nil -> :ok
+      {field, _id} -> {:error, Error.new(:invalid_params, %{field: field, reason: "not a session id"})}
+    end
+  end
+
+  defp malformed?({_field, id}), do: not Troupe.Session.valid_id?(id)
+
+  defp named_sessions(params) do
+    named =
+      params
+      |> Map.take(["session_id", "parent"])
+      |> Enum.filter(fn {_field, id} -> is_binary(id) and id != "" end)
+
+    with topic when is_binary(topic) <- Map.get(params, "topic"),
+         {:ok, _kind, id} when is_binary(id) <- Session.parse_topic(topic) do
+      [{"topic", id} | named]
+    else
+      _no_session -> named
+    end
   end
 
   # -- reads ------------------------------------------------------------------
@@ -235,7 +277,8 @@ defmodule Troupe.Gateway.Dispatch do
         :fs_changed,
         %{
           "path" => Workspace.relative(workspace, resolved),
-          "hash" => "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
+          "hash" =>
+            "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
           "size" => byte_size(content)
         },
         actor(context)
@@ -324,7 +367,13 @@ defmodule Troupe.Gateway.Dispatch do
         |> Path.expand()
         |> Definitions.load()
         |> Definitions.primaries()
-        |> Enum.map(&%{"name" => &1.name, "description" => &1.description, "source" => Atom.to_string(&1.source)})
+        |> Enum.map(
+          &%{
+            "name" => &1.name,
+            "description" => &1.description,
+            "source" => Atom.to_string(&1.source)
+          }
+        )
         |> Enum.sort_by(& &1["name"])
 
       {:ok, %{"agents" => agents}}
@@ -455,6 +504,57 @@ defmodule Troupe.Gateway.Dispatch do
         nil -> {:ok, %{"goal" => nil, "set_by" => nil, "set_at" => nil}}
         goal -> {:ok, %{"goal" => goal.text, "set_by" => goal.set_by, "set_at" => goal.set_at}}
       end
+    end
+  end
+
+  # A loop towards the goal (Decision 681). Starting one activates the session, since its
+  # iterations are the root agent's turns; the answer names the loop and its cap, and the
+  # effect is `loop_started`, carrying this `command_id`, then the iterations. A session
+  # with no goal, or with a loop already running, is refused with what to do instead.
+  defp handle("session.loop.start", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, max} <- loop_iterations(params),
+         :ok <- activate(session_id) do
+      opts = [max_iterations: max] ++ command_opts(params)
+
+      case Troupe.start_loop(session_id, actor(context), opts) do
+        {:ok, loop} ->
+          {:ok, %{"accepted" => true, "loop_id" => loop.id, "max_iterations" => loop.max_iterations}}
+
+        {:error, :no_goal} ->
+          {:error,
+           Error.new(:conflict, %{
+             needs: "goal",
+             reason: "the session has no goal to loop towards: set one with session.goal.set"
+           })}
+
+        {:error, {:already_running, loop_id}} ->
+          {:error,
+           Error.new(:conflict, %{
+             loop_id: loop_id,
+             reason: "a loop is already running: session.loop.stop stops it"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
+    end
+  end
+
+  # Not activating: a dormant session's loop is not running, so there is nothing to stop,
+  # and the log already reads it as interrupted.
+  defp handle("session.loop.stop", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      :ok = Troupe.stop_loop(session_id, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.loop.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      {:ok, %{"loop" => Troupe.loop(session_id)}}
     end
   end
 
@@ -619,9 +719,14 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
-        :ok -> {:ok, %{"removed" => true}}
-        {:error, :dirty} -> {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
-        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+        :ok ->
+          {:ok, %{"removed" => true}}
+
+        {:error, :dirty} ->
+          {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
     end
   end
@@ -659,9 +764,14 @@ defmodule Troupe.Gateway.Dispatch do
       enabled = Map.get(params, "enabled", true)
 
       case Troupe.set_watch(workspace, enabled) do
-        {:ok, backend} -> {:ok, %{"enabled" => enabled, "backend" => to_string(backend)}}
-        {:error, :already_watching} -> {:error, Error.new(:conflict, %{reason: "watch is exclusive per workspace"})}
-        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+        {:ok, backend} ->
+          {:ok, %{"enabled" => enabled, "backend" => to_string(backend)}}
+
+        {:error, :already_watching} ->
+          {:error, Error.new(:conflict, %{reason: "watch is exclusive per workspace"})}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
     end
   end
@@ -729,8 +839,18 @@ defmodule Troupe.Gateway.Dispatch do
     settings_result(ModelSettings.write(params, workspace_param(params)))
   end
 
+  defp model_settings("config.import", %{"from" => "opencode"} = params) do
+    settings_result(ModelSettings.import_opencode(workspace_param(params)))
+  end
+
+  defp model_settings("config.import", %{"from" => from}) do
+    settings_result({:error, "config.import copies from opencode, not #{inspect(from)}"})
+  end
+
   defp settings_result({:ok, result}), do: {:ok, result}
-  defp settings_result({:error, reason}), do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
+  defp settings_result({:error, reason}),
+    do: {:error, Error.new(:invalid_params, %{reason: reason})}
 
   defp workspace_param(%{"workspace" => workspace}) when is_binary(workspace) and workspace != "",
     do: Path.expand(workspace)
@@ -784,7 +904,8 @@ defmodule Troupe.Gateway.Dispatch do
       parent when is_binary(parent) ->
         if Troupe.get_session(parent),
           do: {:ok, parent},
-          else: {:error, Error.new(:invalid_params, %{field: "parent", reason: "no such session"})}
+          else:
+            {:error, Error.new(:invalid_params, %{field: "parent", reason: "no such session"})}
 
       _other ->
         {:error, Error.new(:invalid_params, %{field: "parent", reason: "must be a session id"})}
@@ -815,6 +936,7 @@ defmodule Troupe.Gateway.Dispatch do
       Enum.map_join(Provider.known(), ", ", &to_string/1) <>
       " — an OpenAI-compatible gateway is `provider: openai` with a `base_url`"
   end
+
   defp start_error(other), do: inspect(other)
 
   defp pin(params, pinned?) do
@@ -843,6 +965,15 @@ defmodule Troupe.Gateway.Dispatch do
   defp trimmed(text) when is_binary(text), do: String.trim(text)
   defp trimmed(_text), do: ""
 
+  # Absent is the config's cap; present, it is a whole number of iterations, at least one.
+  defp loop_iterations(params) do
+    case Map.get(params, "max_iterations") do
+      nil -> {:ok, nil}
+      n when is_integer(n) and n > 0 -> {:ok, n}
+      _ -> {:error, Error.new(:invalid_params, %{field: "max_iterations", reason: "a positive integer"})}
+    end
+  end
+
   defp command_opts(params) do
     case Map.get(params, "command_id") do
       command_id when is_binary(command_id) -> [command_id: command_id]
@@ -867,7 +998,9 @@ defmodule Troupe.Gateway.Dispatch do
   # there is not — a dormant session still has a mount table, and a client reading one
   # must be confined by the same rules the agent was.
   defp mounted(session_id, workspace) do
-    case Troupe.replay_from(session_id, 0) |> Enum.reverse() |> Enum.find(&(&1.type == "mounts_resolved")) do
+    case Troupe.replay_from(session_id, 0)
+         |> Enum.reverse()
+         |> Enum.find(&(&1.type == "mounts_resolved")) do
       nil -> workspace
       event -> Workspace.with_mounts(workspace, Mounts.from_json(event.data))
     end

@@ -1,0 +1,23 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/loop_iteration_started.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "iteration": {
+      "type": "integer"
+    },
+    "loop_id": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "iteration",
+    "loop_id"
+  ],
+  "title": "loop_iteration_started",
+  "type": "object"
+}

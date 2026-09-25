@@ -73,21 +73,11 @@ defmodule Troupe.Paths do
   @doc """
   A directory written so that a glob built on it matches that directory and no other.
 
-  `Path.wildcard/2` reads `\\` as an escape and `*`, `?`, `[` and `{` as wildcards, so a
-  runtime path cannot start a pattern as it is. The state directory on Windows is
-  `C:\\Users\\me\\AppData\\Local\\troupe`, which matched nothing at all, so every dormant
-  session vanished from the listing when the daemon restarted; a workspace at
-  `C:/src/app[1]` is read as `C:/src/app1`. So `\\` becomes `/`, the separator a glob
-  expects, and the wildcard characters are escaped: only what is joined on after this is
-  a pattern. A backslash is a separator on every host here, as it is in
-  `Troupe.Workspace`; a glob could not match one inside a name anyway.
+  This is `Troupe.Protocol.Glob.escape/1`, which says why. It lives in the protocol so
+  that a bundle's skills and the TUI's `@file` completion escape exactly as the core does.
   """
   @spec glob_escape(Path.t()) :: String.t()
-  def glob_escape(path) do
-    path
-    |> String.replace("\\", "/")
-    |> String.replace(["*", "?", "[", "{"], &("\\" <> &1))
-  end
+  defdelegate glob_escape(path), to: Troupe.Protocol.Glob, as: :escape
 
   defp override(var) do
     case System.get_env(var) do
