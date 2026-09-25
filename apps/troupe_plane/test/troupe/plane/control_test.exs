@@ -10,7 +10,7 @@ defmodule Troupe.Plane.ControlTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Fleet, SCIM, Sessions, TeamBudget}
+  alias Troupe.Plane.{Bundles, Drain, Fleet, Placement, SCIM, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -398,6 +398,63 @@ defmodule Troupe.Plane.ControlTest do
       assert session.last_seq == 12
     end
 
+    test "a pod's own dormancy report gives its slot back, and the pod has room again at once",
+         %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      [pod] = Fleet.list_workers("dev")
+
+      # Full: the pod enrolled with room for four.
+      for n <- 1..4, do: placed("s-#{n}")
+      full = placement("dev")
+      assert full.capacities[pod.id] == 4
+
+      assert {:ok, _} =
+               call(worker, "session.dormant", %{"session_id" => "s-1", "last_seq" => 12})
+
+      # The report marked the row dormant first, which clears the `worker_id` a release
+      # gives the slot back by, so the pod stayed charged for four. Nothing put that right
+      # until a reserve was about to be refused and the actor counted the profile again.
+      assert placement("dev").capacities[pod.id] == 3
+
+      placed("s-5")
+      refilled = placement("dev")
+      assert refilled.capacities[pod.id] == 4
+      assert refilled.loaded_at == full.loaded_at, "the slot came back only by counting again"
+    end
+
+    test "a slot is given back once, however many times its session is put to sleep",
+         %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      [pod] = Fleet.list_workers("dev")
+      placed("s-1")
+      placed("s-2")
+
+      # The plane gives a session back itself when a pod it asked to archive answers
+      # without having reported it, and the pod's own report can still arrive after that.
+      Drain.strand(pod, "s-1")
+      assert {:ok, _} = call(worker, "session.dormant", %{"session_id" => "s-1"})
+      assert {:ok, _} = call(worker, "session.dormant", %{"session_id" => "s-1"})
+
+      assert placement("dev").capacities[pod.id] == 1
+    end
+
+    test "a session its pod parks read-only gives its slot back", %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      [pod] = Fleet.list_workers("dev")
+      placed("s-1")
+      placed("s-2")
+
+      assert {:ok, _} =
+               call(worker, "session.unrestorable", %{
+                 "session_id" => "s-1",
+                 "epoch" => Sessions.get("s-1").epoch,
+                 "reason" => "workspace_gone"
+               })
+
+      assert Sessions.get("s-1").state == "read_only"
+      assert placement("dev").capacities[pod.id] == 1
+    end
+
     test "a pod that cannot put a tree back parks the session read-only, fenced on the epoch", %{port: port} do
       worker = enrolled(port, "dev-token", "troupe-w-dev-0")
       {:ok, _} = Sessions.create(%{id: "s-1", owner_subject: "idp|alice", profile: "dev", epoch: 2})
@@ -566,6 +623,17 @@ defmodule Troupe.Plane.ControlTest do
 
     worker
   end
+
+  # A session created and given a slot the way `session.create` gives one.
+  defp placed(id) do
+    {:ok, _} = Sessions.create(%{id: id, owner_subject: "idp|alice", profile: "dev"})
+    {:ok, _} = Placement.reserve("dev", id)
+  end
+
+  # What the placement actor holds, read without making it count again:
+  # `Placement.inspect_state/1` reloads from the database first, which is exactly what
+  # would hide a slot that was never given back.
+  defp placement(profile), do: :sys.get_state(:global.whereis_name({Placement, profile}))
 
   # The plane asks every pod what it holds the moment it enrols. A fake pod that never
   # answered would leave the plane waiting, so this reads past the pushes to the request

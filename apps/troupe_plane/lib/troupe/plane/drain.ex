@@ -115,13 +115,12 @@ defmodule Troupe.Plane.Drain do
   and the next open replays it somewhere else. What is lost is the process, which was
   already lost when the pod went.
 
-  **The order is load-bearing.** `Placement.release/2` gives a slot back only when it
-  finds a `worker_id` to clear, and `Sessions.dormant/1` clears it — so doing these the
-  other way round marks the session dormant, finds nothing to unplace, and leaves the pod
-  charged for a session that is no longer on it. A profile whose count only ever goes up
-  is a profile that is eventually full for ever. That was fixed once in the control
-  connection and was still the wrong way round here, which is the argument for this
-  living in one place.
+  **Release first.** `Placement.release/2` finds the slot by the row's `worker_id`, and
+  `Sessions.dormant/1` clears it. Released after, the slot used to stay charged to a pod
+  the session had left, and a profile whose count only ever goes up is eventually full for
+  ever; now it comes back, but by counting the whole profile again (Decision 690). The
+  control connection's orphan path calls this rather than keep its own copy of the order,
+  which was right there and wrong in the same module's dormancy report.
   """
   @spec strand(Worker.t()) :: [String.t()]
   def strand(%Worker{} = worker) do
