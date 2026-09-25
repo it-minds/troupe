@@ -298,8 +298,10 @@ defmodule Troupe.Sessions.Index do
   # Waiting on a person and on nothing else: the root agent has asked something — an
   # approval, a question, the budget's own question (Decision 660) — and every task it has
   # running is one of the askers. Only the root's own calls are asked again when the tree
-  # comes back; a delegation comes back interrupted, so a session with a subagent alive is
-  # busy, and a subagent's question times out with its tool as it always has.
+  # comes back; a delegation comes back interrupted, so a session with a subagent at work is
+  # busy, and a subagent's question times out with its tool as it always has. One that
+  # finished or ran out of budget is not at work: it stays up, `:done`, and what it had to
+  # say is already its delegation's result (#134).
   defp parked_or_busy(session_id) do
     root = Session.root_path()
 
@@ -307,14 +309,18 @@ defmodule Troupe.Sessions.Index do
       (Approvals.pending(session_id) ++ Questions.pending(session_id))
       |> Enum.count(&(&1.agent_path == root))
 
+    subagents = Troupe.agent_tree(session_id) -- [root]
+
     parked? =
-      asked > 0 and Troupe.agent_tree(session_id) == [root] and
+      asked > 0 and Enum.all?(subagents, &done_agent?(session_id, &1)) and
         length(Task.Supervisor.children(Registry.tasks(session_id, root))) <= asked
 
     if parked?, do: :parked, else: :busy
   catch
     :exit, _ -> :busy
   end
+
+  defp done_agent?(session_id, path), do: match?(%{state: :done}, Troupe.snapshot(session_id, path))
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 
