@@ -2,6 +2,7 @@ defmodule Troupe.Agent.ResilienceTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.Server, as: AgentServer
+  alias Troupe.LLM.Message
   alias Troupe.Session.Approvals
 
   describe "tool isolation" do
@@ -210,6 +211,110 @@ defmodule Troupe.Agent.ResilienceTest do
       assert Troupe.snapshot(session.id).state == :idle
       assert Troupe.snapshot(session.id).done_reason == nil
     end
+
+    # The summary `finish` left outlived the turn that gave it, so the first tool turn after
+    # a wake finished again at once, with the old summary, before the model saw its results.
+    test "a woken agent's tool turn goes back to the model rather than finishing again", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          steps: [
+            {:tools, [{"finish", %{"summary" => "all done"}}]},
+            {:tools, [{"todo_read", %{}}]},
+            {:text, "and again"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "do the thing")
+      await_state(session.id, [:done], 10_000)
+
+      Troupe.send_input(session.id, "one more thing")
+      await_state(session.id, [:idle, :done], 10_000)
+
+      assert Troupe.snapshot(session.id).state == :idle
+      assert Fake.call_count(fake) == 3
+      assert [%{data: %{"summary" => "all done"}}] = events_of_type(session.id, "agent_done")
+    end
+  end
+
+  # `child_seq` was not folded, so a restarted agent named its next child `general#1` again,
+  # and that child replayed the first one's log instead of taking its task: finished
+  # already, it never reported, and the delegation waited for ever.
+  describe "a delegation after a restart" do
+    test "starts a child of its own on the new task, after the agent restarts", context do
+      %{session: session, fake: fake} = start_session(context, routes: two_delegations())
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate the first")
+      await_rest(session.id)
+
+      restart_agent(session.id)
+
+      Troupe.send_input(session.id, "delegate the second")
+      await_rest(session.id)
+
+      assert_second_child(session.id, fake)
+    end
+
+    test "starts a child of its own on the new task, after the session comes back", context do
+      %{session: session, fake: fake} = start_session(context, routes: two_delegations())
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate the first")
+      await_rest(session.id)
+
+      reopen(context, session.id, fake, [])
+
+      Troupe.send_input(session.id, "delegate the second")
+      await_rest(session.id)
+
+      assert_second_child(session.id, fake)
+    end
+
+    # A delegation in flight when the agent restarts is taken up again, like any call that
+    # had not finished, and a child is started for it afresh on the same task.
+    test "that takes up an unfinished one starts that child afresh", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "first task"}}]},
+              {:text, "first done"},
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "second task"}}]},
+              {:text, "second done"}
+            ],
+            "general" => [
+              {:tools, [{"finish", %{"summary" => "first result"}}]},
+              {:tools, [{"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}]},
+              {:tools, [{"finish", %{"summary" => "second result"}}]}
+            ]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate the first")
+      await_rest(session.id)
+
+      Troupe.send_input(session.id, "delegate the second")
+      await_started_call(session.id, "slow")
+      restart_agent(session.id)
+      await_rest(session.id)
+
+      paths = session.id |> events_of_type("delegation_started") |> Enum.map(& &1.data["child_path"])
+      assert paths == [["root", "general#1"], ["root", "general#2"], ["root", "general#3"]]
+
+      results =
+        session.id
+        |> events_of_type("tool_call_completed")
+        |> Enum.filter(&(&1.agent == ["root"] and &1.data["name"] == "delegate"))
+        |> Enum.map(& &1.data["content"])
+
+      assert results == ["first result", "second result"]
+
+      [_first, _second, third] = Fake.requests_for(fake, "general")
+      assert [task] = third.messages
+      assert Message.text(task) == "second task"
+    end
   end
 
   describe "cancellation" do
@@ -254,6 +359,36 @@ defmodule Troupe.Agent.ResilienceTest do
       agent = Registry.agent_pid(session.id, ["root"])
       Troupe.cancel(session.id)
       assert AgentServer.snapshot(agent).state == :idle
+    end
+
+    # A `finish` in a turn the cancel stopped left its summary behind, and the next turn
+    # finished with it as soon as its own tools came back, before the model saw them.
+    test "a finish in a cancelled turn does not end the next one", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          steps: [
+            {:tools,
+             [
+               {"finish", %{"summary" => "stale"}},
+               {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}
+             ]},
+            {:tools, [{"todo_read", %{}}]},
+            {:text, "carried on"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "finish while counting")
+      await_started_call(session.id, "slow")
+      Troupe.cancel(session.id)
+      await_state(session.id, [:idle])
+
+      Troupe.send_input(session.id, "carry on")
+      await_state(session.id, [:idle, :done], 10_000)
+
+      assert Troupe.snapshot(session.id).state == :idle
+      assert Fake.call_count(fake) == 3
+      assert events_of_type(session.id, "agent_done") == []
     end
   end
 
@@ -475,6 +610,49 @@ defmodule Troupe.Agent.ResilienceTest do
       assert first.data["content"] == "approved: one"
       refute denied.data["ok"]
       assert denied.data["content"] =~ "denied"
+    end
+  end
+
+  defp two_delegations do
+    %{
+      "root" => [
+        {:tools, [{"delegate", %{"agent" => "general", "task" => "first task"}}]},
+        {:text, "first done"},
+        {:tools, [{"delegate", %{"agent" => "general", "task" => "second task"}}]},
+        {:text, "second done"}
+      ],
+      "general" => [
+        {:tools, [{"finish", %{"summary" => "first result"}}]},
+        {:tools, [{"finish", %{"summary" => "second result"}}]}
+      ]
+    }
+  end
+
+  defp assert_second_child(session_id, fake) do
+    paths = session_id |> events_of_type("delegation_started") |> Enum.map(& &1.data["child_path"])
+    assert paths == [["root", "general#1"], ["root", "general#2"]]
+
+    results =
+      session_id
+      |> events_of_type("tool_call_completed")
+      |> Enum.filter(&(&1.agent == ["root"] and &1.data["name"] == "delegate"))
+      |> Enum.map(& &1.data["content"])
+
+    assert results == ["first result", "second result"]
+
+    # Seeded with its own task, not replaying the first child's conversation.
+    [_first, second] = Fake.requests_for(fake, "general")
+    assert [task] = second.messages
+    assert Message.text(task) == "second task"
+  end
+
+  # The root's turn is over: `turn_ended`, from the log, so a restart's `idle` published
+  # from init is not mistaken for it.
+  defp await_rest(session_id, timeout \\ 10_000) do
+    receive do
+      {:troupe_event, ^session_id, %Event{type: "turn_ended", agent: ["root"]}} -> :ok
+    after
+      timeout -> raise "timed out waiting for the root agent's turn to end"
     end
   end
 

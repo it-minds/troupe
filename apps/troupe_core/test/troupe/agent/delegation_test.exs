@@ -186,6 +186,66 @@ defmodule Troupe.Agent.DelegationTest do
     end
   end
 
+  describe "a subagent whose model request fails" do
+    # A root rests after a failed request and waits for the person to say try again. A
+    # subagent has nobody to say it: resting left its parent's `delegate` open for ever.
+    test "hands its parent what it found, labelled cut short", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [
+              {:text_and_tools, "I found the retry logic in lib/retry.ex.", [{"todo_read", %{}}]},
+              {:error, {:api_error, "the gateway is down"}}
+            ]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["ok"]
+      assert result.data["content"] =~ "cut short"
+      assert result.data["content"] =~ "model request failed"
+      assert result.data["content"] =~ "the gateway is down"
+      assert result.data["content"] =~ "I found the retry logic in lib/retry.ex."
+
+      [child] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert child.data["reason"] == "llm_error"
+      assert Troupe.snapshot(session.id).state == :idle
+    end
+
+    test "says so plainly when it failed before reporting anything", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [{:error, {:api_error, "the gateway is down"}}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["content"] =~ "before it reported anything"
+      assert result.data["content"] =~ "the gateway is down"
+      refute result.data["content"] =~ "cut short"
+
+      [child] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert child.data["reason"] == "llm_error"
+    end
+  end
+
   describe "a delegate's turns" do
     # Issue #118: a share of the root's remaining turns gave an `explore` asked to read an
     # app 13 or 14 turns, and six of seven ran out reading before they reported.
