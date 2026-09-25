@@ -136,6 +136,7 @@ defmodule Troupe.Operator.Reconciler do
     status =
       resource
       |> status_for(desired, failures, pruned, namespace)
+      |> egress_status(desired, failures, generation(resource))
       |> secret_status(missing, generation(resource))
       |> upgrade_status(behind, generation(resource))
 
@@ -175,6 +176,16 @@ defmodule Troupe.Operator.Reconciler do
     |> current_status()
     |> Map.put("namespace", namespace)
     |> Status.put("Ready", false, "ApplyFailed", message, generation(resource))
+  end
+
+  # Whether the allowlist is enforced on the wire or only checked, which the plane reads
+  # to say which guarantee a profile's workers have. Its own condition rather than part of
+  # `Ready`: a profile without Cilium reconciled perfectly well, and what it lacks is a
+  # guarantee, not a resource.
+  defp egress_status(status, desired, failures, generation) do
+    failed = Enum.map(failures, fn {resource, _error} -> resource end)
+    {holds?, reason, message} = Resources.egress_by_hostname(desired, failed)
+    Status.put(status, "EgressByHostname", holds?, reason, message, generation)
   end
 
   # A secret the profile refers to and the cluster does not have. Reported rather than

@@ -13,24 +13,48 @@ defmodule Troupe.Plane.Fleet.Provisioner.Kubernetes do
   second provisioner. Direct and GitOps are two ways of delivering the same document to the
   same substrate; that is a different question from which substrate it is.
 
-  ## Every guarantee, and this is the only one that can say so
+  ## Every guarantee where there is Cilium, and this is the only one that can say so
 
-  A pod gets the admission policy, the NetworkPolicy, Cilium's FQDN egress and a disruption
-  budget, because the cluster enforces them whether or not the plane is running. That is
-  what the rest of the design leans on, and it is why a profile provisioned any other way
-  has to say what it is missing rather than leave somebody to assume.
+  A pod gets the admission policy, the NetworkPolicy and a disruption budget, because the
+  cluster enforces them whether or not the plane is running. That is what the rest of the
+  design leans on, and it is why a profile provisioned any other way has to say what it is
+  missing rather than leave somebody to assume.
+
+  Egress by hostname is Cilium's, and a cluster need not have it. Where the operator has
+  none it writes no FQDN rules, the allowlist is checked at admission and at every
+  reconcile, and a worker reaches any public host on 443 and 80. So that one is not
+  assumed: it is claimed only where the operator's `EgressByHostname` condition on the
+  profile says it wrote the rules and the cluster took them, and otherwise the profile has
+  `egress_checked_at_admission` in its place.
   """
 
   @behaviour Troupe.Plane.Fleet.Provisioner
 
   alias Troupe.Plane.{Drain, Fleet, Provision}
-  alias Troupe.Plane.Fleet.{Profile, Provisioner}
+  alias Troupe.Plane.Fleet.Profile
 
   @impl true
   def name, do: "kubernetes"
 
   @impl true
-  def guarantees(%Profile{}), do: Provisioner.guarantees()
+  def guarantees(%Profile{} = profile) do
+    [:admission_policy, :network_policy, egress(profile), :disruption_budget]
+  end
+
+  # Asked of the operator, per profile, because only it knows whether it has Cilium and
+  # whether the policy applied. Silence is the weaker answer: a profile not reconciled
+  # yet, a plane with no cluster to ask, and a bare profile that stands for Kubernetes in
+  # general, which has no `WorkerProfile` to ask about.
+  defp egress(%Profile{name: nil}), do: :egress_checked_at_admission
+
+  defp egress(%Profile{} = profile) do
+    reported? =
+      profile
+      |> Provision.conditions()
+      |> Enum.any?(&match?(%{"type" => "EgressByHostname", "status" => "True"}, &1))
+
+    if reported?, do: :fqdn_egress, else: :egress_checked_at_admission
+  end
 
   @doc """
   Write the profile's `WorkerProfile`, which is how a pod comes to exist.

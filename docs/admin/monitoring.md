@@ -21,7 +21,7 @@ deployed, the rollout has not finished or the image tag did not move.
 ## 2. Kubernetes signals
 
 - **`WorkerProfile` conditions** `Ready`, `PolicyViolation`, `SecretMissing`,
-  `UpgradePending` ([profiles-and-policy.md §2](profiles-and-policy.md#status-conditions));
+  `UpgradePending`, `EgressByHostname` ([profiles-and-policy.md §2](profiles-and-policy.md#status-conditions));
   `kubectl -n troupe-system get wp`.
 - **Events**: the operator may write them (through Bonny); Troupe's own code writes none.
 - **PodDisruptionBudgets**: the plane's `minAvailable: 1` with more than one replica, each
