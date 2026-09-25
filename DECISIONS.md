@@ -1463,7 +1463,7 @@ citation keeps meaning what it meant.
      - **Not done here:** editing prices in the console, and a price per model in the
        desktop app's model settings; a plane report of the calls that cost nothing.
 
-690. **What `troupe-daemon` prints names `troupe-daemon`'s commands, in ASCII, with paths
+691. **What `troupe-daemon` prints names `troupe-daemon`'s commands, in ASCII, with paths
      as Windows writes them.** D20 in docs/developer/defects.md. What loading warns about
      is written once, naming `troupe config migrate` and `troupe config trust`, and both
      programs print it. `config --explain`, `validate`, `migrate`, `trust` and `untrust`
