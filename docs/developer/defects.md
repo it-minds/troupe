@@ -54,7 +54,16 @@ the #85 fixer (PR #88), 2026-09-22.
 - The memory test "a second session finds a brief and starts nothing" refutes an event
   that could only arrive before its subscription, so it can pass vacuously.
 
-Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunk 3 (2026-09-25).
+- Order- or load-dependent: core `CutShortTest` (`cut_short_test.exs:106`) once saw
+  `budget_ask_answered` after `budget_exhausted` in a full run, and the plane's
+  `UsageTest` `enrolled/1` sometimes gets `{:error, :closed}` from the control listener.
+- Unused aliases warn in `harness_test.exs` (`Principals`) and `triggers_test.exs` in the
+  plane.
+- Parallel plane suites on the shared `troupe_plane_test` database deadlock (Postgrex
+  `40P01`); run one at a time. A branch that adds a migration leaves the shared database
+  unmigrated for everyone else until someone runs `MIX_ENV=test mix ecto.migrate`.
+
+Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 and 4 (2026-09-25/26).
 
 ### D9 - The admin docs describe a `subject_claim` setting the plane does not have (unconfirmed, medium)
 
@@ -78,19 +87,6 @@ fixer (PR #101), 2026-09-23.
   #119 fixer (PR #140), 2026-09-25.
 
 2026-09-23 and 2026-09-25.
-
-### D11 - `/todo cancel <id>` needs an id the TUI never shows (medium)
-
-The TUI lists task text only, so a person cannot see what to type. Found by the #99
-fixer (PR #102), 2026-09-23.
-
-### D12 - The TUI reads four protocol error codes wrongly (medium)
-
-`reason/1` in `clients/tui/lib/troupe/remote/rpc.ex` maps -32004 to `not_found` (PROTOCOL.md
-section 10: `forbidden`), -32009 to `conflict` (`resync_required`), -32010 to `no_capacity`
-(`unavailable`) and -32012 to `session_moved` (`payload_too_large`). A real `conflict`
-(-32006) reaches the TUI as the bare word, with no reason. Found by the #59 fixer
-(PR #108), 2026-09-23.
 
 ### D14 - Small leftovers of the budget and loop work (low)
 
@@ -118,30 +114,6 @@ sit beside `sessions\`, `identity.json` and `daemon.json`.
   Windows state.
 - Found reviewing the installers (PR #121), 2026-09-24.
 
-### D16 - An `{env:VAR}` key in opencode's config is sent as it is written (unconfirmed, medium)
-
-`Troupe.Config.OpenCode.provider/3` (`apps/troupe_core/lib/troupe/config/open_code.ex`)
-takes `options.apiKey` and `options.authToken` as written. The fallback merges them into
-the session's providers, and `Troupe.Config.target/2` sends the key unchanged. Only
-`config.yaml` goes through `Troupe.Config.interpolate/1`. opencode itself expands
-`{env:VAR}` (and `{file:path}`), so a key written that way in `opencode.jsonc` reaches
-the provider as the literal text `{env:VAR}`, and the provider refuses it.
-
-- Workaround: a key in opencode's `auth.json`, or the copy `troupe config` offers,
-  since `config.yaml` is interpolated when it is read.
-- To confirm: `apiKey: "{env:SOME_KEY}"` in `opencode.jsonc` with no `config.yaml`,
-  then a session; the provider answers 401.
-- Fix: interpolate in `OpenCode.provider/3`, as `Config.read_yaml/1` does.
-- Found while adding the opencode copy (PR #121), 2026-09-24.
-
-### D17 - A question that times out or is cancelled stays open in the GUI (medium)
-
-The GUI transcript's `openQuestions` (`clients/gui/packages/client/src/transcript.ts`)
-never closes a question on its call's `tool_call_completed` (an `ask_user` that timed out),
-on a `cancelled`, or on `tool_failures_ask_answered` (the failure guard's question when
-nobody is there to answer). The TUI has the first gap for questions too. #143 and #150
-fixed the same gaps for approvals. Found by the #145 fixer (PR #150), 2026-09-25.
-
 ### D18 - A session restored while a subagent waits on an approval may keep it open (unconfirmed, medium)
 
 On restore, the root's `delegate` call is closed as interrupted, but the child's own call
@@ -161,30 +133,44 @@ summary. Found by the #145 fixer (PR #150), 2026-09-25.
 
 Found by the #149 fixer (PR #151), 2026-09-25.
 
-### D20 - Small leftovers of the first-run and headless work (low)
+### D21 - A remote session that moves to another pod isn't followed (medium)
 
-- A headless run still waits for ever if the daemon connection dies for good; killing
-  `troupe.exe` on Windows can leave Burrito's `erl.exe` running.
-- Plain `troupe` with a redirected, non-terminal stdout renders into it and never exits.
-- The headless root window is named `/root`, not the profile.
-- Printed paths still mix separators on Windows in config errors and warnings,
-  `config --explain` and the daemon's status line (`Endpoint.discovery_path/0`).
-- `Troupe.Protocol.Daemon.detach/1` starts the daemon with `cmd.exe /c start /b`; a quoted
-  path with a space becomes `start`'s window title. The TUI never reaches it.
-- The TUI help (`clients/tui/lib/troupe/settings.ex` ~458) says `troupe daemon status`
-  prints the state directory; it doesn't.
-- The worker's `activation_error/1` shows a `Troupe.Config.Error` as an inspected struct.
+`Troupe.Remote.Worker.connect/1` reconnects to the endpoint it stored and never calls
+`session.open` again, so an active remote session whose plane moved it to another pod is
+not followed. The old -32012 "session moved" retry, removed in #163 because PROTOCOL.md
+section 10 has no such code, never fired for a real move either. Found by the #158 fixer
+(PR #163), 2026-09-26.
+
+### D22 - Revoking access or erasing a running session may keep its budget reservation (unconfirmed, medium)
+
+`Identity.revoke/2` calls `Sessions.read_only_for/2`, which takes active sessions off
+their pods with no `Placement.release` or `Budget.release`. `Erasure.erase/2` of a running
+session never releases the team/person budget slice: the worker's `session.erase` doesn't
+report dormancy, and `TeamBudget.load` reloads open reservations from the ledger. Placement
+recovers on its recount (#174); the budget slices would look held for good. To confirm:
+revoke a person with a running session, or erase one, then read the team's reserved
+amount. Found by the #173 fixer (PR #174), 2026-09-26.
+
+### D23 - Small leftovers of chunk 4 (low)
+
 - The config schema's `$id` (`https://troupe.dev/schema/config/v1.json`) isn't served, so
   an editor can't fetch it.
-- `Ledger.breakdown/3` puts its default `to: DateTime.utc_now()` into the cache key, so a
-  call without `:to` never hits the cache and adds an ETS entry until the sweep.
-- Config loader warnings (`apps/troupe_core/lib/troupe/config/layers.ex`) and
-  `config validate/migrate/--explain` output (`config/explain.ex`) say `troupe config ...`
-  even when `troupe-daemon` prints them.
-- The TUI tells a plane (remote) session's no-key model error to run `troupe config`
-  (`remote/translate.ex` -> `ui/model_error.ex`), which can't fix a plane worker's key.
+- Killing `troupe.exe` on Windows can leave Burrito's `erl.exe` running.
+- `admin.profiles.list` (the Workers page, every second) reads each Kubernetes
+  WorkerProfile twice.
+- `Provision.conditions/1` handles only `{:error, _}`; an exit from the Kubernetes client
+  would crash the calling LiveView.
+- `PlatformBudget`'s moduledoc says the deployment cap comes from a Helm value; nothing
+  outside tests sets `:deployment_budget_micros`.
+- `Troupe.A2A.Plane.list_tasks/1` sends `sessions.list` a nested `filter` the plane
+  ignores; nothing calls it.
+- `RPC.scope_hint` still accepts the old `data.scope` spelling beside section 10's
+  `required_scope`, and the TUI's `FakeRemote` attaches `data.params` to every error, which
+  only the removed -32012 retry read.
+- The worker reports a root in agent state `waiting` as `idle` for the moment before the
+  question is logged.
 
-Found by the fixers of #76 (PRs #146, #153), #106, #122, #127 and #128, 2026-09-25.
+Found by the chunk 4 fixers, 2026-09-26.
 
 ## Taken
 
@@ -201,6 +187,14 @@ Found by the fixers of #76 (PRs #146, #153), #106, #122, #127 and #128, 2026-09-
 | The plane has no `session.archive`; A2A `tasks/cancel` fails (found by the #111 fixer) | #135 |
 | A cancelled approval stays waiting in three more readers (found by the D13 and #142 fixers) | #142, PR #143; #145, PR #150 |
 | A failed subagent never reports; delegation reuses a child path after restart (found by the #127 and D13 fixers) | #149, PR #151 |
+| D11 - `/todo cancel <id>` needs an id the TUI never shows | PR #163 |
+| D12 - The TUI reads four protocol error codes wrongly | PR #163 |
+| D16 - An `{env:VAR}` key in opencode's config is sent as it is written | #161, PR #169 |
+| D17 - A question that times out or is cancelled stays open in the GUI | #162, PR #168 |
+| D20 - Small leftovers of the first-run and headless work (what remains is in D23) | PR #175 |
+| A pod's slot isn't given back when the pod reports a session asleep (found by the #135 fixer) | #173, PR #174 |
+| A session waiting on a question never reaches the desktop inbox (found by the D17 fixer) | #172, PR #176 |
+| A finished subagent stays in memory until its session stops (found by the #134 fixer) | #171 |
 
 ## Checked and not a defect
 
