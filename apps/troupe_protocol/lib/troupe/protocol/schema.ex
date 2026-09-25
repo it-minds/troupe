@@ -216,6 +216,9 @@ defmodule Troupe.Protocol.Schema do
         "summary" => optional(:string),
         "limit" => optional(:string)
       },
+      # The agent's turn is over and it waits for input: the durable twin of `agent_state`
+      # reaching `idle`, for a client that was not listening when it happened (issue #127).
+      "turn_ended" => %{},
       # Input that arrived after an agent finished. Recorded rather than dropped: it is
       # the difference between "the user said nothing" and "the user said something and
       # nobody was listening".

@@ -50,7 +50,8 @@ defmodule Troupe.Agent.LoopTest do
                "tool_call_completed",
                "tool_results",
                "llm_request",
-               "llm_response"
+               "llm_response",
+               "turn_ended"
              ] == types
     end
 

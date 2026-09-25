@@ -286,11 +286,23 @@ defmodule Troupe.Remote.Translate do
       "agent_woken" ->
         {[emit.(:remote_note, %{text: "woken"}), emit.(:agent_state, %{to: :thinking})], memory}
 
+      # The reason rides along, so a reader that must tell a finish from a stop short (the
+      # headless printer's exit code) does not have to parse the note.
       "agent_done" ->
-        {[emit.(:agent_state, %{to: :done})] ++ done_note(emit, data), memory}
+        {[emit.(:agent_state, %{to: :done, reason: data["reason"]})] ++ done_note(emit, data),
+         memory}
+
+      # The turn is over and the agent waits for input: the same `idle` the live
+      # `agent_state` says, but from the log, so it is neither dropped nor missed by a
+      # client that attached after it happened.
+      "turn_ended" ->
+        {[emit.(:agent_state, %{to: :idle})], memory}
 
       "cancelled" ->
-        {[emit.(:remote_note, %{text: "cancelled"}), emit.(:agent_state, %{to: :idle})], memory}
+        {[
+           emit.(:remote_note, %{text: "cancelled"}),
+           emit.(:agent_state, %{to: :idle, reason: "cancelled"})
+         ], memory}
 
       "compacted" ->
         {[emit.(:remote_note, %{text: "context compacted"})], memory}

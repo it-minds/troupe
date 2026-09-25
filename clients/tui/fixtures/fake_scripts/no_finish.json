@@ -1,0 +1,21 @@
+{
+  "routes": {
+    "root": [
+      {
+        "text": "Writing hello.txt.",
+        "tools": [
+          {
+            "name": "write_file",
+            "input": {
+              "path": "hello.txt",
+              "content": "hello from troupe\n"
+            }
+          }
+        ]
+      },
+      {
+        "text": "Wrote hello.txt. That is the whole task, and I am not calling finish."
+      }
+    ]
+  }
+}
