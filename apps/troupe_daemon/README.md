@@ -84,6 +84,7 @@ caches windows and prices in `models.json`.
 |---|---|
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_BASE_URL`, `TROUPE_API_KEY` / `TROUPE_AUTH_TOKEN` | the session-wide provider |
 | `TROUPE_DAEMON_IDLE_MINUTES` | exit after this long with nothing running; `0` never (default 10) |
+| `TROUPE_SESSION_IDLE_MINUTES`, `TROUPE_SESSION_DETACHED_MINUTES` | when a session goes to sleep, watched and unwatched ([below](#how-long-it-stays-up)) |
 | `TROUPE_DAEMON_LOG` | `file` (default: `daemon.log` in the state directory) or `stderr` |
 | `TROUPE_LOG_LEVEL` | `debug`, `info`, `warning`, `error` |
 | `TROUPE_STATE_HOME`, `TROUPE_CONFIG_HOME` | where sessions and config live |
@@ -91,6 +92,25 @@ caches windows and prices in `models.json`.
 
 The daemon is not a distributed Erlang node (`rel/env.sh.eex` sets
 `RELEASE_DISTRIBUTION=none`): no name, no `epmd`, no port beyond its own two.
+
+## How long it stays up
+
+A daemon a client started has to go away by itself, and a laptop is not quiet until it
+has. A turn that is running — a model call, a tool — is never stopped for it, whether
+anybody is attached or not. Below that, each step down has one clock:
+
+| Step | After this long | Set by | Default |
+|---|---|---|---|
+| a session sleeps, watched | idle or waiting on a person, with a client subscribed to it or in watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
+| a session sleeps, unwatched | the same, with nobody watching it | `TROUPE_SESSION_DETACHED_MINUTES` (`:troupe_core, :detached_idle_ms`) | 2 min |
+| the daemon exits | no client connected and no session awake | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
+
+`0` means never. A session that sleeps stops its tree and keeps its log: the next command
+that acts on it — input, an answer, an approval — brings it back, and an approval or a
+question it was waiting on is asked again rather than failed, so it can be answered days
+later. Reading it (listing, subscribing, its history) wakes nothing. In a session that is
+still awake, a call waiting on a person is failed as timed out after the tool's own
+timeout, three minutes — one reason an unwatched session sleeps before then.
 
 ## Building
 
