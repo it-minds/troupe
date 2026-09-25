@@ -2,6 +2,7 @@ defmodule Troupe.Agent.ResilienceTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.Server, as: AgentServer
+  alias Troupe.Session.Approvals
 
   describe "tool isolation" do
     test "a tool that raises becomes an error result and the agent survives", context do
@@ -256,6 +257,157 @@ defmodule Troupe.Agent.ResilienceTest do
     end
   end
 
+  # What a cancel killed stays killed. The log is what a restarted agent rebuilds from,
+  # so each call the cancel stopped has to be closed there, and the turn has to read as
+  # cancelled rather than as one the model still owes.
+  describe "a cancelled turn after a restart" do
+    # The positive beside the negatives below: without it, a replay that re-dispatched
+    # nothing at all would pass them.
+    test "without the cancel, a call waiting for approval is put back", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [auto_approve: false],
+          steps: [{:tools, [{"needs_approval", %{"note" => "one"}}]}, {:text, "done"}]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "ask me")
+      await_event(session.id, :approval_requested)
+
+      reopen(context, session.id, fake, auto_approve: false)
+
+      assert Troupe.snapshot(session.id).outstanding == ["needs_approval"]
+    end
+
+    test "a call that was waiting for approval is not asked for again", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [auto_approve: false],
+          steps: [{:tools, [{"needs_approval", %{"note" => "one"}}]}, {:text, "never asked"}]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "ask me")
+      request = await_event(session.id, :approval_requested)
+      Troupe.cancel(session.id)
+      await_state(session.id, [:idle])
+
+      conversation = Troupe.snapshot(session.id).conversation
+      calls = Fake.call_count(fake)
+
+      reopen(context, session.id, fake, auto_approve: false)
+
+      snapshot = Troupe.snapshot(session.id)
+      assert snapshot.state == :idle
+      assert snapshot.outstanding == []
+      assert Enum.map(snapshot.conversation, & &1.role) == Enum.map(conversation, & &1.role)
+      assert Approvals.pending(session.id) == []
+      assert [_asked_once] = events_of_type(session.id, "approval_requested")
+      assert Fake.call_count(fake) == calls
+
+      [completed] = events_of_type(session.id, "tool_call_completed")
+      assert completed.data["call_id"] == request.data["call_id"]
+      refute completed.data["ok"]
+      assert completed.data["content"] =~ "cancelled"
+
+      # Nothing was in flight when the session stopped, so it did not come back
+      # interrupted either.
+      [restarted] = events_of_type(session.id, "agent_restarted")
+      assert restarted.data["interrupted"] == false
+      assert restarted.data["incomplete_calls"] == []
+    end
+
+    test "a running tool is not run again", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          steps: [
+            {:tools, [{"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 400}}]},
+            {:text, "never asked"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "count slowly")
+      await_started_call(session.id, "slow")
+      Troupe.cancel(session.id)
+      await_state(session.id, [:idle])
+      calls = Fake.call_count(fake)
+
+      restart_agent(session.id)
+
+      snapshot = Troupe.snapshot(session.id)
+      assert snapshot.state == :idle
+      assert snapshot.outstanding == []
+      assert [_started_once] = events_of_type(session.id, "tool_call_started")
+      assert Fake.call_count(fake) == calls
+
+      [completed] = events_of_type(session.id, "tool_call_completed")
+      refute completed.data["ok"]
+      assert completed.data["content"] =~ "cancelled"
+    end
+
+    test "a delegation is not made again", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [auto_approve: false],
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "ask for it"}}]},
+              {:text, "never asked"}
+            ],
+            "general" => [
+              {:tools, [{"needs_approval", %{"note" => "child"}}]},
+              {:text, "never asked"}
+            ]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_event(session.id, :approval_requested)
+      Troupe.cancel(session.id)
+      await_state(session.id, [:idle])
+      calls = Fake.call_count(fake)
+
+      restart_agent(session.id)
+
+      snapshot = Troupe.snapshot(session.id)
+      assert snapshot.state == :idle
+      assert snapshot.outstanding == []
+      assert [_delegated_once] = events_of_type(session.id, "delegation_started")
+      assert Fake.call_count(fake) == calls
+
+      [completed] =
+        session.id
+        |> events_of_type("tool_call_completed")
+        |> Enum.filter(&(&1.agent == ["root"]))
+
+      assert completed.data["name"] == "delegate"
+      refute completed.data["ok"]
+    end
+
+    test "a model call is not made again", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          delay_ms: 2_000,
+          steps: [{:text, "too slow"}, {:text, "never asked"}]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "think slowly")
+      await_state(session.id, [:thinking])
+      # Asked and not yet answered, so the count below cannot move behind the test's back.
+      await_requests(fake, 1)
+      Troupe.cancel(session.id)
+      await_state(session.id, [:idle])
+
+      restart_agent(session.id)
+
+      assert Troupe.snapshot(session.id).state == :idle
+      assert Fake.call_count(fake) == 1
+    end
+  end
+
   describe "budgets" do
     test "max_turns stops the agent with :budget_exhausted after exactly that many calls",
          context do
@@ -323,6 +475,56 @@ defmodule Troupe.Agent.ResilienceTest do
       assert first.data["content"] == "approved: one"
       refute denied.data["ok"]
       assert denied.data["content"] =~ "denied"
+    end
+  end
+
+  # One agent crashing inside a live session: its next start is a warm one, which
+  # finishes whatever the log says it had started.
+  defp restart_agent(session_id) do
+    agent = Registry.agent_pid(session_id, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+    await_new_agent(session_id, ["root"], agent, 5_000)
+  end
+
+  # The whole session going away and coming back, as it does across a daemon restart:
+  # the agent's next start is a cold one.
+  defp reopen(context, session_id, fake, overrides) do
+    :ok = Troupe.stop_session(session_id)
+    await_released(session_id, 200)
+
+    {:ok, _session} =
+      Troupe.resume(session_id,
+        workspace: context.workspace,
+        fake: fake,
+        config_overrides:
+          [provider: "fake", model: "fake-model", state_dir: context.state_dir] ++ overrides
+      )
+
+    :ok
+  end
+
+  # `stop_session/1` returns before the registry has let go of the session's names, and
+  # a resume that wins that race finds a dead pid under them.
+  defp await_released(_session_id, 0), do: :ok
+
+  defp await_released(session_id, attempts) do
+    if Registry.whereis({:session, session_id}) || Registry.whereis({:log, session_id}) do
+      Process.sleep(5)
+      await_released(session_id, attempts - 1)
+    else
+      :ok
+    end
+  end
+
+  defp await_requests(fake, count, attempts \\ 200) do
+    cond do
+      Fake.call_count(fake) >= count -> :ok
+      attempts == 0 -> flunk("the model was never asked")
+      true ->
+        Process.sleep(5)
+        await_requests(fake, count, attempts - 1)
     end
   end
 

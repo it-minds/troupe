@@ -451,12 +451,154 @@ defmodule Troupe.Operator.ResourcesTest do
         |> Enum.flat_map(&(&1["toFQDNs"] || []))
         |> Enum.map(& &1["matchName"])
 
-      # Exactly what the profile declared, including the endpoints it would otherwise
-      # have reached through a wide CIDR rule.
-      assert "llm.internal.test" in names
-      assert "mcp.internal.test" in names
-      assert "api.anthropic.com" in names
-      assert "github.com" in names
+      # Exactly what the profile declared — each destination once, and nothing it did not
+      # declare.
+      assert Enum.sort(names) ==
+               Enum.sort([
+                 "llm.internal.test",
+                 "mcp.internal.test",
+                 "api.anthropic.com",
+                 "github.com"
+               ])
+
+      assert Enum.sort(names) == Enum.sort(Profile.egress_destinations(profile))
+    end
+
+    test "with Cilium, nothing reaches outside the cluster but the FQDN rules",
+         %{profile: profile, policy: policy} do
+      resources = Resources.for_profile(profile, policy, %Settings{cilium_available: true})
+      rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
+
+      # Cilium admits the union of every policy that selects a pod, so one address block
+      # in the NetworkPolicy would be wider than the allowlist whatever the FQDN rules say.
+      refute Enum.any?(rules, fn rule -> Enum.any?(rule["to"], &Map.has_key?(&1, "ipBlock")) end)
+      refute Jason.encode!(resources) =~ "0.0.0.0/0"
+
+      # And nothing in either policy is open-ended: a NetworkPolicy rule with no `to` admits
+      # every destination on its ports, and a Cilium rule with no peer is the same.
+      assert Enum.all?(rules, &match?([_ | _], &1["to"]))
+
+      [cilium] = all(resources, "CiliumNetworkPolicy")
+
+      for rule <- get_in(cilium, ["spec", "egress"]) do
+        assert match?([_ | _], rule["toEndpoints"]) or match?([_ | _], rule["toFQDNs"]),
+               "an egress rule with no peer: #{inspect(rule)}"
+      end
+    end
+
+    test "without Cilium, public addresses are open on 443 and 80 and nothing else is",
+         %{profile: profile, policy: policy} do
+      # Plain NetworkPolicy has no way to name a host, so this is the documented gap
+      # (docs/admin/configuration.md, Part E) rather than the allowlist. Pinned, so that
+      # widening it is a decision somebody makes on purpose.
+      resources = Resources.for_profile(profile, policy, %Settings{cilium_available: false})
+      rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
+
+      assert [public] =
+               Enum.filter(rules, fn rule ->
+                 Enum.any?(rule["to"], &Map.has_key?(&1, "ipBlock"))
+               end)
+
+      assert [%{"ipBlock" => %{"cidr" => "0.0.0.0/0", "except" => except}}] = public["to"]
+
+      assert Enum.sort(except) == [
+               "10.0.0.0/8",
+               "169.254.0.0/16",
+               "172.16.0.0/12",
+               "192.168.0.0/16"
+             ]
+
+      assert public["ports"] == [
+               %{"protocol" => "TCP", "port" => 443},
+               %{"protocol" => "TCP", "port" => 80}
+             ]
+    end
+
+    test "DNS is the cluster's resolver in kube-system, and nothing that merely carries its label",
+         %{resources: resources} do
+      rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
+      dns = Enum.filter(rules, fn rule -> Enum.any?(rule["ports"], &(&1["port"] == 53)) end)
+
+      assert dns == [
+               %{
+                 "to" => [
+                   %{
+                     "namespaceSelector" => %{
+                       "matchLabels" => %{"kubernetes.io/metadata.name" => "kube-system"}
+                     },
+                     "podSelector" => %{"matchLabels" => %{"k8s-app" => "kube-dns"}}
+                   }
+                 ],
+                 "ports" => [
+                   %{"protocol" => "UDP", "port" => 53},
+                   %{"protocol" => "TCP", "port" => 53}
+                 ]
+               }
+             ]
+    end
+
+    test "Cilium proxies DNS, which is how the FQDN rules learn an address at all",
+         %{profile: profile, policy: policy} do
+      [cilium] =
+        profile
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+        |> all("CiliumNetworkPolicy")
+
+      # In a namespaced CiliumNetworkPolicy an endpoint selector without the namespace
+      # label means the policy's own namespace, where no resolver runs; and without a
+      # `dns` rule no lookup passes through the proxy, so `toFQDNs` never learns an address.
+      assert [
+               %{
+                 "toEndpoints" => [
+                   %{
+                     "matchLabels" => %{
+                       "k8s:io.kubernetes.pod.namespace" => "kube-system",
+                       "k8s:k8s-app" => "kube-dns"
+                     }
+                   }
+                 ],
+                 "toPorts" => [
+                   %{
+                     "ports" => [%{"port" => "53", "protocol" => "ANY"}],
+                     "rules" => %{"dns" => [%{"matchPattern" => "*"}]}
+                   }
+                 ]
+               },
+               %{"toFQDNs" => [_ | _]}
+             ] = get_in(cilium, ["spec", "egress"])
+    end
+
+    test "a profile that names no host gets DNS and no FQDN rule", %{policy: policy} do
+      resources =
+        [llm: nil, mcpServers: [], egress: %{}]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      [cilium] = all(resources, "CiliumNetworkPolicy")
+      assert [dns] = get_in(cilium, ["spec", "egress"])
+      assert Map.has_key?(dns, "toEndpoints")
+    end
+
+    test "a model gateway or MCP server inside the cluster is its namespace and port",
+         %{policy: policy} do
+      # A `.svc` name resolves to a Service address, which an FQDN rule cannot follow to
+      # the pod behind it, so these are reached the way OpenBao and object storage are.
+      resources =
+        [
+          llm: %{"endpoint" => "http://gateway.llm.svc:4000/v1"},
+          mcpServers: [%{"name" => "docs", "url" => "http://docs.mcp.svc.cluster.local/mcp"}]
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
+
+      assert namespace_rule("llm", 4000) in rules
+      assert namespace_rule("mcp", 80) in rules
+      assert namespace_rule("troupe-system", 8200) in rules
+      assert namespace_rule("troupe-system", 9000) in rules
     end
 
     test "a wildcard in the profile's egress becomes a pattern, and an exact name stays a name",
@@ -602,4 +744,15 @@ defmodule Troupe.Operator.ResourcesTest do
   end
 
   defp container(resources), do: hd(pod_spec(resources)["containers"])
+
+  defp namespace_rule(namespace, port) do
+    %{
+      "to" => [
+        %{
+          "namespaceSelector" => %{"matchLabels" => %{"kubernetes.io/metadata.name" => namespace}}
+        }
+      ],
+      "ports" => [%{"protocol" => "TCP", "port" => port}]
+    }
+  end
 end

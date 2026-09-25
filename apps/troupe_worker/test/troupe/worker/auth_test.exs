@@ -5,8 +5,10 @@ defmodule Troupe.Worker.AuthTest do
   A token for one session is for the methods about that session. Everything else a pod
   serves is about the pod — creating a session in any workspace, a path's brief, the
   workspaces it has seen, the machine's settings and identity — and a token for one session
-  is refused it before anything runs. The walk is over the protocol's own method table, so
-  a method added to it is one somebody has to put on one side of that line.
+  is refused it before anything runs. So are the four about the session that are the
+  plane's to do: archiving, pinning and erasing it. The walk is over the protocol's own
+  method table, so a method added to it is one somebody has to put on one side of that
+  line.
 
   The guard alone, asked directly: nothing here needs OpenBao, MinIO or a session, so
   nothing skips. `harness_auth_test.exs` asks the same over a real connection.
@@ -50,6 +52,11 @@ defmodule Troupe.Worker.AuthTest do
     "worktree.discard"
   ]
 
+  # About the session, and done through the plane, which holds a pod session's row, key
+  # and retention. The plane's own erasure reaches the pod over the control channel, not
+  # through this guard (`erasure_test.exs`).
+  @plane_level ["session.archive", "session.pin", "session.unpin", "session.erase"]
+
   # Every method the clients send a worker today, read from their sources: the TUI's
   # `clients/tui/lib/troupe/remote/worker.ex`, the GUI's
   # `clients/gui/packages/client/src/session.ts` and `connection.ts`, and the A2A facade's
@@ -84,11 +91,12 @@ defmodule Troupe.Worker.AuthTest do
   end
 
   describe "a token for one session" do
-    test "has every method about its session and is refused every other", %{guard: guard} do
+    test "has every method about its session but the plane's, and is refused every other",
+         %{guard: guard} do
       wrong =
         for method <- methods(),
             answer = guard.(session_token(), method, params_for(method)),
-            about_the_session?(method) != (answer == :ok),
+            its_own?(method) != (answer == :ok),
             do: {method, answer}
 
       assert wrong == []
@@ -101,6 +109,17 @@ defmodule Troupe.Worker.AuthTest do
         assert {:error, error} = guard.(session_token(), method, params_for(method))
         assert error.message == "forbidden"
         assert error.data.method == method
+      end
+    end
+
+    for method <- @plane_level do
+      test "is refused #{method} on its own session, which is the plane's", %{guard: guard} do
+        method = unquote(method)
+
+        assert {:error, error} = guard.(session_token(), method, params_for(method))
+        assert error.message == "forbidden"
+        assert error.data.method == method
+        assert error.data.reason == "done through the plane"
       end
     end
 
@@ -148,6 +167,8 @@ defmodule Troupe.Worker.AuthTest do
     |> Enum.sort()
     |> Kernel.--(@connection_own)
   end
+
+  defp its_own?(method), do: about_the_session?(method) and method not in @plane_level
 
   defp about_the_session?(method) do
     method in @connection_level or

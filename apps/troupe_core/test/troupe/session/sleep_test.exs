@@ -293,7 +293,7 @@ defmodule Troupe.Session.SleepTest do
   end
 
   describe "a turn cancelled while it waited on a person" do
-    test "is not asked again when the session wakes: the call is closed off", context do
+    test "is not asked again when the session wakes: the cancel closed the call", context do
       %{session: session, fake: fake} =
         start_session(context,
           config_overrides: [auto_approve: false],
@@ -307,15 +307,21 @@ defmodule Troupe.Session.SleepTest do
       Troupe.cancel(sid)
       await_event(sid, :cancelled)
 
-      sweep(context, session, @short)
+      index = sweep(context, session, @short)
       asleep(sid)
+      assert %{state: :dormant, status: :idle} = GenServer.call(index, {:get, sid})
+
       wake(context, session, fake, auto_approve: false)
+      await_event(sid, :agent_restarted)
 
-      assert %{data: %{"call_id" => ^call_id, "ok" => false, "content" => content}} =
-               await_event(sid, :tool_call_completed)
+      # Whatever the woken agent was going to do, it has done by the time it answers.
+      assert %{state: :idle} = Troupe.snapshot(sid)
 
-      assert content =~ "interrupted"
+      assert [%{data: %{"ok" => false, "content" => "cancelled" <> _}}] =
+               sid |> events_of_type(:tool_call_completed) |> Enum.filter(&(&1.data["call_id"] == call_id))
+
       assert [_] = events_of_type(sid, :approval_requested)
+      assert Approvals.pending(sid) == []
       assert Fake.call_count(fake) == 1
     end
   end

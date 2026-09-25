@@ -22,6 +22,11 @@ defmodule Troupe.Operator.Resources do
   # directory, so they name the same constant.
   @state_dir "/var/lib/troupe"
 
+  # The cluster's resolver, as both network policies select it: CoreDNS keeps the
+  # `k8s-app` label kube-dns had, in the namespace kube-dns ran in.
+  @dns_namespace "kube-system"
+  @dns_app "kube-dns"
+
   @doc "Every object a profile implies, in dependency order."
   @spec for_profile(Profile.t(), Policy.t(), Settings.t()) :: [map()]
   def for_profile(%Profile{} = profile, %Policy{} = policy, %Settings{} = settings) do
@@ -284,10 +289,15 @@ defmodule Troupe.Operator.Resources do
   # -- network ----------------------------------------------------------------
 
   # Default-deny in both directions, then exactly what a worker needs. Standard
-  # NetworkPolicy cannot express a hostname, so the FQDN destinations become a wide
-  # rule here and a precise `CiliumNetworkPolicy` alongside where Cilium is present.
-  # The gap is written down rather than hidden: a policy that silently allows more than
-  # it says is worse than one that admits what it cannot do.
+  # NetworkPolicy cannot express a hostname, so where Cilium is present the allowlist is
+  # the `CiliumNetworkPolicy` alongside, and nothing in this object reaches outside the
+  # cluster. It has to be nothing: Cilium enforces both objects and admits the union of
+  # what they allow, so any wider rule here would be wider than the allowlist too, and
+  # the FQDN rules could not take it back.
+  #
+  # Without Cilium there is nothing to write a hostname in, so the external destinations
+  # stay one wide rule and the gap is written down rather than hidden: a policy that
+  # silently allows more than it says is worse than one that admits what it cannot do.
   defp network_policy(namespace, profile, policy, settings) do
     %{
       "apiVersion" => "networking.k8s.io/v1",
@@ -305,19 +315,22 @@ defmodule Troupe.Operator.Resources do
             "ports" => [%{"protocol" => "TCP", "port" => 4000}]
           }
         ],
-        "egress" => egress_rules(settings)
+        "egress" => egress_rules(profile, settings)
       }
     }
   end
 
-  defp egress_rules(settings) do
+  defp egress_rules(profile, settings) do
     [
-      # DNS, without which none of the rest resolves.
+      # DNS, without which none of the rest resolves: the cluster's resolver, in the
+      # namespace it runs in. The label alone would be any pod anywhere that carries it.
       %{
         "to" => [
           %{
-            "namespaceSelector" => %{},
-            "podSelector" => %{"matchLabels" => %{"k8s-app" => "kube-dns"}}
+            "namespaceSelector" => %{
+              "matchLabels" => %{"kubernetes.io/metadata.name" => @dns_namespace}
+            },
+            "podSelector" => %{"matchLabels" => %{"k8s-app" => @dns_app}}
           }
         ],
         "ports" => [%{"protocol" => "UDP", "port" => 53}, %{"protocol" => "TCP", "port" => 53}]
@@ -332,10 +345,18 @@ defmodule Troupe.Operator.Resources do
           }
         ],
         "ports" => [%{"protocol" => "TCP", "port" => settings.plane_control_port}]
-      },
-      # Everything outside the cluster: the LLM endpoint, the MCP servers, the git
-      # hosts, and OpenBao and object storage when they are external. Narrowed to the
-      # exact names by the Cilium policy where that is available.
+      }
+    ] ++ public_rule(settings) ++ in_cluster_rules(profile, settings)
+  end
+
+  # Everything outside the cluster — the LLM endpoint, the MCP servers, the git hosts,
+  # and OpenBao and object storage when they are external — as public addresses on 443
+  # and 80, because that is as close as a NetworkPolicy can come to a list of names. Only
+  # where there is no Cilium to hold the names instead; see `network_policy/4`.
+  defp public_rule(%Settings{cilium_available: true}), do: []
+
+  defp public_rule(_settings) do
+    [
       %{
         "to" => [
           %{
@@ -347,15 +368,19 @@ defmodule Troupe.Operator.Resources do
         ],
         "ports" => [%{"protocol" => "TCP", "port" => 443}, %{"protocol" => "TCP", "port" => 80}]
       }
-    ] ++ in_cluster_rules(settings)
+    ]
   end
 
   # And when they are *not* external. A worker fetches its session key from the key
   # manager and reads and writes sealed segments in object storage; a pod that could
-  # reach neither could not activate a session at all. The rule above covers them only
-  # while they are outside the cluster, which the chart's own defaults are not.
-  defp in_cluster_rules(%Settings{} = settings) do
-    [settings.bao_address, settings.object_store_endpoint]
+  # reach neither could not activate a session at all. The same goes for a model gateway
+  # or an MCP server the profile names by a `.svc` host. None of these is reachable by
+  # an FQDN rule — the name resolves to a Service address, which Cilium translates to a
+  # pod before it applies policy — nor by the public rule above, which leaves out the
+  # private ranges a cluster lives in. So each is its namespace and its port.
+  defp in_cluster_rules(%Profile{} = profile, %Settings{} = settings) do
+    [settings.bao_address, settings.object_store_endpoint, profile.llm_endpoint]
+    |> Enum.concat(Enum.map(profile.mcp_servers, & &1.url))
     |> Enum.flat_map(&in_cluster_rule/1)
     |> Enum.uniq()
   end
@@ -379,7 +404,7 @@ defmodule Troupe.Operator.Resources do
 
   # `openbao.troupe-system.svc` and `openbao.troupe-system.svc.cluster.local` both name
   # a Service in `troupe-system`. Anything else is a name this cluster does not serve,
-  # and the ipBlock rule is what covers it.
+  # and the FQDN rule covers it — or, without Cilium, the public one.
   defp cluster_namespace(host) do
     case String.split(host, ".") do
       [_service, namespace, "svc" | _rest] -> namespace
@@ -400,9 +425,9 @@ defmodule Troupe.Operator.Resources do
 
   defp cilium_network_policy(_namespace, _profile, %Settings{cilium_available: false}), do: []
 
+  # The allowlist, by name: every host the profile declares and nothing else outside the
+  # cluster, since the NetworkPolicy beside it no longer reaches past the cluster at all.
   defp cilium_network_policy(namespace, profile, _settings) do
-    patterns = Enum.map(Profile.egress_destinations(profile), &fqdn_selector/1)
-
     [
       %{
         "apiVersion" => "cilium.io/v2",
@@ -410,13 +435,47 @@ defmodule Troupe.Operator.Resources do
         "metadata" => metadata("troupe-egress", namespace, profile),
         "spec" => %{
           "endpointSelector" => %{"matchLabels" => Names.labels(profile.name)},
-          "egress" => [
-            %{"toFQDNs" => patterns},
-            %{"toEndpoints" => [%{"matchLabels" => %{"k8s-app" => "kube-dns"}}]}
-          ]
+          "egress" => [cilium_dns_rule() | fqdn_rules(profile)]
         }
       }
     ]
+  end
+
+  # A `toFQDNs` rule admits the addresses Cilium has watched a name resolve to, and it
+  # watches only lookups that pass through its DNS proxy — which is what a `dns` rule on
+  # the resolver's port turns on. Without one the FQDN rule learns nothing and admits
+  # nothing. Every lookup is let through; it is the connection afterwards that the
+  # allowlist decides.
+  #
+  # The namespace is a label here, and it has to be there: in a namespaced
+  # `CiliumNetworkPolicy` an endpoint selector without one means this namespace, where
+  # no resolver runs.
+  defp cilium_dns_rule do
+    %{
+      "toEndpoints" => [
+        %{
+          "matchLabels" => %{
+            "k8s:io.kubernetes.pod.namespace" => @dns_namespace,
+            "k8s:k8s-app" => @dns_app
+          }
+        }
+      ],
+      "toPorts" => [
+        %{
+          "ports" => [%{"port" => "53", "protocol" => "ANY"}],
+          "rules" => %{"dns" => [%{"matchPattern" => "*"}]}
+        }
+      ]
+    }
+  end
+
+  # No rule at all for a profile that names no host, rather than a `toFQDNs` that is
+  # empty and means whatever the Cilium version at hand takes an empty list to mean.
+  defp fqdn_rules(profile) do
+    case Profile.egress_destinations(profile) do
+      [] -> []
+      hosts -> [%{"toFQDNs" => Enum.map(hosts, &fqdn_selector/1)}]
+    end
   end
 
   # `matchName` is an exact hostname and nothing else: a `*` in it is a literal star,

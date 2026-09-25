@@ -89,7 +89,7 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it; when none are outstanding, the next turn |
 | compacting | summary | carry on the interrupted turn, or come to rest |
 | done | input | a root agent that finished takes it as a new turn; one out of budget stays done |
-| any | cancel | kill tasks and children → done (`cancelled`) |
+| any | cancel | kill tasks and children, close their calls as errors → idle (`cancelled`) |
 
 Input arriving while busy is postponed with `gen_statem`'s `:postpone`, not a hand-rolled
 queue, and delivered at the turn boundary. **Replay**: an agent's state is a fold over its
@@ -335,7 +335,9 @@ so it cannot be replayed against the API server. StatefulSets are `OnDelete` bec
 holds live sessions. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
-than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for.
+than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for, a
+DNS rule through Cilium's proxy so it can learn addresses, and no wide rule beside it,
+since Cilium admits the union of every policy on a pod.
 
 ### 6.4 The admin surface
 

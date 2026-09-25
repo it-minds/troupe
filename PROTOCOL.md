@@ -282,6 +282,7 @@ delegate again.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |
+| `turn_ended` | — the agent's turn is over and it waits for input: the model answered without asking for a tool, or its request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done` |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
@@ -527,6 +528,11 @@ input: `agent_woken`, then the turn as usual. One whose budget is exhausted is n
 writes `input_after_done` instead.
 
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
+
+Each tool call the cancel stops is closed before `cancelled` is written: a
+`tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
+up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
+model call is made for the cancelled turn.
 
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
@@ -984,19 +990,27 @@ ACL of each session a request names.
 
 **It calls the methods about its session, and no others.** Those are `subscribe` and
 `unsubscribe` on its own topics, the two listings above, and every command whose params
-require `session_id` (§6): `session.get`, `session.archive`, `session.pin`,
-`session.unpin`, `session.erase`, `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.*`, `session.loop.*`, `approval.respond`, `question.answer`, `todo.edit`,
-`fs.list`, `fs.read`, `fs.upload`, `blob.get`, `mcp.status`, `presence.set`,
-`tools.register` and `tools.unregister`. Everything else a worker serves is about the pod
-or a path on it — `session.create`, `agents.list`, `workflows.list`, `memory.get`,
-`memory.forget`, `workspace.recent`, `workspace.search`, `worktree.*`, `watch.set`,
-`identity.*` and `config.*` — and a token for one session is refused it with `forbidden`
-and `data.method` naming it. A method a worker does not have is `method_not_found`,
-whatever the token, and `initialize` and `auth.refresh` belong to the connection. The
-plane mints every token for a pod with a `session_id`; one without is signed only by
-tooling that runs its own pod (the end-to-end tests, the benchmark), and keeps the whole
-table.
+require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
+`profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
+`question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
+`mcp.status`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+worker serves is about the pod or a path on it — `session.create`, `agents.list`,
+`workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
+`worktree.*`, `watch.set`, `identity.*` and `config.*` — and a token for one session is
+refused it with `forbidden` and `data.method` naming it. A method a worker does not have
+is `method_not_found`, whatever the token, and `initialize` and `auth.refresh` belong to
+the connection. The plane mints every token for a pod with a `session_id`; one without is
+signed only by tooling that runs its own pod (the end-to-end tests, the benchmark), and
+keeps the whole table.
+
+**Archiving, pinning and erasing a pod session are the plane's.** The plane holds the
+session's row, its key, its placement and its retention, so a worker refuses
+`session.archive`, `session.pin`, `session.unpin` and `session.erase` to a token for one
+session with `forbidden`, `data.method` naming it and `data.reason` of
+`done through the plane`. A client pins, unpins and erases a pod session with the
+plane's methods of the same names; the plane's erasure reaches the pod over its control
+channel and deletes the pod's copy along with the key and the objects. A pod session goes
+dormant on its own idle timeout.
 
 ### `auth.expiring` (notification, server → client)
 

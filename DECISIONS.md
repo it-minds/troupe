@@ -355,6 +355,16 @@ citation keeps meaning what it meant.
      team page because that is where somebody is standing when they wonder who is near
      theirs, and the flash says "in every team" so nobody mistakes it for a team setting.
 
+684. **A `monthly` budget is the calendar month in UTC, and it turns over because it is
+     asked, not because a job runs.** It resets at 00:00 UTC on the 1st, the same instant
+     on every replica whatever zone anybody is in; decided for #106 over a zone set on the
+     plane and a rolling thirty days. Nothing is written at midnight. The period's start is
+     worked out on every read (`Ledger.period_start/1`) and the ledger's cache is keyed by
+     it, so the first read of a month is a new sum and not last month's remembered one.
+     `never` counts everything. A person's cap and the platform's have no period and count
+     everything too: a person's follows them between teams (471), and following a team's
+     period would give somebody in a `monthly` team and a `never` one two answers.
+
 497. **The plane holds the prompt while a session waits.** It is the only piece of
      session content the plane ever holds, it is held for seconds, and it is cleared the
      moment the session is placed. The alternative is a session that starts and then
@@ -1149,3 +1159,21 @@ citation keeps meaning what it meant.
          this branch, driven through a pseudo-terminal in a scratch home.
        - `install.ps1`'s fallback against `v0.3.3-pre.1`.
      - **Not tested:** the TUI's terminal detection and unechoed key prompt on Windows.
+
+685. **The end of a turn is a durable event, `turn_ended`, beside the ephemeral
+     `agent_state`.** An agent whose turn ends without `finish` — a reply in prose, or a
+     failed model request — rests `idle`, and until now only the live `agent_state` said
+     so. That event is ephemeral: a client that attached after the turn ended never saw
+     it, and a connection that falls behind drops it. `troupe run --headless` is exactly
+     that client, since its session starts working before anything has subscribed, and
+     against a real model it never exited (issue #127). The agent now logs `turn_ended`
+     (no fields) just before it publishes `idle`, from the one place a turn comes to rest;
+     a cancelled turn still ends with `cancelled` and a finished agent with `agent_done`,
+     so between them the three say from the log alone that an agent is waiting. It is an
+     added event type, which PROTOCOL.md §11 allows and clients must ignore when they do
+     not know it; the GUI does, and the TUI reads it as the `idle` it is (clients/tui
+     Decision 112). The Loop and the sealer keep reading the live state, which in-process
+     they cannot miss, and the index keeps asking the agent.
+     - **Proof:** `Troupe.Agent.TurnEndedTest`, the whole-turn sequence in
+       `Troupe.Agent.LoopTest`, `Troupe.Session.LogSchemaTest` (the schema knows the type),
+       and `mix troupe.schema.diff`.

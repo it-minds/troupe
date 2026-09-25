@@ -41,15 +41,46 @@ defmodule Troupe.CLI.Daemon do
     end
   end
 
+  @doc """
+  How to start the daemon binary at `path` with `args`: as itself, or through `cmd.exe`.
+
+  On Windows `troupe-daemon` is a `.cmd` shim, which is what the installers put on the
+  `PATH` there, and Windows will not start a batch file as a program — `System.cmd/3`
+  answers `:eacces`. So a `.cmd` or `.bat` goes to `System.shell/2`, which is `cmd /s /c`
+  there: `/s` takes the outer pair of quotes off the line and leaves the rest alone, so a
+  path and an argument with spaces in them each keep their own.
+  """
+  @spec invocation(String.t(), [String.t()], {atom(), atom()}) ::
+          {:exec, String.t(), [String.t()]} | {:shell, String.t()}
+  def invocation(path, args, os_type \\ :os.type()) do
+    if match?({:win32, _}, os_type) and String.downcase(Path.extname(path)) in [".cmd", ".bat"] do
+      words = [~s("#{String.replace(path, "/", "\\")}") | Enum.map(args, &quote_arg/1)]
+      {:shell, ~s("#{Enum.join(words, " ")}")}
+    else
+      {:exec, path, args}
+    end
+  end
+
   defp exec(path, args) do
+    opts = [into: IO.stream(:stdio, :line), stderr_to_stdout: true]
+
     {_output, status} =
-      System.cmd(path, args, into: IO.stream(:stdio, :line), stderr_to_stdout: true)
+      case invocation(path, args) do
+        {:exec, path, args} -> System.cmd(path, args, opts)
+        {:shell, line} -> System.shell(line, opts)
+      end
 
     status
   rescue
     error in ErlangError ->
       IO.puts(:stderr, "could not run #{path}: #{Exception.message(error)}")
       1
+  end
+
+  # A word cmd.exe reads as one word as it stands, like every argument the daemon takes,
+  # goes as it is; anything else is quoted.
+  defp quote_arg(arg) do
+    if arg =~ ~r/^[\w.:\/\\+@-]+$/, do: arg, else: ~s("#{arg}")
   end
 
   defp missing do

@@ -13,6 +13,7 @@ defmodule Troupe.Worker.Auth do
   and what role. It is checked once, at `initialize`, and again at every `auth.refresh`.
   It is good for that session alone: a request naming another is refused, so is a method
   about the pod rather than a session, and a listing of the pod shows only that one.
+  Archiving, pinning and erasing the session are refused too, because they are the plane's.
 
   **The ACL mirror** says what is true now. A collaborator whose access was revoked
   still holds a token that verifies perfectly, so the role in it is a claim about the
@@ -32,20 +33,28 @@ defmodule Troupe.Worker.Auth do
   @listings ["session.list", "fleet.get"]
 
   # What a token for one session may ask of a pod: every command that names a session as
-  # `session_id`, which the guard then holds to the token's; that session's topics; and the
-  # listings, narrowed to it. Everything else a pod serves is about the pod rather than a
-  # session — a session created in any workspace, the brief, agents or workflows of a
-  # path, the workspaces and worktrees the pod has seen, the machine's settings and
-  # identity. `initialize` and `auth.refresh` are the connection's own and never get here.
+  # `session_id`, which the guard then holds to the token's, but the plane's four below;
+  # that session's topics; and the listings, narrowed to it. Everything else a pod serves is
+  # about the pod rather than a session — a session created in any workspace, the brief,
+  # agents or workflows of a path, the workspaces and worktrees the pod has seen, the
+  # machine's settings and identity. `initialize` and `auth.refresh` are the connection's
+  # own and never get here.
   @session_methods ~w(
     subscribe unsubscribe session.list fleet.get
-    session.get session.archive session.pin session.unpin session.erase
+    session.get
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     session.goal.set session.goal.get session.goal.clear
     session.loop.start session.loop.stop session.loop.get
     fs.list fs.read fs.upload blob.get mcp.status presence.set
     tools.register tools.unregister
   )
+
+  # About the session, and still not the pod's to do. The plane holds a pod session's row,
+  # its key, its placement and its retention, so doing any of these here would leave the
+  # two disagreeing: the pod's own `session.erase` deletes its copy and leaves the key, the
+  # objects and the row. A client asks the plane, whose erasure reaches this pod over the
+  # control channel (`Troupe.Worker.Plane.Commands`), which this guard is not on.
+  @plane_methods ~w(session.archive session.pin session.unpin session.erase)
 
   @enforce_keys [:worker_id]
   defstruct [:worker_id, :issuer, jwks: %{"keys" => []}, acl: %{}, revoked: MapSet.new()]
@@ -242,9 +251,10 @@ defmodule Troupe.Worker.Auth do
   # A token that names a session is good for that session and no other. A pod holds
   # several people's sessions, and the role in a token is a role on one of them — so
   # every session a request names must be the token's, the method must be one about a
-  # session, and the ACL is then asked about that one. A token with no session in it —
-  # which the plane never mints for a pod, and tooling that runs its own pod signs — keeps
-  # every method and is held to the ACL of each session the request names.
+  # session and not the plane's, and the ACL is then asked about that one. A token with no
+  # session in it — which the plane never mints for a pod, and tooling that runs its own
+  # pod signs — keeps every method and is held to the ACL of each session the request
+  # names.
   defp do_check(state, claims, method, params) do
     named = named_sessions(params)
 
@@ -263,6 +273,8 @@ defmodule Troupe.Worker.Auth do
         another_session(field)
     end
   end
+
+  defp method_refusal(method) when method in @plane_methods, do: through_the_plane(method)
 
   # A method this server does not have is left to the dispatcher, which answers
   # `method_not_found` to everybody and runs nothing.
@@ -317,5 +329,9 @@ defmodule Troupe.Worker.Auth do
 
   defp not_about_the_session(method) do
     {:error, Error.new(:forbidden, %{reason: "not about the token's session", method: method})}
+  end
+
+  defp through_the_plane(method) do
+    {:error, Error.new(:forbidden, %{reason: "done through the plane", method: method})}
   end
 end

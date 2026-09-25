@@ -82,9 +82,9 @@ defmodule Troupe.Daemon.CLI do
   @spec main(command()) :: non_neg_integer()
   def main(:status) do
     case running() do
-      {:ok, endpoint, discovery} ->
+      {:ok, endpoint} ->
         IO.puts("troupe-daemon is running at #{Endpoint.describe(endpoint)}")
-        IO.puts(discovery)
+        Enum.each(where(), &IO.puts/1)
         0
 
       :not_running ->
@@ -160,9 +160,9 @@ defmodule Troupe.Daemon.CLI do
   @spec announce() :: :ok
   def announce do
     case running() do
-      {:ok, endpoint, discovery} ->
+      {:ok, endpoint} ->
         IO.puts("troupe-daemon #{version()} listening at #{Endpoint.describe(endpoint)}")
-        IO.puts(discovery)
+        Enum.each(where(), &IO.puts/1)
 
       :not_running ->
         IO.puts(
@@ -205,12 +205,25 @@ defmodule Troupe.Daemon.CLI do
 
   defp running do
     with {:ok, endpoint} <- Endpoint.discover(),
-         true <- Daemon.running?(endpoint: endpoint),
-         {:ok, discovery} <- File.read(Endpoint.discovery_path()) do
-      {:ok, endpoint, String.trim(discovery)}
+         true <- Daemon.running?(endpoint: endpoint) do
+      {:ok, endpoint}
     else
       _ -> :not_running
     end
+  end
+
+  # The lines under "running at": the WebSocket a graphical client dials, and the file
+  # every client reads its token from. Never the tokens themselves — they admit a client
+  # to every session on this machine, `daemon.json` is readable by this user alone, and a
+  # terminal's scrollback, or whatever collects it, is not.
+  defp where do
+    websocket =
+      case Endpoint.discover_ws() do
+        {:ok, %{port: port}} -> ["  websocket  ws://127.0.0.1:#{port}/v1/socket"]
+        {:error, :not_running} -> []
+      end
+
+    websocket ++ ["  tokens     #{Endpoint.discovery_path()}"]
   end
 
   @spec usage() :: String.t()

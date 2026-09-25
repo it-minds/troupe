@@ -122,8 +122,8 @@ defmodule Troupe.CLI.Runner do
   end
 
   # `troupe run AGENT "task"`: one session, one agent, one task, in its own worktree
-  # when asked. Headless prints the transcript and exits when the agent rests; the TUI
-  # opens on it otherwise.
+  # when asked. Headless prints the transcript and exits when the agent rests, with a
+  # code that says how (`Troupe.UI.Headless.Printer`); the TUI opens on it otherwise.
   defp run(args) do
     params = %{
       profile: args.agent,
