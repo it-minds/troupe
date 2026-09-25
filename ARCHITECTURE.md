@@ -89,7 +89,7 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it; when none are outstanding, the next turn |
 | compacting | summary | carry on the interrupted turn, or come to rest |
 | done | input | a root agent that finished takes it as a new turn; one out of budget stays done |
-| any | cancel | kill tasks and children → done (`cancelled`) |
+| any | cancel | kill tasks and children, close their calls as errors → idle (`cancelled`) |
 
 Input arriving while busy is postponed with `gen_statem`'s `:postpone`, not a hand-rolled
 queue, and delivered at the turn boundary. **Replay**: an agent's state is a fold over its

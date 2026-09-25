@@ -528,6 +528,11 @@ writes `input_after_done` instead.
 
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
 
+Each tool call the cancel stops is closed before `cancelled` is written: a
+`tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
+up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
+model call is made for the cancelled turn.
+
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
 
