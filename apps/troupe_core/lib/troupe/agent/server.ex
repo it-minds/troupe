@@ -271,6 +271,10 @@ defmodule Troupe.Agent.Server do
   defp fold_event(%Event{type: "goal_set", data: data}, state), do: %{state | goal: data["text"]}
   defp fold_event(%Event{type: "goal_cleared"}, state), do: %{state | goal: nil}
 
+  # The number the next child takes (Decision 688), a head of its own for the same reason.
+  defp fold_event(%Event{type: "delegation_started", data: data}, state),
+    do: %{state | child_seq: child_seq(state, data["child_path"])}
+
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
       "user_input" ->
@@ -371,6 +375,21 @@ defmodule Troupe.Agent.Server do
   end
 
   defp safe_reason(_reason), do: :finished
+
+  # A child's path is used once (Decision 688). One started again under a path an earlier
+  # child had would replay that child's log — its conversation, its open calls, a `finish`
+  # it already reported — instead of taking the task it was given. The number a path ends
+  # in is the one to beat, rather than a count: a child that failed to start took a number
+  # and wrote no `delegation_started`. A path without one counts as one more.
+  defp child_seq(state, path) do
+    with [_ | _] <- path,
+         last when is_binary(last) <- List.last(path),
+         [_, n] <- Regex.run(~r/#(\d+)$/, last) do
+      max(state.child_seq, String.to_integer(n))
+    else
+      _ -> state.child_seq + 1
+    end
+  end
 
   # What to do after replay.
   #
@@ -1382,13 +1401,31 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # A subagent ends `llm_error` and hands its parent what it has: resting, as a root does,
+  # waits for a person to say try again, and nobody talks to a subagent but its parent,
+  # which was left waiting on the delegation for ever (Decision 688).
   defp llm_failed(state, message) do
     log(state, :llm_error, %{"reason" => message})
 
-    # The failure goes into the conversation so the next turn can react to it, rather
-    # than vanishing into a log the model cannot read.
-    note = "The previous model request failed: #{message}. Try a different approach."
-    to_idle_or_done(%{state | conversation: state.conversation ++ [Message.user(note)]})
+    if State.subagent?(state) do
+      finish_short(state, :llm_error, failed_summary(state, message))
+    else
+      # The failure goes into the conversation so the next turn can react to it, rather
+      # than vanishing into a log the model cannot read.
+      note = "The previous model request failed: #{message}. Try a different approach."
+      to_idle_or_done(%{state | conversation: state.conversation ++ [Message.user(note)]})
+    end
+  end
+
+  defp failed_summary(state, message) do
+    case last_assistant_text(state) do
+      "" ->
+        "The delegated agent's model request failed (#{message}) before it reported anything."
+
+      text ->
+        "[cut short: the delegated agent's model request failed (#{message}), so this may " <>
+          "be incomplete]\n\n" <> text
+    end
   end
 
   defp finish_turn(state, text) do
@@ -1635,8 +1672,9 @@ defmodule Troupe.Agent.Server do
         if from_state == :acting, do: {:keep_state, state}, else: {:next_state, :acting, state}
 
       state.finish_summary != nil ->
+        summary = state.finish_summary
         state = fold_results(state, State.ordered_results(state))
-        report_and_finish(state, state.finish_summary)
+        report_and_finish(state, summary)
 
       true ->
         results = State.ordered_results(state)

@@ -252,6 +252,23 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:budget_ask_answered, %{call_id: call_id(data), decision: data["decision"]})],
          memory}
 
+      # The failure guard's question (troupe-remote Decision 687) is drawn as the question it
+      # rides on, the other way round from the budget's: its options are the harness's own
+      # words, `stop` first, and headless mode answers any question with the first option.
+      # The tool and the count this adds are already the question's text.
+      "tool_failures_ask_started" ->
+        {[], memory}
+
+      # Ends the question as its answer does. It is the only word there is when the session
+      # has nobody to ask: the question is written, never answered, and the agent stops.
+      "tool_failures_ask_answered" ->
+        {[
+           emit.(:tool_failures_ask_answered, %{
+             call_id: call_id(data),
+             decision: data["decision"]
+           })
+         ], memory}
+
       # A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
       "truncated" ->
         {[emit.(:remote_note, %{text: truncated(data)})], memory}
@@ -304,9 +321,12 @@ defmodule Troupe.Remote.Translate do
       "turn_ended" ->
         {[emit.(:agent_state, ended_by(%{to: :idle}, data))], memory}
 
+      # The model's own `:cancelled`, not a note that says so: it also ends whatever the
+      # agent and those under it were still asking, which a subagent the cancel took down
+      # never answers (#145).
       "cancelled" ->
         {[
-           emit.(:remote_note, %{text: "cancelled"}),
+           emit.(:cancelled, %{}),
            emit.(:agent_state, %{to: :idle, reason: "cancelled"})
          ], memory}
 
