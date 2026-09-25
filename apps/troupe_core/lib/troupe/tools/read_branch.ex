@@ -11,6 +11,12 @@ defmodule Troupe.Tools.ReadBranch do
 
   Everything here is read off the log on disk (`Troupe.Session.Log.read_session/2`),
   so a branch that has gone dormant reads the same as one still running.
+
+  A subagent is not a branch: what a `delegate` call's subagent found comes back as that
+  call's result. An agent that has just delegated takes this tool for the way to read its
+  subagents, so the description says otherwise, and a wrong id is answered with the ids
+  that exist: a bare "no branch 7" once had a model guess ids one call at a time, for
+  hundreds of calls (#116).
   """
 
   @behaviour Troupe.Tool
@@ -26,7 +32,9 @@ defmodule Troupe.Tools.ReadBranch do
   @impl Troupe.Tool
   def description do
     "List this session's branches, or read what a finished one was asked and what it " <>
-      "answered."
+      "answered. A branch is a separate session started from this one, by the person or " <>
+      "by the librarian. A subagent you started with `delegate` is not a branch: what it " <>
+      "found is the result of the delegate call that started it."
   end
 
   @impl Troupe.Tool
@@ -37,7 +45,8 @@ defmodule Troupe.Tools.ReadBranch do
         "session_id" => %{
           "type" => "string",
           "description" =>
-            "The branch to read. Leave out to list every branch of this session with its state."
+            "The session id of the branch to read, as the listing gives it. Leave out to " <>
+              "list every branch of this session with its state."
         }
       },
       "required" => []
@@ -123,12 +132,29 @@ defmodule Troupe.Tools.ReadBranch do
   end
 
   # Only a session in the family is readable: a branch is not a way to open any log on
-  # the machine by guessing an id.
+  # the machine by guessing an id. So a wrong id is answered with the right ones.
   defp fetch_branch(ctx, id) do
-    case Enum.find(family(ctx), &(&1.id == id)) do
-      nil -> {:error, "no branch #{id}"}
+    branches = family(ctx)
+
+    case Enum.find(branches, &(&1.id == id)) do
+      nil -> {:error, no_branch(id, branches)}
       meta -> {:ok, meta}
     end
+  end
+
+  defp no_branch(id, branches) do
+    known =
+      case branches do
+        [] ->
+          "This session has no branches."
+
+        _ ->
+          "The branches you can read: " <>
+            Enum.map_join(branches, ", ", &"#{&1.id} (#{&1.profile})") <> "."
+      end
+
+    "no branch #{inspect(id)}. #{known} A subagent started with `delegate` is not a " <>
+      "branch: what it found is the result of the delegate call that started it."
   end
 
   defp finished(events, id) do

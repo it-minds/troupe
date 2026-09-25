@@ -1914,8 +1914,14 @@ defmodule Troupe.Agent.Server do
     end)
   end
 
-  defp emptyable(""), do: nil
-  defp emptyable(text), do: text
+  # Whitespace is not a report: some models open a turn with a bare "\n\n" before its
+  # tool calls, and handed over as findings it tells the parent nothing.
+  defp emptyable(text) do
+    case String.trim(text) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
 
   defp report_and_finish(state, summary) do
     if state.parent do

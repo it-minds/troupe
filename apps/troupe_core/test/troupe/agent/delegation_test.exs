@@ -154,6 +154,36 @@ defmodule Troupe.Agent.DelegationTest do
 
       assert result.data["content"] =~ "before reporting anything"
     end
+
+    test "does not hand over whitespace as its findings", context do
+      %{session: session} =
+        start_session(context,
+          config_overrides: [max_turns: 20],
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            # Some models open a turn with a bare "\n\n" before its tool calls and leave
+            # the text of every later one empty: nothing the parent could act on.
+            "general" =>
+              [{:text_and_tools, "\n\n", [{"todo_read", %{}}]}] ++
+                List.duplicate({:text_and_tools, "", [{"todo_read", %{}}]}, 20)
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate something open-ended")
+      await_root_idle(session.id, 20_000)
+
+      result =
+        session.id
+        |> events_of_type("tool_call_completed")
+        |> Enum.find(&(&1.data["name"] == "delegate"))
+
+      assert result.data["content"] =~ "before reporting anything"
+      refute result.data["content"] =~ "cut short"
+    end
   end
 
   describe "no orphans" do
