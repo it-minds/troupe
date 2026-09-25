@@ -84,7 +84,7 @@ export type Entry =
        * when nobody is there to ask.
        */
       answer: string | undefined;
-      /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
+      /** Set when it ended unanswered: a cancel reached it, or its call timed out while it waited. */
       closed: boolean;
     }
   | { kind: "todo"; seq: number; agent: string[]; items: TodoItem[]; source: string }
