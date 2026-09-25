@@ -28,7 +28,22 @@ scripts/toolbox            # a shell
 Five tests do not pass in a container and are not made to: the OS-pid cancellation test
 and four gateway tests that spawn or `kill -9` a daemon. They pass on a Linux runner.
 
-## 2. The gate
+| Service | Image | Host port | Credentials | Notes |
+|---|---|---|---|---|
+| `postgres` | `postgres:16-alpine` | 55432 (5432 in the container); 55433 is mapped to 5433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; WAL archive volume chowned to 70:70 by a `busybox` init service (`docker-compose.yml:14-53`) |
+| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 59000 (S3), 59001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:74-85`) |
+| `openbao` | `openbao/openbao:2.4.1`, dev mode | 58200 | root token `troupe-dev-root` | `openbao-setup` enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) (`:106-119`); KV v2 is at `secret/` in dev mode |
+
+`config/config.exs:61-70` points the dev and test repos at `localhost:55432`
+(`troupe_plane_dev` / `troupe_plane_test`), `:86-96` points the object store at
+`localhost:59000`, and `:98-113` points both the worker's KMS and the plane's transit at
+`localhost:58200` with the dev root token — "for these two environments only".
+
+Stop them with `scripts/dev-down`; `scripts/dev-down --purge` also removes the volumes
+(`scripts/dev-down:7-11`).
+
+Then create and migrate the test database, which is what `apps/troupe_plane/test/test_helper.exs:26-31`
+tells you to do when it finds none:
 
 ```bash
 mix deps.get

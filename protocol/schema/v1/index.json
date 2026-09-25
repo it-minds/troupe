@@ -3,6 +3,7 @@
     "commands/approval.respond.json",
     "commands/blob.get.json",
     "commands/config.get.json",
+    "commands/config.import.json",
     "commands/config.models.json",
     "commands/config.set.json",
     "commands/fleet.get.json",

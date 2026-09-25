@@ -102,8 +102,8 @@ budget question, streamed reasoning and the harness's notes — run the real
 client tests drive it:
 
 ```sh
-# 1. the daemon: install it (install.sh / install.ps1 at the repository root; --no-tui
-#    for the daemon alone) or build it in ../../apps/troupe_daemon with
+# 1. the daemon: install it (install.sh / install.ps1 from a release; -y for the
+#    daemon alone, --gui for this app too) or build it in ../../apps/troupe_daemon with
 #    `MIX_ENV=prod mix release troupe_daemon`
 # 2. a workspace whose model is the script
 mkdir -p ~/demo/.troupe && cat > ~/demo/.troupe/config.yaml <<'YAML'

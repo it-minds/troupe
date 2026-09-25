@@ -8,7 +8,8 @@ defmodule Troupe.Config.OpenCode do
   keyed), `npm` (to detect an Anthropic SDK provider), and per model `models.<name>.id`
   (the id the gateway wants on the wire), `limit.context`, `limit.output` and
   `options.reasoningEffort`. Keys are used at session start and never written anywhere
-  by Troupe.
+  by Troupe, unless a person asks for the copy (`Troupe.Config.ModelSettings.import_opencode/1`),
+  which writes each one into `config.yaml` as it is written here.
 
   Not read: `variants`, `agent`, `permission`, `mcp`, `lsp` and everything else opencode
   keeps in the same file.
@@ -23,13 +24,19 @@ defmodule Troupe.Config.OpenCode do
   @spec config_path() :: String.t()
   def config_path do
     System.get_env("TROUPE_OPENCODE_CONFIG") ||
-      Path.join(System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config"), "opencode/opencode.jsonc")
+      Path.join(
+        System.get_env("XDG_CONFIG_HOME") || Path.expand("~/.config"),
+        "opencode/opencode.jsonc"
+      )
   end
 
   @spec auth_path() :: String.t()
   def auth_path do
     System.get_env("TROUPE_OPENCODE_AUTH") ||
-      Path.join(System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"), "opencode/auth.json")
+      Path.join(
+        System.get_env("XDG_DATA_HOME") || Path.expand("~/.local/share"),
+        "opencode/auth.json"
+      )
   end
 
   @doc "Providers found in opencode's config, keyed by name; `%{}` when there is none."
@@ -41,8 +48,11 @@ defmodule Troupe.Config.OpenCode do
     auth = read_auth(auth_path)
 
     case read_config(config_path) do
-      %{"provider" => provs} when is_map(provs) -> Map.new(provs, fn {name, def} -> {name, provider(name, def, auth)} end)
-      _ -> %{}
+      %{"provider" => provs} when is_map(provs) ->
+        Map.new(provs, fn {name, def} -> {name, provider(name, def, auth)} end)
+
+      _ ->
+        %{}
     end
   end
 
@@ -64,7 +74,11 @@ defmodule Troupe.Config.OpenCode do
     token = Map.get(options, "authToken")
 
     %{
-      type: if(String.contains?(Map.get(def, "npm") || "", "anthropic"), do: :anthropic, else: :openai),
+      type:
+        if(String.contains?(Map.get(def, "npm") || "", "anthropic"),
+          do: :anthropic,
+          else: :openai
+        ),
       base_url: Map.get(options, "baseURL"),
       api_key: key || token || Map.get(auth, name),
       auth: if(is_nil(key) and is_binary(token), do: :bearer, else: :api_key),
@@ -74,7 +88,14 @@ defmodule Troupe.Config.OpenCode do
   end
 
   defp provider(_name, _def, _auth),
-    do: %{type: :openai, base_url: nil, api_key: nil, auth: :api_key, models: %{}, source: :opencode}
+    do: %{
+      type: :openai,
+      base_url: nil,
+      api_key: nil,
+      auth: :api_key,
+      models: %{},
+      source: :opencode
+    }
 
   # opencode's model shape, translated into Troupe's: the window and the output cap
   # live under `limit`, the effort under the model's own `options`.

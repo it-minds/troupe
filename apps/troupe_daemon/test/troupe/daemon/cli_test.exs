@@ -50,11 +50,33 @@ defmodule Troupe.Daemon.CLITest do
     assert CLI.parse(["version"]) == :version
     assert CLI.parse(["--version"]) == :version
     assert CLI.parse(["models", "--refresh"]) == {:models, refresh: true}
+    assert CLI.parse(["config", "import-opencode"]) == :config_import_opencode
     assert {:error, _} = CLI.parse(["frobnicate"])
     assert {:error, _} = CLI.parse([])
 
     assert capture_io(:stderr, fn -> assert CLI.main({:error, "x"}) == 2 end) =~
              "troupe-daemon [run]"
+  end
+
+  test "an opencode import says what it copied, what it kept, and when there was nothing" do
+    imported = %{
+      "from" => "/oc.jsonc",
+      "providers" => ["gateway"],
+      "kept" => ["portal"],
+      "default" => "gateway/m"
+    }
+
+    assert CLI.import_report(imported, "/c.yaml") == [
+             "copied opencode's config (/oc.jsonc) into /c.yaml",
+             "  providers  gateway",
+             "  kept       portal (already there)",
+             "  default    gateway/m"
+           ]
+
+    assert [line] =
+             CLI.import_report(%{imported | "providers" => [], "default" => nil}, "/c.yaml")
+
+    assert line =~ "nothing to copy"
   end
 
   test "run's options open the loopback door and read the idle timeout from config" do

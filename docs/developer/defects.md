@@ -96,6 +96,41 @@ approval, restart the daemon, and resume. Found by the #59 fixer (PR #108), 2026
 - After a daemon crash mid-loop, the TUI status line shows `loop n/N` until the session
   is activated and `loop_stopped interrupted` arrives (PR #108).
 
+### D9 - On Windows the desktop app installs into the daemon's state directory (low)
+
+The desktop app's NSIS setup (`installMode: currentUser` in
+`clients/gui/apps/desktop/src-tauri/tauri.conf.json`) installs into
+`%LOCALAPPDATA%\Troupe`. The daemon keeps its state in `%LOCALAPPDATA%\troupe`, and NTFS
+is case-insensitive, so both are one directory: `troupe-desktop.exe` and `uninstall.exe`
+sit beside `sessions\`, `identity.json` and `daemon.json`.
+
+- Nothing loses data today. Tauri's uninstaller deletes its own files by name and removes
+  the directory only when it is empty.
+- Anything that treats the install directory as the app's own takes the sessions and the
+  machine's identity with it: a bundler template that removes it recursively, a person
+  deleting "the app's folder", a cleanup tool. `install.ps1 -Uninstall -Purge` has to run
+  the app's uninstaller before it purges the state, and does.
+- Fix: give one of them another directory. For example, an NSIS hook or template that
+  installs under `%LOCALAPPDATA%\Programs\Troupe`, or a subdirectory for the daemon's
+  Windows state.
+- Found reviewing the installers (PR #121), 2026-09-24.
+
+### D10 - An `{env:VAR}` key in opencode's config is sent as it is written (unconfirmed, medium)
+
+`Troupe.Config.OpenCode.provider/3` (`apps/troupe_core/lib/troupe/config/open_code.ex`)
+takes `options.apiKey` and `options.authToken` as written. The fallback merges them into
+the session's providers, and `Troupe.Config.target/2` sends the key unchanged. Only
+`config.yaml` goes through `Troupe.Config.interpolate/1`. opencode itself expands
+`{env:VAR}` (and `{file:path}`), so a key written that way in `opencode.jsonc` reaches
+the provider as the literal text `{env:VAR}`, and the provider refuses it.
+
+- Workaround: a key in opencode's `auth.json`, or the copy `troupe config` offers,
+  since `config.yaml` is interpolated when it is read.
+- To confirm: `apiKey: "{env:SOME_KEY}"` in `opencode.jsonc` with no `config.yaml`,
+  then a session; the provider answers 401.
+- Fix: interpolate in `OpenCode.provider/3`, as `Config.read_yaml/1` does.
+- Found while adding the opencode copy (PR #121), 2026-09-24.
+
 ## Taken
 
 | Defect | Taken by |

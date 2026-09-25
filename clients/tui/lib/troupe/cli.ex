@@ -12,7 +12,7 @@ defmodule Troupe.CLI do
       troupe login PLANE_URL       sign in to a plane with the device flow
       troupe logout [PLANE_URL]    forget a plane's credentials (--all forgets every one)
       troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
-      troupe config                show the resolved providers and models (keys masked)
+      troupe config                show the resolved providers and models (keys masked); with none, set them up
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`

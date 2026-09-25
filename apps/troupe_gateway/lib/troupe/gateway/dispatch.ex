@@ -111,7 +111,8 @@ defmodule Troupe.Gateway.Dispatch do
     # changes what every later session on the machine talks to.
     "config.get" => :observe,
     "config.models" => :admin,
-    "config.set" => :admin
+    "config.set" => :admin,
+    "config.import" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -276,7 +277,8 @@ defmodule Troupe.Gateway.Dispatch do
         :fs_changed,
         %{
           "path" => Workspace.relative(workspace, resolved),
-          "hash" => "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
+          "hash" =>
+            "sha256:" <> (:sha256 |> :crypto.hash(content) |> Base.encode16(case: :lower)),
           "size" => byte_size(content)
         },
         actor(context)
@@ -365,7 +367,13 @@ defmodule Troupe.Gateway.Dispatch do
         |> Path.expand()
         |> Definitions.load()
         |> Definitions.primaries()
-        |> Enum.map(&%{"name" => &1.name, "description" => &1.description, "source" => Atom.to_string(&1.source)})
+        |> Enum.map(
+          &%{
+            "name" => &1.name,
+            "description" => &1.description,
+            "source" => Atom.to_string(&1.source)
+          }
+        )
         |> Enum.sort_by(& &1["name"])
 
       {:ok, %{"agents" => agents}}
@@ -711,9 +719,14 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("worktree.remove", params, _context) do
     with {:ok, path} <- fetch(params, "path") do
       case Worktrees.remove(path, Map.get(params, "force", false)) do
-        :ok -> {:ok, %{"removed" => true}}
-        {:error, :dirty} -> {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
-        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+        :ok ->
+          {:ok, %{"removed" => true}}
+
+        {:error, :dirty} ->
+          {:error, Error.new(:conflict, %{reason: "worktree has local changes"})}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
     end
   end
@@ -751,9 +764,14 @@ defmodule Troupe.Gateway.Dispatch do
       enabled = Map.get(params, "enabled", true)
 
       case Troupe.set_watch(workspace, enabled) do
-        {:ok, backend} -> {:ok, %{"enabled" => enabled, "backend" => to_string(backend)}}
-        {:error, :already_watching} -> {:error, Error.new(:conflict, %{reason: "watch is exclusive per workspace"})}
-        {:error, reason} -> {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
+        {:ok, backend} ->
+          {:ok, %{"enabled" => enabled, "backend" => to_string(backend)}}
+
+        {:error, :already_watching} ->
+          {:error, Error.new(:conflict, %{reason: "watch is exclusive per workspace"})}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
       end
     end
   end
@@ -821,8 +839,18 @@ defmodule Troupe.Gateway.Dispatch do
     settings_result(ModelSettings.write(params, workspace_param(params)))
   end
 
+  defp model_settings("config.import", %{"from" => "opencode"} = params) do
+    settings_result(ModelSettings.import_opencode(workspace_param(params)))
+  end
+
+  defp model_settings("config.import", %{"from" => from}) do
+    settings_result({:error, "config.import copies from opencode, not #{inspect(from)}"})
+  end
+
   defp settings_result({:ok, result}), do: {:ok, result}
-  defp settings_result({:error, reason}), do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
+  defp settings_result({:error, reason}),
+    do: {:error, Error.new(:invalid_params, %{reason: reason})}
 
   defp workspace_param(%{"workspace" => workspace}) when is_binary(workspace) and workspace != "",
     do: Path.expand(workspace)
@@ -876,7 +904,8 @@ defmodule Troupe.Gateway.Dispatch do
       parent when is_binary(parent) ->
         if Troupe.get_session(parent),
           do: {:ok, parent},
-          else: {:error, Error.new(:invalid_params, %{field: "parent", reason: "no such session"})}
+          else:
+            {:error, Error.new(:invalid_params, %{field: "parent", reason: "no such session"})}
 
       _other ->
         {:error, Error.new(:invalid_params, %{field: "parent", reason: "must be a session id"})}
@@ -907,6 +936,7 @@ defmodule Troupe.Gateway.Dispatch do
       Enum.map_join(Provider.known(), ", ", &to_string/1) <>
       " — an OpenAI-compatible gateway is `provider: openai` with a `base_url`"
   end
+
   defp start_error(other), do: inspect(other)
 
   defp pin(params, pinned?) do
@@ -968,7 +998,9 @@ defmodule Troupe.Gateway.Dispatch do
   # there is not — a dormant session still has a mount table, and a client reading one
   # must be confined by the same rules the agent was.
   defp mounted(session_id, workspace) do
-    case Troupe.replay_from(session_id, 0) |> Enum.reverse() |> Enum.find(&(&1.type == "mounts_resolved")) do
+    case Troupe.replay_from(session_id, 0)
+         |> Enum.reverse()
+         |> Enum.find(&(&1.type == "mounts_resolved")) do
       nil -> workspace
       event -> Workspace.with_mounts(workspace, Mounts.from_json(event.data))
     end
