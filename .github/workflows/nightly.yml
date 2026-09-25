@@ -12,8 +12,8 @@ on:
     inputs:
       only:
         description: >-
-          `live` runs the real-gateway check alone (a few cents, about fifteen minutes), on
-          any branch; `all` runs everything (about seventy minutes)
+          `live` runs the real-gateway check alone (about five minutes, some tens of thousands
+          of tokens), on any branch; `all` runs everything (about seventy minutes)
         type: choice
         options: [all, live]
         default: all
