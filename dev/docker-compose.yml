@@ -52,11 +52,12 @@ services:
       timeout: 3s
       retries: 30
 
-  # quay.io, not Docker Hub: MinIO withdrew `minio/minio` and `minio/mc` from Docker
-  # Hub, and a pull of either now fails with "pull access denied", which reads like a
-  # credentials problem and is not one. The same images, same tags, are on quay.
+  # Pigsty's community builds of MinIO, not MinIO's own: MinIO withdrew `minio/minio` and
+  # `minio/mc` from Docker Hub, then made its quay.io copies private too (2026-09-24),
+  # and each fails with a pull error that reads like a credentials problem and is not
+  # one. A third party's tag can be moved, so each is pinned by digest as well.
   minio:
-    image: quay.io/minio/minio:RELEASE.2025-04-22T22-12-26Z
+    image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: troupe
@@ -75,7 +76,7 @@ services:
   # Versioning on the bucket is required: erasure has to destroy prior versions too,
   # and a done item checks that none of them decrypt afterwards.
   minio-setup:
-    image: quay.io/minio/mc:RELEASE.2025-04-16T18-13-26Z
+    image: pgsty/mc:RELEASE.2026-09-16T00-00-00Z@sha256:cfc83108c3abb371f8fb84d99c1fdc88f8c237e022409b0081fb7c0a3be634dd
     depends_on:
       minio:
         condition: service_healthy
