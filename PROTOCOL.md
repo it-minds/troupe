@@ -283,7 +283,7 @@ delegate again.
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |
 | `turn_ended` | — the agent's turn is over and it waits for input: the model answered without asking for a tool, or its request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done` |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer` |
