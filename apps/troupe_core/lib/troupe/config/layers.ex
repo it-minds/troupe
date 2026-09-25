@@ -483,7 +483,7 @@ defmodule Troupe.Config.Layers do
         | values: Map.drop(acc.values, keys),
           entries:
             Enum.map(acc.entries, fn entry ->
-              if hd(entry.path) in keys, do: %{entry | ignored: ignored_because(kind, [hd(entry.path)], ctx)}, else: entry
+              if hd(entry.path) in keys, do: %{entry | ignored: reason(kind, "it", ctx)}, else: entry
             end),
           warnings:
             acc.warnings ++
@@ -497,8 +497,7 @@ defmodule Troupe.Config.Layers do
   defp ignore_kind(%{scope: :trusted}, %{trusted?: false}), do: :untrusted
   defp ignore_kind(_spec, _ctx), do: nil
 
-  # "auto_approve and mcp are ignored: ..."; on a ladder, where there is one key, what
-  # comes after the colon.
+  # "auto_approve and mcp are ignored: " and the reason; a ladder entry has the reason.
   defp ignored_because(kind, [_one] = keys, ctx), do: "#{hd(keys)} is ignored: " <> reason(kind, "it", ctx)
 
   defp ignored_because(kind, keys, ctx) do

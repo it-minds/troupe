@@ -77,7 +77,7 @@ defmodule Troupe.Config.ExplainTest do
 
       {text, 0} = Config.explain(ctx.ws, "auto_approve", ctx.opts)
       assert text =~ "auto_approve = false"
-      assert text =~ "ignored: a project's file sets it only in a trusted workspace"
+      assert text =~ ~r/\n\s+ignored: a project's file sets it only in a trusted workspace/
     end
 
     test "--json has every key, its value, layer, file and ladder, secrets masked", ctx do
