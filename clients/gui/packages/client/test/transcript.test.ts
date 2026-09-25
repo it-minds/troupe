@@ -3,7 +3,7 @@
 // the same log twice produces the same list, and an ephemeral changes nothing durable.
 
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { addPending, dropPending, emptyTranscript, fold, isBusy, needsYou, openApprovals, openQuestions, rootState } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
@@ -163,14 +163,22 @@ describe("the transcript fold", () => {
 // cancel closes each call it stops with a `tool_call_completed` and then says
 // `cancelled`; a tool that timed out waiting is closed the same way; a subagent the cancel
 // took down says nothing at all. `open` stops while the approval is still waiting.
+const recordings = new URL("../../../../../test/fixtures/approvals/", import.meta.url);
+
+// The image build (clients/gui/Dockerfile) sees clients/gui alone, so these logs are not
+// there; the GUI job in ci.yml has the whole repository and runs them.
+const noRecordings = existsSync(recordings)
+  ? false
+  : "the recorded logs are at the repository's root, outside this build";
+
 function recorded(name: string): DurableEvent[] {
-  return readFileSync(new URL(`../../../../../test/fixtures/approvals/${name}.jsonl`, import.meta.url), "utf8")
+  return readFileSync(new URL(`${name}.jsonl`, recordings), "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line) as DurableEvent);
 }
 
-describe("an approval in a recorded log", () => {
+describe("an approval in a recorded log", { skip: noRecordings }, () => {
   it("is not open once its turn was cancelled or its tool timed out", () => {
     for (const name of ["cancelled", "timed_out", "subagent_cancelled"]) {
       const state = foldAll(recorded(name));
