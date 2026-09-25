@@ -1150,7 +1150,7 @@ citation keeps meaning what it meant.
        - `install.ps1`'s fallback against `v0.3.3-pre.1`.
      - **Not tested:** the TUI's terminal detection and unechoed key prompt on Windows.
 
-684. **The end of a turn is a durable event, `turn_ended`, beside the ephemeral
+685. **The end of a turn is a durable event, `turn_ended`, beside the ephemeral
      `agent_state`.** An agent whose turn ends without `finish` — a reply in prose, or a
      failed model request — rests `idle`, and until now only the live `agent_state` said
      so. That event is ephemeral: a client that attached after the turn ended never saw

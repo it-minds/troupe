@@ -197,7 +197,7 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      leaves the agent `idle`, and the printer waited for the `done` that only `finish`
      writes: `troupe run --headless` did its work, printed its answer and sat there until
      something killed it (issue #127). The daemon now writes the end of a turn to the log
-     (`turn_ended`, root Decision 684), and the printer rests on it, on `cancelled` and on
+     (`turn_ended`, root Decision 685), and the printer rests on it, on `cancelled` and on
      `agent_done`, all read from the log rather than the live `agent_state`, which can be
      dropped and says `idle` once before the task is taken. The code is `0` for a turn that
      ended or an agent that finished, `1` for one that stopped short, a failed model request
