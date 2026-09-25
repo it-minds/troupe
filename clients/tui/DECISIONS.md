@@ -218,10 +218,12 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      vendor's variable at the vendor's own endpoint, the fake, or an OpenAI-compatible
      server elsewhere, which may want none. The report (`troupe config`, `troupe models`,
      `troupe-daemon config` and `models`) names the key it will use
-     (`key=(ANTHROPIC_API_KEY)`) and, with none, ends with `troupe config` as the next
-     step and `provider: anthropic` with `api_key: "{env:ANTHROPIC_API_KEY}"` before the
-     gateways; a headless run and the TUI's transcript put the same step under the model
-     error (`Troupe.UI.ModelError`). `troupe config` offers a provider here first,
+     (`key=(ANTHROPIC_API_KEY)`) and, with none, ends with the next step and
+     `provider: anthropic` with `api_key: "{env:ANTHROPIC_API_KEY}"` before the gateways:
+     `troupe config` through `troupe`, and the file through `troupe-daemon`, because an
+     install may have the daemon without the TUI; a headless run and the TUI's transcript
+     put the same step under the model error (`Troupe.UI.ModelError`); the desktop app has
+     its own for a local session. `troupe config` offers a provider here first,
      Anthropic first, and Enter at the key saves that reference; a `config.yaml` through
      which no model can be asked gets the report and then the choices; and plain `troupe`
      asks them before it opens a session on a machine with no file and no key. Three more

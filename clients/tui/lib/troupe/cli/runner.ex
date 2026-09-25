@@ -271,7 +271,7 @@ defmodule Troupe.CLI.Runner do
         "  ! #{name}: #{inspect(reason)}"
       end)
 
-    Enum.join([Troupe.Config.describe(cfg) | notes], "\n")
+    Enum.join([Troupe.Config.describe(cfg, command: "troupe") | notes], "\n")
   end
 
   defp print({text, code}) do

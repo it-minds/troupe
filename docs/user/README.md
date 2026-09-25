@@ -23,6 +23,17 @@ machine and you see the same transcript; two people can open the same session at
 With no model set up, plain `troupe` asks the same questions first, and whatever needs a
 model says to run `troupe config` rather than failing without a reason.
 
+Without the TUI, the desktop app sets up the same file on **This computer**, under
+**Models**, or you write it yourself. The simplest `config.yaml` takes the key from the
+environment:
+
+```yaml
+provider: anthropic
+api_key: "{env:ANTHROPIC_API_KEY}"
+```
+
+`troupe-daemon config` then shows what is in force.
+
 ## Ways in
 
 | Way in | What it is | Its documentation |

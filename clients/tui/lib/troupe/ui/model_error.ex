@@ -5,7 +5,8 @@ defmodule Troupe.UI.ModelError do
   A machine with no usable model settings is the commonest first run, and it fails on
   the first model request with "no API key is configured"; `troupe config` is what sets
   a provider up. The headless printer and the terminal UI print the step under the
-  error in the same words, and they are the words `troupe-daemon config` ends with.
+  error in the same words, and they are the words `troupe config` ends with. The desktop
+  app puts its own step under the same two errors, for a session on that computer.
   """
 
   @doc "The next step for a model error's message, or `nil` when there is no obvious one."

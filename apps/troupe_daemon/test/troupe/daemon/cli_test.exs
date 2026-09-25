@@ -159,6 +159,44 @@ defmodule Troupe.Daemon.CLITest do
     refute out =~ "secret-key-1234567890"
   end
 
+  # An install may have the daemon and no `troupe`, so the daemon's report ends with the
+  # step every install can take, the file, and names what else writes it after that.
+  test "config and models with no key name the file as the next step", %{base: base} do
+    no_key_environment(base)
+    user = Troupe.Paths.display(Path.join([base, "config", "config.yaml"]))
+
+    for command <- [:config, {:models, refresh: false}] do
+      out = capture_io(fn -> assert CLI.main(command) == 0 end)
+
+      assert out =~
+               "next step: anthropic has no key, so no model can be asked. Write a provider into #{user}; the simplest is\n" <>
+                 "    provider: anthropic\n" <>
+                 "    api_key: \"{env:ANTHROPIC_API_KEY}\"\n"
+
+      assert out =~ "`troupe config` and the desktop app (This computer > Models) write the same file."
+      refute out =~ "Run `troupe config`"
+    end
+  end
+
+  # A fresh account: no provider, key or opencode in the environment, whatever the
+  # developer running this has.
+  defp no_key_environment(base) do
+    vars =
+      ~w(ANTHROPIC_API_KEY OPENAI_API_KEY TROUPE_API_KEY TROUPE_AUTH_TOKEN TROUPE_AUTH TROUPE_PROVIDER
+         TROUPE_BASE_URL TROUPE_MODEL TROUPE_SMALL_MODEL TROUPE_EXPENSIVE_MODEL TROUPE_OPENCODE_CONFIG
+         TROUPE_OPENCODE_AUTH)
+
+    previous = Map.new(vars, &{&1, System.get_env(&1)})
+    Enum.each(vars, &System.delete_env/1)
+    System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(base, "no-opencode.jsonc"))
+    System.put_env("TROUPE_OPENCODE_AUTH", Path.join(base, "no-auth.json"))
+
+    on_exit(fn -> Enum.each(previous, &restore_env/1) end)
+  end
+
+  defp restore_env({var, nil}), do: System.delete_env(var)
+  defp restore_env({var, value}), do: System.put_env(var, value)
+
   # A terminal's scrollback is no place for the tokens that admit a client: what `status`
   # and `run` print is where the daemon answers and which file holds them.
   defp assert_where_not_tokens(out) do

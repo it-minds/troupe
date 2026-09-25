@@ -1147,7 +1147,9 @@ citation keeps meaning what it meant.
        (clients/tui Decision 111).
      - **The installers** end with the same check. An existing `config.yaml` is named.
        opencode's config is offered for the copy. Otherwise, with the TUI installed, the
-       installer hands over to `troupe config`, or names the ways on when it cannot. A
+       installer hands over to `troupe config`, or names the ways on when it cannot;
+       without it, the next step is the desktop app's Models panel where the app is
+       installed, or the file, since only the TUI has `troupe config`. A
        daemon from before `import-opencode` answers "unknown arguments", and the
        installer says it could not copy and goes on.
      - **Proof:**
