@@ -1004,11 +1004,13 @@ defmodule Troupe.UI.TUI.Model do
     }
   end
 
+  # A reply's usage arrives in this module's shape: `Troupe.Remote.Translate` reads the
+  # wire's `input_tokens` and `output_tokens`, and a journal holds what it translated.
   # An `assistant_message` written before the cache figures existed simply has none.
   defp used(reported) do
     %{
-      input: Map.get(reported, :input_tokens, 0),
-      output: Map.get(reported, :output_tokens, 0),
+      input: Map.get(reported, :input, 0),
+      output: Map.get(reported, :output, 0),
       cache_read: Map.get(reported, :cache_read, 0),
       cache_write: Map.get(reported, :cache_write, 0)
     }
