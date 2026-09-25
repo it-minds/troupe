@@ -102,19 +102,28 @@ defmodule Troupe.Plane.Ledger do
   @spec period_start(Team.t() | Ecto.UUID.t()) :: DateTime.t() | nil
   def period_start(%Team{budget_period: period}), do: period_start(period, now())
 
-  def period_start(team_id) do
-    Repo.one(from(t in Team, where: t.id == ^team_id, select: t.budget_period))
-    |> period_start(now())
-  end
+  def period_start(team_id), do: team_id |> budget_period() |> period_start(now())
 
-  defp period_start("monthly", now) do
+  defp period_start("monthly", now), do: beginning_of_month(now)
+  defp period_start(_never, _now), do: nil
+
+  @doc """
+  When the current calendar month began, in UTC.
+
+  The period of a person's cap and of the platform's, which have no `budget_period` of
+  their own to choose: they turn over when a `monthly` team does, at midnight UTC on the
+  1st. Worked out on every read, as a team's is, so nothing has to run at midnight for a
+  person refused in one month to be given a session in the next.
+  """
+  @spec month_start() :: DateTime.t()
+  def month_start, do: beginning_of_month(now())
+
+  defp beginning_of_month(now) do
     now
     |> DateTime.to_date()
     |> Date.beginning_of_month()
     |> DateTime.new!(~T[00:00:00.000000], "Etc/UTC")
   end
-
-  defp period_start(_never, _now), do: nil
 
   # The clock a period is read against. Configurable only so a test can stand either side
   # of midnight on the 1st rather than wait for it.
@@ -130,18 +139,19 @@ defmodule Troupe.Plane.Ledger do
   Cached, and invalidated by the one process that writes the table, so a page that is
   reloaded twice in a minute costs one aggregate rather than two. A `:from` of `nil` is
   from the beginning, which is what `period_start/1` answers for a ceiling that never
-  turns over.
+  turns over. No `:to` is up to now, and is remembered as that rather than as the instant
+  it was asked: a key holding the time of asking is a key nothing ever asks for again.
   """
   @spec breakdown(Ecto.UUID.t(), :model | :owner_subject | :session_id, keyword()) :: [map()]
   def breakdown(team_id, group_by, opts \\ [])
       when group_by in [:model, :owner_subject, :session_id] do
     from = Keyword.get(opts, :from) || ~U[1970-01-01 00:00:00.000000Z]
-    to = Keyword.get(opts, :to, DateTime.utc_now())
+    to = Keyword.get(opts, :to)
 
     Cache.fetch({team_id, {:breakdown, group_by, from, to}}, fn ->
-      Repo.all(
+      query =
         from(u in UsageRecord,
-          where: u.team_id == ^team_id and u.occurred_at >= ^from and u.occurred_at < ^to,
+          where: u.team_id == ^team_id and u.occurred_at >= ^from,
           group_by: field(u, ^group_by),
           order_by: [desc: coalesce(sum(u.cost_micros), 0)],
           select: %{
@@ -152,7 +162,10 @@ defmodule Troupe.Plane.Ledger do
             cost_micros: type(coalesce(sum(u.cost_micros), 0), :integer)
           }
         )
-      )
+
+      query = if to, do: where(query, [u], u.occurred_at < ^to), else: query
+
+      Repo.all(query)
     end)
   end
 
@@ -177,6 +190,12 @@ defmodule Troupe.Plane.Ledger do
   @spec budget_micros(Ecto.UUID.t()) :: non_neg_integer()
   def budget_micros(team_id) do
     Repo.one(from(t in Team, where: t.id == ^team_id, select: t.budget_micros)) || 0
+  end
+
+  @doc "What a team's budget is measured over, `monthly` or `never`; `nil` for no such team."
+  @spec budget_period(Ecto.UUID.t()) :: String.t() | nil
+  def budget_period(team_id) do
+    Repo.one(from(t in Team, where: t.id == ^team_id, select: t.budget_period))
   end
 
   @doc """
@@ -244,15 +263,18 @@ defmodule Troupe.Plane.Ledger do
   started is the principal's sponsor. A cap on a person that only counted the sessions
   they typed into would be a cap they could step around by writing a trigger.
 
-  Over all time, whatever period their teams' ceilings are measured over. A person's cap
-  is one number across every team, and has no period of its own: following a team's would
-  give somebody in a `monthly` team and a `never` one two answers to one question.
+  In the calendar month in UTC (`month_start/0`), whatever period their teams' ceilings
+  are measured over. A person's cap is one number across every team, so it cannot borrow
+  a team's period: somebody in a `monthly` team and a `never` one would get two answers
+  to one question. It has its own, and it is the month.
   """
   @spec spent_micros_for(String.t()) :: non_neg_integer()
   def spent_micros_for(subject) when is_binary(subject) do
+    since = month_start()
+
     Repo.one(
       from(u in UsageRecord,
-        where: u.owner_subject == ^subject,
+        where: u.owner_subject == ^subject and u.occurred_at >= ^since,
         select: type(coalesce(sum(u.cost_micros), 0), :integer)
       )
     ) || 0
@@ -273,15 +295,24 @@ defmodule Troupe.Plane.Ledger do
   @doc """
   What the whole deployment has spent and promised, for the two ceilings above a team.
 
+  Spent in the calendar month in UTC (`month_start/0`), as a person's is. What is promised
+  has no month: a reservation still open is money held now, whichever month it was made in.
+
   Not cached and not held in a process between calls. It is read once per session
   create, which is not a hot path, and a number that was right a minute ago is exactly
   the sort of thing that lets a deployment quietly pass its own ceiling.
   """
   @spec platform_totals() :: %{spent_micros: non_neg_integer(), reserved_micros: non_neg_integer()}
   def platform_totals do
+    since = month_start()
+
     spent =
-      Repo.one(from(u in UsageRecord, select: type(coalesce(sum(u.cost_micros), 0), :integer))) ||
-        0
+      Repo.one(
+        from(u in UsageRecord,
+          where: u.occurred_at >= ^since,
+          select: type(coalesce(sum(u.cost_micros), 0), :integer)
+        )
+      ) || 0
 
     reserved =
       Repo.one(

@@ -1052,7 +1052,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.person.budget",
       function: :person_budget,
       summary:
-        "Set or clear a person's own spend ceiling, in millionths, across every team they are in. 0 or absent is no ceiling.",
+        "Set or clear a person's own monthly spend ceiling, in millionths, across every team they are in. It counts the calendar month in UTC and turns over on the 1st. 0 or absent is no ceiling.",
       risk: :write,
       arguments: [
         %Argument{
@@ -1072,7 +1072,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.budget.explain",
       function: :budget_explain,
       summary:
-        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, and which rung set it.",
+        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it.",
       risk: :read,
       arguments: [
         %Argument{

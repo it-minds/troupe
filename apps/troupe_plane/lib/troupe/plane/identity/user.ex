@@ -33,9 +33,9 @@ defmodule Troupe.Plane.Identity.User do
     field(:display_name, :string)
     field(:active, :boolean, default: true)
 
-    # This person's own spend ceiling, in millionths, across every team they are in.
-    # Zero and `nil` both mean no ceiling: somebody who has never been given one should
-    # not be unable to work.
+    # This person's own spend ceiling, in millionths, across every team they are in, per
+    # calendar month in UTC. Zero and `nil` both mean no ceiling: somebody who has never
+    # been given one should not be unable to work.
     field(:budget_micros, :integer)
 
     # `"user"` for a person, `"service"` for a principal; never persisted, because a

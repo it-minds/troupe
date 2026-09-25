@@ -13,6 +13,13 @@ defmodule Troupe.Plane.PersonBudget do
   That is the only shape that makes a cap mean anything: a cap per team per person would
   be a cap somebody clears by being added to a second team.
 
+  ## A cap is a month
+
+  What counts is what they spent in the calendar month in UTC, so somebody at their cap
+  can start sessions again from midnight UTC on the 1st. The month is the person's own
+  period rather than any team's: a person in a `monthly` team and a `never` one has one
+  cap, and it cannot follow both.
+
   ## Whose spend a principal's is
 
   A session a trigger started is attributed to the principal's **sponsor**, not to the
@@ -147,6 +154,7 @@ defmodule Troupe.Plane.PersonBudget do
       scope: :person,
       subject: state.subject,
       budget_micros: state.budget_micros,
+      budget_period: "monthly",
       spent_micros: state.spent_micros,
       reserved_micros: reserved(state),
       remaining_micros:

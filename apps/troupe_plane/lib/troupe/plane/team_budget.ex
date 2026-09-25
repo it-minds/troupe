@@ -23,7 +23,14 @@ defmodule Troupe.Plane.TeamBudget do
   alias Troupe.Plane.Ledger.Cache
 
   @enforce_keys [:team_id]
-  defstruct [:team_id, :budget_micros, spent_micros: 0, reserved_micros: 0, reservations: %{}]
+  defstruct [
+    :team_id,
+    :budget_micros,
+    :budget_period,
+    spent_micros: 0,
+    reserved_micros: 0,
+    reservations: %{}
+  ]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -209,6 +216,7 @@ defmodule Troupe.Plane.TeamBudget do
     %{
       state
       | budget_micros: Ledger.budget_micros(state.team_id),
+        budget_period: Ledger.budget_period(state.team_id),
         spent_micros: Ledger.spent_micros(state.team_id),
         reserved_micros: reservations |> Map.values() |> Enum.sum(),
         reservations: reservations
@@ -219,10 +227,13 @@ defmodule Troupe.Plane.TeamBudget do
   # given one should not be unable to work.
   defp unlimited?(%__MODULE__{budget_micros: budget}), do: is_nil(budget) or budget <= 0
 
+  # The period comes with the figure, because a spend without the period it covers cannot
+  # be read against anything: the Budgets page labels each ceiling's bar with it.
   defp summary(state) do
     %{
       team_id: state.team_id,
       budget_micros: state.budget_micros,
+      budget_period: state.budget_period,
       spent_micros: state.spent_micros,
       reserved_micros: state.reserved_micros,
       remaining_micros:
