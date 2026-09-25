@@ -11,6 +11,9 @@ Unix socket, loopback TCP or a loopback WebSocket, and emits the same events a p
 troupe-daemon [run]               serve on this machine until idle or stopped
 troupe-daemon status              say whether one is running, and where
 troupe-daemon config              the resolved providers and models (keys masked)
+troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
+troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
+troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
 troupe-daemon config import-opencode   copy opencode's providers into config.yaml
 troupe-daemon models [--refresh]  every model this machine can address
 troupe-daemon version
@@ -52,14 +55,18 @@ keep the previous release beside the new one for rollback, and take `--uninstall
 ## Configuration
 
 `~/.config/troupe/config.yaml` (`%APPDATA%\troupe\config.yaml` on Windows), then the
-project's `.troupe/config.yaml`, then `TROUPE_*`:
+project's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then `TROUPE_*`, merged
+by key. A project's files set the provider, keys, approvals, MCP servers and paths only
+in a workspace the user file's `trusted_workspaces` names, and a pod's never do. The
+rules and every key: [docs/user/configuration.md](../../docs/user/configuration.md).
 
 ```yaml
 providers:
   gateway:
     type: anthropic
     base_url: https://gw.example/anthropic/v1
-    auth_token: "{env:GW_TOKEN}"
+    api_key: "{env:GW_TOKEN}"
+    auth: bearer
     models:
       claude-opus-5: {id: eu.anthropic.claude-opus-5, context: 400000, max_output: 64000}
 models:
@@ -68,8 +75,10 @@ models:
 ```
 
 With no key of its own the daemon reuses an opencode installation's providers and default
-model. `troupe-daemon config` shows what was resolved; `troupe-daemon models --refresh`
-asks every provider what it serves and caches windows and prices in `models.json`.
+model. `troupe-daemon config` shows what was resolved, `config --explain [KEY]` which file
+set each value, `config validate` what is wrong, and `config migrate` the rewrite to the
+current spellings; `troupe-daemon models --refresh` asks every provider what it serves and
+caches windows and prices in `models.json`.
 
 | variable | meaning |
 |---|---|

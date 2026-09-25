@@ -46,6 +46,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
     :ok
   end
 
+  defp attempt(%Request{api_key: {:refused, _why} = refused}, _reply_to, _ref), do: {:error, refused}
   defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, :first)
 
   defp post(request, body, reply_to, ref, pass) do
@@ -403,8 +404,13 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp base_url(%Request{base_url: nil}), do: @default_base_url
   defp base_url(%Request{base_url: url}), do: url
 
+  # `OPENAI_API_KEY` is OpenAI's key, so it goes to OpenAI's endpoint and nowhere else:
+  # a gateway or a local server configured without a key is sent none.
   defp api_key(%Request{api_key: key}) when is_binary(key) and key != "", do: key
-  defp api_key(_request), do: System.get_env("OPENAI_API_KEY")
+
+  defp api_key(%Request{base_url: url}) do
+    if Endpoint.vendor?(url, @default_base_url), do: System.get_env("OPENAI_API_KEY")
+  end
 
   defp describe(%{"error" => %{"message" => message}}), do: message
   defp describe(body) when is_binary(body), do: String.slice(body, 0, 400)

@@ -65,12 +65,29 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :config} = args} ->
         Troupe.CLI.ConfigSetup.run(args.workspace)
 
+      # Read here, from the same files the daemon reads: the answers are about files, and
+      # need no daemon to give them.
+      {:ok, %{mode: :config_explain} = args} ->
+        print(Troupe.Config.explain(args.workspace, args.key, json: args.json))
+
+      {:ok, %{mode: :config_validate} = args} ->
+        print(Troupe.Config.validate(args.workspace, args.path))
+
+      {:ok, %{mode: :config_migrate} = args} ->
+        print(Troupe.Config.migrate(args.workspace, args.path, write: args.write))
+
       {:ok, %{mode: :config_pull} = args} ->
         Troupe.CLI.ModelConfig.pull(args.plane_url)
 
       {:ok, %{mode: :models} = args} ->
-        IO.puts(models_report(args))
-        0
+        case models_report(args) do
+          {:ok, report} ->
+            IO.puts(report)
+            0
+
+          {:error, message} ->
+            fail(message)
+        end
 
       {:ok, %{mode: :run} = args} ->
         run(args)
@@ -175,15 +192,16 @@ defmodule Troupe.CLI.Runner do
   # Mouse reporting: `--mouse`/`--no-mouse` beats the `mouse` setting, which
   # defaults to on. Off means the terminal keeps its own click-and-drag
   # selection, at the cost of clicking tiles and wheel scrolling.
-  defp mouse_opts(args) do
-    mouse? =
-      case args.mouse do
-        nil -> Troupe.Settings.mouse?(Troupe.Config.load(args.workspace))
-        flag -> flag
-      end
-
-    [mouse_capture: mouse?]
+  defp mouse_opts(%{mouse: nil} = args) do
+    case Troupe.Config.resolve(args.workspace) do
+      {:ok, config, _layers} -> [mouse_capture: Troupe.Settings.mouse?(config)]
+      # The session started, so the daemon read the files; a file this VM refuses is not
+      # a reason to leave the person without a terminal UI.
+      {:error, _error} -> [mouse_capture: true]
+    end
   end
+
+  defp mouse_opts(args), do: [mouse_capture: args.mouse]
 
   defp tui(sid, extra) do
     # `extra` first: a Keyword lookup takes the earliest match, so the caller's
@@ -225,8 +243,13 @@ defmodule Troupe.CLI.Runner do
   # first when asked. Refreshing is never implicit — it costs two round trips
   # and a session must start without them.
   defp models_report(args) do
-    cfg = Troupe.Config.load(args.workspace)
+    case Troupe.Config.resolve(args.workspace) do
+      {:ok, cfg, _layers} -> {:ok, models_report(args, cfg)}
+      {:error, error} -> {:error, Exception.message(error)}
+    end
+  end
 
+  defp models_report(args, cfg) do
     failures =
       if args.refresh do
         {:ok, _catalog, failures} = Troupe.LLM.Catalog.Store.refresh(cfg)
@@ -243,6 +266,11 @@ defmodule Troupe.CLI.Runner do
       end)
 
     Enum.join([Troupe.Config.describe(cfg) | notes], "\n")
+  end
+
+  defp print({text, code}) do
+    IO.write(text)
+    code
   end
 
   defp fail(msg) do

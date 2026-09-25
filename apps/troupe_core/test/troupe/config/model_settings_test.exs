@@ -127,8 +127,11 @@ defmodule Troupe.Config.ModelSettingsTest do
       {:ok, written} = YamlElixir.read_from_file(path)
       assert written["max_branches"] == 3
       assert written["read_roots"] == ["~/src/dep"]
-      # The old flat spelling is gone, so the two cannot disagree.
+      # The old flat spelling is gone, so the two cannot disagree, and the file says which
+      # version it is and where an editor finds the schema.
       refute Map.has_key?(written, "model")
+      assert written["version"] == 1
+      assert File.read!(path) =~ "# yaml-language-server: $schema=https://troupe.dev/schema/config/v1.json"
       assert written["models"] == %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b"}
 
       config = Config.load(nil)

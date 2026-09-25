@@ -64,7 +64,7 @@ defmodule Troupe.LLM.FakeScriptTest do
 
     File.write!(Path.join(context.workspace, ".troupe/config.yaml"), """
     provider: fake
-    model: fake-model
+    models: {default: fake-model}
     auto_approve: true
     fake_script: #{script}
     """)

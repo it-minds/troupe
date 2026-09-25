@@ -51,11 +51,31 @@ defmodule Troupe.Daemon.CLITest do
     assert CLI.parse(["--version"]) == :version
     assert CLI.parse(["models", "--refresh"]) == {:models, refresh: true}
     assert CLI.parse(["config", "import-opencode"]) == :config_import_opencode
+    assert CLI.parse(["config", "--explain"]) == {:config_explain, nil, false}
+    assert CLI.parse(["config", "--explain", "max_turns", "--json"]) == {:config_explain, "max_turns", true}
+    assert CLI.parse(["config", "--json"]) == {:config_explain, nil, true}
+    assert CLI.parse(["config", "validate"]) == {:config_validate, nil}
+    assert CLI.parse(["config", "validate", "a.yaml"]) == {:config_validate, "a.yaml"}
+    assert CLI.parse(["config", "migrate", "--write"]) == {:config_migrate, nil, true}
+    assert CLI.parse(["config", "migrate", "a.yaml"]) == {:config_migrate, "a.yaml", false}
+    assert {:error, _} = CLI.parse(["config", "max_turns"])
     assert {:error, _} = CLI.parse(["frobnicate"])
     assert {:error, _} = CLI.parse([])
 
     assert capture_io(:stderr, fn -> assert CLI.main({:error, "x"}) == 2 end) =~
              "troupe-daemon [run]"
+  end
+
+  test "config validate exits 1 on a typo and config refuses a file it cannot load", %{base: base} do
+    user = Path.join([base, "config", "config.yaml"])
+    File.write!(user, "max_tokns: 400000\n")
+
+    output = capture_io(fn -> assert CLI.main({:config_validate, nil}) == 1 end)
+    assert output =~ "#{user}:1: max_tokns is not a setting Troupe knows, and is ignored; did you mean max_tokens?"
+
+    File.write!(user, "approvals: sometimes\n")
+    output = capture_io(:stderr, fn -> assert CLI.main(:config) == 1 end)
+    assert output =~ "approvals must be one of wait, deny, not \"sometimes\""
   end
 
   test "an opencode import says what it copied, what it kept, and when there was nothing" do

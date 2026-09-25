@@ -20,7 +20,7 @@ defmodule Troupe.Config.ModelSettings do
   """
 
   alias Troupe.Config
-  alias Troupe.Config.{OpenCode, Yaml}
+  alias Troupe.Config.{Migrate, OpenCode, Schema}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
 
@@ -326,13 +326,23 @@ defmodule Troupe.Config.ModelSettings do
 
   defp project(nil), do: []
 
+  # Only what takes effect: in a workspace that is not trusted, the provider, URL and key
+  # a project's file names are ignored, and do not beat the user's (Decision 686).
   defp project(workspace) do
-    path = Path.join(Troupe.Paths.project_dir(workspace), "config.yaml")
-    keys = path |> read_raw() |> Map.keys() |> Enum.filter(&(&1 in @managed)) |> Enum.sort()
+    trusted? = Config.trusted?(workspace)
 
-    if keys == [],
-      do: [],
-      else: [%{"source" => "project", "detail" => "#{path} sets #{Enum.join(keys, ", ")}"}]
+    for path <- [Config.project_path(workspace), Config.local_path(workspace)],
+        keys = path |> read_raw() |> Map.keys() |> Enum.filter(&(&1 in @managed and (trusted? or not gated?(&1)))),
+        keys != [] do
+      %{"source" => "project", "detail" => "#{path} sets #{keys |> Enum.sort() |> Enum.join(", ")}"}
+    end
+  end
+
+  defp gated?(key) do
+    case Schema.at([key]) do
+      %{scope: :trusted} -> true
+      _ -> key == "auth_token"
+    end
   end
 
   defp env do
@@ -385,7 +395,14 @@ defmodule Troupe.Config.ModelSettings do
     raw |> Map.delete("auth_token") |> Map.put("api_key", key)
   end
 
-  defp put_key(raw, _params), do: raw
+  # No new key: an `auth_token` the file holds is kept as the key it is, under its new
+  # name, bearer unless the screen just said otherwise.
+  defp put_key(raw, _params) do
+    case Map.pop(raw, "auth_token") do
+      {token, raw} when is_binary(token) -> raw |> Map.put_new("auth", "bearer") |> Map.put("api_key", token)
+      {_none, raw} -> raw
+    end
+  end
 
   defp put_models(raw, models) when map_size(models) == 0, do: raw
 
@@ -404,37 +421,10 @@ defmodule Troupe.Config.ModelSettings do
     if block == %{}, do: Map.delete(raw, "models"), else: Map.put(raw, "models", block)
   end
 
-  # Written beside the target and renamed over it, so a crash mid-write leaves the old
-  # file rather than half a new one. The key is in there, so on Unix only the user may
-  # read it; on Windows the file lives in the user's own profile.
-  defp save(path, updated) do
-    File.mkdir_p!(Path.dirname(path))
-    tmp = path <> ".tmp"
-
-    # The copy may hold a key too, so it is locked down like the file itself.
-    if File.regular?(path) and File.cp(path, path <> ".previous") == :ok,
-      do: restrict(path <> ".previous")
-
-    with :ok <- File.write(tmp, header() <> Yaml.encode(updated)),
-         :ok <- restrict(tmp),
-         :ok <- File.rename(tmp, path) do
-      :ok
-    else
-      {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
-    end
-  end
-
-  defp header do
-    "# Written by troupe's model settings. Comments are not kept; the file before the\n" <>
-      "# last save is config.yaml.previous.\n"
-  end
-
-  defp restrict(path) do
-    case :os.type() do
-      {:unix, _} -> File.chmod(path, 0o600)
-      _ -> :ok
-    end
-  end
+  # Through the one writer every config file goes through: the new spellings only,
+  # `version: 1`, a header, the old file kept as `.previous`, and on Unix readable by
+  # the user alone, since the key is in there (Decision 686).
+  defp save(path, updated), do: Migrate.write(path, updated)
 
   # -- validation ---------------------------------------------------------------
 

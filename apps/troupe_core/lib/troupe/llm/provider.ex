@@ -184,6 +184,7 @@ defmodule Troupe.LLM.Provider do
   defp sentence({:http_status, status, detail}), do: "the provider answered #{status}" <> detail(detail)
   defp sentence({:api_error, message}), do: "the provider reported an error" <> detail(message)
   defp sentence(:missing_api_key), do: "no API key is configured for the provider"
+  defp sentence({:refused, why}) when is_binary(why), do: why
   defp sentence({:timeout, _ms}), do: "the model did not answer in time"
   defp sentence(other), do: inspect(other)
 

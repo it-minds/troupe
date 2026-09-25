@@ -99,14 +99,18 @@ defmodule Troupe.ReadRootsTest do
       assert File.read!(path) =~ "defmodule Dep"
     end
 
-    test "read_roots in a config file are expanded" do
+    test "read_roots in a config file are expanded, and one that is not a path refuses the file" do
       dir = Path.join(System.tmp_dir!(), "troupe-rr-cfg-#{System.unique_integer([:positive])}")
       File.mkdir_p!(Path.join(dir, ".troupe"))
       on_exit(fn -> File.rm_rf(dir) end)
-      File.write!(Path.join(dir, ".troupe/config.yaml"), "read_roots:\n  - ../vendor\n  - 7\n")
+      File.write!(Path.join(dir, ".troupe/config.yaml"), "read_roots:\n  - ../vendor\n")
 
       config = Troupe.Config.load(dir)
       assert config.read_roots == [Path.expand("../vendor")]
+
+      File.write!(Path.join(dir, ".troupe/config.yaml"), "read_roots:\n  - ../vendor\n  - 7\n")
+      assert {:error, error} = Troupe.Config.resolve(dir)
+      assert Exception.message(error) =~ "read_roots must be a list of strings; 7 is not a string"
     end
   end
 end

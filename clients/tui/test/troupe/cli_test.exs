@@ -30,6 +30,45 @@ defmodule Troupe.CLITest do
     assert CLI.version() == "troupe " <> (File.read!("../../VERSION") |> String.trim())
   end
 
+  test "parses the config command lines" do
+    assert {:ok, %{mode: :config}} = CLI.parse(["config"])
+
+    assert {:ok, %{mode: :config_explain, key: nil, json: false}} =
+             CLI.parse(["config", "--explain"])
+
+    assert {:ok, %{mode: :config_explain, key: "max_turns"}} =
+             CLI.parse(["config", "--explain", "max_turns"])
+
+    assert {:ok, %{mode: :config_explain, key: nil, json: true}} = CLI.parse(["config", "--json"])
+
+    assert {:ok, %{mode: :config_explain, key: "models", json: true}} =
+             CLI.parse(["config", "--explain", "models", "--json"])
+
+    assert {:ok, %{mode: :config_validate, path: nil}} = CLI.parse(["config", "validate"])
+
+    assert {:ok, %{mode: :config_validate, path: "a.yaml"}} =
+             CLI.parse(["config", "validate", "a.yaml"])
+
+    assert {:ok, %{mode: :config_migrate, path: nil, write: false}} =
+             CLI.parse(["config", "migrate"])
+
+    assert {:ok, %{mode: :config_migrate, path: nil, write: true}} =
+             CLI.parse(["config", "migrate", "--write"])
+
+    assert {:ok, %{mode: :config_pull}} = CLI.parse(["config", "pull"])
+    assert CLI.usage() =~ "troupe config --explain"
+  end
+
+  test "config --explain and validate answer from the files, with the exit status" do
+    ws = tmp_workspace(%{".troupe/config.yaml" => "max_turns: 12\nmax_tokns: 1\n"})
+
+    {text, 0} = Troupe.Config.explain(ws, "max_turns")
+    assert text =~ "max_turns = 12"
+
+    {text, 1} = Troupe.Config.validate(ws, Path.join(ws, ".troupe/config.yaml"))
+    assert text =~ "did you mean max_tokens?"
+  end
+
   test "parses the remote command lines" do
     assert {:ok, %{mode: :login, plane_url: "https://plane.example"}} =
              CLI.parse(["login", "https://plane.example"])

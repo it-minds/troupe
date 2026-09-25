@@ -79,7 +79,7 @@ defmodule Troupe.Session.Approvals do
 
   @doc "Approve everything from now on, as `--auto-approve` does."
   @spec set_auto_approve(String.t(), boolean()) :: :ok
-  def set_auto_approve(session_id, value) do
+  def set_auto_approve(session_id, value) when is_boolean(value) do
     GenServer.call(Troupe.Registry.approvals(session_id), {:auto_approve, value})
   end
 
@@ -97,7 +97,7 @@ defmodule Troupe.Session.Approvals do
     state = %__MODULE__{
       session_id: session_id,
       mode: Keyword.get(opts, :mode, :wait),
-      auto_approve: Keyword.get(opts, :auto_approve, false),
+      auto_approve: Keyword.get(opts, :auto_approve, false) == true,
       managed_rules_only: Keyword.get(opts, :managed_rules_only, false)
     }
 
@@ -148,7 +148,7 @@ defmodule Troupe.Session.Approvals do
   @impl GenServer
   def handle_call({:request, req}, from, state) do
     cond do
-      state.auto_approve ->
+      state.auto_approve == true ->
         {:reply, :allow, state}
 
       MapSet.member?(state.session_allows, req.tool) ->

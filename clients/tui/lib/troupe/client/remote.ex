@@ -47,7 +47,14 @@ defmodule Troupe.Client.Remote do
         _ -> sid
       end
 
-    {label, Config.load(File.cwd!())}
+    # A screen, not a session: a refused file shows the defaults and says why.
+    config =
+      case Config.resolve(File.cwd!()) do
+        {:ok, config, _layers} -> config
+        {:error, error} -> %Config{warnings: [Exception.message(error)]}
+      end
+
+    {label, config}
   end
 
   @impl true
