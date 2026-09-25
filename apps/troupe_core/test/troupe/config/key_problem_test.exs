@@ -80,9 +80,9 @@ defmodule Troupe.Config.KeyProblemTest do
     end
   end
 
-  describe "describe/1" do
+  describe "describe/2" do
     test "with no key, it ends with the next step and the simplest file" do
-      report = Config.describe(%Config{})
+      report = Config.describe(%Config{}, command: "troupe")
 
       assert report =~ "key=(none)"
       assert report =~ "no key"
@@ -90,6 +90,24 @@ defmodule Troupe.Config.KeyProblemTest do
       assert report =~ ~s(provider: anthropic\n    api_key: "{env:ANTHROPIC_API_KEY}")
       # The simplest case before the gateways.
       assert :binary.match(report, "provider: anthropic\n") < :binary.match(report, "gateway such as LiteLLM")
+    end
+
+    # The daemon's report may be read on an install with no `troupe` at all.
+    test "through the daemon, the next step is the file, and `troupe config` comes after it" do
+      path = Troupe.Paths.display(Config.user_path())
+      report = Config.describe(%Config{})
+
+      assert report =~ "next step: anthropic has no key, so no model can be asked. Write a provider into #{path}; the simplest is"
+      assert report =~ ~s(provider: anthropic\n    api_key: "{env:ANTHROPIC_API_KEY}")
+      assert report =~ "`troupe config` and the desktop app (This computer > Models) write the same file."
+      refute report =~ "Run `troupe config`"
+    end
+
+    test "names the subcommands of the program it is read through" do
+      config = %Config{warnings: ["something old"]}
+
+      assert Config.describe(config) =~ "`troupe-daemon config validate` lists them"
+      assert Config.describe(config, command: "troupe") =~ "`troupe config validate` lists them"
     end
 
     test "a key from the environment is named, and there is no next step" do

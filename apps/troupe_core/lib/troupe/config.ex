@@ -837,9 +837,16 @@ defmodule Troupe.Config do
   @doc """
   Resolved providers and models with keys masked, for a person to read, what loading
   warned about, and — when no model can be asked (`key_problem/1`) — the next step.
+
+  `command` is the program the person ran, `"troupe-daemon"` unless it says `"troupe"`,
+  and the report names that program's subcommands. Only `troupe` sets a provider up by
+  asking, and an install may have the daemon without it, so through `troupe-daemon` the
+  next step is the file, which any install can write.
   """
-  @spec describe(t()) :: String.t()
-  def describe(%__MODULE__{} = config) do
+  @spec describe(t(), command: String.t()) :: String.t()
+  def describe(%__MODULE__{} = config, opts \\ []) do
+    command = Keyword.get(opts, :command, "troupe-daemon")
+
     """
     provider: #{config.provider} base_url=#{config.base_url || "(default)"} key=#{session_key(config)} auth=#{config.auth}
     models: default=#{config.model} cheap=#{config.small_model || "(default)"} expensive=#{config.expensive_model || "(default)"}
@@ -849,7 +856,7 @@ defmodule Troupe.Config do
     #{describe_choices(config)}
     config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
     catalog: #{Troupe.Paths.display(Store.path())} (#{Store.fetched_at() || "never fetched"})
-    """ <> describe_warnings(config.warnings) <> describe_next_step(config)
+    """ <> describe_warnings(config.warnings, command) <> describe_next_step(config, command)
   end
 
   defp session_key(%__MODULE__{refused: nil} = config),
@@ -865,31 +872,47 @@ defmodule Troupe.Config do
 
   # One next step, and the simplest file that would have made it unnecessary: a key in
   # the environment and a reference to it, before the gateways most of the rest of this
-  # report is about.
-  defp describe_next_step(config) do
-    case key_problem(config) do
-      nil ->
+  # report is about. Through `troupe` the step is `troupe config`; through the daemon it
+  # is the file, and what else writes it comes after.
+  defp describe_next_step(config, command) do
+    path = Troupe.Paths.display(user_path())
+
+    case {key_problem(config), command} do
+      {nil, _command} ->
         ""
 
-      {:refused, _why} ->
+      {{:refused, _why}, "troupe"} ->
         "next step: the default model's provider is refused (the warning above says why); " <>
           "set the variable it names, or run `troupe config` to set up a provider\n"
 
-      {:no_key, name} ->
+      {{:refused, _why}, _command} ->
+        "next step: the default model's provider is refused (the warning above says why); " <>
+          "set the variable it names, or write another provider into #{path}\n"
+
+      {{:no_key, name}, "troupe"} ->
         """
         next step: #{name} has no key, so no model can be asked. Run `troupe config` to set up a provider.
-          The simplest #{Troupe.Paths.display(user_path())} is
+          The simplest #{path} is
             provider: anthropic
             api_key: "{env:ANTHROPIC_API_KEY}"
           and a gateway such as LiteLLM is `provider: openai` with its `base_url` and `api_key`.
         """
+
+      {{:no_key, name}, _command} ->
+        """
+        next step: #{name} has no key, so no model can be asked. Write a provider into #{path}; the simplest is
+            provider: anthropic
+            api_key: "{env:ANTHROPIC_API_KEY}"
+          and a gateway such as LiteLLM is `provider: openai` with its `base_url` and `api_key`.
+          `troupe config` and the desktop app (This computer > Models) write the same file.
+        """
     end
   end
 
-  defp describe_warnings([]), do: ""
+  defp describe_warnings([], _command), do: ""
 
-  defp describe_warnings(warnings) do
-    "warnings (`troupe config validate` lists them; `troupe config migrate` fixes old spellings):\n" <>
+  defp describe_warnings(warnings, command) do
+    "warnings (`#{command} config validate` lists them; `#{command} config migrate` fixes old spellings):\n" <>
       Enum.map_join(warnings, "", &"  #{&1}\n")
   end
 

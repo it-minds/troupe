@@ -238,7 +238,7 @@ defmodule Troupe.CLI.ConfigSetup do
       "  * take your organisation's settings: troupe login <plane-url>, then troupe config pull"
     )
 
-    io.say.("  * or set it in the desktop app's Models settings")
+    io.say.("  * or set it up in the desktop app (This computer > Models)")
     io.say.("Then troupe config shows what Troupe will use.")
   end
 
@@ -491,7 +491,7 @@ defmodule Troupe.CLI.ConfigSetup do
   # A refused file is the report: what is wrong, where, and what to write instead.
   defp describe(workspace) do
     case Troupe.Config.resolve(workspace) do
-      {:ok, config, _layers} -> Troupe.Config.describe(config)
+      {:ok, config, _layers} -> Troupe.Config.describe(config, command: "troupe")
       {:error, error} -> Exception.message(error)
     end
   end

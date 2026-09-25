@@ -80,7 +80,7 @@ export function Session({
 
       <div className="stagearea">
         <div className="conversation">
-          <Stream state={view.state} self={self} readBlob={view.readBlob} />
+          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
@@ -239,10 +239,13 @@ function Banners({
 function Stream({
   state,
   self,
+  local,
   readBlob,
 }: {
   state: TranscriptState;
   self: string | undefined;
+  /** A session on this computer, whose model settings are this person's to change. */
+  local: boolean;
   readBlob: (blob: string) => Promise<string>;
 }): JSX.Element {
   const bottom = useRef<HTMLDivElement>(null);
@@ -256,7 +259,7 @@ function Stream({
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
 
       {state.entries.map((e) => (
-        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} readBlob={readBlob} />
+        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} />
       ))}
 
       {state.thinking && (
@@ -295,10 +298,12 @@ function Stream({
 function StreamEntry({
   entry,
   self,
+  local,
   readBlob,
 }: {
   entry: Entry;
   self: string | undefined;
+  local: boolean;
   readBlob: (blob: string) => Promise<string>;
 }): JSX.Element | null {
   switch (entry.kind) {
@@ -348,9 +353,31 @@ function StreamEntry({
     case "question":
       return entry.answer === undefined ? null : <AnswerRecord entry={entry} />;
 
-    case "system":
-      return <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" ? "error" : ""}`}>{entry.text}</p>;
+    case "system": {
+      const step = local && entry.type === "llm_error" ? modelErrorStep(entry.text) : null;
+      return (
+        <>
+          <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" ? "error" : ""}`}>{entry.text}</p>
+          {step && <p className="note">{step}</p>}
+        </>
+      );
+    }
   }
+}
+
+/**
+ * What a person does about a failed model request in a session on this computer, where
+ * there is one obvious thing. A computer with no model settings is the commonest first
+ * run, and its first request fails with "no API key is configured"; the settings are on
+ * This computer, under Models. A team session's model is the plane's, not this person's
+ * to set, so it gets no step. The terminal client puts its own step under the same two
+ * errors (`Troupe.UI.ModelError`).
+ */
+function modelErrorStep(text: string): string | null {
+  const reason = text.replace(/^model error: /, "");
+  if (reason.startsWith("no API key is configured")) return "Set up a provider on This computer, under Models.";
+  if (reason.startsWith("the provider rejected the credentials")) return "Check the key on This computer, under Models.";
+  return null;
 }
 
 /**

@@ -208,8 +208,9 @@ function Remove-Installed {
 }
 
 # A model is the one thing a first run cannot do without. opencode's providers are copied
-# by the daemon (Troupe reads them anyway while it has none of its own); `troupe config`
-# sets up the rest: a plane's settings, or a provider of the person's own.
+# by the daemon (Troupe reads them anyway while it has none of its own). Otherwise the
+# next step is `troupe config` where the TUI is installed, and the desktop app's Models
+# panel or the file itself where it is not: only the TUI has the command.
 function Show-ModelSettings {
   # Windows PowerShell turns a native command's stderr into a terminating error under
   # "Stop"; here a failure is an answer to report, not a reason to stop.
@@ -220,9 +221,10 @@ function Show-ModelSettings {
   $opencodeFile = if ($env:TROUPE_OPENCODE_CONFIG) { $env:TROUPE_OPENCODE_CONFIG }
     elseif ($env:XDG_CONFIG_HOME) { Join-Path $env:XDG_CONFIG_HOME "opencode\opencode.jsonc" }
     else { Join-Path $home_ ".config\opencode\opencode.jsonc" }
+  $report = if ($Tui) { "troupe config" } else { "troupe-daemon config" }
   if (Test-Path $configFile) {
     Write-Host "  $configFile"
-    if ($Tui) { Write-Host "  troupe config shows what Troupe will use." }
+    Write-Host "  $report shows what Troupe will use."
     return
   }
   Write-Host "  No $configFile yet, so no model is set up."
@@ -251,10 +253,22 @@ function Show-ModelSettings {
       return
     }
   }
-  Write-Host "  When you are ready, either:"
-  Write-Host "    * take your organisation's settings: troupe login <plane-url>, then troupe config pull"
-  Write-Host "    * write $configFile with a provider (provider, base_url, api_key, models)"
-  Write-Host "    * or set it in the desktop app's Models settings"
+  if ($Tui) {
+    Write-Host "  Next: troupe config sets one up, then troupe in a project directory opens a session."
+  } elseif ($Gui -or (Get-DesktopEntry)) {
+    Write-Host "  Next: set one up in the desktop app (This computer > Models), or write that file."
+  } else {
+    Write-Host "  Next: write that file."
+  }
+  Write-Host "  The simplest config.yaml takes the key from the environment:"
+  Write-Host "      provider: anthropic"
+  Write-Host "      api_key: `"{env:ANTHROPIC_API_KEY}`""
+  if ($Tui) {
+    Write-Host "  Or take your organisation's settings: troupe login <plane-url>, then troupe config pull."
+  } else {
+    Write-Host "  $report then shows what Troupe will use."
+  }
+  Write-Host "  First run: https://github.com/$Repo/blob/v$Version/docs/user/README.md#first-run"
 }
 
 function Write-RemovalPlan([bool]$PurgeToo) {
@@ -498,8 +512,8 @@ if (-not $PathHadBinDir) {
   }
 }
 if ($Tui) {
-  Write-Item "troupe            the TUI, in a project directory"
-  Write-Item "troupe config     the model settings it will use"
+  Write-Item "troupe config     sets up a model, or shows the one in use"
+  Write-Item "troupe            then the TUI, in a project directory"
 }
 if ($Gui) { Write-Item "Troupe            the desktop app, in the Start menu" }
 Write-Item "the desktop app starts the daemon when it needs one; so does troupe"

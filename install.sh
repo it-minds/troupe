@@ -341,15 +341,17 @@ install_gui_macos() {
 }
 
 # A model is the one thing a first run cannot do without. opencode's providers are copied
-# by the daemon (Troupe reads them anyway while it has none of its own); `troupe config`
-# sets up the rest: a plane's settings, or a provider of the person's own.
+# by the daemon (Troupe reads them anyway while it has none of its own). Otherwise the
+# next step is `troupe config` where the TUI is installed, and the desktop app's Models
+# panel or the file itself where it is not: only the TUI has the command.
 model_settings() {
   heading "Model settings"
   config_file="$CONFIG_DIR/config.yaml"
   opencode_file="${TROUPE_OPENCODE_CONFIG:-${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.jsonc}"
+  if [ "$with_tui" = 1 ]; then report="troupe config"; else report="troupe-daemon config"; fi
   if [ -f "$config_file" ]; then
     say "  $config_file"
-    if [ "$with_tui" = 1 ]; then say "  troupe config shows what Troupe will use."; fi
+    say "  $report shows what Troupe will use."
     return 0
   fi
   say "  No $config_file yet, so no model is set up."
@@ -377,10 +379,22 @@ model_settings() {
       return 0
     fi
   fi
-  say "  When you are ready, either:"
-  say "    * take your organisation's settings: troupe login <plane-url>, then troupe config pull"
-  say "    * write $config_file with a provider (provider, base_url, api_key, models)"
-  say "    * or set it in the desktop app's Models settings"
+  if [ "$with_tui" = 1 ]; then
+    say "  Next: troupe config sets one up, then troupe in a project directory opens a session."
+  elif [ "$with_gui" = 1 ] || gui_installed; then
+    say "  Next: set one up in the desktop app (This computer > Models), or write that file."
+  else
+    say "  Next: write that file."
+  fi
+  say "  The simplest config.yaml takes the key from the environment:"
+  say "      provider: anthropic"
+  say "      api_key: \"{env:ANTHROPIC_API_KEY}\""
+  if [ "$with_tui" = 1 ]; then
+    say "  Or take your organisation's settings: troupe login <plane-url>, then troupe config pull."
+  else
+    say "  $report then shows what Troupe will use."
+  fi
+  say "  First run: https://github.com/$REPO/blob/v$VERSION/docs/user/README.md#first-run"
 }
 
 install() {
@@ -543,8 +557,8 @@ install() {
     fi
   fi
   if [ "$with_tui" = 1 ]; then
-    item "troupe            the TUI, in a project directory"
-    item "troupe config     the model settings it will use"
+    item "troupe config     sets up a model, or shows the one in use"
+    item "troupe            then the TUI, in a project directory"
   fi
   if [ "$with_gui" = 1 ]; then
     if [ "$OS" = Darwin ]; then item "Troupe            the desktop app, in ~/Applications"; else item "Troupe            the desktop app, in your applications menu"; fi
