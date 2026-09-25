@@ -21,7 +21,7 @@ defmodule Troupe.Sessions.Index do
 
   alias Troupe.{Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
-  alias Troupe.Session.{Approvals, Log, Questions, Watcher}
+  alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
 
   @type meta :: %{
           id: String.t(),
@@ -31,6 +31,7 @@ defmodule Troupe.Sessions.Index do
           profile: String.t(),
           state: :active | :dormant | :read_only | :erased,
           status: atom(),
+          pending_approvals: non_neg_integer(),
           tokens: non_neg_integer(),
           cost: float(),
           created_at: String.t() | nil,
@@ -326,11 +327,12 @@ defmodule Troupe.Sessions.Index do
 
   @impl GenServer
   def handle_call({:get, session_id}, _from, state) do
-    {:reply, Map.get(state.live, session_id) || from_disk(state, session_id), state}
+    {:reply, live(state, session_id) || from_disk(state, session_id), state}
   end
 
   def handle_call({:list, filter}, _from, state) do
-    {:reply, state |> all() |> apply_filter(filter), state}
+    listed = state |> all() |> apply_filter(filter) |> Enum.map(&(live(state, &1.id) || &1))
+    {:reply, listed, state}
   end
 
   def handle_call(:live_ids, _from, state) do
@@ -355,6 +357,28 @@ defmodule Troupe.Sessions.Index do
 
     {:reply, workspaces, state}
   end
+
+  # A running session's entry, with the approvals it has open read when it is asked for:
+  # from the session's own summary projection, which already follows every way an
+  # approval ends (#142) and is what a worker reports to the plane from. Nothing here
+  # hears the session's events, so a count kept here would be one more reader to get it
+  # wrong.
+  defp live(state, session_id) do
+    case Map.fetch(state.live, session_id) do
+      {:ok, entry} ->
+        open = session_id |> Summary.snapshot() |> Map.get("approvals", [])
+        entry |> Map.put(:pending_approvals, length(open)) |> waiting()
+
+      :error ->
+        nil
+    end
+  end
+
+  # `waiting` outranks whatever else a listing would say, as it does in what a worker
+  # reports: a session with an approval open is waiting on a person, whatever its agent
+  # is doing meanwhile. So a local row and a plane's row say the same of it.
+  defp waiting(%{pending_approvals: open} = meta) when open > 0, do: %{meta | status: :waiting}
+  defp waiting(meta), do: meta
 
   # Live entries win: a session with a running tree knows more about itself than its
   # log's first event does.
@@ -420,23 +444,37 @@ defmodule Troupe.Sessions.Index do
         last = List.last(events)
         created = Enum.find(events, &(&1.type == "session_created"))
 
-        [
-          %{
-            id: Path.basename(Path.dirname(path)),
-            workspace: get_data(created, "workspace", "(unknown)"),
-            branch: get_data(created, "branch", nil),
-            parent: get_data(created, "parent", nil),
-            profile: get_data(created, "profile", "build"),
-            state: :dormant,
-            status: status_from_log(events),
-            tokens: total_tokens(events),
-            cost: total_cost(events),
-            created_at: first.ts,
-            last_active_at: last.ts,
-            pinned: false
-          }
-        ]
+        meta = %{
+          id: Path.basename(Path.dirname(path)),
+          workspace: get_data(created, "workspace", "(unknown)"),
+          branch: get_data(created, "branch", nil),
+          parent: get_data(created, "parent", nil),
+          profile: get_data(created, "profile", "build"),
+          state: :dormant,
+          status: status_from_log(events),
+          pending_approvals: open_approvals(events),
+          tokens: total_tokens(events),
+          cost: total_cost(events),
+          created_at: first.ts,
+          last_active_at: last.ts,
+          pinned: false
+        }
+
+        [waiting(meta)]
     end
+  end
+
+  # The root agent's approvals still open, folded by the summary projection's own rule:
+  # an approval ends with its decision, with its call's `tool_call_completed`, or with a
+  # cancel. The root's alone, like the status below, because those are what it asks again
+  # when it wakes; a delegation comes back interrupted, and what its subagent asked is
+  # owed to nobody.
+  defp open_approvals(events) do
+    events
+    |> Enum.filter(&(&1.agent == Session.root_path()))
+    |> Enum.reduce(Summary.empty(), &Summary.fold(&2, &1))
+    |> Map.get("approvals", [])
+    |> length()
   end
 
   # What a session was in the middle of when it stopped, read from the log alone. A

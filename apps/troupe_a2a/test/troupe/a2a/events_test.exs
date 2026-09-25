@@ -9,6 +9,8 @@ defmodule Troupe.A2A.EventsTest do
   alias Troupe.A2A.{Auth, Events}
   alias Troupe.Protocol.Event
 
+  @recorded Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))
+
   defp fold(events) do
     Enum.reduce(events, {Events.new("t-1"), []}, fn json, {acc, updates} ->
       {acc, new} = Events.step(acc, Event.from_json(json))
@@ -18,6 +20,14 @@ defmodule Troupe.A2A.EventsTest do
 
   defp durable(seq, type, data, agent \\ ["root"]) do
     %{"seq" => seq, "type" => type, "data" => data, "agent" => agent}
+  end
+
+  defp recorded(name) do
+    [@recorded, name <> ".jsonl"]
+    |> Path.join()
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&Jason.decode!/1)
   end
 
   defp assistant(text, stop_reason) do
@@ -92,6 +102,73 @@ defmodule Troupe.A2A.EventsTest do
 
     assert acc.state == "working"
     assert acc.pending == %{}
+  end
+
+  # Logs real sessions wrote against the scripted model (test/fixtures/approvals at the
+  # repository's root), so the task is held to what the agent actually writes (#145): a
+  # cancel closes each call it stops with a `tool_call_completed` and then says
+  # `cancelled`; a tool that timed out waiting is closed the same way; a subagent the
+  # cancel took down says nothing at all. `open` stops while the approval still waits.
+  describe "an approval in a recorded log" do
+    test "stops the task waiting once its tool timed out, and the turn works on" do
+      events = recorded("timed_out")
+
+      # Asked at seq 8, and the call closed at seq 9 without a decision.
+      {acc, updates} = fold(Enum.take(events, 9))
+      assert acc.state == "working"
+      assert acc.pending == %{}
+      assert %{"final" => false, "status" => %{"state" => "working"}} = List.last(updates)
+
+      {acc, _updates} = fold(events)
+      assert acc.state == "completed"
+    end
+
+    test "leaves a later approval's decision free to bring the task back to working" do
+      # The model asks again after the timeout, and this time somebody answers: the
+      # request and the decision from `decided`, after `timed_out` up to its results.
+      asked_again =
+        "decided"
+        |> recorded()
+        |> Enum.filter(&(&1["seq"] in 7..9))
+        |> Enum.with_index(11)
+        |> Enum.map(fn {event, seq} -> Map.put(event, "seq", seq) end)
+
+      {acc, _updates} = fold(Enum.take(recorded("timed_out"), 10) ++ asked_again)
+      assert acc.state == "working"
+      assert acc.pending == %{}
+    end
+
+    test "is not pending once the turn was cancelled, whichever agent asked" do
+      for name <- ~w(cancelled subagent_cancelled) do
+        {acc, _updates} = fold(recorded(name))
+        assert acc.state == "canceled", name
+        assert acc.pending == %{}, name
+      end
+    end
+
+    test "ends with a cancel that reached the subagent asking, which leaves the task working" do
+      # The subagent asked at seq 15. A cancel of that subagent alone ends its approval;
+      # the root is still at work, so the task is too.
+      asked = Enum.take(recorded("subagent_cancelled"), 15)
+      cancel = durable(16, "cancelled", %{}, ["root", "general#1"])
+
+      {acc, _updates} = fold(asked)
+      assert acc.state == "input-required"
+
+      {acc, _updates} = fold(asked ++ [cancel])
+      assert acc.state == "working"
+      assert acc.pending == %{}
+    end
+
+    test "is closed by its decision, and input-required while nobody has answered it" do
+      {decided, _updates} = fold(recorded("decided"))
+      assert decided.state == "completed"
+      assert decided.pending == %{}
+
+      {open, _updates} = fold(recorded("open"))
+      assert open.state == "input-required"
+      assert Map.keys(open.pending) == ["call_4"]
+    end
   end
 
   test "a published file is an artifact named by its hash" do
