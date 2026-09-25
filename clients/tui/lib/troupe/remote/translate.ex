@@ -294,9 +294,10 @@ defmodule Troupe.Remote.Translate do
 
       # The turn is over and the agent waits for input: the same `idle` the live
       # `agent_state` says, but from the log, so it is neither dropped nor missed by a
-      # client that attached after it happened.
+      # client that attached after it happened. A `reason` rides along when the harness
+      # ended the turn rather than the model (`tool_failures`, troupe-remote Decision 687).
       "turn_ended" ->
-        {[emit.(:agent_state, %{to: :idle})], memory}
+        {[emit.(:agent_state, ended_by(%{to: :idle}, data))], memory}
 
       "cancelled" ->
         {[
@@ -483,6 +484,11 @@ defmodule Troupe.Remote.Translate do
        do: [emit.(:remote_note, %{text: "done (#{reason})"})]
 
   defp done_note(_emit, _data), do: []
+
+  defp ended_by(idle, %{"reason" => reason}) when is_binary(reason),
+    do: Map.put(idle, :reason, reason)
+
+  defp ended_by(idle, _data), do: idle
 
   defp as(%{"profile" => profile}) when is_binary(profile), do: " as #{profile}"
   defp as(_data), do: ""

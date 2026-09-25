@@ -189,7 +189,6 @@ defmodule Troupe.Agent.Server do
       watcher: Keyword.get(opts, :watcher),
       bundle: Keyword.get(opts, :bundle),
       budget: opts |> Keyword.get(:budget, Config.budget(config)) |> Budget.start(),
-      budget_overridden: Keyword.get(opts, :budget_overridden, false),
       fake: Keyword.get(opts, :fake)
     }
 
@@ -298,7 +297,14 @@ defmodule Troupe.Agent.Server do
       "profile_switched" ->
         switch_definition(state, data["to"])
 
-      type when type in ["compacted", "budget_ask_started", "budget_ask_answered"] ->
+      type
+      when type in [
+             "compacted",
+             "budget_ask_started",
+             "budget_ask_answered",
+             "tool_failures_ask_started",
+             "tool_failures_ask_answered"
+           ] ->
         fold_limits(state, type, data)
 
       type when type in ["agent_done", "agent_woken"] ->
@@ -323,13 +329,34 @@ defmodule Troupe.Agent.Server do
   end
 
   defp fold_limits(state, "budget_ask_started", data) do
-    %{state | budget_ask_pending: data["call_id"], budget_asks: state.budget_asks + 1}
+    %{
+      state
+      | budget_ask_pending: data["call_id"],
+        budget_asks: state.budget_asks + 1,
+        budget_ask_limit: limit_of(data["dimension"])
+    }
   end
 
+  # An `always` written before Decision 687 does not say what it lifted. It lifts the limit
+  # its question named, which is all that question was about; a limit it used to lift as
+  # well asks again when it is reached, which costs a question and never any work.
   defp fold_limits(state, "budget_ask_answered", data) do
-    state
+    %{state | budget_ask_limit: limit_named(data["lifted"]) || state.budget_ask_limit}
     |> apply_budget_decision(budget_decision_atom(data["decision"]))
-    |> Map.put(:budget_ask_pending, nil)
+    |> Map.merge(%{budget_ask_pending: nil, budget_ask_limit: nil})
+  end
+
+  defp fold_limits(state, "tool_failures_ask_started", data) do
+    %{
+      state
+      | budget_ask_pending: data["call_id"],
+        failure_asks: state.failure_asks + 1,
+        failure_ask: {data["tool"], data["failures"]}
+    }
+  end
+
+  defp fold_limits(state, "tool_failures_ask_answered", _data) do
+    %{state | budget_ask_pending: nil, failure_ask: nil}
   end
 
   defp fold_done(state, "agent_done", data), do: %{state | done_reason: safe_reason(data["reason"])}
@@ -378,9 +405,10 @@ defmodule Troupe.Agent.Server do
   defp carry_on(state, []), do: if(needs_turn?(state), do: :turn, else: :none)
   defp carry_on(_state, incomplete), do: {:rerun, incomplete}
 
-  # A spent budget whose question is still waiting on a person is asked again rather than
-  # dropped: the turn goes only as far as the gate, which asks under the same id and makes
-  # no model call while the budget is spent (Decision 660). A cancelled one is not waiting.
+  # A question at the gate still waiting on a person — a spent budget's (Decision 660), or
+  # the failure guard's (Decision 687), which waits in the same place — is asked again
+  # rather than dropped: the turn goes only as far as the gate, which asks under the same
+  # id and makes no model call until it is answered. A cancelled one is not waiting.
   defp interrupt(state, [], awaiting) do
     cond do
       MapSet.member?(awaiting, state.budget_ask_pending) -> :turn
@@ -440,14 +468,16 @@ defmodule Troupe.Agent.Server do
   end
 
   # Whether the last thing that happened to a turn was a cancel: no input, model call or
-  # tool call since.
+  # tool call since. A turn the failure guard stopped (Decision 687) counts as one — the
+  # harness cancelled it, and taking it up again after a restart is the loop it stopped.
   defp cancelled?(events) do
     last =
       events
-      |> Enum.filter(&(&1.type in ~w(user_input llm_request tool_call_started cancelled)))
+      |> Enum.filter(&(&1.type in ~w(user_input llm_request tool_call_started cancelled turn_ended)))
       |> List.last()
 
-    match?(%Event{type: "cancelled"}, last)
+    match?(%Event{type: "cancelled"}, last) or
+      match?(%Event{type: "turn_ended", data: %{"reason" => "tool_failures"}}, last)
   end
 
   defp needs_turn?(%State{conversation: []}), do: false
@@ -624,15 +654,19 @@ defmodule Troupe.Agent.Server do
 
   # -- :waiting ---------------------------------------------------------------
   #
-  # The budget is spent and the person attached has been asked (Decision 660). Nothing
-  # runs; input queues as it does mid-turn; the answer comes back from the task that
-  # waited on `Troupe.Session.Questions`.
+  # The budget is spent, or a tool keeps failing, and the person attached has been asked
+  # (Decisions 660, 687). Nothing runs; input queues as it does mid-turn; the answer comes
+  # back from the task that waited on `Troupe.Session.Questions`.
 
   @doc false
   def waiting({:call, from}, :snapshot, state), do: reply_snapshot(from, :waiting, state)
 
   def waiting(:info, {:budget_answer, call_id, answer}, %State{budget_ask_pending: call_id} = state) do
     budget_answered(%{state | budget_ask_task: nil}, budget_decision(answer))
+  end
+
+  def waiting(:info, {:failure_answer, call_id, answer}, %State{budget_ask_pending: call_id} = state) do
+    failures_answered(%{state | budget_ask_task: nil}, failure_decision(answer))
   end
 
   def waiting(:info, :cancel, state), do: cancel_everything(state)
@@ -920,9 +954,9 @@ defmodule Troupe.Agent.Server do
   # -- turns ------------------------------------------------------------------
 
   defp start_turn(state) do
-    case budget_gate(state) do
+    case gate(state) do
       halt when halt != :ok ->
-        budget_halt(halt)
+        gate_halt(halt)
 
       :ok ->
         definition = effective_definition(state)
@@ -1221,12 +1255,15 @@ defmodule Troupe.Agent.Server do
     truncated(state, response)
   end
 
+  # Whitespace is not text: a reply of "\n\n" is as empty as one of nothing, and handed
+  # to a parent as a summary it said nothing.
   defp handle_response(state, %Response{} = response) do
     case Response.tool_uses(response) do
       [] ->
-        if Message.text(Response.to_message(response)) == "",
-          do: empty_reply(state),
-          else: finish_turn(%{state | truncation_retried: false}, response)
+        case emptyable(Message.text(Response.to_message(response))) do
+          nil -> empty_reply(state)
+          text -> finish_turn(%{state | truncation_retried: false}, text)
+        end
 
       tool_uses ->
         dispatch_tools(%{state | truncation_retried: false}, tool_uses)
@@ -1354,10 +1391,10 @@ defmodule Troupe.Agent.Server do
     to_idle_or_done(%{state | conversation: state.conversation ++ [Message.user(note)]})
   end
 
-  defp finish_turn(state, %Response{} = response) do
+  defp finish_turn(state, text) do
     cond do
       State.subagent?(state) ->
-        report_and_finish(state, Message.text(Response.to_message(response)))
+        report_and_finish(state, text)
 
       needs_compaction?(state) ->
         enter_compaction(state, :idle)
@@ -1383,10 +1420,11 @@ defmodule Troupe.Agent.Server do
   # The end of a turn is written down as well as announced. `agent_state` is ephemeral and
   # may be dropped, and a client that attached after the turn ended — `troupe run
   # --headless`, whose session starts working before anything has subscribed — still has
-  # to be able to tell that the agent is waiting for input (issue #127).
-  defp rest(state) do
+  # to be able to tell that the agent is waiting for input (issue #127). A `reason` says the
+  # harness ended the turn rather than the model (Decision 687).
+  defp rest(state, reason \\ nil) do
     state = %{state | turn_mode: nil}
-    log(state, :turn_ended, %{})
+    log(state, :turn_ended, if(reason, do: %{"reason" => reason}, else: %{}))
     publish_state(state, :idle)
     {:next_state, :idle, state}
   end
@@ -1601,29 +1639,192 @@ defmodule Troupe.Agent.Server do
         report_and_finish(state, state.finish_summary)
 
       true ->
-        state |> fold_results(State.ordered_results(state)) |> continue_after_results()
+        results = State.ordered_results(state)
+        state |> fold_results(results) |> count_failures(results) |> continue_after_results()
     end
   end
 
   defp continue_after_results(state) do
-    case budget_gate(state) do
+    case gate(state) do
       :ok ->
         if needs_compaction?(state),
           do: enter_compaction(state, :thinking),
           else: start_turn(state)
 
       halt ->
-        budget_halt(halt)
+        gate_halt(halt)
     end
   end
 
+  # -- the failure guard ------------------------------------------------------
+  #
+  # A model can call the same tool, fail the same way, and call it again, for as long as
+  # anything lets it: a `read_branch` of ids "1" to "352", one per model call, ran for half
+  # an hour after `always` had lifted every limit (issue #117). The harness spends the
+  # money, so the harness notices (Decision 687). Failures of each tool are counted in a
+  # row; a success of that tool clears its count. At `tool_failures_note_at` the model is
+  # told to stop and reconsider; at `tool_failures_stop_at` the turn stops before its next
+  # model call and the person attached is asked whether it goes on — whatever the budget
+  # says, because this is about the loop and not the money. A subagent is stopped and hands
+  # its parent what it has, and a session nobody is attached to answers `stop` itself.
+
+  defp count_failures(state, results) do
+    counts =
+      Enum.reduce(results, state.tool_failures, fn
+        %Result{ok?: true, name: name}, acc -> Map.delete(acc, name)
+        %Result{name: name}, acc -> Map.update(acc, name, 1, &(&1 + 1))
+      end)
+
+    case newly_failing(state.tool_failures, counts, state.config.tool_failures_note_at) do
+      [] -> %{state | tool_failures: counts}
+      failing -> note_failures(%{state | tool_failures: counts}, failing)
+    end
+  end
+
+  defp newly_failing(before, counts, at) when is_integer(at) and at > 0 do
+    for {tool, n} <- counts, n >= at, Map.get(before, tool, 0) < at, do: {tool, n}
+  end
+
+  defp newly_failing(_before, _counts, _at), do: []
+
+  # A note from the harness, after the results, as the reply-shape notes are (Decision
+  # 659): the model reads it, a client shows it, and a replay rebuilds it.
+  defp note_failures(state, failing) do
+    ask = if State.subagent?(state), do: "finish and say what is in the way", else: "ask the user"
+
+    note =
+      Enum.map_join(failing, " ", fn {tool, n} -> "#{tool} has failed #{n} times in a row." end) <>
+        " Stop repeating it: read what the errors say and try a different approach, or #{ask}. " <>
+        "If it keeps failing, the harness will stop this turn."
+
+    log(state, :user_input, %{"source" => "harness", "text" => note})
+    %{state | conversation: state.conversation ++ [Message.user(note)]}
+  end
+
+  defp stuck_tool(%State{config: %{tool_failures_stop_at: at}} = state) when is_integer(at) and at > 0 do
+    Enum.find(state.tool_failures, fn {_tool, n} -> n >= at end)
+  end
+
+  defp stuck_tool(_state), do: nil
+
+  # Asked as the budget is: through `Troupe.Session.Questions` under an id of its own
+  # (`failures-<n>`), so any client that answers an `ask_user` answers this, and a question
+  # still owed after a restart is asked again under the same id. `stop` comes first,
+  # because a client with nobody to ask answers with the first option (the headless runner
+  # does) and stopping is what a loop nobody is watching should do.
+  defp ask_failures(state, tool, failures) do
+    detail = "#{tool} has failed #{failures} times in a row"
+
+    {call_id, state} =
+      case state.failure_ask do
+        {_tool, _failures} ->
+          {state.budget_ask_pending, state}
+
+        nil ->
+          id = "failures-#{state.failure_asks + 1}"
+
+          log(state, :tool_failures_ask_started, %{
+            "call_id" => id,
+            "tool" => tool,
+            "failures" => failures,
+            "detail" => detail
+          })
+
+          {id, %{state | failure_asks: state.failure_asks + 1, failure_ask: {tool, failures}}}
+      end
+
+    ask_person(state, :failure_answer, %{
+      call_id: call_id,
+      agent_path: state.agent_path,
+      question: detail <> " — stop this turn?",
+      options: [
+        %{label: "stop", description: "end this turn here; the agent waits for your next message"},
+        %{
+          label: "continue",
+          description: "let it keep trying; asked again after #{state.config.tool_failures_stop_at} more failures"
+        }
+      ],
+      multiple: false
+    })
+  end
+
+  defp failure_decision({:ok, text}) when is_binary(text) do
+    case text |> String.trim() |> String.downcase() do
+      go when go in ["continue", "c", "allow", "yes", "y", "go on"] -> :continue
+      _other -> :stop
+    end
+  end
+
+  defp failure_decision(_unattended_or_odd), do: :stop
+
+  # Either way the tool starts counting again: `continue` is a person saying it may, and
+  # after `stop` the next turn is the person's.
+  defp failures_answered(%State{failure_ask: {tool, failures}} = state, decision) do
+    log(state, :tool_failures_ask_answered, %{
+      "call_id" => state.budget_ask_pending,
+      "decision" => Atom.to_string(decision)
+    })
+
+    state = %{
+      state
+      | budget_ask_pending: nil,
+        failure_ask: nil,
+        tool_failures: Map.delete(state.tool_failures, tool)
+    }
+
+    case decision do
+      :continue -> start_turn(state)
+      :stop -> stop_failing(state, tool, failures)
+    end
+  end
+
+  # The model is told why in its conversation, so the person's next message does not
+  # arrive as though nothing had happened, and `turn_ended` says why in the log, for a
+  # reader that has to tell this rest from one the model chose.
+  defp stop_failing(state, tool, failures) do
+    note =
+      "The harness stopped this turn because #{tool} failed #{failures} times in a row. " <>
+        "Wait for the person's next message before trying it again."
+
+    log(state, :user_input, %{"source" => "harness", "text" => note})
+    rest(%{state | conversation: state.conversation ++ [Message.user(note)]}, "tool_failures")
+  end
+
+  defp failing_summary(state, tool, failures) do
+    why = "#{tool} failed #{failures} times in a row"
+
+    case last_assistant_text(state) do
+      "" -> "The delegated agent was stopped because #{why}, before it reported anything."
+      text -> "[cut short: the delegated agent was stopped because #{why}, so this may be incomplete]\n\n" <> text
+    end
+  end
+
+  # -- the gate ---------------------------------------------------------------
+
+  # What stands between an agent and its next model call: the failure guard, then the
+  # budget. One question at a time — both wait in `:waiting` under `budget_ask_pending` —
+  # and one still owed is asked again, under its own id, before anything else is.
+  defp gate(%State{failure_ask: {tool, failures}} = state), do: failure_halt(state, tool, failures)
+
+  defp gate(state) do
+    case stuck_tool(state) do
+      nil -> budget_gate(state)
+      {tool, failures} -> failure_halt(state, tool, failures)
+    end
+  end
+
+  defp failure_halt(%State{parent: parent} = state, tool, failures) when is_pid(parent),
+    do: {:failing, state, tool, failures}
+
+  defp failure_halt(state, tool, failures), do: {:ask, ask_failures(state, tool, failures)}
+
   # Whether another model call may start (Decision 660). A spent budget is a question,
   # not a stop: the person attached is asked, once per slice, and `allow` buys the same
-  # slice again. `full_send` and an earlier `always` pass without asking; a session whose
-  # budget is a contract (`budget_asks: false` — the plane's terms) stops as it always
-  # did; an unattended session answers no itself, through the questions' deny mode.
+  # slice again. `full_send` passes without asking, and a limit `always` lifted is never
+  # the one that stops (Decision 687); a session whose budget is a contract
+  # (`budget_asks: false` — the plane's terms) stops as it always did; an unattended
+  # session answers no itself, through the questions' deny mode.
   defp budget_gate(%State{config: %{full_send: true}}), do: :ok
-  defp budget_gate(%State{budget_overridden: true}), do: :ok
 
   defp budget_gate(%State{config: %{budget_asks: false}} = state), do: check_or_stop(state)
 
@@ -1646,20 +1847,42 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  defp budget_halt({:stop, state, limit}) do
+  defp gate_halt({:stop, state, limit}) do
     enter_done(state, :budget_exhausted, %{"limit" => Atom.to_string(limit)})
   end
 
-  defp budget_halt({:ask, state}) do
+  defp gate_halt({:failing, state, tool, failures}) do
+    finish_short(state, :tool_failures, failing_summary(state, tool, failures))
+  end
+
+  defp gate_halt({:ask, state}) do
     publish_state(state, :waiting)
     {:next_state, :waiting, state}
   end
 
-  @budget_options [
-    %{label: "allow", description: "one more slice: the same budget again, then ask again"},
-    %{label: "always", description: "lift this agent's budget for the rest of the session"},
-    %{label: "deny", description: "stop here"}
-  ]
+  # `always` names the limit it lifts, and only that one (Decision 687): the question was
+  # about one limit, and an answer that switched off the other three is how a loop of
+  # failing calls ran on for half an hour past a time limit that had already warned.
+  defp budget_options(dim) do
+    [
+      %{label: "allow", description: "one more slice: the same budget again, then ask again"},
+      %{label: "always", description: "lift the #{limit_words(dim)} limit for the rest of the session"},
+      %{label: "deny", description: "stop here"}
+    ]
+  end
+
+  defp limit_words(:turns), do: "turn"
+  defp limit_words(:input), do: "input-token"
+  defp limit_words(:output), do: "output-token"
+  defp limit_words(:wall), do: "time"
+
+  @limits [:max_turns, :max_input_tokens, :max_output_tokens, :wall_clock]
+
+  # The limit a `budget_ask_started` names by its dimension, and one a `budget_ask_answered`
+  # names outright. Both from a closed set, so an odd value in a log is nothing rather than
+  # a new atom.
+  defp limit_of(dimension), do: Enum.find(@limits, &(Atom.to_string(Headroom.dimension(&1)) == dimension))
+  defp limit_named(name), do: Enum.find(@limits, &(Atom.to_string(&1) == name))
 
   # The question rides on `Troupe.Session.Questions`, exactly as an `ask_user` does, so a
   # client that can answer a question can answer this one and no new method is needed.
@@ -1691,23 +1914,27 @@ defmodule Troupe.Agent.Server do
           {id, %{state | budget_asks: state.budget_asks + 1}}
       end
 
-    question = %{
+    %{state | budget_ask_limit: limit}
+    |> ask_person(:budget_answer, %{
       call_id: call_id,
       agent_path: state.agent_path,
       question: detail <> " — continue?",
-      options: @budget_options,
+      options: budget_options(dim),
       multiple: false
-    }
+    })
+  end
 
+  # A task waits on the answer and sends it back tagged, so the agent never blocks.
+  defp ask_person(state, tag, question) do
     agent = self()
     session_id = state.session_id
 
     {:ok, pid} =
       Task.Supervisor.start_child(tasks(state), fn ->
-        send(agent, {:budget_answer, call_id, Questions.ask(session_id, question)})
+        send(agent, {tag, question.call_id, Questions.ask(session_id, question)})
       end)
 
-    %{state | budget_ask_pending: call_id, budget_ask_task: pid}
+    %{state | budget_ask_pending: question.call_id, budget_ask_task: pid}
   end
 
   defp budget_decision({:ok, text}) when is_binary(text) do
@@ -1729,19 +1956,29 @@ defmodule Troupe.Agent.Server do
     %{state | budget: Budget.grant(state.budget), headroom_warned: MapSet.new()}
   end
 
-  defp apply_budget_decision(state, :always), do: %{state | budget_overridden: true}
+  defp apply_budget_decision(%State{budget_ask_limit: nil} = state, :always), do: state
+
+  defp apply_budget_decision(state, :always),
+    do: %{state | budget: Budget.lift(state.budget, state.budget_ask_limit)}
+
   defp apply_budget_decision(state, :deny), do: state
 
   defp budget_answered(state, decision) do
     data = %{"call_id" => state.budget_ask_pending, "decision" => Atom.to_string(decision)}
 
     data =
-      if decision == :allow,
-        do: Map.put(data, "grant", grant_json(Budget.original(state.budget))),
-        else: data
+      case decision do
+        :allow -> Map.put(data, "grant", grant_json(Budget.original(state.budget)))
+        :always when state.budget_ask_limit != nil -> Map.put(data, "lifted", Atom.to_string(state.budget_ask_limit))
+        _other -> data
+      end
 
     log(state, :budget_ask_answered, data)
-    state = state |> apply_budget_decision(decision) |> Map.put(:budget_ask_pending, nil)
+
+    state =
+      state
+      |> apply_budget_decision(decision)
+      |> Map.merge(%{budget_ask_pending: nil, budget_ask_limit: nil})
 
     if decision == :deny do
       limit =
@@ -1841,10 +2078,9 @@ defmodule Troupe.Agent.Server do
       parent: self(),
       parent_ref: child_ref,
       task: task,
+      # A limit `always` lifted reaches the subtree inside the slice: a person who lifted
+      # it for the root did not mean each delegate to stop at it.
       budget: Budget.slice(state.budget, definition.budget_share),
-      # `always` reaches the subtree: a person who lifted the root's budget did not mean
-      # to be asked again by each of its delegates.
-      budget_overridden: state.budget_overridden,
       watcher: state.watcher,
       bundle: state.bundle,
       fake: state.fake

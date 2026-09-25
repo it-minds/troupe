@@ -186,6 +186,90 @@ defmodule Troupe.Agent.DelegationTest do
     end
   end
 
+  describe "a delegate's turns" do
+    # Issue #118: a share of the root's remaining turns gave an `explore` asked to read an
+    # app 13 or 14 turns, and six of seven ran out reading before they reported.
+    test "are its own, so an explore delegated late in a root's turn still finishes", context do
+      write_file(context, "mix.exs", "defmodule App.MixProject do\nend\n")
+
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" =>
+              List.duplicate({:tools, [{"todo_read", %{}}]}, 6) ++
+                [
+                  {:tools, [{"delegate", %{"agent" => "explore", "task" => "summarise the app"}}]},
+                  {:text, "root done"}
+                ],
+            "explore" =>
+              List.duplicate({:tools, [{"read_file", %{"path" => "mix.exs"}}]}, 20) ++
+                [{:tools, [{"finish", %{"summary" => "an app with a mix.exs"}}]}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "look at the app")
+      await_root_idle(session.id, 20_000)
+
+      result =
+        session.id
+        |> events_of_type("tool_call_completed")
+        |> Enum.find(&(&1.data["name"] == "delegate"))
+
+      assert result.data["ok"]
+      assert result.data["content"] == "an app with a mix.exs"
+
+      [explore] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert explore.data["reason"] == "finished"
+    end
+  end
+
+  describe "a delegate's final reply" do
+    test "is handed over trimmed", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [{:text, "\n\nThe retry logic is in lib/retry.ex.\n"}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["content"] == "The retry logic is in lib/retry.ex."
+    end
+
+    test "of whitespace alone is not a summary: it is nudged once, then ends empty", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [{:text, "\n\n"}, {:text, "  \n"}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["content"] =~ "no text and no tool call"
+      assert length(Fake.requests_for(fake, "general")) == 2
+
+      [child] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert child.data["reason"] == "empty_reply"
+    end
+  end
+
   describe "no orphans" do
     test "killing a parent Node leaves nothing alive under it", context do
       %{session: session} =

@@ -53,6 +53,9 @@ with control rights can answer; the first answer wins and everyone is told who g
 
 **Budget.** Limits on turns, tokens and time, plus your team's money budget on the plane.
 When one is reached the agent says which and asks, or stops; it never silently continues.
+"Always" lifts the limit it asked about for the rest of the session, and the others still
+ask. Apart from the budget, a tool that fails ten times in a row stops the turn and asks
+whether to go on, even with every limit lifted.
 
 **Bundle.** The agents, skills and MCP servers a profile's sessions carry, published in
 versions. A session is pinned to the version current when it started.

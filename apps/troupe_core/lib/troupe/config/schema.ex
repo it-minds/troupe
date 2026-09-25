@@ -226,6 +226,20 @@ defmodule Troupe.Config.Schema do
           default: 60_000,
           field: :tool_output_limit
         ),
+        spec(
+          "tool_failures_note_at",
+          {:integer, 0},
+          "Failures of one tool in a row after which the model is told to stop and reconsider; 0 never.",
+          default: 5,
+          field: :tool_failures_note_at
+        ),
+        spec(
+          "tool_failures_stop_at",
+          {:integer, 0},
+          "Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never.",
+          default: 10,
+          field: :tool_failures_stop_at
+        ),
         spec("read_roots", {:list, :string}, "Directories outside the workspace the read tools may reach.",
           default: [],
           scope: :trusted,

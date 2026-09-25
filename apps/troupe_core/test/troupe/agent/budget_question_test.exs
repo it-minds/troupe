@@ -1,13 +1,16 @@
 defmodule Troupe.Agent.BudgetQuestionTest do
   @moduledoc """
   A spent budget is a question for the person attached, not a stop (Decision 660): `allow`
-  buys the same slice again, `always` lifts it, `deny` ends the agent; a contract budget
-  and an unattended session behave as before; `full_send` never asks.
+  buys the same slice again, `always` lifts the one limit it was asked about (Decision
+  687), `deny` ends the agent; a contract budget and an unattended session behave as
+  before; `full_send` never asks.
   """
 
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.Server
+  alias Troupe.Budget
+  alias Troupe.Session.Log
 
   defp tools(n), do: List.duplicate({:tools, [{"todo_read", %{}}]}, n)
   defp finish(summary), do: {:text_and_tools, "done", [{"finish", %{"summary" => summary}}]}
@@ -64,7 +67,7 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     assert %{"budget" => %{"turns" => 4, "max_turns" => 4}} = Server.summary(snapshot_state(sid), :done)
   end
 
-  test "always lifts this agent's budget for the rest of the session", context do
+  test "always lifts the limit it was asked about for the rest of the session", context do
     {sid, fake} = run(context, tools(3) ++ [finish("ok")], max_turns: 1)
 
     await_question(sid, "budget-1")
@@ -75,6 +78,69 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     assert Fake.call_count(fake) == 4
     assert [%{data: %{"decision" => "always"}}] = events_of_type(sid, :budget_ask_answered)
     assert length(events_of_type(sid, :budget_ask_started)) == 1
+  end
+
+  # The fake answers every call with 100 input tokens, so 150 is spent by the second call.
+  test "always on input tokens lifts that limit alone: the turn limit still asks", context do
+    {sid, fake} = run(context, tools(6), max_input_tokens: 150, max_turns: 4)
+
+    asked = await_question(sid, "budget-1")
+    assert asked["question"] =~ "input tokens"
+    always = Enum.find(asked["options"], &(label(&1) == "always"))
+    assert (always["description"] || always[:description]) == "lift the input-token limit for the rest of the session"
+
+    Troupe.answer(sid, "budget-1", "always")
+
+    assert_receive {:troupe_event, ^sid,
+                    %Event{type: "budget_ask_answered", data: %{"decision" => "always", "lifted" => "max_input_tokens"}}},
+                   10_000
+
+    asked = await_question(sid, "budget-2")
+    assert asked["question"] =~ "turns 4/4"
+    assert Fake.call_count(fake) == 4
+    assert [_, %{data: %{"dimension" => "turns"}}] = events_of_type(sid, :budget_ask_started)
+
+    Troupe.answer(sid, "budget-2", "deny")
+    assert await_done(sid)["limit"] == "max_turns"
+  end
+
+  test "always on turns leaves the input-token and time limits asking", context do
+    {sid, fake} = run(context, tools(6), max_turns: 1, max_input_tokens: 250)
+
+    assert await_question(sid, "budget-1")["question"] =~ "turns 1/1"
+    Troupe.answer(sid, "budget-1", "always")
+
+    assert await_question(sid, "budget-2")["question"] =~ "input tokens"
+    assert Fake.call_count(fake) == 3
+    Troupe.answer(sid, "budget-2", "deny")
+    assert await_done(sid)["limit"] == "max_input_tokens"
+
+    {slow, _fake} = run(context, tools(6), max_turns: 1, wall_clock_ms: 1_500)
+    await_question(slow, "budget-1")
+    Troupe.answer(slow, "budget-1", "always")
+    Process.sleep(1_600)
+    Troupe.send_input(slow, "and again")
+    assert await_question(slow, "budget-2")["question"] =~ "wall clock"
+  end
+
+  test "an always from before the answer said what it lifted folds to the limit its question named", context do
+    {sid, _fake} = run(context, tools(6), max_input_tokens: 150, max_turns: 4)
+    await_question(sid, "budget-1")
+
+    # What a daemon before Decision 687 wrote: `always` and nothing about which limit.
+    Log.append(sid, ["root"], :budget_ask_answered, %{"call_id" => "budget-1", "decision" => "always"})
+
+    agent = Troupe.Registry.agent_pid(sid, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+    # The restarted agent carries on past the input-token limit, and the turn limit it no
+    # longer lifts asks when it is reached.
+    assert await_question(sid, "budget-2")["question"] =~ "turns 4/4"
+    {_state_name, state} = :sys.get_state(await_new_agent(sid, agent, 50))
+    assert state.budget.lifted == [:max_input_tokens]
+    assert {:exhausted, :max_turns} = Budget.check(state.budget)
   end
 
   test "a fresh slice warns afresh", context do

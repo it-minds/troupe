@@ -153,6 +153,24 @@ defmodule Troupe.Session.LoopTest do
       assert outcomes(sid) == ["failed", "failed"]
       assert Fake.call_count(fake) == 2
     end
+
+    # Decision 687: a loop nobody is watching, on a model that calls the same failing tool
+    # every time, is stopped by the failure guard each iteration and by the loop after that.
+    test "an iteration the failure guard stopped is a failed one", context do
+      %{sid: sid, fake: fake} =
+        start_with_goal(context,
+          steps: List.duplicate({:tools, [{"read_file", %{"path" => "missing.txt"}}]}, 10),
+          config_overrides: [loop_max_failures: 2, tool_failures_note_at: 0, tool_failures_stop_at: 2, approvals: :deny]
+        )
+
+      {:ok, _} = Troupe.start_loop(sid, nil, max_iterations: 10)
+
+      stopped = await_event(sid, :loop_stopped, 10_000)
+      assert stopped.data["reason"] == "failures"
+      assert stopped.data["detail"] =~ "a tool kept failing"
+      assert outcomes(sid) == ["failed", "failed"]
+      assert Fake.call_count(fake) == 4
+    end
   end
 
   describe "stopping" do

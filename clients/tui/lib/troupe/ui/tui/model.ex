@@ -1419,7 +1419,9 @@ defmodule Troupe.UI.TUI.Model do
           %{kind: :budget} ->
             [
               {:blank, ""},
-              {:pending, "#{who}BUDGET EXHAUSTED: continue anyway? (y yes / n stop / a always)"}
+              {:pending,
+               "#{who}BUDGET EXHAUSTED (#{Map.get(item, :detail, "a limit")}): continue anyway? " <>
+                 "(y one more slice / n stop / a lift this limit for the session)"}
             ]
 
           # Never raise here: the renderer's caller drops the frame on an

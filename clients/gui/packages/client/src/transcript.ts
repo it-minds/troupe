@@ -556,7 +556,8 @@ export function needsYou(state: TranscriptState): boolean {
 
 const BUDGET_OPTIONS: QuestionOption[] = [
   { label: "allow", description: "one more slice: the same budget again, then ask again" },
-  { label: "always", description: "lift this agent's budget for the rest of the session" },
+  // The limit the question names, and no other (troupe-remote Decision 687).
+  { label: "always", description: "lift this limit for the rest of the session; the others still ask" },
   { label: "deny", description: "stop here" },
 ];
 
