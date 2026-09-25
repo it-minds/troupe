@@ -288,7 +288,7 @@ defmodule Troupe.Config.Schema do
           default: true,
           field: :memory
         ),
-        spec("memory_auto_refresh", :boolean, "A new session refreshes a missing or stale brief.",
+        spec("memory_auto_refresh", :boolean, "A new session in a git repository refreshes a missing or stale brief; never a headless run.",
           default: true,
           field: :memory_auto_refresh
         ),

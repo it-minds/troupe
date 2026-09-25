@@ -468,8 +468,10 @@ defmodule Troupe.Client.Daemon do
   @doc """
   Create a session in a workspace and attach to it.
 
-  `params`: `profile`, `prompt`, `worktree` (`"auto"`, `"never"`, `"always"`), and a
-  `config` map of what a client may set — `auto_approve`, `watch`.
+  `params`: `profile`, `prompt`, `worktree` (`"auto"`, `"never"`, `"always"`), a
+  `config` map of what a client may set — `auto_approve`, `watch`, `full_send` — and
+  `refresh_brief: false` for a session that must not start the librarian beside itself,
+  such as a headless run's.
   """
   @impl true
   def create_session({:local, workspace} = origin, params) do
@@ -491,9 +493,12 @@ defmodule Troupe.Client.Daemon do
                attach(origin, sid, %{
                  workspace: result["workspace"] || workspace,
                  profile: params[:profile],
-                 title: params[:prompt]
+                 title: params[:prompt],
+                 isolation: if(result["worktree"], do: :worktree, else: :shared)
                }) do
-          refresh_brief_if_asked(sid, result["workspace"] || workspace)
+          if params[:refresh_brief] != false,
+            do: refresh_brief_if_asked(sid, result["workspace"] || workspace)
+
           {:ok, sid}
         end
 
@@ -616,6 +621,7 @@ defmodule Troupe.Client.Daemon do
                 workspace: meta[:workspace],
                 profile: meta[:profile],
                 title: meta[:title],
+                isolation: meta[:isolation] || :shared,
                 as: meta[:as]
               ]}
            ) do
@@ -832,11 +838,15 @@ defmodule Troupe.Client.Daemon do
 
   # A new session on a repository with no brief, or a stale one, starts the librarian
   # as a branch when the workspace config asks for it (`memory_auto_refresh`, the
-  # default). Off in tests and for anyone who would rather run `/memory refresh`.
+  # default). Off in tests and for anyone who would rather run `/memory refresh`. Only in
+  # a git repository, which is what a brief describes — `troupe` opened in a home
+  # directory surveys nothing — and only with a model to ask, or the first thing a new
+  # user saw would be the librarian failing beside their own first turn.
   defp refresh_brief_if_asked(sid, workspace) do
     config = config(workspace)
 
-    if config.memory != false and config.memory_auto_refresh != false do
+    if config.memory != false and config.memory_auto_refresh != false and repository?(workspace) and
+         Config.key_problem(config) == nil do
       case Link.call("memory.get", %{workspace: workspace}) do
         {:ok, %{"status" => status}} when status in ["absent", "stale"] ->
           prompt = if status == "absent", do: @first_prompt, else: @refresh_prompt
@@ -848,6 +858,18 @@ defmodule Troupe.Client.Daemon do
       end
     else
       :ok
+    end
+  end
+
+  # In a git work tree: a `.git` directory, or the `.git` file a worktree has, here or in
+  # a directory above.
+  defp repository?(dir) do
+    dir = Path.expand(dir)
+
+    cond do
+      File.exists?(Path.join(dir, ".git")) -> true
+      Path.dirname(dir) == dir -> false
+      true -> repository?(Path.dirname(dir))
     end
   end
 

@@ -51,6 +51,7 @@ defmodule Troupe.Config do
   alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, OpenCode, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
+  alias Troupe.LLM.Endpoint
 
   require Logger
 
@@ -665,6 +666,76 @@ defmodule Troupe.Config do
   defp key_or_refusal(key, nil), do: key
   defp key_or_refusal(_key, why), do: {:refused, why}
 
+  @doc """
+  Why the default model cannot be asked, or `nil` when it can.
+
+  `{:no_key, provider}` when its provider has no key of its own and no vendor variable
+  stands in for one — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, which only ever go to the
+  vendor's own endpoint — and `{:refused, why}` when a `{env:VAR}` its key or URL reads
+  is not set. An OpenAI-compatible gateway configured without a key is not a problem, as
+  a local vLLM needs none; nor is the `fake` provider, which asks nobody.
+
+  What a first run is told before anything else: `troupe config` ends its report with the
+  next step when this is not `nil`, and plain `troupe` offers the setup.
+  """
+  @spec key_problem(t()) :: nil | {:no_key, String.t()} | {:refused, String.t()}
+  def key_problem(%__MODULE__{} = config) do
+    model = resolve_model(config, config.model)
+    target = target(config, model)
+
+    name =
+      case split_model(config, model) do
+        {nil, _bare} -> to_string(config.provider)
+        {_provider, _bare} -> model |> String.split("/", parts: 2) |> hd()
+      end
+
+    case target.api_key do
+      {:refused, why} ->
+        {:refused, why}
+
+      key ->
+        if keyed?(target.provider, target.base_url, key) or keyless?(target),
+          do: nil,
+          else: {:no_key, name}
+    end
+  end
+
+  @doc """
+  The variable holding a vendor's own key — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` — when
+  a provider of that type at `base_url` may be sent it, and `nil` for a gateway. What a
+  setup offers to reference when a person gives no key of their own.
+  """
+  @spec vendor_key_var(atom() | String.t(), String.t() | nil) :: String.t() | nil
+  defdelegate vendor_key_var(type, base_url), to: Endpoint
+
+  # Whether a request to a provider carries a key, or needs none: its own, the vendor's
+  # variable at the vendor's own endpoint, or the fake's nothing at all.
+  defp keyed?(type, base_url, key) do
+    type = to_string(type)
+
+    cond do
+      present?(key) -> true
+      type == "fake" -> true
+      var = Endpoint.vendor_key_var(type, base_url) -> present?(System.get_env(var))
+      true -> false
+    end
+  end
+
+  # An OpenAI-compatible server that is not OpenAI's is sent no key it was not given,
+  # and may well want none.
+  defp keyless?(%{provider: "openai", base_url: base_url}),
+    do: Endpoint.vendor_key_var("openai", base_url) == nil
+
+  defp keyless?(_target), do: false
+
+  defp session_keyed?(%__MODULE__{refused: nil} = config),
+    do: keyed?(config.provider, config.base_url, config.api_key)
+
+  defp session_keyed?(%__MODULE__{}), do: false
+
+  defp provider_keyed?(%{refused: why}) when is_binary(why), do: false
+  defp provider_keyed?(provider), do: keyed?(provider.type, provider.base_url, provider.api_key)
+
   @doc "The model an alias names: `default`, `cheap`/`small`, `expensive`; anything else is itself."
   @spec resolve_model(t(), String.t() | atom()) :: String.t()
   def resolve_model(%__MODULE__{} = config, alias) when alias in ["default", :default], do: config.model
@@ -695,7 +766,7 @@ defmodule Troupe.Config do
   """
   @spec models(t()) :: [model_choice()]
   def models(%__MODULE__{} = config) do
-    session_key? = present?(config.api_key)
+    session_key? = session_keyed?(config)
 
     from_providers = Enum.flat_map(config.providers, &provider_choices/1)
     bare = Enum.map(Enum.sort(config.windows), fn {id, ctx} -> choice(id, nil, id, ctx, :config, session_key?) end)
@@ -713,7 +784,7 @@ defmodule Troupe.Config do
   end
 
   defp provider_choices({name, provider}) do
-    key? = present?(provider.api_key)
+    key? = provider_keyed?(provider)
 
     case Enum.sort(provider.models) do
       [] -> [choice(name <> "/", name, nil, nil, provider.source, key?)]
@@ -724,7 +795,7 @@ defmodule Troupe.Config do
   defp current_choice(config, id) do
     {provider, model} = split_model(config, id)
     name = provider && id |> String.split("/", parts: 2) |> hd()
-    key? = if provider, do: present?(provider.api_key), else: present?(config.api_key)
+    key? = if provider, do: provider_keyed?(provider), else: session_keyed?(config)
     choice(id, name, model, context_window(config, id), (provider && provider.source) || :config, key?)
   end
 
@@ -737,7 +808,7 @@ defmodule Troupe.Config do
 
   defp catalog_only(%__MODULE__{} = config) do
     known = Enum.flat_map(config.providers, fn {n, p} -> Enum.map(p.models, &(n <> "/" <> elem(&1, 0))) end)
-    session_key? = present?(config.api_key)
+    session_key? = session_keyed?(config)
 
     config.catalog
     |> Map.keys()
@@ -754,7 +825,7 @@ defmodule Troupe.Config do
         context: entry.context,
         price: Catalog.describe_price(entry),
         source: :catalog,
-        key?: (provider && present?(provider.api_key)) || session_key?
+        key?: if(provider, do: provider_keyed?(provider), else: session_key?)
       }
     end)
   end
@@ -763,7 +834,10 @@ defmodule Troupe.Config do
     %{id: id, provider: provider, model: model, context: context, price: nil, source: source, key?: key?}
   end
 
-  @doc "Resolved providers and models with keys masked, for a person to read, and what loading warned about."
+  @doc """
+  Resolved providers and models with keys masked, for a person to read, what loading
+  warned about, and — when no model can be asked (`key_problem/1`) — the next step.
+  """
   @spec describe(t()) :: String.t()
   def describe(%__MODULE__{} = config) do
     """
@@ -773,13 +847,44 @@ defmodule Troupe.Config do
     #{describe_providers(config)}
     models Troupe can address (use one as models.default):
     #{describe_choices(config)}
-    config dir: #{Troupe.Paths.config_dir()}   opencode: #{OpenCode.config_path()}
-    catalog: #{Store.path()} (#{Store.fetched_at() || "never fetched"})
-    """ <> describe_warnings(config.warnings)
+    config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
+    catalog: #{Troupe.Paths.display(Store.path())} (#{Store.fetched_at() || "never fetched"})
+    """ <> describe_warnings(config.warnings) <> describe_next_step(config)
   end
 
-  defp session_key(%__MODULE__{refused: nil, api_key: key}), do: mask(key)
+  defp session_key(%__MODULE__{refused: nil} = config),
+    do: key_label(config.provider, config.base_url, config.api_key)
+
   defp session_key(%__MODULE__{}), do: "(refused)"
+
+  # A key of the provider's own, masked, or the vendor variable that stands in for one.
+  defp key_label(type, base_url, key) do
+    var = if present?(key), do: nil, else: Endpoint.vendor_key_var(type, base_url)
+    if var && present?(System.get_env(var)), do: "(#{var})", else: mask(key)
+  end
+
+  # One next step, and the simplest file that would have made it unnecessary: a key in
+  # the environment and a reference to it, before the gateways most of the rest of this
+  # report is about.
+  defp describe_next_step(config) do
+    case key_problem(config) do
+      nil ->
+        ""
+
+      {:refused, _why} ->
+        "next step: the default model's provider is refused (the warning above says why); " <>
+          "set the variable it names, or run `troupe config` to set up a provider\n"
+
+      {:no_key, name} ->
+        """
+        next step: #{name} has no key, so no model can be asked. Run `troupe config` to set up a provider.
+          The simplest #{Troupe.Paths.display(user_path())} is
+            provider: anthropic
+            api_key: "{env:ANTHROPIC_API_KEY}"
+          and a gateway such as LiteLLM is `provider: openai` with its `base_url` and `api_key`.
+        """
+    end
+  end
 
   defp describe_warnings([]), do: ""
 
@@ -802,7 +907,7 @@ defmodule Troupe.Config do
   end
 
   defp provider_key(%{refused: why}) when is_binary(why), do: "(refused)"
-  defp provider_key(provider), do: mask(provider.api_key)
+  defp provider_key(provider), do: key_label(provider.type, provider.base_url, provider.api_key)
 
   defp describe_choices(config) do
     case models(config) do

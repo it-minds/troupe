@@ -18,11 +18,16 @@ defmodule Troupe.Remote.Translate do
 
   require Logger
 
-  @typedoc "What the translator has to remember between events of one session."
-  @type memory :: %{agents: MapSet.t(), unknown: MapSet.t()}
+  @typedoc """
+  What the translator has to remember between events of one session, and what the
+  window it opens says the session works in: `:remote` for a worker on a plane,
+  `:shared` or `:worktree` for a session in the daemon on this machine.
+  """
+  @type memory :: %{agents: MapSet.t(), unknown: MapSet.t(), isolation: atom()}
 
-  @spec memory() :: memory()
-  def memory, do: %{agents: MapSet.new(), unknown: MapSet.new()}
+  @spec memory(atom()) :: memory()
+  def memory(isolation \\ :remote),
+    do: %{agents: MapSet.new(), unknown: MapSet.new(), isolation: isolation}
 
   @doc """
   One durable event as zero or more local events, plus the memory to carry on
@@ -133,7 +138,7 @@ defmodule Troupe.Remote.Translate do
       spawned =
         durable_event(session_id, root, :branch_spawned, ts(event), %{
           name: profile_name(root),
-          isolation: :remote,
+          isolation: memory.isolation,
           prompt: ""
         })
 

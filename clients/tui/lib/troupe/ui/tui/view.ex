@@ -380,7 +380,9 @@ defmodule Troupe.UI.TUI.View do
       end
   end
 
-  defp isolation_text(%{isolation: :worktree}), do: "worktree (not created yet)"
+  # A session the daemon started in a worktree of its own (`troupe run --worktree`) is
+  # told so by `session.create`, not by a `worktree_created` of its own.
+  defp isolation_text(%{isolation: :worktree}), do: "worktree"
   defp isolation_text(%{isolation: :remote}), do: "a worker on the plane"
   defp isolation_text(_), do: "shared checkout"
 
@@ -1308,8 +1310,15 @@ defmodule Troupe.UI.TUI.View do
     end
   end
 
-  # A remote session says what it is and what it will not let you do; a local
-  # one adds nothing to the line at all.
+  # A remote session says what it is and what it will not let you do; a local one, in
+  # the daemon on this machine (no plane), says only the second, when there is one.
+  defp remote_note(%{model: %{remote: %{plane_url: nil} = remote}}) do
+    case remote[:reason] do
+      reason when is_binary(reason) -> " · #{reason}"
+      _ -> ""
+    end
+  end
+
   defp remote_note(%{model: %{remote: %{} = remote}}) do
     state = " · remote (#{remote[:state] || "?"})"
 

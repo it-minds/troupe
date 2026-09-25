@@ -113,9 +113,13 @@ defmodule Troupe.CLI.Runner do
         # somewhere real.
         page = if args.remote, do: [page: :hq, plane: plane(args)], else: []
 
+        # A first run meets the setup before a session it could not use: `troupe config`'s
+        # own questions on a machine with no settings and no key, and nothing otherwise.
+        unless args.remote, do: Troupe.CLI.ConfigSetup.before_session(args.workspace)
+
         case Client.create_session({:local, args.workspace}, %{
                worktree: "never",
-               config: config(args)
+               config: CLI.session_config(args)
              }) do
           {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
           {:error, reason} -> fail("could not start session: #{inspect(reason)}")
@@ -132,24 +136,11 @@ defmodule Troupe.CLI.Runner do
   defp plane(%{plane_url: url}) when is_binary(url), do: url
   defp plane(_args), do: nil
 
-  # What a client may ask the daemon to set on a session, and only that (the daemon
-  # refuses the rest; the provider and its key are the machine's).
-  defp config(args) do
-    %{auto_approve: args.auto_approve, watch: args.watch, full_send: args.full_send}
-  end
-
   # `troupe run AGENT "task"`: one session, one agent, one task, in its own worktree
   # when asked. Headless prints the transcript and exits when the agent rests, with a
   # code that says how (`Troupe.UI.Headless.Printer`); the TUI opens on it otherwise.
   defp run(args) do
-    params = %{
-      profile: args.agent,
-      prompt: args.task,
-      worktree: if(args.worktree, do: "always", else: "never"),
-      config: config(args)
-    }
-
-    case Client.create_session({:local, args.workspace}, params) do
+    case Client.create_session({:local, args.workspace}, run_params(args)) do
       {:ok, sid} when args.headless ->
         me = self()
 
@@ -166,6 +157,21 @@ defmodule Troupe.CLI.Runner do
       {:error, reason} ->
         fail("could not start: #{inspect(reason)}")
     end
+  end
+
+  @doc """
+  The session `troupe run` asks for. A headless run is a script's, and starts no
+  librarian beside the task it was given.
+  """
+  @spec run_params(CLI.args()) :: map()
+  def run_params(args) do
+    %{
+      profile: args.agent,
+      prompt: args.task,
+      worktree: if(args.worktree, do: "always", else: "never"),
+      config: CLI.session_config(args),
+      refresh_brief: not args.headless
+    }
   end
 
   # With an id: reopen that session. Without one: reopen the one this directory

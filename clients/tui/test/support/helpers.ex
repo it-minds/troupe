@@ -59,7 +59,8 @@ defmodule Troupe.TestHelpers do
   Options: `:workspace`; `:script` (steps for the root agent) or `:scripts` (a map of
   agent name → steps, `"root"` for the root; the old `"code-1"` spelling is read as the
   root); `:auto_approve` (default true, because most tests are about the transcript, not
-  the gate); `:profile`; `:prompt`; `:config` (extra YAML keys as a map).
+  the gate); `:profile`; `:prompt`; `:config` (extra YAML keys as a map); `:params` (what
+  `session.create` is asked for beyond those, as a client such as `troupe run` asks).
 
   Steps are the old spellings: `{:text, t}`, `{:tool, name, input}`, `{:tools, [{n, i}]}`,
   `{:finish, summary}`, `{:error, reason}`, plus `{:text_and_tools, t, calls}`, or a map
@@ -80,6 +81,7 @@ defmodule Troupe.TestHelpers do
       %{worktree: "never"}
       |> put_present(:profile, Keyword.get(opts, :profile))
       |> put_present(:prompt, Keyword.get(opts, :prompt))
+      |> Map.merge(Keyword.get(opts, :params, %{}))
 
     {:ok, sid} = Client.create_session({:local, ws}, params)
     :ok = Client.subscribe(sid)

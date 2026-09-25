@@ -14,9 +14,40 @@ defmodule Troupe.ConfigSetupTest do
   @nothing %{"exists" => false, "path" => @path, "api_key_source" => nil}
 
   test "a machine with a config.yaml gets the report, without asking the daemon" do
-    assert ConfigSetup.run("/w", io(local_file?: true)) == 0
+    assert ConfigSetup.run("/w", io(local_file?: true, usable?: true)) == 0
     assert said() == ["REPORT"]
     refute_received {:call, _, _}
+  end
+
+  test "a vendor's key in the environment is settings too, with no config.yaml" do
+    assert ConfigSetup.run("/w", io(daemon: settings(@nothing), usable?: true)) == 0
+    assert said() == ["REPORT"]
+    refute_received {:ask, _}
+  end
+
+  describe "a config.yaml through which no model can be asked" do
+    @file_without_key %{"exists" => true, "path" => @path, "api_key_source" => nil}
+
+    test "gets the report, whose next step is here: the ways on follow" do
+      assert ConfigSetup.run(
+               "/w",
+               io(local_file?: true, daemon: settings(@file_without_key), answers: ["3"])
+             ) == 0
+
+      assert_received {:ask, "choice [1]: "}
+
+      text = Enum.join(said(), "\n")
+      assert text =~ "REPORT"
+      assert text =~ "How should this machine reach a model?"
+      assert text =~ "When you are ready, either:"
+    end
+
+    test "without a terminal gets the report alone" do
+      daemon = settings(@file_without_key)
+      assert ConfigSetup.run("/w", io(local_file?: true, daemon: daemon, interactive?: false)) == 0
+      assert said() == ["REPORT"]
+      refute_received {:ask, _}
+    end
   end
 
   test "settings in TROUPE_* variables are settings" do
@@ -81,10 +112,14 @@ defmodule Troupe.ConfigSetupTest do
       assert text =~ "No model settings yet: #{@path} does not exist."
       assert text =~ "troupe login <plane-url>, then troupe config pull"
       assert text =~ "write #{@path} with a provider"
+      # The simplest first: a key in the environment, then a gateway, then a plane.
+      assert text =~ ~s(provider: anthropic\n      api_key: "{env:ANTHROPIC_API_KEY}")
+      assert position(text, "provider: anthropic") < position(text, "provider: openai")
+      assert position(text, "provider: openai") < position(text, "troupe login")
     end
 
     test "a plane: sign in, then take its settings" do
-      answers = ["1", "https://plane.example"]
+      answers = ["2", "https://plane.example"]
       assert ConfigSetup.run("/w", io(daemon: settings(@nothing), answers: answers)) == 0
       assert_received {:login, "https://plane.example"}
       assert_received {:pull, "https://plane.example"}
@@ -107,7 +142,7 @@ defmodule Troupe.ConfigSetupTest do
       end
 
       # choice, provider, base URL, key, default model, cheap model, save
-      answers = ["2", "1", "https://llm-gw.example/v1", "{env:TROUPE_SETUP_TEST_KEY}", "2", "1", ""]
+      answers = ["1", "2", "https://llm-gw.example/v1", "{env:TROUPE_SETUP_TEST_KEY}", "2", "1", ""]
       assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
 
       assert_received {:secret, _}
@@ -126,7 +161,11 @@ defmodule Troupe.ConfigSetupTest do
       assert Enum.join(said(), "\n") =~ "saved to #{@path}"
     end
 
-    test "a provider that lists nothing still takes a model typed out" do
+    # A fresh machine, answering Enter to everything: Anthropic, its own endpoint, the
+    # key read from ANTHROPIC_API_KEY, and the default model. The test VM has no
+    # ANTHROPIC_API_KEY (test_helper.exs), so the provider lists nothing and the note says
+    # what to set.
+    test "Enter all the way is Anthropic with the key from ANTHROPIC_API_KEY" do
       daemon = fn
         "config.get", _ ->
           {:ok, @nothing}
@@ -136,21 +175,47 @@ defmodule Troupe.ConfigSetupTest do
            %{"models" => [], "failures" => [%{"provider" => "anthropic", "reason" => "no API key"}]}}
 
         "config.set", _ ->
-          {:ok, %{"path" => @path, "api_key_set" => false}}
+          {:ok, %{"path" => @path, "api_key_set" => true}}
       end
 
-      answers = ["2", "2", "", "", "claude-sonnet-5", "", "y"]
-      assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: ["", "", "", "", "", "", ""])) == 0
+
+      assert_received {:ask, "provider: 1 Anthropic, 2 OpenAI" <> _}
+
+      assert_received {:secret,
+                       "API key, or {env:VAR} to read it from the environment [{env:ANTHROPIC_API_KEY}]: "}
+
+      assert_received {:ask, "default model id [claude-sonnet-5]: "}
+      # Asked with what the variable holds, which here is nothing.
+      assert_received {:call, "config.models", ask_params}
+      refute Map.has_key?(ask_params, "api_key")
 
       assert_received {:call, "config.set", params}
       assert params["provider"] == "anthropic"
+      assert params["api_key"] == "{env:ANTHROPIC_API_KEY}"
       assert params["models"] == %{"default" => "claude-sonnet-5"}
-      refute Map.has_key?(params, "api_key")
       refute Map.has_key?(params, "base_url")
 
       text = Enum.join(said(), "\n")
       assert text =~ "anthropic: no API key"
-      assert text =~ "no key is in force yet"
+      assert text =~ "note: ANTHROPIC_API_KEY is not set in this shell"
+    end
+
+    test "a gateway given no key saves none, and says no key is in force" do
+      daemon = fn
+        "config.get", _ -> {:ok, @nothing}
+        "config.models", _ -> {:ok, %{"models" => [], "failures" => []}}
+        "config.set", _ -> {:ok, %{"path" => @path, "api_key_set" => false}}
+      end
+
+      answers = ["1", "2", "http://localhost:8000/v1", "", "qwen3", "", "y"]
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: answers)) == 0
+
+      assert_received {:secret, "API key, or {env:VAR} to read it from the environment: "}
+      assert_received {:call, "config.set", params}
+      refute Map.has_key?(params, "api_key")
+      assert params["models"] == %{"default" => "qwen3"}
+      assert Enum.join(said(), "\n") =~ "no key is in force yet"
     end
 
     test "saying no at the end saves nothing" do
@@ -159,7 +224,7 @@ defmodule Troupe.ConfigSetupTest do
         "config.models", _ -> {:ok, %{"models" => [%{"id" => "m"}], "failures" => []}}
       end
 
-      assert ConfigSetup.run("/w", io(daemon: daemon, answers: ["2", "1", "", "key", "", "", "n"])) ==
+      assert ConfigSetup.run("/w", io(daemon: daemon, answers: ["1", "1", "", "key", "", "", "n"])) ==
                1
 
       refute_received {:call, "config.set", _}
@@ -168,6 +233,35 @@ defmodule Troupe.ConfigSetupTest do
     test "not now names the ways on" do
       assert ConfigSetup.run("/w", io(daemon: settings(@nothing), answers: ["3"])) == 0
       assert Enum.join(said(), "\n") =~ "When you are ready, either:"
+    end
+  end
+
+  describe "before plain troupe opens a session" do
+    test "a machine that is set up is asked nothing, and the daemon is not asked either" do
+      assert ConfigSetup.before_session("/w", io(local_file?: true, usable?: true)) == :ok
+      assert ConfigSetup.before_session("/w", io(usable?: true)) == :ok
+      assert said() == []
+      refute_received {:call, _, _}
+    end
+
+    test "a config.yaml with no key opens the session, which says what to do on its first turn" do
+      assert ConfigSetup.before_session("/w", io(local_file?: true)) == :ok
+      assert said() == []
+    end
+
+    test "a machine with nothing gets the first run's questions" do
+      assert ConfigSetup.before_session("/w", io(daemon: settings(@nothing), answers: ["3"])) == :ok
+      assert_received {:ask, "choice [1]: "}
+
+      text = Enum.join(said(), "\n")
+      assert text =~ "No model settings yet: #{@path} does not exist."
+      assert text =~ "When you are ready, either:"
+    end
+
+    test "without a terminal, one line says what to run" do
+      assert ConfigSetup.before_session("/w", io(interactive?: false)) == :ok
+      assert said() == ["No provider is set up yet: run `troupe config` to set one up."]
+      refute_received {:call, _, _}
     end
   end
 
@@ -213,9 +307,12 @@ defmodule Troupe.ConfigSetupTest do
       end,
       describe: fn -> "REPORT" end,
       opencode: fn -> Keyword.get(opts, :opencode, %{names: [], default: nil}) end,
-      local_file?: fn -> Keyword.get(opts, :local_file?, false) end
+      local_file?: fn -> Keyword.get(opts, :local_file?, false) end,
+      usable?: fn -> Keyword.get(opts, :usable?, false) end
     }
   end
+
+  defp position(text, part), do: text |> :binary.match(part) |> elem(0)
 
   defp answer do
     case Process.get(:answers) do

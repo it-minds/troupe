@@ -43,9 +43,9 @@ defmodule Troupe.CLI do
           task: String.t() | nil,
           headless: boolean(),
           worktree: boolean(),
-          auto_approve: boolean(),
-          full_send: boolean(),
-          watch: boolean(),
+          auto_approve: boolean() | nil,
+          full_send: boolean() | nil,
+          watch: boolean() | nil,
           mouse: boolean() | nil,
           workspace: String.t(),
           session_id: String.t() | nil,
@@ -96,9 +96,10 @@ defmodule Troupe.CLI do
       task: nil,
       headless: Keyword.get(opts, :headless, false),
       worktree: Keyword.get(opts, :worktree, false),
-      auto_approve: Keyword.get(opts, :auto_approve, false),
-      full_send: Keyword.get(opts, :full_send, false),
-      watch: Keyword.get(opts, :watch, false),
+      # nil, not false: no flag means "whatever the config says" (`session_config/1`).
+      auto_approve: Keyword.get(opts, :auto_approve),
+      full_send: Keyword.get(opts, :full_send),
+      watch: Keyword.get(opts, :watch),
       # nil, not false: no flag means "whatever the `mouse` setting says".
       mouse: Keyword.get(opts, :mouse),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),
@@ -176,6 +177,22 @@ defmodule Troupe.CLI do
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
   defp parse_rest(other, _base), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}
+
+  @doc """
+  What the command line asks of a new session's config: only the switches it was given.
+
+  `--auto-approve`, `--watch` and `--full-send` (and their `--no-` forms) beat the config
+  files for one session; a switch not given leaves the files' value in force, so
+  `auto_approve: true` in a config file applies to `troupe` as it does to every other
+  client. These three are all a client may set; the daemon refuses the rest, since the
+  provider and its key are the machine's.
+  """
+  @spec session_config(args()) :: map()
+  def session_config(args) do
+    args
+    |> Map.take([:auto_approve, :watch, :full_send])
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
 
   @spec usage() :: String.t()
   def usage, do: @moduledoc |> String.split("\n") |> Enum.drop(2) |> Enum.join("\n")

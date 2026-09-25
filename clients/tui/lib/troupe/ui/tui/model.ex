@@ -14,6 +14,7 @@ defmodule Troupe.UI.TUI.Model do
 
   alias Troupe.Client.Message
   alias Troupe.Event
+  alias Troupe.UI.ModelError
 
   @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown."
   @type tool_entry :: %{
@@ -421,10 +422,13 @@ defmodule Troupe.UI.TUI.Model do
       :cancelled ->
         w |> ensure_agent(path) |> push(path, {:system, "cancelled"}) |> drop_pending(path)
 
+      # With the next step under it where there is one: on a first run with no key, the
+      # first turn is where a person learns that `troupe config` sets a provider up.
       :llm_error ->
         w
         |> ensure_agent(path)
         |> push(path, {:system, "LLM error: #{d.message}"})
+        |> push_step(path, ModelError.next_step(d.message))
         |> Map.put(:model_errors, Map.put(Map.get(w, :model_errors, %{}), path, d.message))
 
       :todo_updated ->
@@ -706,6 +710,9 @@ defmodule Troupe.UI.TUI.Model do
     do: push_entry(w, path, {kind, sanitize(text)})
 
   defp push(w, path, entry), do: push_entry(w, path, entry)
+
+  defp push_step(w, _path, nil), do: w
+  defp push_step(w, path, step), do: push(w, path, {:system, step})
 
   defp push_entry(w, path, entry),
     do: update_agent(w, path, fn a -> %{a | transcript: a.transcript ++ [entry]} end)

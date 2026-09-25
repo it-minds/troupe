@@ -66,6 +66,16 @@ defmodule Troupe.Paths do
     |> binary_part(0, 16)
   end
 
+  @doc """
+  A path as a person on this platform writes it: with backslashes on Windows, where one
+  joined onto `%APPDATA%` otherwise prints as `C:\\Users\\me\\AppData\\Roaming/troupe`.
+  For showing only; every path Troupe opens works with either separator.
+  """
+  @spec display(Path.t(), {atom(), atom()}) :: String.t()
+  def display(path, os_type \\ :os.type())
+  def display(path, {:win32, _}), do: path |> to_string() |> String.replace("/", "\\")
+  def display(path, _os_type), do: to_string(path)
+
   @doc "Per-project overrides: `<workspace>/.troupe/`."
   @spec project_dir(Path.t()) :: Path.t()
   def project_dir(workspace_root), do: Path.join(workspace_root, ".troupe")

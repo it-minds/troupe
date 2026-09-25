@@ -6,6 +6,23 @@ team's worker pods, or in the daemon on your own machine, and the window you loo
 through is only a window. Close it and the session carries on; open it from another
 machine and you see the same transcript; two people can open the same session at once.
 
+## First run
+
+1. Install `troupe` and `troupe-daemon` with the latest release's `install.sh` or
+   `install.ps1` ([README](../../README.md#what-it-ships)), saying yes to the TUI.
+2. `troupe config` sets up a model. Enter at every question is Anthropic with the key read
+   from `ANTHROPIC_API_KEY`; the other choices are OpenAI, a gateway such as LiteLLM, or
+   your organisation's plane.
+3. `troupe` in a project directory opens a session; `troupe run "a task" --headless` does
+   one task and exits.
+4. The settings are one file, `config.yaml` in `~/.config/troupe/` (`%APPDATA%\troupe\` on
+   Windows), and `troupe config` shows what is in force.
+5. `troupe config validate` checks that file after you edit it by hand;
+   [configuration.md](configuration.md) has every key.
+
+With no model set up, plain `troupe` asks the same questions first, and whatever needs a
+model says to run `troupe config` rather than failing without a reason.
+
 ## Ways in
 
 | Way in | What it is | Its documentation |

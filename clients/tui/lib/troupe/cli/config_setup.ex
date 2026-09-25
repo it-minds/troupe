@@ -2,21 +2,29 @@ defmodule Troupe.CLI.ConfigSetup do
   @moduledoc """
   `troupe config`: the resolved settings, or a first run when there are none.
 
-  A machine with a `config.yaml`, or with its provider in `TROUPE_*` variables, gets the
-  report `troupe config` has always printed. A machine with neither has nothing to
-  report, and on a terminal this asks how it should reach a model instead:
+  A machine with a `config.yaml`, or with its provider in `TROUPE_*` variables, or with a
+  vendor's key in the environment (`ANTHROPIC_API_KEY`), gets the report `troupe config`
+  has always printed. A machine with none of those has nothing to report, and on a
+  terminal this asks how it should reach a model instead:
 
     * opencode is set up here: Troupe already reads opencode's providers while it has
       none of its own, and this offers to copy them into `config.yaml` (`config.import`),
       keys as opencode has them written, so the machine stops depending on opencode.
-    * otherwise, three ways on: take an organisation's settings from a Troupe plane
-      (`troupe login`, then `troupe config pull`); set a provider up here (provider, URL
-      and key, then a model from what the provider lists, through `config.models` and
-      `config.set`); or not now, which says where each of those lives.
+    * otherwise, three ways on: set a provider up here (Anthropic first, then OpenAI or a
+      gateway: provider, URL and key, then a model from what the provider lists, through
+      `config.models` and `config.set`); take an organisation's settings from a Troupe
+      plane (`troupe login`, then `troupe config pull`); or not now, which says where
+      each of those lives.
 
-  Without a terminal it asks nothing and prints the same ways on. Every read and write
-  goes through the daemon, as `troupe config pull` does: the daemon is the process whose
-  environment decides which `config.yaml` a session reads.
+  A `config.yaml` through which no model can be asked (`Troupe.Config.key_problem/1`)
+  gets the report, whose last line names `troupe config` as the next step, and then the
+  same three ways on. Without a terminal it asks nothing and prints the ways on. Every
+  read and write goes through the daemon, as `troupe config pull` does: the daemon is the
+  process whose environment decides which `config.yaml` a session reads.
+
+  Plain `troupe` asks the same questions before it opens a session on a machine with no
+  settings and no key (`before_session/2`), so a first run meets the setup rather than a
+  model error.
   """
 
   alias Troupe.CLI.ModelConfig
@@ -28,8 +36,8 @@ defmodule Troupe.CLI.ConfigSetup do
   Everything this touches outside itself, so a test can play a person and a daemon:
   `say` prints a line, `ask` reads one (`nil` at end of input), `secret` reads one
   without echo, `call` is a daemon request, `login` and `pull` are the commands of the
-  same names, `describe` is the full report and `opencode` the providers Troupe is
-  reading from opencode right now.
+  same names, `describe` is the full report, `opencode` the providers Troupe is reading
+  from opencode right now, and `usable?` whether the settings in force can ask a model.
   """
   @type io :: %{
           interactive?: boolean(),
@@ -41,7 +49,8 @@ defmodule Troupe.CLI.ConfigSetup do
           pull: (String.t() -> non_neg_integer()),
           describe: (-> String.t()),
           opencode: (-> %{names: [String.t()], default: String.t() | nil}),
-          local_file?: (-> boolean())
+          local_file?: (-> boolean()),
+          usable?: (-> boolean())
         }
 
   @doc "Run `troupe config` for a workspace; returns the exit status."
@@ -50,22 +59,75 @@ defmodule Troupe.CLI.ConfigSetup do
     io = io || io(workspace)
 
     # The common case, a machine that is set up, needs no daemon to say so.
-    if io.local_file?.() do
-      io.say.(io.describe.())
-      0
+    if io.local_file?.() and io.usable?.() do
+      report(io)
     else
       case io.call.("config.get", %{}) do
-        {:ok, %{"exists" => true}} -> report(io)
-        {:ok, %{"api_key_source" => "env"}} -> report(io)
-        {:ok, settings} -> first_run(settings, io)
-        {:error, reason} -> daemon_down(reason, io)
+        {:ok, %{"exists" => true} = settings} ->
+          if io.usable?.(), do: report(io), else: no_key(settings, io)
+
+        {:ok, %{"api_key_source" => "env"}} ->
+          report(io)
+
+        {:ok, %{"api_key_source" => "opencode"} = settings} ->
+          first_run(settings, io)
+
+        {:ok, settings} ->
+          if io.usable?.(), do: report(io), else: first_run(settings, io)
+
+        {:error, reason} ->
+          daemon_down(reason, io)
       end
+    end
+  end
+
+  @doc """
+  What plain `troupe` does before it opens a session: on a machine with no `config.yaml`
+  and no key in force, the questions `troupe config` asks on a first run, or one line
+  saying to run it where there is no terminal to ask on. Anything else goes on to the
+  session at once.
+  """
+  @spec before_session(Path.t(), io() | nil) :: :ok
+  def before_session(workspace, io \\ nil) do
+    io = io || io(workspace)
+
+    cond do
+      io.local_file?.() or io.usable?.() ->
+        :ok
+
+      not io.interactive? ->
+        io.say.("No provider is set up yet: run `troupe config` to set one up.")
+        :ok
+
+      true ->
+        # The daemon may know better: a file, or a key in its own environment.
+        case io.call.("config.get", %{}) do
+          {:ok, %{"exists" => true}} ->
+            :ok
+
+          {:ok, %{"api_key_source" => "env"}} ->
+            :ok
+
+          {:ok, settings} ->
+            _ = first_run(settings, io)
+            :ok
+
+          {:error, _reason} ->
+            :ok
+        end
     end
   end
 
   defp report(io) do
     io.say.(io.describe.())
     0
+  end
+
+  # A file through which no model can be asked: the report says why and names this
+  # command as the next step, so in a terminal the next step is here.
+  defp no_key(%{"path" => path}, io) do
+    io.say.(io.describe.())
+    if io.interactive?, do: choose(Troupe.Paths.display(path), io), else: 0
   end
 
   defp daemon_down(reason, io) do
@@ -75,6 +137,7 @@ defmodule Troupe.CLI.ConfigSetup do
   end
 
   defp first_run(%{"path" => path} = settings, io) do
+    path = Troupe.Paths.display(path)
     opencode = io.opencode.()
 
     io.say.("No model settings yet: #{path} does not exist.")
@@ -137,19 +200,21 @@ defmodule Troupe.CLI.ConfigSetup do
 
   # -- the three ways on ----------------------------------------------------------
 
+  # The simplest first: a key of one's own, which is what a fresh machine has. Enter
+  # takes it.
   defp choose(path, io) do
     io.say.("")
     io.say.("How should this machine reach a model?")
-    io.say.("  1  take your organisation's settings from its Troupe plane")
-    io.say.("  2  set up a provider here: an API key, or a gateway such as LiteLLM")
+    io.say.("  1  set up a provider here: an Anthropic or OpenAI key, or a gateway such as LiteLLM")
+    io.say.("  2  take your organisation's settings from its Troupe plane")
     io.say.("  3  not now")
 
     case io.ask.("choice [1]: ") do
       answer when answer in ["", "1"] ->
-        from_plane(io)
+        set_up_here(path, io)
 
       "2" ->
-        set_up_here(path, io)
+        from_plane(io)
 
       _other ->
         ways_on(path, io)
@@ -160,16 +225,19 @@ defmodule Troupe.CLI.ConfigSetup do
   defp ways_on(path, io) do
     io.say.("")
     io.say.("When you are ready, either:")
+    io.say.("  * write #{path} with a provider; the simplest is a key in the environment:")
+    io.say.("      provider: anthropic")
+    io.say.("      api_key: \"{env:ANTHROPIC_API_KEY}\"")
+    io.say.("    or a gateway such as LiteLLM, anything speaking Chat Completions:")
+    io.say.("      provider: openai")
+    io.say.("      base_url: https://llm-gw.example/v1")
+    io.say.("      api_key: \"{env:MY_GATEWAY_KEY}\"")
+    io.say.("      models: {default: some-model, cheap: a-smaller-model}")
 
     io.say.(
       "  * take your organisation's settings: troupe login <plane-url>, then troupe config pull"
     )
 
-    io.say.("  * write #{path} with a provider, for example:")
-    io.say.("      provider: openai            # anything speaking Chat Completions; or anthropic")
-    io.say.("      base_url: https://llm-gw.example/v1")
-    io.say.("      api_key: \"{env:MY_GATEWAY_KEY}\"")
-    io.say.("      models: {default: some-model, cheap: a-smaller-model}")
     io.say.("  * or set it in the desktop app's Models settings")
     io.say.("Then troupe config shows what Troupe will use.")
   end
@@ -188,18 +256,15 @@ defmodule Troupe.CLI.ConfigSetup do
   defp set_up_here(path, io) do
     provider =
       case io.ask.(
-             "provider: 1 OpenAI-compatible (OpenAI, LiteLLM, vLLM, OpenRouter), 2 Anthropic [1]: "
+             "provider: 1 Anthropic, 2 OpenAI or an OpenAI-compatible gateway (LiteLLM, vLLM, OpenRouter) [1]: "
            ) do
-        "2" -> "anthropic"
-        _ -> "openai"
+        "2" -> "openai"
+        _ -> "anthropic"
       end
 
     base_url = io.ask.(base_url_prompt(provider)) |> blank_to_nil()
-
-    key =
-      io.secret.("API key, or {env:VAR} to read it from the environment: ")
-      |> blank_to_nil()
-
+    fallback = vendor_key(provider, base_url)
+    key = blank_to_nil(io.secret.(key_prompt(fallback))) || fallback
     params = %{"provider" => provider, "base_url" => base_url, "api_key" => key}
 
     with {:ok, default, cheap} <- pick_models(params, io),
@@ -222,12 +287,27 @@ defmodule Troupe.CLI.ConfigSetup do
 
   defp base_url_prompt(_), do: "base URL (Enter for the provider's own): "
 
+  # The vendor's own variable, at the vendor's own endpoint: what Enter at the key prompt
+  # saves, so the simplest setup is a key in the environment and a reference to it in the
+  # file. A gateway has a key of its own, or needs none.
+  defp vendor_key(provider, base_url) do
+    case Troupe.Config.vendor_key_var(provider, base_url) do
+      nil -> nil
+      var -> "{env:#{var}}"
+    end
+  end
+
+  defp key_prompt(nil), do: "API key, or {env:VAR} to read it from the environment: "
+
+  defp key_prompt(reference),
+    do: "API key, or {env:VAR} to read it from the environment [#{reference}]: "
+
   # The provider says what it serves; a key given as `{env:VAR}` is looked up for the
   # asking, and saved as the reference.
   defp pick_models(params, io) do
     ask_params =
       params
-      |> Map.update!("api_key", &(&1 && Troupe.Config.interpolate(&1)))
+      |> Map.update!("api_key", &(&1 && blank_to_nil(Troupe.Config.interpolate(&1))))
       |> Enum.reject(fn {_key, value} -> is_nil(value) end)
       |> Map.new()
 
@@ -242,17 +322,22 @@ defmodule Troupe.CLI.ConfigSetup do
           []
       end
 
-    choose_models(listed, io)
+    choose_models(listed, params["provider"], io)
   end
 
-  defp choose_models([], io) do
-    case io.ask.("default model id: ") |> blank_to_nil() do
+  # Nothing listed, usually for want of a key yet. Anthropic's default is worth offering,
+  # the model Troupe uses when nothing names one; anything else is typed out.
+  defp choose_models([], provider, io) do
+    fallback = if provider == "anthropic", do: %Troupe.Config{}.model
+    prompt = if fallback, do: "default model id [#{fallback}]: ", else: "default model id: "
+
+    case blank_to_nil(io.ask.(prompt)) || fallback do
       nil -> {:error, "no model given; nothing saved"}
       default -> {:ok, default, io.ask.("cheap model id (Enter: the same): ") |> blank_to_nil()}
     end
   end
 
-  defp choose_models(ids, io) do
+  defp choose_models(ids, _provider, io) do
     io.say.("The provider serves:")
 
     ids
@@ -288,10 +373,20 @@ defmodule Troupe.CLI.ConfigSetup do
 
     case io.call.("config.set", params) do
       {:ok, saved} ->
-        io.say.("saved to #{saved["path"]}")
+        io.say.("saved to #{Troupe.Paths.display(saved["path"])}")
 
-        unless saved["api_key_set"],
-          do: io.say.("note: no key is in force yet; set the variable it names")
+        cond do
+          # Saved as it is, and refused until the variable is set: better said now than
+          # on the first turn.
+          var = unset_variable(params["api_key"]) ->
+            io.say.("note: #{var} is not set in this shell; set it before you start troupe")
+
+          not saved["api_key_set"] ->
+            io.say.("note: no key is in force yet; set the variable it names")
+
+          true ->
+            :ok
+        end
 
         0
 
@@ -314,6 +409,15 @@ defmodule Troupe.CLI.ConfigSetup do
 
   defp at(nil), do: ""
   defp at(url), do: " at #{url}"
+
+  defp unset_variable(key) when is_binary(key) do
+    case Regex.run(~r/^\{env:([A-Za-z_][A-Za-z0-9_]*)\}$/, key) do
+      [_, var] -> if System.get_env(var) in [nil, ""], do: var
+      nil -> nil
+    end
+  end
+
+  defp unset_variable(_key), do: nil
 
   defp blank_to_nil(nil), do: nil
 
@@ -344,7 +448,8 @@ defmodule Troupe.CLI.ConfigSetup do
       pull: &ModelConfig.pull/1,
       describe: fn -> describe(workspace) end,
       opencode: fn -> opencode(workspace) end,
-      local_file?: fn -> File.regular?(Troupe.Config.user_path()) end
+      local_file?: fn -> File.regular?(Troupe.Config.user_path()) end,
+      usable?: fn -> usable?(workspace) end
     }
   end
 
@@ -388,6 +493,15 @@ defmodule Troupe.CLI.ConfigSetup do
     case Troupe.Config.resolve(workspace) do
       {:ok, config, _layers} -> Troupe.Config.describe(config)
       {:error, error} -> Exception.message(error)
+    end
+  end
+
+  # Read here, from the files and the environment the daemon this process embeds reads
+  # too. A refused file is not a missing key: its report says what is wrong instead.
+  defp usable?(workspace) do
+    case Troupe.Config.resolve(workspace) do
+      {:ok, config, _layers} -> Troupe.Config.key_problem(config) == nil
+      {:error, _error} -> true
     end
   end
 

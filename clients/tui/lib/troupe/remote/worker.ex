@@ -199,8 +199,11 @@ defmodule Troupe.Remote.Worker do
       subscribed?: false,
       scopes: [],
       capabilities: %{},
-      memory: Translate.memory(),
+      memory: Translate.memory(Keyword.get(opts, :isolation, :remote)),
       profile: Keyword.get(opts, :profile) || "session",
+      # What the root window says the session works in: a worker on the plane unless the
+      # caller knows better, as the daemon's client does of its own sessions.
+      isolation: Keyword.get(opts, :isolation, :remote),
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       agent: nil,
@@ -810,7 +813,7 @@ defmodule Troupe.Remote.Worker do
       state,
       state.agent || "session",
       :remote_status,
-      Map.put(capability, :endpoint, state.endpoint)
+      capability |> Map.put(:endpoint, state.endpoint) |> Map.put(:plane_url, state.plane_url)
     )
   end
 
@@ -836,7 +839,7 @@ defmodule Troupe.Remote.Worker do
       agent_path: root,
       type: :branch_spawned,
       ts: System.system_time(:millisecond),
-      data: %{name: state.profile, isolation: :remote, prompt: ""}
+      data: %{name: state.profile, isolation: state.isolation, prompt: ""}
     }
 
     for event <- Journal.append(state.session_id, [spawned]), do: publish(state, event)

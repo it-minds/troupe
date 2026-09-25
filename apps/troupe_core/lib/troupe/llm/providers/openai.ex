@@ -409,7 +409,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
   defp api_key(%Request{api_key: key}) when is_binary(key) and key != "", do: key
 
   defp api_key(%Request{base_url: url}) do
-    if Endpoint.vendor?(url, @default_base_url), do: System.get_env("OPENAI_API_KEY")
+    if var = Endpoint.vendor_key_var(:openai, url), do: System.get_env(var)
   end
 
   defp describe(%{"error" => %{"message" => message}}), do: message
