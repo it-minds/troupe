@@ -8,6 +8,11 @@ defmodule Troupe.A2A.StubPlane do
   caller's task is not found" a real test rather than a stubbed answer — and hands out
   grants that point at the fake worker. Every `/rpc` call is recorded, so a test can
   assert on what the facade actually sent.
+
+  It answers only methods the real plane has (`Troupe.Plane.Harness`), in the shape the
+  plane answers them, and anything else is `method_not_found` as it is there. A stub that
+  answered a method the plane lacked is how `tasks/cancel` passed here while the plane
+  refused its `session.archive`.
   """
 
   use GenServer
@@ -186,20 +191,21 @@ defmodule Troupe.A2A.StubPlane do
     {{:ok, %{"sessions" => rows}}, state}
   end
 
+  # The row, asleep: the plane puts a running session to sleep on its pod and answers one
+  # that is not running as it stands.
   defp answer("session.archive", %{"session_id" => id}, subject, state) do
-    case with_row(state, id, subject, fn _row -> {:ok, %{"session_id" => id}} end) do
-      {{:ok, _} = ok, state} ->
-        rows = Map.update!(state.rows, id, &Map.put(&1, "state", "dormant"))
-        {ok, %{state | rows: rows}}
-
-      other ->
-        other
+    case with_row(state, id, subject, fn row -> {:ok, asleep(row)} end) do
+      {{:ok, row}, state} -> {{:ok, row}, %{state | rows: Map.put(state.rows, id, row)}}
+      refused -> refused
     end
   end
 
   defp answer(method, _params, _subject, state) do
     {{:error, -32_601, "method_not_found: #{method}"}, state}
   end
+
+  defp asleep(%{"state" => "active"} = row), do: Map.put(row, "state", "dormant")
+  defp asleep(row), do: row
 
   # The plane refuses to say whether a session another principal cannot see exists.
   defp with_row(state, id, subject, fun) do
