@@ -74,7 +74,7 @@ defmodule Troupe.Session.Summary do
     # Both halves are needed and only the first was here: an event already in the log and
     # also sitting in this process's mailbox was folded once from each, which doubled a
     # session's cost whenever a turn happened to be in flight while the projection started.
-    Events.subscribe(session_id)
+    Events.subscribe(session_id, :internal)
 
     # Folded from the log first, so a restarted projection is immediately right rather
     # than right from the next event onwards.

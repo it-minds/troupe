@@ -60,3 +60,19 @@ idle =
   end
 
 config :troupe_daemon, idle_shutdown_ms: idle
+
+# Minutes a session may sit with nothing running — idle, or waiting on a person — before
+# its tree is stopped: the first while somebody is watching it, the second once nobody is
+# (and never longer than the first). `0` means never. Stopped is dormant, not gone: the
+# next command brings it back, with any question it was waiting on.
+session_minutes = fn name, default ->
+  case Integer.parse(System.get_env(name, default)) do
+    {0, ""} -> :infinity
+    {minutes, ""} when minutes > 0 -> :timer.minutes(minutes)
+    _ -> raise "#{name} is not a whole number of minutes"
+  end
+end
+
+config :troupe_core,
+  session_idle_ms: session_minutes.("TROUPE_SESSION_IDLE_MINUTES", "30"),
+  detached_idle_ms: session_minutes.("TROUPE_SESSION_DETACHED_MINUTES", "2")

@@ -872,14 +872,16 @@ so. The plane has already asked for another worker; `retry_after_ms` says when t
 again. A refusal happens only where a person set a ceiling, and then it quotes the number
 they set.
 
-A session goes `dormant` on its own idle timeout, or on `session.archive`. Its log
+A session goes `dormant` on its own idle timeout, or on `session.archive`. Waiting on a
+person counts as idle, and a local daemon's timeout is shorter for a session no client is
+subscribed to ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log
 stays, and so does everything a client can learn from it: `session.list`,
 `session.get`, `blob.get` and `subscribe` all work on a dormant session and start
 nothing. That is deliberate — a session that woke up because somebody looked at it
 would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
 
 #### Activation is about the session, not about the pod
@@ -906,7 +908,9 @@ What a client sees is this:
 - every session it could see before is still listed, `dormant`;
 - a session that was mid-turn reports `"status": "interrupted"`, which is read from
   the log — a tool call that started and never completed, or a request the model never
-  answered — and is therefore true before anything has been restarted;
+  answered — and is therefore true before anything has been restarted; one that was
+  waiting on a person — an approval, a question, the budget's question — reports
+  `"status": "waiting"`, read the same way;
 - **no model call is made.** A session comes back interrupted and stays that way until
   an activating command arrives. Resuming instead would mean a crash loop spends money
   and re-runs shell commands nobody is watching. A daemon may be configured to resume,
@@ -916,7 +920,9 @@ What a client sees is this:
 
 When an interrupted session is activated, the tool calls that never finished are
 closed off as errors naming the interruption, so the conversation the model sees has a
-result for every call it made.
+result for every call it made. A call that was waiting on a person is not closed off: it
+is asked again, under the same id, and an answer that arrived in the meantime — the
+`approval.respond` or `question.answer` that woke the session — is handed to it.
 
 ---
 
