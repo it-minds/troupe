@@ -18,7 +18,7 @@ defmodule Troupe.SettingsTest do
 
       for field <- Settings.fields() do
         # `nil` is a real value for the cheap and expensive models: it means the default.
-        inherits? = field.key in ["small_model", "expensive_model"]
+        inherits? = field.key in ["models.cheap", "models.expensive"]
         assert Settings.get(cfg, field.key) != nil or inherits?, field.key
         assert is_binary(Settings.format(cfg, field.key)), field.key
       end
@@ -43,19 +43,19 @@ defmodule Troupe.SettingsTest do
       assert Settings.parse(float, "0.5") == {:ok, 0.5}
       assert {:error, _} = Settings.parse(float, "2")
 
-      {:ok, model} = Settings.fetch("model")
+      {:ok, model} = Settings.fetch("models.default")
       assert Settings.parse(model, "gateway/opus") == {:ok, "gateway/opus"}
       assert {:error, _} = Settings.parse(model, "")
 
-      {:ok, cheap} = Settings.fetch("small_model")
+      {:ok, cheap} = Settings.fetch("models.cheap")
       assert Settings.parse(cheap, "default") == {:ok, nil}
     end
 
-    test "put changes the field, marks an explicit default model, and keeps mouse in extra" do
+    test "put changes the field, marks an explicit default model, and sets mouse" do
       cfg = %Config{}
       assert %Config{max_turns: 3} = Settings.put(cfg, "max_turns", 3)
-      assert %Config{model: "x", models_explicit?: true} = Settings.put(cfg, "model", "x")
-      assert %Config{extra: %{"mouse" => false}} = off = Settings.put(cfg, "mouse", false)
+      assert %Config{model: "x", models_explicit?: true} = Settings.put(cfg, "models.default", "x")
+      assert %Config{mouse: false} = off = Settings.put(cfg, "mouse", false)
       refute Settings.mouse?(off)
     end
 
@@ -73,7 +73,7 @@ defmodule Troupe.SettingsTest do
       assert path == Path.join(ws, ".troupe/config.yaml")
       assert Config.load(ws).max_turns == 3
 
-      {:ok, _} = Settings.persist(ws, "model", "gateway/opus")
+      {:ok, _} = Settings.persist(ws, "models.default", "gateway/opus")
       assert Config.load(ws).model == "gateway/opus"
       # the other keys in the file survive a write
       assert File.read!(path) =~ "max_turns: 3"
@@ -92,6 +92,40 @@ defmodule Troupe.SettingsTest do
       assert Settings.mouse?(Config.load(ws))
       {:ok, _} = Settings.persist(ws, "mouse", false)
       refute Settings.mouse?(Config.load(ws))
+    end
+
+    test "writes the new spelling only, replacing the old one, with version and the schema header" do
+      ws =
+        workspace_with_config(
+          "# hand-written\nmodel: old-default\nsmall_model: old-cheap\nmax_turns: 5\n"
+        )
+
+      {:ok, path} = Settings.persist(ws, "models.default", "gateway/opus")
+
+      {:ok, written} = YamlElixir.read_from_file(path)
+      assert written["models"] == %{"default" => "gateway/opus", "cheap" => "old-cheap"}
+      refute Map.has_key?(written, "model")
+      refute Map.has_key?(written, "small_model")
+      assert written["version"] == 1
+      assert File.read!(path) =~ "# yaml-language-server: $schema="
+      assert File.read!(path <> ".previous") =~ "# hand-written"
+
+      config = Config.load(ws)
+
+      assert {config.model, config.small_model, config.max_turns, config.warnings} ==
+               {"gateway/opus", "old-cheap", 5, []}
+    end
+
+    test "writes auto_approve to the user's file while the workspace is not trusted" do
+      # The suite trusts the temp directory; this workspace is outside it.
+      ws = Path.join([File.cwd!(), "tmp", "untrusted-#{System.unique_integer([:positive])}"])
+      File.mkdir_p!(Path.join(ws, ".troupe"))
+      File.write!(Path.join(ws, ".troupe/config.yaml"), "max_turns: 5\n")
+      on_exit(fn -> File.rm_rf(ws) end)
+
+      refute Config.trusted?(ws)
+      assert Settings.target_path(ws, "auto_approve") == Config.user_path()
+      assert Settings.target_path(ws, "max_turns") == Path.join(ws, ".troupe/config.yaml")
     end
   end
 

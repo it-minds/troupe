@@ -1,0 +1,291 @@
+#!/usr/bin/env bash
+# The harness against a real model: one short headless run, and what it has to show.
+#
+#   scripts/live-check task       write a file with given content, then stop
+#   scripts/live-check delegate   hand a question to one `explore` subagent, answer with its fact
+#   scripts/live-check loop       a read that can only fail, which the failure guard has to stop
+#
+# The nightly's `live` job runs all three against the LiteLLM gateway
+# (.github/workflows/live.yml; .github/CI.md says what a failure means). The model is the
+# environment's - TROUPE_PROVIDER, TROUPE_BASE_URL, TROUPE_API_KEY, TROUPE_MODEL - and
+# nothing here prints them. With TROUPE_PROVIDER=fake and a TROUPE_FAKE_SCRIPT it runs
+# offline, which is how a change to this script is tried before it spends anything.
+#
+# Each run gets an empty workspace, its own config, state and runtime directories, and its
+# own daemon, stopped when the run ends, so nothing is left spending afterwards. The user
+# config sets the budgets - well above what the task needs, far below the defaults - and
+# turns off the brief's automatic refresh, which would start a librarian nobody asked for.
+#
+# Environment:
+#   TROUPE_BIN          the `troupe` binary (default: troupe on the PATH)
+#   TROUPE_DAEMON_BIN   `troupe-daemon`; empty, the client embeds a daemon instead
+#   LIVE_DIR            where the runs' directories go (default: a new temporary one)
+#   LIVE_TIMEOUT        seconds a run may take before it is killed (default 300)
+#   LIVE_SUMMARY        a file to append the run's Markdown table row to
+#
+# Exits 0 when the run showed what it had to, and 1 with an `::error::` saying what it did
+# not. What the answer says is only warned about: that is the model's, not the harness's.
+set -euo pipefail
+
+scenario=${1:-}
+case "$scenario" in
+  task | delegate | loop) ;;
+  *)
+    echo "usage: scripts/live-check task|delegate|loop" >&2
+    exit 2
+    ;;
+esac
+
+TROUPE_BIN=${TROUPE_BIN:-troupe}
+TROUPE_DAEMON_BIN=${TROUPE_DAEMON_BIN:-}
+LIVE_TIMEOUT=${LIVE_TIMEOUT:-300}
+LIVE_DIR=${LIVE_DIR:-$(mktemp -d)}
+LIVE_SUMMARY=${LIVE_SUMMARY:-}
+
+# The failure guard's threshold for the loop (Decision 687): low, so the check is quick
+# and the model has little room to give up by itself before the guard is reached.
+failures_at=3
+
+dir="$LIVE_DIR/$scenario"
+rm -rf "$dir"
+mkdir -p "$dir/work" "$dir/config" "$dir/state" "$dir/run"
+chmod 700 "$dir/run"
+
+# Everything the client and its daemon read or write, here: the user config, the session
+# logs, and the socket and discovery file, so a run finds its own daemon and no other.
+export TROUPE_CONFIG_HOME="$dir/config" TROUPE_STATE_HOME="$dir/state" XDG_RUNTIME_DIR="$dir/run"
+
+cat > "$dir/config/config.yaml" <<'EOF'
+version: 1
+max_turns: 12
+max_input_tokens: 200000
+max_output_tokens: 24000
+wall_clock_ms: 240000
+budget_asks: false
+memory_auto_refresh: false
+EOF
+
+say() { printf '%s\n' "$*"; }
+
+# -- the scenario -------------------------------------------------------------------
+flags=()
+case "$scenario" in
+  task)
+    title="headless task"
+    flags=(--auto-approve)
+    prompt="Create a file named hello.txt in the current directory whose only content is the line: troupe nightly ok
+Use write_file once and do nothing else. When the file is written, say so in one short sentence and stop."
+    ;;
+
+  delegate)
+    title="delegation"
+    # Shell commands and edits are allowed, so a model that lists the directory before
+    # delegating is not failed for asking; what is checked is the delegation.
+    flags=(--auto-approve)
+    mkdir -p "$dir/work/notes"
+    say "The harbour opens at six and closes at dusk. Boats moor on the east quay." > "$dir/work/notes/harbour.txt"
+    say "The lighthouse keeper is Ines Varga. Her cat is called Pemberton and sleeps by the lamp." > "$dir/work/notes/keeper.txt"
+    say "Oil, wicks and biscuits arrive every second Tuesday." > "$dir/work/notes/supplies.txt"
+    fact="Pemberton"
+    prompt="The notes/ directory holds a few short text files. Find out what the lighthouse keeper's cat is called.
+Do not read, list or search any file yourself: call the delegate tool exactly once, with agent \"explore\" and a task asking it to find the cat's name in notes/.
+When it reports back, answer in one sentence that names the cat."
+    ;;
+
+  loop)
+    title="failing tool loop"
+    # No --auto-approve: the only way out is a file that is never there, and a model that
+    # tries to write it is refused rather than allowed to end the loop another way.
+    cat >> "$dir/config/config.yaml" <<EOF
+tool_failures_note_at: $failures_at
+tool_failures_stop_at: $failures_at
+EOF
+    prompt="This tests reading a file that another process writes. Read inbox/ready.txt with the read_file tool and tell me its first line.
+The file may not exist yet: whenever read_file fails, call read_file on inbox/ready.txt again, and keep doing so until it succeeds.
+Use no tool other than read_file, do not create the file, and do not stop or reply until you have read it."
+    ;;
+esac
+
+# -- the daemon ---------------------------------------------------------------------
+# In its own session, so stopping it stops everything it started: the release's wrapper,
+# the VM and the agents in it, and with them any further model call.
+daemon_pid=
+stop_daemon() {
+  if [ -n "$daemon_pid" ]; then
+    kill -TERM -- "-$daemon_pid" 2> /dev/null || true
+    wait "$daemon_pid" 2> /dev/null || true
+    daemon_pid=
+  fi
+}
+trap stop_daemon EXIT
+
+if [ -n "$TROUPE_DAEMON_BIN" ]; then
+  TROUPE_DAEMON_LOG=stderr setsid "$TROUPE_DAEMON_BIN" run > "$dir/daemon.log" 2>&1 &
+  daemon_pid=$!
+  for _ in $(seq 1 60); do
+    "$TROUPE_DAEMON_BIN" status > /dev/null 2>&1 && break
+    sleep 1
+  done
+  if ! "$TROUPE_DAEMON_BIN" status > /dev/null 2>&1; then
+    cat "$dir/daemon.log"
+    say "::error title=live $title::the daemon did not start within 60 s"
+    exit 1
+  fi
+fi
+
+# -- the run ------------------------------------------------------------------------
+# Output to a file rather than through a pipe, which would stay open for as long as
+# anything the binary started holds it (native.yml's container job says the same).
+say "live-check $scenario: troupe run build ... --headless ${flags[*]} (timeout ${LIVE_TIMEOUT}s)"
+cd "$dir/work"
+started=$(date +%s)
+code=0
+timeout --kill-after=20 "$LIVE_TIMEOUT" "$TROUPE_BIN" run build "$prompt" --headless "${flags[@]}" \
+  > "$dir/out.log" 2>&1 || code=$?
+seconds=$(($(date +%s) - started))
+stop_daemon
+
+say "::group::the run's output (exit $code, ${seconds}s)"
+cat "$dir/out.log"
+say "::endgroup::"
+
+# -- what the log says --------------------------------------------------------------
+# One session is expected; a second (a branch, a librarian) is counted in the spend, and
+# the assertions read the one without a parent.
+mapfile -t logs < <(find "$dir/state" -name events.jsonl 2> /dev/null | sort)
+root=
+for log in "${logs[@]}"; do
+  parent=$(jq -rs '[.[] | select(.type == "session_created")][0].data.parent // empty' "$log")
+  if [ -z "$parent" ]; then root=$log; fi
+done
+
+q() { jq -s "$@" "$root"; }
+spent() { cat "${logs[@]}" | jq -s "$@"; }
+
+calls=0 tokens_in=0 tokens_out=0 cost="-"
+if [ "${#logs[@]}" -gt 0 ]; then
+  calls=$(spent '[.[] | select(.type == "llm_response")] | length')
+  tokens_in=$(spent '[.[] | select(.type == "llm_response") | .data.usage // {} | (.input_tokens // 0) + (.cache_read // 0) + (.cache_write // 0)] | add // 0')
+  tokens_out=$(spent '[.[] | select(.type == "llm_response") | .data.usage.output_tokens // 0] | add // 0')
+  # The gateway's price where it gave one; a call it did not price is not a free one.
+  cost=$(spent -r '[.[] | select(.type == "llm_response")] as $r
+    | [$r[] | .data.gateway.cost_micros | numbers] as $c
+    | if ($c | length) == 0 then "not reported"
+      else "$" + ((($c | add) / 100 | round) / 10000 | tostring)
+        + (if ($c | length) < ($r | length) then " (\($c | length) of \($r | length) calls priced)" else "" end)
+      end')
+fi
+
+result=pass
+notes=()
+fail() {
+  result=fail
+  notes+=("$1")
+  say "::error title=live $title::$1"
+}
+warn() {
+  notes+=("$1")
+  say "::warning title=live $title::$1"
+}
+
+if [ "$code" = 124 ] || [ "$code" = 137 ]; then
+  fail "the run hit this job's own timeout (${LIVE_TIMEOUT}s): nothing in the harness stopped it"
+elif [ -z "$root" ]; then
+  fail "the run left no session log (exit $code)"
+else
+  case "$scenario" in
+    task)
+      [ "$code" = 0 ] || fail "troupe run exited $code, not 0"
+      if [ ! -f "$dir/work/hello.txt" ]; then
+        fail "hello.txt was not written"
+      elif [ "$(tr -d '\r' < "$dir/work/hello.txt")" != "troupe nightly ok" ]; then
+        fail "hello.txt holds something other than the line asked for"
+      fi
+      # #127 and #139: a model that answers in prose ends its turn, the log says so, and
+      # the headless run exits on it.
+      ended=$(q '[.[] | select(.agent == ["root"] and .type == "turn_ended")] | length')
+      finished=$(q '[.[] | select(.agent == ["root"] and .type == "agent_done" and .data.reason == "finished")] | length')
+      if [ "$ended" -gt 0 ]; then
+        notes+=("turn_ended")
+      elif [ "$finished" -gt 0 ]; then
+        notes+=("ended by finish, no turn_ended")
+      else
+        fail "the root never rested: no turn_ended in the log"
+      fi
+      ;;
+
+    delegate)
+      [ "$code" = 0 ] || fail "troupe run exited $code, not 0"
+      started_calls='[.[] | select(.agent == ["root"] and .type == "tool_call_started" and .data.name == "delegate")]'
+      delegations=$(q "$started_calls | length")
+      agents=$(q -r "$started_calls | map(.data.args.agent // \"?\") | join(\",\")")
+      if [ "$delegations" = 0 ]; then
+        fail "the root never called delegate"
+      else
+        [ "$delegations" = 1 ] || warn "delegate was called $delegations times"
+        [ "$agents" = explore ] || warn "delegated to $agents, not explore"
+        # The subagent's summary, or #130's honest word that it was cut short: either is a
+        # result, and an empty one or a failed call is not.
+        ok=$(q -r '[.[] | select(.agent == ["root"] and .type == "tool_call_completed" and .data.name == "delegate")] | last | if . == null then "none" else (.data.ok | tostring) end')
+        # On one line: it goes into an annotation, which ends at the first newline.
+        summary=$(q -r '[.[] | select(.agent == ["root"] and .type == "tool_call_completed" and .data.name == "delegate")] | last | .data.content // "" | tostring | gsub("\\s+"; " ")')
+        if [ "$ok" = none ]; then
+          fail "the delegate call never completed"
+        elif [ "$ok" != true ]; then
+          fail "the delegate call failed: ${summary:0:200}"
+        elif [ -z "$(printf '%s' "$summary" | tr -d '[:space:]')" ]; then
+          fail "the delegate call returned an empty result"
+        else
+          case "$summary" in
+            "[cut short"* | "The delegated agent"*) warn "the subagent was cut short: ${summary:0:160}" ;;
+            *) notes+=("delegated to $agents") ;;
+          esac
+        fi
+      fi
+      answer=$(q -r '[.[] | select(.agent == ["root"] and .type == "llm_response")] | last | [.data.message.content[]? | select(.type == "text") | .text] | join(" ")')
+      if printf '%s' "$answer" | grep -qi "$fact"; then
+        notes+=("the answer names $fact")
+      else
+        warn "the final answer does not name $fact"
+      fi
+      ;;
+
+    loop)
+      guarded=$(q '[.[] | select(.agent == ["root"] and .type == "turn_ended" and .data.reason == "tool_failures")] | length')
+      budget=$(q -r '[.[] | select(.type == "budget_exhausted" or .type == "budget_ask_started" or (.type == "agent_done" and .data.reason == "budget_exhausted")) | .data.limit // .data.dimension // "a limit"] | unique | join(", ")')
+      failed=$(q '[.[] | select(.agent == ["root"] and .type == "tool_call_completed" and .data.name == "read_file" and .data.ok == false)] | length')
+      asked=$(q '[.[] | select(.type == "tool_failures_ask_started")] | length')
+      if [ -n "$budget" ]; then
+        fail "a budget stopped the loop ($budget) after $failed failed reads, not the failure guard"
+      elif [ "$guarded" -gt 0 ]; then
+        [ "$code" = 1 ] || fail "the guard stopped the turn, but troupe run exited $code, not 1"
+        notes+=("stopped by the guard after $failed failed reads")
+        [ "$asked" -gt 0 ] || warn "no tool_failures_ask_started before the stop"
+      elif [ "$failed" -lt "$failures_at" ]; then
+        fail "inconclusive: the model stopped by itself after $failed failed reads, before the guard's $failures_at (exit $code)"
+      else
+        fail "$failed failed reads and the guard never stopped the turn (exit $code)"
+      fi
+      ;;
+  esac
+fi
+
+if [ "$result" = fail ]; then
+  if [ -n "$root" ]; then
+    say "::group::the session's log, one event a line"
+    q -r '.[] | [.seq, (.agent | join("/")), .type, (.data | tostring | .[0:240])] | @tsv'
+    say "::endgroup::"
+  fi
+  if [ -f "$dir/daemon.log" ]; then
+    say "::group::the daemon's log (last 80 lines)"
+    tail -n 80 "$dir/daemon.log"
+    say "::endgroup::"
+  fi
+fi
+
+note=$(IFS=';'; printf '%s' "${notes[*]:-}" | sed 's/;/; /g; s/|/\//g')
+row="| $title | $result | $code | $calls | $tokens_in | $tokens_out | $cost | ${seconds}s | $note |"
+say "$row"
+[ -n "$LIVE_SUMMARY" ] && say "$row" >> "$LIVE_SUMMARY"
+
+[ "$result" = pass ]

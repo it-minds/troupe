@@ -192,3 +192,60 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      prompt reads without echo in `-noshell`'s raw mode where the terminal allows it,
      and says so where it cannot. Proof: `test/troupe/config_setup_test.exs`, and
      `scripts/dev config` driven through a pseudo-terminal.
+112. **A headless run ends when the agent comes to rest, not only when it calls `finish`,
+     and its exit code says how.** A real model usually ends its turn with prose, which
+     leaves the agent `idle`, and the printer waited for the `done` that only `finish`
+     writes: `troupe run --headless` did its work, printed its answer and sat there until
+     something killed it (issue #127). The daemon now writes the end of a turn to the log
+     (`turn_ended`, root Decision 685), and the printer rests on it, on `cancelled` and on
+     `agent_done`, all read from the log rather than the live `agent_state`, which can be
+     dropped and says `idle` once before the task is taken. The code is `0` for a turn that
+     ended or an agent that finished, `1` for one that stopped short, a failed model request
+     or a cancel, and `3` when an approval was refused for want of anyone to give it —
+     Decision 20 still refuses it, and the `3` is what lets a script tell that the task may
+     not have been done. A model error is printed, with `troupe config` as the next step
+     where the provider has no key. The printer's replay key gains the event's type, since
+     one durable event can become several local ones with the same `seq`. Proof: the CLI
+     tests with a turn that ends in prose, with and without the printer listening, a
+     refused approval, a model error, a provider with no key, a refusal and a librarian
+     branch that rests first, all of which failed before this; and the native smoke runs
+     `fixtures/fake_scripts/no_finish.json` through the shipped binary.
+113. **A first run is told the one next step, and plain `troupe` asks it before a
+     session.** On a fresh account every surface said `key=(none)` or `no key` and
+     stopped, and `troupe config` without a terminal showed a gateway example, never the
+     simplest case (issue #76, the slice for the 0.5.0 beta). `Troupe.Config.key_problem/1`
+     now says whether the default model can be asked at all: its provider's own key, the
+     vendor's variable at the vendor's own endpoint, the fake, or an OpenAI-compatible
+     server elsewhere, which may want none. The report (`troupe config`, `troupe models`,
+     `troupe-daemon config` and `models`) names the key it will use
+     (`key=(ANTHROPIC_API_KEY)`) and, with none, ends with the next step and
+     `provider: anthropic` with `api_key: "{env:ANTHROPIC_API_KEY}"` before the gateways:
+     `troupe config` through `troupe`, and the file through `troupe-daemon`, because an
+     install may have the daemon without the TUI; a headless run and the TUI's transcript
+     put the same step under the model error (`Troupe.UI.ModelError`); the desktop app has
+     its own for a local session. `troupe config` offers a provider here first,
+     Anthropic first, and Enter at the key saves that reference; a `config.yaml` through
+     which no model can be asked gets the report and then the choices; and plain `troupe`
+     asks them before it opens a session on a machine with no file and no key. Three more
+     things a first run met: `--auto-approve`, `--watch` and `--full-send` are sent only
+     when given, where all three went as `false` and a config file's values never reached
+     a TUI session; the project brief is refreshed automatically only for a session a
+     person opens, in a git repository, with a model to ask, because the librarian
+     surveyed whatever directory `troupe` was opened in, spent tokens beside every
+     headless run and, with no key, failed beside the first turn; and a daemon session's
+     window says `shared` or `worktree`, not `remote`. The paths those surfaces print use
+     the platform's separator (`Troupe.Paths.display/1`). Proof:
+     `test/troupe/config_setup_test.exs`, the CLI, memory and model tests, and
+     `apps/troupe_core/test/troupe/config/key_problem_test.exs`.
+
+114. **A headless run whose turn the failure guard stopped ends `1`, and the budget
+     question's `a` lifts the one limit it names.** The daemon now stops a turn in which one
+     tool has failed ten times in a row, asking the person attached first (root Decision
+     687). Headless mode answers that question as it answers any, with the first option,
+     which the daemon makes `stop`; the turn then ends with `turn_ended` carrying
+     `reason: tool_failures`, which the translation passes on and the printer reads as a
+     stop short, so a script or a nightly job sees `1` and the reason rather than a `0`
+     for a run that did nothing. The window's budget line names the limit and says that
+     `a` lifts it for the session, because since 687 that is all `always` does. Proof: the
+     CLI test with a model that reads a missing file twelve times, and the translation
+     test.

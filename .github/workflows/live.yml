@@ -1,0 +1,172 @@
+# The harness against a real model, nightly: three short headless runs through the
+# LiteLLM gateway, each in an empty workspace of its own. Every other check in this
+# repository uses the scripted `fake` model, which does what it is told; the runaway
+# sessions of 0.4 happened on a real one (`qwen3-235b`), so this is where a harness change
+# meets what a real model does with it.
+#
+#   * a headless task: write a file, then stop, and the run exits 0 (#127, #139);
+#   * a delegation: one `explore` subagent, whose result reaches the root (#130);
+#   * a tool that can only fail, which the failure guard stops, and not a budget (#117).
+#
+# `scripts/live-check` runs each and says what it found; `.github/CI.md` says what a
+# failure means. Called by `nightly.yml`, which runs on a schedule and by hand and never
+# for a pull request, so the gateway's key never reaches a fork's code; the `if:` on the
+# job that holds it keeps it that way should anything else ever call this.
+name: live
+
+on:
+  workflow_call:
+    inputs:
+      model:
+        description: The gateway's name for the model every run uses.
+        type: string
+        default: qwen3-235b
+    secrets:
+      base_url:
+        description: The gateway, an OpenAI-compatible endpoint (`/v1` or not).
+        required: false
+      api_key:
+        description: A key for it, capped at the gateway.
+        required: false
+
+env:
+  OTP_VERSION: "28.5.0.5"
+  ELIXIR_VERSION: "1.20.4"
+  ZIG_VERSION: "0.16.0"
+
+jobs:
+  # Built as a person builds from source on Linux, with `scripts/install-local`: the
+  # daemon release and the TUI's Burrito binary. Its own job, without the key, so the
+  # build's time is not the runs' and the key is in no step that compiles anything.
+  build:
+    name: troupe-daemon and troupe, from source
+    runs-on: ubuntu-24.04
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: ${{ env.OTP_VERSION }}
+          elixir-version: ${{ env.ELIXIR_VERSION }}
+
+      - uses: mlugg/setup-zig@v2
+        with:
+          version: ${{ env.ZIG_VERSION }}
+
+      # Burrito unpacks the precompiled ERTS it downloads with 7z.
+      - name: Install xz and 7z
+        run: sudo apt-get update && sudo apt-get install -y xz-utils p7zip-full
+
+      # Both Mix projects' dependencies and builds, and the ERTS Burrito downloads.
+      - uses: actions/cache@v4
+        with:
+          path: |
+            deps
+            _build/prod
+            clients/tui/deps
+            clients/tui/_build/prod
+            ~/.cache/burrito_file_cache
+          key: ${{ runner.os }}-live-${{ hashFiles('mix.lock', 'clients/tui/mix.lock', '.tool-versions') }}
+          restore-keys: ${{ runner.os }}-live-
+
+      - name: Build and install
+        env:
+          TROUPE_INSTALL_DIR: ${{ runner.temp }}/troupe/bin
+          TROUPE_LIB_DIR: ${{ runner.temp }}/troupe/lib/troupe-daemon
+        run: scripts/install-local --tui
+
+      - name: Pack
+        run: tar -czf troupe-live.tar.gz -C "$RUNNER_TEMP/troupe" .
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: troupe-live
+          path: troupe-live.tar.gz
+          retention-days: 3
+
+  live:
+    name: three runs against the gateway
+    needs: [build]
+    # Scheduled or dispatched, never a pull request: the key is a repository secret.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
+    # The spend's backstop. Each run has its own budget and timeout below; this is for
+    # whatever gets past both.
+    timeout-minutes: 20
+    env:
+      LIVE_TIMEOUT: "300"
+      TROUPE_PROVIDER: openai
+      TROUPE_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: troupe-live
+
+      # Where `scripts/live-check` finds the binaries and puts its runs, for every step
+      # after this one (a job's own `env` cannot name the runner's temporary directory).
+      - name: Unpack
+        run: |
+          mkdir -p "$RUNNER_TEMP/troupe" "$RUNNER_TEMP/live"
+          tar -xzf troupe-live.tar.gz -C "$RUNNER_TEMP/troupe"
+          {
+            echo "TROUPE_BIN=$RUNNER_TEMP/troupe/bin/troupe"
+            echo "TROUPE_DAEMON_BIN=$RUNNER_TEMP/troupe/lib/troupe-daemon/bin/troupe-daemon"
+            echo "LIVE_DIR=$RUNNER_TEMP/live"
+            echo "LIVE_SUMMARY=$RUNNER_TEMP/live/summary.md"
+          } >> "$GITHUB_ENV"
+          "$RUNNER_TEMP/troupe/bin/troupe" --version
+          "$RUNNER_TEMP/troupe/lib/troupe-daemon/bin/troupe-daemon" version
+
+      # The secrets are masked in the log as they are; the gateway's host name is masked
+      # too, for an error that names the host without the rest of the address.
+      - name: The gateway is configured
+        id: gateway
+        env:
+          BASE_URL: ${{ secrets.base_url }}
+          API_KEY: ${{ secrets.api_key }}
+        run: |
+          if [ -z "$BASE_URL" ] || [ -z "$API_KEY" ]; then
+            echo "::error::the repository secrets TROUPE_NIGHTLY_BASE_URL and TROUPE_NIGHTLY_API_KEY must both be set"
+            exit 1
+          fi
+          host=${BASE_URL#*://}; host=${host%%/*}; host=${host%%:*}
+          echo "::add-mask::$host"
+
+      - name: A headless task
+        timeout-minutes: 6
+        env:
+          TROUPE_BASE_URL: ${{ secrets.base_url }}
+          TROUPE_API_KEY: ${{ secrets.api_key }}
+        run: scripts/live-check task
+
+      - name: A delegation
+        if: ${{ !cancelled() && steps.gateway.outcome == 'success' }}
+        timeout-minutes: 6
+        env:
+          TROUPE_BASE_URL: ${{ secrets.base_url }}
+          TROUPE_API_KEY: ${{ secrets.api_key }}
+        run: scripts/live-check delegate
+
+      - name: A failing tool loop
+        if: ${{ !cancelled() && steps.gateway.outcome == 'success' }}
+        timeout-minutes: 6
+        env:
+          TROUPE_BASE_URL: ${{ secrets.base_url }}
+          TROUPE_API_KEY: ${{ secrets.api_key }}
+        run: scripts/live-check loop
+
+      - name: What each run spent
+        if: ${{ !cancelled() }}
+        env:
+          MODEL: ${{ inputs.model }}
+        run: |
+          {
+            echo "### Against the gateway, with \`$MODEL\`"
+            echo
+            echo "| run | result | exit | model calls | tokens in | tokens out | cost | time | notes |"
+            echo "|---|---|---|---|---|---|---|---|---|"
+            if [ -s "$LIVE_SUMMARY" ]; then cat "$LIVE_SUMMARY"; else echo "| nothing ran | | | | | | | | |"; fi
+          } >> "$GITHUB_STEP_SUMMARY"

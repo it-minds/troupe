@@ -93,12 +93,15 @@ Then `troupe login http://plane.localtest.me:30080` and `troupe --remote`.
 ## 5. Configuration
 
 `Troupe.Config` layers built-in defaults, `<config dir>/config.yaml`,
-`<workspace>/.troupe/config.yaml`, environment variables, then explicit options; merging
-is key-wise and any string may say `{env:VAR}`. Its moduledoc and struct in
-`apps/troupe_core/lib/troupe/config.ex` are the reference for every key and default; the
-[TUI README](../../clients/tui/README.md#configure-a-provider) shows the common ones.
-A workspace can name `provider: fake` and a `fake_script` to run the daemon without a
-model.
+`<workspace>/.troupe/config.yaml`, `<workspace>/.troupe/config.local.yaml`, environment
+variables, then explicit options; maps merge by key and any string may say `{env:VAR}`.
+Every key is in one table, `Troupe.Config.Schema`, from which `mix troupe.config.schema`
+writes `protocol/schema/config/v1.json` and the reference in
+[docs/user/configuration.md](../user/configuration.md); CI runs it with `--check`, so run
+it and commit the result after changing a key. `TROUPE_PROVIDER=fake` and
+`TROUPE_FAKE_SCRIPT` run the daemon without a model; so do `provider: fake` and
+`fake_script:` in a workspace's own file, once the workspace is on the user file's
+`trusted_workspaces` (Decision 686).
 
 ## 6. Development variables
 

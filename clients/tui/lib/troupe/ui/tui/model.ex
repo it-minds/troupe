@@ -14,6 +14,7 @@ defmodule Troupe.UI.TUI.Model do
 
   alias Troupe.Client.Message
   alias Troupe.Event
+  alias Troupe.UI.ModelError
 
   @typedoc "A tool call in a transcript. `lines` is `result` split for rendering; `preview` is the approval preview (a diff for edits), when one was shown."
   @type tool_entry :: %{
@@ -315,8 +316,13 @@ defmodule Troupe.UI.TUI.Model do
           push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
         end)
 
+      # The call is over, and so is an approval it was still waiting for: a cancel closes
+      # each call it stops with one of these, and so does a tool that timed out waiting.
+      # Neither is ever answered.
       :tool_call_completed ->
-        update_agent(ensure_agent(w, path), path, fn a ->
+        %{w | pending: Enum.reject(w.pending, &(&1.kind == :approval and &1.call_id == d.call_id))}
+        |> ensure_agent(path)
+        |> update_agent(path, fn a ->
           %{a | transcript: Enum.map(a.transcript, &complete_tool(&1, d))}
         end)
 
@@ -369,7 +375,7 @@ defmodule Troupe.UI.TUI.Model do
 
         %{w | pending: pending}
 
-      :budget_ask_answered ->
+      t when t in [:budget_ask_answered, :tool_failures_ask_answered] ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
 
       t when t in [:approval_answered, :question_answered] ->
@@ -421,10 +427,13 @@ defmodule Troupe.UI.TUI.Model do
       :cancelled ->
         w |> ensure_agent(path) |> push(path, {:system, "cancelled"}) |> drop_pending(path)
 
+      # With the next step under it where there is one: on a first run with no key, the
+      # first turn is where a person learns that `troupe config` sets a provider up.
       :llm_error ->
         w
         |> ensure_agent(path)
         |> push(path, {:system, "LLM error: #{d.message}"})
+        |> push_step(path, ModelError.next_step(d.message))
         |> Map.put(:model_errors, Map.put(Map.get(w, :model_errors, %{}), path, d.message))
 
       :todo_updated ->
@@ -706,6 +715,9 @@ defmodule Troupe.UI.TUI.Model do
     do: push_entry(w, path, {kind, sanitize(text)})
 
   defp push(w, path, entry), do: push_entry(w, path, entry)
+
+  defp push_step(w, _path, nil), do: w
+  defp push_step(w, path, step), do: push(w, path, {:system, step})
 
   defp push_entry(w, path, entry),
     do: update_agent(w, path, fn a -> %{a | transcript: a.transcript ++ [entry]} end)
@@ -1419,7 +1431,9 @@ defmodule Troupe.UI.TUI.Model do
           %{kind: :budget} ->
             [
               {:blank, ""},
-              {:pending, "#{who}BUDGET EXHAUSTED: continue anyway? (y yes / n stop / a always)"}
+              {:pending,
+               "#{who}BUDGET EXHAUSTED (#{Map.get(item, :detail, "a limit")}): continue anyway? " <>
+                 "(y one more slice / n stop / a lift this limit for the session)"}
             ]
 
           # Never raise here: the renderer's caller drops the frame on an

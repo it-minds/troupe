@@ -6,6 +6,15 @@ config_home =
 
 File.mkdir_p!(config_home)
 System.put_env("TROUPE_CONFIG_HOME", config_home)
+
+# Tests put a provider, MCP servers and read roots in a scratch workspace's own
+# `.troupe/config.yaml`, which a project's file sets only in a trusted workspace. The
+# scratch workspaces are made under the system's temp directory, so that is trusted; a
+# test about the trust gate itself reads a user file of its own (`user_path:`).
+File.write!(
+  Path.join(config_home, "config.yaml"),
+  "version: 1\ntrusted_workspaces:\n  - #{Jason.encode!(System.tmp_dir!())}\n"
+)
 System.delete_env("TROUPE_STATE_HOME")
 System.at_exit(fn _ -> File.rm_rf!(config_home) end)
 

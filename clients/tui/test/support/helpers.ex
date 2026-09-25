@@ -59,10 +59,12 @@ defmodule Troupe.TestHelpers do
   Options: `:workspace`; `:script` (steps for the root agent) or `:scripts` (a map of
   agent name → steps, `"root"` for the root; the old `"code-1"` spelling is read as the
   root); `:auto_approve` (default true, because most tests are about the transcript, not
-  the gate); `:profile`; `:prompt`; `:config` (extra YAML keys as a map).
+  the gate); `:profile`; `:prompt`; `:config` (extra YAML keys as a map); `:params` (what
+  `session.create` is asked for beyond those, as a client such as `troupe run` asks).
 
   Steps are the old spellings: `{:text, t}`, `{:tool, name, input}`, `{:tools, [{n, i}]}`,
-  `{:finish, summary}`, `{:error, reason}`, plus `{:text_and_tools, t, calls}`.
+  `{:finish, summary}`, `{:error, reason}`, plus `{:text_and_tools, t, calls}`, or a map
+  written into the script as it is (`%{"stop" => "refusal", "text" => t}`).
   """
   def start_session!(opts \\ []) do
     ws = Keyword.get_lazy(opts, :workspace, fn -> tmp_workspace() end)
@@ -79,6 +81,7 @@ defmodule Troupe.TestHelpers do
       %{worktree: "never"}
       |> put_present(:profile, Keyword.get(opts, :profile))
       |> put_present(:prompt, Keyword.get(opts, :prompt))
+      |> Map.merge(Keyword.get(opts, :params, %{}))
 
     {:ok, sid} = Client.create_session({:local, ws}, params)
     :ok = Client.subscribe(sid)
@@ -138,7 +141,7 @@ defmodule Troupe.TestHelpers do
       Map.merge(
         %{
           "provider" => "fake",
-          "model" => "fake-model",
+          "models" => %{"default" => "fake-model"},
           "auto_approve" => auto_approve?,
           # A test's session must not start a librarian of its own; the one test about
           # the refresh turns it back on through `:config`.
@@ -148,7 +151,9 @@ defmodule Troupe.TestHelpers do
         Map.new(extra, fn {k, v} -> {to_string(k), v} end)
       )
 
-    File.write!(Path.join(ws, ".troupe/config.yaml"), Troupe.Settings.encode_yaml(yaml))
+    # `provider`, `auto_approve` and `fake_script` are read from a project's file only
+    # in a trusted workspace; test_helper.exs trusts the directory these are made in.
+    :ok = Troupe.Config.write_file(Path.join(ws, ".troupe/config.yaml"), yaml)
   end
 
   defp json_step({:text, text}), do: %{"text" => text}
@@ -164,6 +169,8 @@ defmodule Troupe.TestHelpers do
     do: %{"tools" => [%{"name" => "finish", "input" => %{"summary" => summary}}]}
 
   defp json_step({:error, reason}), do: %{"error" => to_string(reason)}
+  # The JSON the daemon reads, as it is: for what the tuples do not spell, such as `stop`.
+  defp json_step(%{} = step), do: step
 
   @doc "Waits for the window `path` to reach `state`: `:done`, `:thinking`, `:idle`, `:acting`."
   def await_state(path, state, timeout \\ 5_000) do

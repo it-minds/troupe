@@ -112,7 +112,7 @@ defmodule Troupe.Session.Loop do
     session_id = Keyword.fetch!(opts, :session_id)
     Process.set_label("troupe loop #{session_id}")
 
-    :ok = Events.subscribe(session_id)
+    :ok = Events.subscribe(session_id, :internal)
     events = Log.replay(session_id, Session.root_path())
 
     state = %__MODULE__{
@@ -352,6 +352,11 @@ defmodule Troupe.Session.Loop do
   defp track_complete(_event, calls, done), do: {calls, done}
 
   defp failure(%Event{type: "llm_error", data: data}), do: "the model request failed: #{data["reason"]}"
+
+  # The harness stopped the turn because a tool kept failing (Decision 687): a failed
+  # iteration, so that a loop stuck the same way every time stops at `loop_max_failures`.
+  defp failure(%Event{type: "turn_ended", data: %{"reason" => "tool_failures"}}),
+    do: "the turn was stopped: a tool kept failing"
 
   defp failure(%Event{type: "agent_done", data: %{"reason" => reason}})
        when reason not in ["finished", "budget_exhausted"],

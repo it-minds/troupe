@@ -156,7 +156,7 @@ defmodule Troupe.Session do
     bundle = Keyword.get(opts, :bundle)
 
     with {:ok, workspace} <- open_workspace(workspace_path, opts),
-         config = Config.load(workspace.root_real, Keyword.get(opts, :config_overrides, [])),
+         {:ok, config} <- config(workspace, opts),
          :ok <- known_provider(config) do
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
@@ -196,6 +196,22 @@ defmodule Troupe.Session do
          # another (Decision 646). Recorded, listed, filtered on; nothing else.
          parent: Keyword.get(opts, :parent)
        ]}
+    end
+  end
+
+  # A file Troupe refuses is an answer to `session.create`, naming the file, the key and
+  # the fix. A session on a pod reads no gated key from the project's own file, whatever
+  # the pod's user file says (Decision 686).
+  defp config(workspace, opts) do
+    trust = if Keyword.get(opts, :kind, :local) == :team, do: [trust: :never], else: []
+
+    case Config.resolve(workspace.root_real, Keyword.get(opts, :config_overrides, []), trust) do
+      {:ok, config, _layers} ->
+        Config.log_warnings(config)
+        {:ok, config}
+
+      {:error, error} ->
+        {:error, error}
     end
   end
 

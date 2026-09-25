@@ -90,18 +90,22 @@ defmodule Troupe.ConfigTest do
       assert Config.load(root).api_key == "s3cret-value"
     end
 
-    test "an unrecognised key is kept rather than crashing the load", %{root: root} do
+    test "an unrecognised key warns rather than crashing the load, and an x- key is kept", %{root: root} do
       # A key that is not an existing atom used to raise from `nil && ...`, taking the
       # whole config load with it — so a typo, or a key from a newer version, made
       # Troupe unstartable.
       File.write!(Path.join(root, ".troupe/config.yaml"), """
       some_future_key: a value
-      model: still-read
+      x-team-note: kept for another tool
+      models:
+        default: still-read
       """)
 
       config = Config.load(root)
-      assert config.extra["some_future_key"] == "a value"
       assert config.model == "still-read"
+      assert config.extra == %{"x-team-note" => "kept for another tool"}
+      assert [warning] = config.warnings
+      assert warning =~ ".troupe/config.yaml:1: some_future_key is not a setting Troupe knows, and is ignored"
     end
 
     test "a missing file is not an error", %{root: root} do

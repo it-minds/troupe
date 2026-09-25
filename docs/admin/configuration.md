@@ -9,6 +9,8 @@ Every knob, in four layers, lowest first:
 4. **Secrets** the chart references but never creates (Part D), and the ports and labels the
    network depends on (Part E).
 
+A session also reads `config.yaml` files: a machine's and a workspace's (Part F).
+
 ---
 
 ## Part A — Environment variables
@@ -38,7 +40,7 @@ Every knob, in four layers, lowest first:
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
 | `TROUPE_WORKERS_TLS_SECRET` | unset | one TLS Secret shared by every pod Ingress; ignored when a cert issuer is set | `operator.tlsSecretName` |
 | `TROUPE_WORKERS_CERT_ISSUER` | unset | cert-manager ClusterIssuer per pod Ingress, secret `<profile>-<ordinal>-tls` | `operator.certIssuer` |
-| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile | `operator.ciliumAvailable` |
+| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)) | `operator.ciliumAvailable` |
 | `TROUPE_MAX_PORTS` | `65536` | `+Q` in every worker's `ERL_FLAGS` | `operator.maxPorts` |
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300 | `operator.drainTimeoutSeconds` |
@@ -249,14 +251,41 @@ from those and from operator pods.
 | `troupe-plane` | HTTP from ingress namespaces (and A2A pods when enabled); control port from worker namespaces and the operator; epmd and dist from plane pods | unrestricted |
 | `troupe-operator` | nothing | unrestricted |
 | `troupe-a2a` | `a2a.port` from ingress namespaces | unrestricted |
-| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS; the plane's control port; `0.0.0.0/0` minus private and link-local ranges on 443 and 80; OpenBao and object storage when their hosts are `*.svc` |
-| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, plus DNS |
+| `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private and link-local ranges on 443 and 80 |
+| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
 
-Without Cilium a worker can reach any public host on 443 and 80; `allowedEgress` is then a
-check at admission and reconcile, not on the wire.
+With Cilium a worker reaches the hosts its profile names and nothing else outside the
+cluster: Cilium admits the union of both policies, so the NetworkPolicy carries no address
+block. Without Cilium a worker can reach any public host on 443 and 80; `allowedEgress` is
+then a check at admission and reconcile, not on the wire.
 
 **Ingress annotations.** Plane: 3600 s read and send timeouts, `proxy-body-size`, the rate
 limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only): 3600 s
 timeouts, `limit-connections: 50`. The Scaleway controller adds PROXY protocol and
 `proxy-body-size: 16m`, so an oversized `input.send` is refused by the worker rather than
 the proxy. The plane's JSON parser takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
+
+---
+
+## Part F — The config.yaml a session reads
+
+Every session, on a pod or on a laptop, also reads settings from files: the user's
+`config.yaml`, the workspace's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then
+the `TROUPE_*` variables, merged by key and checked against one key table. The rules and
+every key are in [docs/user/configuration.md](../user/configuration.md); the schema is
+`protocol/schema/config/v1.json`. What an administrator needs from them:
+
+- **A pod's provider is its profile's.** The operator writes the provider, model and key
+  into the pod as `TROUPE_*` (A.3). A session on a pod never reads the keys that change
+  approvals, endpoints and credentials, commands to run or readable paths from the
+  project's own file, whatever the repository says; the rest of that file (models,
+  budgets, the project brief) applies.
+- **A file Troupe refuses fails the session's start**, and says which file, which key and
+  what to write: one that is not YAML, a value of the wrong type, an enum value nobody
+  knows, both spellings of one setting, or a file written for a newer Troupe.
+- **On a laptop**, a workspace's files set those keys only once the user's own file lists
+  the workspace under `trusted_workspaces`. `troupe config pull` writes the plane's
+  client defaults (Part C) into the user's file through the daemon, in the current
+  spellings.
+- **A repository can check its own file** in CI: `troupe config validate
+  .troupe/config.yaml` exits non-zero on any problem, an unknown key included.

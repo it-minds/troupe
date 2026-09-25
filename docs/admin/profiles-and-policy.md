@@ -118,10 +118,24 @@ applies a profile or publishes a bundle, which needs its Kubernetes connection
 ([configuration.md A.2](configuration.md#a2-plane-troupe_plane), `TROUPE_KUBECONFIG`).
 
 **Egress.** A worker may reach DNS, the plane's control port, OpenBao, object storage, the
-LLM endpoint, its MCP servers and its git hosts. Plain NetworkPolicy cannot name a host, so
-the external ones are one wide rule — public addresses on 443 and 80 — and the per-host
-rules exist only in the `CiliumNetworkPolicy`. Without Cilium the policy is a check at
-admission and reconcile, not on the wire.
+LLM endpoint, its MCP servers and its git hosts. Those in the cluster (a `*.svc` host) are
+their namespace and port. Plain NetworkPolicy cannot name a host, so only the
+`CiliumNetworkPolicy` names the external ones, and what a worker can reach depends on
+whether Cilium is there:
+
+- **With Cilium** (`operator.ciliumAvailable: true`) the allowlist is enforced on the
+  wire. The NetworkPolicy reaches nothing outside the cluster, because Cilium admits the
+  union of every policy on a pod and one wide rule would admit every public host. The
+  `CiliumNetworkPolicy` admits the profile's hosts by name, and sends DNS through Cilium's
+  proxy, which is how it learns the addresses a name resolves to. A host the profile does
+  not name does not connect.
+- **Without Cilium** the external ones are one wide rule, public addresses on 443 and 80,
+  and the policy is a check at admission and reconcile, not on the wire. Troupe writes no
+  address list in its place: the allowlist holds names, not addresses.
+
+`ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
+outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the
+`CiliumNetworkPolicy`.
 
 ## 5. TeamVolume
 

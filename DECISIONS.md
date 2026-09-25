@@ -355,6 +355,16 @@ citation keeps meaning what it meant.
      team page because that is where somebody is standing when they wonder who is near
      theirs, and the flash says "in every team" so nobody mistakes it for a team setting.
 
+684. **A `monthly` budget is the calendar month in UTC, and it turns over because it is
+     asked, not because a job runs.** It resets at 00:00 UTC on the 1st, the same instant
+     on every replica whatever zone anybody is in; decided for #106 over a zone set on the
+     plane and a rolling thirty days. Nothing is written at midnight. The period's start is
+     worked out on every read (`Ledger.period_start/1`) and the ledger's cache is keyed by
+     it, so the first read of a month is a new sum and not last month's remembered one.
+     `never` counts everything. A person's cap and the platform's have no period and count
+     everything too: a person's follows them between teams (471), and following a team's
+     period would give somebody in a `monthly` team and a `never` one two answers.
+
 497. **The plane holds the prompt while a session waits.** It is the only piece of
      session content the plane ever holds, it is held for seconds, and it is cleared the
      moment the session is placed. The alternative is a session that starts and then
@@ -687,7 +697,7 @@ citation keeps meaning what it meant.
      errs towards finishing.
 
 660. **A spent budget is a question for the person attached, not a stop: `allow` buys
-     the same slice again, `always` lifts it for the agent and its subagents, `deny`
+     the same slice again, `always` lifts that limit for the agent and its subagents, `deny`
      ends the agent; a budget the plane's terms set is a contract and stops; `full_send`
      never asks; an unattended session answers no itself.** Ending the agent is what a
      limit is for on a pod running the plane's terms, and exactly wrong on a laptop
@@ -702,8 +712,9 @@ citation keeps meaning what it meant.
      given (`Budget.grant/1`, so grants do not compound) and forgets which limits were
      warned about, because a fresh slice is a fresh warning; the question comes back at
      the end of that slice, a checkpoint each time rather than one irreversible yes.
-     `always` sets `budget_overridden`, which a delegation inherits: a person who lifted
-     the root's budget did not mean to be asked by each of its children. The events are
+     `always` lifts the limit the question was about, and no other (687), and a
+     delegation inherits it: a person who lifted it for the root did not mean each of its
+     children to stop at it. The events are
      `budget_ask_started` and `budget_ask_answered` (with the `grant`), both folded: the
      grant survives a restart, and a `budget_ask_started` without its answer leaves the
      question owed, asked again under the same id, where the questions server hands back
@@ -1136,7 +1147,9 @@ citation keeps meaning what it meant.
        (clients/tui Decision 111).
      - **The installers** end with the same check. An existing `config.yaml` is named.
        opencode's config is offered for the copy. Otherwise, with the TUI installed, the
-       installer hands over to `troupe config`, or names the ways on when it cannot. A
+       installer hands over to `troupe config`, or names the ways on when it cannot;
+       without it, the next step is the desktop app's Models panel where the app is
+       installed, or the file, since only the TUI has `troupe config`. A
        daemon from before `import-opencode` answers "unknown arguments", and the
        installer says it could not copy and goes on.
      - **Proof:**
@@ -1149,3 +1162,225 @@ citation keeps meaning what it meant.
          this branch, driven through a pseudo-terminal in a scratch home.
        - `install.ps1`'s fallback against `v0.3.3-pre.1`.
      - **Not tested:** the TUI's terminal detection and unechoed key prompt on Windows.
+
+685. **The end of a turn is a durable event, `turn_ended`, beside the ephemeral
+     `agent_state`.** An agent whose turn ends without `finish` — a reply in prose, or a
+     failed model request — rests `idle`, and until now only the live `agent_state` said
+     so. That event is ephemeral: a client that attached after the turn ended never saw
+     it, and a connection that falls behind drops it. `troupe run --headless` is exactly
+     that client, since its session starts working before anything has subscribed, and
+     against a real model it never exited (issue #127). The agent now logs `turn_ended`
+     (no fields) just before it publishes `idle`, from the one place a turn comes to rest;
+     a cancelled turn still ends with `cancelled` and a finished agent with `agent_done`,
+     so between them the three say from the log alone that an agent is waiting. It is an
+     added event type, which PROTOCOL.md §11 allows and clients must ignore when they do
+     not know it; the GUI does, and the TUI reads it as the `idle` it is (clients/tui
+     Decision 112). The Loop and the sealer keep reading the live state, which in-process
+     they cannot miss, and the index keeps asking the agent.
+     - **Proof:** `Troupe.Agent.TurnEndedTest`, the whole-turn sequence in
+       `Troupe.Agent.LoopTest`, `Troupe.Session.LogSchemaTest` (the schema knows the type),
+       and `mix troupe.schema.diff`.
+
+686. **A config file has one key table, is read strictly, and says where each value came
+     from; a workspace's own files set the keys that decide what may run only once the
+     workspace is trusted.** Issue #122, the part of it that changes how an existing
+     `config.yaml` is read, so it lands before 0.5.0. `Troupe.Config.Schema` is the table:
+     every key's type, default, which files may set it, whether it is a secret, and what
+     it does. `Troupe.Config.Layers` reads and merges the files against it, and
+     `mix troupe.config.schema` writes `protocol/schema/config/v1.json` and the key
+     reference in `docs/user/configuration.md` from it, which CI checks with `--check`.
+     - **Version.** `version: 1`; a file without it is version 1, and a higher one is
+       refused as written for a newer Troupe.
+     - **Strict.** A file that is not YAML, a value of the wrong type, or an enum value
+       nobody knows (`provider`, `auth`, `approvals`, a provider's `type`, an MCP
+       server's `permission`) refuses the load, naming the file, the line, the key and
+       what to write; `session.create` answers with that. Nothing loads as `%{}` and no
+       enum falls back. `yes`/`no`/`on`/`off`, which YAML 1.2 reads as words, are read
+       as the booleans they mean for a boolean key, with a warning, and the approval gate
+       takes only `true` as on. Options a client or the command line passes are checked
+       against the same table.
+     - **Unknown keys warn**, with the file, the line and the nearest key; `x-` keys pass
+       and land in `extra`. `mouse` and `llm_timeout_ms` are keys of their own, and
+       `llm_timeout_ms` is now the request's timeout.
+     - **One spelling.** `models.{default,cheap,expensive,windows}`, and `api_key` with
+       `auth: bearer`. `model`, `small_model`, `expensive_model`, `windows`,
+       `models.small` and `auth_token` load until version 2, each with a warning; both
+       spellings of one setting in one file refuse it. Every writer — the daemon's
+       `config.set` and `config.import`, the terminal UI's settings page,
+       `troupe config migrate --write` — goes through `Troupe.Config.Migrate.write/2`,
+       which writes the new spellings, `version: 1`, a `yaml-language-server` header
+       naming the schema, and keeps the file it replaced as `.previous`. Loading never
+       rewrites a file, since a rewrite drops comments.
+     - **Maps merge by key** (RFC 7396): a map merges, `null` removes, a list replaces.
+     - **`{env:VAR}` that is not set** refuses the provider or MCP server that reads it,
+       naming the variable, and anywhere else refuses the load. A refused provider's
+       target carries `{:refused, why}` as its key, which both adapters answer with that
+       error and no request. `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are used only with
+       the vendor's own endpoint (`Troupe.LLM.Endpoint.vendor?/2`).
+     - **Scopes and trust.** A key is `:any`, `:trusted` or `:user`. The trusted keys
+       change approvals (`auto_approve`, `approvals`, the two `managed_*`), endpoints and
+       credentials (`provider`, `base_url`, `api_key`, `auth`, `providers`), commands to
+       run (`mcp`), or readable paths (`read_roots`, `state_dir`, `fake_script`). A
+       workspace's `.troupe/config.yaml` and `config.local.yaml` set them only when the
+       workspace, or a directory above it, is on `trusted_workspaces` in the user file,
+       the one `:user` key; otherwise they are ignored with a warning that says how to
+       trust it. A git worktree of a trusted checkout is trusted when the checkout's
+       `.git/worktrees/<name>/gitdir` names it back. A session on a pod (`kind: :team`)
+       resolves with `trust: :never`. The prompt that asks a person to trust a workspace
+       comes with #60.
+     - **Precedence** is unchanged, with `.troupe/config.local.yaml` between the project
+       file and the environment.
+     - **Seeing it.** `troupe config --explain [KEY] [--json]` shows every value, secrets
+       masked, with the layer and file that set it, and for one key its whole ladder,
+       ignored entries and why included. `troupe config validate [PATH]` exits 1 on any
+       error, refusal or warning. `troupe config migrate [--write] [PATH]` prints each
+       file's rewrite. `troupe-daemon config` takes the same arguments.
+     - **Choices made here.** The trust list is a list of paths in the user file, a
+       directory trusting what is under it, and not a per-workspace prompt, which #60
+       adds. `config.local.yaml` is gated like the project file: it lives in the
+       workspace, and nothing but `.gitignore` keeps it out of a repository. The schema's
+       `$id`, and the header writers add, is `https://troupe.dev/schema/config/v1.json`,
+       the protocol schema's pattern; until it is served, an editor points at the file.
+     - **Proof:**
+       - `Troupe.Config.LayersTest`: each refusal (YAML, type, the enums, version, both
+         spellings), the warnings (unknown keys with line and suggestion, old spellings,
+         `no` read as false), merging by key with `null` and lists, the local layer, an
+         unset variable refusing a provider, the session provider, an MCP server and
+         the load, the trust gate and its warning, trust from a parent directory and a
+         worktree (and not from a borrowed `.git` file), and pods.
+       - `Troupe.Config.ExplainTest`: `--explain` with every key, a ladder, JSON and
+         masking; `validate`'s exit status; `migrate` and `--write` with `.previous`; the
+         writer; the committed schema and reference current; every YAML example in
+         `docs/user/configuration.md` and the two READMEs valid.
+       - `Troupe.LLM.ProviderKeysTest`: a vendor variable reaches only its vendor's
+         endpoint, and a refused provider makes no request.
+       - `Troupe.SettingsTest` (clients/tui) and `Troupe.Config.ModelSettingsTest`: both
+         writers write the new spellings only, with `version` and the header.
+       - `Troupe.Daemon.CLITest`: the arguments, and `validate`'s exit status.
+     - **Not tested:** an editor reading the schema through the header, and the native
+       smoke runs, which now take the scripted model from `TROUPE_PROVIDER` and
+       `TROUPE_FAKE_SCRIPT`.
+
+687. **A tool that keeps failing stops the turn and asks, whatever the budget says;
+     `always` lifts only the limit it was asked about; and a delegate's turns are its
+     own.** Issues #117 and #118, from one session: a `qwen3-235b` root agent called
+     `read_branch` with ids `"1"` to `"352"`, one per model call, and failed the same way
+     each time for half an hour and over $4, after the person had answered `always` to an
+     input-token question — which lifted the turn, output and time limits as well.
+     - **The failure guard.** `Agent.Server` counts each tool's failures in a row, by the
+       tool's name. Not by its error text: the loop's errors differed by id, normalising
+       text is guesswork, and a tool that fails ten times running deserves the question
+       whatever it said. A success of that tool clears its count. Counts are taken when a
+       turn's results are folded, in call order; the calls a cancel or a restart closes
+       are not counted. At `tool_failures_note_at` (5) a note follows the results, a
+       `user_input` from `harness` as 659's notes are: the model reads it, both clients
+       already show it, a replay rebuilds it. At `tool_failures_stop_at` (10) the gate
+       before the next model call stops the turn, ahead of the budget and under
+       `full_send`, a lifted limit or a contract budget alike, because it is about the
+       loop and not the money.
+     - **Asking.** The root asks as the budget does (660): through
+       `Troupe.Session.Questions` under `failures-<n>`, with `tool_failures_ask_started`
+       and `tool_failures_ask_answered` beside it, waiting in `:waiting` in the slot the
+       budget question uses. So there is one question at a time, and one still owed is
+       folded and asked again under its own id after a restart. `stop` is the first
+       option, because a client with nobody to ask answers with the first (the headless
+       runner does); `continue` clears the count. `stop` writes a harness note saying why
+       and ends the turn with `turn_ended` `reason: tool_failures`. The headless runner
+       exits 1 on it, `/loop` counts it a failed iteration, and a restart does not take
+       the turn up again (it reads as a cancel). A session with `approvals: deny` answers
+       `stop` itself. A subagent does not ask: it ends `tool_failures` and hands its
+       parent what it has, labelled partial. The counts are not replayed, as 659's guards
+       are not; `0` turns a step off.
+     - **`always` lifts one limit.** `Troupe.Budget` gains `lifted`, which `check/1`
+       skips. The answer names the limit (`budget_ask_answered.lifted`), and the option
+       says which: "lift the input-token limit for the rest of the session". The GUI's
+       and TUI's own words for it changed to match. A lifted limit still reaches the
+       delegates, inside their slice, since 660's reason stands; a lifted dimension's
+       slice is a share of the parent's first allowance, because of a limit it has passed
+       the parent has nothing left to share. An `always` in a log written before this has
+       no `lifted`, and folds to the limit its `budget_ask_started` named. That is what
+       the question asked about; the limits it used to lift as well ask again when
+       reached, which costs a question and never any work. 660 said `always` lifted the
+       whole budget, and now points here.
+     - **A delegate's turns are its own.** `Budget.slice/2` gave a child `budget_share`
+       of its parent's *remaining* turns: 0.4 × (40 − used), about 14 for an `explore`
+       started late in a root's turn, and six of seven asked to read an app ran out
+       before reporting (#115). But a child's turns cost its parent none. Only its tokens
+       are charged back, and its clock runs on the parent's, so sharing turns had nothing
+       behind it and shrank with every turn the parent took. A delegate now gets the turns
+       its parent was first given (40 by default), lowered by its definition's
+       `max_turns` as a root's are; tokens and time are still a share of what the parent
+       has left. The issue's other options were worse. A turn floor for `explore` alone
+       patches one profile. Leaving turns out for read-only agents needs a notion of
+       read-only, and removes the one bound on a loop of cheap calls. Resetting a root's
+       turns on each input changes the root's contract, and belongs with the root
+       turn-cap discussion. With tokens still sliced and the failure guard on stuck
+       loops, a full turn allowance is safe.
+     - **Whitespace is not a reply.** A reply of whitespace alone is empty, nudged once
+       and then `empty_reply` (659), and a subagent's prose summary is handed over
+       trimmed, as #130 did for a budget stop's.
+     - **Proof:**
+       - `Troupe.Agent.ToolFailuresTest`: the note at 5 and the question at 10, `stop`,
+         `continue`, a success clearing the count, `full_send`, `always` on the budget
+         question, an unattended session, the config's thresholds, a subagent, a
+         question re-asked after a restart, a stopped turn a restart leaves alone, and
+         no approval left open in the summary after a stop.
+       - `Troupe.Session.SleepTest`: a session asleep on the guard's question is listed
+         as waiting and asks it again on wake (#119's sleep); once stopped, it wakes
+         with nothing to take up.
+       - `Troupe.Agent.BudgetQuestionTest`: `always` on input tokens leaves turns asking;
+         on turns, input tokens and time; an old `always` folds to its question's limit.
+       - `Troupe.BudgetTest`: each limit lifted leaves the other three.
+       - `Troupe.Agent.DelegationTest`: an `explore` delegated after six turns finishes
+         twenty reads, and a subagent's whitespace or padded reply.
+       - `Troupe.Session.LoopTest`: guard-stopped iterations stop a loop.
+       - The TUI's CLI test: a headless run exits 1 on a guard stop.
+       - The installed daemon, driven with a fake-provider script.
+     - **Not tested:** a real gateway. The nightly real-gateway job is to rely on the
+       guard's `turn_ended` reason.
+
+688. **A delegation always comes back: a subagent whose model request fails hands its
+     parent what it has, a child's path names one child for the life of the session, and
+     a `finish` ends only the turn that called it.** Issue #149, three defects found by
+     fixers in the chunk before 0.5.0, in the family of its gate on runaway and hung
+     agents. Two left a parent waiting on its `delegate` call for ever, since a delegation
+     has no timeout; the third ended a turn before the model saw its results.
+     - **A failed model request.** A root rests after one (685): the error goes into its
+       conversation and the person says what next. A subagent rested too, and nobody
+       talks to a subagent but its parent, which was waiting on it. It now ends
+       `llm_error`, as a spent budget (660) or a failing tool (687) ends it, and hands its
+       parent what it said before the failure, labelled cut short, or a line saying the
+       request failed before it reported anything. Either way the error is in it, so the
+       parent's model can tell a blown context from a gateway that is down before it
+       delegates again. A context overflow still compacts once and retries first.
+       `llm_error` joins `agent_done`'s reasons; a root never ends with it, and its
+       `turn_ended` keeps no `reason`, since the `llm_error` before it says why and the
+       clients already read that.
+     - **A child's path.** `spawn_child` names a child `<agent>#<n>` from `child_seq`,
+       which was never folded, so after any restart the next delegation was `#1` again.
+       A child started under a path that has a log replays that log instead of taking its
+       task; the first child had finished, so the new one came back `done`, never
+       reported, and its parent waited. `delegation_started` is now folded, to the highest
+       number a child path ends in. Not a count: a child that failed to start took a
+       number and wrote no event. A path from before the numbers (`["root", "explore"]`)
+       counts as one more. A delegation that a restart takes up again, being a call that
+       had not finished (re-run at least once, as any tool is), gets a new child on the
+       same task rather than the path it had: that child's log would come back `done` if
+       it had reported just before its parent died, and hang as before. What the old
+       child did is still in the log.
+     - **`finish`.** Its summary waits for the turn's other calls, and was never cleared.
+       After a finished root was woken (635), or a cancel stopped a turn with a `finish`
+       in it, the next tool turn finished at once with the old summary. It is now cleared
+       with the rest of a turn's call bookkeeping, in `State.clear_calls/1`.
+     - **Old logs.** `Troupe.Log.Fold` witnesses `delegation_started` without projecting
+       it: the children it started are in the witness already, each an agent under its
+       own path, so the recorded fixture hashes stand and a change in how paths are made
+       would still move them.
+     - **Proof:**
+       - `Troupe.Agent.DelegationTest`: a subagent whose model request fails, after
+         saying something and before.
+       - `Troupe.Agent.ResilienceTest`: a second delegation after an agent restart and
+         after the session comes back, a delegation a restart takes up again, a woken
+         agent's tool turn, and a `finish` in a cancelled turn.
+       - `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and the witness.
+       - The installed daemon, driven with a fake-provider script.

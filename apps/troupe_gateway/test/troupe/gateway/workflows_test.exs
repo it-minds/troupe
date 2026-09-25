@@ -163,7 +163,7 @@ defmodule Troupe.Gateway.WorkflowsTest do
 
     File.write!(Path.join(workspace, ".troupe/config.yaml"), """
     provider: fake
-    model: fake-model
+    models: {default: fake-model}
     auto_approve: true
     fake_script: #{script}
     """)

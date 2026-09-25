@@ -41,6 +41,9 @@ defmodule Troupe.Session.Approvals do
     # approval answered but its tool not yet finished comes back, re-dispatches the call,
     # and must not ask the same person the same question again.
     decided: %{},
+    # Requests read back from the log with no decision and no result yet: the calls a
+    # session that slept mid-approval re-dispatches when it comes back.
+    awaiting: %{},
     session_allows: MapSet.new()
   ]
 
@@ -79,7 +82,7 @@ defmodule Troupe.Session.Approvals do
 
   @doc "Approve everything from now on, as `--auto-approve` does."
   @spec set_auto_approve(String.t(), boolean()) :: :ok
-  def set_auto_approve(session_id, value) do
+  def set_auto_approve(session_id, value) when is_boolean(value) do
     GenServer.call(Troupe.Registry.approvals(session_id), {:auto_approve, value})
   end
 
@@ -97,7 +100,7 @@ defmodule Troupe.Session.Approvals do
     state = %__MODULE__{
       session_id: session_id,
       mode: Keyword.get(opts, :mode, :wait),
-      auto_approve: Keyword.get(opts, :auto_approve, false),
+      auto_approve: Keyword.get(opts, :auto_approve, false) == true,
       managed_rules_only: Keyword.get(opts, :managed_rules_only, false)
     }
 
@@ -117,12 +120,24 @@ defmodule Troupe.Session.Approvals do
     :exit, _reason -> state
   end
 
+  defp fold(%{type: "approval_requested", data: data} = event, state) do
+    req = %{
+      call_id: data["call_id"],
+      tool: data["tool"],
+      args: data["args"],
+      agent_path: data["agent_path"] || event.agent
+    }
+
+    %{state | awaiting: Map.put(state.awaiting, req.call_id, req)}
+  end
+
   defp fold(%{type: "approval_decided", data: data} = event, state) do
     decision = data["decision"]
 
     state = %{
       state
       | decided: Map.put(state.decided, data["call_id"], answer_for(decision)),
+        awaiting: Map.delete(state.awaiting, data["call_id"]),
         resolved:
           Map.put(state.resolved, data["call_id"], %{
             agent_path: event.agent || data["agent_path"],
@@ -137,6 +152,11 @@ defmodule Troupe.Session.Approvals do
     end
   end
 
+  # A call closed off some other way — timed out, interrupted — is waiting for nobody,
+  # whatever its approval says.
+  defp fold(%{type: "tool_call_completed", data: %{"call_id" => id}}, state),
+    do: %{state | awaiting: Map.delete(state.awaiting, id)}
+
   defp fold(_event, state), do: state
 
   defp answer_for("deny"), do: :deny
@@ -148,7 +168,7 @@ defmodule Troupe.Session.Approvals do
   @impl GenServer
   def handle_call({:request, req}, from, state) do
     cond do
-      state.auto_approve ->
+      state.auto_approve == true ->
         {:reply, :allow, state}
 
       MapSet.member?(state.session_allows, req.tool) ->
@@ -207,39 +227,55 @@ defmodule Troupe.Session.Approvals do
   def handle_cast({:decide, call_id, decision, actor}, state) do
     case Map.pop(state.pending, call_id) do
       {nil, _} ->
-        {:noreply, already_resolved(state, call_id)}
+        {:noreply, not_pending(state, call_id, decision, actor)}
 
       {entry, pending} ->
         Process.demonitor(entry.monitor, [:flush])
-        answer = if decision == :deny, do: :deny, else: :allow
-        GenServer.reply(entry.from, answer)
-
-        # `allow_session` becomes a plain `allow` where the platform holds the rules: the
-        # call in front of the person is answered, and nothing standing is created. The
-        # *decision that was made* still goes in the log as `allow`, because an event
-        # saying `allow_session` beside a session that allows nothing would be a log that
-        # disagreed with itself.
-        decision = if state.managed_rules_only, do: managed(decision), else: decision
-
-        allows =
-          if decision == :allow_session,
-            do: MapSet.put(state.session_allows, entry.req.tool),
-            else: state.session_allows
-
-        Log.append(
-          state.session_id,
-          entry.req.agent_path,
-          :approval_decided,
-          Map.put(describe(entry.req), "decision", Atom.to_string(decision)),
-          actor
-        )
-
-        resolved = Map.put(state.resolved, call_id, resolved_by(entry.req, actor))
-        decided = Map.put(state.decided, call_id, answer)
-
-        {:noreply,
-         %{state | pending: pending, resolved: resolved, decided: decided, session_allows: allows}}
+        GenServer.reply(entry.from, if(decision == :deny, do: :deny, else: :allow))
+        {:noreply, record(%{state | pending: pending}, entry.req, decision, actor)}
     end
+  end
+
+  # Asked before this tree started, and not yet asked again. Answering a dormant session's
+  # approval is what wakes it, so the answer can arrive before the call it answers has
+  # gone back out; it is kept, and handed over when that call asks.
+  defp not_pending(state, call_id, decision, actor) do
+    case Map.fetch(state.awaiting, call_id) do
+      {:ok, req} -> record(state, req, decision, actor)
+      :error -> already_resolved(state, call_id)
+    end
+  end
+
+  defp record(state, req, decision, actor) do
+    answer = if decision == :deny, do: :deny, else: :allow
+
+    # `allow_session` becomes a plain `allow` where the platform holds the rules: the
+    # call in front of the person is answered, and nothing standing is created. The
+    # *decision that was made* still goes in the log as `allow`, because an event
+    # saying `allow_session` beside a session that allows nothing would be a log that
+    # disagreed with itself.
+    decision = if state.managed_rules_only, do: managed(decision), else: decision
+
+    allows =
+      if decision == :allow_session,
+        do: MapSet.put(state.session_allows, req.tool),
+        else: state.session_allows
+
+    Log.append(
+      state.session_id,
+      req.agent_path,
+      :approval_decided,
+      Map.put(describe(req), "decision", Atom.to_string(decision)),
+      actor
+    )
+
+    %{
+      state
+      | resolved: Map.put(state.resolved, req.call_id, resolved_by(req, actor)),
+        decided: Map.put(state.decided, req.call_id, answer),
+        awaiting: Map.delete(state.awaiting, req.call_id),
+        session_allows: allows
+    }
   end
 
   # A second answer to a decided prompt is not an error — two people watching one
@@ -270,12 +306,14 @@ defmodule Troupe.Session.Approvals do
 
   @impl GenServer
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
-    pending =
-      state.pending
-      |> Enum.reject(fn {_id, entry} -> entry.monitor == monitor end)
-      |> Map.new()
+    {gone, pending} =
+      Enum.split_with(state.pending, fn {_id, entry} -> entry.monitor == monitor end)
 
-    {:noreply, %{state | pending: pending}}
+    # The call that was asking has been closed off — timed out, cancelled — so nothing is
+    # waiting for this answer any more, including a call from before the tree started.
+    awaiting = Map.drop(state.awaiting, Enum.map(gone, &elem(&1, 0)))
+
+    {:noreply, %{state | pending: Map.new(pending), awaiting: awaiting}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}

@@ -196,12 +196,29 @@ defmodule Troupe.Protocol.Schema do
         "limit" => required(:integer),
         "detail" => required(:string)
       },
-      # `allow` (one more slice, `grant` says how much), `always` (this agent and its
-      # subagents stop asking) or `deny` (`budget_exhausted` follows).
+      # `allow` (one more slice, `grant` says how much), `always` (the limit asked about,
+      # named in `lifted`, is lifted for this agent and its subagents; the others still
+      # ask — Decision 687) or `deny` (`budget_exhausted` follows).
       "budget_ask_answered" => %{
         "call_id" => required(:string),
         "decision" => required(:string),
-        "grant" => optional(:object)
+        "grant" => optional(:object),
+        "lifted" => optional(:string)
+      },
+      # One tool has failed `failures` times in a row and the agent asks before its next
+      # model call whether the turn goes on (Decision 687). The question itself is a
+      # `question_asked` under the same `call_id`, with options `stop` and `continue`.
+      "tool_failures_ask_started" => %{
+        "call_id" => required(:string),
+        "tool" => required(:string),
+        "failures" => required(:integer),
+        "detail" => required(:string)
+      },
+      # `continue` (the tool's count starts again) or `stop` (`turn_ended` follows, with
+      # `reason: tool_failures`).
+      "tool_failures_ask_answered" => %{
+        "call_id" => required(:string),
+        "decision" => required(:string)
       },
       # A limit is near (Decision 655): once per dimension per agent.
       "budget_warning" => %{
@@ -216,6 +233,10 @@ defmodule Troupe.Protocol.Schema do
         "summary" => optional(:string),
         "limit" => optional(:string)
       },
+      # The agent's turn is over and it waits for input: the durable twin of `agent_state`
+      # reaching `idle`, for a client that was not listening when it happened (issue #127).
+      # `reason` only when the harness ended it: `tool_failures` (Decision 687).
+      "turn_ended" => %{"reason" => optional(:string)},
       # Input that arrived after an agent finished. Recorded rather than dropped: it is
       # the difference between "the user said nothing" and "the user said something and
       # nobody was listening".

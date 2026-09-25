@@ -18,11 +18,16 @@ defmodule Troupe.Remote.Translate do
 
   require Logger
 
-  @typedoc "What the translator has to remember between events of one session."
-  @type memory :: %{agents: MapSet.t(), unknown: MapSet.t()}
+  @typedoc """
+  What the translator has to remember between events of one session, and what the
+  window it opens says the session works in: `:remote` for a worker on a plane,
+  `:shared` or `:worktree` for a session in the daemon on this machine.
+  """
+  @type memory :: %{agents: MapSet.t(), unknown: MapSet.t(), isolation: atom()}
 
-  @spec memory() :: memory()
-  def memory, do: %{agents: MapSet.new(), unknown: MapSet.new()}
+  @spec memory(atom()) :: memory()
+  def memory(isolation \\ :remote),
+    do: %{agents: MapSet.new(), unknown: MapSet.new(), isolation: isolation}
 
   @doc """
   One durable event as zero or more local events, plus the memory to carry on
@@ -133,7 +138,7 @@ defmodule Troupe.Remote.Translate do
       spawned =
         durable_event(session_id, root, :branch_spawned, ts(event), %{
           name: profile_name(root),
-          isolation: :remote,
+          isolation: memory.isolation,
           prompt: ""
         })
 
@@ -247,6 +252,23 @@ defmodule Troupe.Remote.Translate do
         {[emit.(:budget_ask_answered, %{call_id: call_id(data), decision: data["decision"]})],
          memory}
 
+      # The failure guard's question (troupe-remote Decision 687) is drawn as the question it
+      # rides on, the other way round from the budget's: its options are the harness's own
+      # words, `stop` first, and headless mode answers any question with the first option.
+      # The tool and the count this adds are already the question's text.
+      "tool_failures_ask_started" ->
+        {[], memory}
+
+      # Ends the question as its answer does. It is the only word there is when the session
+      # has nobody to ask: the question is written, never answered, and the agent stops.
+      "tool_failures_ask_answered" ->
+        {[
+           emit.(:tool_failures_ask_answered, %{
+             call_id: call_id(data),
+             decision: data["decision"]
+           })
+         ], memory}
+
       # A reply the output cap cut, or one with nothing in it (troupe-remote Decision 659).
       "truncated" ->
         {[emit.(:remote_note, %{text: truncated(data)})], memory}
@@ -286,11 +308,27 @@ defmodule Troupe.Remote.Translate do
       "agent_woken" ->
         {[emit.(:remote_note, %{text: "woken"}), emit.(:agent_state, %{to: :thinking})], memory}
 
+      # The reason rides along, so a reader that must tell a finish from a stop short (the
+      # headless printer's exit code) does not have to parse the note.
       "agent_done" ->
-        {[emit.(:agent_state, %{to: :done})] ++ done_note(emit, data), memory}
+        {[emit.(:agent_state, %{to: :done, reason: data["reason"]})] ++ done_note(emit, data),
+         memory}
 
+      # The turn is over and the agent waits for input: the same `idle` the live
+      # `agent_state` says, but from the log, so it is neither dropped nor missed by a
+      # client that attached after it happened. A `reason` rides along when the harness
+      # ended the turn rather than the model (`tool_failures`, troupe-remote Decision 687).
+      "turn_ended" ->
+        {[emit.(:agent_state, ended_by(%{to: :idle}, data))], memory}
+
+      # The model's own `:cancelled`, not a note that says so: it also ends whatever the
+      # agent and those under it were still asking, which a subagent the cancel took down
+      # never answers (#145).
       "cancelled" ->
-        {[emit.(:remote_note, %{text: "cancelled"}), emit.(:agent_state, %{to: :idle})], memory}
+        {[
+           emit.(:cancelled, %{}),
+           emit.(:agent_state, %{to: :idle, reason: "cancelled"})
+         ], memory}
 
       "compacted" ->
         {[emit.(:remote_note, %{text: "context compacted"})], memory}
@@ -471,6 +509,11 @@ defmodule Troupe.Remote.Translate do
        do: [emit.(:remote_note, %{text: "done (#{reason})"})]
 
   defp done_note(_emit, _data), do: []
+
+  defp ended_by(idle, %{"reason" => reason}) when is_binary(reason),
+    do: Map.put(idle, :reason, reason)
+
+  defp ended_by(idle, _data), do: idle
 
   defp as(%{"profile" => profile}) when is_binary(profile), do: " as #{profile}"
   defp as(_data), do: ""

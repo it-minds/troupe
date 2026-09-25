@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { DaemonClient, DaemonSource, FleetStore, filterRows, rowFromDaemon } from "../src/index.js";
+import { awaitingApproval, DaemonClient, DaemonSource, FleetStore, filterRows, rowFromDaemon } from "../src/index.js";
 import type { DaemonEndpoint, FleetRow, FleetSource } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
@@ -87,6 +87,45 @@ describe("stage 2, done item 2: one list, two kinds, each labelled", () => {
       last_active_at: null,
     });
     assert.equal(row.costMicros, 250_000);
+  });
+});
+
+// The inbox is a listing, not a replay: it shows the rows that count an approval open.
+// The daemon's rows carried no count, and `rowFromDaemon` took the missing field for 0, so
+// in local mode a session waiting on its person never reached the inbox (#145). The
+// daemon's `session.list` now carries `pending_approvals`, and `status: "waiting"` while
+// one is open, the same two a plane's row carries.
+describe("the inbox in local mode", () => {
+  let daemon: FakeDaemon;
+  let client: DaemonClient;
+
+  before(async () => {
+    daemon = new FakeDaemon();
+    await daemon.start();
+    client = new DaemonClient(endpointOf(daemon));
+  });
+
+  after(async () => {
+    client.disconnect();
+    await daemon.stop();
+  });
+
+  it("lists a local session waiting on an approval, and only that one", async () => {
+    const waiting = daemon.seed("/home/ada/waiting", { status: "waiting", pendingApprovals: 1 });
+    daemon.seed("/home/ada/idle");
+
+    const store = new FleetStore([new DaemonSource(client)]);
+    await store.refresh();
+
+    const inbox = awaitingApproval(store.current.rows);
+    assert.deepEqual(
+      inbox.map((r) => r.id),
+      [waiting.id],
+    );
+    assert.equal(inbox[0]?.kind, "local");
+    assert.equal(inbox[0]?.pendingApprovals, 1);
+    assert.equal(inbox[0]?.status, "waiting");
+    assert.deepEqual(filterRows(store.current.rows, { needsApproval: true }), inbox);
   });
 });
 

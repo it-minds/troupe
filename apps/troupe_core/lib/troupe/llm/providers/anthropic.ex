@@ -47,6 +47,7 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp attempt(request, reply_to, ref) do
     case api_key(request) do
       nil -> {:error, :missing_api_key}
+      {:refused, _why} = refused -> {:error, refused}
       key -> post(request, key, reply_to, ref)
     end
   end
@@ -324,8 +325,14 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp base_url(%Request{base_url: nil}), do: @default_base_url
   defp base_url(%Request{base_url: url}), do: url
 
+  # `ANTHROPIC_API_KEY` is Anthropic's key, so it goes to Anthropic's endpoint and
+  # nowhere else: a gateway that was configured without a key does not get it.
+  defp api_key(%Request{api_key: {:refused, _why} = refused}), do: refused
   defp api_key(%Request{api_key: key}) when is_binary(key) and key != "", do: key
-  defp api_key(_request), do: System.get_env("ANTHROPIC_API_KEY")
+
+  defp api_key(%Request{base_url: url}) do
+    if var = Endpoint.vendor_key_var(:anthropic, url), do: System.get_env(var)
+  end
 
   # Anthropic's own scheme is `x-api-key`; a gateway in front of its API usually wants
   # the same token as a bearer, which is what `auth_token` in a config file says.

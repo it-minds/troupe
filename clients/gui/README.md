@@ -105,11 +105,13 @@ client tests drive it:
 # 1. the daemon: install it (install.sh / install.ps1 from a release; -y for the
 #    daemon alone, --gui for this app too) or build it in ../../apps/troupe_daemon with
 #    `MIX_ENV=prod mix release troupe_daemon`
-# 2. a workspace whose model is the script
+# 2. a workspace whose model is the script. The provider, the script and auto_approve
+#    are read from a workspace's own file only once the user's config.yaml trusts it
+#    (trusted_workspaces: [/home/you/demo]); troupe config validate says so until then.
 mkdir -p ~/demo/.troupe && cat > ~/demo/.troupe/config.yaml <<'YAML'
 provider: fake
 fake_script: /home/you/demo/.troupe/script.json   # absolute: resolved by the daemon, not the workspace
-model: fake-model
+models: {default: fake-model}
 auto_approve: true
 max_turns: 2          # so the budget question appears on the third turn
 YAML

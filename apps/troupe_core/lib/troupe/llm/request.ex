@@ -21,6 +21,8 @@ defmodule Troupe.LLM.Request do
     # made from it. `nil` asks for no reasoning and gets the plain output cap.
     reasoning_effort: nil,
     base_url: nil,
+    # `{:refused, why}` when the provider may not be used — a `{env:VAR}` its key or URL
+    # reads is not set — which the adapter answers with that error and no request.
     api_key: nil,
     # How the key is presented: the provider's own scheme, or `Authorization: Bearer`
     # for a gateway that fronts a provider's API but not its authentication.
@@ -51,7 +53,7 @@ defmodule Troupe.LLM.Request do
           temperature: float() | nil,
           reasoning_effort: String.t() | nil,
           base_url: String.t() | nil,
-          api_key: String.t() | nil,
+          api_key: String.t() | {:refused, String.t()} | nil,
           auth: :api_key | :bearer,
           provider: module() | nil,
           timeout_ms: pos_integer(),

@@ -14,11 +14,20 @@ System.delete_env("TROUPE_DAEMON_SOCKET")
 System.delete_env("TROUPE_DAEMON_COMMAND")
 
 for var <-
-      ~w(TROUPE_PROVIDER TROUPE_MODEL TROUPE_API_KEY TROUPE_BASE_URL TROUPE_AUTH TROUPE_AUTH_TOKEN TROUPE_FAKE_SCRIPT) do
+      ~w(TROUPE_PROVIDER TROUPE_MODEL TROUPE_API_KEY TROUPE_BASE_URL TROUPE_AUTH TROUPE_AUTH_TOKEN TROUPE_FAKE_SCRIPT ANTHROPIC_API_KEY OPENAI_API_KEY) do
   System.delete_env(var)
 end
 
 System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(tmp, "no-opencode.jsonc"))
 System.put_env("TROUPE_OPENCODE_AUTH", Path.join(tmp, "no-auth.json"))
+
+# The tests drive the daemon's scripted model from each workspace's `.troupe/config.yaml`
+# (`provider: fake`, `fake_script:`), and a project's file sets those only in a trusted
+# workspace. Every test workspace, and every worktree made beside one, is under the
+# system's temp directory, so the machine's user file trusts that.
+File.write!(
+  Path.join([tmp, "config", "config.yaml"]),
+  "version: 1\ntrusted_workspaces:\n  - #{Jason.encode!(System.tmp_dir!())}\n"
+)
 
 ExUnit.start(exclude: [:manual, :slow], timeout: 60_000, capture_log: true)

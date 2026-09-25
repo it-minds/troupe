@@ -55,6 +55,9 @@ defmodule Troupe.Log.Fold do
   The durable event types this fold acts on.
 
   Everything the agent's own replay acts on, plus the ones the summary projection needs.
+  `delegation_started` is read by the agent for the number its next child takes (Decision
+  688) and adds nothing here: the children it started are in the witness already, each an
+  agent under its own path, so a change in how those paths are made moves the hash.
   """
   @spec witnessed_types() :: [String.t()]
   def witnessed_types do
@@ -64,6 +67,7 @@ defmodule Troupe.Log.Fold do
       tool_call_started tool_call_completed tool_results
       todo_updated profile_switched compacted
       goal_set goal_cleared
+      delegation_started
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
       session_tainted

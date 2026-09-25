@@ -11,13 +11,17 @@ defmodule Troupe.Sessions.Index do
   It holds metadata only: workspace, profile, lifecycle state, counters. Session
   *content* is in the log and never here, which is the same rule the remote plane
   follows and the reason this can be rebuilt from logs at any time.
+
+  It is also what puts a session to sleep. One with nothing running — idle, or waiting on
+  a person — gives its actor tree back after `session_idle_ms` while somebody is watching
+  it, and after the much shorter `detached_idle_ms` once nobody is.
   """
 
   use GenServer
 
-  alias Troupe.Paths
+  alias Troupe.{Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
-  alias Troupe.Session.Log
+  alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
 
   @type meta :: %{
           id: String.t(),
@@ -27,6 +31,7 @@ defmodule Troupe.Sessions.Index do
           profile: String.t(),
           state: :active | :dormant | :read_only | :erased,
           status: atom(),
+          pending_approvals: non_neg_integer(),
           tokens: non_neg_integer(),
           cost: float(),
           created_at: String.t() | nil,
@@ -102,8 +107,14 @@ defmodule Troupe.Sessions.Index do
 
   # How long a session may sit with nothing to do before its actor tree is stopped.
   # Its log stays; subscribing to it still serves history; the next activating command
-  # brings the tree back.
+  # brings the tree back. Waiting on a person is nothing to do: an approval or a question
+  # is durable, and is asked again when the tree comes back.
   @default_idle_ms 30 * 60 * 1000
+  # The same for a session nobody is watching, which has nobody to notice it sleep and
+  # keeps a laptop awake until it does. Shorter than a tool's own timeout (three minutes),
+  # so a call waiting on a person is still outstanding when the tree comes down, and is
+  # asked again on the way back rather than failed as timed out.
+  @default_detached_ms 2 * 60 * 1000
   @sweep_ms 15_000
 
   @impl GenServer
@@ -115,11 +126,21 @@ defmodule Troupe.Sessions.Index do
         Application.get_env(:troupe_core, :session_idle_ms, @default_idle_ms)
       end)
 
+    # Never longer than the watched clock: nobody looking is less reason to keep a tree,
+    # not more. `:infinity` sorts after every number, so this is also "never" only when
+    # both are.
+    detached_ms =
+      opts
+      |> Keyword.get_lazy(:detached_idle_ms, fn ->
+        Application.get_env(:troupe_core, :detached_idle_ms, @default_detached_ms)
+      end)
+      |> min(idle_ms)
+
     sweep_ms =
       Keyword.get_lazy(opts, :sweep_ms, fn ->
         Application.get_env(:troupe_core, :session_sweep_ms, @sweep_ms)
       end)
-    if idle_ms != :infinity, do: Process.send_after(self(), :sweep, sweep_ms)
+    if detached_ms != :infinity, do: Process.send_after(self(), :sweep, sweep_ms)
 
     {:ok,
      %{
@@ -127,6 +148,7 @@ defmodule Troupe.Sessions.Index do
        monitors: %{},
        state_dir: Keyword.get(opts, :state_dir),
        idle_ms: idle_ms,
+       detached_ms: detached_ms,
        sweep_ms: sweep_ms
      }}
   end
@@ -213,7 +235,7 @@ defmodule Troupe.Sessions.Index do
         state
 
       {:ok, entry} ->
-        sweep_live(state, session_id, entry, agent_state(session_id))
+        sweep_live(state, session_id, watch(entry, session_id), agent_state(session_id))
     end
   end
 
@@ -223,25 +245,75 @@ defmodule Troupe.Sessions.Index do
 
   defp sweep_live(state, session_id, _entry, :gone), do: drop(state, session_id)
 
-  defp sweep_live(state, session_id, entry, :idle) do
-    idle_since = Map.get(entry, :idle_since) || now_ms()
+  # Idle, or parked on a person: the same here, since neither has anything running to lose.
+  defp sweep_live(state, session_id, entry, _idle_or_parked) do
+    now = now_ms()
+    entry = Map.put(entry, :idle_since, Map.get(entry, :idle_since) || now)
 
-    if now_ms() - idle_since >= state.idle_ms do
+    if due?(state, entry, now) do
       Troupe.stop_session(session_id)
       drop(state, session_id)
     else
-      put_in(state.live[session_id], Map.put(entry, :idle_since, idle_since))
+      put_in(state.live[session_id], entry)
     end
+  end
+
+  # On the long clock whoever is watching, or on the short one once nobody has been
+  # watching for that long either.
+  defp due?(state, %{idle_since: idle_since} = entry, now) do
+    unwatched_since = Map.get(entry, :unwatched_since)
+
+    now - idle_since >= state.idle_ms or
+      (unwatched_since != nil and now - max(idle_since, unwatched_since) >= state.detached_ms)
+  end
+
+  # When the sweep first found nobody watching, so the short clock runs from whichever
+  # came later — going quiet, or the last viewer leaving — and a client that reconnects
+  # within a sweep or two finds its session where it left it.
+  defp watch(entry, session_id) do
+    if watched?(session_id),
+      do: Map.put(entry, :unwatched_since, nil),
+      else: Map.put(entry, :unwatched_since, Map.get(entry, :unwatched_since) || now_ms())
+  end
+
+  # A client follows it, or it is in watch mode — a person's editor rather than a client,
+  # and one that stops being watched when the tree stops.
+  defp watched?(session_id) do
+    Events.watched?(session_id) or Watcher.enabled?(session_id)
+  catch
+    :exit, _ -> false
   end
 
   defp agent_state(session_id) do
     case Troupe.snapshot(session_id) do
       %{state: state} when state in [:idle, :done] -> :idle
+      %{state: state} when state in [:acting, :waiting] -> parked_or_busy(session_id)
       %{state: _} -> :busy
       _ -> :gone
     end
   catch
     :exit, _ -> :gone
+  end
+
+  # Waiting on a person and on nothing else: the root agent has asked something — an
+  # approval, a question, the budget's own question (Decision 660) — and every task it has
+  # running is one of the askers. Only the root's own calls are asked again when the tree
+  # comes back; a delegation comes back interrupted, so a session with a subagent alive is
+  # busy, and a subagent's question times out with its tool as it always has.
+  defp parked_or_busy(session_id) do
+    root = Session.root_path()
+
+    asked =
+      (Approvals.pending(session_id) ++ Questions.pending(session_id))
+      |> Enum.count(&(&1.agent_path == root))
+
+    parked? =
+      asked > 0 and Troupe.agent_tree(session_id) == [root] and
+        length(Task.Supervisor.children(Registry.tasks(session_id, root))) <= asked
+
+    if parked?, do: :parked, else: :busy
+  catch
+    :exit, _ -> :busy
   end
 
   defp now_ms, do: System.monotonic_time(:millisecond)
@@ -255,11 +327,12 @@ defmodule Troupe.Sessions.Index do
 
   @impl GenServer
   def handle_call({:get, session_id}, _from, state) do
-    {:reply, Map.get(state.live, session_id) || from_disk(state, session_id), state}
+    {:reply, live(state, session_id) || from_disk(state, session_id), state}
   end
 
   def handle_call({:list, filter}, _from, state) do
-    {:reply, state |> all() |> apply_filter(filter), state}
+    listed = state |> all() |> apply_filter(filter) |> Enum.map(&(live(state, &1.id) || &1))
+    {:reply, listed, state}
   end
 
   def handle_call(:live_ids, _from, state) do
@@ -284,6 +357,28 @@ defmodule Troupe.Sessions.Index do
 
     {:reply, workspaces, state}
   end
+
+  # A running session's entry, with the approvals it has open read when it is asked for:
+  # from the session's own summary projection, which already follows every way an
+  # approval ends (#142) and is what a worker reports to the plane from. Nothing here
+  # hears the session's events, so a count kept here would be one more reader to get it
+  # wrong.
+  defp live(state, session_id) do
+    case Map.fetch(state.live, session_id) do
+      {:ok, entry} ->
+        open = session_id |> Summary.snapshot() |> Map.get("approvals", [])
+        entry |> Map.put(:pending_approvals, length(open)) |> waiting()
+
+      :error ->
+        nil
+    end
+  end
+
+  # `waiting` outranks whatever else a listing would say, as it does in what a worker
+  # reports: a session with an approval open is waiting on a person, whatever its agent
+  # is doing meanwhile. So a local row and a plane's row say the same of it.
+  defp waiting(%{pending_approvals: open} = meta) when open > 0, do: %{meta | status: :waiting}
+  defp waiting(meta), do: meta
 
   # Live entries win: a session with a running tree knows more about itself than its
   # log's first event does.
@@ -349,50 +444,120 @@ defmodule Troupe.Sessions.Index do
         last = List.last(events)
         created = Enum.find(events, &(&1.type == "session_created"))
 
-        [
-          %{
-            id: Path.basename(Path.dirname(path)),
-            workspace: get_data(created, "workspace", "(unknown)"),
-            branch: get_data(created, "branch", nil),
-            parent: get_data(created, "parent", nil),
-            profile: get_data(created, "profile", "build"),
-            state: :dormant,
-            status: status_from_log(events),
-            tokens: total_tokens(events),
-            cost: total_cost(events),
-            created_at: first.ts,
-            last_active_at: last.ts,
-            pinned: false
-          }
-        ]
+        meta = %{
+          id: Path.basename(Path.dirname(path)),
+          workspace: get_data(created, "workspace", "(unknown)"),
+          branch: get_data(created, "branch", nil),
+          parent: get_data(created, "parent", nil),
+          profile: get_data(created, "profile", "build"),
+          state: :dormant,
+          status: status_from_log(events),
+          pending_approvals: open_approvals(events),
+          tokens: total_tokens(events),
+          cost: total_cost(events),
+          created_at: first.ts,
+          last_active_at: last.ts,
+          pinned: false
+        }
+
+        [waiting(meta)]
     end
+  end
+
+  # The root agent's approvals still open, folded by the summary projection's own rule:
+  # an approval ends with its decision, with its call's `tool_call_completed`, or with a
+  # cancel. The root's alone, like the status below, because those are what it asks again
+  # when it wakes; a delegation comes back interrupted, and what its subagent asked is
+  # owed to nobody.
+  defp open_approvals(events) do
+    events
+    |> Enum.filter(&(&1.agent == Session.root_path()))
+    |> Enum.reduce(Summary.empty(), &Summary.fold(&2, &1))
+    |> Map.get("approvals", [])
+    |> length()
   end
 
   # What a session was in the middle of when it stopped, read from the log alone. A
   # tool call that started and never finished, or a request the model never answered,
   # is a session that was interrupted — and a client has to be able to see that before
-  # anything has been restarted.
+  # anything has been restarted. One whose open calls were all waiting on a person was
+  # not: it asks again when it wakes, so it is still waiting.
+  #
+  # The root agent's part of the log only. A subagent's `finish` does not finish the
+  # session, and a subagent a cancel took down leaves calls open in its own log that
+  # nobody owes anything.
   defp status_from_log(events) do
+    root = Enum.filter(events, &(&1.agent == Session.root_path()))
+    open = open_calls(root)
+    asked = asked_of_a_person(root)
+
     cond do
-      Enum.any?(events, &(&1.type == "agent_done")) -> :done
-      incomplete_tool_call?(events) -> :interrupted
-      unanswered_request?(events) -> :interrupted
+      done?(root) -> :done
+      open != [] and Enum.all?(open, &MapSet.member?(asked, &1)) -> :waiting
+      open != [] -> :interrupted
+      unanswered_request?(root) -> :interrupted
+      MapSet.member?(asked, owed_gate_question(root)) -> :waiting
       true -> :idle
     end
   end
 
-  defp incomplete_tool_call?(events) do
-    completed =
-      for %Event{type: "tool_call_completed", data: %{"call_id" => id}} <- events,
-          into: MapSet.new(),
-          do: id
+  # The last word on it, since a finished root is woken by the next input.
+  defp done?(events) do
+    events
+    |> Enum.filter(&(&1.type in ["agent_done", "agent_woken"]))
+    |> List.last()
+    |> case do
+      %Event{type: "agent_done"} -> true
+      _ -> false
+    end
+  end
 
-    Enum.any?(events, fn
-      %Event{type: "tool_call_started", data: %{"call_id" => id}} ->
-        not MapSet.member?(completed, id)
+  # Started and never finished, since the last cancel: a cancel ends every call it finds.
+  defp open_calls(events) do
+    events
+    |> Enum.reduce(MapSet.new(), fn
+      %Event{type: "tool_call_started", data: %{"call_id" => id}}, open -> MapSet.put(open, id)
+      %Event{type: "tool_call_completed", data: %{"call_id" => id}}, open -> MapSet.delete(open, id)
+      %Event{type: "cancelled"}, _open -> MapSet.new()
+      _event, open -> open
+    end)
+    |> MapSet.to_list()
+  end
 
-      _ ->
-        false
+  # An approval requested and not decided, or a question asked and not answered, since the
+  # last cancel: what the agent itself asks again when it comes back.
+  defp asked_of_a_person(events) do
+    Enum.reduce(events, MapSet.new(), fn
+      %Event{type: type, data: %{"call_id" => id}}, asked
+      when type in ["approval_requested", "question_asked"] ->
+        MapSet.put(asked, id)
+
+      %Event{type: type, data: %{"call_id" => id}}, asked
+      when type in ["approval_decided", "question_answered"] ->
+        MapSet.delete(asked, id)
+
+      %Event{type: "cancelled"}, _asked ->
+        MapSet.new()
+
+      _event, asked ->
+        asked
+    end)
+  end
+
+  # The id of the question still owed at the gate before the next model call, if one is:
+  # the budget's (Decision 660) or the failure guard's (Decision 687).
+  defp owed_gate_question(events) do
+    Enum.reduce(events, nil, fn
+      %Event{type: type, data: %{"call_id" => id}}, _owed
+      when type in ["budget_ask_started", "tool_failures_ask_started"] ->
+        id
+
+      %Event{type: type}, _owed
+      when type in ["budget_ask_answered", "tool_failures_ask_answered"] ->
+        nil
+
+      _event, owed ->
+        owed
     end)
   end
 

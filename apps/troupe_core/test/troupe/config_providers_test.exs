@@ -67,14 +67,15 @@ defmodule Troupe.ConfigProvidersTest do
   end
 
   describe "named providers" do
-    setup %{workspace: workspace} do
-      File.write!(Path.join(workspace, ".troupe/config.yaml"), """
+    setup %{workspace: workspace, config_home: config_home} do
+      File.write!(Path.join(config_home, "config.yaml"), """
       api_key: session-key-1234567890
       providers:
         gateway:
           type: anthropic
           base_url: https://gw.example/anthropic/v1
-          auth_token: gw-token-1234567890
+          api_key: gw-token-1234567890
+          auth: bearer
           models:
             claude-opus-5:
               id: eu.anthropic.claude-opus-5
@@ -159,10 +160,25 @@ defmodule Troupe.ConfigProvidersTest do
       assert Config.target(config, nil) |> Map.take([:api_key, :auth]) == %{api_key: "tok-1234567890", auth: :bearer}
     end
 
-    test "auth_token in a file says bearer by itself", %{workspace: workspace} do
-      File.write!(Path.join(workspace, ".troupe/config.yaml"), "auth_token: file-token-123456\n")
+    test "auth_token in a file says bearer by itself", %{workspace: workspace, config_home: config_home} do
+      File.write!(Path.join(config_home, "config.yaml"), "auth_token: file-token-123456\n")
       config = Config.load(workspace)
       assert {config.api_key, config.auth} == {"file-token-123456", :bearer}
+      assert Enum.any?(config.warnings, &(&1 =~ "auth_token is the old spelling of api_key with auth: bearer"))
+    end
+
+    test "a provider's auth_token is its key, sent as a bearer token", %{workspace: workspace, config_home: config_home} do
+      File.write!(Path.join(config_home, "config.yaml"), """
+      providers:
+        gw:
+          type: anthropic
+          base_url: https://gw.example/anthropic/v1
+          auth_token: gw-token-1234567890
+      """)
+
+      config = Config.load(workspace)
+      assert Config.target(config, "gw/x") |> Map.take([:api_key, :auth]) == %{api_key: "gw-token-1234567890", auth: :bearer}
+      assert Enum.any?(config.warnings, &(&1 =~ "providers.gw.auth_token is the old spelling"))
     end
   end
 
@@ -213,8 +229,8 @@ defmodule Troupe.ConfigProvidersTest do
       assert config.model == "claude-sonnet-5"
     end
 
-    test "a config file's provider of the same name wins over opencode's", %{workspace: workspace} do
-      File.write!(Path.join(workspace, ".troupe/config.yaml"), """
+    test "a config file's provider of the same name wins over opencode's", %{workspace: workspace, config_home: config_home} do
+      File.write!(Path.join(config_home, "config.yaml"), """
       providers:
         portal:
           base_url: https://mine.example/v1
@@ -238,7 +254,7 @@ defmodule Troupe.ConfigProvidersTest do
         }
       }))
 
-      File.write!(Path.join(workspace, ".troupe/config.yaml"), """
+      File.write!(Path.join(config_home, "config.yaml"), """
       api_key: k-1234567890
       models:
         windows:

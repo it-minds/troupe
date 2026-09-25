@@ -6,6 +6,34 @@ team's worker pods, or in the daemon on your own machine, and the window you loo
 through is only a window. Close it and the session carries on; open it from another
 machine and you see the same transcript; two people can open the same session at once.
 
+## First run
+
+1. Install `troupe` and `troupe-daemon` with the latest release's `install.sh` or
+   `install.ps1` ([README](../../README.md#what-it-ships)), saying yes to the TUI.
+2. `troupe config` sets up a model. Enter at every question is Anthropic with the key read
+   from `ANTHROPIC_API_KEY`; the other choices are OpenAI, a gateway such as LiteLLM, or
+   your organisation's plane.
+3. `troupe` in a project directory opens a session; `troupe run "a task" --headless` does
+   one task and exits.
+4. The settings are one file, `config.yaml` in `~/.config/troupe/` (`%APPDATA%\troupe\` on
+   Windows), and `troupe config` shows what is in force.
+5. `troupe config validate` checks that file after you edit it by hand;
+   [configuration.md](configuration.md) has every key.
+
+With no model set up, plain `troupe` asks the same questions first, and whatever needs a
+model says to run `troupe config` rather than failing without a reason.
+
+Without the TUI, the desktop app sets up the same file on **This computer**, under
+**Models**, or you write it yourself. The simplest `config.yaml` takes the key from the
+environment:
+
+```yaml
+provider: anthropic
+api_key: "{env:ANTHROPIC_API_KEY}"
+```
+
+`troupe-daemon config` then shows what is in force.
+
 ## Ways in
 
 | Way in | What it is | Its documentation |
@@ -53,6 +81,9 @@ with control rights can answer; the first answer wins and everyone is told who g
 
 **Budget.** Limits on turns, tokens and time, plus your team's money budget on the plane.
 When one is reached the agent says which and asks, or stops; it never silently continues.
+"Always" lifts the limit it asked about for the rest of the session, and the others still
+ask. Apart from the budget, a tool that fails ten times in a row stops the turn and asks
+whether to go on, even with every limit lifted.
 
 **Bundle.** The agents, skills and MCP servers a profile's sessions carry, published in
 versions. A session is pinned to the version current when it started.
@@ -75,4 +106,5 @@ principal. Such sessions are flagged for review until somebody looks at them.
   a deliberate confirmation, and everyone on the session sees it.
 
 How it works underneath: [../../ARCHITECTURE.md](../../ARCHITECTURE.md). Running the
-platform: [../admin/README.md](../admin/README.md).
+platform: [../admin/README.md](../admin/README.md). Every setting, which file wins and how
+to see where a value came from: [configuration.md](configuration.md).

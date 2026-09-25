@@ -70,12 +70,11 @@ The binaries are not code-signed.
 ```yaml
 # ~/.config/troupe/config.yaml (Linux/macOS) or %APPDATA%\troupe\config.yaml
 provider: anthropic          # anthropic | openai | fake
-api_key: sk-ant-...          # or TROUPE_API_KEY / ANTHROPIC_API_KEY
+api_key: "{env:MY_ANTHROPIC_KEY}"   # a variable, or the key itself; or TROUPE_API_KEY
 models:
   default: claude-opus-5     # expensive: editing
   cheap: claude-haiku-4-5    # cheap: exploration, synthesis, /ask
-max_branches: 8
-compaction: {fraction: 0.8, keep_last_turns: 4}
+compact_at: 0.8              # summarise older turns at 80% of the context window
 read_roots:                  # extra directories the *read* tools may reach into
   - ~/src/some-dependency
 ```
@@ -87,10 +86,16 @@ the agent read a dependency's source without shelling out; `write_file` and
 Paths are compared after resolving symlinks, so a link out of the workspace
 counts as wherever it actually points.
 
-A project `.troupe/config.yaml` overrides keys; environment variables
-(`TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`)
-override both. `provider: openai` speaks Chat Completions against any
-`base_url` (LiteLLM, vLLM, Mistral, ...).
+A project `.troupe/config.yaml`, then a git-ignored `.troupe/config.local.yaml`,
+override keys, merging maps by key; environment variables (`TROUPE_PROVIDER`,
+`TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`) override the files. A
+project's files set the provider, keys, approvals, MCP servers and read roots only
+once the workspace is on `trusted_workspaces` in this file. `provider: openai`
+speaks Chat Completions against any `base_url` (LiteLLM, vLLM, Mistral, ...).
+Every key, which file wins, and what is checked:
+[docs/user/configuration.md](../../docs/user/configuration.md);
+`troupe config --explain` shows where each value came from, and
+`troupe config validate` checks the files.
 
 ### Several providers, or reusing opencode
 
@@ -123,7 +128,8 @@ providers:
   lego-anthropic:
     type: anthropic
     base_url: https://api.genai.example.com/anthropic/v1   # /v1 is not doubled
-    auth_token: ...                    # Authorization: Bearer (api_key: sends x-api-key)
+    api_key: "{env:GENAI_TOKEN}"
+    auth: bearer                       # Authorization: Bearer; api_key (the default) sends x-api-key
     models:
       claude-opus-5:                   # the name you address
         id: eu.anthropic.claude-opus-5 # the name that goes on the wire
@@ -134,10 +140,8 @@ providers:
 
 `reasoning_effort` goes to an OpenAI-compatible provider verbatim (with
 `max_completion_tokens`, which is what a reasoning model wants); for Anthropic it
-becomes a thinking budget and raises the output cap to fit. An agent definition's
-own `reasoning_effort:` overrides it, and a top-level `reasoning_effort:` (or
-`TROUPE_REASONING_EFFORT`) is the fallback when neither says anything. The
-session-wide provider takes `auth_token:` too, or `TROUPE_AUTH_TOKEN`.
+becomes a thinking budget and raises the output cap to fit. The session-wide
+provider takes `auth: bearer` too, or `TROUPE_AUTH_TOKEN`.
 
 ### MCP servers
 
@@ -161,7 +165,8 @@ mcp:
 
 `/mcp` in the TUI shows each server's state (✓ ready, … connecting, ✗ error)
 and its tools. A server that fails to start is marked, not fatal — the rest
-still work.
+still work; so is one whose `{env:VAR}` is not set, which is never started. A
+project's own `mcp:` starts nothing until the workspace is trusted.
 
 If Troupe has no API key of its own, it reads the providers from opencode's
 `~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
@@ -174,11 +179,17 @@ masked.
 
 On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
 With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
-opencode has them written. Otherwise it offers three choices: take your organisation's
-settings from a plane (`troupe login`, then `troupe config pull`), set up a provider here
-(provider, URL, key and a model from what the provider lists), or not now. Without a
-terminal it prints those choices and asks nothing. The installers end with the same
-check.
+opencode has them written. Otherwise it offers three choices: set up a provider here
+(Anthropic first, then OpenAI or a gateway: provider, URL, key and a model from what the
+provider lists; Enter at every question is Anthropic, with
+`api_key: "{env:ANTHROPIC_API_KEY}"`), take your organisation's settings from a plane
+(`troupe login`, then `troupe config pull`), or not now. Without a terminal it prints
+those choices and asks nothing. A `config.yaml` through which no model can be asked gets the
+report and then the same choices, and plain `troupe` asks them before it opens a session
+on a machine with no settings and no key. The installers end with the same check.
+
+Whatever finds no key says so with one next step, `troupe config`: the report's last
+line, a headless run's model error, and the first turn in the TUI.
 
 ## Use
 
@@ -196,6 +207,22 @@ troupe whoami [PLANE_URL]               # who the plane says you are, and your t
 troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a plane
 troupe --version
 ```
+
+`troupe run --headless` prints the transcript, one line per event prefixed with the agent
+that wrote it, and exits when the agent comes to rest: when its turn ends, whether or not
+the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
+`--auto-approve` for a task that writes files or runs commands, or set `auto_approve` in
+the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A
+headless run starts no librarian: the project brief is refreshed automatically only for
+a session a person opens, in a git repository, with a model to ask
+(`memory_auto_refresh`). The exit code says how the run ended, for scripts and CI:
+
+| code | the run |
+|---|---|
+| `0` | ended its turn, or the agent finished |
+| `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; or the session could not start. The last line says which |
+| `2` | never started: the command line did not parse |
+| `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
 
 Inside the TUI, everything starts with `/`:
 
@@ -330,13 +357,13 @@ does, plus the commands, keys and concepts worth knowing. `↑`/`↓` moves, Ent
 toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the
 wheel scrolls the help, Esc goes back.
 
-A change applies to the running session immediately (`auto_approve`, watch mode
-with its timings and profiles, `max_branches`) or to branches dispatched from
-then on (models, reasoning effort, compaction, timeouts, delegation depth), and
-is written to the config file that
+Watch mode applies to the running session immediately; everything else to the
+sessions and branches started from then on. A change is written, under its
+current name (`models.default`, never the old `model`), to the config file that
 owns it: the project's `.troupe/config.yaml` when the project has one, else the
-global `config.yaml`. Environment variables still win over both, so a setting
-masked by `TROUPE_MODEL` is saved but not in effect.
+global `config.yaml` — and `auto_approve` to the global one while the workspace is
+not trusted, since the project's would be ignored. Environment variables still win
+over both, so a setting masked by `TROUPE_MODEL` is saved but not in effect.
 
 ### Watch mode
 
@@ -507,8 +534,8 @@ mix deps.get              # the harness apps are path dependencies on ../../apps
 mix check                 # compile --warnings-as-errors, format, credo --strict, test
 scripts/dev [args]        # run the CLI/TUI from source without a build (dev loop)
 scripts/build-local       # Burrito binary for this host into burrito_out/
-printf 'provider: fake\nfake_script: %s\n' "$PWD/fixtures/fake_scripts/smoke.json" > .troupe/config.yaml
-burrito_out/troupe_linux_x86_64 run build smoke --headless --auto-approve
+TROUPE_PROVIDER=fake TROUPE_FAKE_SCRIPT="$PWD/fixtures/fake_scripts/smoke.json" \
+  burrito_out/troupe_linux_x86_64 run build smoke --headless --auto-approve
 ```
 
 The harness itself — `troupe_core`, `troupe_gateway`, `troupe_protocol` — is a path
@@ -520,8 +547,9 @@ both this project and the umbrella lock must be at one version in both `mix.lock
 runs it. The version is the root `VERSION`. `troupe_core`'s compile cross-compiles the
 `reaper` helper for the host, and `TROUPE_REAPER_TARGETS=all` builds every target (the
 release does this). Every OS process a session starts runs under reaper, which kills the
-whole process tree when its owner dies. The model is the workspace's business: `provider:
-fake` and `fake_script:` in its `.troupe/config.yaml` give a deterministic one.
+whole process tree when its owner dies. `TROUPE_PROVIDER=fake` and `TROUPE_FAKE_SCRIPT`
+give a deterministic model; so do `provider: fake` and `fake_script:` in a workspace's
+`.troupe/config.yaml`, once the workspace is trusted, which is how the test suite does it.
 
 See `ARCHITECTURE.md` §9 for the client boundary and the remote client — its §1–8
 describe the harness as it was before the daemon, and the root

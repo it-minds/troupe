@@ -95,6 +95,29 @@ defmodule Troupe.ModelConfigTest do
       assert Model.activity_line(window, "root", 0, 10) =~ "thinking"
     end
 
+    # A first run's first turn, in the terminal UI: the error, and under it the one thing
+    # to do, in the words the headless printer and `troupe-daemon config` use.
+    test "puts the next step under the error in the transcript" do
+      model =
+        Model.rebuild("s-1", "/w", [
+          event(:branch_spawned, %{name: "build", isolation: :shared}),
+          event(:llm_error, %{message: "no API key is configured for the provider"})
+        ])
+
+      [window] = Model.windows(model)
+
+      assert Enum.take(window.agents["root"].transcript, -2) == [
+               {:system, "LLM error: no API key is configured for the provider"},
+               {:system, "run `troupe config` to set up a provider"}
+             ]
+
+      other = Model.apply(model, event(:llm_error, %{message: "the gateway is down"}))
+      [window] = Model.windows(other)
+
+      assert List.last(window.agents["root"].transcript) ==
+               {:system, "LLM error: the gateway is down"}
+    end
+
     # A root agent ends a text-only turn with an ephemeral `agent_state: idle` and no
     # durable marker, and idle was folded in with "nothing heard from this agent yet" —
     # so a session the user was happily chatting with spun on "starting" forever.

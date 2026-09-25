@@ -59,24 +59,66 @@ defmodule Troupe.Plane.Ledger do
   end
 
   @doc """
-  What a team has actually spent.
+  What a team has actually spent, in the period its ceiling is measured over.
+
+  Remembered under the start of that period rather than under the team alone. Nothing is
+  written at midnight on the 1st, so nothing would throw last month's total away: the
+  first read of a new month has to be a new question, or a team at its ceiling stays
+  refused for as long as the cache holds the answer.
 
   `sum` over a bigint comes back from Postgres as numeric, which Ecto hands over as a
   `Decimal`; arithmetic on that against plain integers silently does the wrong thing,
   so it is cast where it is read rather than everywhere it is used.
   """
-  @spec spent_micros(Ecto.UUID.t()) :: non_neg_integer()
-  def spent_micros(team_id) do
-    Cache.fetch({team_id, :spent_micros}, fn ->
+  @spec spent_micros(Team.t() | Ecto.UUID.t()) :: non_neg_integer()
+  def spent_micros(%Team{id: team_id} = team), do: spent_since(team_id, period_start(team))
+  def spent_micros(team_id), do: spent_since(team_id, period_start(team_id))
+
+  defp spent_since(team_id, since) do
+    Cache.fetch({team_id, {:spent_micros, since}}, fn ->
       query =
         from(u in UsageRecord,
           where: u.team_id == ^team_id,
           select: type(coalesce(sum(u.cost_micros), 0), :integer)
         )
 
+      query = if since, do: where(query, [u], u.occurred_at >= ^since), else: query
+
       Repo.one(query) || 0
     end)
   end
+
+  @doc """
+  When a team's current budget period began, or `nil` for a ceiling that never turns over.
+
+  `monthly` is the calendar month in UTC: it turns over at midnight UTC on the 1st, the
+  same instant on every replica whatever zone the people spending it are in. Anything
+  else counts everything the team has ever spent — `never` on purpose, and a period this
+  does not know by counting too much rather than too little.
+
+  One answer for every reader — the ceiling, the budget bar, Overview, the admin API —
+  because each of them asks here rather than working it out.
+  """
+  @spec period_start(Team.t() | Ecto.UUID.t()) :: DateTime.t() | nil
+  def period_start(%Team{budget_period: period}), do: period_start(period, now())
+
+  def period_start(team_id) do
+    Repo.one(from(t in Team, where: t.id == ^team_id, select: t.budget_period))
+    |> period_start(now())
+  end
+
+  defp period_start("monthly", now) do
+    now
+    |> DateTime.to_date()
+    |> Date.beginning_of_month()
+    |> DateTime.new!(~T[00:00:00.000000], "Etc/UTC")
+  end
+
+  defp period_start(_never, _now), do: nil
+
+  # The clock a period is read against. Configurable only so a test can stand either side
+  # of midnight on the 1st rather than wait for it.
+  defp now, do: Application.get_env(:troupe_plane, :budget_clock, &DateTime.utc_now/0).()
 
   @doc """
   What a team spent in a window, grouped.
@@ -86,12 +128,14 @@ defmodule Troupe.Plane.Ledger do
   a hundred models is read from the top.
 
   Cached, and invalidated by the one process that writes the table, so a page that is
-  reloaded twice in a minute costs one aggregate rather than two.
+  reloaded twice in a minute costs one aggregate rather than two. A `:from` of `nil` is
+  from the beginning, which is what `period_start/1` answers for a ceiling that never
+  turns over.
   """
   @spec breakdown(Ecto.UUID.t(), :model | :owner_subject | :session_id, keyword()) :: [map()]
   def breakdown(team_id, group_by, opts \\ [])
       when group_by in [:model, :owner_subject, :session_id] do
-    from = Keyword.get(opts, :from, ~U[1970-01-01 00:00:00.000000Z])
+    from = Keyword.get(opts, :from) || ~U[1970-01-01 00:00:00.000000Z]
     to = Keyword.get(opts, :to, DateTime.utc_now())
 
     Cache.fetch({team_id, {:breakdown, group_by, from, to}}, fn ->
@@ -199,6 +243,10 @@ defmodule Troupe.Plane.Ledger do
   Attributed by `owner_subject` on the usage record, which for a session a trigger
   started is the principal's sponsor. A cap on a person that only counted the sessions
   they typed into would be a cap they could step around by writing a trigger.
+
+  Over all time, whatever period their teams' ceilings are measured over. A person's cap
+  is one number across every team, and has no period of its own: following a team's would
+  give somebody in a `monthly` team and a `never` one two answers to one question.
   """
   @spec spent_micros_for(String.t()) :: non_neg_integer()
   def spent_micros_for(subject) when is_binary(subject) do

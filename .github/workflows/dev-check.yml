@@ -48,6 +48,7 @@ jobs:
               - mix.lock
               - .credo.exs
               - protocol/**
+              - docs/user/configuration.md
             protocol:
               - apps/troupe_protocol/**
               - apps/troupe_gateway/**
@@ -87,6 +88,10 @@ jobs:
       - name: Compile with warnings as errors
         run: MIX_ENV=test mix compile --warnings-as-errors
       - run: mix credo --strict
+      # `protocol/schema/config/v1.json` and the key reference in
+      # docs/user/configuration.md, both generated from Troupe.Config.Schema.
+      - name: The committed config schema and its reference are current
+        run: MIX_ENV=test mix troupe.config.schema --check
       - name: The committed protocol schema is compatible and current
         if: needs.changes.outputs.protocol == 'true'
         run: |

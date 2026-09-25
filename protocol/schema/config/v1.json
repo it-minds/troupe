@@ -1,0 +1,696 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://troupe.dev/schema/config/v1.json",
+  "title": "Troupe config.yaml, version 1",
+  "description": "The user's config.yaml, a project's .troupe/config.yaml and .troupe/config.local.yaml. Generated from Troupe.Config.Schema by mix troupe.config.schema; do not edit.",
+  "type": "object",
+  "properties": {
+    "version": {
+      "description": "The version of this format. A file without it is version 1.",
+      "default": 1,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1,
+      "maximum": 1
+    },
+    "$schema": {
+      "description": "Where an editor finds this schema. Troupe does not read it.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "description": "The session-wide provider's API. Read from a project's file only in a trusted workspace.",
+      "default": "anthropic",
+      "enum": [
+        "anthropic",
+        "openai",
+        "fake",
+        null
+      ]
+    },
+    "base_url": {
+      "description": "The session-wide provider's URL. Unset: the vendor's own endpoint. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "api_key": {
+      "description": "The session-wide provider's key. `{env:VAR}` reads it from the environment. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "auth": {
+      "description": "How the key is sent: the vendor's own header, or `Authorization: Bearer`. Read from a project's file only in a trusted workspace.",
+      "default": "api_key",
+      "enum": [
+        "api_key",
+        "bearer",
+        null
+      ]
+    },
+    "providers": {
+      "description": "Named providers. A model spelled `<provider>/<model>` goes to that provider. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "type": {
+            "description": "The API it speaks. A gateway such as LiteLLM or vLLM is `openai`.",
+            "default": "openai",
+            "enum": [
+              "openai",
+              "anthropic",
+              null
+            ]
+          },
+          "base_url": {
+            "description": "Where it is. Unset: the vendor's own endpoint.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "api_key": {
+            "description": "Its key. `{env:VAR}` reads it from the environment.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "auth": {
+            "description": "How the key is sent: the vendor's own header, or `Authorization: Bearer`.",
+            "default": "api_key",
+            "enum": [
+              "api_key",
+              "bearer",
+              null
+            ]
+          },
+          "models": {
+            "description": "The models it serves, by the name Troupe addresses them with.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": [
+                "object",
+                "null"
+              ],
+              "properties": {
+                "id": {
+                  "description": "The id that goes on the wire, when the gateway renamed the model. Unset: the name.",
+                  "type": [
+                    "string",
+                    "null"
+                  ]
+                },
+                "context": {
+                  "description": "The model's context window, in tokens.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                },
+                "max_output": {
+                  "description": "The most output tokens to ask for.",
+                  "type": [
+                    "integer",
+                    "null"
+                  ],
+                  "minimum": 1
+                },
+                "reasoning_effort": {
+                  "description": "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens.",
+                  "type": [
+                    "string",
+                    "integer",
+                    "null"
+                  ]
+                }
+              },
+              "patternProperties": {
+                "^x-": {}
+              },
+              "additionalProperties": false
+            }
+          },
+          "auth_token": {
+            "description": "Old spelling of api_key with auth: bearer.",
+            "deprecated": true,
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "models": {
+      "description": "Which model each role uses.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "properties": {
+        "default": {
+          "description": "The model every agent uses unless its definition names one.",
+          "default": "claude-sonnet-5",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "cheap": {
+          "description": "The model for small jobs, compaction summaries among them. Unset: the default model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "expensive": {
+          "description": "The model an agent asking for `expensive` gets. Unset: the default model.",
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "windows": {
+          "description": "Context windows for bare model ids, in tokens.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        },
+        "small": {
+          "description": "Old spelling of models.cheap.",
+          "deprecated": true,
+          "type": [
+            "string",
+            "null"
+          ]
+        }
+      },
+      "patternProperties": {
+        "^x-": {}
+      },
+      "additionalProperties": false
+    },
+    "max_tokens": {
+      "description": "The most output tokens one model call asks for.",
+      "default": 8192,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "context_window": {
+      "description": "The window assumed when neither a provider nor the catalog says.",
+      "default": 200000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "compact_at": {
+      "description": "The share of the window at which an agent summarises older turns.",
+      "default": 0.75,
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "llm_timeout_ms": {
+      "description": "How long one model call may take before it is given up on.",
+      "default": 300000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "max_turns": {
+      "description": "Model calls an agent may make.",
+      "default": 40,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "max_input_tokens": {
+      "description": "Input tokens an agent may spend.",
+      "default": 2000000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "max_output_tokens": {
+      "description": "Output tokens an agent may spend.",
+      "default": 400000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "wall_clock_ms": {
+      "description": "How long an agent may run.",
+      "default": 1800000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "max_depth": {
+      "description": "How deep agents may delegate; 1 means the root alone may.",
+      "default": 3,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "budget_warn_at": {
+      "description": "The share of any limit at which the agent is warned.",
+      "default": 0.8,
+      "type": [
+        "number",
+        "null"
+      ],
+      "exclusiveMinimum": 0,
+      "maximum": 1
+    },
+    "full_send": {
+      "description": "No budget warnings.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "budget_asks": {
+      "description": "A spent budget asks the person attached, rather than stopping.",
+      "default": true,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "auto_approve": {
+      "description": "Run every tool call without asking. Read from a project's file only in a trusted workspace.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "approvals": {
+      "description": "What a call that asks does with nobody attached: wait, or be denied. Read from a project's file only in a trusted workspace.",
+      "default": "wait",
+      "enum": [
+        "wait",
+        "deny",
+        null
+      ]
+    },
+    "managed_permission_rules_only": {
+      "description": "A session may not allow a tool for itself. Read from a project's file only in a trusted workspace.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "managed_mcp_servers_only": {
+      "description": "A client may not offer a session its own tools. Read from a project's file only in a trusted workspace.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "shell_timeout_ms": {
+      "description": "How long a shell command may run.",
+      "default": 120000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "tool_output_limit": {
+      "description": "Bytes of a tool's output the model sees.",
+      "default": 60000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "tool_failures_note_at": {
+      "description": "Failures of one tool in a row after which the model is told to stop and reconsider; 0 never.",
+      "default": 5,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "tool_failures_stop_at": {
+      "description": "Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never.",
+      "default": 10,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "read_roots": {
+      "description": "Directories outside the workspace the read tools may reach. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "mcp": {
+      "description": "The workspace's own MCP servers, by name. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": [
+          "object",
+          "null"
+        ],
+        "properties": {
+          "command": {
+            "description": "A server on its standard streams: the program to run.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "args": {
+            "description": "Its arguments.",
+            "type": [
+              "array",
+              "null"
+            ],
+            "items": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "env": {
+            "description": "Variables to set for it.",
+            "type": [
+              "object",
+              "null"
+            ],
+            "additionalProperties": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          },
+          "cd": {
+            "description": "The directory to run it in. Unset: the workspace.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "url": {
+            "description": "A server over HTTP: its URL.",
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "permission": {
+            "description": "`auto` runs its tools without asking.",
+            "default": "ask",
+            "enum": [
+              "ask",
+              "auto",
+              null
+            ]
+          },
+          "timeout_ms": {
+            "description": "How long one call may take.",
+            "default": 30000,
+            "type": [
+              "integer",
+              "null"
+            ],
+            "minimum": 1
+          }
+        },
+        "patternProperties": {
+          "^x-": {}
+        },
+        "additionalProperties": false
+      }
+    },
+    "watch": {
+      "description": "Act on `AI!` and `AI?` comments.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "watch_debounce_ms": {
+      "description": "How long watch mode waits for writes to settle.",
+      "default": 300,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "watch_poll_interval_ms": {
+      "description": "How often watch mode polls where it cannot be told.",
+      "default": 1000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "fs_events": {
+      "description": "Record every file change in the workspace as an event.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "fs_debounce_ms": {
+      "description": "How long file events wait for writes to settle.",
+      "default": 100,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "default_agent": {
+      "description": "The agent a session starts with.",
+      "default": "build",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resume_on_restart": {
+      "description": "A session that comes back after a restart carries on by itself.",
+      "default": false,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "loop_max_iterations": {
+      "description": "Turns `/loop` runs when not told.",
+      "default": 10,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "loop_max_failures": {
+      "description": "Failed turns in a row that stop a loop.",
+      "default": 3,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "memory": {
+      "description": "Agents read and write the project brief, `.troupe/memory.md`.",
+      "default": true,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "memory_auto_refresh": {
+      "description": "A new session in a git repository refreshes a missing or stale brief; never a headless run.",
+      "default": true,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "memory_max_chars": {
+      "description": "How much of the brief goes into a prompt.",
+      "default": 6000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "memory_max_age_days": {
+      "description": "How old the brief may be before it counts as stale.",
+      "default": 7,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
+    "trusted_workspaces": {
+      "description": "Workspaces whose own files may set the keys marked trusted. A path trusts everything under it. Read only from the user's config.yaml.",
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": [
+          "string",
+          "null"
+        ]
+      }
+    },
+    "state_dir": {
+      "description": "Where session logs go. Unset: the platform's state directory. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "fake_script": {
+      "description": "With `provider: fake`, the file of scripted answers. Read from a project's file only in a trusted workspace.",
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mouse": {
+      "description": "The terminal UI captures the mouse.",
+      "default": true,
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "model": {
+      "description": "Old spelling of models.default.",
+      "deprecated": true,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "small_model": {
+      "description": "Old spelling of models.cheap.",
+      "deprecated": true,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expensive_model": {
+      "description": "Old spelling of models.expensive.",
+      "deprecated": true,
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "windows": {
+      "description": "Old spelling of models.windows.",
+      "deprecated": true,
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": {
+        "type": [
+          "integer",
+          "null"
+        ],
+        "minimum": 1
+      }
+    },
+    "auth_token": {
+      "description": "Old spelling of api_key with auth: bearer. Read from a project's file only in a trusted workspace.",
+      "deprecated": true,
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "patternProperties": {
+    "^x-": {}
+  },
+  "additionalProperties": false
+}

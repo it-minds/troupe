@@ -65,12 +65,29 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :config} = args} ->
         Troupe.CLI.ConfigSetup.run(args.workspace)
 
+      # Read here, from the same files the daemon reads: the answers are about files, and
+      # need no daemon to give them.
+      {:ok, %{mode: :config_explain} = args} ->
+        print(Troupe.Config.explain(args.workspace, args.key, json: args.json))
+
+      {:ok, %{mode: :config_validate} = args} ->
+        print(Troupe.Config.validate(args.workspace, args.path))
+
+      {:ok, %{mode: :config_migrate} = args} ->
+        print(Troupe.Config.migrate(args.workspace, args.path, write: args.write))
+
       {:ok, %{mode: :config_pull} = args} ->
         Troupe.CLI.ModelConfig.pull(args.plane_url)
 
       {:ok, %{mode: :models} = args} ->
-        IO.puts(models_report(args))
-        0
+        case models_report(args) do
+          {:ok, report} ->
+            IO.puts(report)
+            0
+
+          {:error, message} ->
+            fail(message)
+        end
 
       {:ok, %{mode: :run} = args} ->
         run(args)
@@ -96,9 +113,13 @@ defmodule Troupe.CLI.Runner do
         # somewhere real.
         page = if args.remote, do: [page: :hq, plane: plane(args)], else: []
 
+        # A first run meets the setup before a session it could not use: `troupe config`'s
+        # own questions on a machine with no settings and no key, and nothing otherwise.
+        unless args.remote, do: Troupe.CLI.ConfigSetup.before_session(args.workspace)
+
         case Client.create_session({:local, args.workspace}, %{
                worktree: "never",
-               config: config(args)
+               config: CLI.session_config(args)
              }) do
           {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
           {:error, reason} -> fail("could not start session: #{inspect(reason)}")
@@ -115,24 +136,11 @@ defmodule Troupe.CLI.Runner do
   defp plane(%{plane_url: url}) when is_binary(url), do: url
   defp plane(_args), do: nil
 
-  # What a client may ask the daemon to set on a session, and only that (the daemon
-  # refuses the rest; the provider and its key are the machine's).
-  defp config(args) do
-    %{auto_approve: args.auto_approve, watch: args.watch, full_send: args.full_send}
-  end
-
   # `troupe run AGENT "task"`: one session, one agent, one task, in its own worktree
-  # when asked. Headless prints the transcript and exits when the agent rests; the TUI
-  # opens on it otherwise.
+  # when asked. Headless prints the transcript and exits when the agent rests, with a
+  # code that says how (`Troupe.UI.Headless.Printer`); the TUI opens on it otherwise.
   defp run(args) do
-    params = %{
-      profile: args.agent,
-      prompt: args.task,
-      worktree: if(args.worktree, do: "always", else: "never"),
-      config: config(args)
-    }
-
-    case Client.create_session({:local, args.workspace}, params) do
+    case Client.create_session({:local, args.workspace}, run_params(args)) do
       {:ok, sid} when args.headless ->
         me = self()
 
@@ -149,6 +157,21 @@ defmodule Troupe.CLI.Runner do
       {:error, reason} ->
         fail("could not start: #{inspect(reason)}")
     end
+  end
+
+  @doc """
+  The session `troupe run` asks for. A headless run is a script's, and starts no
+  librarian beside the task it was given.
+  """
+  @spec run_params(CLI.args()) :: map()
+  def run_params(args) do
+    %{
+      profile: args.agent,
+      prompt: args.task,
+      worktree: if(args.worktree, do: "always", else: "never"),
+      config: CLI.session_config(args),
+      refresh_brief: not args.headless
+    }
   end
 
   # With an id: reopen that session. Without one: reopen the one this directory
@@ -175,15 +198,16 @@ defmodule Troupe.CLI.Runner do
   # Mouse reporting: `--mouse`/`--no-mouse` beats the `mouse` setting, which
   # defaults to on. Off means the terminal keeps its own click-and-drag
   # selection, at the cost of clicking tiles and wheel scrolling.
-  defp mouse_opts(args) do
-    mouse? =
-      case args.mouse do
-        nil -> Troupe.Settings.mouse?(Troupe.Config.load(args.workspace))
-        flag -> flag
-      end
-
-    [mouse_capture: mouse?]
+  defp mouse_opts(%{mouse: nil} = args) do
+    case Troupe.Config.resolve(args.workspace) do
+      {:ok, config, _layers} -> [mouse_capture: Troupe.Settings.mouse?(config)]
+      # The session started, so the daemon read the files; a file this VM refuses is not
+      # a reason to leave the person without a terminal UI.
+      {:error, _error} -> [mouse_capture: true]
+    end
   end
+
+  defp mouse_opts(args), do: [mouse_capture: args.mouse]
 
   defp tui(sid, extra) do
     # `extra` first: a Keyword lookup takes the earliest match, so the caller's
@@ -225,8 +249,13 @@ defmodule Troupe.CLI.Runner do
   # first when asked. Refreshing is never implicit — it costs two round trips
   # and a session must start without them.
   defp models_report(args) do
-    cfg = Troupe.Config.load(args.workspace)
+    case Troupe.Config.resolve(args.workspace) do
+      {:ok, cfg, _layers} -> {:ok, models_report(args, cfg)}
+      {:error, error} -> {:error, Exception.message(error)}
+    end
+  end
 
+  defp models_report(args, cfg) do
     failures =
       if args.refresh do
         {:ok, _catalog, failures} = Troupe.LLM.Catalog.Store.refresh(cfg)
@@ -242,7 +271,12 @@ defmodule Troupe.CLI.Runner do
         "  ! #{name}: #{inspect(reason)}"
       end)
 
-    Enum.join([Troupe.Config.describe(cfg) | notes], "\n")
+    Enum.join([Troupe.Config.describe(cfg, command: "troupe") | notes], "\n")
+  end
+
+  defp print({text, code}) do
+    IO.write(text)
+    code
   end
 
   defp fail(msg) do

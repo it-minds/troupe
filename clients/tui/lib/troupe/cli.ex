@@ -13,6 +13,9 @@ defmodule Troupe.CLI do
       troupe logout [PLANE_URL]    forget a plane's credentials (--all forgets every one)
       troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
       troupe config                show the resolved providers and models (keys masked); with none, set them up
+      troupe config --explain [KEY] [--json]  every setting, or KEY's, and which file set it (secrets masked)
+      troupe config validate [PATH]   check the config files, or one; exits 1 on any problem
+      troupe config migrate [--write] [PATH]  show, or make, the rewrite to the current spellings
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
@@ -27,6 +30,9 @@ defmodule Troupe.CLI do
             | :version
             | :help
             | :config
+            | :config_explain
+            | :config_validate
+            | :config_migrate
             | :config_pull
             | :models
             | :login
@@ -37,9 +43,9 @@ defmodule Troupe.CLI do
           task: String.t() | nil,
           headless: boolean(),
           worktree: boolean(),
-          auto_approve: boolean(),
-          full_send: boolean(),
-          watch: boolean(),
+          auto_approve: boolean() | nil,
+          full_send: boolean() | nil,
+          watch: boolean() | nil,
           mouse: boolean() | nil,
           workspace: String.t(),
           session_id: String.t() | nil,
@@ -47,7 +53,12 @@ defmodule Troupe.CLI do
           remote: boolean(),
           plane_url: String.t() | nil,
           all: boolean(),
-          daemon_args: [String.t()]
+          daemon_args: [String.t()],
+          explain: boolean(),
+          json: boolean(),
+          write: boolean(),
+          key: String.t() | nil,
+          path: String.t() | nil
         }
 
   @spec parse([String.t()]) :: {:ok, args()} | {:error, String.t()}
@@ -72,7 +83,10 @@ defmodule Troupe.CLI do
           help: :boolean,
           refresh: :boolean,
           remote: :boolean,
-          all: :boolean
+          all: :boolean,
+          explain: :boolean,
+          json: :boolean,
+          write: :boolean
         ]
       )
 
@@ -82,9 +96,10 @@ defmodule Troupe.CLI do
       task: nil,
       headless: Keyword.get(opts, :headless, false),
       worktree: Keyword.get(opts, :worktree, false),
-      auto_approve: Keyword.get(opts, :auto_approve, false),
-      full_send: Keyword.get(opts, :full_send, false),
-      watch: Keyword.get(opts, :watch, false),
+      # nil, not false: no flag means "whatever the config says" (`session_config/1`).
+      auto_approve: Keyword.get(opts, :auto_approve),
+      full_send: Keyword.get(opts, :full_send),
+      watch: Keyword.get(opts, :watch),
       # nil, not false: no flag means "whatever the `mouse` setting says".
       mouse: Keyword.get(opts, :mouse),
       workspace: Path.expand(Keyword.get(opts, :workspace, File.cwd!())),
@@ -93,7 +108,12 @@ defmodule Troupe.CLI do
       remote: Keyword.get(opts, :remote, false),
       plane_url: nil,
       all: Keyword.get(opts, :all, false),
-      daemon_args: []
+      daemon_args: [],
+      explain: Keyword.get(opts, :explain, false),
+      json: Keyword.get(opts, :json, false),
+      write: Keyword.get(opts, :write, false),
+      key: nil,
+      path: nil
     }
 
     cond do
@@ -130,6 +150,23 @@ defmodule Troupe.CLI do
     do: {:ok, %{base | mode: :run, agent: agent, task: task}}
 
   defp parse_rest(["run"], _base), do: {:error, "usage: troupe run [AGENT] \"task\""}
+  # `--explain` names at most one key; `--json` alone is the whole explanation as JSON.
+  defp parse_rest(["config"], %{explain: explain, json: json} = base) when explain or json,
+    do: {:ok, %{base | mode: :config_explain}}
+
+  defp parse_rest(["config", key], %{explain: true} = base),
+    do: {:ok, %{base | mode: :config_explain, key: key}}
+
+  defp parse_rest(["config", "validate"], base), do: {:ok, %{base | mode: :config_validate}}
+
+  defp parse_rest(["config", "validate", path], base),
+    do: {:ok, %{base | mode: :config_validate, path: path}}
+
+  defp parse_rest(["config", "migrate"], base), do: {:ok, %{base | mode: :config_migrate}}
+
+  defp parse_rest(["config", "migrate", path], base),
+    do: {:ok, %{base | mode: :config_migrate, path: path}}
+
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
   defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}
 
@@ -140,6 +177,22 @@ defmodule Troupe.CLI do
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
   defp parse_rest(other, _base), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}
+
+  @doc """
+  What the command line asks of a new session's config: only the switches it was given.
+
+  `--auto-approve`, `--watch` and `--full-send` (and their `--no-` forms) beat the config
+  files for one session; a switch not given leaves the files' value in force, so
+  `auto_approve: true` in a config file applies to `troupe` as it does to every other
+  client. These three are all a client may set; the daemon refuses the rest, since the
+  provider and its key are the machine's.
+  """
+  @spec session_config(args()) :: map()
+  def session_config(args) do
+    args
+    |> Map.take([:auto_approve, :watch, :full_send])
+    |> Map.reject(fn {_key, value} -> is_nil(value) end)
+  end
 
   @spec usage() :: String.t()
   def usage, do: @moduledoc |> String.split("\n") |> Enum.drop(2) |> Enum.join("\n")

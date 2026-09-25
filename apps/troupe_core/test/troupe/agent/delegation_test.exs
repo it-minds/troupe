@@ -154,6 +154,180 @@ defmodule Troupe.Agent.DelegationTest do
 
       assert result.data["content"] =~ "before reporting anything"
     end
+
+    test "does not hand over whitespace as its findings", context do
+      %{session: session} =
+        start_session(context,
+          config_overrides: [max_turns: 20],
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            # Some models open a turn with a bare "\n\n" before its tool calls and leave
+            # the text of every later one empty: nothing the parent could act on.
+            "general" =>
+              [{:text_and_tools, "\n\n", [{"todo_read", %{}}]}] ++
+                List.duplicate({:text_and_tools, "", [{"todo_read", %{}}]}, 20)
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate something open-ended")
+      await_root_idle(session.id, 20_000)
+
+      result =
+        session.id
+        |> events_of_type("tool_call_completed")
+        |> Enum.find(&(&1.data["name"] == "delegate"))
+
+      assert result.data["content"] =~ "before reporting anything"
+      refute result.data["content"] =~ "cut short"
+    end
+  end
+
+  describe "a subagent whose model request fails" do
+    # A root rests after a failed request and waits for the person to say try again. A
+    # subagent has nobody to say it: resting left its parent's `delegate` open for ever.
+    test "hands its parent what it found, labelled cut short", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [
+              {:text_and_tools, "I found the retry logic in lib/retry.ex.", [{"todo_read", %{}}]},
+              {:error, {:api_error, "the gateway is down"}}
+            ]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["ok"]
+      assert result.data["content"] =~ "cut short"
+      assert result.data["content"] =~ "model request failed"
+      assert result.data["content"] =~ "the gateway is down"
+      assert result.data["content"] =~ "I found the retry logic in lib/retry.ex."
+
+      [child] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert child.data["reason"] == "llm_error"
+      assert Troupe.snapshot(session.id).state == :idle
+    end
+
+    test "says so plainly when it failed before reporting anything", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [{:error, {:api_error, "the gateway is down"}}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["content"] =~ "before it reported anything"
+      assert result.data["content"] =~ "the gateway is down"
+      refute result.data["content"] =~ "cut short"
+
+      [child] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert child.data["reason"] == "llm_error"
+    end
+  end
+
+  describe "a delegate's turns" do
+    # Issue #118: a share of the root's remaining turns gave an `explore` asked to read an
+    # app 13 or 14 turns, and six of seven ran out reading before they reported.
+    test "are its own, so an explore delegated late in a root's turn still finishes", context do
+      write_file(context, "mix.exs", "defmodule App.MixProject do\nend\n")
+
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" =>
+              List.duplicate({:tools, [{"todo_read", %{}}]}, 6) ++
+                [
+                  {:tools, [{"delegate", %{"agent" => "explore", "task" => "summarise the app"}}]},
+                  {:text, "root done"}
+                ],
+            "explore" =>
+              List.duplicate({:tools, [{"read_file", %{"path" => "mix.exs"}}]}, 20) ++
+                [{:tools, [{"finish", %{"summary" => "an app with a mix.exs"}}]}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "look at the app")
+      await_root_idle(session.id, 20_000)
+
+      result =
+        session.id
+        |> events_of_type("tool_call_completed")
+        |> Enum.find(&(&1.data["name"] == "delegate"))
+
+      assert result.data["ok"]
+      assert result.data["content"] == "an app with a mix.exs"
+
+      [explore] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert explore.data["reason"] == "finished"
+    end
+  end
+
+  describe "a delegate's final reply" do
+    test "is handed over trimmed", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [{:text, "\n\nThe retry logic is in lib/retry.ex.\n"}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["content"] == "The retry logic is in lib/retry.ex."
+    end
+
+    test "of whitespace alone is not a summary: it is nudged once, then ends empty", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look into it"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [{:text, "\n\n"}, {:text, "  \n"}]
+          }
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "delegate it")
+      await_root_idle(session.id)
+
+      result = session.id |> events_of_type("tool_call_completed") |> Enum.find(&(&1.data["name"] == "delegate"))
+      assert result.data["content"] =~ "no text and no tool call"
+      assert length(Fake.requests_for(fake, "general")) == 2
+
+      [child] = Enum.filter(events_of_type(session.id, "agent_done"), &(&1.agent != ["root"]))
+      assert child.data["reason"] == "empty_reply"
+    end
   end
 
   describe "no orphans" do

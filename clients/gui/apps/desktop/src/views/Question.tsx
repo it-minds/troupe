@@ -19,7 +19,8 @@ type Question = Extract<Entry, { kind: "question" }>;
 const BUDGET_ANSWERS: Record<string, { label: string; className: string }> = {
   allow: { label: "Spend one more slice", className: "allow" },
   deny: { label: "Stop here", className: "deny" },
-  always: { label: "Stop asking for this session", className: "scoped" },
+  // The limit the question names, and only that one (troupe-remote Decision 687).
+  always: { label: "Lift this limit for the session", className: "scoped" },
 };
 
 export function QuestionPanel({

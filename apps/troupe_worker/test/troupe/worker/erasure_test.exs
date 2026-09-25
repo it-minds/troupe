@@ -22,6 +22,7 @@ defmodule Troupe.Worker.ErasureTest do
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Sessions.Cipher
   alias Troupe.Worker.Plane.Link
+  alias Troupe.Worker.Session.Restore
 
   @moduletag timeout: 180_000
 
@@ -97,6 +98,48 @@ defmodule Troupe.Worker.ErasureTest do
 
     # 4. And the PVC holds nothing either.
     refute File.exists?(context.workspace)
+  end
+
+  # A pod session is erased only through the plane: its own token is refused
+  # `session.erase` on the pod (`harness_auth_test.exs`), so this push is what has to reach
+  # a session still running there and take the pod's copy along with the key and objects.
+  test "reaches a session still running on the pod and takes the pod's copy", context do
+    link = attach_pod(context)
+
+    assert {:ok, _} = activate(context, report: Link.reporter(link))
+    run_turn(context.session_id, @marker)
+
+    # Sealed, so there are objects to delete and no upload still in flight.
+    %{sealer: sealer} = Manager.status(Sessions.whereis(context.session_id))
+    assert {:ok, _} = Sealer.seal_now(sealer)
+    assert {:ok, [_ | _]} = ObjectStore.list(context.store, Storage.prefix(context.session_id))
+
+    log_dir =
+      Path.dirname(Restore.log_path(context.session_id, context.workspace, context.state_dir))
+
+    assert File.exists?(context.workspace)
+    assert File.exists?(log_dir)
+
+    session = PlaneSessions.get(context.session_id)
+
+    assert {:ok, tombstone} =
+             Erasure.erase(session, actor: "ada@example.test", reason: "requested")
+
+    # Carried out by this pod now, not left pending for the next one to enrol.
+    assert tombstone.applied_by == ["troupe-w-dev-0"]
+
+    # The pod's copy: the running tree, the workspace and the local log.
+    assert Sessions.whereis(context.session_id) == nil
+    refute File.exists?(context.workspace)
+    refute File.exists?(log_dir)
+
+    # And the rest of the erasure: the key, every version of every object, the plane's row.
+    refute KMS.adapter().exists?(context.team, context.session_id)
+
+    assert {:ok, []} =
+             ObjectStore.list_versions(context.store, Storage.prefix(context.session_id))
+
+    assert PlaneSessions.get(context.session_id).state == "erased"
   end
 
   test "a pod that was offline during the erasure applies it when it enrols", context do

@@ -13,11 +13,11 @@ defmodule Troupe.A2A.Events do
   | `llm_delta` (root) | `working`, with the partial text |
   | `tool_call_started` | `working`, with the tool and its arguments as a `data` part |
   | `approval_requested` | `input-required`; the message names the tool and its arguments |
-  | `approval_decided` | `working` |
+  | `approval_decided`, or the call's `tool_call_completed` | `working`, once no approval is left open |
   | `llm_response` (root) | an `agent` message; `completed` when the turn ends with it |
   | `agent_done` | `completed` with the summary, or `failed` |
   | `llm_error`, `budget_exhausted` | `failed` |
-  | `cancelled` | `canceled` |
+  | `cancelled` (root) | `canceled`; a subagent's ends only the approvals it and those under it asked for |
   | `published` | an artifact with one `file` part, the hash as its id |
   | a blob reference | an artifact with one `file` part served from `blob.get` |
 
@@ -123,20 +123,28 @@ defmodule Troupe.A2A.Events do
     {acc, [status_update(acc, event, message, false)]}
   end
 
+  # The call is over, and so is an approval it was still waiting for: a cancel closes each
+  # call it stops with one of these, and so does a tool that timed out waiting. Neither is
+  # ever decided, and a task still waiting on one could not be brought back to `working`.
   defp fold(acc, %Event{type: "tool_call_completed", data: data} = event) do
+    {acc, closed} = close_approvals(acc, [data["call_id"]], event)
+
     case blob_ref(data["content"]) do
       nil ->
-        {acc, []}
+        {acc, closed}
 
       ref ->
         name = "#{data["name"] || "tool"} result"
-        put_artifact(acc, blob_artifact(acc.task_id, ref, name, "text/plain"), event)
+        artifact = blob_artifact(acc.task_id, ref, name, "text/plain")
+        {acc, added} = put_artifact(acc, artifact, event)
+        {acc, closed ++ added}
     end
   end
 
   defp fold(acc, %Event{type: "approval_requested", data: data} = event) do
     call_id = data["call_id"]
-    pending = Map.put(acc.pending, call_id, %{"tool" => data["tool"], "args" => data["args"]})
+    asked = %{"tool" => data["tool"], "args" => data["args"], "agent" => event.agent}
+    pending = Map.put(acc.pending, call_id, asked)
     message = approval_message(acc.task_id, call_id, data["tool"], data["args"])
     acc = %{acc | pending: pending, state: "input-required", message: message}
     {acc, [status_update(acc, event, message, true)]}
@@ -144,14 +152,7 @@ defmodule Troupe.A2A.Events do
 
   defp fold(acc, %Event{type: type, data: data} = event)
        when type in ["approval_decided", "approval_resolved"] do
-    acc = %{acc | pending: Map.delete(acc.pending, data["call_id"])}
-
-    if acc.state == "input-required" and map_size(acc.pending) == 0 do
-      acc = %{acc | state: "working", message: nil}
-      {acc, [status_update(acc, event, nil, false)]}
-    else
-      {acc, []}
-    end
+    close_approvals(acc, [data["call_id"]], event)
   end
 
   defp fold(acc, %Event{type: "llm_response", data: data} = event) do
@@ -177,8 +178,16 @@ defmodule Troupe.A2A.Events do
     finish(acc, event, "failed", text_message(acc, "The budget ran out: #{data["limit"]}."))
   end
 
+  # The session's cancel is the root's, and ends the task. One that reached only a
+  # subagent ends what that agent and those under it were asking, and nothing else: the
+  # root is still at work, and so is the task.
   defp fold(acc, %Event{type: "cancelled"} = event) do
-    finish(acc, event, "canceled", nil)
+    if root?(event) do
+      finish(acc, event, "canceled", nil)
+    else
+      asked = for {id, %{"agent" => agent}} <- acc.pending, within?(agent, event.agent), do: id
+      close_approvals(acc, asked, event)
+    end
   end
 
   defp fold(acc, %Event{type: "published", data: data} = event) do
@@ -245,6 +254,26 @@ defmodule Troupe.A2A.Events do
     acc = %{acc | state: state, message: message, pending: %{}}
     {acc, [status_update(acc, event, message, true)]}
   end
+
+  # An approval ends with its decision, with its call, or with a cancel of the agent that
+  # asked or of one above it (#142). The task goes back to work once nothing is left
+  # waiting on the caller.
+  defp close_approvals(acc, call_ids, event) do
+    acc = %{acc | pending: Map.drop(acc.pending, call_ids)}
+
+    if acc.state == "input-required" and map_size(acc.pending) == 0 do
+      acc = %{acc | state: "working", message: nil}
+      {acc, [status_update(acc, event, nil, false)]}
+    else
+      {acc, []}
+    end
+  end
+
+  # Whether `agent` is the agent at `path` or one under it.
+  defp within?(agent, path) when is_list(agent) and is_list(path),
+    do: Enum.take(agent, length(path)) == path
+
+  defp within?(_agent, _path), do: false
 
   defp working(%{state: state} = acc) when state in ["submitted", "working"],
     do: %{acc | state: "working"}

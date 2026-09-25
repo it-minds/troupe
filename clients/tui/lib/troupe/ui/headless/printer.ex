@@ -1,8 +1,23 @@
 defmodule Troupe.UI.Headless.Printer do
   @moduledoc """
   Headless renderer: prints the event stream as plain lines prefixed by
-  `agent_path`, for CI and scripting. Notifies `:on_rest` when the target
-  branch rests. Pending approvals are denied (use `--auto-approve`).
+  `agent_path`, for CI and scripting. Notifies `:on_rest` once, with an exit code,
+  when the target branch rests. Pending approvals are denied (use `--auto-approve`).
+
+  The target rests when its turn ends (`turn_ended`), when the turn is cancelled, or
+  when it is done (`agent_done`). All three are read from the log, never from the live
+  `agent_state`, which may be dropped under load and says `idle` once before the task is
+  even taken. A model that answers in prose and never calls `finish` ends its turn like
+  any other, and that is a rest. The code says how it ended:
+
+    * `0` — the turn ended, or the agent finished
+    * `1` — the agent ended short (budget, refusal, a cut or empty reply, a tool that kept
+      failing), its last model request failed, or the turn was cancelled or stopped
+      because a tool kept failing
+    * `3` — it asked for something only a person can allow, and nobody was there: an
+      approval was refused (Decision 20)
+
+  `2` is the CLI's own, for a command line it cannot parse.
 
   A session starts working the moment it is created, and this process is started
   after that, so a quick run can have finished — and rested — before anything here
@@ -15,6 +30,7 @@ defmodule Troupe.UI.Headless.Printer do
 
   alias Troupe.Client
   alias Troupe.Client.Message
+  alias Troupe.UI.ModelError
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -38,7 +54,11 @@ defmodule Troupe.UI.Headless.Printer do
       on_rest: Keyword.get(opts, :on_rest),
       io: io,
       streaming: %{},
-      seen: MapSet.new()
+      seen: MapSet.new(),
+      # What the exit code needs to know by the time the target rests.
+      failed: false,
+      refused: MapSet.new(),
+      rested: false
     }
 
     # Subscribed first, read back second: anything published in between is in both,
@@ -58,10 +78,12 @@ defmodule Troupe.UI.Headless.Printer do
     end
   end
 
-  # Durable events carry a sequence number, unique within their session's window, so
-  # the pair identifies one; a transient event has none and is never replayed anyway.
-  defp first_time(%{seq: seq, agent_path: path}, state) when is_integer(seq) do
-    key = {path, seq}
+  # Durable events carry a sequence number, unique within their session's window; a
+  # transient event has none and is never replayed anyway. One durable event can become
+  # several local ones, all with its `seq` (`cancelled` is a note and a state), so the
+  # type is part of the key, or only the first of them would ever be handled.
+  defp first_time(%{seq: seq, agent_path: path, type: type}, state) when is_integer(seq) do
+    key = {path, seq, type}
 
     if MapSet.member?(state.seen, key),
       do: :seen,
@@ -71,26 +93,77 @@ defmodule Troupe.UI.Headless.Printer do
   defp first_time(_event, state), do: {:ok, state}
 
   defp react(event, state) do
-    # A session rests when its agent is done (`agent_done`, folded to `agent_state
-    # :done`) or fails. `branch_state` is the older local spelling and still read.
     case event do
-      %{type: :agent_state, agent_path: path, data: %{to: :done}} when path == state.target ->
-        if state.on_rest, do: state.on_rest.(0)
-        state
+      # The target at rest, as the log says it: `turn_ended` and `cancelled` arrive as a
+      # durable `idle`, `agent_done` as a durable `done`. A live `agent_state` has no
+      # `seq`, and is not a rest (see the moduledoc).
+      %{type: :agent_state, agent_path: path, seq: seq, data: %{to: to} = data}
+      when path == state.target and is_integer(seq) and to in [:idle, :done] ->
+        rest(state, outcome(state, data))
 
-      %{type: t, agent_path: path}
-      when t in [:branch_state, :branch_failed] and path == state.target ->
-        rest? = t == :branch_failed or event.data.state in [:done_unread]
+      # `branch_state` is the older local spelling and still read.
+      %{type: :branch_failed, agent_path: path} when path == state.target ->
+        rest(state, {1, nil})
 
-        if rest? and state.on_rest do
-          state.on_rest.(if(t == :branch_failed, do: 1, else: 0))
-        end
+      %{type: :branch_state, agent_path: path, data: %{state: :done_unread}}
+      when path == state.target ->
+        rest(state, {0, nil})
 
-        state
+      %{type: :llm_error, agent_path: path} when path == state.target ->
+        %{state | failed: true}
+
+      # Counted when asked, not when answered: the request is in the log before the tool
+      # waits on it, while the answer is written after the tool has it and can land behind
+      # the rest it led to. Its subagents' requests count as its own, being for its task.
+      %{type: :approval_requested, agent_path: path, data: %{call_id: id}} ->
+        if path == state.target or String.starts_with?(path, state.target <> "/"),
+          do: %{state | refused: MapSet.put(state.refused, id)},
+          else: state
+
+      # Somebody else, attached to the same session, said yes before headless mode said no.
+      %{type: :approval_answered, data: %{call_id: id, decision: decision}}
+      when decision != :deny ->
+        %{state | refused: MapSet.delete(state.refused, id)}
 
       _ ->
         state
     end
+  end
+
+  # How the run ended, as an exit code and, when it is not 0, the reason in words.
+  defp outcome(state, data) do
+    cond do
+      data.to == :done and data[:reason] not in [nil, "finished"] ->
+        {1, "the agent ended #{data.reason}"}
+
+      data[:reason] == "cancelled" ->
+        {1, "the turn was cancelled"}
+
+      data[:reason] == "tool_failures" ->
+        {1, "a tool kept failing, and the harness stopped the turn"}
+
+      state.failed ->
+        {1, "the model request failed"}
+
+      MapSet.size(state.refused) > 0 ->
+        {3, refusals(MapSet.size(state.refused)) <> ", with nobody to ask (use --auto-approve)"}
+
+      true ->
+        {0, nil}
+    end
+  end
+
+  defp refusals(1), do: "an approval was refused"
+  defp refusals(n), do: "#{n} approvals were refused"
+
+  # Once: the run ends at its first rest, and a later one (watch input woke the agent
+  # again before the VM went) is not a second answer.
+  defp rest(%{rested: true} = state, _outcome), do: state
+
+  defp rest(state, {code, why}) do
+    if why, do: line(state, state.target, "exit #{code}: #{why}")
+    if state.on_rest, do: state.on_rest.(code)
+    %{state | rested: true}
   end
 
   defp print(%{type: :llm_delta}, state), do: state
@@ -115,6 +188,17 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp print(%{type: :tool_call_completed, agent_path: p, data: d}, state) do
     say(state, p, "#{if d.ok, do: "✓", else: "✗"} #{d.call_id}: #{String.slice(d.content, 0, 400)}")
+  end
+
+  # A failed model request ends the turn, so it is the reason a run exits 1 and has to be
+  # on screen, with the next step where there is an obvious one.
+  defp print(%{type: :llm_error, agent_path: p, data: d}, state) do
+    line(state, p, "model error: #{d.message}")
+
+    case ModelError.next_step(d.message) do
+      nil -> state
+      step -> say(state, p, step)
+    end
   end
 
   defp print(%{type: :approval_requested, agent_path: p, data: d}, state) do

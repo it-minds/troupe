@@ -246,7 +246,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
@@ -264,13 +264,15 @@ Durable:
 | `loop_iteration_started` | `loop_id`, `iteration`, `command_id` — the command id the iteration's input carries, which the root's `input_accepted` echoes |
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
-| `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
+| `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
-| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: this agent and its subagents stop asking; `deny`: `budget_exhausted` follows) |
+| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
-| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`), `summary`, `limit` |
+| `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
+| `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
+| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead), `summary`, `limit` |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
@@ -278,11 +280,21 @@ first given again — a checkpoint every slice. It is a stop where the budget is
 (`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
 session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
 never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again.
+delegate again. `always` lifts only the limit it was asked about (Decision 687).
+
+A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
+counts each tool's failures in a row; a success of that tool clears its count. At
+`tool_failures_note_at` (5) the model gets a note, a `user_input` from `harness`; at
+`tool_failures_stop_at` (10) the agent is `waiting` on a `tool_failures_ask_started`
+question before its next model call, under `full_send` and a lifted budget alike. `stop`
+comes first among the options, so a client that answers with the first option stops.
+Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask: it ends
+`tool_failures` and hands its parent what it found, labelled partial.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
+| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or a root's request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop` |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer` |
@@ -503,9 +515,14 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
+"pending_approvals", "tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
 
 `filter.parent` selects the branches of one session.
+
+`pending_approvals` counts the approvals still open (see `approval_requested` for when one
+ends), and `status` is `waiting` while there is one, whatever else it would say: the two
+columns a plane's `sessions.list` row carries, so an inbox is a listing and not a replay.
+A dormant session counts the root agent's, which are what it asks again when it wakes.
 
 #### `session.get` → one session object plus `head_seq`.
 
@@ -527,6 +544,11 @@ input: `agent_woken`, then the turn as usual. One whose budget is exhausted is n
 writes `input_after_done` instead.
 
 #### `turn.cancel` → `{"command_id", "session_id"}`. Valid from any state.
+
+Each tool call the cancel stops is closed before `cancelled` is written: a
+`tool_call_completed` with `ok: false`, then the turn's `tool_results`. A restart takes
+up nothing a cancel stopped: no call runs again, no approval is asked for again, and no
+model call is made for the cancelled turn.
 
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
@@ -571,8 +593,8 @@ from its prose: on the loop's turns, and only there, the agent is offered
 `goal_complete {summary}`, and an iteration in which it completes that call ends the
 loop with reason `goal_complete`. An iteration that ends without one is followed by
 the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
-(3) iterations in a row fail (the model request failed, or the agent ended short or
-crashed); when the budget question is asked (`budget`: the question stays with whoever
+(3) iterations in a row fail (the model request failed, the agent ended short or
+crashed, or the failure guard stopped the turn); when the budget question is asked (`budget`: the question stays with whoever
 answers it, and the loop does not resume after an `allow`); when somebody cancels the
 turn with `turn.cancel` (`cancelled`) or clears the goal (`goal_cleared`, and the turn in
 flight finishes); and when the root agent has ended in a way input does not wake
@@ -872,14 +894,16 @@ so. The plane has already asked for another worker; `retry_after_ms` says when t
 again. A refusal happens only where a person set a ceiling, and then it quotes the number
 they set.
 
-A session goes `dormant` on its own idle timeout, or on `session.archive`. Its log
+A session goes `dormant` on its own idle timeout, or on `session.archive`. Waiting on a
+person counts as idle, and a local daemon's timeout is shorter for a session no client is
+subscribed to ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log
 stays, and so does everything a client can learn from it: `session.list`,
 `session.get`, `blob.get` and `subscribe` all work on a dormant session and start
 nothing. That is deliberate — a session that woke up because somebody looked at it
 would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
 
 #### Activation is about the session, not about the pod
@@ -906,7 +930,9 @@ What a client sees is this:
 - every session it could see before is still listed, `dormant`;
 - a session that was mid-turn reports `"status": "interrupted"`, which is read from
   the log — a tool call that started and never completed, or a request the model never
-  answered — and is therefore true before anything has been restarted;
+  answered — and is therefore true before anything has been restarted; one that was
+  waiting on a person — an approval, a question, the budget's question — reports
+  `"status": "waiting"`, read the same way;
 - **no model call is made.** A session comes back interrupted and stays that way until
   an activating command arrives. Resuming instead would mean a crash loop spends money
   and re-runs shell commands nobody is watching. A daemon may be configured to resume,
@@ -916,7 +942,9 @@ What a client sees is this:
 
 When an interrupted session is activated, the tool calls that never finished are
 closed off as errors naming the interruption, so the conversation the model sees has a
-result for every call it made.
+result for every call it made. A call that was waiting on a person is not closed off: it
+is asked again, under the same id, and an answer that arrived in the meantime — the
+`approval.respond` or `question.answer` that woke the session — is handed to it.
 
 ---
 
@@ -978,19 +1006,27 @@ ACL of each session a request names.
 
 **It calls the methods about its session, and no others.** Those are `subscribe` and
 `unsubscribe` on its own topics, the two listings above, and every command whose params
-require `session_id` (§6): `session.get`, `session.archive`, `session.pin`,
-`session.unpin`, `session.erase`, `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.*`, `session.loop.*`, `approval.respond`, `question.answer`, `todo.edit`,
-`fs.list`, `fs.read`, `fs.upload`, `blob.get`, `mcp.status`, `presence.set`,
-`tools.register` and `tools.unregister`. Everything else a worker serves is about the pod
-or a path on it — `session.create`, `agents.list`, `workflows.list`, `memory.get`,
-`memory.forget`, `workspace.recent`, `workspace.search`, `worktree.*`, `watch.set`,
-`identity.*` and `config.*` — and a token for one session is refused it with `forbidden`
-and `data.method` naming it. A method a worker does not have is `method_not_found`,
-whatever the token, and `initialize` and `auth.refresh` belong to the connection. The
-plane mints every token for a pod with a `session_id`; one without is signed only by
-tooling that runs its own pod (the end-to-end tests, the benchmark), and keeps the whole
-table.
+require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
+`profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
+`question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
+`mcp.status`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+worker serves is about the pod or a path on it — `session.create`, `agents.list`,
+`workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
+`worktree.*`, `watch.set`, `identity.*` and `config.*` — and a token for one session is
+refused it with `forbidden` and `data.method` naming it. A method a worker does not have
+is `method_not_found`, whatever the token, and `initialize` and `auth.refresh` belong to
+the connection. The plane mints every token for a pod with a `session_id`; one without is
+signed only by tooling that runs its own pod (the end-to-end tests, the benchmark), and
+keeps the whole table.
+
+**Archiving, pinning and erasing a pod session are the plane's.** The plane holds the
+session's row, its key, its placement and its retention, so a worker refuses
+`session.archive`, `session.pin`, `session.unpin` and `session.erase` to a token for one
+session with `forbidden`, `data.method` naming it and `data.reason` of
+`done through the plane`. A client pins, unpins and erases a pod session with the
+plane's methods of the same names; the plane's erasure reaches the pod over its control
+channel and deletes the pod's copy along with the key and the objects. A pod session goes
+dormant on its own idle timeout.
 
 ### `auth.expiring` (notification, server → client)
 

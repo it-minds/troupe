@@ -32,8 +32,9 @@ operator:
     requests: {cpu: 100m, memory: 128Mi}
     limits: {cpu: 500m, memory: 512Mi}
   # Whether Cilium is installed. With it the operator writes CiliumNetworkPolicy with
-  # real FQDN rules; without it, egress to named hosts is a CIDR rule and a documented
-  # gap.
+  # real FQDN rules and no address block beside them, so a worker reaches the hosts its
+  # profile names and nothing else outside the cluster; without it, egress to named hosts
+  # is a CIDR rule and a documented gap. True on a cluster without Cilium fails closed.
   ciliumAvailable: false
   # The namespace running this controller must carry `troupe.dev/ingress=true`: a
   # worker's NetworkPolicy admits traffic from namespaces with that label and from

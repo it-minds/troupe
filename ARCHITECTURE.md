@@ -84,22 +84,25 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | thinking | text only | done (`finished`) — an implicit finish |
 | thinking | prompt over the compaction threshold | compacting |
 | thinking | cut at the output cap, or empty | note it and re-issue once, then done (`output_truncated`, `empty_reply`) |
-| thinking | refusal, model error | done (`refused`, `llm_error`); a context overflow compacts once and retries |
+| thinking | refusal, model error | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
 | acting | each call | allowlist and permission check → error result, approval request, or a task |
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it; when none are outstanding, the next turn |
 | compacting | summary | carry on the interrupted turn, or come to rest |
 | done | input | a root agent that finished takes it as a new turn; one out of budget stays done |
-| any | cancel | kill tasks and children → done (`cancelled`) |
+| any | cancel | kill tasks and children, close their calls as errors → idle (`cancelled`) |
 
 Input arriving while busy is postponed with `gen_statem`'s `:postpone`, not a hand-rolled
 queue, and delivered at the turn boundary. **Replay**: an agent's state is a fold over its
 own events; a crashed agent rebuilds from the log and finishes what it started, never
 re-running a completed call. **Budgets** — turns, input and output tokens, working time —
-are checked before every request; a child gets a share of its parent's. Past `warn_at`
-(0.8) a dimension logs one warning; at the ceiling the agent asks the person attached, and
-a grant buys another slice, folded from the log (Decision 660). **Compaction** is planned
-against the whole prompt including cache reads, keeps the recent turns and logs the
-replacement conversation so replay is faithful.
+are checked before every request; a child gets a share of the tokens and time its parent
+has left, and the turns its parent was first given. Past `warn_at` (0.8) a dimension logs
+one warning; at the ceiling the agent asks the person attached, a grant buys another
+slice, folded from the log (Decision 660), and `always` lifts the one limit asked about
+(Decision 687). **A tool that keeps failing** — ten times in a row, by default — stops the
+turn before the next request and asks, whatever the budget says (Decision 687).
+**Compaction** is planned against the whole prompt including cache reads, keeps the recent
+turns and logs the replacement conversation so replay is faithful.
 
 ### 2.3 Tools
 
@@ -127,8 +130,8 @@ breakpoint.
 | What dies | What restarts | Observed |
 |---|---|---|
 | a tool task | nothing; the agent gets `DOWN` or a timeout | an error result; the agent carries on |
-| the model stream | nothing | the agent ends `llm_error` |
-| `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once) |
+| the model stream | nothing | an `llm_error`; a root rests, a subagent ends `llm_error` and its parent gets what it had |
+| `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once), a delegation to a new child |
 | a subagent's node, past its restart limit | nothing; the parent gets `DOWN` | an error result for that delegation only |
 | `Watcher`, `Files`, `Loop`, `Summary` | that child and those after it | a notice; a loop carries on from its log |
 | `Approvals`, `Log`, or the session past 3 restarts in 10 s | everything below it; the whole session | a restarted tree replays; a stopped one comes back dormant from its log |
@@ -197,8 +200,11 @@ administers — are checked once per method.
 | `read_only` | stopped | as dormant; activating commands are refused |
 | `erased` | gone | `not_found` |
 
-A session goes dormant after its idle timeout; the next *activating* command restores the
-tree by folding the log. A daemon restart brings sessions back dormant — restarting every
+A session goes dormant after its idle timeout — waiting on a person counts as idle, and the
+timeout is minutes rather than half an hour once no client is watching it
+([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)); the next
+*activating* command restores the tree by folding the log, and asks again whatever it was
+waiting on. A daemon restart brings sessions back dormant — restarting every
 session a person ever had is a stampede, not a restoration — and stops itself after a quiet
 period with no clients. `Sessions.Index` holds metadata only and monitors each live tree,
 so a crashed session leaves the live view at once. The TUI's HQ page is a `fleet`
@@ -332,7 +338,9 @@ so it cannot be replayed against the API server. StatefulSets are `OnDelete` bec
 holds live sessions. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
-than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for.
+than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for, a
+DNS rule through Cilium's proxy so it can learn addresses, and no wide rule beside it,
+since Cilium admits the union of every policy on a pod.
 
 ### 6.4 The admin surface
 

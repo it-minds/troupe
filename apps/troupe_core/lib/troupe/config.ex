@@ -2,18 +2,28 @@ defmodule Troupe.Config do
   @moduledoc """
   Resolved settings for one session.
 
-  Layered lowest to highest: built-in defaults, the global `config.yaml`, the
-  project's `.troupe/config.yaml`, environment variables, then explicit options from
-  the CLI or the client API. Merging is key-wise, so a project file that sets only
-  `model` keeps the global provider.
+  Layered lowest to highest: built-in defaults, the user's `config.yaml`, the project's
+  `.troupe/config.yaml`, the project's git-ignored `.troupe/config.local.yaml`,
+  environment variables, then explicit options from the CLI or the client API. Maps
+  merge by key (RFC 7396): a project file that adds one provider keeps the user's
+  others, `null` removes what a lower layer set, and a list replaces. Every key, its
+  type and which files may set it are in `Troupe.Config.Schema`; how the files are read
+  and merged is `Troupe.Config.Layers`.
+
+  A file is read strictly. One that is not YAML, has a value of the wrong type or an
+  enum value nobody knows, uses two spellings of one setting, or was written for a newer
+  Troupe refuses the load (`Troupe.Config.Error`), naming the file, the key and the fix.
+  An unknown key, an old spelling, and a key a project's file may not set warn, and the
+  load goes on.
 
   Any string value may reference the environment as `{env:VAR}`, which is how a key
   reaches Troupe without being written into a file:
 
       api_key: "{env:MY_GATEWAY_KEY}"
 
-  An unset variable interpolates to an empty string rather than the literal
-  placeholder, so a missing key fails as a missing key instead of being sent upstream.
+  A variable that is not set refuses the provider or MCP server that uses it, naming
+  the variable, and anywhere else refuses the load. Nothing unset is ever sent upstream,
+  as an empty string or as the placeholder.
 
   ## Providers, on a laptop
 
@@ -28,21 +38,22 @@ defmodule Troupe.Config do
         gateway:
           type: anthropic
           base_url: https://gw.example/anthropic/v1
-          auth_token: "{env:GW_TOKEN}"
+          api_key: "{env:GW_TOKEN}"
+          auth: bearer
           models:
             claude-opus-5: {id: eu.anthropic.claude-opus-5, context: 400000, max_output: 64000}
       models:
         default: gateway/claude-opus-5
         cheap: gateway/claude-haiku-4-5
         windows: {some-bare-model: 128000}
-
-  `models.default` and `model` are the same setting; the block form exists so a
-  laptop config reads the way the TUI's always has.
   """
 
-  alias Troupe.Config.OpenCode
+  alias Troupe.Config.{Error, Explain, Issue, Layers, Migrate, OpenCode, Schema, Trust}
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
+  alias Troupe.LLM.Endpoint
+
+  require Logger
 
   # A flat record of every setting a session reads, on purpose: a config file's key is a
   # field's name, and a nested shape here would be a second vocabulary for the same thing.
@@ -57,8 +68,11 @@ defmodule Troupe.Config do
             api_key: nil,
             # How the session-wide key is presented: each provider's own scheme, or
             # `Authorization: Bearer` for a gateway that fronts a provider's API but not
-            # its authentication (opencode writes that key as `authToken`).
+            # its authentication.
             auth: :api_key,
+            # Why the session-wide provider may not be used, when a `{env:VAR}` its key or
+            # URL reads is not set. A request to it fails with this rather than going out.
+            refused: nil,
             # Named providers, addressable as `<name>/<model>`. From `providers:` in a
             # config file, or from opencode when Troupe has no key of its own.
             providers: %{},
@@ -73,6 +87,8 @@ defmodule Troupe.Config do
             max_tokens: 8192,
             context_window: 200_000,
             compact_at: 0.75,
+            # How long one model call may take, and how long a stream may go quiet.
+            llm_timeout_ms: 300_000,
             max_turns: 40,
             max_input_tokens: 2_000_000,
             max_output_tokens: 400_000,
@@ -86,6 +102,12 @@ defmodule Troupe.Config do
             # Whether a spent budget is a question for the person attached (Decision 660) or
             # a stop. `false` where the budget is a contract — the plane's terms set it so.
             budget_asks: true,
+            # A tool that keeps failing (Decision 687): after this many failures of one tool
+            # in a row the model is told to stop and reconsider, and after the second the
+            # turn stops and the person attached is asked whether it goes on. Budgets lifted
+            # or not. `0` turns that step off.
+            tool_failures_note_at: 5,
+            tool_failures_stop_at: 10,
             shell_timeout_ms: 120_000,
             tool_output_limit: 60_000,
             watch: false,
@@ -98,7 +120,7 @@ defmodule Troupe.Config do
             fs_debounce_ms: 100,
             # Who the LLM gateway should bill and record this session against:
             # `%{owner:, team:}`. Set by the worker when the plane places the session,
-            # empty for a local one where there is nobody to bill.
+            # empty for a local one where there is nobody to bill. Never from a file.
             attribution: %{},
             auto_approve: false,
             # Two switches a platform sets and a session may not move. Both arrive with
@@ -144,27 +166,41 @@ defmodule Troupe.Config do
             # Directories outside the workspace the *read* tools may reach (Decision 653):
             # a dependency checkout, a sibling repository. Writes never leave the workspace.
             read_roots: [],
+            # Workspaces whose own files may set the keys the schema marks trusted
+            # (Decision 686). Read only from the user file.
+            trusted_workspaces: [],
             # Where session logs go. `nil` means the platform state directory; an explicit
             # path lets an embedding caller isolate state without touching the environment.
             state_dir: nil,
             # Only meaningful with `provider: "fake"`: a JSON script of scripted
             # answers, which is how a packaged binary is smoke-tested with no model.
             fake_script: nil,
-            extra: %{}
+            # The terminal UI's: whether it captures the mouse. The daemon has no opinion.
+            mouse: true,
+            # Keys starting with `x-`, which a file may carry for its own tools and Troupe
+            # does not read.
+            extra: %{},
+            # What loading said and went on anyway: unknown keys, old spellings, keys a
+            # project's file may not set, refused providers. One line each.
+            warnings: []
 
   @type t :: %__MODULE__{}
 
   @typedoc "How a key is presented on the wire."
   @type auth :: :api_key | :bearer
 
-  @typedoc "A named provider, addressable as `<name>/<model>`."
+  @typedoc """
+  A named provider, addressable as `<name>/<model>`. `refused` says why it may not be
+  used — a `{env:VAR}` it reads is not set — and a request to it fails with that.
+  """
   @type provider :: %{
-          type: :anthropic | :openai,
-          base_url: String.t() | nil,
-          api_key: String.t() | nil,
-          auth: auth(),
-          models: %{optional(String.t()) => model()},
-          source: :yaml | :opencode
+          required(:type) => :anthropic | :openai,
+          required(:base_url) => String.t() | nil,
+          required(:api_key) => String.t() | nil,
+          required(:auth) => auth(),
+          required(:models) => %{optional(String.t()) => model()},
+          required(:source) => :yaml | :opencode,
+          optional(:refused) => String.t() | nil
         }
 
   @typedoc """
@@ -179,43 +215,343 @@ defmodule Troupe.Config do
           reasoning_effort: String.t() | nil
         }
 
-  @typedoc "Everything one request needs to reach the model it names."
+  @typedoc """
+  Everything one request needs to reach the model it names. `api_key` is
+  `{:refused, why}` for a provider that may not be used, which the adapter answers with
+  an error instead of a request.
+  """
   @type target :: %{
           provider: String.t(),
           model: String.t(),
           base_url: String.t() | nil,
-          api_key: String.t() | nil,
+          api_key: String.t() | {:refused, String.t()} | nil,
           auth: auth(),
           max_output: pos_integer() | nil,
           reasoning_effort: String.t() | nil
         }
 
   @doc """
-  Load configuration for a workspace.
+  Load configuration for a workspace, logging what loading warned about.
 
   `overrides` wins over everything and is where CLI flags land. A `nil` workspace is
   the configuration outside any project: the user's file, the environment and the
   fallbacks, which is what a settings screen that is not about one repository shows.
+  Raises `Troupe.Config.Error` when a file is refused; `resolve/3` answers instead.
   """
-  @spec load(Path.t() | nil, keyword()) :: t()
-  def load(workspace_root, overrides \\ []) do
-    project =
-      if workspace_root,
-        do: read_yaml(Path.join(Troupe.Paths.project_dir(workspace_root), "config.yaml")),
-        else: %{}
+  @spec load(Path.t() | nil, keyword(), keyword()) :: t()
+  def load(workspace_root, overrides \\ [], opts \\ []) do
+    case resolve(workspace_root, overrides, opts) do
+      {:ok, config, _layers} ->
+        log_warnings(config)
+        config
 
-    %__MODULE__{}
-    |> merge_map(read_yaml(user_path()))
-    |> merge_map(project)
-    |> merge_env()
-    |> merge_keyword(overrides)
-    |> apply_opencode()
-    |> apply_catalog()
+      {:error, error} ->
+        raise error
+    end
+  end
+
+  @doc """
+  Resolve configuration for a workspace, and say how: the config, and the layers it was
+  built from — every file read, every value each one gave, and what was ignored.
+
+  Options: `:trust` — `:never` for a session on a pod, which reads no gated key from a
+  project's file; `:user_path` — the user file, when not `user_path/0`.
+  """
+  @spec resolve(Path.t() | nil, keyword(), keyword()) ::
+          {:ok, t(), Layers.Result.t()} | {:error, Error.t()}
+  def resolve(workspace_root, overrides \\ [], opts \\ []) do
+    layers = Layers.read(workspace_root, opts)
+
+    with [] <- layers.errors,
+         {:ok, config, layers} <- layers |> build() |> apply_overrides(overrides, layers) do
+      {config, layers} = apply_opencode(config, layers)
+      config = apply_catalog(config)
+      {:ok, %{config | warnings: Enum.map(layers.warnings ++ layers.refusals, &Issue.format/1)}, layers}
+    else
+      [_ | _] = errors -> {:error, %Error{issues: errors}}
+      {:error, %Error{}} = error -> error
+    end
+  end
+
+  @doc "Say, once, what loading warned about."
+  @spec log_warnings(t()) :: :ok
+  def log_warnings(%__MODULE__{warnings: warnings}) do
+    Enum.each(warnings, &Logger.warning("troupe: config: " <> &1))
   end
 
   @doc "The user's own `config.yaml`, the file every workspace starts from."
   @spec user_path() :: Path.t()
   def user_path, do: Path.join(Troupe.Paths.config_dir(), "config.yaml")
+
+  @doc "A workspace's committed `.troupe/config.yaml`."
+  @spec project_path(Path.t()) :: Path.t()
+  def project_path(workspace), do: Path.join(Troupe.Paths.project_dir(workspace), "config.yaml")
+
+  @doc "A workspace's git-ignored `.troupe/config.local.yaml`, for one person's settings there."
+  @spec local_path(Path.t()) :: Path.t()
+  def local_path(workspace), do: Path.join(Troupe.Paths.project_dir(workspace), "config.local.yaml")
+
+  # -- the doors a client uses ----------------------------------------------------
+
+  @doc "`troupe config --explain [KEY] [--json]`: `Troupe.Config.Explain.explain/3`."
+  defdelegate explain(workspace, key \\ nil, opts \\ []), to: Explain
+
+  @doc "`troupe config validate [PATH]`: `Troupe.Config.Explain.validate/3`."
+  defdelegate validate(workspace, path \\ nil, opts \\ []), to: Explain
+
+  @doc "`troupe config migrate [--write] [PATH]`: `Troupe.Config.Explain.migrate/3`."
+  defdelegate migrate(workspace, path \\ nil, opts \\ []), to: Explain
+
+  @doc "Write a config file the way every writer does: `Troupe.Config.Migrate.write/2`."
+  defdelegate write_file(path, map), to: Migrate, as: :write
+
+  @doc "Remove the old spellings of one setting: `Troupe.Config.Migrate.drop_spellings/2`."
+  defdelegate drop_spellings(map, path), to: Migrate
+
+  @doc "Whether a project's file may set the key at `path` only in a trusted workspace."
+  @spec gated?([String.t()]) :: boolean()
+  def gated?(path), do: match?(%{scope: :trusted}, Schema.at(path))
+
+  @doc """
+  Whether a workspace is on the user file's `trusted_workspaces`, so its own files may
+  set the keys the schema marks trusted.
+  """
+  @spec trusted?(Path.t()) :: boolean()
+  def trusted?(workspace) do
+    case Layers.parse(user_path()) do
+      {:ok, map, _text} -> Trust.trusted?(workspace, Layers.trust_list(map))
+      _ -> false
+    end
+  end
+
+  # -- building -------------------------------------------------------------------
+
+  defp build(%Layers.Result{values: values} = layers) do
+    config =
+      Enum.reduce(Schema.keys(), %__MODULE__{}, fn spec, acc ->
+        case Map.fetch(values, spec.key) do
+          {:ok, value} -> put_key(acc, spec, value, layers)
+          :error -> acc
+        end
+      end)
+
+    %{config | extra: layers.extra, refused: layers.refused.session}
+  end
+
+  defp put_key(config, %{key: "models"}, models, _layers) do
+    config
+    |> put_model(:model, models["default"])
+    |> put_model(:small_model, models["cheap"])
+    |> put_model(:expensive_model, models["expensive"])
+    |> then(&%{&1 | windows: Map.get(models, "windows", %{}), models_explicit?: Map.has_key?(models, "default")})
+  end
+
+  defp put_key(config, %{key: "providers"}, providers, layers),
+    do: %{config | providers: parse_providers(providers, layers.refused.providers)}
+
+  defp put_key(config, %{key: "mcp"}, servers, layers),
+    do: %{config | mcp: parse_mcp(servers, layers.refused.mcp)}
+
+  defp put_key(config, %{field: nil}, _value, _layers), do: config
+  defp put_key(config, %{field: field}, value, _layers), do: Map.put(config, field, field_value(field, value))
+
+  defp put_model(config, _field, nil), do: config
+  defp put_model(config, field, model), do: Map.put(config, field, model)
+
+  defp field_value(field, value) when field in [:auth, :approvals], do: enum_atom(value)
+  defp field_value(field, value) when field in [:compact_at, :budget_warn_at], do: value / 1
+  defp field_value(:read_roots, roots), do: roots |> Enum.filter(&is_binary/1) |> Enum.map(&Path.expand/1)
+  defp field_value(_field, {:unset_env, _var, _raw}), do: nil
+  defp field_value(_field, value), do: value
+
+  defp parse_providers(map, refused) do
+    Map.new(map, fn {name, p} ->
+      provider = %{
+        type: enum_atom(string(p["type"]) || "openai"),
+        base_url: string(p["base_url"]),
+        api_key: string(p["api_key"]),
+        auth: enum_atom(string(p["auth"]) || "api_key"),
+        models: parse_models(p["models"]),
+        source: :yaml
+      }
+
+      {name, with_refusal(provider, refused[name])}
+    end)
+  end
+
+  # A server is started from exactly one of `command` and `url`; one with neither or
+  # both is refused by the loader, and never started.
+  defp parse_mcp(map, refused) do
+    Map.new(map, fn {name, entry} ->
+      server = %{
+        command: string(entry["command"]),
+        args: entry |> Map.get("args", []) |> Enum.map(&string/1) |> Enum.reject(&is_nil/1),
+        env: entry |> Map.get("env", %{}) |> Map.new(fn {k, v} -> {k, string(v) || ""} end),
+        cd: string(entry["cd"]),
+        url: string(entry["url"]),
+        permission: if(entry["permission"] == "auto", do: :auto, else: :ask),
+        timeout_ms: entry["timeout_ms"] || 30_000
+      }
+
+      {name, with_refusal(server, refused[name])}
+    end)
+  end
+
+  defp with_refusal(entry, nil), do: entry
+  defp with_refusal(entry, why), do: Map.put(entry, :refused, why)
+
+  defp string(value) when is_binary(value) and value != "", do: value
+  defp string(_value), do: nil
+
+  # The schema has already said the value is one of these.
+  @enum_atoms [:anthropic, :openai, :api_key, :bearer, :wait, :deny]
+  defp enum_atom(value) when is_atom(value), do: value
+  defp enum_atom(value), do: Enum.find(@enum_atoms, &(Atom.to_string(&1) == value))
+
+  # -- the command line -----------------------------------------------------------
+
+  # Struct fields, as a caller names them. A setting the schema knows is checked the way
+  # a file's is — a client that sends `auto_approve: "no"` is refused, not taken at its
+  # truthiness — and recorded in the ladder; the rest (the catalog, the attribution a
+  # worker sets) is the caller's own and is put as it is.
+  defp apply_overrides(config, overrides, layers) do
+    Enum.reduce_while(overrides, {:ok, config, layers}, fn
+      {_key, nil}, acc ->
+        {:cont, acc}
+
+      {key, value}, {:ok, config, layers} ->
+        case override(config, key, value) do
+          {:ok, config} -> {:cont, {:ok, config, record_override(layers, key, value)}}
+          :ignore -> {:cont, {:ok, config, layers}}
+          {:error, message} -> {:halt, {:error, override_error(key, message)}}
+        end
+    end)
+  end
+
+  defp override_error(key, message),
+    do: %Error{issues: [%Issue{level: :error, source: "command line", key: to_string(key), message: message}]}
+
+  defp override(config, :model, value) when is_binary(value), do: {:ok, %{config | model: value, models_explicit?: true}}
+
+  defp override(config, key, value) when is_atom(key) do
+    cond do
+      key in [:__struct__, :warnings, :refused] or not Map.has_key?(config, key) ->
+        :ignore
+
+      spec = field_spec(key) ->
+        case override_value(spec.type, value) do
+          {:ok, value} when key in [:auth, :approvals] ->
+            {:ok, Map.put(config, key, enum_atom(value))}
+
+          {:ok, value} ->
+            {:ok, Map.put(config, key, value)}
+
+          :error ->
+            {path, _spec} = Schema.by_field(key)
+
+            {:error,
+             "#{Enum.join(path, ".")} is set to #{Layers.show(value)}; it must be " <>
+               Schema.describe_type(spec.type) <> Schema.hint(path)}
+        end
+
+      true ->
+        {:ok, Map.put(config, key, value)}
+    end
+  end
+
+  defp override(_config, _key, _value), do: :ignore
+
+  defp field_spec(field) do
+    case Schema.by_field(field) do
+      {_path, spec} -> spec
+      nil -> nil
+    end
+  end
+
+  defp override_value(:boolean, value) when is_boolean(value), do: {:ok, value}
+  defp override_value({:integer, min}, value) when is_integer(value) and value >= min, do: {:ok, value}
+  defp override_value(:fraction, value) when is_number(value) and value > 0 and value <= 1, do: {:ok, value / 1}
+  defp override_value(:string, value) when is_binary(value), do: {:ok, value}
+
+  defp override_value({:enum, values}, value) when is_atom(value) or is_binary(value) do
+    if to_string(value) in values, do: {:ok, value}, else: :error
+  end
+
+  defp override_value(type, _value) when type in [:boolean, :fraction, :string], do: :error
+  defp override_value({kind, _}, _value) when kind in [:integer, :enum], do: :error
+  # Lists and maps arrive in the struct's own shape from a caller that built them.
+  defp override_value(_type, value), do: {:ok, value}
+
+  defp record_override(layers, key, value) do
+    case Schema.by_field(key) do
+      {path, _spec} -> record(layers, path, :cli, "command line", value)
+      nil -> layers
+    end
+  end
+
+  # Without a key of its own, Troupe reuses opencode's providers, and — when nothing
+  # named a default model — opencode's own default, else the first provider with a key.
+  # A key the files name but the environment does not hold is not "no key": the provider
+  # is refused, and opencode does not stand in for it.
+  defp apply_opencode(%__MODULE__{} = config, layers) do
+    if is_nil(config.api_key) and is_nil(config.refused) and to_string(config.provider) in ["anthropic", "openai"] do
+      found = OpenCode.providers()
+      layers = found |> Map.keys() |> Kernel.--(Map.keys(config.providers)) |> record_opencode(layers)
+      providers = Map.merge(found, config.providers)
+      config = %{config | providers: providers}
+
+      cond do
+        providers == %{} -> {config, layers}
+        config.models_explicit? -> {config, layers}
+        true -> default_model_from(config, layers)
+      end
+    else
+      {config, layers}
+    end
+  end
+
+  defp record_opencode(names, layers) do
+    Enum.reduce(names, layers, &record(&2, ["providers", &1], :opencode, OpenCode.config_path(), "(opencode's)"))
+  end
+
+  defp default_model_from(config, layers) do
+    fallback =
+      config.providers
+      |> Enum.filter(fn {_name, p} -> present?(p.api_key) end)
+      |> Enum.map(&elem(&1, 0))
+      |> Enum.sort()
+      |> List.first()
+
+    default =
+      case OpenCode.default_model() do
+        nil when fallback != nil -> first_model(config.providers[fallback], fallback)
+        nil -> nil
+        model -> model
+      end
+
+    if default do
+      {%{config | model: default, small_model: config.small_model || default},
+       record(layers, ["models", "default"], :opencode, OpenCode.config_path(), default)}
+    else
+      {config, layers}
+    end
+  end
+
+  # One more value on a key's ladder, from a layer that is not a file's.
+  defp record(layers, path, layer, source, value) do
+    entry = %{path: path, layer: layer, source: source, value: value, raw: nil, ignored: nil}
+    %{layers | ladder: Map.update(layers.ladder, path, [entry], &(&1 ++ [entry]))}
+  end
+
+  defp first_model(%{models: models}, name) when map_size(models) > 0,
+    do: name <> "/" <> (models |> Map.keys() |> Enum.sort() |> hd())
+
+  defp first_model(_provider, name), do: name <> "/"
+
+  # The cached catalog, unless the caller passed one: an explicit option wins over every
+  # file, here as everywhere else.
+  defp apply_catalog(%__MODULE__{catalog: catalog} = config) when map_size(catalog) > 0, do: config
+  defp apply_catalog(%__MODULE__{} = config), do: %{config | catalog: Store.load()}
 
   @doc "The budget an agent starts with under this config."
   @spec budget(t()) :: Troupe.Budget.t()
@@ -292,6 +628,9 @@ defmodule Troupe.Config do
   `<name>/<model>` id goes to that provider, under its own key and auth scheme, as the
   wire id its `models:` entry declares — which is how `gateway/claude-opus-5` sends
   `eu.anthropic.claude-opus-5` to a gateway that renamed it. `nil` means the default.
+
+  A provider refused for an unset `{env:VAR}` gets `api_key: {:refused, why}`, which
+  the adapter answers with that error and no request.
   """
   @spec target(t(), String.t() | nil) :: target()
   def target(%__MODULE__{} = config, model) do
@@ -303,7 +642,7 @@ defmodule Troupe.Config do
           provider: to_string(config.provider),
           model: bare,
           base_url: config.base_url,
-          api_key: config.api_key,
+          api_key: key_or_refusal(config.api_key, config.refused),
           auth: config.auth,
           max_output: nil,
           reasoning_effort: nil
@@ -316,13 +655,86 @@ defmodule Troupe.Config do
           provider: Atom.to_string(provider.type),
           model: (spec && spec.id) || bare,
           base_url: provider.base_url,
-          api_key: provider.api_key,
+          api_key: key_or_refusal(provider.api_key, Map.get(provider, :refused)),
           auth: provider.auth,
           max_output: spec && spec.max_output,
           reasoning_effort: spec && spec.reasoning_effort
         }
     end
   end
+
+  defp key_or_refusal(key, nil), do: key
+  defp key_or_refusal(_key, why), do: {:refused, why}
+
+  @doc """
+  Why the default model cannot be asked, or `nil` when it can.
+
+  `{:no_key, provider}` when its provider has no key of its own and no vendor variable
+  stands in for one — `ANTHROPIC_API_KEY` or `OPENAI_API_KEY`, which only ever go to the
+  vendor's own endpoint — and `{:refused, why}` when a `{env:VAR}` its key or URL reads
+  is not set. An OpenAI-compatible gateway configured without a key is not a problem, as
+  a local vLLM needs none; nor is the `fake` provider, which asks nobody.
+
+  What a first run is told before anything else: `troupe config` ends its report with the
+  next step when this is not `nil`, and plain `troupe` offers the setup.
+  """
+  @spec key_problem(t()) :: nil | {:no_key, String.t()} | {:refused, String.t()}
+  def key_problem(%__MODULE__{} = config) do
+    model = resolve_model(config, config.model)
+    target = target(config, model)
+
+    name =
+      case split_model(config, model) do
+        {nil, _bare} -> to_string(config.provider)
+        {_provider, _bare} -> model |> String.split("/", parts: 2) |> hd()
+      end
+
+    case target.api_key do
+      {:refused, why} ->
+        {:refused, why}
+
+      key ->
+        if keyed?(target.provider, target.base_url, key) or keyless?(target),
+          do: nil,
+          else: {:no_key, name}
+    end
+  end
+
+  @doc """
+  The variable holding a vendor's own key — `ANTHROPIC_API_KEY`, `OPENAI_API_KEY` — when
+  a provider of that type at `base_url` may be sent it, and `nil` for a gateway. What a
+  setup offers to reference when a person gives no key of their own.
+  """
+  @spec vendor_key_var(atom() | String.t(), String.t() | nil) :: String.t() | nil
+  defdelegate vendor_key_var(type, base_url), to: Endpoint
+
+  # Whether a request to a provider carries a key, or needs none: its own, the vendor's
+  # variable at the vendor's own endpoint, or the fake's nothing at all.
+  defp keyed?(type, base_url, key) do
+    type = to_string(type)
+
+    cond do
+      present?(key) -> true
+      type == "fake" -> true
+      var = Endpoint.vendor_key_var(type, base_url) -> present?(System.get_env(var))
+      true -> false
+    end
+  end
+
+  # An OpenAI-compatible server that is not OpenAI's is sent no key it was not given,
+  # and may well want none.
+  defp keyless?(%{provider: "openai", base_url: base_url}),
+    do: Endpoint.vendor_key_var("openai", base_url) == nil
+
+  defp keyless?(_target), do: false
+
+  defp session_keyed?(%__MODULE__{refused: nil} = config),
+    do: keyed?(config.provider, config.base_url, config.api_key)
+
+  defp session_keyed?(%__MODULE__{}), do: false
+
+  defp provider_keyed?(%{refused: why}) when is_binary(why), do: false
+  defp provider_keyed?(provider), do: keyed?(provider.type, provider.base_url, provider.api_key)
 
   @doc "The model an alias names: `default`, `cheap`/`small`, `expensive`; anything else is itself."
   @spec resolve_model(t(), String.t() | atom()) :: String.t()
@@ -354,7 +766,7 @@ defmodule Troupe.Config do
   """
   @spec models(t()) :: [model_choice()]
   def models(%__MODULE__{} = config) do
-    session_key? = present?(config.api_key)
+    session_key? = session_keyed?(config)
 
     from_providers = Enum.flat_map(config.providers, &provider_choices/1)
     bare = Enum.map(Enum.sort(config.windows), fn {id, ctx} -> choice(id, nil, id, ctx, :config, session_key?) end)
@@ -372,7 +784,7 @@ defmodule Troupe.Config do
   end
 
   defp provider_choices({name, provider}) do
-    key? = present?(provider.api_key)
+    key? = provider_keyed?(provider)
 
     case Enum.sort(provider.models) do
       [] -> [choice(name <> "/", name, nil, nil, provider.source, key?)]
@@ -383,7 +795,7 @@ defmodule Troupe.Config do
   defp current_choice(config, id) do
     {provider, model} = split_model(config, id)
     name = provider && id |> String.split("/", parts: 2) |> hd()
-    key? = if provider, do: present?(provider.api_key), else: present?(config.api_key)
+    key? = if provider, do: provider_keyed?(provider), else: session_keyed?(config)
     choice(id, name, model, context_window(config, id), (provider && provider.source) || :config, key?)
   end
 
@@ -396,7 +808,7 @@ defmodule Troupe.Config do
 
   defp catalog_only(%__MODULE__{} = config) do
     known = Enum.flat_map(config.providers, fn {n, p} -> Enum.map(p.models, &(n <> "/" <> elem(&1, 0))) end)
-    session_key? = present?(config.api_key)
+    session_key? = session_keyed?(config)
 
     config.catalog
     |> Map.keys()
@@ -413,7 +825,7 @@ defmodule Troupe.Config do
         context: entry.context,
         price: Catalog.describe_price(entry),
         source: :catalog,
-        key?: (provider && present?(provider.api_key)) || session_key?
+        key?: if(provider, do: provider_keyed?(provider), else: session_key?)
       }
     end)
   end
@@ -422,19 +834,86 @@ defmodule Troupe.Config do
     %{id: id, provider: provider, model: model, context: context, price: nil, source: source, key?: key?}
   end
 
-  @doc "Resolved providers and models with keys masked, for a person to read."
-  @spec describe(t()) :: String.t()
-  def describe(%__MODULE__{} = config) do
+  @doc """
+  Resolved providers and models with keys masked, for a person to read, what loading
+  warned about, and — when no model can be asked (`key_problem/1`) — the next step.
+
+  `command` is the program the person ran, `"troupe-daemon"` unless it says `"troupe"`,
+  and the report names that program's subcommands. Only `troupe` sets a provider up by
+  asking, and an install may have the daemon without it, so through `troupe-daemon` the
+  next step is the file, which any install can write.
+  """
+  @spec describe(t(), command: String.t()) :: String.t()
+  def describe(%__MODULE__{} = config, opts \\ []) do
+    command = Keyword.get(opts, :command, "troupe-daemon")
+
     """
-    provider: #{config.provider} base_url=#{config.base_url || "(default)"} key=#{mask(config.api_key)} auth=#{config.auth}
+    provider: #{config.provider} base_url=#{config.base_url || "(default)"} key=#{session_key(config)} auth=#{config.auth}
     models: default=#{config.model} cheap=#{config.small_model || "(default)"} expensive=#{config.expensive_model || "(default)"}
     named providers (use as <name>/<model>):
     #{describe_providers(config)}
     models Troupe can address (use one as models.default):
     #{describe_choices(config)}
-    config dir: #{Troupe.Paths.config_dir()}   opencode: #{OpenCode.config_path()}
-    catalog: #{Store.path()} (#{Store.fetched_at() || "never fetched"})
-    """
+    config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
+    catalog: #{Troupe.Paths.display(Store.path())} (#{Store.fetched_at() || "never fetched"})
+    """ <> describe_warnings(config.warnings, command) <> describe_next_step(config, command)
+  end
+
+  defp session_key(%__MODULE__{refused: nil} = config),
+    do: key_label(config.provider, config.base_url, config.api_key)
+
+  defp session_key(%__MODULE__{}), do: "(refused)"
+
+  # A key of the provider's own, masked, or the vendor variable that stands in for one.
+  defp key_label(type, base_url, key) do
+    var = if present?(key), do: nil, else: Endpoint.vendor_key_var(type, base_url)
+    if var && present?(System.get_env(var)), do: "(#{var})", else: mask(key)
+  end
+
+  # One next step, and the simplest file that would have made it unnecessary: a key in
+  # the environment and a reference to it, before the gateways most of the rest of this
+  # report is about. Through `troupe` the step is `troupe config`; through the daemon it
+  # is the file, and what else writes it comes after.
+  defp describe_next_step(config, command) do
+    path = Troupe.Paths.display(user_path())
+
+    case {key_problem(config), command} do
+      {nil, _command} ->
+        ""
+
+      {{:refused, _why}, "troupe"} ->
+        "next step: the default model's provider is refused (the warning above says why); " <>
+          "set the variable it names, or run `troupe config` to set up a provider\n"
+
+      {{:refused, _why}, _command} ->
+        "next step: the default model's provider is refused (the warning above says why); " <>
+          "set the variable it names, or write another provider into #{path}\n"
+
+      {{:no_key, name}, "troupe"} ->
+        """
+        next step: #{name} has no key, so no model can be asked. Run `troupe config` to set up a provider.
+          The simplest #{path} is
+            provider: anthropic
+            api_key: "{env:ANTHROPIC_API_KEY}"
+          and a gateway such as LiteLLM is `provider: openai` with its `base_url` and `api_key`.
+        """
+
+      {{:no_key, name}, _command} ->
+        """
+        next step: #{name} has no key, so no model can be asked. Write a provider into #{path}; the simplest is
+            provider: anthropic
+            api_key: "{env:ANTHROPIC_API_KEY}"
+          and a gateway such as LiteLLM is `provider: openai` with its `base_url` and `api_key`.
+          `troupe config` and the desktop app (This computer > Models) write the same file.
+        """
+    end
+  end
+
+  defp describe_warnings([], _command), do: ""
+
+  defp describe_warnings(warnings, command) do
+    "warnings (`#{command} config validate` lists them; `#{command} config migrate` fixes old spellings):\n" <>
+      Enum.map_join(warnings, "", &"  #{&1}\n")
   end
 
   defp describe_providers(%__MODULE__{providers: providers}) when map_size(providers) == 0,
@@ -444,16 +923,19 @@ defmodule Troupe.Config do
     providers
     |> Enum.sort()
     |> Enum.map_join("\n", fn {name, p} ->
-      "  #{name}: #{p.type} #{p.base_url || "(default url)"} key=#{mask(p.api_key)} source=#{p.source}" <>
+      "  #{name}: #{p.type} #{p.base_url || "(default url)"} key=#{provider_key(p)} source=#{p.source}" <>
         if(p.auth == :bearer, do: " auth=bearer", else: "") <>
         if(p.models == %{}, do: "", else: " models=" <> describe_models(p.models))
     end)
   end
 
+  defp provider_key(%{refused: why}) when is_binary(why), do: "(refused)"
+  defp provider_key(provider), do: key_label(provider.type, provider.base_url, provider.api_key)
+
   defp describe_choices(config) do
     case models(config) do
       [] ->
-        "  (none detected; set model or configure a provider)"
+        "  (none detected; set models.default or configure a provider)"
 
       list ->
         Enum.map_join(list, "\n", fn choice ->
@@ -481,33 +963,23 @@ defmodule Troupe.Config do
     Enum.map_join(Enum.sort(models), ",", fn {name, %{id: id}} -> if id == name, do: name, else: "#{name}->#{id}" end)
   end
 
-  defp mask(nil), do: "(none)"
-  defp mask(""), do: "(empty)"
-  defp mask(key) when byte_size(key) <= 8, do: "****"
-  defp mask(key), do: binary_part(key, 0, 4) <> "…" <> binary_part(key, byte_size(key) - 2, 2)
-
-  # -- loading ------------------------------------------------------------------
-
-  defp read_yaml(path) do
-    case File.read(path) do
-      {:ok, contents} ->
-        case YamlElixir.read_from_string(contents) do
-          {:ok, map} when is_map(map) -> interpolate(map)
-          _ -> %{}
-        end
-
-      {:error, _} ->
-        %{}
-    end
-  end
+  @doc "A secret as a person may see it: its first four and last two characters at most."
+  @spec mask(term()) :: String.t()
+  def mask(nil), do: "(none)"
+  def mask(""), do: "(empty)"
+  def mask(key) when is_binary(key) and byte_size(key) <= 8, do: "****"
+  def mask(key) when is_binary(key), do: binary_part(key, 0, 4) <> "…" <> binary_part(key, byte_size(key) - 2, 2)
+  def mask(_other), do: "****"
 
   @env_reference ~r/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/
 
   @doc """
-  Replace every `{env:VAR}` reference in a loaded config with its value.
+  Replace every `{env:VAR}` reference in a value with its value, an unset one with an
+  empty string.
 
-  Public so the substitution can be tested directly — it is the part that decides
-  whether a secret reaches a provider.
+  For showing a person what a file would hold and for trying a key out, never for
+  loading: `load/3` refuses what an unset variable feeds instead
+  (`Troupe.Config.Layers.interpolate/1`).
   """
   @spec interpolate(term()) :: term()
   def interpolate(value) when is_binary(value) do
@@ -521,214 +993,6 @@ defmodule Troupe.Config do
   def interpolate(list) when is_list(list), do: Enum.map(list, &interpolate/1)
   def interpolate(other), do: other
 
-  defp merge_map(config, map) when map_size(map) == 0, do: config
-
-  defp merge_map(config, map) do
-    Enum.reduce(map, config, fn {key, value}, acc -> put_string_key(acc, key, value) end)
-  end
-
-  defp merge_env(config) do
-    config
-    |> put_env("TROUPE_PROVIDER", :provider)
-    |> put_env("TROUPE_BASE_URL", :base_url)
-    |> put_env("TROUPE_API_KEY", :api_key)
-    |> put_env("TROUPE_SMALL_MODEL", :small_model)
-    |> put_env("TROUPE_EXPENSIVE_MODEL", :expensive_model)
-    |> put_env("TROUPE_FAKE_SCRIPT", :fake_script)
-    |> env_auth(System.get_env("TROUPE_AUTH"))
-    |> env_auth_token(System.get_env("TROUPE_AUTH_TOKEN"))
-    |> env_model(System.get_env("TROUPE_MODEL"))
-  end
-
-  defp env_auth(config, "bearer"), do: %{config | auth: :bearer}
-  defp env_auth(config, "api_key"), do: %{config | auth: :api_key}
-  defp env_auth(config, _other), do: config
-
-  defp env_auth_token(config, token) when is_binary(token) and token != "", do: %{config | api_key: token, auth: :bearer}
-  defp env_auth_token(config, _other), do: config
-
-  defp env_model(config, model) when is_binary(model) and model != "", do: %{config | model: model, models_explicit?: true}
-  defp env_model(config, _other), do: config
-
-  defp put_env(config, var, key) do
-    case System.get_env(var) do
-      nil -> config
-      "" -> config
-      value -> Map.put(config, key, value)
-    end
-  end
-
-  defp merge_keyword(config, overrides) do
-    Enum.reduce(overrides, config, fn
-      {_key, nil}, acc -> acc
-      {:model, value}, acc -> %{acc | model: value, models_explicit?: true}
-      {key, value}, acc -> if Map.has_key?(acc, key), do: Map.put(acc, key, value), else: acc
-    end)
-  end
-
-  # Without a key of its own, Troupe reuses opencode's providers, and — when nothing
-  # named a default model — opencode's own default, else the first provider with a key.
-  defp apply_opencode(%__MODULE__{} = config) do
-    if is_nil(config.api_key) and to_string(config.provider) in ["anthropic", "openai"] do
-      providers = Map.merge(OpenCode.providers(), config.providers)
-      config = %{config | providers: providers}
-
-      cond do
-        providers == %{} -> config
-        config.models_explicit? -> config
-        true -> default_model_from(config)
-      end
-    else
-      config
-    end
-  end
-
-  defp default_model_from(config) do
-    fallback =
-      config.providers
-      |> Enum.filter(fn {_name, p} -> present?(p.api_key) end)
-      |> Enum.map(&elem(&1, 0))
-      |> Enum.sort()
-      |> List.first()
-
-    default =
-      case OpenCode.default_model() do
-        nil when fallback != nil -> first_model(config.providers[fallback], fallback)
-        nil -> nil
-        model -> model
-      end
-
-    if default, do: %{config | model: default, small_model: config.small_model || default}, else: config
-  end
-
-  defp first_model(%{models: models}, name) when map_size(models) > 0,
-    do: name <> "/" <> (models |> Map.keys() |> Enum.sort() |> hd())
-
-  defp first_model(_provider, name), do: name <> "/"
-
-  # The cached catalog, unless the caller passed one: an explicit option wins over every
-  # file, here as everywhere else.
-  defp apply_catalog(%__MODULE__{catalog: catalog} = config) when map_size(catalog) > 0, do: config
-  defp apply_catalog(%__MODULE__{} = config), do: %{config | catalog: Store.load()}
-
-  # The block-shaped keys a laptop config carries, then everything flat.
-  defp put_string_key(config, "providers", value), do: %{config | providers: parse_providers(value)}
-  defp put_string_key(config, "mcp", value) when is_map(value), do: %{config | mcp: parse_mcp(value)}
-  defp put_string_key(config, "mcp", _value), do: %{config | mcp: %{}}
-
-  defp put_string_key(config, "models", value) when is_map(value) do
-    config
-    |> then(fn c -> if m = Map.get(value, "default"), do: %{c | model: to_string(m), models_explicit?: true}, else: c end)
-    |> then(fn c -> if m = Map.get(value, "cheap"), do: %{c | small_model: to_string(m)}, else: c end)
-    |> then(fn c -> if m = Map.get(value, "small"), do: %{c | small_model: to_string(m)}, else: c end)
-    |> then(fn c -> if m = Map.get(value, "expensive"), do: %{c | expensive_model: to_string(m)}, else: c end)
-    |> then(fn c ->
-      case Map.get(value, "windows") do
-        windows when is_map(windows) -> %{c | windows: parse_windows(windows)}
-        _ -> c
-      end
-    end)
-  end
-
-  defp put_string_key(config, "auth_token", token) when is_binary(token) and token != "",
-    do: %{config | api_key: token, auth: :bearer}
-
-  defp put_string_key(config, "auth", "bearer"), do: %{config | auth: :bearer}
-  defp put_string_key(config, "auth", "api_key"), do: %{config | auth: :api_key}
-  defp put_string_key(config, "auth", _other), do: config
-  defp put_string_key(config, "model", value), do: %{config | model: to_string(value), models_explicit?: true}
-  defp put_string_key(config, "windows", value) when is_map(value), do: %{config | windows: parse_windows(value)}
-
-  # Unknown YAML keys land in `:extra` rather than being dropped: a provider-specific
-  # setting should be reachable from a config file without a code change here.
-  defp put_string_key(config, key, value) when is_binary(key) do
-    if known?(config, safe_atom(key)) do
-      atom = safe_atom(key)
-      Map.put(config, atom, coerce(atom, value))
-    else
-      %{config | extra: Map.put(config.extra, key, value)}
-    end
-  end
-
-  defp put_string_key(config, _key, _value), do: config
-
-  # `:extra` is a real field but not one a config file may set directly; a key that is
-  # not a known field at all lands there instead. Written as an explicit boolean
-  # because `nil && ...` on the left of `and` raises rather than being falsy — which
-  # is what made an unrecognised config key crash the whole load.
-  defp known?(_config, nil), do: false
-  defp known?(config, atom),
-    do: Map.has_key?(config, atom) and atom not in [:extra, :providers, :catalog, :models_explicit?, :mcp]
-
-  # A server is a map; anything else under `mcp:` is ignored rather than fatal, since a
-  # typo in one server's entry should not take the whole config down.
-  defp parse_mcp(map) do
-    map
-    |> Enum.filter(fn {_name, entry} -> is_map(entry) end)
-    |> Map.new(fn {name, entry} ->
-      {to_string(name),
-       %{
-         command: string_or_nil(entry["command"]),
-         args: entry["args"] |> List.wrap() |> Enum.map(&to_string/1),
-         env: (entry["env"] || %{}) |> Enum.map(fn {k, v} -> {to_string(k), to_string(v)} end) |> Map.new(),
-         cd: string_or_nil(entry["cd"]),
-         url: string_or_nil(entry["url"]),
-         permission: if(entry["permission"] == "auto", do: :auto, else: :ask),
-         timeout_ms: if(is_integer(entry["timeout_ms"]) and entry["timeout_ms"] > 0, do: entry["timeout_ms"], else: 30_000)
-       }}
-    end)
-  end
-
-  defp string_or_nil(value) when is_binary(value) and value != "", do: value
-  defp string_or_nil(_value), do: nil
-
-  defp safe_atom(key) do
-    String.to_existing_atom(key)
-  rescue
-    ArgumentError -> nil
-  end
-
-  defp coerce(:read_roots, value) when is_list(value),
-    do: value |> Enum.filter(&is_binary/1) |> Enum.map(&Path.expand/1)
-
-  defp coerce(:read_roots, _value), do: []
-  defp coerce(:compact_at, value) when is_integer(value), do: value / 1
-  defp coerce(:budget_warn_at, value) when is_integer(value), do: value / 1
-  defp coerce(:approvals, "deny"), do: :deny
-  defp coerce(:approvals, _value), do: :wait
-  defp coerce(_key, value), do: value
-
-  defp parse_windows(map) do
-    map
-    |> Enum.filter(fn {_id, ctx} -> is_integer(ctx) and ctx > 0 end)
-    |> Map.new(fn {id, ctx} -> {to_string(id), ctx} end)
-  end
-
-  defp parse_providers(map) when is_map(map) do
-    Map.new(map, fn {name, p} ->
-      p = if is_map(p), do: p, else: %{}
-      token = Map.get(p, "auth_token")
-
-      {to_string(name),
-       %{
-         type: if(Map.get(p, "type") == "anthropic", do: :anthropic, else: :openai),
-         base_url: Map.get(p, "base_url"),
-         api_key: token || Map.get(p, "api_key"),
-         auth: parse_auth(token, Map.get(p, "auth")),
-         models: parse_models(Map.get(p, "models")),
-         source: :yaml
-       }}
-    end)
-  end
-
-  defp parse_providers(_other), do: %{}
-
-  # An `auth_token` says bearer by itself: writing the token down is the whole
-  # declaration, exactly as it is in opencode's config.
-  defp parse_auth(token, _auth) when is_binary(token) and token != "", do: :bearer
-  defp parse_auth(_token, "bearer"), do: :bearer
-  defp parse_auth(_token, _auth), do: :api_key
-
   @doc """
   One provider's `models:` block as model specs. Public because
   `Troupe.Config.OpenCode` maps opencode's own shape onto the same specs.
@@ -741,7 +1005,7 @@ defmodule Troupe.Config do
 
       {name,
        %{
-         id: to_string(Map.get(m, "id") || name),
+         id: to_string(string(Map.get(m, "id")) || name),
          context: positive(Map.get(m, "context")),
          max_output: positive(Map.get(m, "max_output")),
          reasoning_effort: effort(Map.get(m, "reasoning_effort"))

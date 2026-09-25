@@ -85,3 +85,7 @@ temporary directory once per run and passes `state_dir` through config, because
   ([e2e.md](../../clients/gui/docs/e2e.md)).
 - `scripts/verify-local.ps1` checks an install made by `scripts/install-local.ps1` on this
   Windows machine.
+- `scripts/live-check task|delegate|loop`: one headless run against a real model, and
+  what it has to show; the nightly runs all three against the gateway
+  ([CI.md](../../.github/CI.md#the-live-check)). With `TROUPE_PROVIDER=fake` and a
+  `TROUPE_FAKE_SCRIPT` it runs offline, which is how a change to it is tried first.

@@ -8,6 +8,7 @@ defmodule Troupe.RemoteTranslateTest do
   use ExUnit.Case, async: true
 
   alias Troupe.Remote.Translate
+  alias Troupe.UI.TUI.Model
 
   @moduletag :remote
 
@@ -166,10 +167,26 @@ defmodule Troupe.RemoteTranslateTest do
              translate(durable("llm_request", %{"model" => "m"}))
 
     assert [
-             %{type: :agent_state, data: %{to: :done}},
+             %{type: :agent_state, data: %{to: :done, reason: "finished"}},
              %{type: :remote_note, data: %{text: "done: all green"}}
            ] =
              translate(durable("agent_done", %{"reason" => "finished", "summary" => "all green"}))
+
+    # The end of a turn, from the log: the same `idle` the live `agent_state` says, with the
+    # durable event's `seq`, which is how a reader tells the two apart.
+    assert [%{type: :agent_state, data: %{to: :idle} = idle, seq: 7}] =
+             translate(durable("turn_ended", %{}))
+
+    refute Map.has_key?(idle, :reason)
+
+    # One the harness stopped says why (troupe-remote Decision 687).
+    assert [%{type: :agent_state, data: %{to: :idle, reason: "tool_failures"}}] =
+             translate(durable("turn_ended", %{"reason" => "tool_failures"}))
+
+    assert [
+             %{type: :cancelled},
+             %{type: :agent_state, data: %{to: :idle, reason: "cancelled"}}
+           ] = translate(durable("cancelled", %{}))
 
     assert [%{type: :remote_note}, %{type: :remote_status, data: %{state: :active}}] =
              translate(durable("session_activated", %{"epoch" => 2, "pod" => "troupe-w-dev-0"}))
@@ -340,6 +357,62 @@ defmodule Troupe.RemoteTranslateTest do
 
     [calls] = translate(durable("truncated", %{"reason" => "max_tokens", "calls" => 2}))
     assert calls.data.text =~ "2 tool call(s) answered with an error"
+  end
+
+  # The failure guard's question (troupe-remote Decision 687) is drawn as the question it
+  # rides on, and its own two events are known: an unknown type is a note in the window
+  # and a log line in headless output. Its answer ends it even where no answer is written,
+  # which is what a session with nobody to ask does.
+  test "the failure guard asks through its question, and its answer ends it" do
+    detail = "read_file has failed 10 times in a row"
+
+    wire = [
+      durable("tool_failures_ask_started", %{
+        "call_id" => "failures-1",
+        "tool" => "read_file",
+        "failures" => 10,
+        "detail" => detail
+      }),
+      durable("question_asked", %{
+        "call_id" => "failures-1",
+        "agent_path" => ["root"],
+        "question" => detail <> " — stop this turn?",
+        "options" => [%{"label" => "stop"}, %{"label" => "continue"}],
+        "multiple" => false
+      })
+    ]
+
+    {asked, memory} =
+      Enum.flat_map_reduce(wire, Translate.remember(Translate.memory(), "root"), fn event, acc ->
+        Translate.durable("s-1", event, acc)
+      end)
+
+    assert [%{type: :question_asked, data: %{call_id: "failures-1", options: options}}] = asked
+    assert Enum.map(options, & &1.label) == ["stop", "continue"]
+
+    {answered, memory} =
+      Translate.durable(
+        "s-1",
+        durable("tool_failures_ask_answered", %{"call_id" => "failures-1", "decision" => "stop"}),
+        memory
+      )
+
+    assert [%{type: :tool_failures_ask_answered, data: %{call_id: "failures-1"}}] = answered
+    assert memory.unknown == MapSet.new()
+
+    spawned = %Troupe.Event{
+      session_id: "s-1",
+      agent_path: "root",
+      type: :branch_spawned,
+      data: %{name: "build", isolation: :remote},
+      ts: 1
+    }
+
+    [window] = "s-1" |> Model.rebuild("/w", [spawned | asked]) |> Model.windows()
+    assert [%{kind: :question, call_id: "failures-1"}] = window.pending
+
+    [window] = "s-1" |> Model.rebuild("/w", [spawned | asked] ++ answered) |> Model.windows()
+    assert window.pending == []
   end
 
   test "a budget warning names its dimension and carries the sentence" do

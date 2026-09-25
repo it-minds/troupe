@@ -25,7 +25,9 @@ defmodule Troupe.Session.Questions do
           multiple: boolean()
         }
 
-  defstruct [:session_id, mode: :wait, pending: %{}, answered: %{}]
+  # `asked` is what the log says was asked and never answered, read back at start-up: the
+  # questions a session that slept mid-question asks again when it comes back.
+  defstruct [:session_id, mode: :wait, pending: %{}, answered: %{}, asked: %{}]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -77,8 +79,15 @@ defmodule Troupe.Session.Questions do
     :exit, _reason -> state
   end
 
+  defp fold(%{type: "question_asked", data: %{"call_id" => id} = data} = event, state),
+    do: %{state | asked: Map.put(state.asked, id, data["agent_path"] || event.agent)}
+
   defp fold(%{type: "question_answered", data: %{"call_id" => id, "text" => text}}, state),
-    do: %{state | answered: Map.put(state.answered, id, text)}
+    do: %{state | answered: Map.put(state.answered, id, text), asked: Map.delete(state.asked, id)}
+
+  # A call closed off some other way — timed out, interrupted — is waiting for nobody.
+  defp fold(%{type: "tool_call_completed", data: %{"call_id" => id}}, state),
+    do: %{state | asked: Map.delete(state.asked, id)}
 
   defp fold(_event, state), do: state
 
@@ -113,34 +122,55 @@ defmodule Troupe.Session.Questions do
   def handle_cast({:answer, call_id, text, actor}, state) do
     case Map.pop(state.pending, call_id) do
       {nil, _} ->
-        # A second answer, or one to a question this session never asked: nothing to
-        # do, and not an error — two people watching one session is the normal case.
-        {:noreply, state}
+        {:noreply, not_pending(state, call_id, text, actor)}
 
       {entry, pending} ->
         Process.demonitor(entry.monitor, [:flush])
         GenServer.reply(entry.from, {:ok, text})
-
-        Log.append(
-          state.session_id,
-          entry.question.agent_path,
-          :question_answered,
-          %{"call_id" => call_id, "text" => text},
-          actor
-        )
-
-        {:noreply, %{state | pending: pending, answered: Map.put(state.answered, call_id, text)}}
+        state = %{state | pending: pending}
+        {:noreply, record(state, call_id, entry.question.agent_path, text, actor)}
     end
+  end
+
+  # Asked before this tree started, and not yet asked again. Answering a dormant session's
+  # question is what wakes it, so the answer can arrive before the call it answers has gone
+  # back out; it is kept, and handed over when that call asks.
+  #
+  # Anything else is a second answer, or one to a question this session never asked:
+  # nothing to do, and not an error — two people watching one session is the normal case.
+  defp not_pending(state, call_id, text, actor) do
+    case Map.fetch(state.asked, call_id) do
+      {:ok, agent_path} -> record(state, call_id, agent_path, text, actor)
+      :error -> state
+    end
+  end
+
+  defp record(state, call_id, agent_path, text, actor) do
+    Log.append(
+      state.session_id,
+      agent_path,
+      :question_answered,
+      %{"call_id" => call_id, "text" => text},
+      actor
+    )
+
+    %{
+      state
+      | answered: Map.put(state.answered, call_id, text),
+        asked: Map.delete(state.asked, call_id)
+    }
   end
 
   @impl GenServer
   def handle_info({:DOWN, monitor, :process, _pid, _reason}, state) do
-    pending =
-      state.pending
-      |> Enum.reject(fn {_id, entry} -> entry.monitor == monitor end)
-      |> Map.new()
+    {gone, pending} =
+      Enum.split_with(state.pending, fn {_id, entry} -> entry.monitor == monitor end)
 
-    {:noreply, %{state | pending: pending}}
+    # The call that was asking has been closed off, so nothing is waiting for this answer
+    # any more, including a call from before the tree started.
+    asked = Map.drop(state.asked, Enum.map(gone, &elem(&1, 0)))
+
+    {:noreply, %{state | pending: Map.new(pending), asked: asked}}
   end
 
   def handle_info(_message, state), do: {:noreply, state}

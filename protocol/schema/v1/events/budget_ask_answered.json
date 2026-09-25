@@ -11,6 +11,9 @@
     },
     "grant": {
       "type": "object"
+    },
+    "lifted": {
+      "type": "string"
     }
   },
   "required": [

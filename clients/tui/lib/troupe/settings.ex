@@ -11,12 +11,13 @@ defmodule Troupe.Settings do
   takes live, through the protocol (`Troupe.Client.put_setting/3`), and everything else
   is for the next session.
 
-  `mouse` is the TUI's own and rides in the config's `extra` map, because the daemon has
-  no opinion about terminals.
+  Each setting's key is its name in `Troupe.Config.Schema`, and it is written under that
+  name only (`models.default`, never the old `model`), through the same writer the
+  daemon's model settings use. `mouse` is the TUI's own; the daemon reads it and does
+  nothing with it.
   """
 
   alias Troupe.Config
-  alias Troupe.Paths
 
   @type type :: :bool | :int | :float | :string | :model
   @type effect :: :now | :next_run
@@ -25,7 +26,7 @@ defmodule Troupe.Settings do
           key: String.t(),
           label: String.t(),
           type: type(),
-          path: atom() | {:extra, String.t()},
+          path: atom(),
           yaml: [String.t()],
           effect: effect(),
           help: String.t()
@@ -49,7 +50,7 @@ defmodule Troupe.Settings do
       key: "mouse",
       label: "mouse",
       type: :bool,
-      path: {:extra, "mouse"},
+      path: :mouse,
       yaml: ["mouse"],
       effect: :next_run,
       help: """
@@ -71,11 +72,11 @@ defmodule Troupe.Settings do
       """
     },
     %{
-      key: "model",
+      key: "models.default",
       label: "model",
       type: :model,
       path: :model,
-      yaml: ["model"],
+      yaml: ["models", "default"],
       effect: :next_run,
       help: """
       The model every agent uses unless its definition names one. A bare id goes
@@ -84,11 +85,11 @@ defmodule Troupe.Settings do
       """
     },
     %{
-      key: "small_model",
+      key: "models.cheap",
       label: "cheap model",
       type: :model,
       path: :small_model,
-      yaml: ["small_model"],
+      yaml: ["models", "cheap"],
       effect: :next_run,
       help: """
       The model for the small jobs — compaction summaries among them. Unset means
@@ -96,11 +97,11 @@ defmodule Troupe.Settings do
       """
     },
     %{
-      key: "expensive_model",
+      key: "models.expensive",
       label: "expensive model",
       type: :model,
       path: :expensive_model,
-      yaml: ["expensive_model"],
+      yaml: ["models", "expensive"],
       effect: :next_run,
       help: """
       The model for agents whose definition asks for the "expensive" alias. Unset
@@ -200,8 +201,8 @@ defmodule Troupe.Settings do
       yaml: ["memory_auto_refresh"],
       effect: :next_run,
       help: """
-      Start the librarian when a new session finds the brief missing or stale.
-      Off means only `/memory refresh` writes it.
+      Start the librarian when a new session in a git repository finds the brief missing
+      or stale; never for a headless run. Off means only `/memory refresh` writes it.
       """
     }
   ]
@@ -221,14 +222,8 @@ defmodule Troupe.Settings do
   @spec get(Config.t(), String.t()) :: term()
   def get(%Config{} = cfg, key) do
     {:ok, field} = fetch(key)
-    read(cfg, field.path)
+    Map.fetch!(cfg, field.path)
   end
-
-  defp read(cfg, {:extra, key}), do: Map.get(cfg.extra, key, default(key))
-  defp read(cfg, field) when is_atom(field), do: Map.fetch!(cfg, field)
-
-  defp default("mouse"), do: true
-  defp default(_key), do: nil
 
   @doc "Whether the TUI should capture the mouse, as the config says."
   @spec mouse?(Config.t()) :: boolean()
@@ -278,7 +273,7 @@ defmodule Troupe.Settings do
 
   # "default" takes an override off: the cheap and expensive models fall back to the
   # default model when they are unset.
-  def parse(%{type: :model, key: key}, text) when key in ["small_model", "expensive_model"] do
+  def parse(%{type: :model, key: key}, text) when key in ["models.cheap", "models.expensive"] do
     case String.trim(text) do
       t when t in ["", "default", "-"] -> {:ok, nil}
       value -> {:ok, value}
@@ -344,7 +339,6 @@ defmodule Troupe.Settings do
     {:ok, field} = fetch(key)
 
     case field.path do
-      {:extra, k} -> %Config{cfg | extra: Map.put(cfg.extra, k, value)}
       :model -> %Config{cfg | model: value, models_explicit?: true}
       k when is_atom(k) -> Map.put(cfg, k, value)
     end
@@ -353,7 +347,13 @@ defmodule Troupe.Settings do
   @doc """
   Writes a setting to the config file that owns it and returns that path: the
   project's `.troupe/config.yaml` when the project already has one (it would
-  otherwise override the global value), else the global `config.yaml`.
+  otherwise override the global value), else the global `config.yaml` — except that a
+  setting a project's file may set only in a trusted workspace goes to the global file
+  when this one is not trusted, since the project's would be ignored.
+
+  Written by its new name only, with any old spelling of it removed, through the writer
+  every config file goes through (`Troupe.Config.Migrate.write/2`): the file keeps
+  everything else, and the file before the save is kept as `.previous`.
   """
   @spec persist(String.t(), String.t(), term()) :: {:ok, String.t()} | {:error, String.t()}
   def persist(workspace, key, value) do
@@ -362,25 +362,34 @@ defmodule Troupe.Settings do
         {:error, "unknown setting #{key}"}
 
       {:ok, field} ->
-        path = target_path(workspace)
+        path = target_path(workspace, key)
 
         with {:ok, existing} <- read_yaml(path),
-             merged = put_in_yaml(existing, field.yaml, value),
-             :ok <- File.mkdir_p(Path.dirname(path)),
-             :ok <- File.write(path, encode_yaml(merged)) do
+             merged =
+               existing |> Config.drop_spellings(field.yaml) |> put_in_yaml(field.yaml, value),
+             :ok <- Config.write_file(path, merged) do
           {:ok, path}
-        else
-          {:error, reason} when is_binary(reason) -> {:error, reason}
-          {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
         end
     end
   end
 
-  @doc "The config file the settings page writes to."
-  @spec target_path(String.t()) :: String.t()
-  def target_path(workspace) do
-    project = Path.join([workspace, ".troupe", "config.yaml"])
-    if File.exists?(project), do: project, else: Path.join(Paths.config_dir(), "config.yaml")
+  @doc "The config file the settings page writes a setting to."
+  @spec target_path(String.t(), String.t() | nil) :: String.t()
+  def target_path(workspace, key \\ nil) do
+    project = Config.project_path(workspace)
+
+    cond do
+      not File.exists?(project) -> Config.user_path()
+      gated?(key) and not Config.trusted?(workspace) -> Config.user_path()
+      true -> project
+    end
+  end
+
+  defp gated?(nil), do: false
+
+  defp gated?(key) do
+    {:ok, field} = fetch(key)
+    Config.gated?(field.yaml)
   end
 
   defp read_yaml(path) do
@@ -403,31 +412,6 @@ defmodule Troupe.Settings do
     nested = if is_map(Map.get(map, key)), do: Map.get(map, key), else: %{}
     Map.put(map, key, put_in_yaml(nested, rest, value))
   end
-
-  @doc false
-  @spec encode_yaml(map()) :: String.t()
-  def encode_yaml(map), do: encode_map(map, "")
-
-  defp encode_map(map, indent) do
-    map
-    |> Enum.sort_by(fn {k, v} -> {is_map(v), to_string(k)} end)
-    |> Enum.map_join(fn
-      {k, v} when is_map(v) and map_size(v) > 0 ->
-        "#{indent}#{k}:\n" <> encode_map(v, indent <> "  ")
-
-      {k, v} when is_map(v) ->
-        "#{indent}#{k}: {}\n"
-
-      {k, v} ->
-        "#{indent}#{k}: #{scalar(v)}\n"
-    end)
-  end
-
-  defp scalar(v) when is_binary(v), do: inspect(v)
-  defp scalar(v) when is_boolean(v) or is_number(v), do: to_string(v)
-  defp scalar(v) when is_atom(v), do: inspect(to_string(v))
-  defp scalar(v) when is_list(v), do: "[" <> Enum.map_join(v, ", ", &scalar/1) <> "]"
-  defp scalar(v), do: inspect(to_string(v))
 
   @doc """
   The curated help shown beside the settings, as `{heading, lines}` sections.
