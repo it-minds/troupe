@@ -62,7 +62,8 @@ defmodule Troupe.TestHelpers do
   the gate); `:profile`; `:prompt`; `:config` (extra YAML keys as a map).
 
   Steps are the old spellings: `{:text, t}`, `{:tool, name, input}`, `{:tools, [{n, i}]}`,
-  `{:finish, summary}`, `{:error, reason}`, plus `{:text_and_tools, t, calls}`.
+  `{:finish, summary}`, `{:error, reason}`, plus `{:text_and_tools, t, calls}`, or a map
+  written into the script as it is (`%{"stop" => "refusal", "text" => t}`).
   """
   def start_session!(opts \\ []) do
     ws = Keyword.get_lazy(opts, :workspace, fn -> tmp_workspace() end)
@@ -166,6 +167,8 @@ defmodule Troupe.TestHelpers do
     do: %{"tools" => [%{"name" => "finish", "input" => %{"summary" => summary}}]}
 
   defp json_step({:error, reason}), do: %{"error" => to_string(reason)}
+  # The JSON the daemon reads, as it is: for what the tuples do not spell, such as `stop`.
+  defp json_step(%{} = step), do: step
 
   @doc "Waits for the window `path` to reach `state`: `:done`, `:thinking`, `:idle`, `:acting`."
   def await_state(path, state, timeout \\ 5_000) do

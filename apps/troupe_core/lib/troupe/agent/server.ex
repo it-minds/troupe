@@ -236,7 +236,8 @@ defmodule Troupe.Agent.Server do
       _ ->
         state = Enum.reduce(events, state, &fold_event/2)
         incomplete = incomplete_calls(events)
-        action = resume_action(state, incomplete, awaiting_approval(events), cold_start?)
+        awaiting = awaiting_approval(events)
+        action = resume_action(state, incomplete, awaiting, cold_start?, cancelled?(events))
 
         log(state, :agent_restarted, %{
           "replayed_events" => length(events),
@@ -360,9 +361,15 @@ defmodule Troupe.Agent.Server do
   # `resume_on_restart: true` opts back into the old behaviour: incomplete tool calls
   # are re-run (at-least-once, documented in ARCHITECTURE.md) and a turn the model owes
   # is taken.
-  defp resume_action(state, incomplete, awaiting, cold_start?) do
+  #
+  # A turn that was cancelled is owed nothing, whichever kind of start this is: the
+  # cancel closed its calls, and a conversation ending on the person's message or on the
+  # results the cancel wrote only looks like a turn the model still owes. A log from
+  # before cancels closed their calls still has them open, and goes the old way.
+  defp resume_action(state, incomplete, awaiting, cold_start?, cancelled?) do
     cond do
       state.done_reason != nil -> :none
+      cancelled? and incomplete == [] -> :none
       not cold_start? or state.config.resume_on_restart -> carry_on(state, incomplete)
       true -> interrupt(state, incomplete, awaiting)
     end
@@ -412,6 +419,17 @@ defmodule Troupe.Agent.Server do
     for %Event{type: "tool_call_started", data: data} <- events,
         not MapSet.member?(completed, data["call_id"]),
         do: {data["call_id"], data["name"], data["args"]}
+  end
+
+  # Whether the last thing that happened to a turn was a cancel: no input, model call or
+  # tool call since.
+  defp cancelled?(events) do
+    last =
+      events
+      |> Enum.filter(&(&1.type in ~w(user_input llm_request tool_call_started cancelled)))
+      |> List.last()
+
+    match?(%Event{type: "cancelled"}, last)
   end
 
   defp needs_turn?(%State{conversation: []}), do: false
@@ -1344,8 +1362,13 @@ defmodule Troupe.Agent.Server do
 
   defp to_idle_or_done(state), do: rest(state)
 
+  # The end of a turn is written down as well as announced. `agent_state` is ephemeral and
+  # may be dropped, and a client that attached after the turn ended — `troupe run
+  # --headless`, whose session starts working before anything has subscribed — still has
+  # to be able to tell that the agent is waiting for input (issue #127).
   defp rest(state) do
     state = %{state | turn_mode: nil}
+    log(state, :turn_ended, %{})
     publish_state(state, :idle)
     {:next_state, :idle, state}
   end
@@ -1915,8 +1938,14 @@ defmodule Troupe.Agent.Server do
     end)
   end
 
-  defp emptyable(""), do: nil
-  defp emptyable(text), do: text
+  # Whitespace is not a report: some models open a turn with a bare "\n\n" before its
+  # tool calls, and handed over as findings it tells the parent nothing.
+  defp emptyable(text) do
+    case String.trim(text) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
 
   defp report_and_finish(state, summary) do
     if state.parent do
@@ -2050,34 +2079,38 @@ defmodule Troupe.Agent.Server do
     terminate_children(state)
     state = kill_budget_ask(state)
 
+    state = close_cancelled_calls(state)
     log(state, :cancelled, %{})
 
     state =
       state
       |> clear_llm()
-      |> State.clear_calls()
       |> Map.put(:turn_mode, nil)
-
-    # A cancel mid-turn can leave the conversation ending on a tool_use with no
-    # results. Providers reject that, so it is trimmed back to a clean boundary.
-    state = %{state | conversation: trim_dangling_tool_uses(state.conversation)}
 
     publish_state(state, :idle)
     {:next_state, :idle, state}
   end
 
-  defp trim_dangling_tool_uses(conversation) do
-    case List.last(conversation) do
-      %Message{role: :assistant} = message ->
-        if Message.tool_uses(message) == [] do
-          conversation
-        else
-          Enum.drop(conversation, -1)
-        end
+  # The calls a cancel stopped are closed off in the log, as a restart closes interrupted
+  # ones. A `tool_call_started` with nothing after it is work a restarted agent still owes:
+  # it would dispatch the call again, asking once more for an approval nobody is going to
+  # give, or running again what somebody just stopped. The results go into the
+  # conversation too, because the model needs a `tool_result` for every `tool_use` it
+  # emitted, and the conversation a restart rebuilds from the log has to be this one.
+  defp close_cancelled_calls(%State{pending: pending} = state) when map_size(pending) == 0,
+    do: state
 
-      _ ->
-        conversation
-    end
+  defp close_cancelled_calls(state) do
+    state =
+      Enum.reduce(State.outstanding(state), state, fn call, acc ->
+        complete_call(
+          acc,
+          call,
+          Result.error(call.id, call.name, "cancelled: the turn was cancelled before this finished")
+        )
+      end)
+
+    fold_results(state, State.ordered_results(state))
   end
 
   defp kill_llm(%State{llm_ref: nil}), do: :ok

@@ -42,11 +42,6 @@ defmodule Troupe.E2E.EgressTest do
     Plane.ready!()
   end
 
-  # Skipped, visibly and for one release: on a cluster that does enforce policy this still
-  # fails, because the policies the operator renders admit more than the allowlist, and
-  # the fix is the next release's (0.3.2). It comes back the moment that lands; a skip
-  # that outlives it is the quiet pass this module was written to prevent.
-  @tag skip: "known failure until the worker egress policy is narrowed (0.3.2)"
   test "a worker cannot dial a host no policy admits", context do
     pod = pod(context.profile)
     namespace = World.worker_namespace(context.profile)
@@ -93,6 +88,29 @@ defmodule Troupe.E2E.EgressTest do
            "a worker cannot reach object storage"
   end
 
+  test "a worker can reach the model endpoint its profile names", context do
+    # The FQDN rules' own half. Nothing else admits a host outside the cluster, and they
+    # admit only addresses Cilium has watched the pod look up — so a policy whose DNS
+    # rule sent no lookup through Cilium's proxy would pass both tests above and leave
+    # every worker unable to reach its model.
+    endpoint = model_endpoint(context.profile)
+    pod = pod(context.profile)
+    namespace = World.worker_namespace(context.profile)
+
+    if reachable_from_here?(endpoint) do
+      assert connects?(namespace, pod, endpoint),
+             "a worker cannot reach #{elem(endpoint, 0)}:#{elem(endpoint, 1)}, which its profile names"
+    else
+      # A positive claim this machine cannot test, said out loud: a pod failing to reach a
+      # host nothing here can reach would say nothing about the policy.
+      IO.puts(:stderr, """
+
+      SKIPPED: #{elem(endpoint, 0)}:#{elem(endpoint, 1)} is not reachable from this machine
+      either, so whether a worker reaches it through its FQDN rule was not tested.
+      """)
+    end
+  end
+
   # -- the witness ------------------------------------------------------------
 
   # Attempted from inside the pod, with what the image already has. The exit status is
@@ -115,5 +133,34 @@ defmodule Troupe.E2E.EgressTest do
 
   defp pod(profile) do
     World.pod(World.worker_namespace(profile), "app.kubernetes.io/name=troupe-worker")
+  end
+
+  # From the profile as the cluster holds it, not from what `remote-up` was told: the
+  # endpoint is an environment variable there, and the operator renders what it reads.
+  defp model_endpoint(profile) do
+    url =
+      World.kubectl!([
+        "get",
+        "workerprofile",
+        profile,
+        "-n",
+        World.namespace(),
+        "-o",
+        "jsonpath={.spec.llm.endpoint}"
+      ])
+
+    %URI{host: host, port: port} = URI.parse(url)
+    {host, port}
+  end
+
+  defp reachable_from_here?({host, port}) do
+    case :gen_tcp.connect(String.to_charlist(host), port, [active: false], 5_000) do
+      {:ok, socket} ->
+        :gen_tcp.close(socket)
+        true
+
+      {:error, _reason} ->
+        false
+    end
   end
 end

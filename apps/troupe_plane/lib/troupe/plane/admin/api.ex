@@ -119,7 +119,7 @@ defmodule Troupe.Plane.Admin.API do
       type: :string,
       values: Team.budget_periods(),
       description:
-        "What the ceiling is measured over: monthly, or never for one that does not turn over."
+        "What the ceiling is measured over: monthly, which turns over on the 1st of the month (UTC), or never for one that does not turn over."
     },
     %Argument{
       name: "idle_timeout_seconds",

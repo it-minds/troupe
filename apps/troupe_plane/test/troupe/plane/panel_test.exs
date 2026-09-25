@@ -1316,6 +1316,39 @@ You build."}
       refute html =~ "the period turns over"
     end
 
+    test "a monthly ceiling says when it turns over, and is not reported once it has",
+         context do
+      # The sentence promised a new period long before anything delivered one (#106). It is
+      # true now, so it says when: the 1st, in UTC, wherever the person reading it is.
+      on_exit(fn -> Application.delete_env(:troupe_plane, :budget_clock) end)
+      at = fn now -> Application.put_env(:troupe_plane, :budget_clock, fn -> now end) end
+
+      {:ok, _} =
+        Ledger.record(%{
+          session_id: "spent-it-all",
+          team_id: context.engineering.id,
+          owner_subject: context.lead.subject,
+          model: "fake-model",
+          cost_micros: 1_000_000,
+          gateway_request_id: "spent-it-all-1",
+          occurred_at: ~U[2026-09-12 09:00:00.000000Z]
+        })
+
+      Ledger.Cache.invalidate(context.engineering.id)
+      conn = sign_in(context.conn, context.root.subject)
+
+      at.(~U[2026-09-30 23:59:59.000000Z])
+      {:ok, _view, html} = live(conn, "/admin")
+
+      assert html =~
+               "engineering is at its monthly ceiling. New sessions are refused until it is raised or the period turns over, on the 1st of the month (UTC)."
+
+      at.(~U[2026-10-01 00:00:00.000000Z])
+      {:ok, _view, html} = live(conn, "/admin")
+
+      refute html =~ "engineering is at its monthly ceiling"
+    end
+
     test "names which ceiling refuses first, and says it in words", context do
       actor = Admin.actor_for_subject(context.root.subject)
 

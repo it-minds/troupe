@@ -202,6 +202,19 @@ troupe --remote [PLANE_URL]             # HQ: teams, profiles and sessions on a 
 troupe --version
 ```
 
+`troupe run --headless` prints the transcript, one line per event prefixed with the agent
+that wrote it, and exits when the agent comes to rest: when its turn ends, whether or not
+the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
+`--auto-approve` for a task that writes files or runs commands. The exit code says how the
+run ended, for scripts and CI:
+
+| code | the run |
+|---|---|
+| `0` | ended its turn, or the agent finished |
+| `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; or the session could not start. The last line says which |
+| `2` | never started: the command line did not parse |
+| `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
+
 Inside the TUI, everything starts with `/`:
 
 | command | effect |

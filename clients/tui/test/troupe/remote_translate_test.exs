@@ -166,10 +166,20 @@ defmodule Troupe.RemoteTranslateTest do
              translate(durable("llm_request", %{"model" => "m"}))
 
     assert [
-             %{type: :agent_state, data: %{to: :done}},
+             %{type: :agent_state, data: %{to: :done, reason: "finished"}},
              %{type: :remote_note, data: %{text: "done: all green"}}
            ] =
              translate(durable("agent_done", %{"reason" => "finished", "summary" => "all green"}))
+
+    # The end of a turn, from the log: the same `idle` the live `agent_state` says, with the
+    # durable event's `seq`, which is how a reader tells the two apart.
+    assert [%{type: :agent_state, data: %{to: :idle}, seq: 7}] =
+             translate(durable("turn_ended", %{}))
+
+    assert [
+             %{type: :remote_note, data: %{text: "cancelled"}},
+             %{type: :agent_state, data: %{to: :idle, reason: "cancelled"}}
+           ] = translate(durable("cancelled", %{}))
 
     assert [%{type: :remote_note}, %{type: :remote_status, data: %{state: :active}}] =
              translate(durable("session_activated", %{"epoch" => 2, "pod" => "troupe-w-dev-0"}))

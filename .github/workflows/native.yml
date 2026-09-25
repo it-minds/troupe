@@ -284,6 +284,13 @@ jobs:
             TROUPE_FAKE_SCRIPT="$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/smoke.json" \
             "$BIN" run build "smoke" --headless --auto-approve
           test -f hello.txt && cat hello.txt
+          # A model that ends its turn in prose and never calls `finish` ends the run too,
+          # with 0 (issue #127): a real one usually does exactly that.
+          REST="$RUNNER_TEMP/no-finish"; mkdir -p "$REST/.troupe" && cd "$REST"
+          TROUPE_PROVIDER=fake TROUPE_MODEL=fake-model \
+            TROUPE_FAKE_SCRIPT="$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/no_finish.json" \
+            "$BIN" run build "no finish" --headless --auto-approve
+          test -f hello.txt
 
       - uses: actions/upload-artifact@v4
         with:
@@ -327,6 +334,13 @@ jobs:
               cat out.log
               [ "$status" = 0 ] || { echo "the run exited $status (124 is the timeout)"; exit 1; }
               if grep -q polling out.log; then echo "watch fell back to polling"; fi
+              test -f hello.txt
+              mkdir -p /rest/.troupe && cd /rest
+              status=0
+              TROUPE_FAKE_SCRIPT=/fixtures/fake_scripts/no_finish.json \
+                timeout 300 $BIN run build "no finish" --headless --auto-approve > out.log 2>&1 || status=$?
+              cat out.log
+              [ "$status" = 0 ] || { echo "the run with no finish exited $status (124 is the timeout)"; exit 1; }
               test -f hello.txt'
             echo "::endgroup::"
           done

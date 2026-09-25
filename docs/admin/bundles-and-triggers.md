@@ -139,6 +139,10 @@ review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
   request id. A reservation is granted when spend plus reservations stays within the
   budget, written before it is granted, and released when the session goes dormant. Zero
   is unlimited.
+- **The period.** A `monthly` team counts what it spent since midnight UTC on the 1st of
+  the month, and a team refused at its ceiling can start sessions again from then; `never`
+  counts everything. A person's cap and the platform's have no period: they count
+  everything, in every team.
 - One budget actor per team, registered cluster-wide, which is why plane replicas must be
   clustered.
 - Costs come from the gateway's `x-litellm-response-cost` header; without one, tokens are

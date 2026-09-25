@@ -66,6 +66,29 @@ defmodule Troupe.Tools.ReadBranchTest do
     assert {:ok, "no branches"} = ReadBranch.run(%{}, ctx(stranger, context))
   end
 
+  # An agent told only "no branch 7" guesses the next id, one model call at a time. The
+  # usual mistake is taking the subagents it delegated to for branches.
+  test "a wrong id is answered with the ids that exist and where a subagent's findings are",
+       context do
+    %{session: alone} = start_session(context, steps: [])
+
+    assert {:error, message} = ReadBranch.run(%{"session_id" => "7"}, ctx(alone, context))
+    assert message =~ ~s(no branch "7")
+    assert message =~ "no branches"
+    assert message =~ "result of the delegate call"
+
+    %{session: parent} = start_session(context, steps: [])
+    %{session: branch} = start_session(context, parent: parent.id, steps: [])
+
+    assert {:error, message} = ReadBranch.run(%{"session_id" => "7"}, ctx(parent, context))
+    assert message =~ ~s(no branch "7")
+    assert message =~ branch.id
+    refute message =~ "no branches"
+    assert message =~ "result of the delegate call"
+
+    assert ReadBranch.description() =~ "delegate"
+  end
+
   defp ctx(session, context) do
     %Ctx{
       session_id: session.id,

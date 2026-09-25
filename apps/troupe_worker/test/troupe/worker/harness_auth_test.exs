@@ -276,6 +276,33 @@ defmodule Troupe.Worker.HarnessAuthTest do
       assert {:ok, %{"servers" => _}} = Client.call(client, "mcp.status", %{"session_id" => mine})
     end
 
+    # The plane holds a pod session's row, key and retention, so these are asked of the
+    # plane; its erasure reaches the pod over the control channel (`erasure_test.exs`).
+    test "a session's token is refused archiving, pinning and erasing it, and none runs",
+         context do
+      jwt = token(context, role: "owner", session_id: context.session_id)
+      mine = context.session_id
+
+      answered =
+        for method <- ["session.pin", "session.unpin", "session.archive", "session.erase"],
+            params = %{"command_id" => "c-" <> method, "session_id" => mine},
+            answer = call_once(context, jwt, method, params),
+            not match?({:error, %{message: "forbidden", data: %{"method" => ^method}}}, answer),
+            do: {method, answer}
+
+      assert answered == []
+
+      # Still running here and unpinned, with its copy on the pod and its key in place.
+      assert Sessions.active_ids() == [mine]
+      assert File.exists?(context.workspace)
+      assert KMS.adapter().exists?(context.team, mine)
+
+      {:ok, client} = connect(context, jwt)
+
+      assert {:ok, %{"id" => ^mine, "state" => "active", "pinned" => false}} =
+               Client.call(client, "session.get", %{"session_id" => mine})
+    end
+
     test "a token with no session in it still has the pod's methods", context do
       {:ok, client} = connect(context, token(context, role: "owner"))
 
