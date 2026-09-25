@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+# The installers as a release attaches them: install.sh and install.ps1 from this checkout,
+# with the release's version written in, so the copy on a release page installs that
+# release -- a release candidate or a pre-release included, which /releases/latest never
+# names -- without TROUPE_VERSION. They are attached with the rest and so land in the
+# release's SHA256SUMS.
+#
+#   scripts/release-installers VERSION OUTDIR
+set -euo pipefail
+
+version=${1:?usage: scripts/release-installers VERSION OUTDIR}
+out=${2:?usage: scripts/release-installers VERSION OUTDIR}
+root=$(cd "$(dirname "$0")/.." && pwd)
+
+case "$version" in
+  *[!0-9A-Za-z.-]* | "") echo "error: $version is not a version" >&2; exit 1 ;;
+esac
+
+mkdir -p "$out"
+sed "s/^PINNED_VERSION=\"\"/PINNED_VERSION=\"${version}\"/" "$root/install.sh" > "$out/install.sh"
+sed "s/^\\\$PinnedVersion = \"\"/\$PinnedVersion = \"${version}\"/" "$root/install.ps1" > "$out/install.ps1"
+
+# A line that no longer matches would publish installers that install the latest release.
+grep -qx "PINNED_VERSION=\"${version}\"" "$out/install.sh" || { echo "error: could not pin install.sh to $version" >&2; exit 1; }
+grep -qxF "\$PinnedVersion = \"${version}\"" "$out/install.ps1" || { echo "error: could not pin install.ps1 to $version" >&2; exit 1; }
+echo "installers pinned to $version in $out"

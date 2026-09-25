@@ -69,7 +69,7 @@ flowchart LR
 
 - **No test suite.** The native jobs' own smoke tests still run (`--version`, a headless run in the embedded daemon), because a binary that cannot start is not a build.
 - The daemon, the TUI and the plane report the pre-release's version. The desktop installers keep VERSION's number: an MSI version must be numeric.
-- It is a GitHub *pre-release*, so `/releases/latest` and the installers' default never pick it up. Install one by name:
+- It is a GitHub *pre-release*, so `/releases/latest` and the installers' default never pick it up. The `install.sh` and `install.ps1` attached to it install it (`scripts/release-installers` pins them), and so does naming it:
   `TROUPE_VERSION=0.3.1-pre.12 sh install.sh` or `$env:TROUPE_VERSION = "0.3.1-pre.12"; .\install.ps1`.
 - Nothing is deployed. Its images can be deployed by hand like any others.
 - Only the newest five are kept (`keep`); older pre-releases and their tags are deleted. Release candidates (`-rc.N`) are releases and are never touched.

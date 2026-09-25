@@ -182,3 +182,13 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      arrives both ways is handled once, keyed by its path and `seq`. Proof: the CLI test
      that lets a session rest before starting the printer, which timed out before this and
      passes after.
+111. **`troupe config` with nothing to report sets the model up instead.** On a machine
+     with no `config.yaml`, and no provider in `TROUPE_*` variables, it asks in a
+     terminal how the machine should reach a model. With opencode set up, it offers to
+     copy it (`config.import`); otherwise the choices are a plane's settings, a provider
+     set up here, or not now. Without a terminal it prints those choices. A report of the
+     defaults would have said `anthropic`, `claude-sonnet-5` and no key, which is true
+     and useless. Every write goes through the daemon, as `config pull`'s does. The key
+     prompt reads without echo in `-noshell`'s raw mode where the terminal allows it,
+     and says so where it cannot. Proof: `test/troupe/config_setup_test.exs`, and
+     `scripts/dev config` driven through a pseudo-terminal.

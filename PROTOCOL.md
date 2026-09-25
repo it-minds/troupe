@@ -675,7 +675,7 @@ every other MCP tool.
 `.troupe/workflows/<name>.json` files in the workspace, each a JSON array of
 `{"name", "prompt", "agent"?, "parallel"?}` steps.
 
-#### `config.get`, `config.models`, `config.set`
+#### `config.get`, `config.models`, `config.set`, `config.import`
 
 The machine's own model settings — the provider, key and models every local session
 starts from — for a settings screen. **The daemon's only**: a worker answers
@@ -717,6 +717,18 @@ set to null is removed. Keys it does not own are kept, but the file is rewritten
 comments are not: the file before the save is kept as `config.yaml.previous`. A file
 that does not parse is never overwritten — the call fails with `invalid_params`. The
 next session reads the new file; nothing restarts.
+
+```json
+{"command_id": "c-13", "from": "opencode"}
+```
+`config.import` (`admin`) → the `config.get` answer after the write, plus `"imported":
+{"from", "providers", "kept", "default"}`. Copies opencode's providers into the file's
+`providers:` block (type, base URL, auth style, models, and the key as opencode has it
+written: an `{env:VAR}` stays a reference, a literal key is copied) so the machine stops
+depending on opencode's config. A provider the file already names is kept as it is and
+listed under `kept`; opencode's default model becomes `models.default` only when the file
+has none. `from` is `opencode`, the only source; with no opencode providers the call fails
+with `invalid_params`. Nothing is written when nothing would change.
 
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
@@ -832,7 +844,7 @@ result for every call it made.
 | --- | --- |
 | `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

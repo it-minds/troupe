@@ -5167,3 +5167,109 @@ Newest at the bottom. `../troupe/DECISIONS.md` covers stage 0 and still applies.
      same. Now an absent claim leaves memberships alone, a present and empty one still
      clears them, and the MCP resource metadata advertises the sign-in's scopes beside the
      MCP one, so the token carries what a login's does. Proof: `Troupe.Plane.LoginGroupsTest`.
+
+680. **The installers take the same flags as `scripts/install-local`, and install the desktop
+     app too.** `install.sh` and `install.ps1` installed `troupe` and `troupe-daemon`, with
+     `--no-tui` for the daemon alone (671), while `scripts/install-local` built the same
+     things from a checkout and asked for them by name: `--tui`, `--gui`. A person handed
+     both had two vocabularies, and no remote way to get the desktop app without
+     choosing among six installers on the releases page. Now the release installers speak
+     the local one's: the daemon always, `--tui` / `-Tui` and `--gui` / `-Gui` for the
+     clients (naming neither: 681; `--no-tui` still means the daemon alone). `--gui`
+     installs the release's AppImage on Linux x86_64 as
+     `~/.local/bin/troupe-desktop` with a menu entry, where `install-local --gui` puts its
+     build; `Troupe.app` from the `.dmg` in `~/Applications` on macOS; and the per-user NSIS
+     setup, run silently, on Windows. A daemon running from the directory being replaced
+     is stopped first, as `install-local` does, so an update reaches the next session
+     rather than the one after a reboot. `install.ps1` uses `return` where it used `exit`,
+     which closes a terminal the script was piped into. Proof: `install.sh` against
+     `v0.3.3-pre.1` in a scratch home on Linux x86_64: `--tui --gui` installed all three
+     with the AppImage's icon, a reinstall kept every `.previous` and stopped the running
+     daemon, a tampered TUI was refused with nothing replaced, no flags without a terminal
+     refused, `--no-tui` installed the daemon alone, and `--uninstall --purge` left no file.
+     The macOS branch and `install.ps1` are untested here: no Mac and no PowerShell.
+
+681. **An installer is downloaded, readable and pinned to its release, and it asks before
+     it acts.** A pipe from `curl` into `sh`, or from `irm` into `iex`, runs whatever
+     arrives. A cut-off download runs as far as it got, nobody reads the script first, and
+     `iex` leaves the script's variables and `$ErrorActionPreference` in the person's
+     session.
+     - **Attached and pinned.** Each release now attaches `install.sh` and `install.ps1`,
+       covered by its `SHA256SUMS`. `scripts/release-installers` writes the release's
+       version into both, so the copy on a release page installs that release, a release
+       candidate or a pre-release included, without `TROUPE_VERSION`.
+     - **Download, read, run.** The notes and READMEs say to download the script, read it
+       if you like, and run it. On Windows that is `powershell -ExecutionPolicy Bypass
+       -File`, because the default policy runs no script.
+     - **It asks.** In a terminal, with neither `--tui` nor `--gui`, the installer asks
+       about each client: yes by default on a fresh machine, otherwise yes for what is
+       already installed. It then prints a plan (downloads, processes to stop, what it
+       replaces, removes and adds to PATH) and asks before doing any of it. `-y` asks
+       nothing. Without a terminal nothing is asked, and naming neither client needs `-y`,
+       as before.
+     - **Next steps.** It ends with the model settings (682) and what to do next.
+     - **Clean install.** `--clean-install` (`-CleanInstall`) removes the current install
+       once the downloads check out, keeping config and state unless `--purge` is given.
+     - **The TUI's payload.** A running TUI is stopped with the daemon, and Burrito's payload
+       is cleared on every TUI install, as `install-local` does. Otherwise a release of the
+       version a local build carried would run the build.
+     - **Fixes found on the way.**
+       - The PATH line goes to the file the person's shell reads. A fresh Mac has no
+         `~/.zshrc`, and zsh never reads `~/.profile`.
+       - Windows waits for the desktop app's NSIS uninstaller by its registry entry,
+         because the uninstaller returns before it is done.
+       - Windows PowerShell's progress bar is off, because it made the downloads many
+         times slower.
+       - Burrito reads `TROUPE_INSTALL_DIR` as where to unpack the TUI, so the bin
+         directory's override is now `TROUPE_BIN_DIR`. `install.sh` still reads the old
+         name and unsets it.
+     - **Proof.** The installers pinned to `v0.3.3-pre.1`, on Linux x86_64 in a scratch
+       home and on Windows 11 in scratch directories:
+       - fresh, update and clean installs;
+       - a running daemon stopped, and `.previous` kept on update, gone after a clean
+         install;
+       - the questions answered through a pseudo-terminal (Linux) and stdin (Windows),
+         including "no" at "Go ahead?";
+       - refusals without a terminal or with a stray `--purge`;
+       - `--uninstall --purge` leaving no file, and the user PATH untouched with
+         `-NoModifyPath`;
+       - `troupe --version` passing, the old variable name included.
+     - **Not tested:** the macOS branch, and `-Gui` on Windows (the desktop app's setup
+       and uninstaller run per user, against the real machine).
+
+682. **A machine with no model settings is set up, not reported on, and opencode's can
+     be copied.** An install ended with a daemon and a client that could not reach a
+     model, and `troupe config` then reported the defaults: `anthropic`,
+     `claude-sonnet-5`, no key. Troupe already reads opencode's providers while it has
+     none of its own (`Troupe.Config.OpenCode`), but only for as long as opencode's file
+     says so, and nothing said that it was happening.
+     - **`config.import`** (`admin`, the daemon's only), with `from: "opencode"`, copies
+       opencode's providers into the `providers:` block of `config.yaml`: type, base URL,
+       auth style, models, and each key as opencode has it written. An `{env:VAR}` stays a
+       reference, and a literal key is copied, which the person asking for the copy
+       asked for. That is the one exception to `OpenCode`'s "never written anywhere".
+       Providers the file already names are kept, and opencode's default model is taken
+       only when the file has none. `troupe-daemon config import-opencode` is the same
+       write for the installers, which have a daemon but may have no client.
+       `ModelSettings.describe/1` now counts a keyed `providers:` entry as the file's key,
+       and reports the opencode fallback only for providers the file does not shadow.
+     - **`troupe config`** with no file and no `TROUPE_*` provider asks, in a terminal:
+       copy opencode's config if it is there. Otherwise it offers a plane's settings
+       (`login`, then `config pull`), a provider set up here (`config.models`, then
+       `config.set`), or not now. Without a terminal it prints those choices
+       (clients/tui Decision 111).
+     - **The installers** end with the same check. An existing `config.yaml` is named.
+       opencode's config is offered for the copy. Otherwise, with the TUI installed, the
+       installer hands over to `troupe config`, or names the ways on when it cannot. A
+       daemon from before `import-opencode` answers "unknown arguments", and the
+       installer says it could not copy and goes on.
+     - **Proof:**
+       - `Troupe.Config.ModelSettingsTest` "import_opencode/1": the copy loads back to
+         the same providers, and a reference stays one.
+       - `Troupe.Gateway.ModelSettingsTest`: `config.import` over the socket, and a
+         source other than opencode refused.
+       - `Troupe.ConfigSetupTest`.
+       - `scripts/dev config` and `install.sh`, the latter against a daemon built from
+         this branch, driven through a pseudo-terminal in a scratch home.
+       - `install.ps1`'s fallback against `v0.3.3-pre.1`.
+     - **Not tested:** the TUI's terminal detection and unechoed key prompt on Windows.

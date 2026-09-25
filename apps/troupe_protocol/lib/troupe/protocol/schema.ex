@@ -499,6 +499,11 @@ defmodule Troupe.Protocol.Schema do
         "api_key" => optional(:string),
         "models" => optional(:object),
         "workspace" => optional(:string)
+      },
+      "config.import" => %{
+        "command_id" => required(:string),
+        "from" => required(:string),
+        "workspace" => optional(:string)
       }
     }
   end

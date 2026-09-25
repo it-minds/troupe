@@ -13,7 +13,9 @@ defmodule Troupe.Gateway.ModelSettingsTest do
            TROUPE_AUTH_TOKEN TROUPE_PROVIDER TROUPE_MODEL)
 
   setup do
-    base = Path.join(System.tmp_dir!(), "troupe-gw-settings-#{System.unique_integer([:positive])}")
+    base =
+      Path.join(System.tmp_dir!(), "troupe-gw-settings-#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(Path.join(base, "config"))
     File.mkdir_p!(Path.join(base, "state"))
 
@@ -25,7 +27,10 @@ defmodule Troupe.Gateway.ModelSettingsTest do
     System.put_env("TROUPE_OPENCODE_AUTH", Path.join(base, "none.json"))
 
     on_exit(fn ->
-      Enum.each(previous, fn {k, v} -> if v, do: System.put_env(k, v), else: System.delete_env(k) end)
+      Enum.each(previous, fn {k, v} ->
+        if v, do: System.put_env(k, v), else: System.delete_env(k)
+      end)
+
       File.rm_rf!(base)
     end)
 
@@ -41,7 +46,8 @@ defmodule Troupe.Gateway.ModelSettingsTest do
       %{client: client}
     end
 
-    test "a settings screen reads, saves and reads back — and the key never comes back", context do
+    test "a settings screen reads, saves and reads back — and the key never comes back",
+         context do
       assert {:ok, %{"exists" => false, "api_key_set" => false, "path" => path}} =
                Client.call(context.client, "config.get", %{})
 
@@ -66,7 +72,10 @@ defmodule Troupe.Gateway.ModelSettingsTest do
 
     test "a bad setting is invalid_params with the reason", context do
       assert {:error, %Error{message: "invalid_params", data: data}} =
-               Client.call(context.client, "config.set", %{"command_id" => "c-2", "provider" => "gemini"})
+               Client.call(context.client, "config.set", %{
+                 "command_id" => "c-2",
+                 "provider" => "gemini"
+               })
 
       assert data["reason"] =~ "provider"
     end
@@ -74,6 +83,32 @@ defmodule Troupe.Gateway.ModelSettingsTest do
     test "discovery with no key says so rather than failing", context do
       assert {:ok, %{"models" => [], "failures" => [%{"reason" => "no API key"}]}} =
                Client.call(context.client, "config.models", %{"provider" => "anthropic"})
+    end
+
+    test "config.import copies opencode's providers, and names only opencode", context do
+      File.write!(System.get_env("TROUPE_OPENCODE_CONFIG"), """
+      {"model": "portal/qwen3-235b",
+       "provider": {"portal": {"options": {"baseURL": "https://portal.example/v1", "apiKey": "{env:PORTAL_KEY}"},
+                               "models": {"qwen3-235b": {}}}}}
+      """)
+
+      assert {:ok, %{"imported" => imported, "exists" => true}} =
+               Client.call(context.client, "config.import", %{
+                 "command_id" => "c-3",
+                 "from" => "opencode"
+               })
+
+      assert imported["providers"] == ["portal"]
+      assert imported["default"] == "portal/qwen3-235b"
+      assert File.read!(context.config_file) =~ "{env:PORTAL_KEY}"
+
+      assert {:error, %Error{message: "invalid_params", data: data}} =
+               Client.call(context.client, "config.import", %{
+                 "command_id" => "c-4",
+                 "from" => "cursor"
+               })
+
+      assert data["reason"] =~ "opencode"
     end
   end
 
