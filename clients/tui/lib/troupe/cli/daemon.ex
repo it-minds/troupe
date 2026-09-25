@@ -73,7 +73,7 @@ defmodule Troupe.CLI.Daemon do
     status
   rescue
     error in ErlangError ->
-      IO.puts(:stderr, "could not run #{path}: #{Exception.message(error)}")
+      IO.puts(:stderr, "could not run #{Troupe.Paths.display(path)}: #{Exception.message(error)}")
       1
   end
 

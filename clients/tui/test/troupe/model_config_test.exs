@@ -118,6 +118,53 @@ defmodule Troupe.ModelConfigTest do
                {:system, "LLM error: the gateway is down"}
     end
 
+    # A plane's worker asks the model with the plane's key, which `troupe config` on this
+    # machine cannot change: the step under the error is the plane's administrator.
+    test "from a plane's worker, says to ask the plane's administrator, not troupe config" do
+      wire = %{
+        "seq" => 6,
+        "ts" => "2026-09-21T18:53:11.170Z",
+        "agent" => ["root"],
+        "type" => "llm_error",
+        "v" => 1,
+        "data" => %{"reason" => "no API key is configured for the provider"}
+      }
+
+      translated = fn isolation ->
+        {[event], _memory} =
+          Translate.durable("s-1", wire, Translate.remember(Translate.memory(isolation), "root"))
+
+        event
+      end
+
+      plane = translated.(:remote)
+      refute Map.has_key?(translated.(:shared).data, :next_step)
+
+      model =
+        Model.rebuild("s-1", "/w", [
+          event(:branch_spawned, %{name: "build", isolation: :remote}),
+          plane
+        ])
+
+      [window] = Model.windows(model)
+
+      assert List.last(window.agents["root"].transcript) ==
+               {:system,
+                "the model's key is the plane's, not this machine's: ask the plane's administrator"}
+
+      refute Enum.any?(
+               window.agents["root"].transcript,
+               &match?({:system, "run `troupe config`" <> _}, &1)
+             )
+
+      rejected = put_in(wire, ["data", "reason"], "the provider rejected the credentials (401)")
+
+      {[event], _} =
+        Translate.durable("s-1", rejected, Translate.remember(Translate.memory(:remote), "root"))
+
+      assert event.data.next_step =~ "ask the plane's administrator"
+    end
+
     # A root agent ends a text-only turn with an ephemeral `agent_state: idle` and no
     # durable marker, and idle was folded in with "nothing heard from this agent yet" —
     # so a session the user was happily chatting with spun on "starting" forever.

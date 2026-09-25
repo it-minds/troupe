@@ -314,6 +314,16 @@ defmodule Troupe.Config do
   @doc "`troupe config trust --list`: `Troupe.Config.Trust.list/1`."
   defdelegate list_trusted(opts \\ []), to: Trust, as: :list
 
+  @doc """
+  `text` as `command` would put it: every quoted `troupe config` command it names is
+  `command`'s `config` command instead. What loading warns about is written once, naming
+  `troupe`, and `troupe-daemon` has the same `config` subcommands, so a report either
+  program prints names the one the person ran.
+  """
+  @spec as_run_by(String.t(), String.t()) :: String.t()
+  def as_run_by(text, "troupe"), do: text
+  def as_run_by(text, command), do: String.replace(text, "`troupe config", "`#{command} config")
+
   @doc "Write a config file the way every writer does: `Troupe.Config.Migrate.write/2`."
   defdelegate write_file(path, map), to: Migrate, as: :write
 
@@ -996,7 +1006,7 @@ defmodule Troupe.Config do
 
   defp describe_warnings(warnings, command) do
     "warnings (`#{command} config validate` lists them; `#{command} config migrate` fixes old spellings):\n" <>
-      Enum.map_join(warnings, "", &"  #{&1}\n")
+      Enum.map_join(warnings, "", &"  #{as_run_by(&1, command)}\n")
   end
 
   defp describe_providers(%__MODULE__{providers: providers}) when map_size(providers) == 0,
@@ -1027,10 +1037,11 @@ defmodule Troupe.Config do
     end
   end
 
+  # Plain commas, as `mask/1` has plain dots: this is printed to a console.
   defp describe_model(%{context: context, source: source, key?: key?} = model) do
     [context && "#{div(context, 1000)}k ctx", describe_price(model), to_string(source), if(key?, do: nil, else: "no key")]
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
-    |> Enum.join(" · ")
+    |> Enum.join(", ")
   end
 
   # Who said what a call costs, and a model nobody priced said out loud: its calls count
@@ -1053,12 +1064,16 @@ defmodule Troupe.Config do
     Enum.map_join(Enum.sort(models), ",", fn {name, %{id: id}} -> if id == name, do: name, else: "#{name}->#{id}" end)
   end
 
-  @doc "A secret as a person may see it: its first four and last two characters at most."
+  @doc """
+  A secret as a person may see it: its first four and last two characters at most, with
+  `...` between, in ASCII because it is printed to a console, and the Windows one shows
+  anything else as a stray character or two.
+  """
   @spec mask(term()) :: String.t()
   def mask(nil), do: "(none)"
   def mask(""), do: "(empty)"
   def mask(key) when is_binary(key) and byte_size(key) <= 8, do: "****"
-  def mask(key) when is_binary(key), do: binary_part(key, 0, 4) <> "…" <> binary_part(key, byte_size(key) - 2, 2)
+  def mask(key) when is_binary(key), do: binary_part(key, 0, 4) <> "..." <> binary_part(key, byte_size(key) - 2, 2)
   def mask(_other), do: "****"
 
   @env_reference ~r/\{env:([A-Za-z_][A-Za-z0-9_]*)\}/

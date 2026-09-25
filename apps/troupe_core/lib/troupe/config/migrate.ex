@@ -163,7 +163,7 @@ defmodule Troupe.Config.Migrate do
   def plan(path) do
     case Layers.parse(path) do
       :absent ->
-        {:error, "#{path} does not exist"}
+        {:error, "#{shown(path)} does not exist"}
 
       {:error, issue} ->
         {:error, Issue.format(issue)}
@@ -174,10 +174,12 @@ defmodule Troupe.Config.Migrate do
             {:ok, %{path: path, text: text, migrated: render(migrated, path), moves: moves, changed?: moves != []}}
 
           {:error, conflicts} ->
-            {:error, "#{path}: " <> Enum.join(conflicts, "; ")}
+            {:error, "#{shown(path)}: " <> Enum.join(conflicts, "; ")}
         end
     end
   end
+
+  defp shown(path), do: Troupe.Paths.display(path)
 
   @doc "A line diff of the file before and after, unchanged runs shortened."
   @spec diff(String.t(), String.t()) :: String.t()
@@ -213,7 +215,7 @@ defmodule Troupe.Config.Migrate do
   def write(path, map) do
     case canonical(map) do
       {:ok, migrated, _moves} -> write_text(path, render(migrated, path))
-      {:error, conflicts} -> {:error, "#{path}: " <> Enum.join(conflicts, "; ")}
+      {:error, conflicts} -> {:error, "#{shown(path)}: " <> Enum.join(conflicts, "; ")}
     end
   end
 
@@ -228,7 +230,7 @@ defmodule Troupe.Config.Migrate do
          :ok <- File.rename(tmp, path) do
       :ok
     else
-      {:error, reason} -> {:error, "could not write #{path}: #{:file.format_error(reason)}"}
+      {:error, reason} -> {:error, "could not write #{shown(path)}: #{:file.format_error(reason)}"}
     end
   end
 

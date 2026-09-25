@@ -21,7 +21,7 @@ defmodule Troupe.CLI.Remote do
          {:ok, request} <- start(discovery, say),
          {:ok, tokens} <- Auth.poll(discovery, request, opts),
          {:ok, path} <- Tokens.put_login(discovery.plane_url, discovery, tokens) do
-      say.("signed in; credentials saved to #{path}#{permissions(path)}")
+      say.("signed in; credentials saved to #{Troupe.Paths.display(path)}#{permissions(path)}")
       identity(discovery.plane_url, say)
     else
       {:error, reason} -> fail(say, reason)
@@ -48,7 +48,7 @@ defmodule Troupe.CLI.Remote do
       target ->
         case Tokens.logout(target) do
           {:ok, path} ->
-            say.("signed out of #{describe(target)}; #{path} updated")
+            say.("signed out of #{describe(target)}; #{Troupe.Paths.display(path)} updated")
             0
 
           {:error, reason} ->

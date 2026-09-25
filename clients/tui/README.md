@@ -223,9 +223,13 @@ a session a person opens, in a git repository, with a model to ask
 | code | the run |
 |---|---|
 | `0` | ended its turn, or the agent finished |
-| `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; or the session could not start. The last line says which |
+| `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; the session could not start; or the connection to the daemon went and did not come back within a minute. The last line says which |
 | `2` | never started: the command line did not parse |
 | `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
+
+The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` without
+`--headless`, with standard output sent to a file or a pipe, say so in one line and exit
+`1` rather than draw into it.
 
 Inside the TUI, everything starts with `/`:
 
@@ -264,8 +268,8 @@ sending; Tab switches the window's profile
 (`/plan` → Tab to `code` → "go" is plan-then-build); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
 dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
 transcript you are reading to the clipboard; `@file` completes paths;
-Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <n>` (the task's number in the side
-panel) and `/todo add <text>` edit the activated branch's task list.
+Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo complete <n>`, `/todo cancel <n>` (the task's
+number in the side panel) and `/todo add <text>` edit the activated branch's task list.
 
 `x` and `d` are double presses (`xx`, `dd`) because the window they act in is also where you type:
 the first press puts the letter in the input box and the box says what a second one would do, and

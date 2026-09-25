@@ -97,6 +97,24 @@ defmodule Troupe.Gateway.AutospawnTest do
     assert launches(context.counter) == 1
   end
 
+  # `start "C:\Program Files\...\troupe-daemon.cmd"` is a window titled with the path, and
+  # nothing started: on Windows the program goes after an empty title, quoted, and the
+  # line through `cmd /s /c`, which leaves the quotes where they are.
+  test "on Windows a program in a directory with a space starts after an empty title", context do
+    dir = Path.join(Path.dirname(context.script), "with space")
+    File.mkdir_p!(dir)
+    program = Path.join(dir, "troupe-daemon.cmd")
+    File.write!(program, "")
+
+    assert Daemon.detach_line(program, {:win32, :nt}) == {:shell, ~s("start "" /b "#{program}" >NUL 2>&1")}
+
+    assert Daemon.detach_line("troupe-daemon run", {:win32, :nt}) ==
+             {:shell, ~s("start "" /b troupe-daemon run >NUL 2>&1")}
+
+    assert {:exec, "/bin/sh", ["-c", "nohup troupe-daemon >/dev/null 2>&1 &"]} =
+             Daemon.detach_line("troupe-daemon", {:unix, :linux})
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp launches(counter) do

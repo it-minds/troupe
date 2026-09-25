@@ -118,6 +118,47 @@ defmodule Troupe.Daemon.CLITest do
     assert out =~ "protocol #{Troupe.Protocol.version()}"
   end
 
+  # The TUI's help says `troupe daemon status` is where to find the sessions.
+  test "status says where the sessions are kept, running or not", %{base: base} do
+    state = "  state      #{Troupe.Paths.display(Path.join(base, "state"))}\n"
+    assert capture_io(fn -> assert CLI.main(:status) == 1 end) =~ "not running\n" <> state
+
+    start_supervised!(
+      {Troupe.Gateway.Daemon, Keyword.put(CLI.run_opts(), :idle_shutdown_ms, :timer.hours(1))}
+    )
+
+    assert capture_io(fn -> assert CLI.main(:status) == 0 end) =~ state
+  end
+
+  # What loading warns about is written naming `troupe config`; printed by this program,
+  # it names this program's commands, which are the same ones. And the masked key is
+  # ASCII, which a Windows console shows as it is.
+  test "the config reports name troupe-daemon's commands, and mask a key in ASCII", %{base: base} do
+    no_key_environment(base)
+
+    File.write!(
+      Path.join([base, "config", "config.yaml"]),
+      "provider: anthropic\napi_key: sk-ant-abcdefghijklmnop\nauto_approve: yes\n"
+    )
+
+    reports = [
+      capture_io(fn -> assert CLI.main(:config) == 0 end),
+      capture_io(fn -> assert CLI.main({:config_explain, nil, false}) == 0 end),
+      capture_io(fn -> assert CLI.main({:config_validate, nil}) == 1 end),
+      capture_io(fn -> assert CLI.main({:config_migrate, nil, false}) == 0 end)
+    ]
+
+    for out <- reports do
+      assert out =~ "`troupe-daemon config migrate"
+      refute out =~ "`troupe config"
+    end
+
+    [described, explained | _] = reports
+    assert described =~ "key=sk-a...op"
+    assert explained =~ ~r/\napi_key\s+sk-a\.\.\.op\s+user\n/
+    assert Enum.all?(String.to_charlist(described <> explained), &(&1 < 128))
+  end
+
   test "status says not running when nothing is, and where when something is" do
     assert capture_io(fn -> assert CLI.main(:status) == 1 end) =~ "not running"
 

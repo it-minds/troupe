@@ -515,11 +515,12 @@ defmodule Troupe.Config.Layers do
 
   defp reason(:untrusted, pronoun, ctx) do
     "a project's file sets #{pronoun} only in a trusted workspace. To trust this one, run " <>
-      "`#{Trust.command(ctx.workspace)}`, which adds it to trusted_workspaces in #{ctx.user_path}"
+      "`#{Trust.command(ctx.workspace)}`, which adds it to trusted_workspaces in " <>
+      Troupe.Paths.display(ctx.user_path)
   end
 
   defp at(nil), do: ""
-  defp at(path), do: " (#{path})"
+  defp at(path), do: " (#{Troupe.Paths.display(path)})"
 
   # -- the environment ------------------------------------------------------------
 

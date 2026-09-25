@@ -19,6 +19,11 @@ defmodule Troupe.UI.Headless.Printer do
 
   `2` is the CLI's own, for a command line it cannot parse.
 
+  The session is the daemon's, and the connection to it can go: a daemon that is stopped
+  or crashes. The client reconnects on its own, and a daemon that comes back within a
+  minute (`:reconnect_ms`) costs a script nothing; one that does not is a run that ended
+  short, `1`, rather than a script waiting for ever on a rest that cannot come.
+
   A session starts working the moment it is created, and this process is started
   after that, so a quick run can have finished — and rested — before anything here
   subscribes. So what the session has already done is read back from its journal
@@ -31,6 +36,8 @@ defmodule Troupe.UI.Headless.Printer do
   alias Troupe.Client
   alias Troupe.Client.Message
   alias Troupe.UI.ModelError
+
+  @reconnect_ms 60_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -58,18 +65,47 @@ defmodule Troupe.UI.Headless.Printer do
       # What the exit code needs to know by the time the target rests.
       failed: false,
       refused: MapSet.new(),
-      rested: false
+      rested: false,
+      reconnect_ms: Keyword.get(opts, :reconnect_ms, @reconnect_ms),
+      # Set while the connection is down: the timer that ends the run if it stays down.
+      lost: nil
     }
 
     # Subscribed first, read back second: anything published in between is in both,
-    # and `seen` drops the second copy, where the other order would lose it.
-    {:ok, Enum.reduce(Client.events(sid), state, &handle_event/2)}
+    # and `seen` drops the second copy, where the other order would lose it. A connection
+    # already down by now said so before anything here listened.
+    state = Enum.reduce(Client.events(sid), state, &handle_event/2)
+    {:ok, connection(state, Client.capability(sid).up?)}
   end
 
   @impl true
   def handle_info({:troupe_event, event}, state), do: {:noreply, handle_event(event, state)}
 
+  def handle_info({:connection_lost, ref}, %{lost: ref} = state) do
+    why = "lost the connection to the daemon, and it did not come back within #{seconds(state)}"
+    {:noreply, rest(state, {1, why})}
+  end
+
   def handle_info(_msg, state), do: {:noreply, state}
+
+  # The client says when the session's connection goes down and comes back up; a timer
+  # runs while it is down.
+  defp connection(%{lost: nil} = state, false) do
+    ref = make_ref()
+    Process.send_after(self(), {:connection_lost, ref}, state.reconnect_ms)
+    %{state | lost: ref}
+  end
+
+  defp connection(state, true), do: %{state | lost: nil}
+  defp connection(state, _up?), do: state
+
+  # Said once an outage, when it starts, so that a script's log shows why it is quiet.
+  defp lost(%{lost: nil} = state, path, false),
+    do: say(state, path, "lost the connection to the daemon; waiting #{seconds(state)} for it")
+
+  defp lost(state, _path, _up?), do: state
+
+  defp seconds(state), do: "#{div(state.reconnect_ms, 1000)} s"
 
   defp handle_event(event, state) do
     case first_time(event, state) do
@@ -124,6 +160,13 @@ defmodule Troupe.UI.Headless.Printer do
       %{type: :approval_answered, data: %{call_id: id, decision: decision}}
       when decision != :deny ->
         %{state | refused: MapSet.delete(state.refused, id)}
+
+      # The session's connection, as the client sees it: down starts the clock on the run
+      # (see the moduledoc), up stops it. Before the first event names the agent, the
+      # client calls it `session`.
+      %{type: :remote_status, agent_path: path, data: %{up?: up?}}
+      when path == state.target or path == "session" ->
+        state |> lost(path, up?) |> connection(up?)
 
       _ ->
         state
@@ -195,7 +238,7 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :llm_error, agent_path: p, data: d}, state) do
     line(state, p, "model error: #{d.message}")
 
-    case ModelError.next_step(d.message) do
+    case ModelError.next_step(d) do
       nil -> state
       step -> say(state, p, step)
     end

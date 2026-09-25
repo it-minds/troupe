@@ -258,15 +258,37 @@ defmodule Troupe.Protocol.Daemon do
   # Detached on purpose: a daemon that dies with the shell that happened to start it
   # is not a daemon. Output goes nowhere — it logs to its own state directory.
   defp detach(command) do
-    {shell, args} =
-      case :os.type() do
-        {:win32, _} -> {"cmd.exe", ["/c", "start", "/b", command]}
-        _ -> {"/bin/sh", ["-c", "nohup " <> command <> " >/dev/null 2>&1 &"]}
+    result =
+      case detach_line(command, :os.type()) do
+        {:shell, line} -> System.shell(line, stderr_to_stdout: true)
+        {:exec, shell, args} -> System.cmd(shell, args, stderr_to_stdout: true)
       end
 
-    case System.cmd(shell, args, stderr_to_stdout: true) do
+    case result do
       {_output, 0} -> :ok
       {output, status} -> {:error, {:spawn_failed, status, String.trim(output)}}
     end
   end
+
+  @doc """
+  How `command` is started detached on `os_type`: through `nohup` in a Unix shell, or
+  `start /b` in `cmd.exe`.
+
+  `start` reads its first quoted argument as the title of a window, so it is given an
+  empty one: without it, a program found on the `PATH` in a directory with a space in its
+  name — quoted, as it has to be — was the title, and nothing started. The line goes
+  through `System.shell/2`, which is `cmd /s /c` there and takes the outer pair of
+  quotes off, leaving the rest as written, as the TUI's `troupe daemon` does. A `command`
+  that is a program's path is quoted here; anything else is a command line and goes as
+  it is.
+  """
+  @spec detach_line(String.t(), {atom(), atom()}) ::
+          {:shell, String.t()} | {:exec, String.t(), [String.t()]}
+  def detach_line(command, {:win32, _}) do
+    program = if File.regular?(command), do: ~s("#{command}"), else: command
+    {:shell, ~s("start "" /b #{program} >NUL 2>&1")}
+  end
+
+  def detach_line(command, _os_type),
+    do: {:exec, "/bin/sh", ["-c", "nohup " <> command <> " >/dev/null 2>&1 &"]}
 end

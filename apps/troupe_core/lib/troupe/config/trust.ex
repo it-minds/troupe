@@ -111,20 +111,25 @@ defmodule Troupe.Config.Trust do
   `troupe config trust [PATH]`: add the workspace to the user file's
   `trusted_workspaces`, as `root/1` names it, unless an entry there trusts it already.
 
-  Options: `:user_path` — the user file, when it is not `Troupe.Config.user_path/0`.
+  Options: `:user_path` — the user file, when it is not `Troupe.Config.user_path/0`;
+  `:command` — the program printing the answer, `"troupe"` unless it says
+  `"troupe-daemon"`, whose `config` commands the answer then names.
   """
   @spec trust(Path.t(), keyword()) :: {String.t(), non_neg_integer()}
   def trust(path, opts \\ []) do
     user_path = user_path(opts)
     path = Path.expand(path)
 
-    with :ok <- directory(path),
-         {:ok, text, entries} <- read_user(user_path),
-         {:ok, said} <- add(path, user_path, text, covering(path, entries)) do
-      {said, 0}
-    else
-      {:error, message} -> {message <> "\n", 1}
-    end
+    answer =
+      with :ok <- directory(path),
+           {:ok, text, entries} <- read_user(user_path),
+           {:ok, said} <- add(path, user_path, text, covering(path, entries)) do
+        {said, 0}
+      else
+        {:error, message} -> {message <> "\n", 1}
+      end
+
+    as_run_by(answer, opts)
   end
 
   defp add(path, user_path, _text, [entry | _]),
@@ -152,21 +157,24 @@ defmodule Troupe.Config.Trust do
   checkout a worktree belongs to. An entry naming a directory above it trusts other
   workspaces too, so it stays, and the answer names it and says it still trusts this one.
 
-  Options: `:user_path`, as for `trust/2`.
+  Options: `:user_path` and `:command`, as for `trust/2`.
   """
   @spec untrust(Path.t(), keyword()) :: {String.t(), non_neg_integer()}
   def untrust(path, opts \\ []) do
     user_path = user_path(opts)
     path = Path.expand(path)
 
-    with {:ok, text, entries} <- read_user(user_path),
-         names = path |> candidates() |> Enum.map(&Workspace.compare_key/1),
-         {removed, kept} = Enum.split_with(entries, &(absolute?(&1) and key(&1) in names)),
-         {:ok, said, code} <- remove(path, user_path, text, removed, covering(path, kept)) do
-      {said, code}
-    else
-      {:error, message} -> {message <> "\n", 1}
-    end
+    answer =
+      with {:ok, text, entries} <- read_user(user_path),
+           names = path |> candidates() |> Enum.map(&Workspace.compare_key/1),
+           {removed, kept} = Enum.split_with(entries, &(absolute?(&1) and key(&1) in names)),
+           {:ok, said, code} <- remove(path, user_path, text, removed, covering(path, kept)) do
+        {said, code}
+      else
+        {:error, message} -> {message <> "\n", 1}
+      end
+
+    as_run_by(answer, opts)
   end
 
   defp remove(path, user_path, _text, [], []) do
@@ -213,6 +221,9 @@ defmodule Troupe.Config.Trust do
   defp relative(entry), do: if(absolute?(entry), do: "", else: "  (not an absolute path, and trusts nothing)")
 
   defp user_path(opts), do: Keyword.get_lazy(opts, :user_path, &Troupe.Config.user_path/0)
+
+  defp as_run_by({text, code}, opts),
+    do: {Troupe.Config.as_run_by(text, Keyword.get(opts, :command, "troupe")), code}
 
   defp directory(path) do
     if File.dir?(path), do: :ok, else: {:error, "#{show(path)} is not a directory; name the workspace to trust"}

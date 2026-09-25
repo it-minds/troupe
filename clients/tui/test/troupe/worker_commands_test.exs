@@ -121,6 +121,34 @@ defmodule Troupe.WorkerCommandsTest do
       await_done()
     end
 
+    # `todo.edit` has always taken `complete`; the window had no way to send it.
+    test "/todo complete takes the number too, and ticks the task off" do
+      {sid, _, _} = start_session!(script: [{:text, "noted"}, {:text, "noted"}, {:text, "noted"}])
+      {pid, session} = start_tui(sid)
+      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      press(pid, "1")
+
+      for task <- ["write the tests", "ship it"] do
+        type(pid, "/todo add " <> task)
+        press(pid, "enter")
+        await_event("root", :todo_updated)
+        await_done()
+      end
+
+      eventually(fn -> screen_text(pid, session) =~ "1. [ ] write the tests" end)
+
+      type(pid, "/todo complete 1")
+      press(pid, "enter")
+
+      completed = await_event("root", :todo_updated)
+
+      assert [%{text: "write the tests", status: :completed}, %{text: "ship it", status: :pending}] =
+               completed.data.items
+
+      eventually(fn -> screen_text(pid, session) =~ "1. [x] write the tests" end)
+      await_done()
+    end
+
     test "/upload puts a file from this machine into the session's workspace" do
       {sid, _, ws} = start_session!(script: [])
       eventually(fn -> Client.capability(sid).up? end)
