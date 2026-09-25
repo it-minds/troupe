@@ -35,16 +35,27 @@ defmodule Troupe.Events do
   So the registration is per process and per session rather than per subscription. Which
   subscriptions want an event is `Troupe.Gateway.Session.interested?/3`'s question, and it
   is the only place that should be asking it.
+
+  `:internal` is for the session's own followers — its summary projection, its loop — which
+  are there whenever the session is and so say nothing about whether anybody is watching
+  it. Everyone else is a viewer, which is what `watched?/1` counts.
   """
-  @spec subscribe(String.t()) :: :ok
-  def subscribe(session_id) do
+  @spec subscribe(String.t(), :viewer | :internal) :: :ok
+  def subscribe(session_id, role \\ :viewer) do
     if following?(session_id) do
       :ok
     else
-      {:ok, _registered} = Registry.register(@registry, session_id, nil)
+      {:ok, _registered} = Registry.register(@registry, session_id, role)
       :ok
     end
   end
+
+  @doc """
+  Whether anybody outside the session follows it: a client's connection, a worker's
+  uplink, a test. A session nobody watches can sleep sooner (`Troupe.Sessions.Index`).
+  """
+  @spec watched?(String.t()) :: boolean()
+  def watched?(session_id), do: Registry.match(@registry, session_id, :viewer) != []
 
   @doc "Whether the calling process already follows this session."
   @spec following?(String.t()) :: boolean()
