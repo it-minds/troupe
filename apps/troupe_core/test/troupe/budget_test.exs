@@ -44,7 +44,9 @@ defmodule Troupe.BudgetTest do
         |> Enum.reverse()
 
       assert stopped_by == rest, "each of the others still stops the agent, in the usual order"
-      assert Budget.check(Budget.lift(lifted, unquote(limit))) == {:exhausted, hd(rest)}, "lifting twice is once"
+
+      assert Budget.check(Budget.lift(lifted, unquote(limit))) == {:exhausted, hd(rest)},
+             "lifting twice is once"
     end
   end
 
@@ -81,7 +83,9 @@ defmodule Troupe.BudgetTest do
     end
 
     test "carries a lifted limit, sized from the parent's first allowance rather than its nothing left" do
-      parent = %Budget{max_input_tokens: 1_000, input_tokens: 5_000} |> Budget.lift(:max_input_tokens)
+      parent =
+        %Budget{max_input_tokens: 1_000, input_tokens: 5_000} |> Budget.lift(:max_input_tokens)
+
       slice = Budget.slice(parent, 0.4)
 
       assert slice.lifted == [:max_input_tokens]

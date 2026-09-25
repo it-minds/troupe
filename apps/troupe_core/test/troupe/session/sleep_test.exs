@@ -130,6 +130,58 @@ defmodule Troupe.Session.SleepTest do
       await_event(sid, :llm_response)
       assert Fake.call_count(fake) == 2
     end
+
+    # Decision 687: the failure guard's question waits where the budget's does, so it sleeps
+    # and comes back the same way.
+    test "sleeps on the failure guard's question, and is asked it again when it wakes", context do
+      failing = List.duplicate({:tools, [{"read_file", %{"path" => "missing.txt"}}]}, 6)
+      guard = [tool_failures_note_at: 0, tool_failures_stop_at: 3]
+
+      %{session: session, fake: fake} =
+        start_session(context, steps: failing, config_overrides: guard)
+
+      sid = session.id
+      follow(sid)
+      Troupe.send_input(sid, "read it")
+      assert %{data: %{"call_id" => "failures-1"}} = await_event(sid, :question_asked)
+      assert %{state: :waiting} = Troupe.snapshot(sid)
+
+      index = sweep(context, session, @short)
+      asleep(sid)
+      assert %{state: :dormant, status: :waiting} = GenServer.call(index, {:get, sid})
+
+      {:ok, woken} = wake(context, session, fake, guard)
+
+      # The same question under the same id, and no model call until it is answered.
+      assert %{data: %{"call_id" => "failures-1", "question" => question}} =
+               await_event(sid, :question_asked)
+
+      assert question =~ "read_file has failed 3 times in a row"
+      assert Fake.call_count(fake) == 3
+
+      Troupe.answer(sid, "failures-1", "stop")
+
+      assert %{data: %{"call_id" => "failures-1", "decision" => "stop"}} =
+               await_event(sid, :tool_failures_ask_answered)
+
+      assert %{data: %{"reason" => "tool_failures"}} = await_event(sid, :turn_ended)
+      assert Fake.call_count(fake) == 3
+
+      # Stopped, it sleeps again as a session at rest, and waking it takes nothing up: the
+      # turn the guard stopped is not one the model is owed.
+      index = sweep(context, woken, @short)
+      asleep(sid)
+      assert %{state: :dormant, status: :idle} = GenServer.call(index, {:get, sid})
+      wake(context, session, fake, guard)
+      assert %{data: %{"interrupted" => false}} = await_event(sid, :agent_restarted)
+
+      # Long enough for a turn it wrongly took up to have asked the model, or the question.
+      Process.sleep(300)
+      assert length(events_of_type(sid, :llm_request)) == 3
+      assert length(events_of_type(sid, :question_asked)) == 2
+
+      assert Fake.call_count(fake) == 3
+    end
   end
 
   describe "a session somebody is watching" do

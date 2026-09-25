@@ -1320,8 +1320,12 @@ citation keeps meaning what it meant.
      - **Proof:**
        - `Troupe.Agent.ToolFailuresTest`: the note at 5 and the question at 10, `stop`,
          `continue`, a success clearing the count, `full_send`, `always` on the budget
-         question, an unattended session, the config's thresholds, a subagent, and a
-         question re-asked after a restart.
+         question, an unattended session, the config's thresholds, a subagent, a
+         question re-asked after a restart, a stopped turn a restart leaves alone, and
+         no approval left open in the summary after a stop.
+       - `Troupe.Session.SleepTest`: a session asleep on the guard's question is listed
+         as waiting and asks it again on wake (#119's sleep); once stopped, it wakes
+         with nothing to take up.
        - `Troupe.Agent.BudgetQuestionTest`: `always` on input tokens leaves turns asking;
          on turns, input tokens and time; an old `always` folds to its question's limit.
        - `Troupe.BudgetTest`: each limit lifted leaves the other three.

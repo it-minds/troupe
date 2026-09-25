@@ -405,9 +405,10 @@ defmodule Troupe.Agent.Server do
   defp carry_on(state, []), do: if(needs_turn?(state), do: :turn, else: :none)
   defp carry_on(_state, incomplete), do: {:rerun, incomplete}
 
-  # A spent budget whose question is still waiting on a person is asked again rather than
-  # dropped: the turn goes only as far as the gate, which asks under the same id and makes
-  # no model call while the budget is spent (Decision 660). A cancelled one is not waiting.
+  # A question at the gate still waiting on a person — a spent budget's (Decision 660), or
+  # the failure guard's (Decision 687), which waits in the same place — is asked again
+  # rather than dropped: the turn goes only as far as the gate, which asks under the same
+  # id and makes no model call until it is answered. A cancelled one is not waiting.
   defp interrupt(state, [], awaiting) do
     cond do
       MapSet.member?(awaiting, state.budget_ask_pending) -> :turn

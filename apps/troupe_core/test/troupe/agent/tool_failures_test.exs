@@ -10,6 +10,7 @@ defmodule Troupe.Agent.ToolFailuresTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Protocol.Schema
+  alias Troupe.Session.Summary
 
   defp failing(n), do: List.duplicate({:tools, [{"read_file", %{"path" => "missing.txt"}}]}, n)
   defp reading(n), do: List.duplicate({:tools, [{"read_file", %{"path" => "here.txt"}}]}, n)
@@ -17,7 +18,10 @@ defmodule Troupe.Agent.ToolFailuresTest do
 
   defp run(context, steps, overrides \\ []) do
     write_file(context, "here.txt", "here\n")
-    %{session: session, fake: fake} = start_session(context, steps: steps, config_overrides: overrides)
+
+    %{session: session, fake: fake} =
+      start_session(context, steps: steps, config_overrides: overrides)
+
     sid = session.id
     :ok = Troupe.subscribe(sid)
     Troupe.send_input(sid, "read the file")
@@ -25,22 +29,35 @@ defmodule Troupe.Agent.ToolFailuresTest do
   end
 
   defp await_question(sid, call_id) do
-    assert_receive {:troupe_event, ^sid, %Event{type: "question_asked", data: %{"call_id" => ^call_id} = asked}},
+    assert_receive {:troupe_event, ^sid,
+                    %Event{type: "question_asked", data: %{"call_id" => ^call_id} = asked}},
                    10_000
 
     asked
   end
 
   defp await_turn_ended(sid) do
-    assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended", agent: ["root"], data: data}}, 10_000
+    assert_receive {:troupe_event, ^sid, %Event{type: "turn_ended", agent: ["root"], data: data}},
+                   10_000
+
     data
   end
 
   defp notes(sid) do
-    for %Event{data: %{"source" => "harness", "text" => text}} <- events_of_type(sid, :user_input), do: text
+    for %Event{data: %{"source" => "harness", "text" => text}} <- events_of_type(sid, :user_input),
+        do: text
   end
 
   defp label(option), do: option["label"] || option[:label]
+
+  # The projection is a subscriber like any other, so it is waited for, not assumed.
+  defp await_summary(sid, predicate, tries \\ 100) do
+    cond do
+      predicate.(Summary.snapshot(sid)) -> :ok
+      tries == 0 -> flunk("the summary never matched: #{inspect(Summary.snapshot(sid))}")
+      true -> Process.sleep(50) && await_summary(sid, predicate, tries - 1)
+    end
+  end
 
   defp assert_schema(sid) do
     for event <- Troupe.events(sid) do
@@ -49,7 +66,8 @@ defmodule Troupe.Agent.ToolFailuresTest do
     end
   end
 
-  test "the same failing call gets a note at five and a question at ten; stop ends the turn", context do
+  test "the same failing call gets a note at five and a question at ten; stop ends the turn",
+       context do
     {sid, fake} = run(context, failing(12))
 
     asked = await_question(sid, "failures-1")
@@ -80,7 +98,8 @@ defmodule Troupe.Agent.ToolFailuresTest do
     await_question(sid, "failures-1")
     Troupe.answer(sid, "failures-1", "continue")
 
-    assert_receive {:troupe_event, ^sid, %Event{type: "agent_done", agent: ["root"], data: %{"reason" => "finished"}}},
+    assert_receive {:troupe_event, ^sid,
+                    %Event{type: "agent_done", agent: ["root"], data: %{"reason" => "finished"}}},
                    10_000
 
     assert Fake.call_count(fake) == 13
@@ -126,7 +145,11 @@ defmodule Troupe.Agent.ToolFailuresTest do
   end
 
   test "the thresholds are the config's, and 0 turns a step off", context do
-    {sid, fake} = run(context, failing(4) ++ [{:text, "no luck"}], tool_failures_note_at: 0, tool_failures_stop_at: 3)
+    {sid, fake} =
+      run(context, failing(4) ++ [{:text, "no luck"}],
+        tool_failures_note_at: 0,
+        tool_failures_stop_at: 3
+      )
 
     await_question(sid, "failures-1")
     assert Fake.call_count(fake) == 3
@@ -142,7 +165,10 @@ defmodule Troupe.Agent.ToolFailuresTest do
             {:text, "root done"}
           ],
           "general" =>
-            [{:text_and_tools, "Looking in the usual place.", [{"read_file", %{"path" => "missing.txt"}}]}] ++
+            [
+              {:text_and_tools, "Looking in the usual place.",
+               [{"read_file", %{"path" => "missing.txt"}}]}
+            ] ++
               failing(12)
         }
       )
@@ -155,13 +181,58 @@ defmodule Troupe.Agent.ToolFailuresTest do
     assert [done] = Enum.filter(events_of_type(sid, :agent_done), &(&1.agent != ["root"]))
     assert done.data["reason"] == "tool_failures"
 
-    result = sid |> events_of_type(:tool_call_completed) |> Enum.find(&(&1.data["name"] == "delegate"))
+    result =
+      sid |> events_of_type(:tool_call_completed) |> Enum.find(&(&1.data["name"] == "delegate"))
+
     assert result.data["ok"]
     assert result.data["content"] =~ "read_file failed 10 times in a row"
     assert result.data["content"] =~ "Looking in the usual place."
 
     assert events_of_type(sid, :question_asked) == []
     assert length(Fake.requests_for(fake, "general")) == 10
+  end
+
+  # The conversation ends on the harness's note, a user message, which is what a turn the
+  # model still owes looks like; a replay that took it up would be the loop it stopped.
+  test "a turn the guard stopped is not taken up again by a restart", context do
+    {sid, fake} = run(context, failing(12))
+    await_question(sid, "failures-1")
+    Troupe.answer(sid, "failures-1", "stop")
+    assert await_turn_ended(sid) == %{"reason" => "tool_failures"}
+
+    agent = Troupe.Registry.agent_pid(sid, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+    assert_receive {:troupe_event, ^sid, %Event{type: "agent_restarted", agent: ["root"]}}, 5_000
+
+    # Long enough for a turn it wrongly took up to have asked the model, or the question.
+    Process.sleep(300)
+    assert length(events_of_type(sid, :llm_request)) == 10
+    assert length(events_of_type(sid, :question_asked)) == 1
+
+    assert Fake.call_count(fake) == 10
+    assert %{state: :idle} = Troupe.snapshot(sid)
+  end
+
+  # #143's projection closes an approval on its decision, its call's end or a cancel. A
+  # guard stop comes only once every call of the turn has a result, so there is none left.
+  test "a guard stop leaves no approval open in the session's summary", context do
+    {sid, fake} =
+      run(context, List.duplicate({:tools, [{"needs_approval", %{"note" => "again"}}]}, 12),
+        auto_approve: false,
+        approvals: :deny,
+        tool_failures_stop_at: 4
+      )
+
+    assert await_turn_ended(sid) == %{"reason" => "tool_failures"}
+    assert Fake.call_count(fake) == 4
+    assert length(events_of_type(sid, :approval_requested)) == 4
+    assert length(events_of_type(sid, :approval_decided)) == 4
+
+    await_summary(sid, &(&1["agents"]["root"]["state"] == "idle"))
+    assert Summary.snapshot(sid)["approvals"] == []
   end
 
   test "a question still owed is asked again under its own id after a restart", context do
