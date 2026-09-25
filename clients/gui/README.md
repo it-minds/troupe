@@ -106,8 +106,8 @@ client tests drive it:
 #    daemon alone, --gui for this app too) or build it in ../../apps/troupe_daemon with
 #    `MIX_ENV=prod mix release troupe_daemon`
 # 2. a workspace whose model is the script. The provider, the script and auto_approve
-#    are read from a workspace's own file only once the user's config.yaml trusts it
-#    (trusted_workspaces: [/home/you/demo]); troupe config validate says so until then.
+#    are read from a workspace's own file only once the user's config.yaml trusts it,
+#    which the last line of this step does; troupe config validate says so until then.
 mkdir -p ~/demo/.troupe && cat > ~/demo/.troupe/config.yaml <<'YAML'
 provider: fake
 fake_script: /home/you/demo/.troupe/script.json   # absolute: resolved by the daemon, not the workspace
@@ -124,6 +124,7 @@ cat > ~/demo/.troupe/script.json <<'JSON'
   {"tools": [{"name": "finish", "input": {"summary": "done"}}]}
 ]}}
 JSON
+troupe-daemon config trust ~/demo
 # 3. run it, and read where it listens
 troupe-daemon run &
 cat "${XDG_RUNTIME_DIR:-$HOME/.troupe/run}/troupe/daemon.json"   # %LOCALAPPDATA%\troupe\daemon.json on Windows

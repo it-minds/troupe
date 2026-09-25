@@ -184,7 +184,8 @@ defmodule Troupe.Config.Explain do
 
   defp trust(%{workspace: nil}), do: ""
   defp trust(%{trusted?: true}), do: " (trusted)"
-  defp trust(%{trusted?: false}), do: " (not trusted: its files set no key marked trusted)"
+  defp trust(%{trusted?: false}),
+    do: " (not trusted: its files set no key marked trusted; `troupe config trust` trusts it)"
 
   defp table(rows) do
     width = rows |> Enum.map(&String.length(&1.key)) |> Enum.max(fn -> 10 end) |> min(44)

@@ -247,6 +247,8 @@ defmodule Troupe.Config.ModelSettingsTest do
       path: path
     } do
       before = Config.load(nil).providers
+      # opencode's fallback reads the reference as the file will: GW_TOKEN is not set yet.
+      assert before["gateway"].refused =~ "reads {env:GW_TOKEN}, and GW_TOKEN is not set"
 
       assert {:ok, %{"imported" => imported} = described} = ModelSettings.import_opencode()
 
@@ -271,13 +273,13 @@ defmodule Troupe.Config.ModelSettingsTest do
       assert config.model == "gateway/claude-opus-5"
 
       for {name, provider} <- before do
-        assert Map.drop(provider, [:source, :api_key]) ==
-                 Map.drop(config.providers[name], [:source, :api_key])
+        assert Map.drop(provider, [:source, :api_key, :refused]) ==
+                 Map.drop(config.providers[name], [:source, :api_key, :refused])
 
         assert config.providers[name].source == :yaml
       end
 
-      # Read from the file, the reference is looked up; opencode's fallback never did.
+      # Read from the file, the reference is looked up, now that it is set.
       assert config.providers["gateway"].api_key == "gw-token-from-env"
       assert config.providers["portal"].api_key == "portal-key-from-auth"
     end

@@ -302,6 +302,15 @@ defmodule Troupe.Config do
   @doc "`troupe config migrate [--write] [PATH]`: `Troupe.Config.Explain.migrate/3`."
   defdelegate migrate(workspace, path \\ nil, opts \\ []), to: Explain
 
+  @doc "`troupe config trust [PATH]`: `Troupe.Config.Trust.trust/2`."
+  defdelegate trust(path, opts \\ []), to: Trust
+
+  @doc "`troupe config untrust [PATH]`: `Troupe.Config.Trust.untrust/2`."
+  defdelegate untrust(path, opts \\ []), to: Trust
+
+  @doc "`troupe config trust --list`: `Troupe.Config.Trust.list/1`."
+  defdelegate list_trusted(opts \\ []), to: Trust, as: :list
+
   @doc "Write a config file the way every writer does: `Troupe.Config.Migrate.write/2`."
   defdelegate write_file(path, map), to: Migrate, as: :write
 
@@ -496,7 +505,8 @@ defmodule Troupe.Config do
   defp apply_opencode(%__MODULE__{} = config, layers) do
     if is_nil(config.api_key) and is_nil(config.refused) and to_string(config.provider) in ["anthropic", "openai"] do
       found = OpenCode.providers()
-      layers = found |> Map.keys() |> Kernel.--(Map.keys(config.providers)) |> record_opencode(layers)
+      unshadowed = Map.keys(found) -- Map.keys(config.providers)
+      layers = unshadowed |> record_opencode(layers) |> refuse_opencode(Map.take(found, unshadowed))
       providers = Map.merge(found, config.providers)
       config = %{config | providers: providers}
 
@@ -512,6 +522,17 @@ defmodule Troupe.Config do
 
   defp record_opencode(names, layers) do
     Enum.reduce(names, layers, &record(&2, ["providers", &1], :opencode, OpenCode.config_path(), "(opencode's)"))
+  end
+
+  # An opencode provider whose key cannot be read is refused, and says so beside the
+  # refusals the files' own providers get.
+  defp refuse_opencode(layers, found) do
+    refusals =
+      for {name, %{refused: why}} when is_binary(why) <- Enum.sort(found) do
+        %Issue{level: :refusal, source: OpenCode.config_path(), key: "providers.#{name}", message: why}
+      end
+
+    %{layers | refusals: layers.refusals ++ refusals}
   end
 
   defp default_model_from(config, layers) do

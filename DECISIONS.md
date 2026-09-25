@@ -1210,22 +1210,29 @@ citation keeps meaning what it meant.
        `troupe config migrate --write` — goes through `Troupe.Config.Migrate.write/2`,
        which writes the new spellings, `version: 1`, a `yaml-language-server` header
        naming the schema, and keeps the file it replaced as `.previous`. Loading never
-       rewrites a file, since a rewrite drops comments.
+       rewrites a file, since a rewrite drops comments. `troupe config trust` and
+       `untrust` (#161) change one list and nothing else, so they edit the file's own
+       lines instead (`Troupe.Config.Yaml.edit_list/4`), keep `.previous` all the same,
+       and change nothing when the edit does not read back as that one change.
      - **Maps merge by key** (RFC 7396): a map merges, `null` removes, a list replaces.
      - **`{env:VAR}` that is not set** refuses the provider or MCP server that reads it,
        naming the variable, and anywhere else refuses the load. A refused provider's
        target carries `{:refused, why}` as its key, which both adapters answer with that
        error and no request. `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are used only with
-       the vendor's own endpoint (`Troupe.LLM.Endpoint.vendor?/2`).
+       the vendor's own endpoint (`Troupe.LLM.Endpoint.vendor?/2`). The fallback to
+       opencode's providers reads their `baseURL`, `apiKey` and `authToken` the same
+       way, with opencode's `{file:path}` too, and refuses a provider whose variable is
+       not set or whose file cannot be read.
      - **Scopes and trust.** A key is `:any`, `:trusted` or `:user`. The trusted keys
        change approvals (`auto_approve`, `approvals`, the two `managed_*`), endpoints and
        credentials (`provider`, `base_url`, `api_key`, `auth`, `providers`), commands to
        run (`mcp`), or readable paths (`read_roots`, `state_dir`, `fake_script`). A
        workspace's `.troupe/config.yaml` and `config.local.yaml` set them only when the
        workspace, or a directory above it, is on `trusted_workspaces` in the user file,
-       the one `:user` key; otherwise they are ignored with a warning that says how to
-       trust it. A git worktree of a trusted checkout is trusted when the checkout's
-       `.git/worktrees/<name>/gitdir` names it back. A session on a pod (`kind: :team`)
+       the one `:user` key; otherwise they are ignored with a warning that names the
+       command to trust it, `troupe config trust`. A git worktree of a trusted checkout
+       is trusted when the checkout's `.git/worktrees/<name>/gitdir` names it back, and
+       `troupe config trust` in a worktree writes the checkout, which trusts them all. A session on a pod (`kind: :team`)
        resolves with `trust: :never`. The prompt that asks a person to trust a workspace
        comes with #60.
      - **Precedence** is unchanged, with `.troupe/config.local.yaml` between the project
@@ -1248,6 +1255,11 @@ citation keeps meaning what it meant.
          unset variable refusing a provider, the session provider, an MCP server and
          the load, the trust gate and its warning, trust from a parent directory and a
          worktree (and not from a borrowed `.git` file), and pods.
+       - `Troupe.Config.TrustTest` and `Troupe.Config.YamlTest`: `trust`, `untrust` and
+         `--list`, a file's comments and other keys surviving both, a worktree trusting
+         through its checkout, and a gated key following the list both ways.
+       - `Troupe.ConfigProvidersTest`: opencode's `{env:VAR}` and `{file:path}` read,
+         and an unset or unreadable one refusing that provider alone.
        - `Troupe.Config.ExplainTest`: `--explain` with every key, a ladder, JSON and
          masking; `validate`'s exit status; `migrate` and `--write` with `.previous`; the
          writer; the committed schema and reference current; every YAML example in

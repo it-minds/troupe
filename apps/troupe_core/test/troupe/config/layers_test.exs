@@ -316,7 +316,10 @@ defmodule Troupe.Config.LayersTest do
              )
 
       assert Enum.any?(config.warnings, &(&1 =~ "config.local.yaml: api_key is ignored: a project's file sets it only"))
-      assert Enum.any?(config.warnings, &(&1 =~ "add #{ctx.ws} to trusted_workspaces in #{ctx.user}"))
+      assert Enum.any?(
+               config.warnings,
+               &(&1 =~ "run `troupe config trust #{ctx.ws}`, which adds it to trusted_workspaces in #{ctx.user}")
+             )
 
       trust(ctx)
       config = load!(ctx)

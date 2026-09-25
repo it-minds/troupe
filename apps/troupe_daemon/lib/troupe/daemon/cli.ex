@@ -8,6 +8,8 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
       troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
       troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
+      troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
+      troupe-daemon config untrust [PATH]   take that back
       troupe-daemon config import-opencode   copy opencode's providers into config.yaml
       troupe-daemon models [--refresh]  every model this machine can address
       troupe-daemon version
@@ -38,6 +40,9 @@ defmodule Troupe.Daemon.CLI do
           | {:config_explain, String.t() | nil, boolean()}
           | {:config_validate, String.t() | nil}
           | {:config_migrate, String.t() | nil, boolean()}
+          | {:config_trust, String.t() | nil}
+          | {:config_untrust, String.t() | nil}
+          | :config_trust_list
           | :config_import_opencode
           | {:models, refresh: boolean()}
           | :version
@@ -85,6 +90,14 @@ defmodule Troupe.Daemon.CLI do
       _ -> {:error, "usage: troupe-daemon config migrate [--write] [PATH]"}
     end
   end
+
+  def parse(["config", "trust", "--list"]), do: :config_trust_list
+  def parse(["config", "trust"]), do: {:config_trust, nil}
+  def parse(["config", "untrust"]), do: {:config_untrust, nil}
+  def parse(["config", "trust", "-" <> _ = flag]), do: unknown(["config", "trust", flag])
+  def parse(["config", "trust", path]), do: {:config_trust, path}
+  def parse(["config", "untrust", "-" <> _ = flag]), do: unknown(["config", "untrust", flag])
+  def parse(["config", "untrust", path]), do: {:config_untrust, path}
 
   def parse(["config" | flags]) when flags != [] do
     case {flags -- ["--explain", "--json"], "--explain" in flags or "--json" in flags} do
@@ -134,6 +147,9 @@ defmodule Troupe.Daemon.CLI do
   def main({:config_explain, key, json?}), do: print(Config.explain(File.cwd!(), key, json: json?))
   def main({:config_validate, path}), do: print(Config.validate(File.cwd!(), path))
   def main({:config_migrate, path, write?}), do: print(Config.migrate(File.cwd!(), path, write: write?))
+  def main({:config_trust, path}), do: print(Config.trust(path || File.cwd!()))
+  def main({:config_untrust, path}), do: print(Config.untrust(path || File.cwd!()))
+  def main(:config_trust_list), do: print(Config.list_trusted())
 
   # What the installers run when a person says yes to copying opencode's config: the same
   # write `config.import` makes, from a VM that has the daemon's environment.
@@ -275,6 +291,8 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
     troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
     troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
+    troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
+    troupe-daemon config untrust [PATH]   take that back
     troupe-daemon config import-opencode   copy opencode's providers into config.yaml
     troupe-daemon models [--refresh]  every model this machine can address
     troupe-daemon version

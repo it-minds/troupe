@@ -99,8 +99,8 @@ you trust the workspace:
 - commands to run: `mcp`
 - paths: `read_roots`, `state_dir`, `fake_script`
 
-Until then they are ignored with a warning, and the rest of the file applies. Trusting a
-workspace is a line in the user file:
+Until then they are ignored with a warning that names the command to run, and the rest
+of the file applies. Trusting a workspace is a line in the user file:
 
 ```yaml
 trusted_workspaces:
@@ -108,8 +108,19 @@ trusted_workspaces:
   - ~/src/work            # a directory trusts everything under it
 ```
 
-A git worktree of a trusted checkout is trusted too, which is where a branch session
-works. `trusted_workspaces` is read only from the user file. A session on a team's pod
+```sh
+troupe config trust [PATH]     # add the workspace (default: this directory)
+troupe config untrust [PATH]   # remove it
+troupe config trust --list     # what is on the list
+```
+
+`trust` and `untrust` change that one list and leave the rest of the file, comments
+included, as it was; the file as it was is kept beside it as `config.yaml.previous`.
+A list written in brackets is written out one item a line. A git worktree of a trusted
+checkout is trusted too, which is where a branch session works, and `trust` in a
+worktree adds the checkout. `untrust` does not remove a directory above the workspace,
+which trusts other workspaces too; it says which one still trusts it.
+`trusted_workspaces` is read only from the user file. A session on a team's pod
 never reads these keys from a project's file, trusted or not: a pod's provider and key
 come from its profile.
 
@@ -142,6 +153,7 @@ troupe config --explain --json      # the same for a program
 troupe config validate              # every file a session here would read; exits 1 on any problem
 troupe config validate .troupe/config.yaml
 troupe config migrate [--write]
+troupe config trust --list          # the workspaces whose own files set the trusted keys
 ```
 
 Secrets are masked everywhere. `troupe-daemon config` takes the same arguments.
