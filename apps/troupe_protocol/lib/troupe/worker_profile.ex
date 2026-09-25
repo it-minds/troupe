@@ -105,6 +105,10 @@ defmodule Troupe.WorkerProfile do
     # cluster's default storage class.
     :storage_size,
     :storage_class,
+    # Dollars per million tokens by model, in the resource's own camelCase, for models a
+    # gateway serves without saying what a streamed call cost (Decision 689). A pod gets
+    # them as `TROUPE_MODEL_PRICES`.
+    llm_prices: %{},
     replicas: 1,
     sessions_per_pod: 4,
     resources: %{},
@@ -137,6 +141,7 @@ defmodule Troupe.WorkerProfile do
       llm_provider: get_in(spec, ["llm", "provider"]) || "openai",
       llm_model: get_in(spec, ["llm", "model"]),
       llm_small_model: get_in(spec, ["llm", "smallModel"]),
+      llm_prices: get_in(spec, ["llm", "prices"]) || %{},
       llm_secret_name: get_in(spec, ["llm", "secretRef", "name"]),
       llm_secret_key: get_in(spec, ["llm", "secretRef", "key"]) || "api-key",
       mcp_servers: Enum.map(Map.get(spec, "mcpServers", []), &mcp_server/1),

@@ -39,6 +39,7 @@ Other `spec` fields:
 |---|---|
 | `llm.endpoint`, `.provider`, `.model` | becomes the worker's `TROUPE_BASE_URL`, `TROUPE_PROVIDER` (`openai` = Chat Completions, which a gateway serves; `anthropic`; `fake`), `TROUPE_MODEL`. The endpoint's host is an egress destination |
 | `llm.secretRef.{name,key}` | the Secret in the worker namespace injected as `TROUPE_API_KEY` (key `api-key`), not optional |
+| `llm.prices` | dollars per million tokens by model, `{"qwen3-235b": {"input": …, "output": …}}` with optional `cacheRead` and `cacheWrite`, injected as `TROUPE_MODEL_PRICES`. For a model the gateway does not price, which with LiteLLM is every streamed call: without a price its calls cost nothing on the ledger and no money budget applies to them. What the gateway says still wins. Set through the API; the console's editor keeps it but does not show it |
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |

@@ -397,10 +397,13 @@ own token. It holds no database and no credential of its own ([docs/a2a.md](docs
 
 **Cost is a fold over the log, not a second thing to write down.** Every `llm_response`
 carries the model and, behind a gateway, its request id and cost, read from response
-headers (`x-litellm-call-id`, `x-litellm-response-cost`). **Troupe has no price table**:
-the gateway has priced the call, and a reconciliation compares the ledger with it by
-request id; where the gateway said nothing, tokens are recorded at zero cost with a
-synthetic id `seq:<session>:<n>` that the reconciliation counts as unmetered.
+headers (`x-litellm-call-id`, `x-litellm-response-cost`). **Troupe keeps no price table
+of its own**: the gateway prices a call where it can, and a reconciliation compares the
+ledger with it by request id. A streamed response carries no cost header, so the harness
+prices such a call itself, from the provider's catalog or else from `models.prices` (a
+profile's `llm.prices`), and marks it `priced_locally` (Decision 689). A call nobody
+priced is recorded at zero cost and said once a session in the log; one with no request
+id gets a synthetic id `seq:<session>:<n>` that the reconciliation counts as unmetered.
 
 On a pod, `Session.Log` hands each event to a usage fold that writes an ETS row from the
 log's own process — no mailbox on the turn path — drained in batches over the control

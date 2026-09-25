@@ -78,6 +78,9 @@ defmodule Troupe.Config do
             providers: %{},
             # Context windows declared by hand for bare model ids.
             windows: %{},
+            # `models.prices`, as written: dollars per million tokens by model, for what
+            # the catalog does not price (Decision 689). `price/2` reads it.
+            prices: %{},
             # What each provider last said about its models, from the cache file. Never
             # fetched here: loading a config must not depend on a provider answering.
             catalog: %{},
@@ -344,6 +347,7 @@ defmodule Troupe.Config do
     |> put_model(:small_model, models["cheap"])
     |> put_model(:expensive_model, models["expensive"])
     |> then(&%{&1 | windows: Map.get(models, "windows", %{}), models_explicit?: Map.has_key?(models, "default")})
+    |> Map.put(:prices, Map.get(models, "prices", %{}))
   end
 
   defp put_key(config, %{key: "providers"}, providers, layers),
@@ -601,6 +605,51 @@ defmodule Troupe.Config do
   end
 
   @doc """
+  What a model costs, and who said so: `{entry, :catalog}` when the provider's own
+  catalog prices it, else `{entry, :config}` when `models.prices` does, else `nil`
+  (Decision 689). The entry is priced per token, as the catalog's are.
+
+  `names` is every name one model goes by, most particular first: the id an agent
+  addressed it with, the id that went on the wire, the one the provider answered as.
+  Unlike a window, a configured price does not overrule the catalog's: a window is a
+  choice a person may make, and a price is a fact about the bill, which the provider's
+  own list is nearer to than a copy of it in a file.
+  """
+  @spec price(t(), String.t() | [String.t()]) :: {Catalog.t(), :catalog | :config} | nil
+  def price(%__MODULE__{} = config, names) do
+    names = names |> List.wrap() |> Enum.filter(&is_binary/1) |> Enum.uniq()
+    Enum.find_value(names, &catalog_price(config, &1)) || Enum.find_value(names, &configured_price(config, &1))
+  end
+
+  defp catalog_price(config, name) do
+    case Map.get(config.catalog, name) do
+      %Catalog{} = entry -> if Catalog.priced?(entry), do: {entry, :catalog}
+      _ -> nil
+    end
+  end
+
+  defp configured_price(config, name) do
+    case Map.get(config.prices, name) do
+      %{"input" => input, "output" => output} = price when is_number(input) and is_number(output) ->
+        entry = %Catalog{
+          id: name,
+          input: per_token(input),
+          output: per_token(output),
+          cache_read: per_token(price["cache_read"]),
+          cache_write: per_token(price["cache_write"])
+        }
+
+        {entry, :config}
+
+      _ ->
+        nil
+    end
+  end
+
+  defp per_token(per_mtok) when is_number(per_mtok), do: per_mtok / 1_000_000
+  defp per_token(_absent), do: nil
+
+  @doc """
   Split `provider/model` into the named provider and the bare model, or `{nil, model}`
   when the prefix names no configured provider — the session-wide one applies then.
   """
@@ -755,14 +804,16 @@ defmodule Troupe.Config do
           model: String.t() | nil,
           context: pos_integer() | nil,
           price: String.t() | nil,
+          price_source: :catalog | :config | nil,
           source: atom(),
           key?: boolean()
         }
 
   @doc """
   Every model this configuration can address: what each named provider declares,
-  every bare id with a declared window, whatever the aliases currently name, and what
-  only the catalog knows — so the value in use is always in the list.
+  every bare id with a declared window, whatever the aliases currently name, every id
+  `models.prices` prices, and what only the catalog knows — so the value in use is
+  always in the list. Each says what it costs and who said so (`price/2`).
   """
   @spec models(t()) :: [model_choice()]
   def models(%__MODULE__{} = config) do
@@ -776,8 +827,10 @@ defmodule Troupe.Config do
       |> Enum.reject(&is_nil/1)
       |> Enum.map(&current_choice(config, &1))
 
-    (from_providers ++ bare ++ current)
-    |> Enum.map(&enrich(&1, config.catalog))
+    priced = config.prices |> Map.keys() |> Enum.sort() |> Enum.map(&current_choice(config, &1))
+
+    (from_providers ++ bare ++ current ++ priced)
+    |> Enum.map(&enrich(&1, config))
     |> Kernel.++(catalog_only(config))
     |> Enum.sort_by(&{&1.provider || "", &1.model || ""})
     |> Enum.uniq_by(& &1.id)
@@ -799,10 +852,17 @@ defmodule Troupe.Config do
     choice(id, name, model, context_window(config, id), (provider && provider.source) || :config, key?)
   end
 
-  defp enrich(choice, catalog) do
-    case Map.fetch(catalog, choice.id) do
-      {:ok, entry} -> %{choice | context: choice.context || entry.context, price: Catalog.describe_price(entry)}
-      :error -> choice
+  defp enrich(choice, config) do
+    case Map.fetch(config.catalog, choice.id) do
+      {:ok, entry} -> priced(%{choice | context: choice.context || entry.context}, config)
+      :error -> priced(choice, config)
+    end
+  end
+
+  defp priced(choice, config) do
+    case price(config, choice.id) do
+      {entry, source} -> %{choice | price: Catalog.describe_price(entry), price_source: source}
+      nil -> choice
     end
   end
 
@@ -817,21 +877,23 @@ defmodule Troupe.Config do
       entry = Map.fetch!(config.catalog, id)
       {provider, model} = split_model(config, id)
       name = provider && id |> String.split("/", parts: 2) |> hd()
+      key? = if(provider, do: provider_keyed?(provider), else: session_key?)
 
-      %{
-        id: id,
-        provider: name,
-        model: model,
-        context: entry.context,
-        price: Catalog.describe_price(entry),
-        source: :catalog,
-        key?: if(provider, do: provider_keyed?(provider), else: session_key?)
-      }
+      priced(choice(id, name, model, entry.context, :catalog, key?), config)
     end)
   end
 
   defp choice(id, provider, model, context, source, key?) do
-    %{id: id, provider: provider, model: model, context: context, price: nil, source: source, key?: key?}
+    %{
+      id: id,
+      provider: provider,
+      model: model,
+      context: context,
+      price: nil,
+      price_source: nil,
+      source: source,
+      key?: key?
+    }
   end
 
   @doc """
@@ -852,7 +914,7 @@ defmodule Troupe.Config do
     models: default=#{config.model} cheap=#{config.small_model || "(default)"} expensive=#{config.expensive_model || "(default)"}
     named providers (use as <name>/<model>):
     #{describe_providers(config)}
-    models Troupe can address (use one as models.default):
+    models Troupe can address (use one as models.default; prices are $ per million tokens in/out):
     #{describe_choices(config)}
     config dir: #{Troupe.Paths.display(Troupe.Paths.config_dir())}   opencode: #{Troupe.Paths.display(OpenCode.config_path())}
     catalog: #{Troupe.Paths.display(Store.path())} (#{Store.fetched_at() || "never fetched"})
@@ -945,10 +1007,17 @@ defmodule Troupe.Config do
   end
 
   defp describe_model(%{context: context, source: source, key?: key?} = model) do
-    [context && "#{div(context, 1000)}k ctx", Map.get(model, :price), to_string(source), if(key?, do: nil, else: "no key")]
+    [context && "#{div(context, 1000)}k ctx", describe_price(model), to_string(source), if(key?, do: nil, else: "no key")]
     |> Enum.filter(&(is_binary(&1) and &1 != ""))
     |> Enum.join(" · ")
   end
+
+  # Who said what a call costs, and a model nobody priced said out loud: its calls count
+  # as free wherever spend is added up, unless the gateway prices them itself.
+  defp describe_price(%{price: nil}), do: "no price"
+  defp describe_price(%{price: price, price_source: :config}), do: price <> " (models.prices)"
+  defp describe_price(%{price: price, price_source: :catalog}), do: price <> " (catalog)"
+  defp describe_price(%{price: price}), do: price
 
   defp in_use(config, id) do
     cond do

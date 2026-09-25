@@ -165,6 +165,26 @@ defmodule Troupe.Plane.UsageTest do
       assert [%{cost_micros: 500}] = Ledger.breakdown(team.id, :model)
     end
 
+    # #160. A gateway streaming a response says nothing of what it cost, so a pod prices
+    # the call itself from its profile's `llm.prices` (Decision 689). The batch carries
+    # the number and not where it came from, and the plane charges it like any other,
+    # which is what makes a team's money budget apply to a model the gateway never prices.
+    test "a cost the pod worked out itself counts against the team's budget", %{
+      port: port,
+      team: team
+    } do
+      worker = enrolled(port)
+
+      {:ok, _} =
+        call(worker, "usage.batch", %{
+          "session_id" => "s-1",
+          "records" => [Map.put(usage(1, 9_999_900), "model", "qwen3-235b")]
+        })
+
+      assert TeamBudget.inspect_state(team).spent_micros == 9_999_900
+      assert {:error, {:over_budget, _state}} = TeamBudget.reserve(team, "s-2", 200)
+    end
+
     test "an empty batch is accepted and changes nothing", %{port: port} do
       worker = enrolled(port)
 

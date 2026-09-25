@@ -80,4 +80,86 @@ defmodule Troupe.Session.LocalPricingTest do
     assert response.data["gateway"] in [nil, %{}] or
              not Map.has_key?(response.data["gateway"], "cost_micros")
   end
+
+  # #160. A pod has no catalog — nothing fetched one — and a gateway model the catalog
+  # does not list, such as `qwen3-235b` behind LiteLLM, has no price in it anyway. So
+  # every such call was free as far as the plane's ledger could tell, and no money budget
+  # ever applied to it.
+  describe "a price in models.prices" do
+    test "prices a call the catalog cannot, marked as this machine's arithmetic", context do
+      write_file(context, ".troupe/config.yaml", """
+      models:
+        prices:
+          fake-model: {input: 1.0, output: 2.0}
+      """)
+
+      response = priced(context, %{})
+
+      # The fake's answer is 100 input tokens and one output token: $1 and $2 a million.
+      assert %{"cost_micros" => 102, "priced_locally" => true} = response.data["gateway"]
+    end
+
+    test "loses to the gateway's own figure", context do
+      write_file(context, ".troupe/config.yaml", """
+      models:
+        prices:
+          fake-model: {input: 1.0, output: 2.0}
+      """)
+
+      %{session: session} = start_session(context, steps: [{:text, "done"}], cost_micros: 777)
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "say something")
+      await_event(session.id, :llm_response)
+
+      response = session.id |> Log.replay() |> Enum.find(&(&1.type == "llm_response"))
+      assert response.data["gateway"]["cost_micros"] == 777
+      refute Map.has_key?(response.data["gateway"], "priced_locally")
+    end
+
+    test "loses to the provider's own price in the catalog", context do
+      write_file(context, ".troupe/config.yaml", """
+      models:
+        prices:
+          fake-model: {input: 1.0, output: 2.0}
+      """)
+
+      response =
+        priced(context, %{
+          "fake-model" => %Catalog{id: "fake-model", input: 3.0e-6, output: 4.0e-6}
+        })
+
+      assert %{"cost_micros" => 304, "priced_locally" => true} = response.data["gateway"]
+    end
+  end
+
+  test "a model with no price anywhere is said once a session, not counted as free in silence",
+       context do
+    test = self()
+    handler = "unpriced-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:troupe, :llm, :unpriced],
+      fn _event, _measurements, meta, _config -> send(test, {:unpriced, meta}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    %{session: session} =
+      start_session(context,
+        steps: [{:tools, [{"list_files", %{}}]}, {:text, "done"}],
+        cost_micros: nil
+      )
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "look around")
+    await_event(session.id, :turn_ended)
+
+    session_id = session.id
+    assert 2 == session_id |> Log.replay() |> Enum.count(&(&1.type == "llm_response"))
+    assert_receive {:unpriced, %{session_id: ^session_id, model: "fake-model"}}
+    refute_receive {:unpriced, %{session_id: ^session_id}}, 100
+  end
 end

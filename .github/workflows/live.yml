@@ -21,6 +21,13 @@ on:
         description: The gateway's name for the model every run uses.
         type: string
         default: qwen3-235b
+      prices:
+        description: >-
+          What the gateway charges for the models it does not price itself, as the JSON
+          TROUPE_MODEL_PRICES takes: {"<model>": {"input": <$/Mtok>, "output": <$/Mtok>}}.
+          Empty, the summary's cost column says "not reported" for such a model.
+        type: string
+        default: ""
     secrets:
       base_url:
         description: The gateway, an OpenAI-compatible endpoint (`/v1` or not).
@@ -98,6 +105,9 @@ jobs:
       LIVE_TIMEOUT: "300"
       TROUPE_PROVIDER: openai
       TROUPE_MODEL: ${{ inputs.model }}
+      # A streamed call carries no cost header, so without a price here the gateway's
+      # models cost nothing as far as the log can tell (#160).
+      TROUPE_MODEL_PRICES: ${{ inputs.prices }}
     steps:
       - uses: actions/checkout@v4
 

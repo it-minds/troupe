@@ -207,6 +207,57 @@
             "minimum": 1
           }
         },
+        "prices": {
+          "description": "Prices for models the provider's catalog does not price, by the name a model is addressed with. What a gateway says a call cost still wins, then the catalog's price.",
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": {
+            "type": [
+              "object",
+              "null"
+            ],
+            "properties": {
+              "input": {
+                "description": "Dollars per million input tokens.",
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "output": {
+                "description": "Dollars per million output tokens.",
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "cache_read": {
+                "description": "Dollars per million prompt tokens read from the cache. Unset: the input price.",
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              },
+              "cache_write": {
+                "description": "Dollars per million prompt tokens written to the cache. Unset: the input price.",
+                "type": [
+                  "number",
+                  "null"
+                ],
+                "minimum": 0
+              }
+            },
+            "patternProperties": {
+              "^x-": {}
+            },
+            "additionalProperties": false
+          }
+        },
         "small": {
           "description": "Old spelling of models.cheap.",
           "deprecated": true,

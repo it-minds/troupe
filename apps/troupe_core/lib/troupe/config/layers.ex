@@ -66,6 +66,9 @@ defmodule Troupe.Config.Layers do
     {"TROUPE_MODEL", ["models", "default"]},
     {"TROUPE_SMALL_MODEL", ["models", "cheap"]},
     {"TROUPE_EXPENSIVE_MODEL", ["models", "expensive"]},
+    # JSON, the shape `models.prices` has in a file: how a profile hands its pods the
+    # prices of the models it serves, since a pod has no file of its own.
+    {"TROUPE_MODEL_PRICES", {:json, ["models", "prices"]}},
     {"TROUPE_FAKE_SCRIPT", ["fake_script"]}
   ]
 
@@ -119,7 +122,7 @@ defmodule Troupe.Config.Layers do
         }
       end)
 
-    result |> unresolved() |> servers()
+    result |> unresolved() |> servers() |> prices()
   end
 
   @doc "The user file's trust list, as written."
@@ -457,6 +460,7 @@ defmodule Troupe.Config.Layers do
   defp ok_type?(value, :version), do: value == 1
   defp ok_type?(value, :effort), do: (is_binary(value) and value != "") or (is_integer(value) and value > 0)
   defp ok_type?(value, :fraction), do: is_number(value) and value > 0 and value <= 1
+  defp ok_type?(value, :price), do: is_number(value) and value >= 0
   defp ok_type?(value, {:integer, min}), do: is_integer(value) and value >= min
   defp ok_type?(value, {:enum, values}), do: is_binary(value) and value in values
   defp ok_type?(value, {:list, item}), do: is_list(value) and Enum.all?(value, &ok_type?(&1, item))
@@ -532,6 +536,30 @@ defmodule Troupe.Config.Layers do
     acc
     |> env_value(var, ["api_key"], value)
     |> env_value(var, ["auth"], "bearer")
+  end
+
+  # Checked as a file's value is, entry by entry, so a price with a word for a number is
+  # refused naming the model, and an unknown key under one warns.
+  defp env_value(acc, var, {:json, key_path}, value) do
+    case Jason.decode(value) do
+      {:ok, decoded} ->
+        {checked, found} = check_value(decoded, Schema.at(key_path), key_path, var, nil)
+
+        %{
+          acc
+          | values: if(found.errors == [], do: put_path(acc.values, key_path, checked), else: acc.values),
+            entries: acc.entries ++ Enum.map(found.entries, &Map.merge(&1, %{layer: :env, source: var})),
+            warnings: acc.warnings ++ found.warnings,
+            errors: acc.errors ++ found.errors
+        }
+
+      {:error, _error} ->
+        message =
+          "#{var} sets #{Enum.join(key_path, ".")}, and must be JSON in the shape a file has, " <>
+            ~s|such as {"<model>": {"input": 0.5, "output": 1.5}}; it is not JSON|
+
+        %{acc | errors: acc.errors ++ [issue(:error, var, nil, Enum.join(key_path, "."), message)]}
+    end
   end
 
   defp env_value(acc, var, key_path, value) do
@@ -624,6 +652,28 @@ defmodule Troupe.Config.Layers do
       {true, true} -> refuse(result, :mcp, name, source, shown, "#{shown} has both a command and a url; keep the one it is")
       {false, false} -> refuse(result, :mcp, name, source, shown, "#{shown} has neither a command nor a url, and is not started")
       _one -> result
+    end
+  end
+
+  # A price is both halves. Checked on the merged value, like a server, since one layer
+  # may give the input price and another the output price.
+  defp prices(%Result{} = result) do
+    case get_in(result.values, ["models", "prices"]) do
+      prices when is_map(prices) -> prices |> Enum.sort() |> Enum.reduce(result, &price/2)
+      _ -> result
+    end
+  end
+
+  defp price({model, entry}, result) do
+    case Enum.reject(["input", "output"], &is_number(entry[&1])) do
+      [] ->
+        result
+
+      missing ->
+        shown = "models.prices.#{model}"
+        source = source_of_any(result.ladder, ["models", "prices", model])
+        message = "#{shown} has no #{Enum.join(missing, " or ")} price, so it prices nothing; give it both"
+        %{result | warnings: result.warnings ++ [issue(:warning, source, nil, shown, message)]}
     end
   end
 

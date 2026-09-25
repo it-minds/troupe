@@ -115,8 +115,10 @@ defmodule Troupe.LLM.Catalog do
     if priced?(entry), do: "$#{per_mtok(entry.input)}/$#{per_mtok(entry.output)}"
   end
 
+  # Rounded before it is compared: $0.10 a million is 1.0e-7 a token, which comes back
+  # as 0.09999999999999999 and would read as `$0.100`.
   defp per_mtok(cost) do
-    dollars = cost * 1_000_000
+    dollars = Float.round(cost * 1_000_000, 6)
 
     cond do
       dollars >= 10 -> :erlang.float_to_binary(dollars, decimals: 0)

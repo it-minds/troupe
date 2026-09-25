@@ -7,8 +7,9 @@
 #
 # The nightly's `live` job runs all three against the LiteLLM gateway
 # (.github/workflows/live.yml; .github/CI.md says what a failure means). The model is the
-# environment's - TROUPE_PROVIDER, TROUPE_BASE_URL, TROUPE_API_KEY, TROUPE_MODEL - and
-# nothing here prints them. With TROUPE_PROVIDER=fake and a TROUPE_FAKE_SCRIPT it runs
+# environment's - TROUPE_PROVIDER, TROUPE_BASE_URL, TROUPE_API_KEY, TROUPE_MODEL, and
+# TROUPE_MODEL_PRICES for a model the gateway does not price - and nothing here prints
+# them. With TROUPE_PROVIDER=fake and a TROUPE_FAKE_SCRIPT it runs
 # offline, which is how a change to this script is tried before it spends anything.
 #
 # Each run gets an empty workspace, its own config, state and runtime directories, and its
@@ -167,11 +168,16 @@ if [ "${#logs[@]}" -gt 0 ]; then
   calls=$(spent '[.[] | select(.type == "llm_response")] | length')
   tokens_in=$(spent '[.[] | select(.type == "llm_response") | .data.usage // {} | (.input_tokens // 0) + (.cache_read // 0) + (.cache_write // 0)] | add // 0')
   tokens_out=$(spent '[.[] | select(.type == "llm_response") | .data.usage.output_tokens // 0] | add // 0')
-  # The gateway's price where it gave one; a call it did not price is not a free one.
+  # The gateway's price where it gave one, else the harness's own from TROUPE_MODEL_PRICES
+  # (`priced_locally`, Decision 689), said as such; a call nobody priced is not a free one.
   cost=$(spent -r '[.[] | select(.type == "llm_response")] as $r
     | [$r[] | .data.gateway.cost_micros | numbers] as $c
+    | [$r[] | select(.data.gateway.priced_locally == true)] as $l
     | if ($c | length) == 0 then "not reported"
       else "$" + ((($c | add) / 100 | round) / 10000 | tostring)
+        + (if ($l | length) == 0 then ""
+           elif ($l | length) == ($c | length) then " priced here"
+           else " (\($l | length) priced here)" end)
         + (if ($c | length) < ($r | length) then " (\($c | length) of \($r | length) calls priced)" else "" end)
       end')
 fi
