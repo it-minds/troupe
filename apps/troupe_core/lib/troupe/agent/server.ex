@@ -1343,8 +1343,13 @@ defmodule Troupe.Agent.Server do
 
   defp to_idle_or_done(state), do: rest(state)
 
+  # The end of a turn is written down as well as announced. `agent_state` is ephemeral and
+  # may be dropped, and a client that attached after the turn ended — `troupe run
+  # --headless`, whose session starts working before anything has subscribed — still has
+  # to be able to tell that the agent is waiting for input (issue #127).
   defp rest(state) do
     state = %{state | turn_mode: nil}
+    log(state, :turn_ended, %{})
     publish_state(state, :idle)
     {:next_state, :idle, state}
   end

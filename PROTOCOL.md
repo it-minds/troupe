@@ -282,6 +282,7 @@ delegate again.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |
+| `turn_ended` | — the agent's turn is over and it waits for input: the model answered without asking for a tool, or its request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done` |
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
