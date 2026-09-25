@@ -2317,6 +2317,7 @@ defmodule Troupe.Plane.Harness do
       "status" => session.status,
       "done_reason" => session.done_reason,
       "pending_approvals" => session.pending_approvals,
+      "pending_questions" => session.pending_questions,
       "cost_micros" => session.cost_micros,
       "origin" => session.origin,
       "terms" => session.terms,

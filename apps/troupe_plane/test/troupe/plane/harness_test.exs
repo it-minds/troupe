@@ -163,6 +163,26 @@ defmodule Troupe.Plane.HarnessTest do
       assert {:ok, %{"sessions" => []}} = Harness.call("sessions.list", %{}, context(stranger))
     end
 
+    # What the worker last reported, so an inbox is this listing and not a replay: a
+    # question waits on a person as an approval does (#172).
+    test "a row carries the approvals and the questions still open" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      session = session!("s-asked", ada, team, [])
+
+      {:ok, _} =
+        Sessions.put_status(session.id, %{
+          "status" => "waiting",
+          "pending_approvals" => 0,
+          "pending_questions" => 1
+        })
+
+      assert {:ok, %{"sessions" => [row]}} = Harness.call("sessions.list", %{}, context(ada))
+
+      assert %{"status" => "waiting", "pending_approvals" => 0, "pending_questions" => 1} =
+               row
+    end
+
     test "a session nobody may see is not found rather than forbidden" do
       team = team_with_grant("engineering", "dev", name: "engineering")
       owner = person("grace@example.test", ["engineering"])

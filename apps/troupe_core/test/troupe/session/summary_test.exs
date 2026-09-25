@@ -13,6 +13,7 @@ defmodule Troupe.Session.SummaryTest do
   alias Troupe.Session.Summary
 
   @recorded Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))
+  @questions Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "questions"]))
 
   test "folds a session into a compact snapshot", context do
     %{session: session} =
@@ -170,6 +171,26 @@ defmodule Troupe.Session.SummaryTest do
     assert Summary.snapshot(session.id)["approvals"] == []
   end
 
+  # A question waits on a person as an approval does, and a listing counts both from here.
+  test "a question is open while it waits, and goes away when its turn is cancelled", context do
+    ask = %{"question" => "Which colour?", "options" => ["red", "blue"]}
+
+    %{session: session} =
+      start_session(context, steps: [{:tools, [{"ask_user", ask}]}, {:text, "never asked"}])
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "ask me")
+
+    asked = await_event(session.id, :question_asked, 10_000)
+    call_id = asked.data["call_id"]
+
+    await_diff(&(&1["questions"] == [call_id]))
+
+    Troupe.cancel(session.id)
+    await_diff(&(&1["questions"] == []))
+    assert Summary.snapshot(session.id)["questions"] == []
+  end
+
   # Logs real sessions wrote against the scripted model, one per way an approval can
   # end, so the fold is held to what the agent actually writes (#142): a cancel closes
   # each call it stops with a `tool_call_completed` and then says `cancelled`; a tool that
@@ -194,10 +215,44 @@ defmodule Troupe.Session.SummaryTest do
       assert [call_id] = open["approvals"]
       assert open["approval_agents"] == %{call_id => "root"}
     end
+
+    # Questions are counted only once one is asked, so a log without one folds to the map
+    # every recorded fixture hash was taken over.
+    test "leaves no count of questions in a log that never asked one" do
+      for name <- ~w(open decided cancelled timed_out subagent_cancelled) do
+        refute Map.has_key?(recorded(name), "questions"), name
+      end
+    end
   end
 
-  defp recorded(name) do
-    [@recorded, name <> ".jsonl"]
+  # The same rules for a question (#162), in logs from `test/fixtures/questions/`: the
+  # agent's `ask_user` answered, cancelled, timed out, or asked by a subagent a cancel took
+  # down; and the budget's and the failure guard's question at the gate, answered by the
+  # harness with nobody there to ask, ended by a cancel, or asked again after one.
+  describe "a question in a recorded log" do
+    test "is open while nobody has answered it, and again once the gate asks it again" do
+      open = asked("open")
+      assert open["questions"] == ["call_16"]
+      assert open["question_agents"] == %{"call_16" => "root"}
+
+      assert asked("budget_asked_again")["questions"] == ["budget-1"]
+    end
+
+    test "is not open once answered, cancelled, timed out, or its subagent was cancelled" do
+      for name <- ~w(answered cancelled timed_out subagent_cancelled failures_cancelled
+                     failures_unattended budget_cancelled budget_unattended) do
+        folded = asked(name)
+        assert folded["questions"] == [], "#{name} still has #{inspect(folded["questions"])}"
+        refute Map.has_key?(folded, "question_agents"), name
+      end
+    end
+  end
+
+  defp recorded(name), do: fold_log(@recorded, name)
+  defp asked(name), do: fold_log(@questions, name)
+
+  defp fold_log(dir, name) do
+    [dir, name <> ".jsonl"]
     |> Path.join()
     |> File.read!()
     |> String.split("\n", trim: true)
@@ -206,11 +261,12 @@ defmodule Troupe.Session.SummaryTest do
   end
 
   # The next diff whose change matches, checking on the way that none of them says which
-  # agent asked for an approval: that is the projection's own bookkeeping.
+  # agent asked for an approval or a question: that is the projection's own bookkeeping.
   defp await_diff(predicate) do
     receive do
       {:troupe_event, _session_id, %Event{type: "summary_diff", data: %{"changed" => changed}}} ->
         refute Map.has_key?(changed, "approval_agents")
+        refute Map.has_key?(changed, "question_agents")
         if predicate.(changed), do: changed, else: await_diff(predicate)
 
       {:troupe_event, _session_id, _event} ->

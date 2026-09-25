@@ -1196,8 +1196,9 @@ defmodule Troupe.Gateway.Dispatch do
       "profile" => Map.get(session, :profile),
       "state" => to_string(Map.get(session, :state, :active)),
       "status" => to_string(Map.get(session, :status, :idle)),
-      # The count a plane's row carries too, so an inbox is a listing and not a replay.
+      # The counts a plane's row carries too, so an inbox is a listing and not a replay.
       "pending_approvals" => Map.get(session, :pending_approvals, 0),
+      "pending_questions" => Map.get(session, :pending_questions, 0),
       "tokens" => Map.get(session, :tokens, 0),
       "cost" => Map.get(session, :cost, 0.0),
       "created_at" => Map.get(session, :created_at),

@@ -413,7 +413,8 @@ with no replay.
 - **`detail`** delivers every event for the session, durable and ephemeral.
 - **`summary`** delivers only `summary_diff` ephemerals plus session lifecycle
   events. A summary carries: per-agent state and profile, current todo item, active
-  tool, tokens, cost, pending approvals, and last error. Summary diffs are throttled
+  tool, tokens, cost, pending approvals, pending questions (`questions`, from a session's
+  first `question_asked` on), and last error. Summary diffs are throttled
   to at most 4 per second.
 - **`fleet`** carries only session lifecycle events — created, state changes,
   archived, erased — for every session the principal can see. `fleet` ignores
@@ -521,14 +522,17 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"pending_approvals", "tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
+"pending_approvals", "pending_questions", "tokens", "cost", "created_at", "last_active_at",
+"pinned"}]}`
 
 `filter.parent` selects the branches of one session.
 
 `pending_approvals` counts the approvals still open (see `approval_requested` for when one
-ends), and `status` is `waiting` while there is one, whatever else it would say: the two
-columns a plane's `sessions.list` row carries, so an inbox is a listing and not a replay.
-A dormant session counts the root agent's, which are what it asks again when it wakes.
+ends), `pending_questions` the questions (see `question_asked`: the agent's `ask_user`, the
+budget's and the failure guard's), and `status` is `waiting` while either is not zero,
+whatever else it would say: the columns a plane's `sessions.list` row carries, so an inbox
+is a listing and not a replay. A dormant session counts the root agent's, which are what it
+asks again when it wakes.
 
 #### `session.get` → one session object plus `head_seq`.
 
