@@ -101,7 +101,7 @@ defmodule Troupe.Daemon.CLITest do
 
     out = capture_io(fn -> assert CLI.main(:status) == 0 end)
     assert out =~ "is running at"
-    assert out =~ ~s("ws")
+    assert_where_not_tokens(out)
 
     # The same door a client takes: discovery, then a handshake that names the daemon.
     {:ok, endpoint} = Endpoint.discover()
@@ -120,6 +120,16 @@ defmodule Troupe.Daemon.CLITest do
     Client.close(client)
   end
 
+  test "run announces where it listens, and where the tokens are, not the tokens" do
+    start_supervised!(
+      {Troupe.Gateway.Daemon, Keyword.put(CLI.run_opts(), :idle_shutdown_ms, :timer.hours(1))}
+    )
+
+    out = capture_io(fn -> assert CLI.announce() == :ok end)
+    assert out =~ "listening at"
+    assert_where_not_tokens(out)
+  end
+
   test "config describes providers with keys masked" do
     System.put_env("TROUPE_API_KEY", "secret-key-1234567890")
     on_exit(fn -> System.delete_env("TROUPE_API_KEY") end)
@@ -127,5 +137,18 @@ defmodule Troupe.Daemon.CLITest do
     out = capture_io(fn -> assert CLI.main(:config) == 0 end)
     assert out =~ "provider: anthropic"
     refute out =~ "secret-key-1234567890"
+  end
+
+  # A terminal's scrollback is no place for the tokens that admit a client: what `status`
+  # and `run` print is where the daemon answers and which file holds them.
+  defp assert_where_not_tokens(out) do
+    {:ok, endpoint} = Endpoint.discover()
+    {:ok, ws} = Endpoint.discover_ws()
+
+    assert out =~ Endpoint.describe(endpoint)
+    assert out =~ "ws://127.0.0.1:#{ws.port}/v1/socket"
+    assert out =~ Endpoint.discovery_path()
+    refute out =~ ws.token
+    if endpoint.token, do: refute(out =~ endpoint.token)
   end
 end
