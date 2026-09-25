@@ -148,7 +148,7 @@ Troupe.Remote.Supervisor (one_for_one)
 
 `one_for_one` is the degraded mode: an unreachable plane does not touch attached sessions.
 A worker connection subscribes from the journal's cursor + 1; the journal drops a batch it
-already has, so a reconnect, `resync_required` or `-32012` all produce the same transcript.
+already has, so a reconnect or a `resync_required` produces the same transcript.
 Deltas are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns
 protocol events into the harness's own at the edge — the model and view never branch on
 "is this remote". Browsing opens with `session.open read`; the first activating action

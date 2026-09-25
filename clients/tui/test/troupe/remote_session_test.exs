@@ -144,23 +144,20 @@ defmodule Troupe.RemoteSessionTest do
       assert seqs(sid) == server_seqs(remote, "s-live")
     end
 
-    test "a -32012 re-opens the session and reconnects to the endpoint it is given" do
+    # -32012 is `payload_too_large` (PROTOCOL.md §10). It once meant a session that had
+    # moved, and the client re-opened the session and sent the command again.
+    test "a -32012 is a message too large: said, and not sent again" do
       {remote, url} = start_remote!(sessions: [fixture()])
       origin = connect!(remote, url)
       sid = attach!(origin, "s-live")
       eventually(fn -> Client.capability(sid).up? end)
 
-      first_endpoint = Worker.status(sid).endpoint
-      FakeRemote.fail_next(remote, "input.send", -32_012, "session moved")
+      FakeRemote.fail_next(remote, "input.send", -32_012, "payload_too_large")
 
-      :ok = Client.send_input(sid, "code-1", "move me")
-
-      eventually(fn -> Worker.status(sid).endpoint != first_endpoint end, 15_000)
-      assert Worker.status(sid).endpoint =~ "/worker/w2"
-
-      # the command was retried after the re-open, not dropped
-      eventually(fn -> Enum.count(calls(remote, "input.send")) == 2 end, 15_000)
-      assert List.last(calls(remote, "session.open"))["mode"] == "activate"
+      assert {:error, "payload_too_large"} = Client.send_input(sid, "code-1", "too much")
+      assert length(calls(remote, "input.send")) == 1
+      assert activate_calls(remote) == []
+      assert Client.capability(sid).up?
     end
   end
 
