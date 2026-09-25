@@ -95,11 +95,14 @@ Input arriving while busy is postponed with `gen_statem`'s `:postpone`, not a ha
 queue, and delivered at the turn boundary. **Replay**: an agent's state is a fold over its
 own events; a crashed agent rebuilds from the log and finishes what it started, never
 re-running a completed call. **Budgets** — turns, input and output tokens, working time —
-are checked before every request; a child gets a share of its parent's. Past `warn_at`
-(0.8) a dimension logs one warning; at the ceiling the agent asks the person attached, and
-a grant buys another slice, folded from the log (Decision 660). **Compaction** is planned
-against the whole prompt including cache reads, keeps the recent turns and logs the
-replacement conversation so replay is faithful.
+are checked before every request; a child gets a share of the tokens and time its parent
+has left, and the turns its parent was first given. Past `warn_at` (0.8) a dimension logs
+one warning; at the ceiling the agent asks the person attached, a grant buys another
+slice, folded from the log (Decision 660), and `always` lifts the one limit asked about
+(Decision 687). **A tool that keeps failing** — ten times in a row, by default — stops the
+turn before the next request and asks, whatever the budget says (Decision 687).
+**Compaction** is planned against the whole prompt including cache reads, keeps the recent
+turns and logs the replacement conversation so replay is faithful.
 
 ### 2.3 Tools
 

@@ -173,8 +173,14 @@ defmodule Troupe.RemoteTranslateTest do
 
     # The end of a turn, from the log: the same `idle` the live `agent_state` says, with the
     # durable event's `seq`, which is how a reader tells the two apart.
-    assert [%{type: :agent_state, data: %{to: :idle}, seq: 7}] =
+    assert [%{type: :agent_state, data: %{to: :idle} = idle, seq: 7}] =
              translate(durable("turn_ended", %{}))
+
+    refute Map.has_key?(idle, :reason)
+
+    # One the harness stopped says why (troupe-remote Decision 687).
+    assert [%{type: :agent_state, data: %{to: :idle, reason: "tool_failures"}}] =
+             translate(durable("turn_ended", %{"reason" => "tool_failures"}))
 
     assert [
              %{type: :remote_note, data: %{text: "cancelled"}},

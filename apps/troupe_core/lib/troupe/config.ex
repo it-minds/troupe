@@ -101,6 +101,12 @@ defmodule Troupe.Config do
             # Whether a spent budget is a question for the person attached (Decision 660) or
             # a stop. `false` where the budget is a contract — the plane's terms set it so.
             budget_asks: true,
+            # A tool that keeps failing (Decision 687): after this many failures of one tool
+            # in a row the model is told to stop and reconsider, and after the second the
+            # turn stops and the person attached is asked whether it goes on. Budgets lifted
+            # or not. `0` turns that step off.
+            tool_failures_note_at: 5,
+            tool_failures_stop_at: 10,
             shell_timeout_ms: 120_000,
             tool_output_limit: 60_000,
             watch: false,

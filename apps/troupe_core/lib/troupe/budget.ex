@@ -20,7 +20,10 @@ defmodule Troupe.Budget do
             started_at: nil,
             # The allowance as first given, once a grant has enlarged it: what `allow` on the
             # budget question buys again (Decision 660). `nil` until then.
-            original: nil
+            original: nil,
+            # Limits the person lifted with `always`, each for the rest of the session and
+            # each on its own: the others still ask when they are reached (Decision 687).
+            lifted: []
 
   @type t :: %__MODULE__{
           max_turns: pos_integer(),
@@ -31,7 +34,8 @@ defmodule Troupe.Budget do
           input_tokens: non_neg_integer(),
           output_tokens: non_neg_integer(),
           started_at: integer() | nil,
-          original: slice() | nil
+          original: slice() | nil,
+          lifted: [exhaustion()]
         }
 
   @type exhaustion :: :max_turns | :max_input_tokens | :max_output_tokens | :wall_clock
@@ -56,16 +60,20 @@ defmodule Troupe.Budget do
   Whether another LLM request is allowed, and if not, which limit stopped it.
 
   Checked immediately before starting a stream, so an exhausted agent makes zero
-  further calls rather than one more.
+  further calls rather than one more. A lifted limit never stops it.
   """
   @spec check(t()) :: :ok | {:exhausted, exhaustion()}
   def check(%__MODULE__{} = b) do
-    cond do
-      b.turns >= b.max_turns -> {:exhausted, :max_turns}
-      b.input_tokens >= b.max_input_tokens -> {:exhausted, :max_input_tokens}
-      b.output_tokens >= b.max_output_tokens -> {:exhausted, :max_output_tokens}
-      elapsed(b) >= b.wall_clock_ms -> {:exhausted, :wall_clock}
-      true -> :ok
+    [
+      max_turns: b.turns >= b.max_turns,
+      max_input_tokens: b.input_tokens >= b.max_input_tokens,
+      max_output_tokens: b.output_tokens >= b.max_output_tokens,
+      wall_clock: elapsed(b) >= b.wall_clock_ms
+    ]
+    |> Enum.find(fn {limit, spent?} -> spent? and limit not in b.lifted end)
+    |> case do
+      nil -> :ok
+      {limit, true} -> {:exhausted, limit}
     end
   end
 
@@ -96,21 +104,40 @@ defmodule Troupe.Budget do
   @doc """
   Carve a slice out for a delegation.
 
-  `share` is the child definition's `budget_share`. Turns are floored at 1 so a
-  delegation always gets at least one chance to answer; token and time slices are
-  taken from what the parent has left, not from its original allowance.
+  `share` is the child definition's `budget_share`, taken of the tokens and time the
+  parent has left: a child's usage is charged back to its parent and its clock runs on
+  the parent's time, so those really come out of the parent's allowance. Turns do not —
+  a child's turns cost its parent none — so a delegate gets the turns its parent was
+  first given, which its definition's `max_turns` may lower (Decision 687). A share of
+  the parent's *remaining* turns shrank with every turn the parent took, until an
+  `explore` asked to read one app ran out before it could report.
+
+  A limit the parent lifted is lifted for the child as well, and the child's figure for
+  it is a share of the parent's first allowance: of a limit it has passed, the parent
+  has nothing left to share.
   """
   @spec slice(t(), float()) :: t()
   def slice(%__MODULE__{} = parent, share) when is_float(share) and share > 0 do
     share = min(share, 1.0)
+    first = original(parent)
 
     %__MODULE__{
-      max_turns: max(trunc((parent.max_turns - parent.turns) * share), 1),
-      max_input_tokens: max(trunc(remaining_input(parent) * share), 1),
-      max_output_tokens: max(trunc(remaining_output(parent) * share), 1),
-      wall_clock_ms: max(trunc(remaining_ms(parent) * share), 1_000)
+      max_turns: first.turns,
+      max_input_tokens:
+        max(trunc(left(parent, :max_input_tokens, remaining_input(parent), first.input_tokens) * share), 1),
+      max_output_tokens:
+        max(trunc(left(parent, :max_output_tokens, remaining_output(parent), first.output_tokens) * share), 1),
+      wall_clock_ms: max(trunc(left(parent, :wall_clock, remaining_ms(parent), first.wall_clock_ms) * share), 1_000),
+      lifted: parent.lifted
     }
   end
+
+  @doc """
+  Lift one limit for the rest of the session: `always` on the budget question, which
+  asked about that limit alone (Decision 687). The others still ask when they are reached.
+  """
+  @spec lift(t(), exhaustion()) :: t()
+  def lift(%__MODULE__{} = b, limit), do: %{b | lifted: Enum.uniq(b.lifted ++ [limit])}
 
   @doc """
   One more slice of the same size (Decision 660): `allow` on the budget question buys the
@@ -155,6 +182,9 @@ defmodule Troupe.Budget do
 
   defp elapsed(%__MODULE__{started_at: nil}), do: 0
   defp elapsed(%__MODULE__{started_at: at}), do: System.monotonic_time(:millisecond) - at
+
+  defp left(%__MODULE__{lifted: lifted}, limit, remaining, first),
+    do: if(limit in lifted, do: first, else: remaining)
 
   defp remaining_input(b), do: max(b.max_input_tokens - b.input_tokens, 0)
   defp remaining_output(b), do: max(b.max_output_tokens - b.output_tokens, 0)

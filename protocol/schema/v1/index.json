@@ -99,6 +99,8 @@
     "events/todo_updated.json",
     "events/tool_call_completed.json",
     "events/tool_call_started.json",
+    "events/tool_failures_ask_answered.json",
+    "events/tool_failures_ask_started.json",
     "events/tool_results.json",
     "events/tools_registered.json",
     "events/tools_unregistered.json",
