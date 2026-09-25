@@ -332,7 +332,9 @@ so it cannot be replayed against the API server. StatefulSets are `OnDelete` bec
 holds live sessions. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
 cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
-than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for.
+than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for, a
+DNS rule through Cilium's proxy so it can learn addresses, and no wide rule beside it,
+since Cilium admits the union of every policy on a pod.
 
 ### 6.4 The admin surface
 
