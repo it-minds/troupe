@@ -57,6 +57,12 @@ defmodule Troupe.Operator.ClusterTest do
       for name <- names do
         namespace = "troupe-w-#{name}"
 
+        # This operator was started without Cilium, and the profile says so where the
+        # plane reads it: no egress by hostname, only the allowlist checked at admission.
+        egress = condition(fetch_profile(conn, name), "EgressByHostname")
+        assert %{"status" => "False", "reason" => "NoCilium"} = egress
+        assert egress["message"] =~ "checked at admission"
+
         assert fetch(conn, "v1", "Namespace", name: namespace)
         assert fetch(conn, "v1", "ServiceAccount", namespace: namespace, name: "troupe-worker")
         assert fetch(conn, "apps/v1", "StatefulSet", namespace: namespace, name: namespace)

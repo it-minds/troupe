@@ -13,6 +13,11 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
   team's work may run on somebody's build box. So every guarantee is listed by name and
   marked given or not given, per provisioner and again per profile.
 
+  Where a weaker one stands in, the page says which rather than round it either way. A
+  Kubernetes profile without Cilium does not have egress by hostname — its allowlist is
+  checked at admission, not on the wire — and "enforced" would be a claim the cluster
+  never made, while "not given" alone would hide the check it does make.
+
   ## The friction is the feature
 
   A profile no substrate enforces may be granted to a team only where a platform admin has
@@ -147,23 +152,40 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
   defp describe(%{message: message}), do: message
 
   # Every guarantee any substrate here names, in a stable order, so the table has rows
-  # even where one provisioner has never heard of one of them.
+  # even where one provisioner has never heard of one of them. A weaker one given in
+  # place of a missing one is not a row of its own: it is what that row's cell says.
   defp every_guarantee(substrates) do
     substrates
-    |> Enum.flat_map(&(&1.guarantees ++ &1.missing))
+    |> Enum.flat_map(&((&1.guarantees ++ &1.missing) -- Map.values(&1.instead)))
     |> Enum.uniq()
     |> Enum.sort()
   end
 
   defp gives?(substrate, guarantee), do: guarantee in substrate.guarantees
 
+  # A weaker guarantee given in its place is named, because "not given" alone would say
+  # that a cluster without Cilium checks the allowlist nowhere at all.
+  defp not_given(substrate, guarantee) do
+    case Map.fetch(substrate.instead, guarantee) do
+      {:ok, weaker} -> "not given: " <> guarantee_name(weaker)
+      :error -> "not given"
+    end
+  end
+
   defp guarantee_name("admission_policy"), do: "admission policy"
   defp guarantee_name("network_policy"), do: "network policy"
   defp guarantee_name("fqdn_egress"), do: "egress by hostname"
+  defp guarantee_name("egress_checked_at_admission"), do: "egress allowlist checked at admission"
   defp guarantee_name("disruption_budget"), do: "disruption budget"
   defp guarantee_name(other), do: String.replace(to_string(other), "_", " ")
 
-  defp unenforced(profiles), do: Enum.filter(profiles, &(&1.missing_guarantees != []))
+  # What a weaker guarantee amounts to, said where a profile is missing the stronger one.
+  defp instead_note("egress_checked_at_admission"),
+    do: "the egress allowlist is checked at admission, not on the wire"
+
+  defp instead_note(other), do: guarantee_name(other) <> " instead"
+
+  defp unenforced(profiles), do: Enum.filter(profiles, & &1.unenforced)
 
   defp allowed(teams), do: Enum.filter(teams, & &1.allow_unenforced_workers)
 
@@ -195,12 +217,12 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
               </tr>
             </thead>
             <tbody>
-              <tr :for={guarantee <- @guarantees}>
+              <tr :for={guarantee <- @guarantees} id={"substrate-#{guarantee}"}>
                 <th scope="row">{guarantee_name(guarantee)}</th>
                 <td :for={substrate <- @substrates}>
                   <span :if={gives?(substrate, guarantee)}>enforced</span>
                   <span :if={not gives?(substrate, guarantee)} class="rung rung--deployment">
-                    not given
+                    {not_given(substrate, guarantee)}
                   </span>
                 </td>
               </tr>
@@ -209,9 +231,13 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
         </div>
 
         <p class="field-help">
-          Every one of these is enforced by Kubernetes whether or not the plane is running,
-          which is what the rest of the design leans on. A machine somebody already has is
-          not a cluster, and the honest answer there is this list rather than a flag.
+          Egress by hostname is Cilium's, and a cluster need not have it. A Kubernetes profile
+          has it where the operator reports that it wrote that profile's FQDN rules, which the
+          next table says profile by profile; without them the allowlist is checked at
+          admission and at every reconcile, and a worker reaches any public host on 443 and
+          80. The rest are enforced by Kubernetes whether or not the plane is running, which
+          is what the rest of the design leans on. A machine somebody already has is not a
+          cluster, and the honest answer there is this list rather than a flag.
         </p>
       </section>
 
@@ -229,7 +255,7 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
               </tr>
             </thead>
             <tbody>
-              <tr :for={profile <- @profiles}>
+              <tr :for={profile <- @profiles} id={"guarantees-#{profile.name}"}>
                 <th scope="row">{profile.name}</th>
                 <td>{profile.provisioner}</td>
                 <td>{profile.replicas} × {profile.sessions_per_pod}</td>
@@ -240,6 +266,9 @@ defmodule Troupe.Plane.Web.Live.Provisioners do
                     class="rung rung--deployment"
                   >
                     {guarantee_name(missing)}
+                  </span>
+                  <span :for={{_missing, weaker} <- profile.guarantees_instead} class="field-help">
+                    {instead_note(weaker)}
                   </span>
                 </td>
               </tr>

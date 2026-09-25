@@ -66,6 +66,37 @@ defmodule Troupe.Operator.Resources do
     |> MapSet.new()
   end
 
+  @doc """
+  Whether a profile's workers have egress by hostname, as its `EgressByHostname`
+  condition says it: the objects `for_profile/3` produced, and those of them that did not
+  apply.
+
+  The plane shows this per profile and cannot work it out for itself. Whether there is a
+  `CiliumNetworkPolicy` at all is this installation's setting, and whether the cluster
+  took it is this pass's apply; both are the operator's to know. Anything short of both
+  is an allowlist checked at admission and at every reconcile, which is less, and the
+  condition says which it is rather than leave the plane to claim the stronger one.
+  """
+  @spec egress_by_hostname([map()], [map()]) :: {boolean(), String.t(), String.t()}
+  def egress_by_hostname(desired, failed) do
+    cilium? = &(&1["kind"] == "CiliumNetworkPolicy")
+
+    cond do
+      not Enum.any?(desired, cilium?) ->
+        {false, "NoCilium",
+         "no CiliumNetworkPolicy: the egress allowlist is checked at admission and at " <>
+           "every reconcile, not on the wire, and a worker reaches any public host on 443 and 80"}
+
+      Enum.any?(failed, cilium?) ->
+        {false, "CiliumPolicyNotApplied",
+         "the CiliumNetworkPolicy did not apply, so nothing limits egress to the allowlist by hostname"}
+
+      true ->
+        {true, "CiliumFQDN",
+         "a worker reaches the hosts its profile names and nothing else outside the cluster"}
+    end
+  end
+
   # -- namespace and identity -------------------------------------------------
 
   # `troupe.dev/workers=true` is what the plane's own NetworkPolicy selects on: the

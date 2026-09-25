@@ -15,6 +15,7 @@ defmodule Troupe.Plane.PanelTest do
     Admin,
     Audit,
     Bundles,
+    FakeWorkerProfiles,
     Fleet,
     Identity,
     Ledger,
@@ -1202,6 +1203,39 @@ You build."}
 
       assert html =~ "not given"
       assert html =~ "laptops"
+    end
+
+    test "says a Kubernetes profile has egress by hostname only where the operator reports it",
+         context do
+      # `dev` is on a cluster whose operator wrote its FQDN rules, and `ux` on one without
+      # Cilium, where the allowlist is checked at admission and not on the wire.
+      FakeWorkerProfiles.start(%{
+        "dev" => FakeWorkerProfiles.egress_by_hostname(true),
+        "ux" => FakeWorkerProfiles.egress_by_hostname(false)
+      })
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/provisioners")
+
+      dev = view |> element("#guarantees-dev") |> render()
+      assert dev =~ "everything is enforced"
+      refute dev =~ "egress by hostname"
+
+      ux = view |> element("#guarantees-ux") |> render()
+      refute ux =~ "everything is enforced"
+      assert ux =~ "egress by hostname"
+      assert ux =~ "the egress allowlist is checked at admission, not on the wire"
+
+      # In general, before any profile, Kubernetes promises the weaker one: which a
+      # profile gets is the operator's to say, profile by profile, as above.
+      kubernetes = view |> element("#substrate-fqdn_egress") |> render()
+      assert kubernetes =~ "checked at admission"
+      assert html =~ "Egress by hostname is Cilium"
+
+      # And neither profile is one a team needs allowing onto: the allowlist is still
+      # admission's to enforce, which is not the case on somebody's build box.
+      refute html =~ "No team may be granted dev"
+      refute html =~ "No team may be granted ux"
     end
 
     test "and says plainly that this is not a way around the policy", context do

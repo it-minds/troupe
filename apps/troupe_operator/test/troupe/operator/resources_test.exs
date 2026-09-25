@@ -601,6 +601,31 @@ defmodule Troupe.Operator.ResourcesTest do
       assert namespace_rule("troupe-system", 9000) in rules
     end
 
+    test "egress by hostname is reported only where the CiliumNetworkPolicy was written and applied",
+         %{profile: profile, policy: policy} do
+      # The plane shows this per profile and has no other way to know it, so each case is
+      # pinned: a `True` here is a guarantee the console will claim.
+      without = Resources.for_profile(profile, policy, %Settings{cilium_available: false})
+
+      assert {false, "NoCilium", message} = Resources.egress_by_hostname(without, [])
+      assert message =~ "checked at admission"
+      assert message =~ "any public host on 443 and 80"
+
+      with_cilium = Resources.for_profile(profile, policy, %Settings{cilium_available: true})
+      assert {true, "CiliumFQDN", _message} = Resources.egress_by_hostname(with_cilium, [])
+
+      # `ciliumAvailable: true` on a cluster without Cilium: the NetworkPolicy applies and
+      # the CiliumNetworkPolicy is refused, so there are no rules by hostname to speak of.
+      failed = all(with_cilium, "CiliumNetworkPolicy")
+
+      assert {false, "CiliumPolicyNotApplied", _message} =
+               Resources.egress_by_hostname(with_cilium, failed)
+
+      # Any other failure is `Ready`'s business and leaves the FQDN rules standing.
+      other = all(with_cilium, "PodDisruptionBudget")
+      assert {true, "CiliumFQDN", _message} = Resources.egress_by_hostname(with_cilium, other)
+    end
+
     test "a wildcard in the profile's egress becomes a pattern, and an exact name stays a name",
          %{policy: policy} do
       resources =

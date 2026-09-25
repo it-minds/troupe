@@ -175,7 +175,9 @@ defmodule Troupe.Plane.Admin do
   Asked of the provisioners rather than of any profile: what a substrate guarantees is a
   property of the substrate, and a row that claimed to be enforced would be a claim the
   cluster never made. A *profile's* own answer is in `profiles_list/1`, because a
-  provisioner may give less for one profile than for another.
+  provisioner may give less for one profile than for another. Kubernetes does: egress by
+  hostname is the operator's to report per profile, so in general it is the weaker
+  guarantee, named in `instead` against the one it stands in for.
 
   Here rather than read out of `Fleet` by a screen, for the reason every other answer is
   here: the console is an admin API client and gets no private path into the plane.
@@ -186,14 +188,15 @@ defmodule Troupe.Plane.Admin do
       {:ok,
        Enum.map(Provisioner.implementations(), fn module ->
          # A bare profile of this provisioner, which is what "in general" can mean: the
-         # question is what the substrate offers before anybody configures anything.
-         profile = %Fleet.Profile{name: module.name(), provisioner: module.name()}
-         given = module.guarantees(profile)
+         # question is what the substrate offers before anybody configures anything. It
+         # has no name, so nothing mistakes it for a profile somebody called `kubernetes`.
+         account = Provisioner.account(%Fleet.Profile{name: nil, provisioner: module.name()})
 
          %{
            name: module.name(),
-           guarantees: Enum.map(given, &to_string/1),
-           missing: Provisioner.guarantees() |> Kernel.--(given) |> Enum.map(&to_string/1)
+           guarantees: Enum.map(account.given, &to_string/1),
+           missing: Enum.map(account.missing, &to_string/1),
+           instead: guarantees_instead(account)
          }
        end)}
     end
@@ -888,7 +891,10 @@ defmodule Troupe.Plane.Admin do
       # A grant to a profile that does not exist is the grant path's business, not this
       # check's, and answering `:ok` here leaves that refusal where it already is.
       is_nil(profile) -> :ok
-      Provisioner.missing(profile) == [] -> :ok
+      # Missing a guarantee with something weaker in its place is not this: Kubernetes
+      # without Cilium still enforces the allowlist at admission. The console says what
+      # such a profile lacks; the friction is for substrates with nothing there at all.
+      not Provisioner.unenforced?(profile) -> :ok
       team.allow_unenforced_workers -> :ok
       true -> unenforced_refusal(team, profile)
     end
@@ -2663,6 +2669,7 @@ defmodule Troupe.Plane.Admin do
 
   defp profile_summary(profile) do
     workers = Fleet.list_workers(profile.name)
+    guarantees = Provisioner.account(profile)
 
     %{
       name: profile.name,
@@ -2683,7 +2690,12 @@ defmodule Troupe.Plane.Admin do
       # Named individually rather than summed into a flag: "unenforced" is not a useful
       # thing to tell somebody deciding whether their team's work may run there.
       provisioner: profile.provisioner,
-      missing_guarantees: profile |> Provisioner.missing() |> Enum.map(&to_string/1),
+      missing_guarantees: Enum.map(guarantees.missing, &to_string/1),
+      # What stands in for a missing one, which is weaker and not nothing: without
+      # Cilium, the allowlist checked at admission in place of egress by hostname.
+      guarantees_instead: guarantees_instead(guarantees),
+      # Whether a grant to a team needs a platform admin's say-so first.
+      unenforced: guarantees.unenforced,
       conditions: Provision.conditions(profile),
       pods:
         Enum.map(workers, fn worker ->
@@ -2707,6 +2719,12 @@ defmodule Troupe.Plane.Admin do
       capacity: Enum.sum(Enum.map(workers, & &1.capacity)),
       active_sessions: Enum.sum(Enum.map(workers, & &1.active_sessions))
     }
+  end
+
+  # A missing guarantee and the weaker one given in its place, by name:
+  # `%{"fqdn_egress" => "egress_checked_at_admission"}` for Kubernetes without Cilium.
+  defp guarantees_instead(account) do
+    Map.new(account.instead, fn {missing, weaker} -> {to_string(missing), to_string(weaker)} end)
   end
 
   defp bundle_state(profile) do

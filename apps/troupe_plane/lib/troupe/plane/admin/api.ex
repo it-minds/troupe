@@ -320,7 +320,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.provisioners.list",
       function: :provisioners,
       summary:
-        "What can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget. A profile on a substrate that gives none of them may only be granted to a team a platform admin has allowed.",
+        "What can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget. Where a weaker one stands in for a missing one, `instead` names it: Kubernetes has egress by hostname only where the operator reports Cilium for a profile, and otherwise the allowlist checked at admission. A profile on a substrate that gives none of them may only be granted to a team a platform admin has allowed.",
       risk: :read
     },
     %Method{

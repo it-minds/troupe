@@ -78,8 +78,9 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run |
+| `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist by name and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
 
-`SecretMissing` and `UpgradePending` do not affect `Ready`. `kubectl -n troupe-system get
+`SecretMissing`, `UpgradePending` and `EgressByHostname` do not affect `Ready`. `kubectl -n troupe-system get
 wp` shows `Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains
@@ -136,6 +137,12 @@ whether Cilium is there:
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the
 `CiliumNetworkPolicy`.
+
+The operator says which on each profile, as the `EgressByHostname` condition, and the
+plane reads it there: the console's **Provisioners** screen and `admin.profiles.list` give
+a profile egress by hostname only where the condition is `True`, and otherwise name it as
+missing with the allowlist checked at admission in its place. A team is still granted such
+a profile without `allow_unenforced_workers`, which is for substrates outside Kubernetes.
 
 ## 5. TeamVolume
 

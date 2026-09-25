@@ -54,12 +54,32 @@ defmodule Troupe.Plane.Fleet.Provisioner do
   Named individually because done item 3 is that the console says *which* guarantee is
   missing. "Unenforced" is not a useful thing to tell somebody who has to decide whether
   their team's session may run there.
+
+  `egress_checked_at_admission` is the weaker one a Kubernetes profile has without Cilium:
+  the allowlist is checked when the profile is admitted and at every reconcile, and not on
+  the wire, where a worker reaches any public host on 443 and 80. It stands in for
+  `fqdn_egress` rather than being counted as it.
   """
-  @type guarantee :: :admission_policy | :network_policy | :fqdn_egress | :disruption_budget
+  @type guarantee ::
+          :admission_policy
+          | :network_policy
+          | :fqdn_egress
+          | :egress_checked_at_admission
+          | :disruption_budget
 
   @guarantees ~w(admission_policy network_policy fqdn_egress disruption_budget)a
 
-  @doc "Every guarantee a provisioner may claim."
+  # A weaker guarantee a provisioner may give where it cannot give one of the above, and
+  # the one it stands in for. Named so that what a profile has can be said exactly,
+  # rather than rounded up to the stronger guarantee or down to nothing.
+  @weaker %{egress_checked_at_admission: :fqdn_egress}
+
+  @doc """
+  Every guarantee a profile can be missing.
+
+  A weaker one given in place of one of these does not count as it: the profile is still
+  missing the stronger one, and `account/1` says what stands in.
+  """
   @spec guarantees() :: [guarantee()]
   def guarantees, do: @guarantees
 
@@ -139,11 +159,47 @@ defmodule Troupe.Plane.Fleet.Provisioner do
   is a comparison, and what a person deciding needs is a list of what is missing.
   """
   @spec missing(Profile.t()) :: [guarantee()]
-  def missing(%Profile{} = profile) do
-    @guarantees -- __MODULE__.for(profile).guarantees(profile)
-  end
+  def missing(%Profile{} = profile), do: account(profile).missing
 
-  @doc "Whether anything is missing at all."
+  @doc """
+  Whether a guarantee is missing with nothing in its place, which is what the ladder
+  refuses a team on without a platform admin's say-so.
+
+  A weaker guarantee in place of a missing one is enough here: a Kubernetes profile
+  without Cilium still has its allowlist enforced at admission, and is not the build box
+  the ladder exists for. It is still missing egress by hostname, and says so.
+  """
   @spec unenforced?(Profile.t()) :: boolean()
-  def unenforced?(%Profile{} = profile), do: missing(profile) != []
+  def unenforced?(%Profile{} = profile), do: account(profile).unenforced
+
+  @doc """
+  What a profile's workers get, asked of its provisioner once.
+
+  `given` is what the provisioner guarantees, weaker ones included; `missing` is every
+  guarantee it does not give; `instead` maps a missing one to the weaker one given in its
+  place; and `unenforced` is whether any is missing with nothing instead. One call, because
+  a Kubernetes provisioner asks the cluster to answer.
+  """
+  @spec account(Profile.t()) :: %{
+          given: [guarantee()],
+          missing: [guarantee()],
+          instead: %{guarantee() => guarantee()},
+          unenforced: boolean()
+        }
+  def account(%Profile{} = profile) do
+    given = __MODULE__.for(profile).guarantees(profile)
+    missing = @guarantees -- given
+
+    instead =
+      for weaker <- given, Map.get(@weaker, weaker) in missing, into: %{} do
+        {Map.fetch!(@weaker, weaker), weaker}
+      end
+
+    %{
+      given: given,
+      missing: missing,
+      instead: instead,
+      unenforced: missing -- Map.keys(instead) != []
+    }
+  end
 end
