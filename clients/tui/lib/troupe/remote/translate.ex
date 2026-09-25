@@ -21,13 +21,20 @@ defmodule Troupe.Remote.Translate do
   @typedoc """
   What the translator has to remember between events of one session, and what the
   window it opens says the session works in: `:remote` for a worker on a plane,
-  `:shared` or `:worktree` for a session in the daemon on this machine.
+  `:shared` or `:worktree` for a session in the daemon on this machine. `budget` is
+  each budget question not yet answered: whether it is still asked, who asked, and
+  what its `budget_ask_started` said.
   """
-  @type memory :: %{agents: MapSet.t(), unknown: MapSet.t(), isolation: atom()}
+  @type memory :: %{
+          agents: MapSet.t(),
+          unknown: MapSet.t(),
+          isolation: atom(),
+          budget: %{String.t() => {:asked | :ended, String.t(), map()}}
+        }
 
   @spec memory(atom()) :: memory()
   def memory(isolation \\ :remote),
-    do: %{agents: MapSet.new(), unknown: MapSet.new(), isolation: isolation}
+    do: %{agents: MapSet.new(), unknown: MapSet.new(), isolation: isolation, budget: %{}}
 
   @doc """
   One durable event as zero or more local events, plus the memory to carry on
@@ -235,22 +242,28 @@ defmodule Troupe.Remote.Translate do
       # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
       # at the screen, with options a client may draw as a menu.
       # The window already knows a `:budget` item and answers it with y / n / a, so the
-      # question the harness also wrote is not drawn a second time.
+      # question the harness also wrote is not drawn a second time. A cancel ends it, but
+      # it is still owed: the next turn's gate asks it again under the same id, with a
+      # `question_asked` alone, and that one is drawn as the item it was.
+      "question_asked" when budget_question? ->
+        asked_again(emit, call_id(data), memory)
+
       type when type in ["question_asked", "question_answered"] and budget_question? ->
         {[], memory}
 
       "budget_ask_started" ->
-        {[
-           emit.(:budget_ask_started, %{
-             call_id: call_id(data),
-             detail: data["detail"] || "budget exhausted",
-             dimension: dimension(data["dimension"])
-           })
-         ], memory}
+        started = %{
+          call_id: call_id(data),
+          detail: data["detail"] || "budget exhausted",
+          dimension: dimension(data["dimension"])
+        }
+
+        {[emit.(:budget_ask_started, started)],
+         put_in(memory, [:budget, started.call_id], {:asked, agent, started})}
 
       "budget_ask_answered" ->
         {[emit.(:budget_ask_answered, %{call_id: call_id(data), decision: data["decision"]})],
-         memory}
+         %{memory | budget: Map.delete(memory.budget, call_id(data))}}
 
       # The failure guard's question (troupe-remote Decision 687) is drawn as the question it
       # rides on, the other way round from the budget's: its options are the harness's own
@@ -328,7 +341,7 @@ defmodule Troupe.Remote.Translate do
         {[
            emit.(:cancelled, %{}),
            emit.(:agent_state, %{to: :idle, reason: "cancelled"})
-         ], memory}
+         ], budget_cancelled(memory, agent)}
 
       "compacted" ->
         {[emit.(:remote_note, %{text: "context compacted"})], memory}
@@ -438,6 +451,31 @@ defmodule Troupe.Remote.Translate do
       _ ->
         {[], memory}
     end
+  end
+
+  # Drawn again only when a cancel had ended it. Asked again with no cancel between, after
+  # a restart, it never left the window.
+  defp asked_again(emit, id, memory) do
+    case memory.budget do
+      %{^id => {:ended, agent, started}} ->
+        {[emit.(:budget_ask_started, started)],
+         put_in(memory, [:budget, id], {:asked, agent, started})}
+
+      _ ->
+        {[], memory}
+    end
+  end
+
+  # The model's own rule for what a cancel ends: the agent it reached and every one under it.
+  defp budget_cancelled(memory, path) do
+    ended =
+      Map.new(memory.budget, fn {id, {state, agent, started}} ->
+        if agent == path or String.starts_with?(agent, path <> "/"),
+          do: {id, {:ended, agent, started}},
+          else: {id, {state, agent, started}}
+      end)
+
+    %{memory | budget: ended}
   end
 
   # Logged once per type, then rendered like any other note: an unknown event is

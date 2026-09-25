@@ -8,11 +8,13 @@ defmodule Troupe.RecordedQuestionsTest do
   waiting — or with a cancel of the agent that asked or of one above it. The budget's
   and the failure guard's question have no call of their own, and also end with the
   harness's `budget_ask_answered` or `tool_failures_ask_answered`, which is all there is
-  when nobody is there to ask.
+  when nobody is there to ask. One of those a cancel ended is still owed, and the next
+  message makes the gate ask it again under the same id.
 
   The logs are `test/fixtures/questions/` at the repository's root, written by sessions
   against the scripted model and read here the way a daemon's worker hands them over:
-  through `Troupe.Remote.Translate`. `open` stops while the question still waits.
+  through `Troupe.Remote.Translate`. `open` stops while the question still waits, and
+  `budget_asked_again` goes on from `budget_cancelled` to the question asked again.
   """
 
   use ExUnit.Case, async: true
@@ -39,9 +41,23 @@ defmodule Troupe.RecordedQuestionsTest do
     assert [%{kind: :question, call_id: "call_16", agent_path: "root"}] = pending("open")
   end
 
-  defp pending(name) do
+  test "the budget question a cancel ended is pending again once the gate asks it again" do
+    assert [%{kind: :budget, call_id: "budget-1", agent_path: "root", detail: "turns 1/1 (100%)"}] =
+             pending("budget_asked_again")
+  end
+
+  # A session that comes back asks the question it slept on again, with no cancel between:
+  # the same log without its cancel.
+  test "the budget question asked again with no cancel between is drawn once" do
+    events = Enum.reject(recorded("budget_asked_again"), &(&1["type"] == "cancelled"))
+    assert [%{kind: :budget, call_id: "budget-1"}] = fold(events)
+  end
+
+  defp pending(name), do: fold(recorded(name))
+
+  defp fold(recorded) do
     {events, _memory} =
-      Enum.flat_map_reduce(recorded(name), Translate.memory(), &Translate.durable("s-1", &1, &2))
+      Enum.flat_map_reduce(recorded, Translate.memory(), &Translate.durable("s-1", &1, &2))
 
     "s-1"
     |> Model.rebuild("/w", events)
