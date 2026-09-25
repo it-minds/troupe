@@ -23,7 +23,9 @@ defmodule Troupe.ModelsReportTest do
     previous = Map.new(@vars, &{&1, System.get_env(&1)})
     Enum.each(@vars, &System.delete_env/1)
 
-    base = Path.join(System.tmp_dir!(), "troupe-models-report-#{System.unique_integer([:positive])}")
+    base =
+      Path.join(System.tmp_dir!(), "troupe-models-report-#{System.unique_integer([:positive])}")
+
     File.mkdir_p!(Path.join(base, "workspace"))
     System.put_env("TROUPE_CONFIG_HOME", Path.join(base, "config"))
     System.put_env("TROUPE_STATE_HOME", Path.join(base, "state"))
@@ -41,7 +43,9 @@ defmodule Troupe.ModelsReportTest do
   test "with no key, names `troupe config` as the next step", %{workspace: workspace} do
     out = capture_io(fn -> assert Runner.main(["models", "--workspace", workspace]) == 0 end)
 
-    assert out =~ "next step: anthropic has no key, so no model can be asked. Run `troupe config` to set up a provider."
+    assert out =~
+             "next step: anthropic has no key, so no model can be asked. Run `troupe config` to set up a provider."
+
     refute out =~ "Write a provider into"
   end
 
