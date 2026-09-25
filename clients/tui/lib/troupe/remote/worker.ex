@@ -813,7 +813,7 @@ defmodule Troupe.Remote.Worker do
       state,
       state.agent || "session",
       :remote_status,
-      Map.put(capability, :endpoint, state.endpoint)
+      capability |> Map.put(:endpoint, state.endpoint) |> Map.put(:plane_url, state.plane_url)
     )
   end
 

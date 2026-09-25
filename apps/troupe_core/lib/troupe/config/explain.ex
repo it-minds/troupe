@@ -282,7 +282,7 @@ defmodule Troupe.Config.Explain do
   def validate(_workspace, path, _opts) when is_binary(path) do
     path = Path.expand(path)
     found = Layers.check(layer_of(path), path)
-    report(found.errors ++ found.warnings, "#{path} is valid")
+    report(found.errors ++ found.warnings, "#{Troupe.Paths.display(path)} is valid")
   end
 
   def validate(workspace, nil, opts) do
@@ -291,7 +291,7 @@ defmodule Troupe.Config.Explain do
         report(error.issues, nil)
 
       {:ok, _config, layers} ->
-        read = layers.files |> Enum.filter(& &1.exists?) |> Enum.map_join(", ", & &1.path)
+        read = layers.files |> Enum.filter(& &1.exists?) |> Enum.map_join(", ", &Troupe.Paths.display(&1.path))
         report(layers.refusals ++ layers.warnings, "valid: " <> if(read == "", do: "no config files", else: read))
     end
   end
