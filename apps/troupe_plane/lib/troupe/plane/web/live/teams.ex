@@ -523,7 +523,10 @@ defmodule Troupe.Plane.Web.Live.Teams do
                 </option>
               </select>
             </label>
-            <p class="field-help">When the total goes back to zero.</p>
+            <p class="field-help">
+              When the total goes back to zero: monthly on the 1st of the month (UTC),
+              never not at all.
+            </p>
           </div>
 
           <div class="setting">

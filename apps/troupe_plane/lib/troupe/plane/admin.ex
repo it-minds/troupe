@@ -2771,11 +2771,13 @@ defmodule Troupe.Plane.Admin do
       # What the team has actually spent, against what it promised. Both are aggregates
       # over an append-only table and both go through `Ledger.Cache`, so a page that is
       # reloaded costs a lookup rather than a scan.
-      spent_micros: Ledger.spent_micros(team.id),
+      spent_micros: Ledger.spent_micros(team),
       reserved_micros: team.id |> Ledger.open_reservations() |> Map.values() |> Enum.sum(),
       # The five models the money went on. Five because it is a summary on a page about
-      # something else; the whole list is what `Ledger.breakdown/3` is for.
-      spend_by_model: team.id |> Ledger.breakdown(:model) |> Enum.take(5)
+      # something else; the whole list is what `Ledger.breakdown/3` is for. Over the same
+      # period as the figure above it, or the two would not add up.
+      spend_by_model:
+        team.id |> Ledger.breakdown(:model, from: Ledger.period_start(team)) |> Enum.take(5)
     }
   end
 
@@ -2786,7 +2788,7 @@ defmodule Troupe.Plane.Admin do
       # The ceiling means nothing without the period it is measured over, and Overview
       # renders both in the same sentence.
       budget_period: team.budget_period,
-      spent_micros: Ledger.spent_micros(team.id),
+      spent_micros: Ledger.spent_micros(team),
       # `open_reservations/1` answers `%{session_id => amount_micros}`, not a list of
       # rows: mapping `& &1.amount_micros` over it hands the function a `{id, amount}`
       # tuple and raises `BadMapError`. Harmless while a team had nothing reserved —

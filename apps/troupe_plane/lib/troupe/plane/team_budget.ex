@@ -77,7 +77,7 @@ defmodule Troupe.Plane.TeamBudget do
     Singleton.call(__MODULE__, team_id(team), {:record_batch, records})
   end
 
-  @doc "What this actor believes, for tests and diagnostics."
+  @doc "What this actor believes, reloaded, for the Budgets page, tests and diagnostics."
   @spec inspect_state(Team.t() | Ecto.UUID.t()) :: map()
   def inspect_state(team), do: Singleton.call(__MODULE__, team_id(team), :inspect)
 
@@ -190,7 +190,13 @@ defmodule Troupe.Plane.TeamBudget do
     end
   end
 
-  def handle_call(:inspect, _from, state), do: {:reply, summary(state), state}
+  # Reloaded too, as `PersonBudget` does. What it spent is a figure for the period it was
+  # last loaded in, and the Budgets page asking after midnight on the 1st would otherwise be
+  # shown last month's total until somebody next tried to start a session.
+  def handle_call(:inspect, _from, state) do
+    state = load(state)
+    {:reply, summary(state), state}
+  end
 
   # -- state ------------------------------------------------------------------
 
