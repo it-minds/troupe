@@ -193,6 +193,7 @@ export interface TriggerRun {
   status: string | null;
   done_reason: string | null;
   pending_approvals: number | null;
+  pending_questions?: number | null;
   cost_micros: number | null;
   reviewed_by: string | null;
   reviewed_at: string | null;

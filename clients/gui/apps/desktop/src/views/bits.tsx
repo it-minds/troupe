@@ -39,12 +39,12 @@ export function Pill({ status, children, title }: { status: Status; children?: s
 /**
  * What a row's state is, in the design's words rather than the protocol's.
  *
- * An approval waiting on somebody outranks everything else — that is the one state the
- * whole colour scheme is built around — and a session that stopped on an error outranks
- * the fact that it is technically idle.
+ * An approval or a question waiting on somebody outranks everything else — that is the
+ * one state the whole colour scheme is built around — and a session that stopped on an
+ * error outranks the fact that it is technically idle.
  */
-export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprovals" | "doneReason">): Status {
-  if (row.pendingApprovals > 0 || row.status === "waiting") return "waiting";
+export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprovals" | "pendingQuestions" | "doneReason">): Status {
+  if (row.pendingApprovals > 0 || row.pendingQuestions > 0 || row.status === "waiting") return "waiting";
   if (row.state === "read_only") return "readonly";
   if (row.doneReason === "budget_exhausted" || row.doneReason === "llm_error" || row.status === "interrupted") return "error";
   if (row.status && ["thinking", "acting", "compacting"].includes(row.status)) return "running";

@@ -101,6 +101,8 @@ export interface SessionRow {
   status: string | null;
   done_reason: string | null;
   pending_approvals: number | null;
+  /** Absent from a plane older than the column. */
+  pending_questions?: number | null;
   cost_micros: number | null;
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   terms: Record<string, unknown> | null;
@@ -339,9 +341,10 @@ export class PlaneClient {
   }
 
   /**
-   * The plane's index, not a replay: `status`, `done_reason`, `pending_approvals` and
-   * `cost_micros` are what the worker last reported over the control channel, which is
-   * what makes a list of fifty sessions one request instead of fifty logs.
+   * The plane's index, not a replay: `status`, `done_reason`, `pending_approvals`,
+   * `pending_questions` and `cost_micros` are what the worker last reported over the
+   * control channel, which is what makes a list of fifty sessions one request instead of
+   * fifty logs.
    *
    * Filters are top-level params, not a nested `filter` object.
    */

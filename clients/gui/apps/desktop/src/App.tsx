@@ -12,7 +12,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { JSX } from "react";
-import { awaitingApproval } from "@troupe/client";
+import { awaitingYou } from "@troupe/client";
 import type { AuthSession } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
@@ -134,7 +134,7 @@ export function App(): JSX.Element {
     );
   }
 
-  const waiting = awaitingApproval(snapshot.rows).length;
+  const waiting = awaitingYou(snapshot.rows).length;
   const planeError = snapshot.sources["plane"]?.error ?? null;
   const row = where.screen === "session" ? snapshot.rows.find((r) => r.id === where.id) : undefined;
   const caps = capabilities();

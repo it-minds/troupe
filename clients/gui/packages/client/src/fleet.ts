@@ -31,6 +31,8 @@ export interface FleetRow {
   status: string | null;
   doneReason: string | null;
   pendingApprovals: number;
+  /** Questions still open: the agent's `ask_user`, or the budget's or the failure guard's. */
+  pendingQuestions: number;
   costMicros: number | null;
   lastActiveAt: string | null;
   pinned: boolean;
@@ -61,6 +63,7 @@ export function rowFromPlane(row: SessionRow, source = "plane"): FleetRow {
     status: row.status ?? null,
     doneReason: row.done_reason ?? null,
     pendingApprovals: row.pending_approvals ?? 0,
+    pendingQuestions: row.pending_questions ?? 0,
     costMicros: row.cost_micros ?? null,
     lastActiveAt: row.last_active_at ?? null,
     pinned: Boolean(row.pinned),
@@ -260,9 +263,18 @@ export function filterRows(rows: FleetRow[], filter: FleetFilter): FleetRow[] {
   });
 }
 
-/** Every session with an approval waiting, which is what the inbox is a list of. */
+/** Every session with an approval waiting. */
 export function awaitingApproval(rows: FleetRow[]): FleetRow[] {
   return rows.filter((r) => r.pendingApprovals > 0);
+}
+
+/**
+ * Every session waiting on its person, which is what the inbox is a list of: an approval
+ * or a question, the agent's or the harness's. A session waiting on a question used to
+ * reach nobody, because the rows counted only approvals.
+ */
+export function awaitingYou(rows: FleetRow[]): FleetRow[] {
+  return rows.filter((r) => r.pendingApprovals > 0 || r.pendingQuestions > 0);
 }
 
 export function totalCostMicros(rows: FleetRow[]): number {
