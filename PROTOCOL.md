@@ -280,7 +280,9 @@ first given again — a checkpoint every slice. It is a stop where the budget is
 (`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
 session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
 never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again. `always` lifts only the limit it was asked about (Decision 687).
+delegate again. It ends `budget_exhausted` with no further model call and nothing left
+running, and a `done` subagent keeps no session awake. `always` lifts only the limit it
+was asked about (Decision 687).
 
 A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
 counts each tool's failures in a row; a success of that tool clears its count. At
