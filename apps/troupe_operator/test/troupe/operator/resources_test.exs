@@ -748,6 +748,40 @@ defmodule Troupe.Operator.ResourcesTest do
     end
   end
 
+  # A gateway streaming a response says nothing of its cost, and a pod has no catalog, so
+  # without these a profile's models cost nothing on the ledger (#160, Decision 689).
+  describe "model prices" do
+    test "reach the pod as models.prices, in the config's own names", %{
+      policy: policy,
+      settings: settings
+    } do
+      llm = %{
+        "endpoint" => "https://llm.internal.test/v1",
+        "secretRef" => %{"name" => "llm-credentials", "key" => "api-key"},
+        "prices" => %{
+          "qwen3-235b" => %{"input" => 0.2, "output" => 0.6, "cacheRead" => 0.05},
+          "glm-5.2" => %{"input" => 1, "output" => 3}
+        }
+      }
+
+      env =
+        [llm: llm]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+        |> container()
+        |> Map.fetch!("env")
+
+      # Sorted, so the same prices are the same value on every reconcile and roll nothing.
+      assert Enum.find(env, &(&1["name"] == "TROUPE_MODEL_PRICES"))["value"] ==
+               ~s|{"glm-5.2":{"input":1,"output":3},"qwen3-235b":{"input":0.2,"output":0.6,"cache_read":0.05}}|
+    end
+
+    test "are not mentioned by a profile that has none", %{resources: resources} do
+      refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_MODEL_PRICES"))
+    end
+  end
+
   test "scaling the profile changes how many pods are addressed", %{
     policy: policy,
     settings: settings

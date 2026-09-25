@@ -1236,7 +1236,8 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  # What this call cost, worked out from the catalog, when the gateway did not say.
+  # What this call cost, worked out from the catalog or `models.prices`, when the gateway
+  # did not say.
   #
   # A streamed response cannot carry a cost header: the headers are sent before a token
   # is generated, so LiteLLM's `x-litellm-response-cost` is simply absent and its
@@ -1245,18 +1246,46 @@ defmodule Troupe.Agent.Server do
   # every session's cost was zero.
   #
   # `priced_locally` marks the difference for whoever reconciles later: the gateway's own
-  # number, when there is one, still wins, and a model the catalog has no price for is
-  # still nothing rather than a guess.
+  # number, when there is one, still wins, then the catalog's price, then a configured
+  # one (Decision 689). A model with none of the three is still nothing rather than a
+  # guess, and is said out loud once a session.
   defp priced_here(%State{} = state, %Response{} = response) do
-    model = response.model || state.llm_model
+    names = priced_as(state, response)
 
-    with model when is_binary(model) <- model,
-         %Catalog{} = entry <- Map.get(state.config.catalog, model),
-         dollars when is_float(dollars) <- Catalog.cost(entry, Map.from_struct(response.usage)) do
-      trunc(dollars * 1_000_000)
-    else
-      _ -> nil
+    case Config.price(state.config, names) do
+      {%Catalog{} = entry, _source} -> round(Catalog.cost(entry, Map.from_struct(response.usage)) * 1_000_000)
+      nil -> unpriced(state, List.first(names))
     end
+  end
+
+  # Every name the model goes by, the one the agent addressed it with first: that is how
+  # the catalog is keyed and how a person writes it in `models.prices`, while the wire id
+  # and the one the provider answered as may be a gateway's renaming of it.
+  defp priced_as(%State{} = state, %Response{} = response) do
+    addressed = Config.resolve_model(state.config, effective_definition(state).model || state.config.model)
+    Enum.uniq(Enum.filter([addressed, state.llm_model, response.model], &is_binary/1))
+  end
+
+  # A call nobody priced counts as free wherever spend is added up — a team's budget on
+  # the plane among them — so a model with no price anywhere is said once a session, to
+  # the log and as telemetry, rather than left to look free. Once a session and not once
+  # an agent: the first agent to call it claims it, and the others find it claimed.
+  defp unpriced(%State{} = state, model) do
+    if Registry.first?({:unpriced, state.session_id, model}) do
+      Logger.warning(
+        "troupe: #{model} has no price, so its calls count as free in session #{state.session_id}: " <>
+          "the gateway did not say what they cost, and neither the catalog nor models.prices prices it. " <>
+          "Set models.prices for it (on a pod, the profile's llm.prices)"
+      )
+
+      :telemetry.execute([:troupe, :llm, :unpriced], %{count: 1}, %{
+        session_id: state.session_id,
+        agent_path: state.agent_path,
+        model: model
+      })
+    end
+
+    nil
   end
 
   # A turn that produced no tool calls ends the turn. A subagent that answered without

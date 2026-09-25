@@ -106,6 +106,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_ALLOWED_ORIGINS` | every origin | origins the WebSocket upgrade admits | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_API_KEY` | core defaults | provider, model, and the key from `llm.secretRef` (not optional: a missing Secret is `CreateContainerConfigError`) | from `llm` |
+| `TROUPE_MODEL_PRICES` | unset | JSON `models.prices`: dollars per million tokens by model, for calls the gateway does not price. Unset, such a call costs nothing on the ledger | from `llm.prices` |
 | `<credentialRef>` | unset | one per MCP server with a secret, default `TROUPE_MCP_<NAME>_TOKEN` | optional `secretKeyRef` |
 | `TROUPE_HTTP_PORT`, `TROUPE_HARNESS_PORT`, `TROUPE_NODE_NAME`, `TROUPE_JWKS_PATH`, `TROUPE_TOKEN_ISSUER`, `TROUPE_MAX_FRAME_BYTES`, `TROUPE_DRAIN_TIMEOUT_SECONDS` | `4000`, `4100`, unset, unset, unset, 16 MiB, `300` | ports, identity and limits the operator leaves at their defaults | no |
 

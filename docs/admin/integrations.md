@@ -73,7 +73,8 @@ are no Raft snapshots ([backup-restore.md](backup-restore.md)).
 
 ## 5. LLM gateway
 
-Troupe has no price table; a profile names any OpenAI-compatible or Anthropic endpoint.
+Troupe keeps no price table of its own; a profile names any OpenAI-compatible or Anthropic
+endpoint, and, for models that endpoint does not price, `llm.prices`.
 
 - Per profile: `llm.endpoint`, `llm.provider`, `llm.model`, and `llm.secretRef` for the key
   ([profiles-and-policy.md §1](profiles-and-policy.md#1-what-an-administrator-sets)). The
@@ -82,7 +83,10 @@ Troupe has no price table; a profile names any OpenAI-compatible or Anthropic en
   `stream_options.include_usage`; `anthropic` to `/v1/messages` with `x-api-key`. `/v1` is
   not doubled.
 - The request id comes from `x-litellm-call-id` or `x-request-id`, the cost from
-  `x-litellm-response-cost`. Without them the cost is 0 and the id synthetic.
+  `x-litellm-response-cost`. A streamed response carries no cost header, because the
+  headers go out before the first token, so the pod prices the call from the profile's
+  `llm.prices` and marks it `priced_locally`. Without either the cost is 0, the pod's log
+  says so once a session, and without an id the id is synthetic.
 - `mix troupe.ledger.reconcile` compares a window of recorded usage with the gateway's
   `GET /spend/logs` by request id and exits non-zero over 1 000 000 micros of drift. It
   reads `:troupe_plane, :gateway` (`base_url` or `spend_url`, and `key`), which no

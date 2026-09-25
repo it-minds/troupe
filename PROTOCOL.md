@@ -342,6 +342,10 @@ it billed: `{"request_id": "…", "cost_micros": 18400}`. Both keys are optional
 whole object is absent where the gateway said nothing, which is a fact a reader may act
 on — tokens with no cost — rather than a cost of zero. A client that shows spend should
 treat an absent `gateway` as "not known" and a `cost_micros` of `0` as "free".
+`"priced_locally": true` beside a `cost_micros` says the harness worked the cost out
+itself, because the gateway did not say: from the provider's catalog, or from the
+`models.prices` its configuration holds (Decision 689). A reconciliation against the
+gateway's own records should expect those to differ from it a little.
 
 Neither key is present in events written before this release. A reader folding an old
 log gets the tokens and no cost, which is what was true.

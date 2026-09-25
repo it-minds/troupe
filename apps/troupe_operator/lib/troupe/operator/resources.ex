@@ -740,7 +740,8 @@ defmodule Troupe.Operator.Resources do
         %{"name" => "TROUPE_PROVIDER", "value" => profile.llm_provider}
       ] ++
         model_env("TROUPE_MODEL", profile.llm_model) ++
-        model_env("TROUPE_SMALL_MODEL", profile.llm_small_model)
+        model_env("TROUPE_SMALL_MODEL", profile.llm_small_model) ++
+        prices_env(profile)
 
     key =
       if profile.llm_secret_name do
@@ -764,6 +765,37 @@ defmodule Troupe.Operator.Resources do
 
   defp model_env(_name, nil), do: []
   defp model_env(name, value), do: [%{"name" => name, "value" => value}]
+
+  # The profile's prices, as the `models.prices` a pod's config reads from
+  # `TROUPE_MODEL_PRICES` (Decision 689): a gateway streaming a response says nothing of
+  # its cost, and a pod has no catalog, so without these a model's calls cost nothing on
+  # the ledger and no money budget applies to them. Sorted and in the config's own key
+  # names, so the value is the same on every reconcile and rolls nothing.
+  defp prices_env(%Profile{llm_prices: prices}) when map_size(prices) == 0, do: []
+
+  defp prices_env(%Profile{llm_prices: prices}) do
+    value =
+      prices
+      |> Enum.sort()
+      |> Enum.map(fn {model, price} -> {model, price_config(price)} end)
+      |> Jason.OrderedObject.new()
+      |> Jason.encode!()
+
+    [%{"name" => "TROUPE_MODEL_PRICES", "value" => value}]
+  end
+
+  defp price_config(price) do
+    [
+      {"input", "input"},
+      {"output", "output"},
+      {"cacheRead", "cache_read"},
+      {"cacheWrite", "cache_write"}
+    ]
+    |> Enum.flat_map(fn {field, key} ->
+      if is_number(price[field]), do: [{key, price[field]}], else: []
+    end)
+    |> Jason.OrderedObject.new()
+  end
 
   # The profile's MCP servers, as a pod learns them before any bundle arrives: the list
   # itself in `TROUPE_MCP_SERVERS`, and one variable per credential.

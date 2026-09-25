@@ -13,7 +13,7 @@ say something the loader does not do.
 | user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
-| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_FAKE_SCRIPT` | a provider for one shell, or for a pod |
+| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT` | a provider for one shell, or for a pod |
 | command line | `--auto-approve`, `--watch`, `--full-send`, and what a client asks for | one session |
 
 Each layer beats the ones above it: the defaults, then the user file, the project file,
@@ -203,6 +203,27 @@ models:
   cheap: gateway/claude-haiku-4-5
 ```
 
+A price for a model the catalog does not price, such as one a LiteLLM gateway serves
+and streams, in dollars per million tokens by the name the model is addressed with. What
+the gateway says a call cost still wins, and then the catalog's price
+(`troupe models --refresh`); a call none of the three prices counts as free, and the
+daemon's log says so once a session. `troupe models` shows each model's price and where
+it came from, or `no price`, and `troupe config --explain models.prices` which file set
+it.
+`TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
+reaches its pods.
+
+```yaml
+version: 1
+provider: openai
+base_url: https://llm-gw.example/v1
+api_key: "{env:GATEWAY_TOKEN}"
+models:
+  default: qwen3-235b
+  prices:
+    qwen3-235b: {input: 0.5, output: 1.5}   # what your gateway charges; these are an example
+```
+
 An unattended session that is told no rather than left waiting, on a smaller budget:
 
 ```yaml
@@ -249,6 +270,11 @@ or the command line where one exists for it.
 | `models.cheap` | string |  | any | The model for small jobs, compaction summaries among them. Unset: the default model. |
 | `models.expensive` | string |  | any | The model an agent asking for `expensive` gets. Unset: the default model. |
 | `models.windows` | map of name to integer ≥ 1 |  | any | Context windows for bare model ids, in tokens. |
+| `models.prices` | map of name to settings |  | any | Prices for models the provider's catalog does not price, by the name a model is addressed with. What a gateway says a call cost still wins, then the catalog's price. |
+| `models.prices.<model>.input` | number ≥ 0 |  | any | Dollars per million input tokens. |
+| `models.prices.<model>.output` | number ≥ 0 |  | any | Dollars per million output tokens. |
+| `models.prices.<model>.cache_read` | number ≥ 0 |  | any | Dollars per million prompt tokens read from the cache. Unset: the input price. |
+| `models.prices.<model>.cache_write` | number ≥ 0 |  | any | Dollars per million prompt tokens written to the cache. Unset: the input price. |
 | `max_tokens` | integer ≥ 1 | `8192` | any | The most output tokens one model call asks for. |
 | `context_window` | integer ≥ 1 | `200000` | any | The window assumed when neither a provider nor the catalog says. |
 | `compact_at` | number, 0 to 1 | `0.75` | any | The share of the window at which an agent summarises older turns. |

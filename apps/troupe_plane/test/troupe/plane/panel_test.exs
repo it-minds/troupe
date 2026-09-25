@@ -528,6 +528,34 @@ defmodule Troupe.Plane.PanelTest do
       assert draft["spec"]["orgMount"] == false
     end
 
+    # `llm.prices` is set through `admin.profile.put`, not on this page (Decision 689). A
+    # draft rebuilt from the form alone would drop it on the next save, and the profile's
+    # models would go back to costing nothing on the ledger.
+    test "keeps the prices it does not show, so a save from here does not drop them", context do
+      prices = %{"qwen3-235b" => %{"input" => 0.2, "output" => 0.6}}
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          spec: %{"llm" => %{"model" => "qwen3-235b", "prices" => prices}}
+        })
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      html =
+        view
+        |> element("form")
+        |> render_change(%{
+          "name" => "dev",
+          "llm.model" => "qwen3-235b",
+          "llm.smallModel" => "qwen3-32b"
+        })
+
+      assert html =~ "qwen3-32b"
+      refute html =~ "prices"
+    end
+
     test "an MCP row with no url is a row being typed, not a server" do
       draft =
         ProfileEditor.draft(%{
