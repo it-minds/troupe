@@ -12,6 +12,9 @@ defmodule Troupe.Session.MCP do
         wiki:
           url: https://wiki.example/mcp
 
+  A project's own file names servers only once the workspace is trusted, since a server
+  is a command this machine runs (Decision 686).
+
   A `command` server speaks over its standard streams and lives as long as the session
   (`Troupe.MCP.Stdio`); a `url` server is the same one-shot HTTP client the pod uses,
   discovered once when the session starts. Both kinds' tools are `mcp.<server>.<tool>`
@@ -28,7 +31,7 @@ defmodule Troupe.Session.MCP do
 
   require Logger
 
-  defstruct [:session_id, :workspace, stdio: [], http: []]
+  defstruct [:session_id, :workspace, stdio: [], http: [], refused: []]
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -71,9 +74,15 @@ defmodule Troupe.Session.MCP do
      %{
        state
        | stdio: for({:stdio, name} <- started, do: name),
-         http: for({:http, entry} <- started, do: entry)
+         http: for({:http, entry} <- started, do: entry),
+         refused: for({:refused, entry} <- started, do: entry)
      }}
   end
+
+  # A server whose config reads a `{env:VAR}` that is not set is never started: it would
+  # run with a credential missing, or be told the placeholder. `/mcp` says why.
+  defp start_server(_state, name, %{refused: why}) when is_binary(why),
+    do: {:refused, %{name: name, state: :error, tools: [], error: why}}
 
   defp start_server(state, name, %{command: command} = config) when is_binary(command) do
     case Stdio.start_link(session_id: state.session_id, name: name, config: config, cwd: state.workspace) do
@@ -113,7 +122,7 @@ defmodule Troupe.Session.MCP do
         }
       end)
 
-    {:reply, Enum.sort_by(stdio ++ http, & &1.name), state}
+    {:reply, Enum.sort_by(stdio ++ http ++ state.refused, & &1.name), state}
   end
 
   # Discovered once, here: a URL server's tools are a property of the server, and a

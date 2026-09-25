@@ -75,4 +75,5 @@ principal. Such sessions are flagged for review until somebody looks at them.
   a deliberate confirmation, and everyone on the session sees it.
 
 How it works underneath: [../../ARCHITECTURE.md](../../ARCHITECTURE.md). Running the
-platform: [../admin/README.md](../admin/README.md).
+platform: [../admin/README.md](../admin/README.md). Every setting, which file wins and how
+to see where a value came from: [configuration.md](configuration.md).

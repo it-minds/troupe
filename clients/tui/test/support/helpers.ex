@@ -139,7 +139,7 @@ defmodule Troupe.TestHelpers do
       Map.merge(
         %{
           "provider" => "fake",
-          "model" => "fake-model",
+          "models" => %{"default" => "fake-model"},
           "auto_approve" => auto_approve?,
           # A test's session must not start a librarian of its own; the one test about
           # the refresh turns it back on through `:config`.
@@ -149,7 +149,9 @@ defmodule Troupe.TestHelpers do
         Map.new(extra, fn {k, v} -> {to_string(k), v} end)
       )
 
-    File.write!(Path.join(ws, ".troupe/config.yaml"), Troupe.Settings.encode_yaml(yaml))
+    # `provider`, `auto_approve` and `fake_script` are read from a project's file only
+    # in a trusted workspace; test_helper.exs trusts the directory these are made in.
+    :ok = Troupe.Config.write_file(Path.join(ws, ".troupe/config.yaml"), yaml)
   end
 
   defp json_step({:text, text}), do: %{"text" => text}

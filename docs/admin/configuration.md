@@ -9,6 +9,8 @@ Every knob, in four layers, lowest first:
 4. **Secrets** the chart references but never creates (Part D), and the ports and labels the
    network depends on (Part E).
 
+A session also reads `config.yaml` files: a machine's and a workspace's (Part F).
+
 ---
 
 ## Part A — Environment variables
@@ -262,3 +264,28 @@ limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only
 timeouts, `limit-connections: 50`. The Scaleway controller adds PROXY protocol and
 `proxy-body-size: 16m`, so an oversized `input.send` is refused by the worker rather than
 the proxy. The plane's JSON parser takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
+
+---
+
+## Part F — The config.yaml a session reads
+
+Every session, on a pod or on a laptop, also reads settings from files: the user's
+`config.yaml`, the workspace's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then
+the `TROUPE_*` variables, merged by key and checked against one key table. The rules and
+every key are in [docs/user/configuration.md](../user/configuration.md); the schema is
+`protocol/schema/config/v1.json`. What an administrator needs from them:
+
+- **A pod's provider is its profile's.** The operator writes the provider, model and key
+  into the pod as `TROUPE_*` (A.3). A session on a pod never reads the keys that change
+  approvals, endpoints and credentials, commands to run or readable paths from the
+  project's own file, whatever the repository says; the rest of that file (models,
+  budgets, the project brief) applies.
+- **A file Troupe refuses fails the session's start**, and says which file, which key and
+  what to write: one that is not YAML, a value of the wrong type, an enum value nobody
+  knows, both spellings of one setting, or a file written for a newer Troupe.
+- **On a laptop**, a workspace's files set those keys only once the user's own file lists
+  the workspace under `trusted_workspaces`. `troupe config pull` writes the plane's
+  client defaults (Part C) into the user's file through the daemon, in the current
+  spellings.
+- **A repository can check its own file** in CI: `troupe config validate
+  .troupe/config.yaml` exits non-zero on any problem, an unknown key included.

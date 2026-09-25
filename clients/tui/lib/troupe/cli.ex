@@ -13,6 +13,9 @@ defmodule Troupe.CLI do
       troupe logout [PLANE_URL]    forget a plane's credentials (--all forgets every one)
       troupe whoami [PLANE_URL]    print who the plane says you are, and your teams
       troupe config                show the resolved providers and models (keys masked); with none, set them up
+      troupe config --explain [KEY] [--json]  every setting, or KEY's, and which file set it (secrets masked)
+      troupe config validate [PATH]   check the config files, or one; exits 1 on any problem
+      troupe config migrate [--write] [PATH]  show, or make, the rewrite to the current spellings
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
@@ -27,6 +30,9 @@ defmodule Troupe.CLI do
             | :version
             | :help
             | :config
+            | :config_explain
+            | :config_validate
+            | :config_migrate
             | :config_pull
             | :models
             | :login
@@ -47,7 +53,12 @@ defmodule Troupe.CLI do
           remote: boolean(),
           plane_url: String.t() | nil,
           all: boolean(),
-          daemon_args: [String.t()]
+          daemon_args: [String.t()],
+          explain: boolean(),
+          json: boolean(),
+          write: boolean(),
+          key: String.t() | nil,
+          path: String.t() | nil
         }
 
   @spec parse([String.t()]) :: {:ok, args()} | {:error, String.t()}
@@ -72,7 +83,10 @@ defmodule Troupe.CLI do
           help: :boolean,
           refresh: :boolean,
           remote: :boolean,
-          all: :boolean
+          all: :boolean,
+          explain: :boolean,
+          json: :boolean,
+          write: :boolean
         ]
       )
 
@@ -93,7 +107,12 @@ defmodule Troupe.CLI do
       remote: Keyword.get(opts, :remote, false),
       plane_url: nil,
       all: Keyword.get(opts, :all, false),
-      daemon_args: []
+      daemon_args: [],
+      explain: Keyword.get(opts, :explain, false),
+      json: Keyword.get(opts, :json, false),
+      write: Keyword.get(opts, :write, false),
+      key: nil,
+      path: nil
     }
 
     cond do
@@ -130,6 +149,23 @@ defmodule Troupe.CLI do
     do: {:ok, %{base | mode: :run, agent: agent, task: task}}
 
   defp parse_rest(["run"], _base), do: {:error, "usage: troupe run [AGENT] \"task\""}
+  # `--explain` names at most one key; `--json` alone is the whole explanation as JSON.
+  defp parse_rest(["config"], %{explain: explain, json: json} = base) when explain or json,
+    do: {:ok, %{base | mode: :config_explain}}
+
+  defp parse_rest(["config", key], %{explain: true} = base),
+    do: {:ok, %{base | mode: :config_explain, key: key}}
+
+  defp parse_rest(["config", "validate"], base), do: {:ok, %{base | mode: :config_validate}}
+
+  defp parse_rest(["config", "validate", path], base),
+    do: {:ok, %{base | mode: :config_validate, path: path}}
+
+  defp parse_rest(["config", "migrate"], base), do: {:ok, %{base | mode: :config_migrate}}
+
+  defp parse_rest(["config", "migrate", path], base),
+    do: {:ok, %{base | mode: :config_migrate, path: path}}
+
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
   defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}
 

@@ -268,7 +268,8 @@ jobs:
           mv "burrito_out/troupe_${{ matrix.target }}${EXT}" "burrito_out/${NAME}"
           echo "name=${NAME}" >> "$GITHUB_OUTPUT"
 
-      # The daemon reads the model from the workspace, so the fake is configured there.
+      # The embedded daemon takes the scripted model from the environment: a workspace's
+      # own file names a provider only once the machine trusts the workspace.
       - name: Smoke test (--version and a headless Fake run in the embedded daemon)
         run: |
           BIN="$PWD/burrito_out/${{ steps.art.outputs.name }}"
@@ -279,14 +280,16 @@ jobs:
           echo "warm --version: $(( (END-START)/1000000 )) ms"
           ls -la "$BIN"
           SMOKE="$RUNNER_TEMP/smoke"; mkdir -p "$SMOKE/.troupe" && cd "$SMOKE"
-          printf 'provider: fake\nmodel: fake-model\nfake_script: %s\n' "$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/smoke.json" > .troupe/config.yaml
-          "$BIN" run build "smoke" --headless --auto-approve
+          TROUPE_PROVIDER=fake TROUPE_MODEL=fake-model \
+            TROUPE_FAKE_SCRIPT="$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/smoke.json" \
+            "$BIN" run build "smoke" --headless --auto-approve
           test -f hello.txt && cat hello.txt
           # A model that ends its turn in prose and never calls `finish` ends the run too,
           # with 0 (issue #127): a real one usually does exactly that.
           REST="$RUNNER_TEMP/no-finish"; mkdir -p "$REST/.troupe" && cd "$REST"
-          printf 'provider: fake\nmodel: fake-model\nfake_script: %s\n' "$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/no_finish.json" > .troupe/config.yaml
-          "$BIN" run build "no finish" --headless --auto-approve
+          TROUPE_PROVIDER=fake TROUPE_MODEL=fake-model \
+            TROUPE_FAKE_SCRIPT="$GITHUB_WORKSPACE/clients/tui/fixtures/fake_scripts/no_finish.json" \
+            "$BIN" run build "no finish" --headless --auto-approve
           test -f hello.txt
 
       - uses: actions/upload-artifact@v4
@@ -321,9 +324,10 @@ jobs:
           chmod +x dist/troupe-*-linux_x86_64
           for img in ubuntu:24.04 alpine:3.20; do
             echo "::group::$img"
-            docker run --rm --init -v "$PWD/dist:/dist" -v "$PWD/clients/tui/fixtures:/fixtures" "$img" sh -c '
+            docker run --rm --init -v "$PWD/dist:/dist" -v "$PWD/clients/tui/fixtures:/fixtures" \
+              -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake-model \
+              -e TROUPE_FAKE_SCRIPT=/fixtures/fake_scripts/smoke.json "$img" sh -c '
               set -e; ulimit -n; BIN=$(ls /dist/troupe-*-linux_x86_64); mkdir -p /work/.troupe && cd /work
-              printf "provider: fake\nmodel: fake-model\nfake_script: /fixtures/fake_scripts/smoke.json\n" > .troupe/config.yaml
               timeout 120 $BIN --version
               status=0
               timeout 300 $BIN run build "smoke" --headless --auto-approve --watch > out.log 2>&1 || status=$?
@@ -332,9 +336,9 @@ jobs:
               if grep -q polling out.log; then echo "watch fell back to polling"; fi
               test -f hello.txt
               mkdir -p /rest/.troupe && cd /rest
-              printf "provider: fake\nmodel: fake-model\nfake_script: /fixtures/fake_scripts/no_finish.json\n" > .troupe/config.yaml
               status=0
-              timeout 300 $BIN run build "no finish" --headless --auto-approve > out.log 2>&1 || status=$?
+              TROUPE_FAKE_SCRIPT=/fixtures/fake_scripts/no_finish.json \
+                timeout 300 $BIN run build "no finish" --headless --auto-approve > out.log 2>&1 || status=$?
               cat out.log
               [ "$status" = 0 ] || { echo "the run with no finish exited $status (124 is the timeout)"; exit 1; }
               test -f hello.txt'

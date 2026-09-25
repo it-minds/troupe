@@ -5,6 +5,9 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon [run]               serve on this machine until idle or stopped
       troupe-daemon status              say whether one is running, and where
       troupe-daemon config              the resolved providers and models (keys masked)
+      troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
+      troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
+      troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
       troupe-daemon config import-opencode   copy opencode's providers into config.yaml
       troupe-daemon models [--refresh]  every model this machine can address
       troupe-daemon version
@@ -32,6 +35,9 @@ defmodule Troupe.Daemon.CLI do
   @type command ::
           :status
           | :config
+          | {:config_explain, String.t() | nil, boolean()}
+          | {:config_validate, String.t() | nil}
+          | {:config_migrate, String.t() | nil, boolean()}
           | :config_import_opencode
           | {:models, refresh: boolean()}
           | :version
@@ -69,6 +75,24 @@ defmodule Troupe.Daemon.CLI do
   def parse(["status"]), do: :status
   def parse(["config"]), do: :config
   def parse(["config", "import-opencode"]), do: :config_import_opencode
+  def parse(["config", "validate"]), do: {:config_validate, nil}
+  def parse(["config", "validate", path]), do: {:config_validate, path}
+
+  def parse(["config", "migrate" | rest]) do
+    case rest -- ["--write"] do
+      [] -> {:config_migrate, nil, "--write" in rest}
+      [path] -> {:config_migrate, path, "--write" in rest}
+      _ -> {:error, "usage: troupe-daemon config migrate [--write] [PATH]"}
+    end
+  end
+
+  def parse(["config" | flags]) when flags != [] do
+    case {flags -- ["--explain", "--json"], "--explain" in flags or "--json" in flags} do
+      {[], true} -> {:config_explain, nil, "--json" in flags}
+      {[key], true} -> if "--explain" in flags, do: {:config_explain, key, "--json" in flags}, else: unknown(flags)
+      _ -> unknown(["config" | flags])
+    end
+  end
   def parse(["models"]), do: {:models, refresh: false}
   def parse(["models", "--refresh"]), do: {:models, refresh: true}
   def parse(["version"]), do: :version
@@ -76,7 +100,9 @@ defmodule Troupe.Daemon.CLI do
   def parse(["help"]), do: :help
   def parse(["--help"]), do: :help
   def parse(["-h"]), do: :help
-  def parse(other), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}
+  def parse(other), do: unknown(other)
+
+  defp unknown(args), do: {:error, "unknown arguments: #{Enum.join(args, " ")}"}
 
   @doc "Run one command and return the exit status."
   @spec main(command()) :: non_neg_integer()
@@ -94,9 +120,20 @@ defmodule Troupe.Daemon.CLI do
   end
 
   def main(:config) do
-    IO.puts(File.cwd!() |> Config.load() |> Config.describe())
-    0
+    case Config.resolve(File.cwd!()) do
+      {:ok, config, _layers} ->
+        IO.puts(Config.describe(config))
+        0
+
+      {:error, error} ->
+        IO.puts(:stderr, Exception.message(error))
+        1
+    end
   end
+
+  def main({:config_explain, key, json?}), do: print(Config.explain(File.cwd!(), key, json: json?))
+  def main({:config_validate, path}), do: print(Config.validate(File.cwd!(), path))
+  def main({:config_migrate, path, write?}), do: print(Config.migrate(File.cwd!(), path, write: write?))
 
   # What the installers run when a person says yes to copying opencode's config: the same
   # write `config.import` makes, from a VM that has the daemon's environment.
@@ -113,23 +150,15 @@ defmodule Troupe.Daemon.CLI do
   end
 
   def main({:models, refresh: refresh?}) do
-    config = Config.load(File.cwd!())
+    case Config.resolve(File.cwd!()) do
+      {:ok, config, _layers} ->
+        IO.puts(Config.describe(if refresh?, do: refresh(config), else: config))
+        0
 
-    config =
-      if refresh? do
-        {:ok, _catalog, failures} = Catalog.Store.refresh(config)
-
-        Enum.each(failures, fn {name, reason} ->
-          IO.puts(:stderr, "#{name}: #{inspect(reason)}")
-        end)
-
-        Config.load(File.cwd!())
-      else
-        config
-      end
-
-    IO.puts(Config.describe(config))
-    0
+      {:error, error} ->
+        IO.puts(:stderr, Exception.message(error))
+        1
+    end
   end
 
   def main(:version) do
@@ -185,6 +214,17 @@ defmodule Troupe.Daemon.CLI do
     System.halt(code)
   end
 
+  defp refresh(config) do
+    {:ok, _catalog, failures} = Catalog.Store.refresh(config)
+    Enum.each(failures, fn {name, reason} -> IO.puts(:stderr, "#{name}: #{inspect(reason)}") end)
+    Config.load(File.cwd!())
+  end
+
+  defp print({text, code}) do
+    IO.write(text)
+    code
+  end
+
   @doc "The lines that say what an opencode import did."
   @spec import_report(map(), String.t()) :: [String.t()]
   def import_report(%{"providers" => [], "default" => nil} = imported, path),
@@ -232,6 +272,9 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon [run]               serve on this machine until idle or stopped
     troupe-daemon status              say whether one is running, and where
     troupe-daemon config              the resolved providers and models (keys masked)
+    troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
+    troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
+    troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
     troupe-daemon config import-opencode   copy opencode's providers into config.yaml
     troupe-daemon models [--refresh]  every model this machine can address
     troupe-daemon version

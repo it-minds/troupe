@@ -84,7 +84,17 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def context(sid) do
     workspace = workspace(sid)
-    {workspace, Config.load(workspace)}
+    {workspace, config(workspace)}
+  end
+
+  # A screen, not a session: a file refused after the session started shows the
+  # defaults with the reason as the config's one warning, rather than taking the
+  # terminal UI down with it. The next session is refused with the same reason.
+  defp config(workspace) do
+    case Config.resolve(workspace) do
+      {:ok, config, _layers} -> config
+      {:error, error} -> %Config{warnings: [Exception.message(error)]}
+    end
   end
 
   @impl true
@@ -254,7 +264,10 @@ defmodule Troupe.Client.Daemon do
 
     with {:ok, path} <- Settings.persist(workspace, key, value),
          :ok <- apply_live(sid, key, value) do
-      {:ok, Config.load(workspace), path}
+      case Config.resolve(workspace) do
+        {:ok, config, _layers} -> {:ok, config, path}
+        {:error, error} -> {:error, "saved to #{path}, but " <> Exception.message(error)}
+      end
     end
   end
 
@@ -677,7 +690,7 @@ defmodule Troupe.Client.Daemon do
   end
 
   defp branch_profile(sid, "worktree"),
-    do: {:ok, Config.load(workspace(sid)).default_agent, "always", :agent}
+    do: {:ok, config(workspace(sid)).default_agent, "always", :agent}
 
   # The librarian writes one file, the brief at the repository's root; it works in the
   # checkout itself rather than a worktree it would have to be merged out of.
@@ -821,7 +834,7 @@ defmodule Troupe.Client.Daemon do
   # as a branch when the workspace config asks for it (`memory_auto_refresh`, the
   # default). Off in tests and for anyone who would rather run `/memory refresh`.
   defp refresh_brief_if_asked(sid, workspace) do
-    config = Config.load(workspace)
+    config = config(workspace)
 
     if config.memory != false and config.memory_auto_refresh != false do
       case Link.call("memory.get", %{workspace: workspace}) do

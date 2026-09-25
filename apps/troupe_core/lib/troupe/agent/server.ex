@@ -541,7 +541,7 @@ defmodule Troupe.Agent.Server do
 
   def thinking(:info, {:llm_timeout, ref}, %State{llm_ref: ref} = state) do
     {:keep_state_and_data,
-     [{:next_event, :info, {:llm_error, ref, {:timeout, state.config.extra["llm_timeout_ms"]}}}]}
+     [{:next_event, :info, {:llm_error, ref, {:timeout, state.config.llm_timeout_ms}}}]}
   end
 
   def thinking(:info, :cancel, state), do: cancel_everything(state)
@@ -984,7 +984,8 @@ defmodule Troupe.Agent.Server do
         auth: target.auth,
         max_tokens: min(request.max_tokens, target.max_output || request.max_tokens),
         reasoning_effort: target.reasoning_effort,
-        provider: adapter_for(target.provider, state)
+        provider: adapter_for(target.provider, state),
+        timeout_ms: config.llm_timeout_ms
     }
   end
 

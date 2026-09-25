@@ -311,9 +311,9 @@ defmodule Troupe.Gateway.Dispatch do
   # The project brief, as a client shows it: status, where it is, when it was built and
   # what it covers, and the text itself for a client that renders it.
   defp handle("memory.get", params, _context) do
-    with {:ok, workspace} <- fetch(params, "workspace") do
-      workspace = Path.expand(workspace)
-      config = Troupe.Config.load(workspace)
+    with {:ok, workspace} <- fetch(params, "workspace"),
+         workspace = Path.expand(workspace),
+         {:ok, config} <- workspace_config(workspace) do
       brief = Troupe.Session.Memory.brief(workspace)
 
       {:ok,
@@ -928,6 +928,8 @@ defmodule Troupe.Gateway.Dispatch do
     do: {:error, Error.new(:invalid_params, %{reason: inspect(reason)})}
 
   defp start_error({:not_a_directory, path}), do: "#{path} is not a directory"
+  # Names the file, the key and the fix, which is all a person needs to act on it.
+  defp start_error(%Troupe.Config.Error{} = error), do: Exception.message(error)
   # Naming the alternatives, because the name people reach for is the gateway they talk
   # to — `litellm`, `vllm`, `openrouter` — and every one of those is `openai` plus a
   # `base_url`.
@@ -943,6 +945,13 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, session_id} <- fetch(params, "session_id") do
       Troupe.pin_session(session_id, pinned?)
       {:ok, %{"session_id" => session_id, "pinned" => pinned?}}
+    end
+  end
+
+  defp workspace_config(workspace) do
+    case Troupe.Config.resolve(workspace) do
+      {:ok, config, _layers} -> {:ok, config}
+      {:error, error} -> {:error, Error.new(:invalid_params, %{field: "config", reason: Exception.message(error)})}
     end
   end
 

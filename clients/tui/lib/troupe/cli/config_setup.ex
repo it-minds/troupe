@@ -342,7 +342,7 @@ defmodule Troupe.CLI.ConfigSetup do
       call: &Link.call/2,
       login: &RemoteCLI.login/1,
       pull: &ModelConfig.pull/1,
-      describe: fn -> Troupe.Config.describe(Troupe.Config.load(workspace)) end,
+      describe: fn -> describe(workspace) end,
       opencode: fn -> opencode(workspace) end,
       local_file?: fn -> File.regular?(Troupe.Config.user_path()) end
     }
@@ -383,8 +383,20 @@ defmodule Troupe.CLI.ConfigSetup do
       else: ask("(this terminal will show it) " <> prompt)
   end
 
+  # A refused file is the report: what is wrong, where, and what to write instead.
+  defp describe(workspace) do
+    case Troupe.Config.resolve(workspace) do
+      {:ok, config, _layers} -> Troupe.Config.describe(config)
+      {:error, error} -> Exception.message(error)
+    end
+  end
+
   defp opencode(workspace) do
-    config = Troupe.Config.load(workspace)
+    config =
+      case Troupe.Config.resolve(workspace) do
+        {:ok, config, _layers} -> config
+        {:error, _error} -> %Troupe.Config{}
+      end
 
     names =
       config.providers
