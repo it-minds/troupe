@@ -68,13 +68,18 @@ defmodule Troupe.Paths do
 
   @doc """
   A path as a person on this platform writes it: with backslashes on Windows, where one
-  joined onto `%APPDATA%` otherwise prints as `C:\\Users\\me\\AppData\\Roaming/troupe`.
-  For showing only; every path Troupe opens works with either separator.
+  joined onto `%APPDATA%` otherwise prints as `C:\\Users\\me\\AppData\\Roaming/troupe`,
+  and with the drive letter Windows itself shows, where `File.cwd!/0` says
+  `c:/Users/me`. For showing only; every path Troupe opens works either way, and nothing
+  stored is ever written through here.
   """
   @spec display(Path.t(), {atom(), atom()}) :: String.t()
   def display(path, os_type \\ :os.type())
-  def display(path, {:win32, _}), do: path |> to_string() |> String.replace("/", "\\")
+  def display(path, {:win32, _}), do: path |> to_string() |> String.replace("/", "\\") |> drive()
   def display(path, _os_type), do: to_string(path)
+
+  defp drive(<<letter, ?:, rest::binary>>) when letter in ?a..?z, do: <<letter - 32, ?:, rest::binary>>
+  defp drive(path), do: path
 
   @doc "Per-project overrides: `<workspace>/.troupe/`."
   @spec project_dir(Path.t()) :: Path.t()

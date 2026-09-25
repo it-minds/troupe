@@ -199,7 +199,7 @@ defmodule Troupe.Remote.Worker do
       subscribed?: false,
       scopes: [],
       capabilities: %{},
-      memory: Translate.memory(Keyword.get(opts, :isolation, :remote)),
+      memory: Translate.memory(Keyword.get(opts, :isolation, :remote), Keyword.get(opts, :profile)),
       profile: Keyword.get(opts, :profile) || "session",
       # What the root window says the session works in: a worker on the plane unless the
       # caller knows better, as the daemon's client does of its own sessions.

@@ -53,6 +53,16 @@ defmodule Troupe.RecordedQuestionsTest do
     assert [%{kind: :budget, call_id: "budget-1"}] = fold(events)
   end
 
+  # A daemon that comes back re-runs the call its agent was waiting in, and the call asks
+  # its question again under the same id: one question to answer, drawn once.
+  test "a question asked again after a restart, under the same id, is drawn once" do
+    events = recorded("open")
+    asked = Enum.find(events, &(&1["type"] == "question_asked"))
+    again = %{asked | "seq" => Enum.max(Enum.map(events, & &1["seq"])) + 1}
+
+    assert [%{kind: :question, call_id: "call_16"}] = fold(events ++ [again])
+  end
+
   defp pending(name), do: fold(recorded(name))
 
   defp fold(recorded) do

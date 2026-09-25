@@ -32,9 +32,20 @@ defmodule Troupe.RecordedApprovalsTest do
     assert [%{kind: :approval, call_id: "call_4", agent_path: "root"}] = pending("open")
   end
 
-  defp pending(name) do
+  # A call re-run after the daemon restarted asks for its approval again under the same id.
+  test "an approval asked again after a restart, under the same id, is drawn once" do
+    events = recorded("open")
+    asked = Enum.find(events, &(&1["type"] == "approval_requested"))
+    again = %{asked | "seq" => Enum.max(Enum.map(events, & &1["seq"])) + 1}
+
+    assert [%{kind: :approval, call_id: "call_4"}] = fold(events ++ [again])
+  end
+
+  defp pending(name), do: fold(recorded(name))
+
+  defp fold(recorded) do
     {events, _memory} =
-      Enum.flat_map_reduce(recorded(name), Translate.memory(), &Translate.durable("s-1", &1, &2))
+      Enum.flat_map_reduce(recorded, Translate.memory(), &Translate.durable("s-1", &1, &2))
 
     "s-1"
     |> Model.rebuild("/w", events)

@@ -202,6 +202,18 @@ defmodule Troupe.Config.TrustTest do
     assert text == "trusted_workspaces in #{ctx.user}:\n  ~/src/work\n  relative/dir  (not an absolute path, and trusts nothing)\n"
   end
 
+  test "printed by troupe-daemon, the answer names troupe-daemon's commands", ctx do
+    File.write!(ctx.user, "trusted_workspaces:\n  - #{Jason.encode!(ctx.base)}\n  - #{Jason.encode!(ctx.ws)}\n")
+
+    assert {text, 1} = Trust.untrust(ctx.ws, user_path: ctx.user, command: "troupe-daemon")
+    assert text =~ "`troupe-daemon config untrust #{ctx.base}` removes that"
+
+    File.rm!(ctx.user)
+    assert {text, 0} = Trust.trust(ctx.ws, user_path: ctx.user, command: "troupe-daemon")
+    assert text =~ "`troupe-daemon config --explain` shows them"
+    refute text =~ "`troupe config"
+  end
+
   test "the command a warning names quotes a path with a space in it" do
     assert Trust.command("/src/my repo") == ~s(troupe config trust "/src/my repo")
     assert Trust.command("/src/repo") == "troupe config trust /src/repo"
