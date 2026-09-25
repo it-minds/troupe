@@ -13,7 +13,7 @@ defmodule Troupe.Protocol.Endpoint do
   """
 
   @enforce_keys [:kind]
-  defstruct [:kind, :path, :port, :token, :authenticator, :guard]
+  defstruct [:kind, :path, :port, :token, :authenticator, :guard, :narrow]
 
   @type t :: %__MODULE__{
           kind: :unix | :tcp | :remote,
@@ -21,7 +21,8 @@ defmodule Troupe.Protocol.Endpoint do
           port: :inet.port_number() | nil,
           token: String.t() | nil,
           authenticator: (map() -> {:ok, map(), [atom()]} | {:error, term()}) | nil,
-          guard: (map(), String.t(), map() -> :ok | {:error, term()}) | nil
+          guard: (map(), String.t(), map() -> :ok | {:error, term()}) | nil,
+          narrow: (map() | nil, String.t(), map() -> map()) | nil
         }
 
   @doc "The endpoint this machine should use, honouring `TROUPE_DAEMON_SOCKET`."
@@ -65,7 +66,10 @@ defmodule Troupe.Protocol.Endpoint do
       # Consulted before every command, because a token is minted once and an ACL can
       # change while it is still valid: a collaborator whose access was revoked has a
       # perfectly good token and must still be refused.
-      guard: Keyword.get(opts, :guard)
+      guard: Keyword.get(opts, :guard),
+      # Applied to an answer before it goes back, for the answers that are about more
+      # than the caller may see: a listing of every session on a pod.
+      narrow: Keyword.get(opts, :narrow)
     }
   end
 

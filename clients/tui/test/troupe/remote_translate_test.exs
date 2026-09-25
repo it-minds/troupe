@@ -358,4 +358,62 @@ defmodule Troupe.RemoteTranslateTest do
     assert odd.data.dimension == :other
     assert odd.data.detail == "moon"
   end
+
+  test "the session's goal is set and cleared as events of its own, not as notes" do
+    [set] = translate(durable("goal_set", %{"text" => "ship it", "command_id" => "c-1"}))
+    assert set.type == :goal_set
+    assert set.agent_path == "root"
+    assert set.data == %{text: "ship it"}
+    assert set.seq == 7
+
+    assert [%{type: :goal_cleared, agent_path: "root"}] =
+             translate(durable("goal_cleared", %{"command_id" => "c-2"}))
+  end
+
+  test "a loop's events are events of their own, and its iterations' input is the loop's, not a person's" do
+    [started] =
+      translate(
+        durable("loop_started", %{
+          "loop_id" => "loop-1",
+          "max_iterations" => 5,
+          "max_failures" => 3,
+          "goal" => "ship it"
+        })
+      )
+
+    assert started.type == :loop_started
+    assert started.data == %{loop_id: "loop-1", max_iterations: 5}
+
+    assert [%{type: :loop_iteration, data: %{iteration: 2}}] =
+             translate(
+               durable("loop_iteration_started", %{
+                 "loop_id" => "loop-1",
+                 "iteration" => 2,
+                 "command_id" => "loop-1.2"
+               })
+             )
+
+    assert [%{type: :loop_iteration_finished, data: %{outcome: "failed", detail: "boom"}}] =
+             translate(
+               durable("loop_iteration_finished", %{
+                 "loop_id" => "loop-1",
+                 "iteration" => 2,
+                 "outcome" => "failed",
+                 "detail" => "boom"
+               })
+             )
+
+    assert [%{type: :loop_stopped, data: %{reason: "goal_complete", iterations: 2, summary: "ok"}}] =
+             translate(
+               durable("loop_stopped", %{
+                 "loop_id" => "loop-1",
+                 "reason" => "goal_complete",
+                 "iterations" => 2,
+                 "summary" => "ok"
+               })
+             )
+
+    assert [%{type: :input, data: %{source: :loop}}] =
+             translate(durable("user_input", %{"source" => "loop", "text" => "Loop iteration 2"}))
+  end
 end

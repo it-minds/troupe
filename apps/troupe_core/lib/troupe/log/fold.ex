@@ -63,6 +63,7 @@ defmodule Troupe.Log.Fold do
       user_input llm_response llm_error
       tool_call_started tool_call_completed tool_results
       todo_updated profile_switched compacted
+      goal_set goal_cleared
       approval_requested approval_decided
       session_created session_dormant session_activated config_upgraded
       session_tainted
@@ -167,6 +168,15 @@ defmodule Troupe.Log.Fold do
   defp agent_fold(agent, %Event{type: "profile_switched", data: data}) do
     %{agent | "profile" => data["to"]}
   end
+
+  # A key that is present only while there is a goal, rather than one more field in
+  # `@agent`: every log written before goals existed then folds to exactly the map it
+  # always did, and its recorded hash stands.
+  defp agent_fold(agent, %Event{type: "goal_set", data: data}) do
+    Map.put(agent, "goal", data["text"])
+  end
+
+  defp agent_fold(agent, %Event{type: "goal_cleared"}), do: Map.delete(agent, "goal")
 
   # Compaction replaces the conversation rather than appending to it, which is the one
   # place the message count can go *down* — and therefore the one place a fold that

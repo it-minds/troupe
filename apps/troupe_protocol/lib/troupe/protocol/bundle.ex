@@ -58,7 +58,7 @@ defmodule Troupe.Protocol.Bundle do
   point of a content-addressed bundle is that it does not say that.
   """
 
-  alias Troupe.Protocol.{AgentDefinition, Canonical}
+  alias Troupe.Protocol.{AgentDefinition, Canonical, Glob}
 
   @schema 1
   @max_document_bytes 4 * 1024 * 1024
@@ -255,7 +255,9 @@ defmodule Troupe.Protocol.Bundle do
   @spec read_skill(Path.t(), String.t()) ::
           {:ok, %{name: String.t(), body: String.t(), files: [String.t()]}} | {:error, :not_found}
   def read_skill(dir, name) do
-    skill_dir = Path.join([dir, "skills", name])
+    # A backslash is a separator here, as it is to the glob below, so the manifest is read
+    # from the directory whose files are listed and the files are relative to it.
+    skill_dir = Path.join([String.replace(dir, "\\", "/"), "skills", name])
     manifest = Path.join(skill_dir, "SKILL.md")
 
     with true <- AgentDefinition.valid_name?(name),
@@ -264,6 +266,7 @@ defmodule Troupe.Protocol.Bundle do
 
       files =
         skill_dir
+        |> Glob.escape()
         |> Path.join("**")
         |> Path.wildcard()
         |> Enum.filter(&File.regular?/1)
@@ -280,6 +283,7 @@ defmodule Troupe.Protocol.Bundle do
   @spec list_skills(Path.t()) :: [%{name: String.t(), description: String.t()}]
   def list_skills(dir) do
     dir
+    |> Glob.escape()
     |> Path.join("skills/*/SKILL.md")
     |> Path.wildcard()
     |> Enum.map(fn manifest ->

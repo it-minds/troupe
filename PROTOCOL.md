@@ -246,7 +246,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`harness` — the last is the note the harness gives a model whose reply was cut or empty), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
@@ -258,6 +258,12 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
+| `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
+| `goal_cleared` | `command_id` |
+| `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
+| `loop_iteration_started` | `loop_id`, `iteration`, `command_id` — the command id the iteration's input carries, which the root's `input_accepted` echoes |
+| `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
+| `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
 | `delegation_started` | `call_id`, `agent`, `child_path`, `task` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
@@ -449,6 +455,14 @@ originating `command_id`, which is how a client reconciles an optimistic render.
 **Replaying a `command_id` is a no-op** that returns the original acknowledgement.
 This makes every command safe to retry after a disconnect.
 
+**A session id is the one the server generated**: a UTC timestamp and six characters
+of URL-safe base64, `20260923T101112-q3Vx_A`, which the examples here shorten to
+`s-9f`. The daemon and a worker refuse any other shape with `invalid_params`, naming
+the field — `session_id`, a branch's `parent`, or the `topic` of a `subscribe` —
+before they look for a session: an id names a place on disk, and a pattern or a path
+in its place would reach sessions it does not name. The plane holds an id a caller
+brings to the same shape, in `session.create` and in a first `session.register`.
+
 ### Session lifecycle
 
 #### `session.create`
@@ -516,6 +530,72 @@ writes `input_after_done` instead.
 
 #### `profile.switch` → `{"command_id", "session_id", "profile": "plan"}`. Applied at
 the next turn boundary.
+
+#### `session.goal.set`, `session.goal.get`, `session.goal.clear`
+```json
+{"command_id": "c-6", "session_id": "s-9f", "text": "the release notes build on Windows"}
+```
+→ `{"accepted": true}`. The effect is a durable `goal_set` carrying `text` (trimmed) and
+the `command_id`, written by the root agent under the actor who sent it;
+`session.goal.clear {command_id, session_id}` writes `goal_cleared`. Setting the goal a
+session already has, or clearing one it does not have, writes nothing. A `text` that is
+empty or only whitespace is `invalid_params` with `field: "text"`.
+
+The goal is part of the root agent's folded state, so it survives a restart and a
+dormancy, and it is read into the root agent's context on **every** turn after it is set —
+not only the next — until it is cleared or replaced. It is taken at once, not at the next
+turn boundary: it changes the next request's prompt and never the one in flight. A
+subagent is given its task by the root agent and does not carry the goal. Both commands
+activate a dormant session, like `profile.switch`.
+
+`session.goal.get {session_id}` → `{"goal": "…", "set_by": "<subject>", "set_at": "<ts>"}`,
+or all three `null` when no goal is set. It is read from the log, so it answers for a
+dormant session and wakes nothing.
+
+#### `session.loop.start`, `session.loop.stop`, `session.loop.get`
+```json
+{"command_id": "c-7", "session_id": "s-9f", "max_iterations": 5}
+```
+→ `{"accepted": true, "loop_id": "loop-1", "max_iterations": 5}`. The session works
+towards its goal on its own, one iteration at a time: `loop_started` carrying the
+`command_id`, then for each iteration `loop_iteration_started`, a turn of the root agent
+(an `input_accepted` echoing the iteration's `command_id` and a `user_input` from `loop`,
+then the turn as usual) and `loop_iteration_finished`, and at the end `loop_stopped`.
+`max_iterations` is optional and the session's `loop_max_iterations` (10) when absent; it
+is otherwise a positive integer, or `invalid_params` with `field: "max_iterations"`. A
+session with no goal answers `conflict` with `needs: "goal"`, and one with a loop already
+running answers `conflict` with its `loop_id`. It activates a dormant session.
+
+Each iteration ends with the agent's own verdict, given as a tool call and never read
+from its prose: on the loop's turns, and only there, the agent is offered
+`goal_complete {summary}`, and an iteration in which it completes that call ends the
+loop with reason `goal_complete`. An iteration that ends without one is followed by
+the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
+(3) iterations in a row fail (the model request failed, or the agent ended short or
+crashed); when the budget question is asked (`budget`: the question stays with whoever
+answers it, and the loop does not resume after an `allow`); when somebody cancels the
+turn with `turn.cancel` (`cancelled`) or clears the goal (`goal_cleared`, and the turn in
+flight finishes); and when the root agent has ended in a way input does not wake
+(`agent_done`). Input a person sends meanwhile is taken between iterations.
+
+`session.loop.stop {command_id, session_id}` → `{"accepted": true}`; the effect is
+`loop_stopped` with reason `requested` and the `command_id`, written under the actor who
+sent it. Any client with `control` may send it, at any point in an iteration: if the root
+agent's turn is the loop's, it is cancelled (`cancelled` follows), and a person's own turn
+is left to finish. Stopping when no loop runs writes nothing. It does not activate a
+dormant session, whose loop is not running.
+
+`session.loop.get {session_id}` → `{"loop": null}`, or `{"loop": {"loop_id", "state"
+(`running` or `stopped`), "iteration", "max_iterations", "failures", "reason",
+"detail", "summary", "goal", "started_by", "started_at"}}` for the session's latest
+loop. It is read from the log and wakes nothing.
+
+A loop is written down the way everything else is, so it survives what the session
+survives. If the session stops mid-loop — a daemon that died, a session made dormant —
+the loop does **not** carry on by itself when the session comes back: the first thing
+the activated session writes about it is `loop_stopped` with reason `interrupted`, and
+`session.loop.get` already answers `stopped` / `interrupted` while the session is
+dormant. A daemon configured to resume (`resume_on_restart`) resumes the loop too.
 
 #### `approval.respond`
 ```json
@@ -679,10 +759,10 @@ every other MCP tool.
 
 The machine's own model settings — the provider, key and models every local session
 starts from — for a settings screen. **The daemon's only**: a worker answers
-`method_not_found`, because a pod's provider is its profile's business. They edit one
-file, the user's `config.yaml` in the daemon's config directory; a client never names a
-path, because the daemon is the process whose environment decides which file a session
-reads.
+`method_not_found`, because a pod's provider is its profile's business — or `forbidden` to
+a token for one session, like every method not about its session (§7). They edit one file,
+the user's `config.yaml` in the daemon's config directory; a client never names a path,
+because the daemon is the process whose environment decides which file a session reads.
 
 ```json
 {"workspace": "/home/me/project"}
@@ -799,7 +879,7 @@ nothing. That is deliberate — a session that woke up because somebody looked a
 would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
 
 #### Activation is about the session, not about the pod
@@ -830,7 +910,9 @@ What a client sees is this:
 - **no model call is made.** A session comes back interrupted and stays that way until
   an activating command arrives. Resuming instead would mean a crash loop spends money
   and re-runs shell commands nobody is watching. A daemon may be configured to resume,
-  and then it re-runs unfinished tool calls and takes the turn it owed.
+  and then it re-runs unfinished tool calls and takes the turn it owed;
+- a loop that was running is stopped, `interrupted`, for the same reason: it is
+  reported so while the session is dormant and written so when it is activated.
 
 When an interrupted session is activated, the tool calls that never finished are
 closed off as errors naming the interruption, so the conversation the model sees has a
@@ -842,8 +924,8 @@ result for every call it made.
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
-| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
@@ -864,7 +946,7 @@ data path of a live session, so a pod that cannot reach it still decides who may
 | --- | --- |
 | `sub` | the subject, as the IdP knows them |
 | `aud` | **the pod's worker id**, not the profile and not the plane |
-| `session_id` | the session this token is for, or absent for a create grant |
+| `session_id` | the session this token is for; the plane always sets it (a token without one is below) |
 | `role` | `owner`, `collaborator`, or `viewer` |
 | `scopes` | the scopes the role carries, so a client need not know the mapping |
 | `team` | the team the session is billed to |
@@ -886,6 +968,29 @@ The role in a token is a claim about the moment it was minted. **Access is check
 on every command** against the ACL the plane has pushed to the pod, so a collaborator
 whose access is revoked is refused on their next command with `forbidden` and
 `data.reason` of `access revoked` — even though the token in their hand still verifies.
+
+**A token is for its session and no other.** A pod holds several people's sessions, so a
+request that names another — as `session_id`, a branch's `parent`, or the id in a
+`session:` or `presence:` topic — is refused with `forbidden` and `data.field` saying
+which, and so is a subscription to `fleet`. `session.list` and `fleet.get` answer with the
+token's own session and none of the others. A token with no `session_id` is held to the
+ACL of each session a request names.
+
+**It calls the methods about its session, and no others.** Those are `subscribe` and
+`unsubscribe` on its own topics, the two listings above, and every command whose params
+require `session_id` (§6): `session.get`, `session.archive`, `session.pin`,
+`session.unpin`, `session.erase`, `input.send`, `turn.cancel`, `profile.switch`,
+`session.goal.*`, `session.loop.*`, `approval.respond`, `question.answer`, `todo.edit`,
+`fs.list`, `fs.read`, `fs.upload`, `blob.get`, `mcp.status`, `presence.set`,
+`tools.register` and `tools.unregister`. Everything else a worker serves is about the pod
+or a path on it — `session.create`, `agents.list`, `workflows.list`, `memory.get`,
+`memory.forget`, `workspace.recent`, `workspace.search`, `worktree.*`, `watch.set`,
+`identity.*` and `config.*` — and a token for one session is refused it with `forbidden`
+and `data.method` naming it. A method a worker does not have is `method_not_found`,
+whatever the token, and `initialize` and `auth.refresh` belong to the connection. The
+plane mints every token for a pod with a `session_id`; one without is signed only by
+tooling that runs its own pod (the end-to-end tests, the benchmark), and keeps the whole
+table.
 
 ### `auth.expiring` (notification, server → client)
 

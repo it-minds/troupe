@@ -89,13 +89,7 @@ The shell also runs the *device* grant rather than the browser build's authoriza
 flow: a desktop app has no redirect to come back from, and the device grant is exactly
 right for one.
 
-Not here yet, and `capabilities()` reports it rather than the app pretending: local
-sessions in the daemon on your own machine, and private sessions that follow you between
-devices. Those are spec stages 2 and 3; `TroupeShell` in `apps/desktop/src/shell.ts`
-already names the two members they need — `findDaemon` and `pickDirectory` — and the
-browser build has always had to render their absence.
-
-Not here at all: automatic updates. Adding the updater means a minisign keypair, which is
+Not here: automatic updates. Adding the updater means a minisign keypair, which is
 a signing decision, so it waits for the same moment signing does. Until then a new version
 means downloading a new installer.
 

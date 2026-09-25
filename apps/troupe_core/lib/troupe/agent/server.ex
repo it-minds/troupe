@@ -80,8 +80,12 @@ defmodule Troupe.Agent.Server do
   `input_queued` and `input_accepted` so an optimistic render can reconcile against what
   actually happened rather than against what it hoped. One is generated for callers that
   have none — the watcher, a seeded task — so every input in the log has the same shape.
+
+  A `:loop` input is `%{loop: loop_id, text: text}`, an iteration of `/loop`, and is taken
+  only while that loop is the one `loop/2` last named: one that was still queued when its
+  loop stopped is dropped rather than run.
   """
-  @spec input(pid(), :user | :watch | :tui_todo_edit, term(), Event.Actor.t() | nil, keyword()) ::
+  @spec input(pid(), :user | :watch | :tui_todo_edit | :loop, term(), Event.Actor.t() | nil, keyword()) ::
           :ok
   def input(pid, source, content, actor \\ nil, opts \\ []) when is_pid(pid) do
     command_id = Keyword.get_lazy(opts, :command_id, &command_id/0)
@@ -105,6 +109,48 @@ defmodule Troupe.Agent.Server do
   @spec switch_profile(pid(), String.t()) :: :ok
   def switch_profile(pid, name) do
     send(pid, {:switch_profile, name})
+    :ok
+  end
+
+  @doc """
+  Set the session's goal, or clear it with `nil`. Taken in any state rather than at the
+  next turn boundary: it changes what the next request's prompt says and never the one
+  already in flight. `:command_id` in `opts` is echoed in the event.
+  """
+  @spec set_goal(pid(), String.t() | nil, Event.Actor.t() | nil, keyword()) :: :ok
+  def set_goal(pid, text, actor \\ nil, opts \\ []) do
+    send(pid, {:goal, text, actor, Keyword.get(opts, :command_id)})
+    :ok
+  end
+
+  @doc """
+  The goal this agent carries. Asked of the agent rather than read from the log, so a
+  `session.goal.set` the agent has not written yet is still in its mailbox ahead of this
+  call and is answered.
+  """
+  @spec goal(pid()) :: String.t() | nil
+  def goal(pid), do: :gen_statem.call(pid, :goal, 5_000)
+
+  @doc """
+  Which loop's iterations this agent takes (Decision 681): `Troupe.Session.Loop` names
+  its loop when it starts or resumes one, and says when it ends. Process-local rather
+  than folded, because the loop process says it again whenever either of them restarts.
+  """
+  @spec loop(pid(), String.t()) :: :ok
+  def loop(pid, loop_id) when is_binary(loop_id) do
+    send(pid, {:loop, loop_id})
+    :ok
+  end
+
+  @doc """
+  The loop has ended: take no more of its iterations. With `cancel: true` a turn that is
+  one of its iterations is cancelled too, which is what `/loop stop` means mid-iteration;
+  asked of the agent because only the agent knows, without a race, whether the turn it is
+  on is the loop's.
+  """
+  @spec end_loop(pid(), keyword()) :: :ok
+  def end_loop(pid, opts \\ []) do
+    send(pid, {:loop_ended, Keyword.get(opts, :cancel, false)})
     :ok
   end
 
@@ -218,6 +264,12 @@ defmodule Troupe.Agent.Server do
         data
     end
   end
+
+  # The goal replaces itself whole and belongs to the root alone. Heads of their own rather
+  # than two more arms of the case below, which is as long as one function should be;
+  # `FoldTest` reads both forms.
+  defp fold_event(%Event{type: "goal_set", data: data}, state), do: %{state | goal: data["text"]}
+  defp fold_event(%Event{type: "goal_cleared"}, state), do: %{state | goal: nil}
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -422,6 +474,12 @@ defmodule Troupe.Agent.Server do
 
   def idle({:call, from}, :snapshot, state), do: reply_snapshot(from, :idle, state)
 
+  # An iteration of a loop that has stopped since it was sent, or of one this agent was
+  # never told about. Dropped: nothing is asking for it any more.
+  def idle(:info, {:input, :loop, %{loop: loop}, _actor, _meta}, %State{loop: current})
+      when loop != current,
+      do: {:keep_state_and_data, []}
+
   def idle(:info, {:input, source, content, actor, meta}, state) do
     start_turn(accept_input(state, source, content, actor, meta))
   end
@@ -590,6 +648,10 @@ defmodule Troupe.Agent.Server do
   @doc false
   def done({:call, from}, :snapshot, state), do: reply_snapshot(from, :done, state)
 
+  def done(:info, {:input, :loop, %{loop: loop}, _actor, _meta}, %State{loop: current})
+      when loop != current,
+      do: {:keep_state_and_data, []}
+
   # The model said it was finished and the person has more to say. The `finish` call's
   # result is already in the conversation, so the model owes nothing and the input is
   # simply the next turn. Only the root: a subagent that finished has reported to its
@@ -634,6 +696,28 @@ defmodule Troupe.Agent.Server do
       _ ->
         {:keep_state, State.unwatch(state, monitor)}
     end
+  end
+
+  # The goal is taken in every state, `:done` included: a finished agent woken by the next
+  # input should find the goal it was given while it rested.
+  defp common(:info, {:goal, text, actor, command_id}, _state_name, state) do
+    {:keep_state, put_goal(state, text, actor, command_id)}
+  end
+
+  defp common(:info, {:loop, loop_id}, _state_name, state), do: {:keep_state, %{state | loop: loop_id}}
+
+  # Only a turn the loop started is cancelled with it: a person's own turn, in flight
+  # while the loop's next iteration waited behind it, is theirs to finish.
+  defp common(:info, {:loop_ended, cancel?}, state_name, state) do
+    state = %{state | loop: nil}
+
+    if cancel? and state.turn_mode == :loop and state_name in [:thinking, :acting, :waiting, :compacting],
+      do: cancel_everything(state),
+      else: {:keep_state, state}
+  end
+
+  defp common({:call, from}, :goal, _state_name, state) do
+    {:keep_state_and_data, [{:reply, from, state.goal}]}
   end
 
   defp common(:info, message, state_name, state) do
@@ -691,6 +775,13 @@ defmodule Troupe.Agent.Server do
   # and `thinking -> acting` is one. Announcing from here without remembering what has
   # been announced would tell everybody watching that the same input was queued three
   # times, which is worse than not telling them at all.
+  #
+  # A loop's iteration waits unannounced: nobody typed it and is waiting to see it taken,
+  # and one whose loop stops while it waits is dropped, which an `input_queued` would
+  # leave standing for ever. `input_accepted` still says when it is taken.
+  defp queue_input(_state, {:input, :loop, _content, _actor, _meta}),
+    do: {:keep_state_and_data, :postpone}
+
   defp queue_input(state, {:input, source, content, actor, meta}) do
     command_id = meta.command_id
 
@@ -741,6 +832,7 @@ defmodule Troupe.Agent.Server do
   defp acceptable?(:user, text), do: is_binary(text)
   defp acceptable?(:watch, %Trigger{}), do: true
   defp acceptable?(:tui_todo_edit, %Todo.Edit{}), do: true
+  defp acceptable?(:loop, %{loop: loop, text: text}), do: is_binary(loop) and is_binary(text)
   defp acceptable?(_source, _content), do: false
 
   # What a person reading the log would call the author. A subject when there is one —
@@ -767,6 +859,13 @@ defmodule Troupe.Agent.Server do
     # profile goes back. `turn_mode` is what `effective_definition/1` reads.
     mode = if trigger.mode == :question, do: :question, else: :normal
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: mode}
+  end
+
+  # An iteration of `/loop`: a user message the model reads like any other, logged as the
+  # loop's rather than a person's, on a turn whose `turn_mode` offers `goal_complete`.
+  defp apply_input(state, :loop, %{text: text}, actor) do
+    log(state, :user_input, %{"source" => "loop", "text" => text}, actor)
+    %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: :loop}
   end
 
   defp apply_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor) do
@@ -897,12 +996,17 @@ defmodule Troupe.Agent.Server do
   # environment: what earlier agents learned about this repository is the first thing
   # a new one should read, and it is read fresh at every prompt so a `remember` made in
   # this session reaches the next agent to start.
+  #
+  # The goal comes after everything that describes the agent and its surroundings and
+  # before the task list: it is what the list is for, and it changes less often than the
+  # list does, which keeps more of the prompt the same from one request to the next.
   defp system_prompt(state, definition) do
     [
       definition.prompt,
       Memory.prompt_section(state.workspace.root_real, state.config),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition),
+      goal_section(state),
       todo_section(state)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
@@ -926,6 +1030,22 @@ defmodule Troupe.Agent.Server do
       {:win32, _} -> "Windows"
       _ -> "Linux"
     end
+  end
+
+  # Every turn, not only the one after it was set: a goal is what the whole session is
+  # working towards, and it stays until a person clears or replaces it.
+  defp goal_section(%State{goal: nil}), do: ""
+
+  defp goal_section(%State{goal: goal}) do
+    """
+    <goal>
+    The goal the person set for this session. Keep working towards it across turns; it
+    stays until they clear or replace it.
+
+    #{goal}
+    </goal>
+    """
+    |> String.trim()
   end
 
   defp todo_section(%State{todos: []}), do: ""
@@ -1377,7 +1497,10 @@ defmodule Troupe.Agent.Server do
       max_depth: state.config.max_depth,
       budget: state.budget,
       config: state.config,
-      timeout_ms: state.config.shell_timeout_ms
+      timeout_ms: state.config.shell_timeout_ms,
+      # Only on a turn a loop started, and only while that loop still runs: it is what
+      # offers `goal_complete` (Decision 681).
+      loop: if(state.turn_mode == :loop, do: state.loop)
     }
   end
 
@@ -2017,6 +2140,25 @@ defmodule Troupe.Agent.Server do
     end
   end
 
+  # -- goal -------------------------------------------------------------------
+
+  # Setting the goal the session already has, or clearing one it does not, writes
+  # nothing: the log records changes, and a client saying the same thing twice is not one.
+  defp put_goal(%State{goal: goal} = state, goal, _actor, _command_id), do: state
+
+  defp put_goal(state, nil, actor, command_id) do
+    log(state, :goal_cleared, command_data(command_id), actor)
+    %{state | goal: nil}
+  end
+
+  defp put_goal(state, text, actor, command_id) when is_binary(text) do
+    log(state, :goal_set, Map.put(command_data(command_id), "text", text), actor)
+    %{state | goal: text}
+  end
+
+  defp command_data(nil), do: %{}
+  defp command_data(command_id), do: %{"command_id" => command_id}
+
   # -- reruns -----------------------------------------------------------------
 
   defp dispatch_reruns(state, calls) do
@@ -2098,6 +2240,7 @@ defmodule Troupe.Agent.Server do
       profile: state.definition.name,
       conversation: state.conversation,
       todos: state.todos,
+      goal: state.goal,
       budget: state.budget,
       done_reason: state.done_reason,
       outstanding: Enum.map(State.outstanding(state), & &1.name)

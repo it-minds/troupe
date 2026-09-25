@@ -16,6 +16,7 @@ defmodule Troupe.Plane.PrivateSessionsTest do
   alias Troupe.ObjectStore
   alias Troupe.ObjectStore.Signed
   alias Troupe.Plane.{Harness, Index, Sessions}
+  alias Troupe.Protocol.SessionId
   alias Troupe.Sessions.{Cipher, Storage}
 
   setup do
@@ -28,7 +29,7 @@ defmodule Troupe.Plane.PrivateSessionsTest do
     test "creates a row with no team, no profile and no pod", %{ada: ada} do
       assert {:ok, json} =
                register(ada, %{
-                 "session_id" => "p-1",
+                 "session_id" => "20260923T000000-priv01",
                  "device" => "ada-laptop",
                  "head_hash" => "sha256:aaa",
                  "last_seq" => 12,
@@ -40,7 +41,7 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       assert json["epoch"] == 1
       assert json["last_seq"] == 12
 
-      row = Sessions.get("p-1")
+      row = Sessions.get("20260923T000000-priv01")
       assert row.team_id == nil
       assert row.profile == nil
       assert row.worker_id == nil
@@ -48,23 +49,23 @@ defmodule Troupe.Plane.PrivateSessionsTest do
     end
 
     test "is idempotent on the id, and a seal only moves forward", %{ada: ada} do
-      {:ok, first} = register(ada, %{"session_id" => "p-2", "last_seq" => 10})
+      {:ok, first} = register(ada, %{"session_id" => "20260923T000000-priv02", "last_seq" => 10})
 
       # A daemon that sealed, lost its connection and retried must end up with one
       # session rather than two, or a refusal.
-      {:ok, again} = register(ada, %{"session_id" => "p-2", "last_seq" => 20})
+      {:ok, again} = register(ada, %{"session_id" => "20260923T000000-priv02", "last_seq" => 20})
       assert again["epoch"] == first["epoch"]
       assert again["last_seq"] == 20
 
       # And a replay of an older seal is not a rewind.
-      {:ok, replay} = register(ada, %{"session_id" => "p-2", "last_seq" => 15})
+      {:ok, replay} = register(ada, %{"session_id" => "20260923T000000-priv02", "last_seq" => 15})
       assert replay["last_seq"] == 20
     end
 
     test "refuses somebody else's id, private or team", %{ada: ada, bob: bob} do
-      {:ok, _} = register(ada, %{"session_id" => "p-3"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv03"})
 
-      assert {:error, error} = register(bob, %{"session_id" => "p-3"})
+      assert {:error, error} = register(bob, %{"session_id" => "20260923T000000-priv03"})
       assert error.message == "forbidden"
 
       # A team session's id is refused too. The id space is shared, and `register` is the
@@ -82,6 +83,20 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       assert {:error, refused} = register(ada, %{"session_id" => "t-1"})
       assert refused.message == "forbidden"
       assert Sessions.get("t-1").kind == "team"
+    end
+
+    test "a new id has the shape the daemon generates", %{ada: ada} do
+      # The id is the session's prefix in object storage, and a presigned URL is signed
+      # for keys under it: a path in its place would be a prefix that is not its own.
+      for bad <- ["../escape", "a/b", "*", "20260923T101112-q3Vx_A/.."] do
+        assert {:error, error} = register(ada, %{"session_id" => bad}), "#{bad} was registered"
+        assert error.message == "invalid_params"
+        assert error.data.field == "session_id"
+        assert Sessions.get(bad) == nil
+      end
+
+      id = SessionId.generate()
+      assert {:ok, %{"id" => ^id}} = register(ada, %{"session_id" => id})
     end
 
     test "the database refuses the shape even when nothing else does", %{ada: ada} do
@@ -114,12 +129,12 @@ defmodule Troupe.Plane.PrivateSessionsTest do
 
   describe "the fence between two devices" do
     test "one claim wins and the loser is told on its next seal", %{ada: ada} do
-      {:ok, _} = register(ada, %{"session_id" => "p-4", "device" => "laptop", "last_seq" => 5})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv04", "device" => "laptop", "last_seq" => 5})
 
       # Both devices read epoch 1. Both try to take it.
       assert {:ok, won} =
                register(ada, %{
-                 "session_id" => "p-4",
+                 "session_id" => "20260923T000000-priv04",
                  "claim" => true,
                  "epoch" => 1,
                  "device" => "desktop"
@@ -130,7 +145,7 @@ defmodule Troupe.Plane.PrivateSessionsTest do
 
       assert {:error, lost} =
                register(ada, %{
-                 "session_id" => "p-4",
+                 "session_id" => "20260923T000000-priv04",
                  "claim" => true,
                  "epoch" => 1,
                  "device" => "laptop"
@@ -141,24 +156,24 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       # The loser learns it lost when it seals, which is the moment it matters: nothing
       # reaches a laptop that is not asking.
       assert {:error, stale} =
-               register(ada, %{"session_id" => "p-4", "epoch" => 1, "last_seq" => 9})
+               register(ada, %{"session_id" => "20260923T000000-priv04", "epoch" => 1, "last_seq" => 9})
 
       assert stale.message == "stale_version"
-      assert Sessions.get("p-4").last_seq == 5
+      assert Sessions.get("20260923T000000-priv04").last_seq == 5
 
       # And the winner goes on sealing.
-      assert {:ok, sealed} = register(ada, %{"session_id" => "p-4", "epoch" => 2, "last_seq" => 9})
+      assert {:ok, sealed} = register(ada, %{"session_id" => "20260923T000000-priv04", "epoch" => 2, "last_seq" => 9})
       assert sealed["last_seq"] == 9
     end
 
     test "a claim on somebody else's session is refused, not fenced", %{ada: ada, bob: bob} do
-      {:ok, _} = register(ada, %{"session_id" => "p-5"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv05"})
 
       assert {:error, error} =
-               register(bob, %{"session_id" => "p-5", "claim" => true, "epoch" => 1})
+               register(bob, %{"session_id" => "20260923T000000-priv05", "claim" => true, "epoch" => 1})
 
       assert error.message == "forbidden"
-      assert Sessions.get("p-5").epoch == 1
+      assert Sessions.get("20260923T000000-priv05").epoch == 1
     end
   end
 
@@ -175,64 +190,69 @@ defmodule Troupe.Plane.PrivateSessionsTest do
           profile: "dev"
         })
 
-      {:ok, _} = register(ada, %{"session_id" => "p-6"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv06"})
 
       assert {:ok, %{"sessions" => all}} = Harness.call("sessions.list", %{}, as(ada))
-      assert Enum.sort(Enum.map(all, & &1["id"])) == ["p-6", "t-2"]
+      assert Enum.sort(Enum.map(all, & &1["id"])) == ["20260923T000000-priv06", "t-2"]
 
       assert {:ok, %{"sessions" => [only]}} =
                Harness.call("sessions.list", %{"kind" => "private"}, as(ada))
 
-      assert only["id"] == "p-6"
+      assert only["id"] == "20260923T000000-priv06"
       assert only["profile"] == nil
     end
 
     test "a private session is nobody else's, team or not", %{ada: ada, bob: bob} do
-      {:ok, _} = register(ada, %{"session_id" => "p-7"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv07"})
 
       assert {:ok, %{"sessions" => []}} = Harness.call("sessions.list", %{}, as(bob))
-      assert {:error, error} = Harness.call("session.get", %{"session_id" => "p-7"}, as(bob))
+      assert {:error, error} = Harness.call("session.get", %{"session_id" => "20260923T000000-priv07"}, as(bob))
       assert error.message == "not_found"
     end
   end
 
   describe "presigned URLs" do
     test "a signed PUT and GET round-trips through the real store", %{ada: ada} do
-      {:ok, _} = register(ada, %{"session_id" => "p-8"})
-      key = "sessions/p-8/segments/00000001.seg"
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv08"})
+      key = "sessions/20260923T000000-priv08/segments/00000001.seg"
 
       assert {:ok, %{"urls" => puts, "expires_in" => 300}} =
-               presign(ada, "p-8", "put", [key])
+               presign(ada, "20260923T000000-priv08", "put", [key])
 
       # The bytes never touch the plane: a laptop with a URL and no credential.
       ciphertext = :crypto.strong_rand_bytes(64)
       assert %{status: status} = Req.put!(puts[key], body: ciphertext, decode_body: false)
       assert status in 200..299
 
-      assert {:ok, %{"urls" => gets}} = presign(ada, "p-8", "get", [key])
+      assert {:ok, %{"urls" => gets}} = presign(ada, "20260923T000000-priv08", "get", [key])
       assert %{status: 200, body: ^ciphertext} = Req.get!(gets[key], decode_body: false)
     end
 
     test "signs only keys under this session's prefix", %{ada: ada, bob: bob} do
-      {:ok, _} = register(ada, %{"session_id" => "p-9"})
-      {:ok, _} = register(bob, %{"session_id" => "p-10"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv09"})
+      {:ok, _} = register(bob, %{"session_id" => "20260923T000000-priv10"})
 
-      for key <- ["sessions/p-10/manifest.json", "sessions/p-9/../p-10/x", "manifest.json"] do
-        assert {:error, error} = presign(ada, "p-9", "put", [key])
+      for key <- [
+            "sessions/20260923T000000-priv10/manifest.json",
+            "sessions/20260923T000000-priv09/../20260923T000000-priv10/x",
+            "manifest.json"
+          ] do
+        assert {:error, error} = presign(ada, "20260923T000000-priv09", "put", [key])
         assert error.message == "invalid_params", "signed #{key}"
       end
     end
 
     test "refuses a session that is not the caller's", %{ada: ada, bob: bob} do
-      {:ok, _} = register(ada, %{"session_id" => "p-11"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv11"})
 
-      assert {:error, error} = presign(bob, "p-11", "get", ["sessions/p-11/manifest.json"])
+      key = "sessions/20260923T000000-priv11/manifest.json"
+      assert {:error, error} = presign(bob, "20260923T000000-priv11", "get", [key])
       assert error.message == "forbidden"
     end
 
     test "a signature stops working when it expires", %{ada: ada} do
-      {:ok, _} = register(ada, %{"session_id" => "p-12"})
-      key = "sessions/p-12/manifest.json"
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv12"})
+      key = "sessions/20260923T000000-priv12/manifest.json"
       store = ObjectStore.from_env()
       {:ok, _} = ObjectStore.put(store, key, "{}")
 
@@ -258,7 +278,7 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       # A session id nothing else has used. The object store is not a database: what a
       # test writes there survives the sandbox rolling back, so a fixed id means the
       # second run of this file lists two segments and fails about the first run.
-      id = "p-#{System.system_time(:microsecond)}"
+      id = SessionId.generate()
       {:ok, _} = register(ada, %{"session_id" => id, "device" => "laptop"})
 
       # What a daemon holds: a session key it made itself, and a plane connection. No
@@ -304,19 +324,19 @@ defmodule Troupe.Plane.PrivateSessionsTest do
     end
 
     test "a rebuild finds a private session without reading a byte of it", %{ada: ada} do
-      {:ok, _} = register(ada, %{"session_id" => "p-14"})
+      {:ok, _} = register(ada, %{"session_id" => "20260923T000000-priv14"})
       data_key = :crypto.strong_rand_bytes(32)
-      store = signed_store(ada, "p-14")
+      store = signed_store(ada, "20260923T000000-priv14")
 
       {:ok, _} =
-        Storage.seal_segment(store, "p-14", data_key, %{
+        Storage.seal_segment(store, "20260923T000000-priv14", data_key, %{
           events: [%{"seq" => 7, "type" => "message"}],
           epoch: 1,
           head_hash: "sha256:seven"
         })
 
       {:ok, _} =
-        Storage.put_manifest(store, "p-14", %{
+        Storage.put_manifest(store, "20260923T000000-priv14", %{
           kind: "private",
           owner_subject: ada.subject,
           epoch: 1,
@@ -330,9 +350,9 @@ defmodule Troupe.Plane.PrivateSessionsTest do
       assert {:ok, %{metadata: metadata}} = ObjectStore.head(ObjectStore.from_env(), key_of(store))
       assert metadata == %{}
 
-      assert {:ok, "p-14"} = Index.rebuild_one(ObjectStore.from_env(), "p-14")
+      assert {:ok, "20260923T000000-priv14"} = Index.rebuild_one(ObjectStore.from_env(), "20260923T000000-priv14")
 
-      row = Sessions.get("p-14")
+      row = Sessions.get("20260923T000000-priv14")
       assert row.epoch == 1
       assert row.last_seq == 7
       assert row.head_hash == "sha256:seven"

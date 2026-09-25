@@ -45,7 +45,7 @@ defmodule Troupe.Plane.Harness do
   alias Troupe.Plane.{Tokens, Triggers}
   alias Troupe.Plane.Triggers.Run
   alias Troupe.Protocol.Bundle, as: Document
-  alias Troupe.Protocol.{Canonical, Error, Origin, Principal, Token}
+  alias Troupe.Protocol.{Canonical, Error, Origin, Principal, SessionId, Token}
   alias Troupe.Sessions.Fork
 
   require Logger
@@ -358,7 +358,7 @@ defmodule Troupe.Plane.Harness do
          {:ok, origin} <- origin_for(params["origin"]),
          answerable = answerable_for(%{origin: origin, owner_subject: user.subject}),
          {:ok, terms} <- terms_for(params["terms"], team, answerable),
-         session_id = params["session_id"] || generate_id(),
+         {:ok, session_id} <- session_id_for(params["session_id"]),
          {:ok, session} <- create_row(session_id, user, team, profile, params, terms, origin),
          {:ok, _budget} <- reserve_budget(team, session),
          {:ok, placement} <- place_or_wait(session, prompt) do
@@ -943,11 +943,12 @@ defmodule Troupe.Plane.Harness do
 
   # An id nobody has used, or one that is already this person's private session. A team
   # session's id is refused here rather than quietly becoming a private row, and so is
-  # somebody else's: the id space is shared, and `register` is the one method a client
-  # picks the id for.
+  # somebody else's: the id space is shared, and the client picks the id. A new one has
+  # the shape the daemon generates, because the id is also the session's prefix in object
+  # storage and must name that prefix and nothing else.
   defp registrable(session_id, user) do
     case Sessions.get(session_id) do
-      nil -> :ok
+      nil -> shaped(session_id)
       %Session{kind: "private", owner_subject: subject} when subject == user.subject -> :ok
       %Session{} -> {:error, Error.new(:forbidden, %{session_id: session_id})}
     end
@@ -1242,6 +1243,22 @@ defmodule Troupe.Plane.Harness do
   # what the team had when it was created, or the default.
   defp slice_of(%{terms: %{"budget_micros" => slice}}) when is_integer(slice), do: slice
   defp slice_of(_session), do: @default_slice_micros
+
+  # Ours unless the caller brought one: the A2A facade names a session after its task.
+  # One it brought has the shape ours have, or it is refused before there is a row. The
+  # pod makes a directory of it, so an id that was a path would put the session's files
+  # somewhere else on the pod's disk.
+  defp session_id_for(nil), do: {:ok, generate_id()}
+
+  defp session_id_for(session_id) do
+    with :ok <- shaped(session_id), do: {:ok, session_id}
+  end
+
+  defp shaped(session_id) do
+    if SessionId.valid?(session_id),
+      do: :ok,
+      else: invalid("not a session id", field: "session_id")
+  end
 
   defp create_row(session_id, user, team, profile, params, terms, origin) do
     attrs = %{
@@ -2249,8 +2266,5 @@ defmodule Troupe.Plane.Harness do
   defp put_option(options, _key, nil), do: options
   defp put_option(options, key, value), do: Keyword.put(options, key, value)
 
-  defp generate_id do
-    stamp = DateTime.utc_now() |> Calendar.strftime("%Y%m%dT%H%M%S")
-    stamp <> "-" <> (4 |> :crypto.strong_rand_bytes() |> Base.url_encode64(padding: false))
-  end
+  defp generate_id, do: SessionId.generate()
 end

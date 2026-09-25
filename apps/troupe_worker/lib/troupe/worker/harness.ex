@@ -54,7 +54,12 @@ defmodule Troupe.Worker.Harness do
   @impl Supervisor
   def init(opts) do
     auth = Keyword.get(opts, :auth, Auth)
-    endpoint = Endpoint.remote(socket_port(opts), Auth.authenticator(auth), guard: Auth.guard(auth))
+
+    endpoint =
+      Endpoint.remote(socket_port(opts), Auth.authenticator(auth),
+        guard: Auth.guard(auth),
+        narrow: &Auth.narrow/3
+      )
 
     children = [
       Troupe.Gateway.Commands,

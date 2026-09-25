@@ -1,5 +1,6 @@
-# The light check for a pull request into a `development-*` branch: one issue of a
-# chunked run (docs/developer/fixing-issues.md).
+# The light check for a pull request that is not into `main`: one issue of a chunked run
+# into its `development-*` branch (docs/developer/fixing-issues.md), or one stacked on
+# another pull request's branch.
 #
 # It catches what breaks the chunk for the next fixer. That means code that does not
 # compile, a credo failure, a protocol schema nobody regenerated, a client that no longer
@@ -8,9 +9,10 @@
 # issue of the run together. That is what `main` is protected by.
 name: dev-check
 
+# Every pull request that is not into `main`: into a chunk, or stacked on another branch.
 on:
   pull_request:
-    branches: ["development-*"]
+    branches-ignore: [main]
 
 concurrency:
   group: dev-check-${{ github.ref }}

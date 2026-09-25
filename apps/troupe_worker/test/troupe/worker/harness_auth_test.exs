@@ -10,9 +10,11 @@ defmodule Troupe.Worker.HarnessAuthTest do
 
   use Troupe.Worker.SessionCase, async: false
 
+  alias Troupe.KMS
   alias Troupe.Plane.Tokens
   alias Troupe.Protocol.Client
   alias Troupe.Protocol.Endpoint
+  alias Troupe.Session.Memory
   alias Troupe.Worker.Auth
 
   @moduletag timeout: 180_000
@@ -137,6 +139,153 @@ defmodule Troupe.Worker.HarnessAuthTest do
     end
   end
 
+  describe "one session per token" do
+    # Two sessions on one pod, as there are in a cluster: this test's, and somebody
+    # else's, in another team.
+    setup context do
+      assert {:ok, _} = activate(context)
+      Map.put(context, :other, other_session!(context))
+    end
+
+    test "a token for one session cannot read, steer, watch or branch from another", context do
+      {:ok, client} =
+        connect(context, token(context, role: "owner", session_id: context.session_id))
+
+      other = context.other
+
+      requests = [
+        {"session.get", %{"session_id" => other}, "session_id"},
+        {"input.send", %{"session_id" => other, "text" => "do something"}, "session_id"},
+        {"subscribe", %{"topic" => "session:" <> other}, "topic"},
+        {"subscribe", %{"topic" => "presence:" <> other}, "topic"},
+        {"subscribe", %{"topic" => "fleet"}, "topic"},
+        {"session.create", %{"workspace" => context.workspace, "parent" => other}, "parent"},
+        # Its own id in one field does not carry another's in the next.
+        {"session.get", %{"session_id" => context.session_id, "parent" => other}, "parent"}
+      ]
+
+      answered =
+        for {method, params, field} <- requests,
+            not refused?(Client.call(client, method, params), field),
+            do: {method, params}
+
+      assert answered == []
+
+      # Its own session is still its own.
+      mine = context.session_id
+      assert {:ok, %{"id" => ^mine}} = Client.call(client, "session.get", %{"session_id" => mine})
+      assert {:ok, _} = Client.subscribe(client, "session:" <> mine)
+    end
+
+    test "a listing of the pod shows a token its own session and nobody else's", context do
+      {:ok, client} =
+        connect(context, token(context, role: "viewer", session_id: context.session_id))
+
+      mine = context.session_id
+
+      assert {:ok, %{"sessions" => [%{"id" => ^mine}]}} = Client.call(client, "session.list", %{})
+      assert {:ok, %{"sessions" => [%{"id" => ^mine}]}} = Client.call(client, "fleet.get", %{})
+
+      # The pod does hold both, as a token with no session in it can see.
+      {:ok, unscoped} = connect(context, token(context, role: "owner"))
+      assert {:ok, %{"sessions" => all}} = Client.call(unscoped, "session.list", %{})
+      assert [mine, context.other] -- Enum.map(all, & &1["id"]) == []
+    end
+
+    test "a token with no session in it is held to the ACL of every session it names", context do
+      {:ok, client} = connect(context, token(context, role: "owner", sub: "mate@example.test"))
+      :ok = Auth.put_acl(context.auth, context.other, "mate@example.test", nil)
+
+      for params <- [
+            %{"topic" => "session:" <> context.other},
+            %{"topic" => "presence:" <> context.other}
+          ] do
+        assert {:error, error} = Client.call(client, "subscribe", params)
+        assert error.data["reason"] == "access revoked"
+      end
+
+      assert {:error, error} =
+               Client.call(client, "session.create", %{
+                 "workspace" => context.workspace,
+                 "parent" => context.other
+               })
+
+      assert error.data["reason"] == "access revoked"
+
+      # A session it has not been thrown off is still open to it.
+      assert {:ok, _} = Client.subscribe(client, "session:" <> context.session_id)
+    end
+  end
+
+  describe "one session, not the pod" do
+    setup context do
+      assert {:ok, _} = activate(context)
+      context
+    end
+
+    test "a session's token is refused the pod's methods, and none of them runs", context do
+      jwt = token(context, role: "owner", session_id: context.session_id)
+
+      # Somewhere on the pod that is not the session's, with a brief in it to forget.
+      elsewhere = Path.join(context.base, "elsewhere")
+      brief = Memory.path(elsewhere)
+      File.mkdir_p!(Path.dirname(brief))
+      File.write!(brief, "# Project brief\n\n## Overview\n\nNot the session's.\n")
+
+      requests = [
+        {"session.create", %{"workspace" => elsewhere}},
+        {"config.get", %{}},
+        {"config.models", %{"provider" => "openai", "base_url" => "http://127.0.0.1:9"}},
+        {"config.set", %{"provider" => "openai", "base_url" => "http://127.0.0.1:9"}},
+        {"identity.get", %{}},
+        {"identity.link", %{"subject" => "someone@example.test"}},
+        {"identity.unlink", %{}},
+        {"watch.set", %{"workspace" => elsewhere, "enabled" => true}},
+        {"memory.get", %{"workspace" => elsewhere}},
+        {"memory.forget", %{"workspace" => elsewhere}},
+        {"agents.list", %{"workspace" => elsewhere}},
+        {"workflows.list", %{"workspace" => elsewhere}},
+        {"workspace.recent", %{}},
+        {"workspace.search", %{"query" => ""}},
+        {"worktree.list", %{"workspace" => elsewhere}},
+        {"worktree.remove", %{"path" => elsewhere}},
+        {"worktree.merge", %{"workspace" => context.workspace, "path" => elsewhere}},
+        {"worktree.discard", %{"workspace" => context.workspace, "path" => elsewhere}}
+      ]
+
+      # A connection each, so one that a request takes down does not hide the rest.
+      answered =
+        for {method, params} <- requests,
+            answer = call_once(context, jwt, method, params),
+            not match?({:error, %{message: "forbidden", data: %{"method" => ^method}}}, answer),
+            do: {method, answer}
+
+      assert answered == []
+
+      assert File.exists?(brief)
+      assert Troupe.Identity.get() == nil
+      assert Sessions.active_ids() == [context.session_id]
+
+      # A method no worker has is still `method_not_found`, and the session's own still
+      # answer on the same token.
+      {:ok, client} = connect(context, jwt)
+      assert {:error, %{message: "method_not_found"}} = Client.call(client, "no.such.method", %{})
+
+      mine = context.session_id
+      assert {:ok, %{"id" => ^mine}} = Client.call(client, "session.get", %{"session_id" => mine})
+      assert {:ok, %{"servers" => _}} = Client.call(client, "mcp.status", %{"session_id" => mine})
+    end
+
+    test "a token with no session in it still has the pod's methods", context do
+      {:ok, client} = connect(context, token(context, role: "owner"))
+
+      assert {:ok, %{"workspaces" => _}} = Client.call(client, "workspace.recent", %{})
+
+      assert {:ok, %{"workflows" => _}} =
+               Client.call(client, "workflows.list", %{"workspace" => context.workspace})
+    end
+  end
+
   describe "expiry" do
     test "a connection is warned before exp and refreshes on the same connection", context do
       # A second past the warning threshold, so this is a test of the warning rather
@@ -184,10 +333,47 @@ defmodule Troupe.Worker.HarnessAuthTest do
     start_supervised!(
       {Troupe.Gateway.Listener,
        name: :"harness-#{port}",
-       endpoint: Endpoint.remote(port, Auth.authenticator(auth), guard: Auth.guard(auth))}
+       endpoint:
+         Endpoint.remote(port, Auth.authenticator(auth),
+           guard: Auth.guard(auth),
+           narrow: &Auth.narrow/3
+         )}
     )
 
     port
+  end
+
+  # Another team's session on the same pod, up and running. Its storage and key go when
+  # the test does, after its tree has stopped: `activate/1` stops the tree on exit, and
+  # exit callbacks run last-registered first.
+  defp other_session!(context) do
+    other = Troupe.Session.generate_id()
+    team = "other-" <> context.team
+    workspace = Path.join(context.base, "other-workspace")
+    File.mkdir_p!(workspace)
+
+    on_exit(fn ->
+      Storage.erase(context.store, other)
+      KMS.adapter().destroy(team, other)
+    end)
+
+    assert {:ok, _} = activate(%{context | session_id: other, team: team, workspace: workspace})
+    other
+  end
+
+  defp refused?({:error, %{message: "forbidden", data: %{"field" => field}}}, field), do: true
+  defp refused?(_answer, _field), do: false
+
+  defp call_once(context, jwt, method, params) do
+    {:ok, client} = connect(context, jwt)
+
+    try do
+      Client.call(client, method, params)
+    catch
+      :exit, reason -> {:exit, reason}
+    after
+      Client.close(client)
+    end
   end
 
   defp connect(context, jwt) do

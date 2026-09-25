@@ -27,14 +27,15 @@ name: ci
 # A push to a branch runs nothing: the pull request for that branch runs the gate, and
 # running it twice for every push measured the same thing twice.
 #
-# A pull request into a `development-*` branch - one issue of a chunked run
-# (docs/developer/fixing-issues.md) - gets the light `dev-check.yml` instead. This gate
-# runs once for the whole chunk, on the chunk's pull request into `main`.
+# Only a pull request into `main` runs it. One into anything else - a `development-*`
+# chunk (docs/developer/fixing-issues.md), or a branch it is stacked on - gets the light
+# `dev-check.yml`, and this gate runs once for the whole chunk, on its pull request into
+# `main`.
 on:
   push:
     branches: [main]
   pull_request:
-    branches-ignore: ["development-*"]
+    branches: [main]
   workflow_call:
     inputs:
       full:
@@ -467,7 +468,7 @@ jobs:
       # A client written against PROTOCOL.md in another language, with no access to this
       # source. The TUI and the GUI live in this repository now, so this is the check that
       # proves the protocol alone is enough to be a client — the one that bring-your-own
-      # clients rely on (Decision 320).
+      # clients rely on (Decision 673).
       - name: Python reference client, end to end
         run: mix test apps/troupe_gateway/test/troupe/gateway/python_client_test.exs --trace
 
@@ -600,10 +601,11 @@ jobs:
           docker compose -f dev/plane-stack.yml logs --no-color plane-migrate | tail -20
 
   # The chart, the GUI's packages and the desktop app repeat VERSION because they cannot
-  # read it; a copy nobody checks is how four numbers came to have no relation. Cheap, so
-  # it runs whatever the change touched.
+  # read it; a copy nobody checks is how four numbers came to have no relation. And a
+  # Markdown link goes dead when any file moves, whatever the change was, so it is checked
+  # here too. Both cheap, so this runs whatever the change touched.
   versions:
-    name: every copy of the version agrees
+    name: every copy of the version agrees, every doc link resolves
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -612,12 +614,17 @@ jobs:
           elixir-version: ${{ env.ELIXIR_VERSION }}
           otp-version: ${{ env.OTP_VERSION }}
       - run: elixir scripts/version.exs check
+      - run: elixir scripts/doc-links.exs
 
+  # Without macOS: a macOS runner costs about ten Linux ones, and the nightly and every
+  # release build both macOS targets anyway.
   native:
     name: native builds
     needs: [changes]
     if: needs.changes.outputs.native == 'true'
     uses: ./.github/workflows/native.yml
+    with:
+      macos: false
 
   # Twenty minutes on a kind cluster, so it is not a pull request's to wait for: the
   # nightly and a release ask for it.

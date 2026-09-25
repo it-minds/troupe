@@ -20,6 +20,8 @@ defmodule Troupe.Tool.Ctx do
     # The config bundle the session is pinned to, `%{version, hash, channel, dir}`, or
     # `nil` for a local session. What the `skill` tool reads from.
     :bundle,
+    # The `/loop` this turn is an iteration of, or `nil`: what offers `goal_complete`.
+    :loop,
     todos: [],
     depth: 0,
     max_depth: 3,
@@ -38,6 +40,7 @@ defmodule Troupe.Tool.Ctx do
           definition: Troupe.Agent.Definition.t() | nil,
           watcher: pid() | nil,
           bundle: map() | nil,
+          loop: String.t() | nil,
           todos: [Troupe.Todo.t()],
           depth: non_neg_integer(),
           max_depth: pos_integer(),

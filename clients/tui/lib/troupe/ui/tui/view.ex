@@ -387,7 +387,7 @@ defmodule Troupe.UI.TUI.View do
   defp todo_block(%{todos: []}), do: []
 
   defp todo_block(%{todos: todos}),
-    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.content}" end)
+    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.text}" end)
 
   defp pending_block(w, path) do
     case Enum.filter(w.pending, &(&1.agent_path == path)) do
@@ -1220,11 +1220,12 @@ defmodule Troupe.UI.TUI.View do
       agents ++ pending
   end
 
+  # An item as `Troupe.Remote.Translate` spells it: `text`, `status`, `id`.
   defp todo_lines(w, path, indent) do
     w.agents
     |> Map.get(path, %{todos: []})
     |> Map.get(:todos, [])
-    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.content}"} end)
+    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.text}"} end)
   end
 
   defp glyph(:completed), do: "x"
@@ -1262,7 +1263,9 @@ defmodule Troupe.UI.TUI.View do
       end
 
     text =
-      "#{Model.attention_summary(state.model)}#{hint} · #{watch}#{mcp} · #{state.session_id}" <>
+      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)}#{loop_note(state.model)}" <>
+        " · #{watch}#{mcp}" <>
+        " · #{state.session_id}" <>
         remote_note(state) <>
         if(notice, do: " · #{notice}", else: "")
 
@@ -1272,6 +1275,37 @@ defmodule Troupe.UI.TUI.View do
         else: text <> " · /help for settings and help · /quit or Ctrl-C twice exits"
 
     {%Paragraph{text: text, style: %Style{fg: :dark_gray}}, rect}
+  end
+
+  # The session's goal, for as long as it has one, near the front of the line where a
+  # narrow terminal still shows it. Clipped: `/goal` prints the whole of it.
+  @goal_width 60
+
+  defp goal_note(model) do
+    case Model.goal(model) do
+      nil ->
+        ""
+
+      goal ->
+        line = goal |> String.split("\n", trim: true) |> Enum.join(" ")
+
+        clipped =
+          if String.length(line) > @goal_width,
+            do: String.slice(line, 0, @goal_width - 1) <> "…",
+            else: line
+
+        " · goal: " <> clipped
+    end
+  end
+
+  # Where a running loop is, beside the goal it works towards. It runs on its own, so the
+  # line is all it takes of the screen: the input box stays yours.
+  defp loop_note(model) do
+    case Model.loop(model) do
+      nil -> ""
+      %{iteration: n, max: nil} -> " · loop #{n}"
+      %{iteration: n, max: max} -> " · loop #{n}/#{max}"
+    end
   end
 
   # A remote session says what it is and what it will not let you do; a local

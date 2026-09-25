@@ -217,6 +217,86 @@ defmodule Troupe do
   @spec switch_profile(String.t(), String.t()) :: :ok | {:error, :no_session}
   def switch_profile(session_id, name), do: with_root(session_id, &Agent.switch_profile(&1, name))
 
+  @doc """
+  Set the session's goal: what every later turn of the root agent works towards, until it
+  is cleared or replaced. The root agent writes `goal_set` under `actor`; `:command_id` in
+  `opts` rides along in the event.
+  """
+  @spec set_goal(String.t(), String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
+          :ok | {:error, :no_session}
+  def set_goal(session_id, text, actor \\ nil, opts \\ []) when is_binary(text) and text != "" do
+    with_root(session_id, &Agent.set_goal(&1, text, actor, opts))
+  end
+
+  @doc "Clear the session's goal; the root agent writes `goal_cleared` if it had one."
+  @spec clear_goal(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
+          :ok | {:error, :no_session}
+  def clear_goal(session_id, actor \\ nil, opts \\ []) do
+    with_root(session_id, &Agent.set_goal(&1, nil, actor, opts))
+  end
+
+  @doc """
+  The session's goal as its log has it — `%{text, set_by, set_at}` — or `nil`.
+
+  Read from the events rather than asked of the agent, so a dormant session answers
+  without its tree being brought back, as every read must.
+  """
+  @spec goal(String.t()) ::
+          %{text: String.t(), set_by: String.t() | nil, set_at: String.t() | nil} | nil
+  def goal(session_id) do
+    root = Session.root_path()
+
+    session_id
+    |> events()
+    |> Enum.reduce(nil, fn
+      %{type: "goal_set", agent: ^root, data: %{"text" => text}} = event, _goal ->
+        %{text: text, set_by: event.actor && event.actor.subject, set_at: event.ts}
+
+      %{type: "goal_cleared", agent: ^root}, _goal ->
+        nil
+
+      _event, goal ->
+        goal
+    end)
+  end
+
+  @doc """
+  Start a loop towards the session's goal (`/loop`, Decision 681): up to `:max_iterations`
+  turns of the root agent (else the config's `loop_max_iterations`), each ending with the
+  agent's own verdict, `goal_complete` or not. Written as `loop_started` under `actor`;
+  `:command_id` rides along. A session with no goal has nothing to loop towards.
+  """
+  @spec start_loop(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) ::
+          {:ok, Troupe.Loop.t()}
+          | {:error, :no_session | :no_goal | {:already_running, String.t()}}
+  def start_loop(session_id, actor \\ nil, opts \\ []) do
+    Troupe.Session.Loop.start(session_id, actor, opts)
+  end
+
+  @doc """
+  Stop the session's loop, written as `loop_stopped` (`requested`) under `actor`, and
+  cancel the root's turn if it is one of the loop's. Nothing is written when no loop runs.
+  """
+  @spec stop_loop(String.t(), Troupe.Protocol.Event.Actor.t() | nil, keyword()) :: :ok
+  def stop_loop(session_id, actor \\ nil, opts \\ []) do
+    Troupe.Session.Loop.stop(session_id, actor, opts)
+  end
+
+  @doc """
+  The session's latest loop as its log has it, or `nil` if it never had one.
+
+  Read from the events, so a dormant session answers without waking; a loop the log says
+  is running in a session whose tree is not is reported as it will be recorded when the
+  session is next activated, stopped and `interrupted`.
+  """
+  @spec loop(String.t()) :: map() | nil
+  def loop(session_id) do
+    case session_id |> events() |> Troupe.Loop.fold() do
+      nil -> nil
+      loop -> Troupe.Loop.to_json(loop, Registry.whereis({:session, session_id}) != nil)
+    end
+  end
+
   @doc "Answer a question an agent asked with `ask_user`. First answer wins."
   @spec answer(String.t(), String.t(), String.t(), Troupe.Protocol.Event.Actor.t() | nil) :: :ok
   def answer(session_id, call_id, text, actor \\ nil) do

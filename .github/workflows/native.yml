@@ -4,8 +4,9 @@
 # One native runner per target. A Mix release carries the build host's ERTS, the TUI's
 # precompiled ExRatatui NIF resolves against the build host, and the desktop app links
 # the platform's webview — none of it cross-builds. So this is slow and wide, and it runs
-# when it proves something: on a pull request that touches one of them (called from
-# `ci.yml`, under `ci-ok`), nightly (`nightly.yml`), for a pre-release (`prerelease.yml`)
+# when it proves something: on a pull request into `main` that touches one of them
+# (called from `ci.yml`, under `ci-ok`, without the macOS targets, which cost about ten
+# Linux runners each), nightly (`nightly.yml`), for a pre-release (`prerelease.yml`)
 # and for a release (`release.yml`) — those two with a tag, and then it attaches
 # everything to that draft release. See `.github/CI.md`.
 #
@@ -30,7 +31,18 @@ on:
         description: The commit to build; empty is the caller's.
         type: string
         default: ""
+      macos:
+        description: >-
+          Build the macOS targets too. A release, a pre-release and the nightly do; a pull
+          request does not, because a macOS runner costs about ten Linux ones.
+        type: boolean
+        default: true
   workflow_dispatch:
+    inputs:
+      macos:
+        description: Build the macOS targets too
+        type: boolean
+        default: true
 
 env:
   # The patch level, the same one `.tool-versions` and `ci.yml` pin, and not `28.5`:
@@ -43,9 +55,61 @@ env:
   ZIG_VERSION: "0.16.0"
 
 jobs:
+  # -- which targets --------------------------------------------------------------
+  #
+  # Every matrix below is read from here, because a matrix of `include:` entries cannot
+  # drop some of them on a condition: `exclude:` does not apply to them. Without
+  # `macos`, the macOS rows are filtered out before any runner starts.
+  targets:
+    name: which targets
+    runs-on: ubuntu-latest
+    outputs:
+      daemon: ${{ steps.pick.outputs.daemon }}
+      tui: ${{ steps.pick.outputs.tui }}
+      desktop: ${{ steps.pick.outputs.desktop }}
+    steps:
+      - id: pick
+        env:
+          MACOS: ${{ inputs.macos }}
+          DAEMON: >-
+            [{"os": "ubuntu-24.04", "target": "linux_x86_64"},
+             {"os": "ubuntu-24.04-arm", "target": "linux_aarch64"},
+             {"os": "macos-15-intel", "target": "macos_x86_64"},
+             {"os": "macos-14", "target": "macos_aarch64"},
+             {"os": "windows-2022", "target": "windows_x86_64"}]
+          TUI: >-
+            [{"os": "ubuntu-24.04", "target": "linux_x86_64", "target_abi": "musl"},
+             {"os": "ubuntu-24.04-arm", "target": "linux_aarch64", "target_abi": "musl"},
+             {"os": "macos-15-intel", "target": "macos_x86_64"},
+             {"os": "macos-14", "target": "macos_aarch64"},
+             {"os": "windows-2022", "target": "windows_x86_64"}]
+          # Linux on 22.04 is the glibc floor: the oldest Ubuntu that carries
+          # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
+          # silently breaks every 22.04 user. Do not "modernise" it.
+          DESKTOP: >-
+            [{"name": "macOS (universal)", "os": "macos-14", "target": "universal-apple-darwin",
+              "rust-targets": "aarch64-apple-darwin,x86_64-apple-darwin"},
+             {"name": "Windows (x64)", "os": "windows-latest", "target": "x86_64-pc-windows-msvc",
+              "rust-targets": "x86_64-pc-windows-msvc"},
+             {"name": "Linux (x64)", "os": "ubuntu-22.04", "target": "x86_64-unknown-linux-gnu",
+              "rust-targets": "x86_64-unknown-linux-gnu"}]
+        # `macos` is empty when nothing passed it, which means the default: build it.
+        run: |
+          if [ "$MACOS" = false ]; then
+            pick() { jq -c 'map(select(.os | startswith("macos") | not))'; }
+          else
+            pick() { jq -c .; }
+          fi
+          {
+            echo "daemon=$(pick <<<"$DAEMON")"
+            echo "tui=$(pick <<<"$TUI")"
+            echo "desktop=$(pick <<<"$DESKTOP")"
+          } >> "$GITHUB_OUTPUT"
+
   # -- troupe-daemon ------------------------------------------------------------
   daemon:
     name: troupe-daemon ${{ matrix.target }}
+    needs: [targets]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
@@ -53,12 +117,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {os: ubuntu-24.04, target: linux_x86_64}
-          - {os: ubuntu-24.04-arm, target: linux_aarch64}
-          - {os: macos-15-intel, target: macos_x86_64}
-          - {os: macos-14, target: macos_aarch64}
-          - {os: windows-2022, target: windows_x86_64}
+        include: ${{ fromJSON(needs.targets.outputs.daemon) }}
     defaults:
       run:
         shell: bash
@@ -146,6 +205,7 @@ jobs:
   # -- troupe (the TUI) ---------------------------------------------------------
   tui:
     name: troupe ${{ matrix.target }}
+    needs: [targets]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
     env:
@@ -154,12 +214,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - {os: ubuntu-24.04, target: linux_x86_64, target_abi: musl}
-          - {os: ubuntu-24.04-arm, target: linux_aarch64, target_abi: musl}
-          - {os: macos-15-intel, target: macos_x86_64}
-          - {os: macos-14, target: macos_aarch64}
-          - {os: windows-2022, target: windows_x86_64}
+        include: ${{ fromJSON(needs.targets.outputs.tui) }}
     defaults:
       run:
         shell: bash
@@ -280,27 +335,13 @@ jobs:
   # warn on first launch (clients/gui/docs/install.md).
   desktop:
     name: desktop ${{ matrix.name }}
+    needs: [targets]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - name: macOS (universal)
-            os: macos-14
-            target: universal-apple-darwin
-            rust-targets: aarch64-apple-darwin,x86_64-apple-darwin
-          - name: Windows (x64)
-            os: windows-latest
-            target: x86_64-pc-windows-msvc
-            rust-targets: x86_64-pc-windows-msvc
-          # 22.04 is the glibc floor: the oldest Ubuntu that carries
-          # libwebkit2gtk-4.1-dev. Building on 24.04 raises the required glibc and
-          # silently breaks every 22.04 user. Do not "modernise" this.
-          - name: Linux (x64)
-            os: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-            rust-targets: x86_64-unknown-linux-gnu
+        include: ${{ fromJSON(needs.targets.outputs.desktop) }}
     defaults:
       run:
         working-directory: clients/gui

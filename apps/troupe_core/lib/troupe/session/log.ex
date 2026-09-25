@@ -103,10 +103,15 @@ defmodule Troupe.Session.Log do
   A dormant session is only its log, and serving one — listing it, replaying it,
   telling a client where its head is — must not start an actor tree. Searching is
   cheap and keeps the caller from having to know the workspace hash.
+
+  The id is escaped along with the state directory: it names one session, and an id of
+  `*` must not find whichever log comes first (#97).
   """
   @spec locate(String.t(), Path.t() | nil) :: Path.t() | nil
   def locate(session_id, state_dir \\ nil) do
-    [Paths.glob_escape(Paths.state_dir(state_dir)), "sessions", "*", session_id, "events.jsonl"]
+    root = state_dir |> Paths.state_dir() |> Paths.glob_escape()
+
+    [root, "sessions", "*", Paths.glob_escape(session_id), "events.jsonl"]
     |> Path.join()
     |> Path.wildcard()
     |> List.first()

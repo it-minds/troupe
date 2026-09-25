@@ -13,6 +13,7 @@ defmodule Troupe.Plane.HarnessTest do
 
   alias Troupe.Plane.{Audit, Bundles, FakePod, Fleet, Harness, Identity, Principals, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connections, Listener}
+  alias Troupe.Protocol.SessionId
 
   @moduletag timeout: 60_000
 
@@ -245,6 +246,38 @@ defmodule Troupe.Plane.HarnessTest do
       assert fetched["hash"] == bundle.hash
       assert fetched["version"] == bundle.version
       assert fetched["channel"] == "stable"
+    end
+
+    test "an id the caller brings has the shape the plane's own have, or nothing is placed",
+         context do
+      team_with_grant("engineering", "dev", name: "engineering")
+      user = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      # The pod makes a directory of the id: a path, a pattern or a separator in its
+      # place is refused before a row exists or a pod hears of it.
+      for bad <- ["../escape", "a/b", "*", "", "20260923T101112-q3Vx_A/..", 42] do
+        params = %{"profile" => "dev", "session_id" => bad}
+
+        assert {:error, error} = Harness.call("session.create", params, context(user)),
+               "#{inspect(bad)} was accepted"
+
+        assert error.message == "invalid_params"
+        assert error.data.field == "session_id"
+      end
+
+      refute_received {:pushed, "session.activate", _params}
+      assert {:ok, %{"sessions" => []}} = Harness.call("sessions.list", %{}, context(user))
+
+      # One of the right shape becomes the session's id, and none at all gets one made.
+      brought = SessionId.generate()
+      params = %{"profile" => "dev", "session_id" => brought}
+      assert {:ok, %{"session_id" => ^brought}} = Harness.call("session.create", params, context(user))
+
+      assert {:ok, %{"session_id" => generated}} =
+               Harness.call("session.create", %{"profile" => "dev"}, context(user))
+
+      assert SessionId.valid?(generated)
     end
 
     test "a user with no grant on the profile cannot create" do

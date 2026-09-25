@@ -17,6 +17,7 @@ defmodule Troupe.Plane.PanelTest do
     Bundles,
     Fleet,
     Identity,
+    Ledger,
     Principals,
     SCIM,
     Sessions,
@@ -310,6 +311,32 @@ defmodule Troupe.Plane.PanelTest do
       |> render_submit()
 
       assert Identity.get_team("engineering").budget_micros == 4_000_000
+    end
+
+    test "every period the page offers is one the team takes", context do
+      # `daily` was offered here and refused by the team, so choosing it saved nothing and
+      # said why only in a changeset's words.
+      {:ok, view, _html} = context.conn |> sign_in(context.lead.subject) |> live("/admin/teams")
+      view |> element("button[phx-value-team='engineering']") |> render_click()
+
+      offered =
+        ~r/<option[^>]* value="([^"]+)"/
+        |> Regex.scan(view |> element("select[name='budget_period']") |> render())
+        |> Enum.map(fn [_option, value] -> value end)
+
+      assert offered == Admin.budget_periods()
+
+      for period <- offered do
+        # A save that worked closes the form; one that was refused leaves it open.
+        edit = element(view, "button[phx-value-team='engineering']")
+        if has_element?(edit), do: render_click(edit)
+
+        view
+        |> form("form[phx-submit='save']", %{"team" => "engineering", "budget_period" => period})
+        |> render_submit()
+
+        assert Identity.get_team("engineering").budget_period == period
+      end
     end
 
     test "a team admin is not offered grants", context do
@@ -1254,6 +1281,39 @@ You build."}
         refute "unlimited" in spends,
                "#{path} renders a spend as a ceiling: #{inspect(Enum.uniq(spends))}"
       end
+    end
+
+    test "a ceiling that never turns over is a total, and promises no new period", context do
+      {:ok, _} =
+        Admin.team_update(Admin.actor_for(context.lead), "engineering", %{budget_period: "never"})
+
+      {:ok, _} =
+        Ledger.record(%{
+          session_id: "spent-it-all",
+          team_id: context.engineering.id,
+          owner_subject: context.lead.subject,
+          model: "fake-model",
+          cost_micros: 1_000_000,
+          gateway_request_id: "spent-it-all-1"
+        })
+
+      Ledger.Cache.invalidate(context.engineering.id)
+      conn = sign_in(context.conn, context.root.subject)
+
+      {:ok, _view, html} = live(conn, "/admin/budgets")
+
+      figures =
+        Regex.scan(~r{<span class="budget__figures">(.*?)</span>}s, html)
+        |> Enum.map(&(&1 |> List.last() |> String.trim()))
+
+      assert "1.00 / 1.00 in total" in figures
+      refute Enum.any?(figures, &String.ends_with?(&1, "never"))
+
+      {:ok, _view, html} = live(conn, "/admin")
+
+      assert html =~ "engineering is at its ceiling, which never turns over."
+      refute html =~ "never ceiling"
+      refute html =~ "the period turns over"
     end
 
     test "names which ceiling refuses first, and says it in words", context do

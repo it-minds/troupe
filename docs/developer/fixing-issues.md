@@ -31,8 +31,8 @@ flowchart LR
   compile with warnings as errors, credo, the committed protocol schema, the TUI's
   compile, the GUI's build and typecheck, and only for what changed. No test suite runs
   there. The fixer has run the tests on this machine, and the full suite runs once, on
-  the chunk's pull request into `main`. `ci.yml` ignores pull requests into
-  `development-*`.
+  the chunk's pull request into `main`. `ci.yml` runs only on pull requests into `main`,
+  and it builds no macOS targets: the nightly and a release do.
 - **The person merges each fixer's pull request into the chunk.** The coordinator never
   does. A fixer that starts after another's merge branches from the newer tip, and a
   fixer whose pull request falls behind is brought up to date by merging the chunk into

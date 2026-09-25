@@ -14,7 +14,7 @@ defmodule Troupe.A2A.Tasks do
   """
 
   alias Troupe.A2A.{Error, Events, Plane, Stream, Worker}
-  alias Troupe.Protocol.{Canonical, Client, Origin, Principal}
+  alias Troupe.Protocol.{Canonical, Client, Origin, Principal, SessionId}
   alias Troupe.Protocol.Error, as: PlaneError
 
   @type action :: {:input, String.t()} | {:decision, String.t(), String.t()}
@@ -352,17 +352,10 @@ defmodule Troupe.A2A.Tasks do
     |> String.slice(0, 80)
   end
 
-  # A version 4 UUID, which is what the task id is called in the request that made it
-  # and what the plane keeps as the session id.
-  defp generate_id do
-    <<a::32, b::16, _::4, c::12, _::2, d::14, e::48>> = :crypto.strong_rand_bytes(16)
-
-    <<a::32, b::16, 4::4, c::12, 2::2, d::14, e::48>>
-    |> Base.encode16(case: :lower)
-    |> then(fn <<a::binary-8, b::binary-4, c::binary-4, d::binary-4, e::binary-12>> ->
-      "#{a}-#{b}-#{c}-#{d}-#{e}"
-    end)
-  end
+  # A session id, which is what the task id is called in the request that made it and
+  # what the plane keeps as the session id. The plane and every pod refuse any other
+  # shape, so it is generated the way the plane generates its own.
+  defp generate_id, do: SessionId.generate()
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

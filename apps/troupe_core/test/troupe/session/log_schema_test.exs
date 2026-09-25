@@ -13,7 +13,7 @@ defmodule Troupe.Session.LogSchemaTest do
   alias Troupe.Protocol.Schema
 
   test "every event a real session writes matches its published schema", context do
-    %{session: session} =
+    %{session: session, fake: fake} =
       start_session(context,
         steps: [
           {:tools,
@@ -27,11 +27,20 @@ defmodule Troupe.Session.LogSchemaTest do
       )
 
     Troupe.subscribe(session.id)
+    Troupe.set_goal(session.id, "the notes exist", nil, command_id: "c-goal")
     Troupe.send_input(session.id, "make some notes")
     await_state(session.id, [:idle, :done], 10_000)
+    # One iteration that calls `goal_complete`, so every `loop_*` event is written.
+    Fake.push(fake, [{:tools, [{"goal_complete", %{"summary" => "notes.md exists"}}]}])
+    {:ok, _loop} = Troupe.start_loop(session.id, nil, max_iterations: 2, command_id: "c-loop")
+    await_event(session.id, :loop_stopped, 10_000)
+    Troupe.clear_goal(session.id)
+    await_event(session.id, :goal_cleared)
 
     events = Troupe.events(session.id)
     assert length(events) > 5, "the session produced too little to be worth checking"
+    assert Enum.any?(events, &(&1.type == "goal_set" and &1.data["command_id"] == "c-goal"))
+    assert Enum.any?(events, &(&1.type == "loop_stopped" and &1.data["reason"] == "goal_complete"))
 
     for event <- events do
       assert Schema.validate_event(event.type, event.data) == :ok,

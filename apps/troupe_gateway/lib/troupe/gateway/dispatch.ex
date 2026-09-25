@@ -67,6 +67,16 @@ defmodule Troupe.Gateway.Dispatch do
     "input.send" => :control,
     "turn.cancel" => :control,
     "profile.switch" => :control,
+    # The goal steers every later turn, so setting and clearing it take what input does;
+    # reading it is reading the log.
+    "session.goal.set" => :control,
+    "session.goal.clear" => :control,
+    "session.goal.get" => :observe,
+    # A loop sends the session input, one iteration after another, so it takes what input
+    # does; so does stopping one. Reading it is reading the log.
+    "session.loop.start" => :control,
+    "session.loop.stop" => :control,
+    "session.loop.get" => :observe,
     "approval.respond" => :control,
     "question.answer" => :control,
     "todo.edit" => :control,
@@ -126,13 +136,20 @@ defmodule Troupe.Gateway.Dispatch do
   @doc "Dispatch one request."
   @spec call(String.t(), map(), Context.t()) :: outcome()
   def call(method, params, %Context{} = context) do
+    with :ok <- permitted(method, context),
+         :ok <- session_ids(params) do
+      idempotent(method, params, context)
+    end
+  end
+
+  defp permitted(method, context) do
     case Map.fetch(@scopes, method) do
       :error ->
         {:error, Error.new(:method_not_found, %{method: method})}
 
       {:ok, required} ->
         if required in context.scopes do
-          idempotent(method, params, context)
+          :ok
         else
           {:error, Error.new(:forbidden, %{required_scope: Atom.to_string(required)})}
         end
@@ -160,6 +177,35 @@ defmodule Troupe.Gateway.Dispatch do
   # new connection from the same person.
   defp ledger_key(%Context{principal: principal}, command_id) do
     {principal["subject"] || principal[:subject], command_id}
+  end
+
+  # A session id names a directory under the state root, and a dormant session is found
+  # by a glob built on it. So every id a request carries — as `session_id`, as a branch's
+  # `parent`, in a topic — is held to the shape the harness generates before any handler
+  # sees it (#97): `*` found another session's log, and `..` or a separator a path
+  # outside the one the id names. An absent or empty id is left for the handler to
+  # report as the field it needed.
+  defp session_ids(params) do
+    case Enum.find(named_sessions(params), &malformed?/1) do
+      nil -> :ok
+      {field, _id} -> {:error, Error.new(:invalid_params, %{field: field, reason: "not a session id"})}
+    end
+  end
+
+  defp malformed?({_field, id}), do: not Troupe.Session.valid_id?(id)
+
+  defp named_sessions(params) do
+    named =
+      params
+      |> Map.take(["session_id", "parent"])
+      |> Enum.filter(fn {_field, id} -> is_binary(id) and id != "" end)
+
+    with topic when is_binary(topic) <- Map.get(params, "topic"),
+         {:ok, _kind, id} when is_binary(id) <- Session.parse_topic(topic) do
+      [{"topic", id} | named]
+    else
+      _no_session -> named
+    end
   end
 
   # -- reads ------------------------------------------------------------------
@@ -427,6 +473,88 @@ defmodule Troupe.Gateway.Dispatch do
          :ok <- activate(session_id) do
       Troupe.switch_profile(session_id, profile)
       {:ok, %{"accepted" => true}}
+    end
+  end
+
+  # The session's goal. Setting and clearing are activating, like a profile switch: the
+  # root agent is what writes `goal_set` and `goal_cleared` and reads the goal into its
+  # prompt. The answer is the acknowledgement; the event, carrying this `command_id`, is
+  # the effect. Reading answers from the log, so a dormant session stays dormant.
+  defp handle("session.goal.set", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, text} <- goal_text(params),
+         :ok <- activate(session_id) do
+      Troupe.set_goal(session_id, text, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.goal.clear", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         :ok <- activate(session_id) do
+      Troupe.clear_goal(session_id, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.goal.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      case Troupe.goal(session_id) do
+        nil -> {:ok, %{"goal" => nil, "set_by" => nil, "set_at" => nil}}
+        goal -> {:ok, %{"goal" => goal.text, "set_by" => goal.set_by, "set_at" => goal.set_at}}
+      end
+    end
+  end
+
+  # A loop towards the goal (Decision 681). Starting one activates the session, since its
+  # iterations are the root agent's turns; the answer names the loop and its cap, and the
+  # effect is `loop_started`, carrying this `command_id`, then the iterations. A session
+  # with no goal, or with a loop already running, is refused with what to do instead.
+  defp handle("session.loop.start", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, max} <- loop_iterations(params),
+         :ok <- activate(session_id) do
+      opts = [max_iterations: max] ++ command_opts(params)
+
+      case Troupe.start_loop(session_id, actor(context), opts) do
+        {:ok, loop} ->
+          {:ok, %{"accepted" => true, "loop_id" => loop.id, "max_iterations" => loop.max_iterations}}
+
+        {:error, :no_goal} ->
+          {:error,
+           Error.new(:conflict, %{
+             needs: "goal",
+             reason: "the session has no goal to loop towards: set one with session.goal.set"
+           })}
+
+        {:error, {:already_running, loop_id}} ->
+          {:error,
+           Error.new(:conflict, %{
+             loop_id: loop_id,
+             reason: "a loop is already running: session.loop.stop stops it"
+           })}
+
+        {:error, :no_session} ->
+          {:error, Error.new(:unavailable, %{reason: "the session is not running"})}
+      end
+    end
+  end
+
+  # Not activating: a dormant session's loop is not running, so there is nothing to stop,
+  # and the log already reads it as interrupted.
+  defp handle("session.loop.stop", params, context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      :ok = Troupe.stop_loop(session_id, actor(context), command_opts(params))
+      {:ok, %{"accepted" => true}}
+    end
+  end
+
+  defp handle("session.loop.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, _session} <- lookup(session_id) do
+      {:ok, %{"loop" => Troupe.loop(session_id)}}
     end
   end
 
@@ -822,6 +950,34 @@ defmodule Troupe.Gateway.Dispatch do
     case Map.get(params, key) do
       value when is_binary(value) and value != "" -> {:ok, value}
       _ -> {:error, Error.new(:invalid_params, %{missing: key})}
+    end
+  end
+
+  # Trimmed, because a goal typed at a prompt arrives with the newline that sent it, and
+  # one that is only whitespace is no goal at all rather than an empty one.
+  defp goal_text(params) do
+    case params |> Map.get("text") |> trimmed() do
+      "" -> {:error, Error.new(:invalid_params, %{field: "text", reason: "a goal needs some text"})}
+      text -> {:ok, text}
+    end
+  end
+
+  defp trimmed(text) when is_binary(text), do: String.trim(text)
+  defp trimmed(_text), do: ""
+
+  # Absent is the config's cap; present, it is a whole number of iterations, at least one.
+  defp loop_iterations(params) do
+    case Map.get(params, "max_iterations") do
+      nil -> {:ok, nil}
+      n when is_integer(n) and n > 0 -> {:ok, n}
+      _ -> {:error, Error.new(:invalid_params, %{field: "max_iterations", reason: "a positive integer"})}
+    end
+  end
+
+  defp command_opts(params) do
+    case Map.get(params, "command_id") do
+      command_id when is_binary(command_id) -> [command_id: command_id]
+      _ -> []
     end
   end
 

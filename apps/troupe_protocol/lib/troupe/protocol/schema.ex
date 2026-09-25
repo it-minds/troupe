@@ -137,6 +137,42 @@ defmodule Troupe.Protocol.Schema do
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
       "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
+      # The session's goal, written by the root agent under whoever set or cleared it, and
+      # carrying the `command_id` of the `session.goal.*` call that asked.
+      "goal_set" => %{"text" => required(:string), "command_id" => optional(:string)},
+      "goal_cleared" => %{"command_id" => optional(:string)},
+      # A loop towards the goal (`session.loop.*`, Decision 681), written under the root
+      # agent's path by the session's loop process. `loop_started` carries the protocol
+      # command that asked; an iteration's `command_id` is the one its input carries, which
+      # the root's `input_accepted` echoes. `outcome` is `continue`, `complete`, `failed`
+      # or `stopped`; `reason` is `goal_complete`, `max_iterations`, `failures`, `budget`,
+      # `requested`, `cancelled`, `goal_cleared`, `interrupted` or `agent_done`.
+      "loop_started" => %{
+        "loop_id" => required(:string),
+        "max_iterations" => required(:integer),
+        "max_failures" => required(:integer),
+        "goal" => required(:string),
+        "command_id" => optional(:string)
+      },
+      "loop_iteration_started" => %{
+        "loop_id" => required(:string),
+        "iteration" => required(:integer),
+        "command_id" => required(:string)
+      },
+      "loop_iteration_finished" => %{
+        "loop_id" => required(:string),
+        "iteration" => required(:integer),
+        "outcome" => required(:string),
+        "detail" => optional(:string)
+      },
+      "loop_stopped" => %{
+        "loop_id" => required(:string),
+        "reason" => required(:string),
+        "iterations" => required(:integer),
+        "detail" => optional(:string),
+        "summary" => optional(:string),
+        "command_id" => optional(:string)
+      },
       "delegation_started" => %{
         "call_id" => required(:string),
         "agent" => required(:string),
@@ -399,6 +435,31 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "profile" => required(:string)
       },
+      # Setting and clearing activate a dormant session, like `profile.switch`; reading
+      # the goal is answered from the log and wakes nothing.
+      "session.goal.set" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "text" => required(:string)
+      },
+      "session.goal.get" => %{"session_id" => required(:string)},
+      "session.goal.clear" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
+      },
+      # A loop towards the goal. Starting one activates a dormant session; stopping one
+      # does not, because a dormant session's loop is not running. Reading it is reading
+      # the log.
+      "session.loop.start" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string),
+        "max_iterations" => optional(:integer)
+      },
+      "session.loop.stop" => %{
+        "command_id" => required(:string),
+        "session_id" => required(:string)
+      },
+      "session.loop.get" => %{"session_id" => required(:string)},
       "approval.respond" => %{
         "command_id" => required(:string),
         "session_id" => required(:string),

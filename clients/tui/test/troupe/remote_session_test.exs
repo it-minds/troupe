@@ -176,6 +176,9 @@ defmodule Troupe.RemoteSessionTest do
 
       eventually(fn -> calls(remote, "auth.refresh") != [] end)
       assert calls(remote, "token.mint") != []
+      # The new token goes where `initialize` put the first one (PROTOCOL.md, `auth.refresh`).
+      assert [%{"auth" => %{"token" => token}}] = calls(remote, "auth.refresh")
+      assert is_binary(token)
 
       # the socket stayed up: no second connection was made
       assert FakeRemote.worker_connections(remote) == connections
