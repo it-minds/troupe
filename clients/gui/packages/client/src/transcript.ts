@@ -60,6 +60,8 @@ export type Entry =
       decision: string | undefined;
       /** Set when another client got there first. */
       resolvedBy: string | undefined;
+      /** Set when it ended unanswered: its call was cancelled, or timed out while it waited. */
+      closed: boolean;
     }
   | { kind: "delegation"; seq: number; agent: string[]; callId: string; child: string; task: string }
   /**
@@ -139,6 +141,8 @@ export const emptyTranscript: TranscriptState = {
 /** The root agent is the one-element path; everything deeper is a subagent. */
 export const isRoot = (agent: string[]): boolean => agent.length <= 1;
 const pathKey = (agent: string[]): string => agent.slice(1).join("/");
+/** Whether `agent` is the agent at `path` or one under it. */
+const within = (agent: string[], path: string[]): boolean => agent.length >= path.length && path.every((part, i) => agent[i] === part);
 
 function textOf(message: unknown): string {
   const content = (message as { content?: Array<{ type?: string; text?: string }> } | undefined)?.content ?? [];
@@ -319,15 +323,33 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         ],
       };
 
+    // The call is over, and so is an approval it was still waiting for: a cancel closes
+    // each call it stops with one of these, and so does a tool that timed out waiting.
     case "tool_call_completed": {
       const id = str(d.data["call_id"]);
       return {
         ...next,
         entries: state.entries.map((en) =>
-          en.kind === "tool" && en.callId === id ? { ...en, ok: Boolean(d.data["ok"]), content: contentOf(d.data["content"]) } : en,
+          en.kind === "tool" && en.callId === id
+            ? { ...en, ok: Boolean(d.data["ok"]), content: contentOf(d.data["content"]) }
+            : en.kind === "approval" && en.callId === id
+              ? closeApproval(en)
+              : en,
         ),
       };
     }
+
+    // A cancel stops the agent it reached and every agent under it, and one it took down
+    // never logs another word, so an approval anywhere in that subtree ends here — the
+    // rule the TUI keeps. The entry saying the turn was cancelled goes in as before.
+    case "cancelled":
+      return {
+        ...next,
+        entries: [
+          ...state.entries.map((en) => (en.kind === "approval" && within(en.agent, d.agent) ? closeApproval(en) : en)),
+          { kind: "system", ...base, type: d.type, text: systemText(d) },
+        ],
+      };
 
     case "delegation_started":
       return {
@@ -404,6 +426,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
             args: d.data["args"],
             decision: undefined,
             resolvedBy: undefined,
+            closed: false,
           },
         ],
       };
@@ -513,9 +536,9 @@ export function isBusy(state: TranscriptState): boolean {
   return ["thinking", "acting", "compacting", "busy"].includes(rootState(state));
 }
 
-/** Approvals in this transcript nobody has answered yet. */
+/** Approvals in this transcript nobody has answered yet, and that are still waiting. */
 export function openApprovals(state: TranscriptState): Extract<Entry, { kind: "approval" }>[] {
-  return state.entries.filter((e): e is Extract<Entry, { kind: "approval" }> => e.kind === "approval" && e.decision === undefined);
+  return state.entries.filter((e): e is Extract<Entry, { kind: "approval" }> => e.kind === "approval" && e.decision === undefined && !e.closed);
 }
 
 /** Questions in this transcript nobody has answered yet — the agent's and the harness's. */
@@ -537,6 +560,11 @@ const BUDGET_OPTIONS: QuestionOption[] = [
   { label: "always", description: "lift this limit for the rest of the session; the others still ask" },
   { label: "deny", description: "stop here" },
 ];
+
+/** An approval that ended without an answer. One somebody answered stays as it was. */
+function closeApproval(en: Extract<Entry, { kind: "approval" }>): Entry {
+  return en.decision === undefined ? { ...en, closed: true } : en;
+}
 
 function hasQuestion(state: TranscriptState, callId: string): boolean {
   return state.entries.some((en) => en.kind === "question" && en.callId === callId);

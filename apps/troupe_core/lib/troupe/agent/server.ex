@@ -235,7 +235,7 @@ defmodule Troupe.Agent.Server do
       _ ->
         state = Enum.reduce(events, state, &fold_event/2)
         incomplete = incomplete_calls(events)
-        awaiting = awaiting_approval(events)
+        awaiting = awaiting_person(events)
         action = resume_action(state, incomplete, awaiting, cold_start?, cancelled?(events))
 
         log(state, :agent_restarted, %{
@@ -405,14 +405,23 @@ defmodule Troupe.Agent.Server do
   defp carry_on(state, []), do: if(needs_turn?(state), do: :turn, else: :none)
   defp carry_on(_state, incomplete), do: {:rerun, incomplete}
 
-  defp interrupt(state, [], _awaiting), do: if(needs_turn?(state), do: :interrupted, else: :none)
+  # A spent budget whose question is still waiting on a person is asked again rather than
+  # dropped: the turn goes only as far as the gate, which asks under the same id and makes
+  # no model call while the budget is spent (Decision 660). A cancelled one is not waiting.
+  defp interrupt(state, [], awaiting) do
+    cond do
+      MapSet.member?(awaiting, state.budget_ask_pending) -> :turn
+      needs_turn?(state) -> :interrupted
+      true -> :none
+    end
+  end
 
   # A call that never finished because it was waiting for a person is not an interrupted
-  # call. A session can go dormant with an approval outstanding and be answered three
-  # days later, and closing it off as an error on the way back would throw away the turn
-  # the person is about to say yes to. It is re-dispatched instead, which puts the
-  # request back in front of whoever is watching — and if the answer is already in the
-  # log, the gate replies with it immediately.
+  # call. A session can go dormant with an approval or a question outstanding and be
+  # answered three days later, and closing it off as an error on the way back would throw
+  # away the turn the person is about to say yes to. It is re-dispatched instead, which
+  # puts the request back in front of whoever is watching — and if the answer is already
+  # in the log, the gate replies with it immediately.
   defp interrupt(_state, incomplete, awaiting) do
     {pending, stopped} = Enum.split_with(incomplete, fn {id, _name, _args} -> id in awaiting end)
 
@@ -423,18 +432,27 @@ defmodule Troupe.Agent.Server do
     end
   end
 
-  # Calls with an approval request and no decision. Both events are durable, which is
-  # what makes this answerable from the log alone after any amount of time.
-  defp awaiting_approval(events) do
-    decided =
-      for %Event{type: "approval_decided", data: %{"call_id" => id}} <- events,
-          into: MapSet.new(),
-          do: id
+  # Calls with an approval requested and no decision, or a question asked and no answer.
+  # All four events are durable, which is what makes this answerable from the log alone
+  # after any amount of time. A cancelled turn is waiting for nobody, whatever it asked:
+  # the cancel closed its calls, and in a log from before cancels did, they are closed off
+  # on the way back like any other rather than asked again.
+  defp awaiting_person(events) do
+    Enum.reduce(events, MapSet.new(), fn
+      %Event{type: type, data: %{"call_id" => id}}, awaiting
+      when type in ["approval_requested", "question_asked"] ->
+        MapSet.put(awaiting, id)
 
-    for %Event{type: "approval_requested", data: %{"call_id" => id}} <- events,
-        not MapSet.member?(decided, id),
-        into: MapSet.new(),
-        do: id
+      %Event{type: type, data: %{"call_id" => id}}, awaiting
+      when type in ["approval_decided", "question_answered"] ->
+        MapSet.delete(awaiting, id)
+
+      %Event{type: "cancelled"}, _awaiting ->
+        MapSet.new()
+
+      _event, awaiting ->
+        awaiting
+    end)
   end
 
   defp incomplete_calls(events) do

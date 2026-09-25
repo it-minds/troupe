@@ -112,7 +112,7 @@ defmodule Troupe.Session.Loop do
     session_id = Keyword.fetch!(opts, :session_id)
     Process.set_label("troupe loop #{session_id}")
 
-    :ok = Events.subscribe(session_id)
+    :ok = Events.subscribe(session_id, :internal)
     events = Log.replay(session_id, Session.root_path())
 
     state = %__MODULE__{

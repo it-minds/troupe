@@ -6,7 +6,9 @@ defmodule Troupe.Gateway.Idle do
   that starts one leaves a process behind forever. It stops only when there is nothing
   to lose: no clients attached and no session running. Sessions that are merely
   dormant do not hold it open — they are durable in their logs and come back on the
-  next activating command.
+  next activating command. Nor, for long, does one that is idle or waiting on a person:
+  `Troupe.Sessions.Index` puts it to sleep, minutes after the last client has gone, since
+  an unanswered approval or question is as durable as the rest of its log.
   """
 
   use GenServer

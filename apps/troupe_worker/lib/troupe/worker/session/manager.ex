@@ -81,7 +81,7 @@ defmodule Troupe.Worker.Session.Manager do
     activated_at: nil,
     dormant_after_ms: @dormant_after_ms,
     status_dirty: false,
-    lifecycle: %{state: "idle", done_reason: nil, interrupted: false, approvals: MapSet.new()}
+    lifecycle: %{state: "idle", done_reason: nil, interrupted: false, approvals: %{}}
   ]
 
   # -- api --------------------------------------------------------------------
@@ -492,10 +492,18 @@ defmodule Troupe.Worker.Session.Manager do
           state.lifecycle
       end
 
-    approvals = state.session_id |> Summary.snapshot() |> Map.get("approvals", []) |> MapSet.new()
+    approvals = open_approvals(Summary.snapshot(state.session_id))
     interrupted = interrupted_on_restore?(state.session_id)
 
     %{state | lifecycle: %{lifecycle | approvals: approvals, interrupted: interrupted}}
+  end
+
+  # Each open approval with the path of the agent that asked, which is what a cancel
+  # after activation needs to find the ones under it. The projection keeps both; one it
+  # has no path for is the root's, which only a cancel of the root reaches.
+  defp open_approvals(summary) do
+    asked = Map.get(summary, "approval_agents", %{})
+    Map.new(Map.get(summary, "approvals", []), &{&1, Map.get(asked, &1, "root")})
   end
 
   # The root's most recent restart, if it was interrupted and nothing has happened
@@ -536,23 +544,48 @@ defmodule Troupe.Worker.Session.Manager do
     status_changed(put_in(state.lifecycle.interrupted, false))
   end
 
-  defp observe(state, %Event{type: "approval_requested", data: %{"call_id" => id}}) do
-    status_changed(update_in(state.lifecycle.approvals, &MapSet.put(&1, id)))
+  defp observe(state, %Event{type: "approval_requested", agent: path, data: %{"call_id" => id}}) do
+    status_changed(update_in(state.lifecycle.approvals, &Map.put(&1, id, Enum.join(path, "/"))))
   end
 
+  # An approval ends with its decision, or with its call: a cancel closes each call it
+  # stops with a `tool_call_completed`, and so does a tool that timed out waiting.
   defp observe(state, %Event{type: type, data: %{"call_id" => id}})
-       when type in ["approval_decided", "approval_resolved"] do
-    status_changed(update_in(state.lifecycle.approvals, &MapSet.delete(&1, id)))
+       when type in ["approval_decided", "approval_resolved", "tool_call_completed"] do
+    close_approvals(state, [id])
+  end
+
+  # Or with a cancel on the agent that asked or on one above it, which takes down every
+  # agent under it without a word from them — the rule `Summary` and the TUI keep.
+  defp observe(state, %Event{type: "cancelled", agent: path}) do
+    cancelled = Enum.join(path, "/")
+
+    ended =
+      for {id, asked} <- state.lifecycle.approvals,
+          asked == cancelled or String.starts_with?(asked, cancelled <> "/"),
+          do: id
+
+    close_approvals(state, ended)
   end
 
   defp observe(state, _event), do: state
+
+  # Reported only when one actually closed: every tool call ends with a
+  # `tool_call_completed`, and nearly none of them was waiting on anybody.
+  defp close_approvals(state, ids) do
+    open = Map.drop(state.lifecycle.approvals, ids)
+
+    if map_size(open) == map_size(state.lifecycle.approvals),
+      do: state,
+      else: status_changed(put_in(state.lifecycle.approvals, open))
+  end
 
   # `waiting` outranks everything: a session with a question outstanding is waiting on
   # a person whatever its agent is doing meanwhile. `interrupted` is an idle root that
   # came back mid-turn and has not been asked to carry on.
   defp lifecycle_status(%{approvals: approvals} = lifecycle) do
     cond do
-      MapSet.size(approvals) > 0 -> "waiting"
+      map_size(approvals) > 0 -> "waiting"
       lifecycle.state == "done" -> "done"
       lifecycle.interrupted -> "interrupted"
       lifecycle.state in ["thinking", "compacting"] -> "thinking"
@@ -565,7 +598,7 @@ defmodule Troupe.Worker.Session.Manager do
     %{
       "status" => lifecycle_status(state.lifecycle),
       "done_reason" => state.lifecycle.done_reason,
-      "pending_approvals" => MapSet.size(state.lifecycle.approvals),
+      "pending_approvals" => map_size(state.lifecycle.approvals),
       "cost_micros" => cost_micros(state.session_id)
     }
   end
