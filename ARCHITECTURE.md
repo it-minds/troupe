@@ -84,7 +84,7 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | thinking | text only | done (`finished`) — an implicit finish |
 | thinking | prompt over the compaction threshold | compacting |
 | thinking | cut at the output cap, or empty | note it and re-issue once, then done (`output_truncated`, `empty_reply`) |
-| thinking | refusal, model error | done (`refused`, `llm_error`); a context overflow compacts once and retries |
+| thinking | refusal, model error | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
 | acting | each call | allowlist and permission check → error result, approval request, or a task |
 | acting | approval, answer, tool result, child result, a task's `DOWN` | record it; when none are outstanding, the next turn |
 | compacting | summary | carry on the interrupted turn, or come to rest |
@@ -130,8 +130,8 @@ breakpoint.
 | What dies | What restarts | Observed |
 |---|---|---|
 | a tool task | nothing; the agent gets `DOWN` or a timeout | an error result; the agent carries on |
-| the model stream | nothing | the agent ends `llm_error` |
-| `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once) |
+| the model stream | nothing | an `llm_error`; a root rests, a subagent ends `llm_error` and its parent gets what it had |
+| `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once), a delegation to a new child |
 | a subagent's node, past its restart limit | nothing; the parent gets `DOWN` | an error result for that delegation only |
 | `Watcher`, `Files`, `Loop`, `Summary` | that child and those after it | a notice; a loop carries on from its log |
 | `Approvals`, `Log`, or the session past 3 restarts in 10 s | everything below it; the whole session | a restarted tree replays; a stopped one comes back dormant from its log |

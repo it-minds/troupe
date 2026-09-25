@@ -186,7 +186,13 @@ defmodule Troupe.Agent.State do
     end)
   end
 
-  @doc "Clear per-turn tool bookkeeping once the results have been folded in."
+  @doc """
+  Clear per-turn tool bookkeeping once the results have been folded in.
+
+  `finish_summary` is part of it: the summary a `finish` gave belongs to the calls it was
+  made among. Left behind by a turn that finished, or by one a cancel stopped, it ended the
+  next tool turn at once, before the model saw its results.
+  """
   @spec clear_calls(t()) :: t()
   def clear_calls(%__MODULE__{} = state) do
     monitors =
@@ -194,7 +200,7 @@ defmodule Troupe.Agent.State do
         if call.monitor, do: Map.delete(acc, call.monitor), else: acc
       end)
 
-    %{state | pending: %{}, call_order: [], monitors: monitors}
+    %{state | pending: %{}, call_order: [], monitors: monitors, finish_summary: nil}
   end
 
   @doc "Register a monitor so a `:DOWN` can be attributed to what it was watching."
