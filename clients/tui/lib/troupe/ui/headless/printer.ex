@@ -29,6 +29,7 @@ defmodule Troupe.UI.Headless.Printer do
 
   alias Troupe.Client
   alias Troupe.Client.Message
+  alias Troupe.UI.ModelError
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -190,7 +191,7 @@ defmodule Troupe.UI.Headless.Printer do
   defp print(%{type: :llm_error, agent_path: p, data: d}, state) do
     line(state, p, "model error: #{d.message}")
 
-    case next_step(d.message) do
+    case ModelError.next_step(d.message) do
       nil -> state
       step -> say(state, p, step)
     end
@@ -280,15 +281,6 @@ defmodule Troupe.UI.Headless.Printer do
   end
 
   defp print(_event, state), do: state
-
-  # A machine with no usable model settings is the commonest first run, and fails on the
-  # first model request with one of these; `troupe config` is what sets a provider up.
-  defp next_step("no API key is configured" <> _), do: "run `troupe config` to set up a provider"
-
-  defp next_step("the provider rejected the credentials" <> _),
-    do: "check the provider's key: `troupe config` shows what is set"
-
-  defp next_step(_message), do: nil
 
   # Every line carries the prefix, not just the first: a tool result is routinely
   # several lines long (a command's output leads with its exit code), and a bare

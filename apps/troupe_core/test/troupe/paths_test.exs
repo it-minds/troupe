@@ -28,4 +28,17 @@ defmodule Troupe.PathsTest do
       end
     end
   end
+
+  describe "display/2" do
+    # What `Path.join/2` makes of `%APPDATA%` and a file name on Windows.
+    test "on Windows, a path joined onto %APPDATA% prints with one kind of separator" do
+      joined = "C:\\Users\\me\\AppData\\Roaming\\troupe/config.yaml"
+      assert Paths.display(joined, {:win32, :nt}) == "C:\\Users\\me\\AppData\\Roaming\\troupe\\config.yaml"
+    end
+
+    test "anywhere else a path is shown as it is" do
+      assert Paths.display("/home/me/.config/troupe/config.yaml", {:unix, :linux}) ==
+               "/home/me/.config/troupe/config.yaml"
+    end
+  end
 end

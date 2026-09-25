@@ -59,6 +59,9 @@ powershell -ExecutionPolicy Bypass -File .\install.ps1
 No questions: `--tui --gui -y` (`-Tui -Gui -Yes`). Start over: `--clean-install`
 (`-CleanInstall`). Remove: `--uninstall [--purge]` (`-Uninstall [-Purge]`).
 
+Then `troupe config` sets up a model and `troupe` opens a session: the
+[first run](docs/user/README.md#first-run), in five steps.
+
 ## Deploy
 
 ```sh

@@ -563,7 +563,7 @@
       ]
     },
     "memory_auto_refresh": {
-      "description": "A new session refreshes a missing or stale brief.",
+      "description": "A new session in a git repository refreshes a missing or stale brief; never a headless run.",
       "default": true,
       "type": [
         "boolean",

@@ -380,7 +380,9 @@ defmodule Troupe.UI.TUI.View do
       end
   end
 
-  defp isolation_text(%{isolation: :worktree}), do: "worktree (not created yet)"
+  # A session the daemon started in a worktree of its own (`troupe run --worktree`) is
+  # told so by `session.create`, not by a `worktree_created` of its own.
+  defp isolation_text(%{isolation: :worktree}), do: "worktree"
   defp isolation_text(%{isolation: :remote}), do: "a worker on the plane"
   defp isolation_text(_), do: "shared checkout"
 

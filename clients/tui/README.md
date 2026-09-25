@@ -179,11 +179,17 @@ masked.
 
 On a machine with no `config.yaml`, `troupe config` in a terminal sets one up instead.
 With opencode there, it offers to copy opencode's providers into `config.yaml`, keys as
-opencode has them written. Otherwise it offers three choices: take your organisation's
-settings from a plane (`troupe login`, then `troupe config pull`), set up a provider here
-(provider, URL, key and a model from what the provider lists), or not now. Without a
-terminal it prints those choices and asks nothing. The installers end with the same
-check.
+opencode has them written. Otherwise it offers three choices: set up a provider here
+(Anthropic first, then OpenAI or a gateway: provider, URL, key and a model from what the
+provider lists; Enter at every question is Anthropic, with
+`api_key: "{env:ANTHROPIC_API_KEY}"`), take your organisation's settings from a plane
+(`troupe login`, then `troupe config pull`), or not now. Without a terminal it prints
+those choices and asks nothing. A `config.yaml` through which no model can be asked gets the
+report and then the same choices, and plain `troupe` asks them before it opens a session
+on a machine with no settings and no key. The installers end with the same check.
+
+Whatever finds no key says so with one next step, `troupe config`: the report's last
+line, a headless run's model error, and the first turn in the TUI.
 
 ## Use
 
@@ -205,8 +211,11 @@ troupe --version
 `troupe run --headless` prints the transcript, one line per event prefixed with the agent
 that wrote it, and exits when the agent comes to rest: when its turn ends, whether or not
 the model called `finish`. Nobody is there to answer an approval, so it is refused; pass
-`--auto-approve` for a task that writes files or runs commands. The exit code says how the
-run ended, for scripts and CI:
+`--auto-approve` for a task that writes files or runs commands, or set `auto_approve` in
+the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A
+headless run starts no librarian: the project brief is refreshed automatically only for
+a session a person opens, in a git repository, with a model to ask
+(`memory_auto_refresh`). The exit code says how the run ended, for scripts and CI:
 
 | code | the run |
 |---|---|

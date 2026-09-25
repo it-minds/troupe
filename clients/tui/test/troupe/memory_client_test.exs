@@ -37,6 +37,7 @@ defmodule Troupe.MemoryClientTest do
   test "a session created where the brief is missing starts the librarian when the config asks" do
     {sid, _, _ws} =
       start_session!(
+        workspace: git_init!(tmp_workspace()),
         script: [@note, {:text, "recorded"}, {:finish, "ok"}],
         config: %{memory_auto_refresh: true}
       )
@@ -65,6 +66,27 @@ defmodule Troupe.MemoryClientTest do
     refute_receive {:troupe_event,
                     %{session_id: ^sid2, type: :branch_spawned, agent_path: "librarian-1"}},
                    500
+  end
+
+  # What a brief describes is a repository: `troupe` opened in a home directory, or any
+  # directory git does not know, surveys nothing. Nor does a session whose client says
+  # not to, as a headless run does. `/memory refresh` still writes one anywhere.
+  test "no librarian starts outside a git repository, or when the client says not to" do
+    {outside, _, _} =
+      start_session!(script: [{:finish, "ok"}], config: %{memory_auto_refresh: true})
+
+    {headless, _, _} =
+      start_session!(
+        workspace: git_init!(tmp_workspace()),
+        script: [{:finish, "ok"}],
+        config: %{memory_auto_refresh: true},
+        params: %{refresh_brief: false}
+      )
+
+    for sid <- [outside, headless] do
+      assert {:ok, "no project brief yet; " <> _} = Client.memory(sid, "")
+      refute Enum.any?(Client.events(sid), &(&1.agent_path == "librarian-1"))
+    end
   end
 
   defp workspace_of(sid) do

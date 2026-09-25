@@ -4,10 +4,11 @@ defmodule Troupe.CLITest do
   import Troupe.TestHelpers
 
   alias Troupe.{CLI, Client}
+  alias Troupe.CLI.Runner
   alias Troupe.UI.Headless.Printer
 
   test "parses the documented command lines" do
-    assert {:ok, %{mode: :tui, watch: false}} = CLI.parse([])
+    assert {:ok, %{mode: :tui, watch: nil}} = CLI.parse([])
     assert {:ok, %{mode: :tui, watch: true}} = CLI.parse(["--watch"])
 
     assert {:ok, %{mode: :run, agent: "build", task: "fix it", headless: true}} =
@@ -28,6 +29,23 @@ defmodule Troupe.CLITest do
     assert {:error, _} = CLI.parse(["run"])
     # The umbrella's `VERSION`, which the TUI shares with everything it is released with.
     assert CLI.version() == "troupe " <> (File.read!("../../VERSION") |> String.trim())
+  end
+
+  # The config files' `auto_approve`, `watch` and `full_send` apply to a session `troupe`
+  # starts unless the command line says otherwise; it used to send all three as false.
+  test "a session is asked for only the switches the command line gave" do
+    session_config = fn argv ->
+      {:ok, args} = CLI.parse(argv)
+      CLI.session_config(args)
+    end
+
+    assert session_config.([]) == %{}
+    assert session_config.(["run", "x", "--headless"]) == %{}
+    assert session_config.(["--watch"]) == %{watch: true}
+    assert session_config.(["--full-send"]) == %{full_send: true}
+
+    assert session_config.(["run", "x", "--auto-approve", "--no-watch"]) ==
+             %{auto_approve: true, watch: false}
   end
 
   test "parses the config command lines" do
@@ -255,7 +273,9 @@ defmodule Troupe.CLITest do
 
   # A first run on a machine with no model settings: the default provider and no key.
   test "headless printer exits 1 on a provider with no key, and names the next step" do
-    {sid, _, _} = start_session!(config: %{provider: "anthropic", model: "claude-sonnet-5"})
+    {sid, _, _} =
+      start_session!(config: %{provider: "anthropic", models: %{"default" => "claude-sonnet-5"}})
+
     {io, _} = printer!(sid)
 
     say!(sid, "say hi")
@@ -274,12 +294,14 @@ defmodule Troupe.CLITest do
     assert contents(io) =~ "root> exit 1: the agent ended refused"
   end
 
-  # The librarian `troupe run` starts on a repository with no brief is a branch of its own,
-  # window `librarian-1`, and its events reach the printer beside root's. It coming to rest
-  # is not the run coming to rest.
+  # A librarian on a repository with no brief is a branch of its own, window `librarian-1`,
+  # and its events reach a printer beside root's: `troupe run` without `--headless` starts
+  # one, and so does `/memory refresh` from anyone attached. It coming to rest is not the
+  # run coming to rest.
   test "headless printer waits for root when the librarian's branch rests first" do
     {sid, _, _} =
       start_session!(
+        workspace: git_init!(tmp_workspace()),
         script: [{:text_and_tools, "the answer", []}],
         config: %{memory_auto_refresh: true}
       )
@@ -302,6 +324,35 @@ defmodule Troupe.CLITest do
     out = contents(io)
     assert out =~ "librarian-1> "
     assert out =~ "root> the answer"
+  end
+
+  # `troupe run "task" --headless` in a repository with no brief, whose config approves
+  # writes: the config's `auto_approve` holds, where the run used to send `false` and the
+  # printer refused the write (exit 3); no librarian starts beside the task; and the
+  # session's window says it is the checkout's own, not "remote".
+  test "a headless run takes the config's approvals, starts no librarian, and is local" do
+    ws = git_init!(tmp_workspace())
+    {:ok, args} = CLI.parse(["run", "write out.txt", "--headless", "--workspace", ws])
+
+    {sid, _, _} =
+      start_session!(
+        workspace: ws,
+        script: [
+          {:tool, "write_file", %{"path" => "out.txt", "content" => "hi"}},
+          {:text_and_tools, "wrote it", []}
+        ],
+        config: %{memory_auto_refresh: true},
+        params: Runner.run_params(args)
+      )
+
+    {io, _} = printer!(sid)
+    assert_receive {:rest, 0}, 15_000
+    assert File.read!(Path.join(ws, "out.txt")) == "hi"
+
+    out = contents(io)
+    assert out =~ ~r/root> spawned \/\w+ \(shared\)/
+    refute out =~ "(remote)"
+    refute Enum.any?(Client.events(sid), &(&1.agent_path == "librarian-1"))
   end
 
   defp printer!(sid) do

@@ -162,6 +162,8 @@ jobs:
           \`\`\`
 
           No questions: \`--tui --gui -y\` (\`-Tui -Gui -Yes\`). Start over: \`--clean-install\` (\`-CleanInstall\`). Remove: \`--uninstall\` (\`-Uninstall\`). The desktop app's own installers are attached as well.
+
+          Then, in a new terminal, \`troupe config\` sets up a model (Enter at every question is Anthropic, with the key from \`ANTHROPIC_API_KEY\`) and \`troupe\` in a project directory opens a session: the [first run](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/user/README.md#first-run).
           NOTES
           flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
           [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)

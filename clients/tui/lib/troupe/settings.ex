@@ -201,8 +201,8 @@ defmodule Troupe.Settings do
       yaml: ["memory_auto_refresh"],
       effect: :next_run,
       help: """
-      Start the librarian when a new session finds the brief missing or stale.
-      Off means only `/memory refresh` writes it.
+      Start the librarian when a new session in a git repository finds the brief missing
+      or stale; never for a headless run. Off means only `/memory refresh` writes it.
       """
     }
   ]
