@@ -1,6 +1,7 @@
 # Every night, on `main`: the full suite — every job whatever changed, the soak and the
-# cluster suite — and the native builds, so a race, a cluster regression or a broken
-# Windows build is found the next morning rather than by the next release. Nothing is
+# cluster suite — the native builds, and the harness against a real model through the
+# gateway, so a race, a cluster regression, a broken Windows build or a model the harness
+# no longer stops is found the next morning rather than by the next release. Nothing is
 # published. `.github/CI.md` has the picture.
 name: nightly
 
@@ -8,10 +9,19 @@ on:
   schedule:
     - cron: "17 2 * * *"
   workflow_dispatch:
+    inputs:
+      only:
+        description: >-
+          `live` runs the real-gateway check alone (a few cents, about fifteen minutes), on
+          any branch; `all` runs everything (about seventy minutes)
+        type: choice
+        options: [all, live]
+        default: all
 
 jobs:
   suite:
     name: the full suite
+    if: inputs.only != 'live'
     uses: ./.github/workflows/ci.yml
     # Everything any job in `ci.yml` asks for, used or not: a called workflow's
     # permissions are checked before any job runs, and its `images` job asks for
@@ -27,4 +37,16 @@ jobs:
 
   native:
     name: native builds
+    if: inputs.only != 'live'
     uses: ./.github/workflows/native.yml
+
+  live:
+    name: against the real gateway
+    uses: ./.github/workflows/live.yml
+    permissions:
+      contents: read
+    with:
+      model: ${{ vars.TROUPE_NIGHTLY_MODEL || 'qwen3-235b' }}
+    secrets:
+      base_url: ${{ secrets.TROUPE_NIGHTLY_BASE_URL }}
+      api_key: ${{ secrets.TROUPE_NIGHTLY_API_KEY }}
