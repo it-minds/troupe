@@ -284,7 +284,8 @@ every key are in [docs/user/configuration.md](../user/configuration.md); the sch
   what to write: one that is not YAML, a value of the wrong type, an enum value nobody
   knows, both spellings of one setting, or a file written for a newer Troupe.
 - **On a laptop**, a workspace's files set those keys only once the user's own file lists
-  the workspace under `trusted_workspaces`. `troupe config pull` writes the plane's
+  the workspace under `trusted_workspaces`, which `troupe config trust` in the workspace
+  adds. `troupe config pull` writes the plane's
   client defaults (Part C) into the user's file through the daemon, in the current
   spellings.
 - **A repository can check its own file** in CI: `troupe config validate

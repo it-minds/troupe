@@ -510,8 +510,8 @@ defmodule Troupe.Config.Layers do
   defp reason(:pod, pronoun, _ctx), do: "a session on a pod never reads #{pronoun} from a project's file"
 
   defp reason(:untrusted, pronoun, ctx) do
-    "a project's file sets #{pronoun} only in a trusted workspace. To trust this one, add " <>
-      "#{ctx.workspace} to trusted_workspaces in #{ctx.user_path}"
+    "a project's file sets #{pronoun} only in a trusted workspace. To trust this one, run " <>
+      "`#{Trust.command(ctx.workspace)}`, which adds it to trusted_workspaces in #{ctx.user_path}"
   end
 
   defp at(nil), do: ""

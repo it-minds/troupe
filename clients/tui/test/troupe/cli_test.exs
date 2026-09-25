@@ -75,6 +75,15 @@ defmodule Troupe.CLITest do
 
     assert {:ok, %{mode: :config_pull}} = CLI.parse(["config", "pull"])
     assert CLI.usage() =~ "troupe config --explain"
+
+    assert {:ok, %{mode: :config_trust, path: nil}} = CLI.parse(["config", "trust"])
+    assert {:ok, %{mode: :config_trust, path: "../r"}} = CLI.parse(["config", "trust", "../r"])
+    assert {:ok, %{mode: :config_trust_list}} = CLI.parse(["config", "trust", "--list"])
+    assert {:ok, %{mode: :config_untrust, path: nil}} = CLI.parse(["config", "untrust"])
+    assert {:ok, %{mode: :config_untrust, path: "../r"}} = CLI.parse(["config", "untrust", "../r"])
+    assert {:error, _} = CLI.parse(["config", "untrust", "--list"])
+    assert {:error, _} = CLI.parse(["config", "trust", "a", "b"])
+    assert CLI.usage() =~ "troupe config trust [PATH]"
   end
 
   test "config --explain and validate answer from the files, with the exit status" do

@@ -76,6 +76,15 @@ defmodule Troupe.CLI.Runner do
       {:ok, %{mode: :config_migrate} = args} ->
         print(Troupe.Config.migrate(args.workspace, args.path, write: args.write))
 
+      {:ok, %{mode: :config_trust} = args} ->
+        print(Troupe.Config.trust(args.path || args.workspace))
+
+      {:ok, %{mode: :config_untrust} = args} ->
+        print(Troupe.Config.untrust(args.path || args.workspace))
+
+      {:ok, %{mode: :config_trust_list}} ->
+        print(Troupe.Config.list_trusted())
+
       {:ok, %{mode: :config_pull} = args} ->
         Troupe.CLI.ModelConfig.pull(args.plane_url)
 

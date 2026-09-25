@@ -14,6 +14,8 @@ troupe-daemon config              the resolved providers and models (keys masked
 troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
 troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
 troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
+troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
+troupe-daemon config untrust [PATH]   take that back
 troupe-daemon config import-opencode   copy opencode's providers into config.yaml
 troupe-daemon models [--refresh]  every model this machine can address
 troupe-daemon version
@@ -57,8 +59,9 @@ keep the previous release beside the new one for rollback, and take `--uninstall
 `~/.config/troupe/config.yaml` (`%APPDATA%\troupe\config.yaml` on Windows), then the
 project's `.troupe/config.yaml` and `.troupe/config.local.yaml`, then `TROUPE_*`, merged
 by key. A project's files set the provider, keys, approvals, MCP servers and paths only
-in a workspace the user file's `trusted_workspaces` names, and a pod's never do. The
-rules and every key: [docs/user/configuration.md](../../docs/user/configuration.md).
+in a workspace the user file's `trusted_workspaces` names (`config trust` adds one), and a
+pod's never do. The rules and every key:
+[docs/user/configuration.md](../../docs/user/configuration.md).
 
 ```yaml
 providers:

@@ -90,7 +90,8 @@ A project `.troupe/config.yaml`, then a git-ignored `.troupe/config.local.yaml`,
 override keys, merging maps by key; environment variables (`TROUPE_PROVIDER`,
 `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_MODEL`) override the files. A
 project's files set the provider, keys, approvals, MCP servers and read roots only
-once the workspace is on `trusted_workspaces` in this file. `provider: openai`
+once the workspace is on `trusted_workspaces` in this file, which
+`troupe config trust` in the workspace does. `provider: openai`
 speaks Chat Completions against any `base_url` (LiteLLM, vLLM, Mistral, ...).
 Every key, which file wins, and what is checked:
 [docs/user/configuration.md](../../docs/user/configuration.md);
@@ -173,7 +174,9 @@ If Troupe has no API key of its own, it reads the providers from opencode's
 opencode's `model` as the default, so an existing opencode setup works with no
 Troupe config at all — `options.baseURL`, `options.apiKey`, `options.authToken`,
 and per model `id`, `limit.context`, `limit.output` and
-`options.reasoningEffort`. `variants`, `agent` and `permission` are not read;
+`options.reasoningEffort`. `{env:VAR}` and `{file:path}` in the first three are
+read as opencode reads them, and one whose variable is not set, or whose file
+cannot be read, refuses that provider. `variants`, `agent` and `permission` are not read;
 agents are files (see below). `troupe config` prints what was resolved with keys
 masked.
 

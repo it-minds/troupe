@@ -58,6 +58,12 @@ defmodule Troupe.Daemon.CLITest do
     assert CLI.parse(["config", "validate", "a.yaml"]) == {:config_validate, "a.yaml"}
     assert CLI.parse(["config", "migrate", "--write"]) == {:config_migrate, nil, true}
     assert CLI.parse(["config", "migrate", "a.yaml"]) == {:config_migrate, "a.yaml", false}
+    assert CLI.parse(["config", "trust"]) == {:config_trust, nil}
+    assert CLI.parse(["config", "trust", "../repo"]) == {:config_trust, "../repo"}
+    assert CLI.parse(["config", "trust", "--list"]) == :config_trust_list
+    assert CLI.parse(["config", "untrust"]) == {:config_untrust, nil}
+    assert CLI.parse(["config", "untrust", "../repo"]) == {:config_untrust, "../repo"}
+    assert {:error, _} = CLI.parse(["config", "untrust", "--list"])
     assert {:error, _} = CLI.parse(["config", "max_turns"])
     assert {:error, _} = CLI.parse(["frobnicate"])
     assert {:error, _} = CLI.parse([])
