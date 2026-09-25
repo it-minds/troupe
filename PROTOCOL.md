@@ -515,9 +515,14 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
+"pending_approvals", "tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
 
 `filter.parent` selects the branches of one session.
+
+`pending_approvals` counts the approvals still open (see `approval_requested` for when one
+ends), and `status` is `waiting` while there is one, whatever else it would say: the two
+columns a plane's `sessions.list` row carries, so an inbox is a listing and not a replay.
+A dormant session counts the root agent's, which are what it asks again when it wakes.
 
 #### `session.get` → one session object plus `head_seq`.
 
