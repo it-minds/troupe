@@ -352,7 +352,7 @@ defmodule Troupe.UI.TUI.View do
        row.root? && present(w.summary) && field("summary", w.summary),
        row.root? && present(w.message) && field("failure", w.message),
        row.root? && present(w.diff_stat) && field("diff", w.diff_stat)
-     ] ++ todo_block(a) ++ pending_block(w, row.path) ++ recent_block(a))
+     ] ++ todo_block(a, row.root?) ++ pending_block(w, row.path) ++ recent_block(a))
     |> Enum.filter(& &1)
     |> Enum.join("\n")
   end
@@ -386,10 +386,10 @@ defmodule Troupe.UI.TUI.View do
   defp isolation_text(%{isolation: :remote}), do: "a worker on the plane"
   defp isolation_text(_), do: "shared checkout"
 
-  defp todo_block(%{todos: []}), do: []
+  defp todo_block(%{todos: []}, _root?), do: []
 
-  defp todo_block(%{todos: todos}),
-    do: ["", "tasks"] ++ Enum.map(todos, fn t -> "  [#{glyph(t.status)}] #{t.text}" end)
+  defp todo_block(%{todos: todos}, root?),
+    do: ["", "tasks"] ++ Enum.map(todo_texts(todos, root?), &("  " <> &1))
 
   defp pending_block(w, path) do
     case Enum.filter(w.pending, &(&1.agent_path == path)) do
@@ -1227,8 +1227,20 @@ defmodule Troupe.UI.TUI.View do
     w.agents
     |> Map.get(path, %{todos: []})
     |> Map.get(:todos, [])
-    |> Enum.map(fn t -> {:text, "#{indent}[#{glyph(t.status)}] #{t.text}"} end)
+    |> todo_texts(path == w.path)
+    |> Enum.map(&{:text, indent <> &1})
   end
+
+  # The window's own list is numbered, because the number is what `/todo cancel` takes:
+  # an item's id is the model's, or a hash of its text, and is never shown. A subagent's
+  # list is not the one `/todo` edits, so it has no numbers to mistake for its own.
+  defp todo_texts(todos, true) do
+    todos
+    |> Enum.with_index(1)
+    |> Enum.map(fn {t, n} -> "#{n}. [#{glyph(t.status)}] #{t.text}" end)
+  end
+
+  defp todo_texts(todos, false), do: Enum.map(todos, &"[#{glyph(&1.status)}] #{&1.text}")
 
   defp glyph(:completed), do: "x"
   defp glyph(:in_progress), do: ">"

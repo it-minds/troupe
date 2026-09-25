@@ -91,6 +91,36 @@ defmodule Troupe.WorkerCommandsTest do
       await_done()
     end
 
+    # An item's id is the model's, or a hash of its text, and is never on screen: the side
+    # panel numbers the window's list, and `/todo cancel` takes that number.
+    test "/todo cancel takes the number the side panel shows beside the task" do
+      {sid, _, _} = start_session!(script: [{:text, "noted"}, {:text, "noted"}, {:text, "noted"}])
+      {pid, session} = start_tui(sid)
+      eventually(fn -> user_state(pid).model.windows["root"] != nil end)
+      press(pid, "1")
+
+      for task <- ["write the tests", "ship it"] do
+        type(pid, "/todo add " <> task)
+        press(pid, "enter")
+        await_event("root", :todo_updated)
+        await_done()
+      end
+
+      eventually(fn -> screen_text(pid, session) =~ "2. [ ] ship it" end)
+
+      type(pid, "/todo cancel 2")
+      press(pid, "enter")
+
+      cancelled = await_event("root", :todo_updated)
+
+      assert [%{text: "write the tests", status: :pending}, %{text: "ship it", status: :cancelled}] =
+               cancelled.data.items
+
+      eventually(fn -> screen_text(pid, session) =~ "2. [-] ship it" end)
+      assert screen_text(pid, session) =~ "1. [ ] write the tests"
+      await_done()
+    end
+
     test "/upload puts a file from this machine into the session's workspace" do
       {sid, _, ws} = start_session!(script: [])
       eventually(fn -> Client.capability(sid).up? end)

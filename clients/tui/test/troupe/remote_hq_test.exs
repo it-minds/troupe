@@ -179,7 +179,7 @@ defmodule Troupe.RemoteHQTest do
   end
 
   describe "a viewer token" do
-    test "disables input and approval, and an injected -32003 is handled gracefully" do
+    test "disables input and approval, and an injected -32004 is handled gracefully" do
       {remote, url} = start_remote!(sessions: sessions(), scopes: ["observe"])
       origin = connect!(remote, url)
       sid = attach!(origin, "s-alpha")
@@ -190,7 +190,7 @@ defmodule Troupe.RemoteHQTest do
       assert capability.reason =~ "observe"
       assert capability.scopes == ["observe"]
 
-      FakeRemote.fail_next(remote, "input.send", -32_003, "control scope required")
+      FakeRemote.fail_next(remote, "input.send", -32_004, "control scope required")
       assert {:error, message} = Client.send_input(sid, "code-1", "let me in")
       assert message =~ "not allowed"
       assert message =~ "control scope required"

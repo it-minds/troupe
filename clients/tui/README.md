@@ -261,8 +261,8 @@ sending; Tab switches the window's profile
 (`/plan` → Tab to `code` → "go" is plan-then-build); `xx` (x twice) cancels and removes the window; Tab on the command line completes command names and the window paths for `/merge`, `/discard`, `/cancel`, `/dismiss`; `dd`
 dismisses a finished window, keeping its worktree; `e` expands tool output; Ctrl-Y copies the
 transcript you are reading to the clipboard; `@file` completes paths;
-Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <id>` and `/todo add <text>` edit the
-activated branch's task list.
+Ctrl-C twice, `/quit`, Ctrl-D or Ctrl-Q exit. `/todo cancel <n>` (the task's number in the side
+panel) and `/todo add <text>` edit the activated branch's task list.
 
 `x` and `d` are double presses (`xx`, `dd`) because the window they act in is also where you type:
 the first press puts the letter in the input box and the box says what a second one would do, and
