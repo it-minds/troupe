@@ -210,13 +210,15 @@ defmodule Troupe.Config.Explain do
       |> Enum.with_index()
       |> Enum.reject(fn {entry, i} -> entry.layer == :default and entry.value == nil and i != winner end)
       |> Enum.map(fn {entry, i} ->
-        "  #{String.pad_trailing(Atom.to_string(entry.layer), 8)} #{String.pad_trailing(shown(entry, spec), 30)}" <>
-          if(entry.source, do: " #{entry.source}", else: "") <>
-          cond do
-            entry.ignored -> "\n           ignored: #{entry.ignored}"
-            i == winner -> "  <- in effect"
-            true -> ""
-          end
+        line =
+          "  #{String.pad_trailing(Atom.to_string(entry.layer), 8)} #{String.pad_trailing(shown(entry, spec), 30)}" <>
+            if(entry.source, do: " #{entry.source}", else: "")
+
+        cond do
+          entry.ignored -> String.trim_trailing(line) <> "\n           ignored: #{entry.ignored}"
+          i == winner -> String.trim_trailing(line) <> "  <- in effect"
+          true -> String.trim_trailing(line)
+        end
       end)
 
     Enum.join(["#{row.key} = #{row.shown}" | lines], "\n")

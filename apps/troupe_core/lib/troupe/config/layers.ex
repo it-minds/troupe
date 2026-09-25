@@ -467,40 +467,53 @@ defmodule Troupe.Config.Layers do
 
   defp gate(walked, :user, _path, _ctx), do: walked
 
-  defp gate(walked, layer, path, ctx) do
-    Enum.reduce(Map.keys(walked.values), walked, fn key, acc ->
-      spec = Enum.find(Schema.keys(), &(&1.key == key))
+  # The keys a workspace's file may not set here are dropped, each marked on the ladder
+  # with why, and the file gets one warning for each reason, naming them all.
+  defp gate(walked, _layer, path, ctx) do
+    ignored =
+      walked.values
+      |> Map.keys()
+      |> Enum.sort()
+      |> Enum.group_by(&ignore_kind(Enum.find(Schema.keys(), fn spec -> spec.key == &1 end), ctx))
+      |> Map.delete(nil)
 
-      case ignore_reason(spec, layer, ctx) do
-        nil ->
-          acc
-
-        reason ->
-          %{
-            acc
-            | values: Map.delete(acc.values, key),
-              entries:
-                Enum.map(acc.entries, fn entry ->
-                  if hd(entry.path) == key, do: %{entry | ignored: reason}, else: entry
-                end),
-              warnings: acc.warnings ++ [issue(:warning, path, nil, key, "#{key} is ignored: #{reason}")]
-          }
-      end
+    Enum.reduce(ignored, walked, fn {kind, keys}, acc ->
+      %{
+        acc
+        | values: Map.drop(acc.values, keys),
+          entries:
+            Enum.map(acc.entries, fn entry ->
+              if hd(entry.path) in keys, do: %{entry | ignored: ignored_because(kind, [hd(entry.path)], ctx)}, else: entry
+            end),
+          warnings:
+            acc.warnings ++
+              [issue(:warning, path, nil, Enum.join(keys, ", "), ignored_because(kind, keys, ctx))]
+      }
     end)
   end
 
-  defp ignore_reason(%{scope: :user}, _layer, ctx),
-    do: "it is read only from the user's config.yaml#{at(ctx.user_path)}"
+  defp ignore_kind(%{scope: :user}, _ctx), do: :user_only
+  defp ignore_kind(%{scope: :trusted}, %{pod?: true}), do: :pod
+  defp ignore_kind(%{scope: :trusted}, %{trusted?: false}), do: :untrusted
+  defp ignore_kind(_spec, _ctx), do: nil
 
-  defp ignore_reason(%{scope: :trusted}, _layer, %{pod?: true}),
-    do: "a session on a pod never reads it from a project's file"
+  # "auto_approve and mcp are ignored: ..."; on a ladder, where there is one key, what
+  # comes after the colon.
+  defp ignored_because(kind, [_one] = keys, ctx), do: "#{hd(keys)} is ignored: " <> reason(kind, "it", ctx)
 
-  defp ignore_reason(%{scope: :trusted}, _layer, %{trusted?: false} = ctx) do
-    "a project's file sets it only in a trusted workspace. To trust this one, add " <>
-      "#{ctx.workspace} to trusted_workspaces in #{ctx.user_path}"
+  defp ignored_because(kind, keys, ctx) do
+    {rest, [last]} = Enum.split(keys, -1)
+    "#{Enum.join(rest, ", ")} and #{last} are ignored: " <> reason(kind, "them", ctx)
   end
 
-  defp ignore_reason(_spec, _layer, _ctx), do: nil
+  defp reason(:user_only, "it", ctx), do: "it is read only from the user's config.yaml#{at(ctx.user_path)}"
+  defp reason(:user_only, "them", ctx), do: "they are read only from the user's config.yaml#{at(ctx.user_path)}"
+  defp reason(:pod, pronoun, _ctx), do: "a session on a pod never reads #{pronoun} from a project's file"
+
+  defp reason(:untrusted, pronoun, ctx) do
+    "a project's file sets #{pronoun} only in a trusted workspace. To trust this one, add " <>
+      "#{ctx.workspace} to trusted_workspaces in #{ctx.user_path}"
+  end
 
   defp at(nil), do: ""
   defp at(path), do: " (#{path})"

@@ -308,12 +308,14 @@ defmodule Troupe.Config.LayersTest do
       # What is not gated applies all the same.
       assert config.max_turns == 7
 
-      for key <- ~w(auto_approve mcp base_url read_roots) do
-        assert Enum.any?(config.warnings, &(&1 =~ "#{ctx.project}: #{key} is ignored: a project's file sets it only in a trusted workspace")),
-               key
-      end
+      assert Enum.any?(
+               config.warnings,
+               &(&1 =~
+                   "#{ctx.project}: auto_approve, base_url, mcp and read_roots are ignored: " <>
+                     "a project's file sets them only in a trusted workspace")
+             )
 
-      assert Enum.any?(config.warnings, &(&1 =~ "config.local.yaml: api_key is ignored"))
+      assert Enum.any?(config.warnings, &(&1 =~ "config.local.yaml: api_key is ignored: a project's file sets it only"))
       assert Enum.any?(config.warnings, &(&1 =~ "add #{ctx.ws} to trusted_workspaces in #{ctx.user}"))
 
       trust(ctx)
@@ -328,7 +330,7 @@ defmodule Troupe.Config.LayersTest do
       trust(ctx)
       config = load!(ctx, [], trust: :never)
       assert {config.auto_approve, config.mcp, config.base_url} == {false, %{}, nil}
-      assert Enum.any?(config.warnings, &(&1 =~ "a session on a pod never reads it from a project's file"))
+      assert Enum.any?(config.warnings, &(&1 =~ "are ignored: a session on a pod never reads them from a project's file"))
     end
 
     test "are trusted by a directory above them", ctx do
