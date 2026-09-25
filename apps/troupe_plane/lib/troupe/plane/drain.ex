@@ -127,12 +127,19 @@ defmodule Troupe.Plane.Drain do
   def strand(%Worker{} = worker) do
     worker.id
     |> Sessions.on_worker()
-    |> Enum.map(fn session_id ->
-      Placement.release(worker.profile, session_id)
-      Sessions.dormant(session_id)
-      release_budget(session_id)
-      session_id
-    end)
+    |> Enum.map(&strand(worker, &1))
+  end
+
+  @doc """
+  The same for one session a pod no longer holds, in the same order: a session archived
+  on a pod whose tree for it had already stopped.
+  """
+  @spec strand(Worker.t(), String.t()) :: String.t()
+  def strand(%Worker{} = worker, session_id) do
+    Placement.release(worker.profile, session_id)
+    Sessions.dormant(session_id)
+    release_budget(session_id)
+    session_id
   end
 
   defp release_budget(session_id) do

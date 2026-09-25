@@ -894,13 +894,13 @@ so. The plane has already asked for another worker; `retry_after_ms` says when t
 again. A refusal happens only where a person set a ceiling, and then it quotes the number
 they set.
 
-A session goes `dormant` on its own idle timeout, or on `session.archive`. Waiting on a
-person counts as idle, and a local daemon's timeout is shorter for a session no client is
-subscribed to ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log
-stays, and so does everything a client can learn from it: `session.list`,
-`session.get`, `blob.get` and `subscribe` all work on a dormant session and start
-nothing. That is deliberate — a session that woke up because somebody looked at it
-would never stay dormant.
+A session goes `dormant` on its own idle timeout, or on `session.archive`: the daemon's for
+a local session, the plane's for a pod session (§7). Waiting on a person counts as idle,
+and a local daemon's timeout is shorter for a session no client is subscribed to
+([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log stays, and so
+does everything a client can learn from it: `session.list`, `session.get`, `blob.get` and
+`subscribe` all work on a dormant session and start nothing. That is deliberate — a session
+that woke up because somebody looked at it would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
@@ -1023,10 +1023,16 @@ keeps the whole table.
 session's row, its key, its placement and its retention, so a worker refuses
 `session.archive`, `session.pin`, `session.unpin` and `session.erase` to a token for one
 session with `forbidden`, `data.method` naming it and `data.reason` of
-`done through the plane`. A client pins, unpins and erases a pod session with the
-plane's methods of the same names; the plane's erasure reaches the pod over its control
-channel and deletes the pod's copy along with the key and the objects. A pod session goes
-dormant on its own idle timeout.
+`done through the plane`. A client archives, pins, unpins and erases a pod session with
+the plane's methods of the same names, each `{session_id}` and each for the session's
+owner. The plane's archive pushes `session.dormant` to the pod holding the session, which
+seals it, uploads its workspace, deletes its own copy and reports it dormant, giving back
+its slot and its budget slice; the answer is the session's row, `dormant`, and the next
+activating command brings it back on whichever pod has room. A session that is not
+running is answered as it stands, one still `pending` is refused with `conflict`, and one
+whose pod does not answer stays as it was, with `unavailable`. The plane's erasure reaches
+the pod over the same control channel and deletes the pod's copy along with the key and
+the objects.
 
 ### `auth.expiring` (notification, server → client)
 

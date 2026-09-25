@@ -269,15 +269,15 @@ thumbprint, so plane and workers agree with nothing kept in step).
 ingress, with their projected ServiceAccount token; a `TokenReview` validates it and **the
 namespace decides the profile**, so a pod can only enrol as what it is. Upward flow
 heartbeats, the session *index* (ids, epochs, sequence numbers, head hashes), status
-columns and usage batches; downward, idempotent pushes — activate, drain, erase, fence,
-JWKS and ACL changes, `config.updated` — routed to whichever replica holds the pod. Bundles
-and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}` answers a
-short-lived JWT for *that session owner's* key slots, the subject read off the session row,
-so a pod naming a session it does not hold gets `not_found`.
+columns and usage batches; downward, idempotent pushes — activate, dormant, drain, erase,
+fence, JWKS and ACL changes, `config.updated` — routed to whichever replica holds the pod.
+Bundles and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}`
+answers a short-lived JWT for *that session owner's* key slots, the subject read off the
+session row, so a pod naming a session it does not hold gets `not_found`.
 
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
-`sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, pin,
-erase, `session.grant`, `session.review`, `trigger.fire`. `session.create` is a sequence
+`sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,
+pin, erase, `session.grant`, `session.review`, `trigger.fire`. `session.create` is a sequence
 of reservations, each given back if a later one fails: row → capacity (`Placement`) →
 budget (`TeamBudget`) → push to the pod → token. The row comes first because a placement
 is a conditional write against it, which survives the replica that made it. `Placement`

@@ -29,6 +29,7 @@ defmodule Troupe.Plane.Harness do
     Budget,
     Bundles,
     Connections,
+    Drain,
     Erasure,
     Fleet,
     Identity,
@@ -53,6 +54,10 @@ defmodule Troupe.Plane.Harness do
   # How long a client should wait before asking again. The scaler's interval plus the
   # time a cold worker takes to schedule, bind its volume and fetch its bundle.
   @wait_hint_ms 5_000
+
+  # How long an archive waits for the pod: what a pod gives one session to seal, upload
+  # its workspace and stop (`Troupe.Worker.Session.Manager.go_dormant/2`).
+  @archive_ms 120_000
 
   # What a session reserves against its team's budget before it starts. A slice rather
   # than the whole budget, so one session cannot lock a team out; the ledger records
@@ -109,6 +114,7 @@ defmodule Troupe.Plane.Harness do
     "session.pin" => :control,
     "session.unpin" => :control,
     "session.erase" => :control,
+    "session.archive" => :control,
     "session.grant" => :control,
     "session.review" => :control,
     "trigger.fire" => :control,
@@ -740,6 +746,24 @@ defmodule Troupe.Plane.Harness do
     end
   end
 
+  # -- archiving --------------------------------------------------------------
+
+  # Dormant now rather than at the idle timeout. A pod session's tree, its slot and its
+  # budget slice are the plane's to give back, so a worker refuses this method to a session
+  # token (PROTOCOL.md §7) and the plane pushes `session.dormant` to the pod instead: the
+  # pod seals, uploads the workspace, deletes its own copy and reports its dormancy, which
+  # gives back the slot and the slice. The log stays, and the next activating command
+  # brings the session back wherever there is room.
+  #
+  # The owner's, as pinning and erasing are: it stops a turn for everybody attached.
+  defp handle("session.archive", params, %{user: user}) do
+    with {:ok, session} <- visible(params["session_id"], user),
+         :ok <- must_administer(user, session),
+         {:ok, archived} <- archive(session, user) do
+      {:ok, session_json(archived, user)}
+    end
+  end
+
   defp pin(params, %{user: user}, pinned?) do
     with {:ok, session} <- visible(params["session_id"], user),
          :ok <- must_administer(user, session) do
@@ -748,6 +772,50 @@ defmodule Troupe.Plane.Harness do
         {:error, reason} -> {:error, Error.new(:internal_error, %{reason: inspect(reason)})}
       end
     end
+  end
+
+  defp archive(%Session{state: "active", worker_id: worker_id} = session, user)
+       when is_binary(worker_id) do
+    with {:ok, worker} <- worker_of(session),
+         {:ok, _slept} <- put_to_sleep(worker, session) do
+      {:ok, _audit} =
+        Audit.record(user.subject, "session.archive", session.id, %{"pod" => worker.pod_name})
+
+      {:ok, Sessions.get(session.id)}
+    end
+  end
+
+  # Nothing is running, and asking twice is what a retry does.
+  defp archive(%Session{state: state} = session, _user) when state in ["dormant", "read_only"],
+    do: {:ok, session}
+
+  # Waiting for room, or between the epoch bump and its placement: there is no pod to tell.
+  defp archive(%Session{} = session, _user) do
+    {:error,
+     Error.new(:conflict, %{reason: "this session is not on a pod yet", state: session.state})}
+  end
+
+  # The pod reports its dormancy down the control channel before it answers, so the row
+  # is normally dormant by now. One that still names this pod at this epoch is a session
+  # whose tree the pod no longer has — it stopped without saying so — and it is given back
+  # the way a lost pod's are.
+  defp put_to_sleep(worker, session) do
+    case Router.push(worker, "session.dormant", %{"session_id" => session.id}, @archive_ms) do
+      {:ok, slept} ->
+        if still_on?(session, worker), do: Drain.strand(worker, session.id)
+        {:ok, slept}
+
+      {:error, reason} ->
+        {:error,
+         Error.new(:unavailable, %{
+           reason: "the pod did not put the session to sleep",
+           detail: inspect(reason)
+         })}
+    end
+  end
+
+  defp still_on?(%Session{id: id, epoch: epoch}, %{id: worker_id}) do
+    match?(%Session{state: "active", worker_id: ^worker_id, epoch: ^epoch}, Sessions.get(id))
   end
 
   # The agent a session starts as must be a primary the pinned bundle defines or a
