@@ -178,8 +178,13 @@ Found by the #149 fixer (PR #151), 2026-09-25.
   an editor can't fetch it.
 - `Ledger.breakdown/3` puts its default `to: DateTime.utc_now()` into the cache key, so a
   call without `:to` never hits the cache and adds an ETS entry until the sweep.
+- Config loader warnings (`apps/troupe_core/lib/troupe/config/layers.ex`) and
+  `config validate/migrate/--explain` output (`config/explain.ex`) say `troupe config ...`
+  even when `troupe-daemon` prints them.
+- The TUI tells a plane (remote) session's no-key model error to run `troupe config`
+  (`remote/translate.ex` -> `ui/model_error.ex`), which can't fix a plane worker's key.
 
-Found by the fixers of #76, #106, #122, #127 and #128, 2026-09-25.
+Found by the fixers of #76 (PRs #146, #153), #106, #122, #127 and #128, 2026-09-25.
 
 ## Taken
 
