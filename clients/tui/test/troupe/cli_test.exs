@@ -285,6 +285,22 @@ defmodule Troupe.CLITest do
     assert out =~ "root> run `troupe config` to set up a provider"
   end
 
+  # troupe-remote Decision 687: a model that keeps calling the same failing tool is asked
+  # about at the tenth failure, headless answers with the first option, `stop`, and the
+  # run ends 1 rather than 0, because nothing was done.
+  test "headless printer exits 1 when a tool kept failing and the turn was stopped" do
+    script = List.duplicate({:tool, "read_file", %{"path" => "missing.txt"}}, 12)
+    {sid, _, _} = start_session!(script: script)
+    {io, _} = printer!(sid)
+
+    say!(sid, "read it")
+    assert_receive {:rest, 1}, 15_000
+    out = contents(io)
+    assert out =~ "root> question: read_file has failed 10 times in a row"
+    assert out =~ ~s{(headless: answered "stop")}
+    assert out =~ "root> exit 1: a tool kept failing, and the harness stopped the turn"
+  end
+
   test "headless printer exits 1 when the agent ends short of finishing" do
     {sid, _, _} = start_session!(script: [%{"stop" => "refusal", "text" => "I will not."}])
     {io, _} = printer!(sid)

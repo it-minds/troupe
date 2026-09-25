@@ -246,7 +246,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text` |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
@@ -268,9 +268,11 @@ Durable:
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
-| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: this agent and its subagents stop asking; `deny`: `budget_exhausted` follows) |
+| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
-| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`), `summary`, `limit` |
+| `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
+| `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
+| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`), `summary`, `limit` |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
@@ -278,12 +280,21 @@ first given again — a checkpoint every slice. It is a stop where the budget is
 (`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
 session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
 never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again.
+delegate again. `always` lifts only the limit it was asked about (Decision 687).
+
+A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
+counts each tool's failures in a row; a success of that tool clears its count. At
+`tool_failures_note_at` (5) the model gets a note, a `user_input` from `harness`; at
+`tool_failures_stop_at` (10) the agent is `waiting` on a `tool_failures_ask_started`
+question before its next model call, under `full_send` and a lifted budget alike. `stop`
+comes first among the options, so a client that answers with the first option stops.
+Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask: it ends
+`tool_failures` and hands its parent what it found, labelled partial.
 | `agent_woken` | `from`, `source` — a root agent that had finished took new input as a turn |
 | `input_after_done` | `source` — input a done agent did not take (its budget is spent) |
 | `cancelled` | — |
-| `turn_ended` | — the agent's turn is over and it waits for input: the model answered without asking for a tool, or its request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done` |
-| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` |
+| `turn_ended` | `reason` — the agent's turn is over and it waits for input: the model answered without asking for a tool, or its request failed and the `llm_error` just before says why. The durable twin of `agent_state` reaching `idle`, for a client that was not listening when it happened; a cancelled turn ends with `cancelled` instead, and a finished agent with `agent_done`. `reason` is there only when the harness ended the turn: `tool_failures`, a tool kept failing and the answer to `tool_failures_ask_started` was `stop` |
+| `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
 | `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer` |
@@ -577,8 +588,8 @@ from its prose: on the loop's turns, and only there, the agent is offered
 `goal_complete {summary}`, and an iteration in which it completes that call ends the
 loop with reason `goal_complete`. An iteration that ends without one is followed by
 the next. The loop also stops when it has run `max_iterations`; when `loop_max_failures`
-(3) iterations in a row fail (the model request failed, or the agent ended short or
-crashed); when the budget question is asked (`budget`: the question stays with whoever
+(3) iterations in a row fail (the model request failed, the agent ended short or
+crashed, or the failure guard stopped the turn); when the budget question is asked (`budget`: the question stays with whoever
 answers it, and the loop does not resume after an `allow`); when somebody cancels the
 turn with `turn.cancel` (`cancelled`) or clears the goal (`goal_cleared`, and the turn in
 flight finishes); and when the root agent has ended in a way input does not wake

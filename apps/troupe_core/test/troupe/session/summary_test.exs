@@ -12,6 +12,8 @@ defmodule Troupe.Session.SummaryTest do
   alias Troupe.Session.Log
   alias Troupe.Session.Summary
 
+  @recorded Path.expand(Path.join([File.cwd!(), "..", "..", "test", "fixtures", "approvals"]))
+
   test "folds a session into a compact snapshot", context do
     %{session: session} =
       start_session(context,
@@ -145,6 +147,77 @@ defmodule Troupe.Session.SummaryTest do
     await_state(session.id, [:idle, :done], 10_000)
 
     assert Summary.snapshot(session.id)["approvals"] == []
+  end
+
+  test "an approval goes away when its turn is cancelled", context do
+    %{session: session} =
+      start_session(context,
+        config_overrides: [auto_approve: false],
+        steps: [{:tools, [{"needs_approval", %{"note" => "hi"}}]}, {:text, "never asked"}]
+      )
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "ask me")
+
+    request = await_event(session.id, :approval_requested, 10_000)
+    call_id = request.data["call_id"]
+
+    # Published before the cancel, so that the diff after it has something to take back.
+    await_diff(&(&1["approvals"] == [call_id]))
+
+    Troupe.cancel(session.id)
+    await_diff(&(&1["approvals"] == []))
+    assert Summary.snapshot(session.id)["approvals"] == []
+  end
+
+  # Logs real sessions wrote against the scripted model, one per way an approval can
+  # end, so the fold is held to what the agent actually writes (#142): a cancel closes
+  # each call it stops with a `tool_call_completed` and then says `cancelled`; a tool that
+  # timed out waiting is closed the same way; a subagent the cancel took down says
+  # nothing at all. `subagent_cancelled` is that last one, and `open` stops mid-wait.
+  describe "an approval in a recorded log" do
+    test "is not pending once its turn was cancelled or its tool timed out" do
+      for name <- ~w(cancelled timed_out subagent_cancelled) do
+        folded = recorded(name)
+        assert folded["approvals"] == [], "#{name} still has #{inspect(folded["approvals"])}"
+
+        # And the map is the one it was before the projection kept track of who asked,
+        # which is what keeps every recorded fixture hash where it was.
+        refute Map.has_key?(folded, "approval_agents"), name
+      end
+    end
+
+    test "is closed by its decision, and pending while nobody has answered it" do
+      assert recorded("decided")["approvals"] == []
+
+      open = recorded("open")
+      assert [call_id] = open["approvals"]
+      assert open["approval_agents"] == %{call_id => "root"}
+    end
+  end
+
+  defp recorded(name) do
+    [@recorded, name <> ".jsonl"]
+    |> Path.join()
+    |> File.read!()
+    |> String.split("\n", trim: true)
+    |> Enum.map(&(&1 |> Jason.decode!() |> Event.from_json()))
+    |> Enum.reduce(Summary.empty(), &Summary.fold(&2, &1))
+  end
+
+  # The next diff whose change matches, checking on the way that none of them says which
+  # agent asked for an approval: that is the projection's own bookkeeping.
+  defp await_diff(predicate) do
+    receive do
+      {:troupe_event, _session_id, %Event{type: "summary_diff", data: %{"changed" => changed}}} ->
+        refute Map.has_key?(changed, "approval_agents")
+        if predicate.(changed), do: changed, else: await_diff(predicate)
+
+      {:troupe_event, _session_id, _event} ->
+        await_diff(predicate)
+    after
+      5_000 -> flunk("no matching summary diff")
+    end
   end
 
   defp collect_diffs(acc \\ []) do

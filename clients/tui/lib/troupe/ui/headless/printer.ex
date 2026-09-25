@@ -11,8 +11,9 @@ defmodule Troupe.UI.Headless.Printer do
   any other, and that is a rest. The code says how it ended:
 
     * `0` — the turn ended, or the agent finished
-    * `1` — the agent ended short (budget, refusal, a cut or empty reply), its last model
-      request failed, or the turn was cancelled
+    * `1` — the agent ended short (budget, refusal, a cut or empty reply, a tool that kept
+      failing), its last model request failed, or the turn was cancelled or stopped
+      because a tool kept failing
     * `3` — it asked for something only a person can allow, and nobody was there: an
       approval was refused (Decision 20)
 
@@ -137,6 +138,9 @@ defmodule Troupe.UI.Headless.Printer do
 
       data[:reason] == "cancelled" ->
         {1, "the turn was cancelled"}
+
+      data[:reason] == "tool_failures" ->
+        {1, "a tool kept failing, and the harness stopped the turn"}
 
       state.failed ->
         {1, "the model request failed"}

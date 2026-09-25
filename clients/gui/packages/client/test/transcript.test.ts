@@ -3,6 +3,7 @@
 // the same log twice produces the same list, and an ephemeral changes nothing durable.
 
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { addPending, dropPending, emptyTranscript, fold, isBusy, needsYou, openApprovals, openQuestions, rootState } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
@@ -110,6 +111,31 @@ describe("the transcript fold", () => {
     assert.equal(openApprovals(state).length, 0);
   });
 
+  it("ends an approval with its call, or with a cancel of the agent that asked or of one above it", () => {
+    seq = 0;
+    const asked = foldAll([
+      durable("approval_requested", { call_id: "a", tool: "shell", args: {} }),
+      durable("approval_requested", { call_id: "b", tool: "shell", args: {} }, ["root", "explore"]),
+      durable("approval_requested", { call_id: "c", tool: "shell", args: {} }, ["root", "other"]),
+    ]);
+    assert.equal(openApprovals(asked).length, 3);
+
+    const timedOut = fold(asked, durable("tool_call_completed", { call_id: "a", name: "shell", ok: false, content: "The tool timed out after 180000ms." }));
+    assert.deepEqual(
+      openApprovals(timedOut).map((e) => e.callId),
+      ["b", "c"],
+    );
+
+    // A subagent's cancel reaches it and what is under it, not its siblings.
+    const cancelled = fold(timedOut, durable("cancelled", {}, ["root", "explore"]));
+    assert.deepEqual(
+      openApprovals(cancelled).map((e) => e.callId),
+      ["c"],
+    );
+    assert.equal(cancelled.entries.at(-1)?.kind, "system", "the cancel is still said in the transcript");
+    assert.deepEqual(openApprovals(fold(cancelled, durable("cancelled"))), []);
+  });
+
   it("keeps a blob reference as a reference", () => {
     seq = 0;
     const ref = { blob: "sha256:aa", size: 40_000, preview: "first bit", truncated: true };
@@ -129,6 +155,40 @@ describe("the transcript fold", () => {
     // Dropping duplicates is `SessionView`'s job, so the fold is free to be pure; what
     // it must not do is move the cursor backwards.
     assert.equal(fold(state, durable("user_input", { source: "user", text: "later" })).lastSeq, e.seq + 1);
+  });
+});
+
+// Logs real sessions wrote against the scripted model (test/fixtures/approvals at the
+// repository's root), so the inbox is held to what the daemon actually writes (#142): a
+// cancel closes each call it stops with a `tool_call_completed` and then says
+// `cancelled`; a tool that timed out waiting is closed the same way; a subagent the cancel
+// took down says nothing at all. `open` stops while the approval is still waiting.
+function recorded(name: string): DurableEvent[] {
+  return readFileSync(new URL(`../../../../../test/fixtures/approvals/${name}.jsonl`, import.meta.url), "utf8")
+    .split(/\r?\n/)
+    .filter((line) => line.trim() !== "")
+    .map((line) => JSON.parse(line) as DurableEvent);
+}
+
+describe("an approval in a recorded log", () => {
+  it("is not open once its turn was cancelled or its tool timed out", () => {
+    for (const name of ["cancelled", "timed_out", "subagent_cancelled"]) {
+      const state = foldAll(recorded(name));
+      assert.deepEqual(openApprovals(state), [], name);
+      assert.equal(needsYou(state), false, name);
+    }
+  });
+
+  it("is closed by its decision, and open while nobody has answered it", () => {
+    const decided = foldAll(recorded("decided"));
+    assert.deepEqual(openApprovals(decided), []);
+    const approval = decided.entries.find((e) => e.kind === "approval") as Extract<Entry, { kind: "approval" }>;
+    assert.equal(approval.decision, "allow");
+    assert.equal(approval.closed, false, "an answered approval is a decision, not one that ended unanswered");
+
+    const open = foldAll(recorded("open"));
+    assert.equal(openApprovals(open).length, 1);
+    assert.equal(needsYou(open), true);
   });
 });
 

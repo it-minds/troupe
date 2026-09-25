@@ -380,6 +380,24 @@
       ],
       "minimum": 1
     },
+    "tool_failures_note_at": {
+      "description": "Failures of one tool in a row after which the model is told to stop and reconsider; 0 never.",
+      "default": 5,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "tool_failures_stop_at": {
+      "description": "Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never.",
+      "default": 10,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 0
+    },
     "read_roots": {
       "description": "Directories outside the workspace the read tools may reach. Read from a project's file only in a trusted workspace.",
       "type": [

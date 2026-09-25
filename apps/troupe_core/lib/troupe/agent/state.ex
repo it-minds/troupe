@@ -86,12 +86,21 @@ defmodule Troupe.Agent.State do
     compact_reason: nil,
     # The budget question (Decision 660): the `call_id` of the one outstanding, the task
     # waiting on its answer, how many have been asked (the id is that count, so a replay
-    # asks again under the same id), and whether `always` was answered — which is folded,
-    # so it survives a restart.
+    # asks again under the same id), and which limit it is about, which is the one
+    # `always` lifts (Decision 687). All but the task are folded. The failure guard's
+    # question (below) waits in the same place, since only one question at a time
+    # stands between an agent and its next model call.
     budget_ask_pending: nil,
     budget_ask_task: nil,
     budget_asks: 0,
-    budget_overridden: false,
+    budget_ask_limit: nil,
+    # The failure guard (Decision 687): failures in a row of each tool, by name, which a
+    # success of that tool clears; and the questions it has asked, and what the one
+    # outstanding is about, `{tool, failures}`. The counts are not replayed — a restart
+    # forgets them, as it does the retry guards above — but a question still owed is.
+    tool_failures: %{},
+    failure_asks: 0,
+    failure_ask: nil,
     compact_resume: :idle,
     finish_summary: nil,
     fake: nil,
@@ -138,7 +147,10 @@ defmodule Troupe.Agent.State do
           budget_ask_pending: String.t() | nil,
           budget_ask_task: pid() | nil,
           budget_asks: non_neg_integer(),
-          budget_overridden: boolean(),
+          budget_ask_limit: Budget.exhaustion() | nil,
+          tool_failures: %{optional(String.t()) => pos_integer()},
+          failure_asks: non_neg_integer(),
+          failure_ask: {String.t(), pos_integer()} | nil,
           compact_resume: :idle | :thinking,
           finish_summary: String.t() | nil,
           fake: pid() | atom() | nil,

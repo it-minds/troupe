@@ -458,7 +458,7 @@ defmodule Troupe.Sessions.Index do
       open != [] and Enum.all?(open, &MapSet.member?(asked, &1)) -> :waiting
       open != [] -> :interrupted
       unanswered_request?(root) -> :interrupted
-      MapSet.member?(asked, owed_budget_question(root)) -> :waiting
+      MapSet.member?(asked, owed_gate_question(root)) -> :waiting
       true -> :idle
     end
   end
@@ -506,12 +506,20 @@ defmodule Troupe.Sessions.Index do
     end)
   end
 
-  # The id of the budget's question still owed, if one is (Decision 660).
-  defp owed_budget_question(events) do
+  # The id of the question still owed at the gate before the next model call, if one is:
+  # the budget's (Decision 660) or the failure guard's (Decision 687).
+  defp owed_gate_question(events) do
     Enum.reduce(events, nil, fn
-      %Event{type: "budget_ask_started", data: %{"call_id" => id}}, _owed -> id
-      %Event{type: "budget_ask_answered"}, _owed -> nil
-      _event, owed -> owed
+      %Event{type: type, data: %{"call_id" => id}}, _owed
+      when type in ["budget_ask_started", "tool_failures_ask_started"] ->
+        id
+
+      %Event{type: type}, _owed
+      when type in ["budget_ask_answered", "tool_failures_ask_answered"] ->
+        nil
+
+      _event, owed ->
+        owed
     end)
   end
 

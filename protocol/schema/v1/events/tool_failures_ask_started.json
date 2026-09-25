@@ -1,25 +1,27 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/budget_ask_answered.json",
+  "$id": "https://troupe.dev/schema/v1/events/tool_failures_ask_started.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
     "call_id": {
       "type": "string"
     },
-    "decision": {
+    "detail": {
       "type": "string"
     },
-    "grant": {
-      "type": "object"
+    "failures": {
+      "type": "integer"
     },
-    "lifted": {
+    "tool": {
       "type": "string"
     }
   },
   "required": [
     "call_id",
-    "decision"
+    "detail",
+    "failures",
+    "tool"
   ],
-  "title": "budget_ask_answered",
+  "title": "tool_failures_ask_started",
   "type": "object"
 }

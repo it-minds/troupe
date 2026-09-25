@@ -270,6 +270,8 @@ or the command line where one exists for it.
 |---|---|---|---|---|
 | `shell_timeout_ms` | integer ≥ 1 | `120000` | any | How long a shell command may run. |
 | `tool_output_limit` | integer ≥ 1 | `60000` | any | Bytes of a tool's output the model sees. |
+| `tool_failures_note_at` | integer ≥ 0 | `5` | any | Failures of one tool in a row after which the model is told to stop and reconsider; 0 never. |
+| `tool_failures_stop_at` | integer ≥ 0 | `10` | any | Failures of one tool in a row that stop the turn and ask whether it goes on, budget or not; 0 never. |
 | `read_roots` | list of strings |  | user; project if trusted | Directories outside the workspace the read tools may reach. |
 | `mcp` | map of name to settings |  | user; project if trusted | The workspace's own MCP servers, by name. |
 | `mcp.<name>.command` | string |  | user; project if trusted | A server on its standard streams: the program to run. |

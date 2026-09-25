@@ -1,5 +1,5 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/budget_ask_answered.json",
+  "$id": "https://troupe.dev/schema/v1/events/tool_failures_ask_answered.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
@@ -8,18 +8,12 @@
     },
     "decision": {
       "type": "string"
-    },
-    "grant": {
-      "type": "object"
-    },
-    "lifted": {
-      "type": "string"
     }
   },
   "required": [
     "call_id",
     "decision"
   ],
-  "title": "budget_ask_answered",
+  "title": "tool_failures_ask_answered",
   "type": "object"
 }

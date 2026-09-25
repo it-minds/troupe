@@ -353,6 +353,11 @@ defmodule Troupe.Session.Loop do
 
   defp failure(%Event{type: "llm_error", data: data}), do: "the model request failed: #{data["reason"]}"
 
+  # The harness stopped the turn because a tool kept failing (Decision 687): a failed
+  # iteration, so that a loop stuck the same way every time stops at `loop_max_failures`.
+  defp failure(%Event{type: "turn_ended", data: %{"reason" => "tool_failures"}}),
+    do: "the turn was stopped: a tool kept failing"
+
   defp failure(%Event{type: "agent_done", data: %{"reason" => reason}})
        when reason not in ["finished", "budget_exhausted"],
        do: "the agent ended #{reason}"
