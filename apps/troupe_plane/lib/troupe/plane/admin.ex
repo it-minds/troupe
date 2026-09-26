@@ -2670,7 +2670,10 @@ defmodule Troupe.Plane.Admin do
 
   defp profile_summary(profile) do
     workers = Fleet.list_workers(profile.name)
-    guarantees = Provisioner.account(profile)
+    # Read once for both: the guarantees are the operator's conditions read one way, and
+    # the Workers page asks for this every second.
+    conditions = Provision.conditions(profile)
+    guarantees = Provisioner.account(profile, conditions: conditions)
 
     %{
       name: profile.name,
@@ -2697,7 +2700,8 @@ defmodule Troupe.Plane.Admin do
       guarantees_instead: guarantees_instead(guarantees),
       # Whether a grant to a team needs a platform admin's say-so first.
       unenforced: guarantees.unenforced,
-      conditions: Provision.conditions(profile),
+      # `nil` where the cluster could not be asked, which is not the same as none.
+      conditions: conditions,
       pods:
         Enum.map(workers, fn worker ->
           %{

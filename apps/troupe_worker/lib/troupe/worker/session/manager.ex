@@ -24,7 +24,8 @@ defmodule Troupe.Worker.Session.Manager do
   ## What the plane is told while a session runs
 
   Four facts that are lifecycle rather than content: `status` (`idle`, `thinking`,
-  `acting`, `waiting` when an approval or a question is pending, `done`, `interrupted`),
+  `acting`, `waiting` when an approval or a question is pending or the root has stopped
+  to ask one, `done`, `interrupted`),
   the `done_reason`, how many approvals and questions are pending, and the cost so far.
   They go out as `session.status` notifications on change, at most twice a second per
   session, and again in the dormancy report — which is what lets the plane list a review
@@ -622,7 +623,10 @@ defmodule Troupe.Worker.Session.Manager do
 
   # `waiting` outranks everything: a session with an approval or a question outstanding is
   # waiting on a person whatever its agent is doing meanwhile. `interrupted` is an idle
-  # root that came back mid-turn and has not been asked to carry on.
+  # root that came back mid-turn and has not been asked to carry on. A root in `waiting`
+  # has stopped to ask the budget's or the failure guard's question, and is waiting from
+  # the moment it stops rather than from the moment the question is logged, as the daemon
+  # reads it.
   defp lifecycle_status(%{approvals: approvals, questions: questions} = lifecycle) do
     cond do
       map_size(approvals) > 0 or map_size(questions) > 0 -> "waiting"
@@ -630,6 +634,7 @@ defmodule Troupe.Worker.Session.Manager do
       lifecycle.interrupted -> "interrupted"
       lifecycle.state in ["thinking", "compacting"] -> "thinking"
       lifecycle.state == "acting" -> "acting"
+      lifecycle.state == "waiting" -> "waiting"
       true -> "idle"
     end
   end

@@ -789,7 +789,7 @@ defmodule Troupe.FakeRemote do
                 {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "result" => result}}, state}
 
               {{:error, code, message}, state} ->
-                error = %{"code" => code, "message" => message, "data" => %{"params" => params}}
+                error = %{"code" => code, "message" => message}
                 {:reply, {200, %{"jsonrpc" => "2.0", "id" => id, "error" => error}}, state}
             end
         end
@@ -1039,7 +1039,7 @@ defmodule Troupe.FakeRemote do
               %{
                 "jsonrpc" => "2.0",
                 "id" => id,
-                "error" => %{"code" => code, "message" => message, "data" => %{"params" => params}}
+                "error" => %{"code" => code, "message" => message}
               }
           end
 
