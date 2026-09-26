@@ -251,9 +251,15 @@ defmodule Troupe.RemoteSessionTest do
 
       FakeRemote.flood(remote, "s-live", 10_000, "delta ")
 
+      # what the worker holds, not what it has yet to collect: garbage from decoding a
+      # burst of frames stays on the heap until the next collection, and the heap grows
+      # in steps (1.8, 2.9, 4.8 MB), so without a collection the peak depends on where
+      # the scheduler cut the burst, and under load it passed 4 MB. Collected, it stays
+      # under 1 MB; holding the flood would take 7.7 MB (768 bytes a decoded frame).
       peak =
         Enum.reduce(1..40, 0, fn _, peak ->
           Process.sleep(25)
+          :erlang.garbage_collect(worker)
           {:memory, bytes} = Process.info(worker, :memory)
           max(peak, bytes)
         end)

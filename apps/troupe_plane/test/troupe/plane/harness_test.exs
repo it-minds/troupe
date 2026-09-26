@@ -11,7 +11,7 @@ defmodule Troupe.Plane.HarnessTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Audit, Bundles, FakePod, Fleet, Harness, Identity, Principals, Sessions, TeamBudget}
+  alias Troupe.Plane.{Audit, Bundles, FakePod, Fleet, Harness, Identity, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connections, Listener}
   alias Troupe.Protocol.SessionId
 

@@ -1,0 +1,28 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/identity.link.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "plane_token": {
+      "type": "string"
+    },
+    "plane_url": {
+      "type": "string"
+    },
+    "subject": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "subject"
+  ],
+  "title": "identity.link",
+  "type": "object"
+}
