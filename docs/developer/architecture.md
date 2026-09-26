@@ -66,7 +66,7 @@ Session.Log          the log and hash chain; everything persists through it
 Session.Approvals    the permission gate
 Session.Questions    what the agent asks a person
 Session.ClientTools  tools a connected client offered
-Session.MCP          the workspace's own MCP servers
+Session.MCP          the person's and the workspace's own MCP servers, and the workspace's trust question
 [LLM.Fake]           only for provider: fake
 Agent.Node           the root agent: Agent.Tasks, Agent.Children, Agent.Server (one_for_all)
 Session.Watcher      watch mode; after the agent, so its crash restarts nothing above

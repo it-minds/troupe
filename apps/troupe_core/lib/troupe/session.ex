@@ -70,10 +70,19 @@ defmodule Troupe.Session do
         # have no way of knowing it needed to offer its tools again.
         {Troupe.Session.ClientTools,
          session_id: session_id, managed_servers_only: config.managed_mcp_servers_only},
-        # The workspace's own MCP servers (Decision 654), started with the session and
-        # gone with it. Above the agent, since their tools are in its list.
+        # The workspace's own MCP servers (Decision 654) and the person's (Decision 700),
+        # started with the session and gone with it. Above the agent, since their tools
+        # are in its list; below `Questions`, which the workspace's servers are asked
+        # through. Only a local session reads the `mcp.json` layers: a pod's servers are
+        # its bundle's, and a checkout's file must never start a command there.
         {Troupe.Session.MCP,
-         session_id: session_id, workspace: workspace.root_real, servers: config.mcp}
+         session_id: session_id,
+         workspace: workspace.root_real,
+         servers: config.mcp,
+         local: Keyword.get(opts, :kind, :local) == :local,
+         trusted: Config.Trust.trusted?(workspace.root_real, config.trusted_workspaces),
+         managed_only: config.managed_mcp_servers_only,
+         state_dir: config.state_dir}
       ] ++
         fake_child(session_id, config, opts) ++
         [
@@ -158,6 +167,10 @@ defmodule Troupe.Session do
     with {:ok, workspace} <- open_workspace(workspace_path, opts),
          {:ok, config} <- config(workspace, opts),
          :ok <- known_provider(config) do
+      # The files beside a person's own skills are read where they are (Decision 700):
+      # the user's skills directory and every linked root become read roots, the
+      # workspace's own `.troupe/skills` being inside the workspace already.
+      config = %{config | read_roots: Enum.uniq(config.read_roots ++ Skills.Local.roots(workspace.root_real))}
 
       # A local session has only `session:/` and this is exactly what `Workspace.new/1`
       # already gave it. A session on a pod arrives with its team volume and possibly

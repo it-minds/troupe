@@ -606,6 +606,49 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "from" => required(:string),
         "workspace" => optional(:string)
+      },
+      # The person's own MCP servers and skills (Decision 700) — the daemon's only, like
+      # the settings; a worker answers `method_not_found`. A file is named to import
+      # (`from`, copied, or read in place with `link`), or one server is written
+      # (`name` and `server`); `scope` is `user` or `workspace`. `mcp.status` above is
+      # what a session runs, and `mcp.list` with a `session_id` joins the two.
+      "mcp.list" => %{"workspace" => optional(:string), "session_id" => optional(:string)},
+      "mcp.add" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => optional(:string),
+        "server" => optional(:object),
+        "from" => optional(:string),
+        "link" => optional(:boolean)
+      },
+      "mcp.remove" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => optional(:string),
+        "include" => optional(:string)
+      },
+      "mcp.check" => %{
+        "workspace" => optional(:string),
+        "session_id" => optional(:string),
+        "name" => optional(:string),
+        "server" => optional(:object)
+      },
+      "skills.list" => %{"workspace" => optional(:string)},
+      "skills.add" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "from" => required(:string),
+        "link" => optional(:boolean)
+      },
+      "skills.remove" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => optional(:string),
+        "include" => optional(:string)
       }
     }
   end

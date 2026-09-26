@@ -13,13 +13,21 @@ defmodule Troupe.Skills do
   The tool is a `Troupe.Tool` value rather than a module, like an MCP tool, because
   whether it exists at all is a property of the session — which bundle it is pinned
   to, and whether its profile asked for any skills — rather than of the code. It reads
-  only from the pinned bundle's directory, and its call and result land in the log as
+  from the pinned bundle's directory and from the person's own layers
+  (`Troupe.Skills.Local`, Decision 700), and its call and result land in the log as
   any tool's do, so a transcript shows which skill was consulted and when. Nothing
   else is logged: the tool call *is* the record.
+
+  A bundle's skills are gated by the profile's `skills:` list and the team's
+  entitlements, since an admin published them for particular agents. A person's own
+  skills are offered to every agent of the session, because the person put them there
+  for their own work; a workspace's skill of the same name as a bundle's shadows it,
+  the nearer layer winning as it does for everything else.
   """
 
   alias Troupe.Agent.Definition
   alias Troupe.Protocol.Bundle
+  alias Troupe.Skills.Local
 
   defmodule Tool do
     @moduledoc "The `skill` tool, as a value."
@@ -71,31 +79,51 @@ defmodule Troupe.Skills do
   end
 
   @doc """
-  The skills a profile may consult, from the bundle it is pinned to.
+  The skills a profile may consult: the bundle's it is allowed, then the person's own.
 
-  The definition's `skills` decides: `all` is every skill in the bundle, a list is
-  those names, and the default — no skills — is an empty list however many the bundle
-  carries. A name the definition lists and the bundle lacks is simply absent; the
-  plane refused such a definition at publish, so here it can only mean a bundle that
-  was materialised by hand.
+  For the bundle the definition's `skills` decides: `all` is every skill in the bundle,
+  a list is those names, and the default — no skills — is an empty list however many
+  the bundle carries. A name the definition lists and the bundle lacks is simply
+  absent; the plane refused such a definition at publish, so here it can only mean a
+  bundle that was materialised by hand. The person's own skills (`Troupe.Skills.Local`)
+  come from the config directory and the workspace given, every one of them, whatever
+  the definition lists; `nil` reads no local layer.
   """
-  @type listed :: %{name: String.t(), description: String.t()}
+  @type listed :: %{
+          name: String.t(),
+          description: String.t(),
+          layer: :bundle | :user | :workspace,
+          dir: Path.t()
+        }
 
-  @spec available(bundle() | nil, Definition.t()) :: [listed()]
-  def available(bundle, %Definition{} = definition) do
-    case {definition.skills, bundle} do
-      {[], _} ->
-        []
+  @spec available(bundle() | nil, Definition.t(), Path.t() | nil) :: [listed()]
+  def available(bundle, %Definition{} = definition, workspace \\ nil) do
+    from_bundle =
+      case {definition.skills, bundle} do
+        {[], _} ->
+          []
 
-      {_, %{dir: dir}} when is_binary(dir) ->
-        dir
-        |> Bundle.list_skills()
-        |> allowed(definition)
-        |> entitled(bundle)
+        {_, %{dir: dir}} when is_binary(dir) ->
+          dir
+          |> Bundle.list_skills()
+          |> allowed(definition)
+          |> entitled(bundle)
+          |> Enum.map(&Map.put(&1, :layer, :bundle))
 
-      _ ->
-        []
-    end
+        _ ->
+          []
+      end
+
+    local =
+      case workspace do
+        nil -> []
+        root -> root |> Local.list() |> Enum.map(&Map.take(&1, [:name, :description, :layer, :dir]))
+      end
+
+    (from_bundle ++ local)
+    |> Enum.reduce(%{}, fn skill, acc -> Map.put(acc, skill.name, skill) end)
+    |> Map.values()
+    |> Enum.sort_by(& &1.name)
   end
 
   defp allowed(skills, definition) do
@@ -117,14 +145,14 @@ defmodule Troupe.Skills do
   The `skill` tool for a session, or none.
 
   Offered only when there is something to read: a bundle directory with skills in it
-  and a profile that lists at least one of them. A model that sees the tool can call
-  it; one that does not has nothing it could ask for.
+  and a profile that lists at least one of them, or a skill of the person's own. A model
+  that sees the tool can call it; one that does not has nothing it could ask for.
   """
-  @spec tools(bundle() | nil, Definition.t()) :: [Tool.t()]
-  def tools(bundle, %Definition{} = definition) do
-    case available(bundle, definition) do
+  @spec tools(bundle() | nil, Definition.t(), Path.t() | nil) :: [Tool.t()]
+  def tools(bundle, %Definition{} = definition, workspace \\ nil) do
+    case available(bundle, definition, workspace) do
       [] -> []
-      skills -> [tool(bundle.dir, skills)]
+      skills -> [tool(skills)]
     end
   end
 
@@ -135,9 +163,9 @@ defmodule Troupe.Skills do
   profile with thirty skills costs thirty lines of prompt rather than thirty
   documents, and the log says which of them the model actually read.
   """
-  @spec prompt_section(bundle() | nil, Definition.t()) :: String.t()
-  def prompt_section(bundle, %Definition{} = definition) do
-    case available(bundle, definition) do
+  @spec prompt_section(bundle() | nil, Definition.t(), Path.t() | nil) :: String.t()
+  def prompt_section(bundle, %Definition{} = definition, workspace \\ nil) do
+    case available(bundle, definition, workspace) do
       [] ->
         ""
 
@@ -147,8 +175,9 @@ defmodule Troupe.Skills do
     end
   end
 
-  defp tool(dir, skills) do
+  defp tool(skills) do
     names = Enum.map(skills, & &1.name)
+    by_name = Map.new(skills, &{&1.name, &1})
 
     %Tool{
       name: "skill",
@@ -164,16 +193,16 @@ defmodule Troupe.Skills do
         "required" => ["name"]
       },
       default_permission: :auto,
-      run: fn args, _ctx -> read(dir, names, args) end
+      run: fn args, _ctx -> read(by_name, args) end
     }
   end
 
   defp description(skills) do
     """
-    Read a skill: instructions your team published for a kind of work, with the files
-    they refer to. Call it when a task matches a skill's description, before starting
-    the work. The files a skill mentions are under `skills:/<name>/` and can be read
-    with `read_file`.
+    Read a skill: instructions published for a kind of work, with the files they refer
+    to. Call it when a task matches a skill's description, before starting the work.
+    The files a skill mentions are listed with the path to read them at, which
+    `read_file` can.
 
     Skills:
     #{Enum.map_join(skills, "\n", &("- " <> &1.name <> ": " <> &1.description))}
@@ -183,30 +212,38 @@ defmodule Troupe.Skills do
 
   # A skill the profile does not list is `not_found`, not `denied`: from inside this
   # session it does not exist, the same way another team's volume does not.
-  defp read(dir, names, args) do
+  defp read(by_name, args) do
     with {:ok, name} <- Troupe.Tool.fetch_string(args, "name"),
-         true <- name in names || {:error, {:unknown_skill, name}},
-         {:ok, skill} <- read_skill(dir, name) do
-      {:ok, render(skill)}
+         {:ok, listed} <- Map.fetch(by_name, name) |> or_unknown(name),
+         {:ok, skill} <- read_skill(listed) do
+      {:ok, render(listed, skill)}
     end
   end
 
-  defp read_skill(dir, name) do
-    case Bundle.read_skill(dir, name) do
+  defp or_unknown({:ok, listed}, _name), do: {:ok, listed}
+  defp or_unknown(:error, name), do: {:error, {:unknown_skill, name}}
+
+  defp read_skill(%{name: name, dir: dir}) do
+    case Bundle.read_skill_dir(dir, name) do
       {:ok, skill} -> {:ok, skill}
       {:error, :not_found} -> {:error, {:unknown_skill, name}}
     end
   end
 
-  defp render(%{name: name, body: body, files: files}) do
-    listed =
+  # A bundle's files are under the read-only `skills:/` mount; a person's own are read
+  # where they are, which the session's read roots allow.
+  defp render(listed, %{name: name, body: body, files: files}) do
+    listed_files =
       files
       |> Enum.reject(&(&1 == "SKILL.md"))
-      |> Enum.map_join("\n", &("- skills:/" <> name <> "/" <> &1))
+      |> Enum.map_join("\n", &("- " <> file_path(listed, name, &1)))
 
-    case listed do
+    case listed_files do
       "" -> body
-      _ -> body <> "\n\nFiles:\n" <> listed
+      _ -> body <> "\n\nFiles:\n" <> listed_files
     end
   end
+
+  defp file_path(%{layer: :bundle}, name, file), do: "skills:/" <> name <> "/" <> file
+  defp file_path(%{dir: dir}, _name, file), do: Path.join(dir, file)
 end

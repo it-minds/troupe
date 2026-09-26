@@ -16,7 +16,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   alias Troupe.Agent.Definitions
   alias Troupe.Config.ModelSettings
-  alias Troupe.Gateway.{ClientTool, Commands, Plane, Presence, Private, Session, Worktrees}
+  alias Troupe.Gateway.{ClientTool, Commands, LocalSources, Plane, Presence, Private, Session, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.LLM.Provider
@@ -113,7 +113,16 @@ defmodule Troupe.Gateway.Dispatch do
     "config.get" => :observe,
     "config.models" => :admin,
     "config.set" => :admin,
-    "config.import" => :admin
+    "config.import" => :admin,
+    # The person's own MCP servers and skills (Decision 700): the daemon's only. Adding,
+    # removing and checking are `admin`, since each names a command this machine runs.
+    "mcp.list" => :observe,
+    "mcp.add" => :admin,
+    "mcp.remove" => :admin,
+    "mcp.check" => :admin,
+    "skills.list" => :observe,
+    "skills.add" => :admin,
+    "skills.remove" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -335,7 +344,8 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # The workspace's own MCP servers for a session: what a client's `/mcp` page shows.
+  # The session's own MCP servers: what a client's `/mcp` page shows. `layer` and
+  # `source` say which file each came from (Decision 700).
   defp handle("mcp.status", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, _session} <- lookup(session_id) do
@@ -347,7 +357,9 @@ defmodule Troupe.Gateway.Dispatch do
             "name" => server.name,
             "state" => to_string(server.state),
             "tools" => server.tools,
-            "error" => server.error
+            "error" => server.error,
+            "layer" => to_string(server[:layer] || :config),
+            "source" => server[:source]
           }
         end)
 
@@ -824,8 +836,19 @@ defmodule Troupe.Gateway.Dispatch do
       else: {:error, Error.new(:method_not_found, %{method: method})}
   end
 
+  # The person's own MCP servers and skills (Decision 700): the daemon's alone, for the
+  # same reason as the settings. `mcp.status`, which a pod answers too, is above.
+  defp handle("mcp." <> _ = method, params, _context), do: local_sources(method, params)
+  defp handle("skills." <> _ = method, params, _context), do: local_sources(method, params)
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
+  defp local_sources(method, params) do
+    if Process.whereis(Troupe.Gateway.Daemon),
+      do: LocalSources.call(method, params),
+      else: {:error, Error.new(:method_not_found, %{method: method})}
   end
 
   defp model_settings("config.get", params) do
