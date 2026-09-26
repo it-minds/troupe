@@ -117,6 +117,11 @@ defmodule Troupe.Agent.CutShortTest do
       assert %{data: %{"reason" => "budget_exhausted", "limit" => "max_turns"}} =
                await_event(sid, :agent_done)
 
+      # `agent_done` is published before `budget_exhausted` is written after it.
+      eventually(fn ->
+        match?([_, %{type: "budget_exhausted"}], Enum.take(events_of(sid, ["root"]), -2))
+      end)
+
       root = events_of(sid, ["root"])
       assert [%{type: "agent_done"}, %{type: "budget_exhausted"}] = Enum.take(root, -2)
       assert [%{data: %{"decision" => "deny"}}] = events_of_type(sid, :budget_ask_answered)
