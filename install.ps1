@@ -10,7 +10,8 @@
       through TROUPE_DAEMON_COMMAND) and starts it when a session needs one.
     * troupe.exe, the terminal client (-Tui), beside the shim. It uses a running daemon if
       there is one and otherwise runs the same harness in its own process.
-    * the desktop app (-Gui), from the release's per-user setup, run silently.
+    * the desktop app (-Gui), from the release's per-user setup, run silently. It installs
+      into %LOCALAPPDATA%\Programs\troupe-desktop.
   Everything is downloaded and checked against the release's SHA256SUMS before anything is
   replaced, and Troupe processes running from what is replaced are stopped first.
 
@@ -197,8 +198,9 @@ function Uninstall-Desktop {
 
 # What this installer (or scripts/install-local.ps1) put on the machine, bar config and
 # state, and bar the PATH entry: a clean install puts everything back in the same place.
-# The desktop app's setup installs into %LOCALAPPDATA%\Troupe, which is the state directory
-# too; its uninstaller removes only its own files, so the state stays.
+# A desktop app set up before 0.5.2 is in %LOCALAPPDATA%\Troupe, which is the state
+# directory, until a newer setup moves it; its uninstaller removes only its own files, so
+# the state stays.
 function Remove-Installed {
   Remove-Item -Force -ErrorAction SilentlyContinue $Shim, $TuiExe, "$TuiExe.previous"
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $LibDir, "$LibDir.previous", "$LibDir.new"
@@ -325,7 +327,7 @@ if ($Uninstall) {
   Remove-Installed
   if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir)) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BinDir }
   Remove-FromUserPath
-  # After the desktop app's uninstaller, which shares the state directory.
+  # After the desktop app's uninstaller: one set up before 0.5.2 is in the state directory.
   if ($Purge) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ConfigDir, $StateDir }
   Write-Host "troupe uninstalled" -ForegroundColor Green
   return

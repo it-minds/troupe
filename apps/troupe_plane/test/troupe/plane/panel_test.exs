@@ -166,6 +166,21 @@ defmodule Troupe.Plane.PanelTest do
       assert html =~ "no conditions reported"
     end
 
+    test "says a profile is unknown when the cluster's client exits rather than answering",
+         context do
+      FakeWorkerProfiles.start(%{"dev" => :exit, "ux" => :exit})
+
+      {:ok, view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
+
+      assert html =~ "troupe-w-dev-0"
+      assert html =~ "unknown: the cluster did not answer"
+      refute html =~ "no conditions reported"
+
+      # And the next refresh says the same rather than taking the page down.
+      send(view.pid, :refresh)
+      assert render(view) =~ "unknown: the cluster did not answer"
+    end
+
     test "a pod going unhealthy is reflected within two seconds", context do
       {:ok, view, html} = context.conn |> sign_in(context.root.subject) |> live("/admin/workers")
       assert html =~ "ready"

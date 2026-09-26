@@ -84,8 +84,7 @@ defmodule Troupe.Registry do
 
   @doc """
   Claim a key for the calling process: `true` the first time, `false` while the process
-  that claimed it lives. How something is said once a session rather than once an agent:
-  the first agent claims it, and the claim goes with that agent.
+  that claimed it lives. `Troupe.Session.Log.first?/2` claims one for a whole session.
   """
   @spec first?(tuple()) :: boolean()
   def first?(key) do

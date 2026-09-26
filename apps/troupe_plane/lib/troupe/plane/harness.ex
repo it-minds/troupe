@@ -1607,10 +1607,10 @@ defmodule Troupe.Plane.Harness do
       # The pod could not put the tree back and says why: the directory the session was
       # recorded in is gone, and nothing restores it. Not a blip worth another try, so the
       # session is parked read-only — history readable, nothing activates it again —
-      # rather than every open meeting the same failure (Decision 661).
+      # rather than every open meeting the same failure (Decision 661). What waking it
+      # took goes back here, whether or not the pod's own report of it arrives.
       {:error, %Error{data: %{"reason" => "workspace_gone"}} = reason} ->
-        Placement.release(session.profile, session.id)
-        Sessions.read_only(session.id)
+        Drain.park(session)
 
         {:error,
          Error.new(:forbidden, %{
@@ -1619,9 +1619,10 @@ defmodule Troupe.Plane.Harness do
            detail: inspect(reason)
          })}
 
+      # Dormant again, holding neither the slot nor the slice it was just given: the pod
+      # that refused it will not report a dormancy that would give them back.
       {:error, reason} ->
-        Placement.release(session.profile, session.id)
-        Sessions.dormant(session.id)
+        Drain.strand(worker, session.id)
 
         {:error,
          Error.new(:unavailable, %{
@@ -1651,10 +1652,15 @@ defmodule Troupe.Plane.Harness do
         {:error, _reason} -> {nil, nil}
       end
 
+    # `state` is the session's as this answer leaves it. `active` says the endpoint runs
+    # it; anything else says the pod only serves its history, so a client opens it with
+    # `activate` before its first activating command rather than sending that to a pod
+    # that does not hold the session (PROTOCOL.md §6, "A session that moves").
     %{
       "session_id" => session.id,
       "epoch" => session.epoch,
       "mode" => Keyword.get(opts, :mode, "activate"),
+      "state" => session.state,
       "endpoint" => worker.endpoint,
       "worker_id" => worker.id,
       "pod" => worker.pod_name,

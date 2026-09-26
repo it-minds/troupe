@@ -74,6 +74,9 @@ defmodule Troupe.UI.TUI.Model do
           ended_at: integer() | nil
         }
 
+  @typedoc "A loop towards the goal while it runs: which one, and where it is."
+  @type loop :: %{id: String.t() | nil, iteration: non_neg_integer(), max: pos_integer() | nil}
+
   @typedoc "One line of the observer tree: an agent, with the window it belongs to."
   @type row :: %{
           window: window(),
@@ -99,9 +102,10 @@ defmodule Troupe.UI.TUI.Model do
           message: String.t() | nil,
           diff_stat: String.t() | nil,
           goal: String.t() | nil,
-          loop: %{iteration: non_neg_integer(), max: pos_integer() | nil} | nil,
+          loop: loop() | nil,
           worktree: map() | nil,
           unconfirmed: %{optional(String.t()) => String.t()},
+          drawn_inputs: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()}
         }
 
@@ -159,6 +163,8 @@ defmodule Troupe.UI.TUI.Model do
           loop: nil,
           worktree: nil,
           unconfirmed: %{},
+          # The lines drawn for inputs the agent has not yet taken, by command id.
+          drawn_inputs: %{},
           warnings: %{}
         }
 
@@ -233,7 +239,7 @@ defmodule Troupe.UI.TUI.Model do
       :input when d.source in [:user, :watch] ->
         w
         |> ensure_agent(path)
-        |> push(path, {:user, d.content})
+        |> draw_input(path, d)
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> Map.put(:ended_at, nil)
         |> unconfirmed(d)
@@ -455,7 +461,7 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(path)
         |> push(path, {:system, "loop: up to #{d.max_iterations} iterations towards the goal"})
-        |> Map.put(:loop, %{iteration: 0, max: d.max_iterations})
+        |> Map.put(:loop, %{id: d[:loop_id], iteration: 0, max: d.max_iterations})
 
       :loop_iteration ->
         %{max: max} = Map.get(w, :loop) || %{max: nil}
@@ -463,7 +469,7 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(path)
         |> push(path, {:system, "loop iteration #{d.iteration}#{if max, do: "/#{max}", else: ""}"})
-        |> Map.put(:loop, %{iteration: d.iteration, max: max})
+        |> Map.put(:loop, %{id: d[:loop_id], iteration: d.iteration, max: max})
 
       :loop_iteration_finished when d.outcome == "failed" ->
         push(
@@ -549,6 +555,23 @@ defmodule Troupe.UI.TUI.Model do
     do: %{w | unconfirmed: Map.put(w.unconfirmed, id, text)}
 
   defp unconfirmed(w, _data), do: w
+
+  # One line per input, however many copies of it arrive (Decision 117). A line typed here
+  # is drawn as it is sent, one sent while the agent works is written as `input_queued`,
+  # and every one is written as the `user_input` the agent takes it as: all of them name
+  # the send's command id. The first copy draws the line, and the `user_input`, always the
+  # last, forgets the id. A copy that says something else is drawn as well: a task edit
+  # is queued as the edit and taken as the agent's note of it.
+  defp draw_input(w, path, %{command_id: id, content: text} = d) when is_binary(id) do
+    w = if w.drawn_inputs[id] == text, do: w, else: push(w, path, {:user, text})
+
+    if Map.get(d, :optimistic, false) or Map.get(d, :queued, false),
+      do: %{w | drawn_inputs: Map.put(w.drawn_inputs, id, text)},
+      else: %{w | drawn_inputs: Map.delete(w.drawn_inputs, id)}
+  end
+
+  # A log written before `user_input` carried the id draws each copy it has.
+  defp draw_input(w, path, d), do: push(w, path, {:user, d.content})
 
   # An agent that is gone never logs `approval_answered`/`question_answered`, so
   # its request would sit in `pending` forever: unanswerable (Approvals dropped
@@ -727,15 +750,29 @@ defmodule Troupe.UI.TUI.Model do
   def windows(%__MODULE__{} = m), do: Enum.map(m.order, &Map.fetch!(m.windows, &1))
 
   @doc """
-  The loop this screen's session is running, `%{iteration, max}`, as its events say, or
-  `nil` when none runs: the session's own window's, like `goal/1`.
+  The loop this screen's session is running, `%{id, iteration, max}`, as its events say,
+  or `nil` when none runs: the session's own window's, like `goal/1`.
   """
-  @spec loop(t()) :: %{iteration: non_neg_integer(), max: pos_integer() | nil} | nil
+  @spec loop(t()) :: loop() | nil
   def loop(%__MODULE__{windows: windows}) do
     case Map.get(windows, "root") do
       %{loop: %{} = loop} -> loop
       _ -> nil
     end
+  end
+
+  @doc """
+  Takes the loop `id` off the window: the session answered that none runs, though no
+  event has said so. A daemon that stopped mid-loop wrote no `loop_stopped`, and a
+  restore records how the loop ended only when the session is next activated. Only that
+  loop: one that started since the question was asked is its own events' to report.
+  """
+  @spec loop_ended(t(), String.t() | nil) :: t()
+  def loop_ended(%__MODULE__{} = m, id) do
+    update_window(m, "root", fn
+      %{loop: %{id: ^id}} = w -> %{w | loop: nil}
+      w -> w
+    end)
   end
 
   @doc """

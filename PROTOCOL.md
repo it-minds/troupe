@@ -246,12 +246,12 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` note, which nobody sent, and from a log written before 0.5.2 |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
 | `llm_response` | `message` (`role`, `content`: blocks of type `text`, `tool_use`, `tool_result` or `reasoning` — the last is the model's thinking, `provider`-bound, replayed only to the provider that made it and carried by `Message.text` nowhere), `usage` (`input_tokens`, `cache_read`, `cache_write`, `output_tokens` — disjoint, so the first three sum to the prompt's length), `stop_reason`, `model`, `gateway` |
-| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets |
+| `llm_error` | `reason` — a sentence a person can act on: a blown context window, rejected credentials, an unknown model, a rate limit the backoff outlasted, with the provider's words in brackets; `note` — a root's, the words its conversation was given about the failure, which a replay puts back |
 | `truncated` | `reason` (`max_tokens`: the output cap cut the reply; `empty`: it had neither text nor a tool call), then one of `note` (the model was asked again), `calls` (tool calls cut mid-argument, answered with an error and not run) or `final: true` (asked once already; the agent ends `output_truncated` or `empty_reply`) |
 | `tool_call_started` | `call_id`, `name`, `args`, `identity`, `principal` |
 | `tool_call_completed` | `call_id`, `name`, `ok`, `content` |
@@ -264,7 +264,7 @@ Durable:
 | `loop_iteration_started` | `loop_id`, `iteration`, `command_id` — the command id the iteration's input carries, which the root's `input_accepted` echoes |
 | `loop_iteration_finished` | `loop_id`, `iteration`, `outcome` (`continue`: the turn ended and the goal is not met; `complete`: the agent called `goal_complete`; `failed`: the turn ended in an error; `stopped`: the loop stopped around it), `detail` |
 | `loop_stopped` | `loop_id`, `reason` (`goal_complete`, `max_iterations`, `failures`, `budget`, `requested`, `cancelled`, `goal_cleared`, `interrupted`, `agent_done`), `iterations`, `detail`, `summary` (the evidence `goal_complete` gave), `command_id` (the `session.loop.stop` that asked) |
-| `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task` |
+| `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task`. The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
 | `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
@@ -272,7 +272,7 @@ Durable:
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
-| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead), `summary`, `limit` |
+| `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit` |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
 `waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
@@ -281,8 +281,8 @@ first given again — a checkpoint every slice. It is a stop where the budget is
 session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
 never asks: it hands its parent what it found, labelled partial, and the parent may
 delegate again. It ends `budget_exhausted` with no further model call and nothing left
-running, and a `done` subagent keeps no session awake. `always` lifts only the limit it
-was asked about (Decision 687).
+running, and a `done` subagent keeps no session awake: its parent stops it on taking its
+result. `always` lifts only the limit it was asked about (Decision 687).
 
 A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
 counts each tool's failures in a row; a success of that tool clears its count. At
@@ -549,7 +549,9 @@ asks again when it wakes.
 {"command_id": "c-1", "session_id": "s-9f", "text": "make the tests pass"}
 ```
 → `{"accepted": true}`. If the agent is busy this produces a durable `input_queued`;
-when taken it produces `input_accepted`. A root agent that has *finished* is woken by
+when taken it produces `input_accepted` and then the `user_input` with the text, and all
+three carry the `command_id`, which is how a client that drew the line when it was typed
+knows each of them for the same line. A root agent that has *finished* is woken by
 input: `agent_woken`, then the turn as usual. One whose budget is exhausted is not, and
 writes `input_after_done` instead.
 
@@ -701,10 +703,12 @@ be linking has a much larger problem than the label.
 ```json
 {"session_id": "s-9f", "blob": "sha256:1f3a…", "range": [0, 65535]}
 ```
-→ `{"blob", "size", "range": [0, 65535], "encoding": "base64", "data": "…"}`
+→ `{"blob", "size", "encoding": "base64", "data": "…"}`
 
-`range` is an inclusive byte range and is optional; omit it for the whole blob.
-Servers may cap a single response and will say so with a shorter `range` than asked.
+`range` is an inclusive byte range and is optional; omit it for the whole blob. The
+answer is the bytes in that range, stopping at the blob's end, and `size` is the whole
+blob's, so a client reading a blob in pieces counts the bytes it decoded and asks for the
+next range until it has `size`. A range that starts past the end answers with no bytes.
 
 #### `fs.list`
 ```json
@@ -732,11 +736,12 @@ or a file larger than the server's cap, is `invalid_params`.
 ```json
 {"command_id": "c-9", "session_id": "s-9f", "path": "notes.md", "content": "…"}
 ```
-→ `{"path", "size", "hash"}`
+→ `{"path", "bytes"}`: the path relative to the workspace, and how many bytes were
+written.
 
 Needs `control`: putting a file into a workspace is steering the session. The write is
-recorded as an `fs_changed` event whose actor is the client that uploaded it, not the
-session.
+recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
+the client that uploaded it, not the session.
 
 #### `agents.list`
 ```json
@@ -915,8 +920,9 @@ does everything a client can learn from it: `session.list`, `session.get`, `blob
 that woke up because somebody looked at it would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
-folding its log before taking effect, and the session logs `session_activated`.
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
+`question.answer`, `todo.edit` and `tools.register`. Each brings a dormant session's tree
+back by folding its log before taking effect, and the session logs `session_activated`.
 
 #### Activation is about the session, not about the pod
 
@@ -933,6 +939,29 @@ session is exactly as dormant afterwards as it was before.
 The two questions are separate everywhere it matters: a session is active or dormant
 whatever its profile is running, and a profile has workers or none whatever its sessions
 are doing.
+
+#### A session that moves
+
+A pod session is not tied to its pod. A drain, a pod replaced for a new image, a pod that
+was lost and another client's activation all leave it dormant where it was — with a
+`session_dormant` in its log wherever there was time to write one — and its next
+activation places it wherever there is room. Nothing is sent to say so, and there is no
+error code for it. What a client connected to the old pod sees is one of three things:
+the connection closes and does not come back, `initialize` is refused, or the pod answers
+**`not_found` with `data.kind` of `session`**, which is what a pod says about a session
+it does not hold. It says so before it runs anything, so a command answered that way did
+not happen.
+
+The plane knows where the session is, and a client asks it rather than the old pod: after
+a connection that failed, and after that `not_found`, it calls the plane's `session.open`
+with the session id again and connects to the `endpoint` with the `token` it is given,
+subscribing from its cursor as after any reconnect. It asks in `read` mode, which wakes
+nothing. The answer's `state` is the session's as the plane has it: `active` means the
+endpoint runs the session, and anything else that the pod only serves its history, so an
+activating command goes through `session.open` in `activate` mode first. An activating
+command the old pod answered `not_found` may then be sent again, once, with the same
+`command_id`. A client gives up after a bounded number of tries and says so, and it stops
+at once when the plane answers `not_found` or `forbidden`.
 
 ### After a restart
 
@@ -1098,6 +1127,7 @@ Needs `control`.
 
 ```json
 {"jsonrpc": "2.0", "id": 7, "method": "tools.register", "params": {
+  "command_id": "c-8", "session_id": "s-9f",
   "tools": [
     {"name": "notes.search", "description": "Search my local notes.",
      "schema": {"type": "object", "properties": {"q": {"type": "string"}}}}

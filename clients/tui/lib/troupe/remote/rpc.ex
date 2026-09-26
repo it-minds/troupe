@@ -143,11 +143,8 @@ defmodule Troupe.Remote.RPC do
 
   defp said?(value), do: is_binary(value) and value != ""
 
-  # -32004 says which scope was missing when it can; saying so is the whole
-  # point of the code.
-  defp scope_hint(%{data: %{"scope" => scope}}) when is_binary(scope),
-    do: " (needs the #{scope} scope)"
-
+  # -32004 says which scope was missing when it can, in `required_scope` (PROTOCOL.md
+  # section 10); saying so is the whole point of the code.
   defp scope_hint(%{data: %{"required_scope" => scope}}) when is_binary(scope),
     do: " (needs the #{scope} scope)"
 

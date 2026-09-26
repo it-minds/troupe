@@ -123,7 +123,7 @@ defmodule Troupe.Plane.TeamLinksTest do
   end
 
   describe "one group, two teams" do
-    test "puts a person in both, with their own budgets and retention", context do
+    test "puts a person in both, with their own budgets and retention" do
       delivery = team_with_grant("itm-consultants", "dev", name: "delivery", budget_micros: 100)
       {:ok, group} = Identity.upsert_group(%{external_id: "itm-consultants"})
 

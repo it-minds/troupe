@@ -287,3 +287,51 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      complete <n>` sends the `complete` that `todo.edit` has always taken. Proof:
      `test/troupe/cli_test.exs`, the translation, model-config, recorded-question and
      recorded-approval tests, and `worker_commands_test.exs`.
+
+117. **A line is drawn once, however many copies of it come back, and the window, not the
+     connection, knows which it has drawn.** A line typed into the TUI was on screen twice
+     (issue #181): once as it was sent and once when the daemon wrote it back. The worker
+     withheld the durable copy of an input it had sent itself, by command id, and the copy
+     with the text, `user_input`, carried none; `input_queued`, which did, was withheld,
+     and a window rebuilt from the journal or another client's drew it beside the
+     `user_input` of the same line. The daemon now writes the command id on `user_input`
+     (root Decision 692), and the model draws a line once per command id: the first copy
+     draws it, whichever that is (the optimistic render, `input_queued`, which the
+     translation marks `queued`, or the `user_input`), and the `user_input`, always the
+     last, forgets the id, so the window remembers only inputs still in flight. The
+     worker's `own_commands` is gone and it publishes every durable event: what this
+     connection sent is not what the window shows, since a worker restarted between the
+     send and the echo has forgotten it, and a window rebuilt in between never drew the
+     line the worker then withheld. A copy that says something else is drawn as well,
+     because a task edit is queued as the edit and taken as the agent's note of it, and a
+     log written before 692 draws every copy it has, as it did. Proof:
+     `test/troupe/typed_input_test.exs`, which types into the TUI on a session in the
+     embedded daemon at an idle agent, mid-turn, and across a restarted worker, and
+     rebuilds each window from the journal, all of which drew the line twice before this;
+     and the translation test, which folds the wire's copies in every order they come.
+
+118. **A remote session the plane moves to another pod is followed there, and a worker
+     that cannot find it stops after ten tries and says so.** D21 in
+     docs/developer/defects.md, issue #184. A drain, a replaced pod, a lost one and an
+     activation by another client all leave a session dormant where it was, and its next
+     activation places it wherever there is room; `Troupe.Remote.Worker` reconnected to
+     the endpoint it was opened with for ever, and sent commands to a pod that answered
+     `not_found`. A reconnect after any failure now asks the plane's `session.open`, in
+     `read` mode, where the session is, and connects with the endpoint and token it is
+     given; a plane that does not answer leaves the endpoint as it was, and one that
+     answers `not_found` or `forbidden` ends the search. A pod's `not_found` naming the
+     session (`data.kind` of `session`) is that pod saying it does not hold it, before it
+     ran anything: an activating command is sent once more, with the same command id,
+     after `session.open activate`, and a second refusal of the same command is
+     answered, as is anything else, while the connection goes after the session. The
+     log's `session_dormant` and `session_activated` set whether the next activating
+     command goes through the plane first, for a plane session only, since a daemon wakes
+     its own. The failures count from the drop, and ten attempts that reach no session end
+     in a notice and a capability that say why; the next command is refused with "trying
+     again" and starts again from the plane. A session is reached when its subscription
+     is answered, not at the handshake, so the backoff resets there too. The plane's
+     `session.open` and `token.mint` answers now carry the session's `state` (additive),
+     so a client knows whether the pod it is handed runs the session or only serves its
+     history, and PROTOCOL.md §6 says how a move looks ("A session that moves"). Proof:
+     `test/troupe/remote_move_test.exs`, six cases that all failed before this, over a
+     `FakeRemote` that can move a session between workers and take a worker away.

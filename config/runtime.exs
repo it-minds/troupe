@@ -360,6 +360,11 @@ if config_env() == :prod do
       groups_claim: System.get_env("TROUPE_GROUPS_CLAIM", "groups"),
       scim_token: presence.(System.get_env("TROUPE_SCIM_TOKEN")),
       platform_admin_group: System.get_env("TROUPE_PLATFORM_ADMIN_GROUP"),
+      # The ceiling on everything this plane spends in a month, in millionths; 0 is none.
+      # The deployment's, and the floor of the argument: a platform admin's own may narrow
+      # it from the console and never raise it (`Troupe.Plane.PlatformBudget`).
+      deployment_budget_micros:
+        String.to_integer(System.get_env("TROUPE_DEPLOYMENT_BUDGET_MICROS", "0")),
       audience: System.get_env("TROUPE_PLANE_AUDIENCE", "troupe-plane-api"),
       # Spelled out rather than `String.to_existing_atom/1`: under `bin/troupe_plane eval`
       # the release boots `start_clean` in interactive mode, no application module is

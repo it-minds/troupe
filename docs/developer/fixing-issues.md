@@ -61,8 +61,16 @@ serial.** Fixers that never touch the install (GUI, docs, server-only) run along
 
 The coordinator hands the install out with a lock: a file `install-lock.txt` in its
 scratch directory, reading `free` or `held by #N`. A fixer that needs the install does
-its code and tests first, then waits for `free`, writes `held by #N`, and writes `free`
-back when it has verified or rolled back.
+its code and tests first, then waits for `free`. Writing the file is not atomic, and two
+fixers that both read `free` both write, so a fixer writes `held by #N`, waits a second,
+reads it again, and goes ahead only if it still says `#N`; otherwise it waits for `free`
+again. It writes `free` back when it has verified or rolled back.
+
+Besides the install, the plane's tests share one database, `troupe_plane_test`, so one
+plane suite runs at a time: two at once deadlock (Postgrex `40P01`). The suite does not
+migrate it, so a fixer who adds a plane migration applies it there
+(`MIX_ENV=test mix ecto.migrate` in `apps/troupe_plane`); until someone does, the plane
+tests fail on every branch that carries it.
 
 Scratch directories may be shared between fixers. Each fixer writes only under a
 subfolder named for its issue (`fix-<N>/`), and reads its pull request body back just
@@ -201,8 +209,11 @@ Every row that applies must pass.
 `install-local.ps1` builds the checkout it lives in, so it builds the fixer's worktree,
 and it puts the toolchain on its own PATH, so a shell opened before the toolchain was
 installed still works.
-The first build in a fresh worktree fetches deps and takes several minutes. After
-`verify-local.ps1` passes, run the issue's own reproduction against the installed
+The first build in a fresh worktree fetches deps and takes several minutes.
+A TUI running on the machine is never stopped: `install-local.ps1` installs around it and
+warns that it holds the unpacked payload, and `verify-local.ps1` fails its daemon check
+while that TUI's embedded harness is the daemon `daemon.json` names, until it is closed.
+After `verify-local.ps1` passes, run the issue's own reproduction against the installed
 binaries (`troupe-daemon.cmd ...`, `troupe.exe ...`, or the desktop app against the
 installed daemon) and keep the command and its output.
 

@@ -519,7 +519,16 @@ defmodule Troupe.Plane.Settings do
     if setting.secret, do: base, else: Map.put(base, :value, display(setting, value))
   end
 
-  defp source(_setting, stored_value, _value) when is_binary(stored_value), do: :stored
+  # Where the value in force came from, which a stored row that no longer parses is not:
+  # the plane runs on the deployment's value then, and "changed here" would name a row
+  # nothing reads. `daily`, stored before it stopped being a budget period, was one.
+  defp source(setting, stored_value, value) when is_binary(stored_value) do
+    case parse(setting, stored_value) do
+      {:ok, _parsed} -> :stored
+      {:error, _reason} -> source(setting, nil, value)
+    end
+  end
+
   defp source(_setting, _stored, nil), do: :unset
   defp source(_setting, _stored, _value), do: :deployed
 

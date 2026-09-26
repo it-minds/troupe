@@ -72,7 +72,14 @@ defmodule Troupe.Protocol.Schema do
         "interrupted" => optional(:boolean),
         "incomplete_calls" => optional({:array, :string})
       },
-      "user_input" => %{"source" => required(:string), "text" => required(:string)},
+      # `command_id` is the send the input was taken from, as its `input_accepted` names it:
+      # what a client that drew the line when it was typed knows it by. A harness note,
+      # which nobody sent, has none, and neither has a log written before it did.
+      "user_input" => %{
+        "source" => required(:string),
+        "text" => required(:string),
+        "command_id" => optional(:string)
+      },
       "input_queued" => %{
         "command_id" => required(:string),
         "author" => required(:string),
@@ -99,8 +106,9 @@ defmodule Troupe.Protocol.Schema do
         # one and not the other.
         "gateway" => optional(:object)
       },
-      # `reason` is a sentence a person can act on (Decision 659), not a term.
-      "llm_error" => %{"reason" => required(:string)},
+      # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
+      # root's: what its conversation was told, which a replay puts back (Decision 693).
+      "llm_error" => %{"reason" => required(:string), "note" => optional(:string)},
       # A reply the output cap cut (`max_tokens`) or that said nothing (`empty`): `note`
       # when the model was asked again, `calls` when tool calls cut mid-argument were
       # answered with an error, `final` when it had been asked once already and the agent
@@ -520,6 +528,7 @@ defmodule Troupe.Protocol.Schema do
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
+      "agents.list" => %{"workspace" => required(:string)},
       "memory.get" => %{"workspace" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
@@ -563,6 +572,17 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "tools" => optional({:array, :string})
       },
+      # Who the machine's user is: a label on what they do, for local transports, since a
+      # pod knows who is calling from the token. `plane_token` is held in memory only.
+      "identity.get" => %{},
+      "identity.link" => %{
+        "command_id" => required(:string),
+        "subject" => required(:string),
+        "display_name" => optional(:string),
+        "plane_url" => optional(:string),
+        "plane_token" => optional(:string)
+      },
+      "identity.unlink" => %{"command_id" => required(:string)},
       # The machine's model settings — the daemon's only; a worker answers
       # `method_not_found`. The key goes in through `config.models` and `config.set` and
       # never comes back out: `config.get` reports `api_key_set`.

@@ -121,6 +121,24 @@ defmodule Troupe.Log.FoldTest do
       assert Fold.state(compacted)["agents"]["root"]["compactions"] == 1
     end
 
+    test "a failed request's note is a message, and an error from before notes is not" do
+      asked = event(1, :user_input, %{"source" => "user", "text" => "hello"})
+      old = [asked, event(2, :llm_error, %{"reason" => "the gateway is down"})]
+
+      noted = [
+        asked,
+        event(2, :llm_error, %{
+          "reason" => "the gateway is down",
+          "note" =>
+            "The previous model request failed: the gateway is down. Try a different approach."
+        })
+      ]
+
+      assert Fold.state(old)["agents"]["root"]["messages"] == 1
+      assert Fold.state(noted)["agents"]["root"]["messages"] == 2
+      assert Fold.hash(old) != Fold.hash(noted)
+    end
+
     test "the hash does not depend on key order" do
       one = [event(1, :user_input, %{"source" => "user", "text" => "a"})]
       two = [event(1, :user_input, %{"text" => "a", "source" => "user"})]

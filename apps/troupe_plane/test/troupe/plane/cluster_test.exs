@@ -14,7 +14,6 @@ defmodule Troupe.Plane.ClusterTest do
 
   use ExUnit.Case, async: false
 
-  alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.Plane.{
     Budget,
     Fleet,
@@ -24,8 +23,7 @@ defmodule Troupe.Plane.ClusterTest do
     Replica,
     Repo,
     Sessions,
-    Singleton,
-    TeamBudget
+    Singleton
   }
 
   @moduletag timeout: 180_000

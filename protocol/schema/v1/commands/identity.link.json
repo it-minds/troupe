@@ -1,22 +1,28 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/user_input.json",
+  "$id": "https://troupe.dev/schema/v1/commands/identity.link.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
     "command_id": {
       "type": "string"
     },
-    "source": {
+    "display_name": {
       "type": "string"
     },
-    "text": {
+    "plane_token": {
+      "type": "string"
+    },
+    "plane_url": {
+      "type": "string"
+    },
+    "subject": {
       "type": "string"
     }
   },
   "required": [
-    "source",
-    "text"
+    "command_id",
+    "subject"
   ],
-  "title": "user_input",
+  "title": "identity.link",
   "type": "object"
 }

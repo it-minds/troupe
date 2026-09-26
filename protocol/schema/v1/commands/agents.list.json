@@ -1,18 +1,15 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/llm_error.json",
+  "$id": "https://troupe.dev/schema/v1/commands/agents.list.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
-    "note": {
-      "type": "string"
-    },
-    "reason": {
+    "workspace": {
       "type": "string"
     }
   },
   "required": [
-    "reason"
+    "workspace"
   ],
-  "title": "llm_error",
+  "title": "agents.list",
   "type": "object"
 }

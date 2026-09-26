@@ -1,18 +1,15 @@
 {
-  "$id": "https://troupe.dev/schema/v1/events/llm_error.json",
+  "$id": "https://troupe.dev/schema/v1/commands/identity.unlink.json",
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
-    "note": {
-      "type": "string"
-    },
-    "reason": {
+    "command_id": {
       "type": "string"
     }
   },
   "required": [
-    "reason"
+    "command_id"
   ],
-  "title": "llm_error",
+  "title": "identity.unlink",
   "type": "object"
 }
