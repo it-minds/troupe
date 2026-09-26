@@ -81,9 +81,13 @@ with control rights can answer; the first answer wins and everyone is told who g
 
 **Budget.** Limits on turns, tokens and time, plus your team's money budget on the plane.
 When one is reached the agent says which and asks, or stops; it never silently continues.
-"Always" lifts the limit it asked about for the rest of the session, and the others still
-ask. Apart from the budget, a tool that fails ten times in a row stops the turn and asks
-whether to go on, even with every limit lifted.
+The question says what the session has used and spent, and you answer with how much more
+and for how long: pick a size for this run, this session or this workspace (which writes
+it to the repository's `.troupe/config.yaml`, so the next session there starts with it),
+or type an amount — `+25`, `+50k tokens`, `+15 min`, with `session` or `workspace` after
+it. "No limit this session" lifts the limit it asked about for the rest of the session,
+and the others still ask. Apart from the budget, a tool that fails ten times in a row
+stops the turn and asks whether to go on, even with every limit lifted.
 
 **Bundle.** The agents, skills and MCP servers a profile's sessions carry, published in
 versions. A session is pinned to the version current when it started.

@@ -39,6 +39,16 @@ defmodule Troupe.Client.Remote do
     end
   end
 
+  # The worker's harness lists the same table a daemon's does, with its bundle's agents;
+  # what a pod cannot do is marked `local` in it and the palette says so.
+  @impl true
+  def command_table(sid) do
+    case Worker.rpc(sid, "commands.list", %{}) do
+      {:ok, %{"commands" => commands}} when is_list(commands) -> commands
+      _ -> []
+    end
+  end
+
   @impl true
   def context(sid) do
     label =

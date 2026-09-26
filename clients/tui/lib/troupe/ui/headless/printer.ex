@@ -67,6 +67,9 @@ defmodule Troupe.UI.Headless.Printer do
       # What the exit code needs to know by the time the target rests.
       failed: false,
       refused: MapSet.new(),
+      # Budget questions answered no: the item is drawn again once the question that
+      # rides beside it arrives with its options (Decision 120), and is answered once.
+      budgets: MapSet.new(),
       rested: false,
       reconnect_ms: Keyword.get(opts, :reconnect_ms, @reconnect_ms),
       # Set while the connection is down: the timer that ends the run if it stays down.
@@ -286,16 +289,20 @@ defmodule Troupe.UI.Headless.Printer do
   # Without this the branch waits for an answer nobody can type and the run never
   # rests. Stopping is the safe default: a headless run has a budget for a reason.
   defp print(%{type: :budget_ask_started, agent_path: p, data: d}, state) do
-    detail = if d[:detail], do: " (#{d.detail})", else: ""
+    if MapSet.member?(state.budgets, d.call_id) do
+      state
+    else
+      detail = if d[:detail], do: " (#{d.detail})", else: ""
 
-    line(
-      state,
-      p,
-      "budget exhausted#{detail}; headless mode stops here (raise the budget to go further)"
-    )
+      line(
+        state,
+        p,
+        "budget exhausted#{detail}; headless mode stops here (raise the budget to go further)"
+      )
 
-    Client.approve(state.session_id, d.call_id, :deny)
-    state
+      Client.approve(state.session_id, d.call_id, :deny)
+      %{state | budgets: MapSet.put(state.budgets, d.call_id)}
+    end
   end
 
   # A warning does not stop anything; it is the one line a headless run gets while

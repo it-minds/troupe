@@ -81,6 +81,16 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # The command table is the daemon's (Decision 698), read over the session's socket
+  # like anything else about it; a session that is not open has no socket to ask.
+  @impl true
+  def command_table(sid) do
+    case Worker.whereis(sid) && Worker.rpc(sid, "commands.list", %{}) do
+      {:ok, %{"commands" => commands}} when is_list(commands) -> commands
+      _ -> []
+    end
+  end
+
   @impl true
   def context(sid) do
     workspace = workspace(sid)

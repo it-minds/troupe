@@ -336,6 +336,47 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      `test/troupe/remote_move_test.exs`, six cases that all failed before this, over a
      `FakeRemote` that can move a session between workers and take a worker away.
 
+119. **The command palette is a popup over the session, opened by `/` on an empty line,
+     Ctrl-K with nothing typed, or `/help`, and it is a view over the harness's
+     `commands.list`: the TUI keeps no list of its own beyond the clauses that run each
+     built-in.** Issue #124, root Decision 698. The three lists in `server.ex` collapse
+     into `@builtins`, which a test holds equal to the harness's table; aliases, Tab
+     completion and which commands take a window path all come from the table
+     (`canonical/2`, `command_names/1`, `takes_window?/2`), so adding a command is one
+     entry there and one clause here. What is typed while the palette is open filters by
+     name, alias and summary; ↑↓ and PgUp/PgDn move over the rows, which keep their
+     sections; Enter runs the row, or puts it on the line when it wants an argument or
+     a window the person has to name; Tab and Space put it on the line too, so
+     `/merge 2⏎` types exactly as it did before there was a palette; Esc closes it with
+     the line clear. A row the client cannot run now is greyed with the reason — no
+     window activated, a session on a plane — and the detail box says why. `/settings`
+     keeps its own entry and `/help` (and `?`) now means help. The session stays on
+     screen behind the popup, and a command picked from a window acts on that window.
+     The box's slash is a prompt: a line that carries its own (one the palette put
+     there) is not shown with two. Proof: `test/troupe/command_palette_test.exs`.
+
+120. **The budget question is drawn as the question it rides on — the harness's words,
+     its options numbered and picked with a digit, or an amount typed — and y, n and a
+     no longer answer it.** Issue #183, troupe-remote Decision 699. The window drew its
+     own line for a `:budget` item, the limit and "continue anyway? (y one more slice / n
+     stop / a lift this limit)", and dropped the `question_asked` the harness writes
+     beside it. So the sizes and scopes the daemon now offers, and its account of what
+     the limit is for and what the session has spent, never reached the screen, and a
+     typed amount — the answer the issue is about — could not be given at all.
+     `Troupe.Remote.Translate` now folds the question's words and options into the
+     `:budget_ask_started` event, whichever of the two events comes first, and the
+     window keeps one item per id; `pending_blocks` draws it as `BUDGET: <the harness's
+     words>`, the numbered options and a hint naming the typed forms, and the digit and
+     Enter keys treat a `:budget` item as a `:question`. The y/n/a shortcuts answer
+     approvals alone: with typing on, an answer in a person's own words — `no limit this
+     session` — would have stopped the session on its first key. A daemon from before
+     this sends the question without an account and the old three options, which draw
+     as they are; headless mode still stops at the budget, and once, though the item is
+     now drawn twice. Proof: `Troupe.RemoteTranslateTest` (the item filled in by its
+     question), `Troupe.BudgetAnswerTest` (the words and options on screen, a digit
+     answers, a typed answer beginning with `n` stays a letter and is sent with Enter),
+     and the recorded questions, which draw as before.
+
 121. **The `/mcp` page is the person's own servers and skills, from the daemon's
      layers, with the verbs to bring them in; it never holds a path of its own.**
      Issue #60's local slice (root Decision 700). The page listed what `mcp.status`

@@ -264,8 +264,21 @@ defmodule Troupe.Worker.Session.Restore do
     )
   end
 
+  # The limits the terms set ride along by the budget's names, so a session whose terms
+  # do let it ask cannot raise itself past them (Decision 699).
   defp contract([]), do: []
-  defp contract(terms), do: Keyword.put_new(terms, :budget_asks, false)
+
+  defp contract(terms) do
+    caps =
+      terms
+      |> Keyword.take([:max_turns, :wall_clock_ms])
+      |> Map.new(fn
+        {:wall_clock_ms, ms} -> {:wall_clock, ms}
+        {key, value} -> {key, value}
+      end)
+
+    terms |> Keyword.put_new(:budget_asks, false) |> Keyword.put(:terms, caps)
+  end
 
   defp default_workspace(context) do
     Path.join([Paths.state_dir(context.state_dir), "workspaces", context.session_id])

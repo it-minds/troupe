@@ -1814,3 +1814,104 @@ button.danger {
   border-color: var(--border-strong);
   color: var(--text-primary);
 }
+
+/* -- command palette -------------------------------------------------------- */
+
+/* A popup over the session: the one list behind the protocol, filtered as you type.
+   Its own block, on the theme's tokens, so a re-skin can take it whole. */
+.palette-scrim {
+  position: fixed;
+  inset: 0;
+  z-index: 20;
+  background: var(--scrim);
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding: 8vh var(--space-4) var(--space-4);
+}
+.palette {
+  width: min(720px, 100%);
+  max-height: 80vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: var(--bg-raised);
+  border: var(--bw-hairline) solid var(--border-strong);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--sh-overlay);
+}
+.palette input {
+  border: 0;
+  border-bottom: var(--bw-hairline) solid var(--border-hairline);
+  border-radius: 0;
+  background: transparent;
+  padding: var(--space-3) var(--space-4);
+  font-size: 15px;
+}
+.palette .rows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-2) 0;
+}
+.palette .rows .note {
+  margin: var(--space-2) var(--space-4);
+}
+.palette .section {
+  padding: var(--space-2) var(--space-4) var(--space-1);
+  font-size: 12px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.palette .row {
+  display: grid;
+  grid-template-columns: 12ch 1fr;
+  gap: var(--space-3);
+  align-items: baseline;
+  padding: var(--space-2) var(--space-4);
+  cursor: pointer;
+}
+.palette .row .name {
+  font-family: var(--font-mono);
+}
+.palette .row .summary {
+  color: var(--text-secondary);
+}
+.palette .row[aria-selected="true"] {
+  background: var(--bg-selected);
+}
+.palette .row.unavailable,
+.palette .row.unavailable .summary {
+  color: var(--text-muted);
+}
+.palette .detail,
+.palette .notice,
+.palette .keys {
+  border-top: var(--bw-hairline) solid var(--border-hairline);
+  padding: var(--space-3) var(--space-4);
+  font-size: 13px;
+}
+.palette .detail {
+  color: var(--text-secondary);
+}
+.palette .detail .usage {
+  font-family: var(--font-mono);
+  color: var(--text-primary);
+}
+.palette .detail p {
+  margin: var(--space-1) 0 0;
+}
+.palette .notice {
+  color: var(--text-primary);
+}
+.palette .keys {
+  padding-top: var(--space-2);
+  padding-bottom: var(--space-2);
+}
+@media (max-width: 480px) {
+  .palette .row {
+    grid-template-columns: 1fr;
+    gap: var(--space-half);
+  }
+}

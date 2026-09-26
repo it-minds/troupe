@@ -2,26 +2,38 @@
 //
 // The agent's `ask_user` hands a decision over: a question, sometimes options, and free
 // text always allowed. The harness's budget question (troupe-remote Decision 660) is the
-// other asker: the budget is spent, and somebody has to say whether to buy another slice.
-// Both arrive as `question_asked`, both are answered with `question.answer`, and both sit
-// where the approval panel sits — the one place on the screen a person is waited on. The
-// budget question speaks in consequences rather than the harness's words: "one more
-// slice", not `allow`.
+// other asker: a limit is reached, and somebody has to say how much more and for how
+// long (troupe-remote Decision 699) — a size for this run, this session or this
+// workspace, no limit for the session, or stop, from the options the harness offers, or
+// an amount typed in. Both arrive as `question_asked`, both are answered with
+// `question.answer`, and both sit where the approval panel sits — the one place on the
+// screen a person is waited on.
 
 import { useState } from "react";
 import type { JSX } from "react";
 import type { Entry } from "@troupe/client";
+import { LEGACY_BUDGET_OPTIONS } from "@troupe/client";
 import { Pill } from "./bits";
 
 type Question = Extract<Entry, { kind: "question" }>;
 
-/** The harness's three answers, in the reader's words. The wire words are the keys. */
-const BUDGET_ANSWERS: Record<string, { label: string; className: string }> = {
-  allow: { label: "Spend one more slice", className: "allow" },
-  deny: { label: "Stop here", className: "deny" },
+/**
+ * The three answers a daemon from before the question carried its options listened
+ * for, in the reader's words. Anything newer is already words: `+25 turns this run`.
+ */
+const BUDGET_ANSWERS: Record<string, string> = {
+  allow: "Spend one more slice",
+  deny: "Stop here",
   // The limit the question names, and only that one (troupe-remote Decision 687).
-  always: { label: "Lift this limit for the session", className: "scoped" },
+  always: "Lift this limit for the session",
 };
+
+/** How a budget answer is coloured: a stop, a raise for this run, or one that lasts longer. */
+function budgetClass(label: string): string {
+  if (label === "deny" || label === "stop") return "deny";
+  if (label === "allow" || label.endsWith("this run") || label.endsWith("this iteration")) return "allow";
+  return "scoped";
+}
 
 export function QuestionPanel({
   entry,
@@ -56,12 +68,8 @@ export function QuestionPanel({
       <header>
         <Pill status="waiting" />
       </header>
-      <h2>{budget ? "Out of budget. Carry on?" : "The session has a question"}</h2>
-      <p className="consequence">
-        {budget
-          ? `${entry.question}. One more slice is the same budget again, and it asks again when that is spent.`
-          : entry.question}
-      </p>
+      <h2>{budget ? "A limit is reached. How much more, and for how long?" : "The session has a question"}</h2>
+      <p className="consequence">{entry.question}</p>
       {error && <p className="also error">{error}</p>}
 
       {!canAnswer ? (
@@ -75,18 +83,43 @@ export function QuestionPanel({
   );
 }
 
+/**
+ * The harness's options — sizes and scopes, each with what it would cost in its title —
+ * then a line for an amount of your own: `+25`, `+25 session`, `+25 workspace`. The
+ * label is the answer, since the harness reads its own labels back.
+ */
 function BudgetAnswers({ entry, busy, onAnswer }: { entry: Question; busy: string | null; onAnswer: (v: string) => Promise<void> }): JSX.Element {
+  const [text, setText] = useState("");
+  const options = entry.options.length > 0 ? entry.options : LEGACY_BUDGET_OPTIONS;
+
   return (
-    <div className="answers">
-      {entry.options.map((o) => {
-        const words = BUDGET_ANSWERS[o.label] ?? { label: o.label, className: "scoped" };
-        return (
-          <button key={o.label} className={words.className} onClick={() => void onAnswer(o.label)} disabled={busy !== null} title={o.description ?? undefined}>
-            {busy === o.label ? "Answering…" : words.label}
+    <>
+      <div className="answers">
+        {options.map((o) => (
+          <button key={o.label} className={budgetClass(o.label)} onClick={() => void onAnswer(o.label)} disabled={busy !== null} title={o.description ?? undefined}>
+            {busy === o.label ? "Answering…" : (BUDGET_ANSWERS[o.label] ?? o.label)}
           </button>
-        );
-      })}
-    </div>
+        ))}
+      </div>
+      <form
+        className="answers"
+        onSubmit={(e) => {
+          e.preventDefault();
+          void onAnswer(text);
+        }}
+      >
+        <input
+          value={text}
+          onChange={(e) => setText(e.target.value)}
+          placeholder="Or type an amount: +25, +25 session, +25 workspace"
+          disabled={busy !== null}
+          aria-label="How much more, and for how long"
+        />
+        <button type="submit" className="allow" disabled={busy !== null || !text.trim()}>
+          {busy === text && text ? "Answering…" : "Answer"}
+        </button>
+      </form>
+    </>
   );
 }
 
@@ -147,8 +180,8 @@ function Answers({ entry, busy, onAnswer }: { entry: Question; busy: string | nu
 /** The question once answered: a calm line in the stream, so the panel can go. */
 export function AnswerRecord({ entry }: { entry: Question }): JSX.Element {
   if (entry.asked === "budget") {
-    const words = BUDGET_ANSWERS[entry.answer ?? ""]?.label ?? entry.answer ?? "answered";
-    return <p className="note">Out of budget — {words.toLowerCase()}.</p>;
+    const words = BUDGET_ANSWERS[entry.answer ?? ""] ?? entry.answer ?? "answered";
+    return <p className="note">Limit reached — {words.toLowerCase()}.</p>;
   }
   return (
     <p className="note">

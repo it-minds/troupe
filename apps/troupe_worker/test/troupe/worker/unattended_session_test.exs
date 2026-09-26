@@ -138,6 +138,12 @@ defmodule Troupe.Worker.UnattendedSessionTest do
       assert done.data["reason"] == "budget_exhausted"
       assert done.data["limit"] == "max_turns"
       assert Fake.call_count(fake) == 1
+
+      # The limits the terms set reach the agent's config by the budget's names: the
+      # ceiling a budget that does ask may not raise itself past (Decision 699).
+      {_state_name, state} = :sys.get_state(Troupe.Registry.agent_pid(context.session_id, ["root"]))
+      assert state.config.terms == %{max_turns: 1}
+      assert state.config.budget_asks == false
     end
 
     test "approvals: deny answers no on the spot, with the system as the actor", context do

@@ -276,6 +276,7 @@ export function App(): JSX.Element {
             row={row}
             sessionId={where.id}
             onBack={() => setWhere({ screen: "sessions" })}
+            onGo={(screen) => setWhere({ screen })}
           />
         )}
       </main>

@@ -267,22 +267,24 @@ Durable:
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task`. The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
-| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
-| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
+| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
+| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
 | `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit` |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
-`waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
-first given again — a checkpoint every slice. It is a stop where the budget is a contract
-(`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
-session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
-never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again. It ends `budget_exhausted` with no further model call and nothing left
+`waiting` until the answer, input queues meanwhile, and the answer says how much more and
+for how long (Decision 699) — a checkpoint every time. It is a stop where the budget is a
+contract (`budget_asks: false`, which the plane's terms set) and never asked under
+`full_send`; a session with `approvals: deny` answers no itself, as it does an `ask_user`.
+A subagent never asks: it hands its parent what it found, labelled partial, and the parent
+may delegate again. It ends `budget_exhausted` with no further model call and nothing left
 running, and a `done` subagent keeps no session awake: its parent stops it on taking its
-result. `always` lifts only the limit it was asked about (Decision 687).
+result. `always` lifts only the limit it was asked about (Decision 687). On a pod the
+terms are a ceiling: a raise past a limit they set is refused with the reason, and the
+workspace is not a scope there.
 
 A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
 counts each tool's failures in a row; a success of that tool clears its count. At
@@ -753,6 +755,31 @@ machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `g
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
 `profile` may name wherever the session will run.
 
+#### `commands.list`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
+"source", "detail", "example"}]}`
+
+The slash commands a client may offer for the session — the one table behind every
+client's palette, so `/help` in the terminal and the desktop app show the same list and
+adding a command is one change in the harness. Entries come grouped by `section`, in
+the order a palette shows them: `session`, `navigate`, `workspace`, `setup`, `agents`,
+`quit`. Each has a `name`, its `aliases`, a one-line `summary`, how it is typed
+(`usage`: `/upload <path>`), its `args` (`{"name", "required", "kind"}`, where `kind`
+is `window`, `file` or `text`, for completion), a longer `detail`, an `example` or
+null, and where it came from: `source` is `builtin` or `agent`. The agents are the
+primary ones `agents.list` answers with for the session's workspace, described by their
+definition; they take a `prompt` and start a branch on it, which a client without
+branches shows as such.
+
+`availability` is what the command needs, for a client to judge and say rather than
+hide the row: `always`; `window` (acts on a window — the activated one, or one named
+as an argument); `local` (a session on this machine: a pod has no checkout, watcher or
+project brief of the person's to act on); `plane` (needs a plane). A client runs what
+it can and shows the rest greyed with the reason. Reading the table wakes nothing.
+
 #### `memory.get`
 ```json
 {"workspace": "/home/me/project"}
@@ -1094,7 +1121,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add`, `skills.remove` |
 
@@ -1151,7 +1178,7 @@ ACL of each session a request names.
 require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
-`mcp.status`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+`mcp.status`, `commands.list`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
