@@ -1171,7 +1171,7 @@ defmodule Troupe.Agent.Server do
       definition.prompt,
       Memory.prompt_section(state.workspace.root_real, state.config),
       environment_section(state),
-      Skills.prompt_section(state.bundle, definition),
+      Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
       goal_section(state),
       todo_section(state)
     ]

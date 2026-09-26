@@ -1,0 +1,33 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/mcp.add.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "from": {
+      "type": "string"
+    },
+    "link": {
+      "type": "boolean"
+    },
+    "name": {
+      "type": "string"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "server": {
+      "type": "object"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id"
+  ],
+  "title": "mcp.add",
+  "type": "object"
+}

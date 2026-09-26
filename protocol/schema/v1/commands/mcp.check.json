@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/mcp.check.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "server": {
+      "type": "object"
+    },
+    "session_id": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [],
+  "title": "mcp.check",
+  "type": "object"
+}

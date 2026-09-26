@@ -173,6 +173,7 @@ defmodule Troupe.UI.TUI.Server do
       sessions: nil,
       files: nil,
       mcp_cursor: 0,
+      mcp_page: nil,
       hq: nil,
       quitting: false,
       size: initial_size(opts),
@@ -458,11 +459,8 @@ defmodule Troupe.UI.TUI.Server do
         {:noreply, %{state | files: %{state.files | cursor: cursor}}}
 
       :mcp ->
-        servers = Model.mcp_servers(state.model)
-
-        cursor =
-          state.mcp_cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(servers) - 1, 0))
-
+        count = length(View.mcp_entries(state))
+        cursor = state.mcp_cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(count - 1, 0))
         {:noreply, %{state | mcp_cursor: cursor}}
 
       :settings when state.settings.picker != nil ->
@@ -698,7 +696,10 @@ defmodule Troupe.UI.TUI.Server do
           :files
 
         "mcp" ->
-          :mcp
+          sources_command(state, "mcp", String.trim(args))
+
+        "skills" ->
+          sources_command(state, "skills", String.trim(args))
 
         n when n in ["hq", "remote"] ->
           {:hq, args}
@@ -723,6 +724,7 @@ defmodule Troupe.UI.TUI.Server do
       :quit -> %{state | quitting: true}
       :files -> toggle_files(state)
       :mcp -> open_mcp(state)
+      {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
       :models -> open_models(state)
@@ -1115,17 +1117,204 @@ defmodule Troupe.UI.TUI.Server do
 
   defp toggle_files(state), do: %{state | focus: :command, files: nil}
 
-  # `/mcp` opens the page on a live query: the fold is transient (driven by
-  # `:mcp_status` events) and empty after a crash, so the page asks the session
-  # for the current state when it opens and folds it in — like `/files` listing.
-  defp open_mcp(state) do
+  ## MCP servers and skills (troupe-remote Decision 700)
+
+  # `/mcp` opens the page on a live query — every server the layers give this
+  # workspace with its state in this session, and every skill — and folds the running
+  # servers into the model for the status line, like `/files` listing. `r` reads it
+  # again, keeping the cursor.
+  defp open_mcp(state, cursor \\ 0) do
+    page =
+      case Client.sources(state.session_id) do
+        {:ok, sources} -> sources
+        {:error, reason} -> %{servers: [], skills: [], warnings: [to_message(reason)]}
+      end
+
     model =
-      Enum.reduce(Client.mcp_status(state.session_id), state.model, fn server, m ->
-        entry = %{state: server.state, tools: server.tools, error: server.error}
-        %{m | mcp: Map.put(m.mcp, server.name, entry)}
+      Enum.reduce(page.servers, state.model, fn
+        %{state: nil}, m ->
+          m
+
+        server, m ->
+          %{
+            m
+            | mcp:
+                Map.put(m.mcp, server.name, %{
+                  state: server.state,
+                  tools: length(server.tools),
+                  error: server.error
+                })
+          }
       end)
 
-    %{put_cmd(state, "") | focus: :mcp, mcp_cursor: 0, model: model}
+    state = %{put_cmd(state, "") | focus: :mcp, mcp_page: page, model: model}
+    %{state | mcp_cursor: min(cursor, max(length(View.mcp_entries(state)) - 1, 0))}
+  end
+
+  # `/mcp import <path>`, `link <path>`, `unlink <path>`, `remove <name>` and
+  # `check <name>` manage the servers, `--workspace` on any of them writing the
+  # workspace's `.troupe/` file instead of the user's; `/skills` has the same verbs for
+  # skills, and either word alone opens the page.
+  defp sources_command(_state, _kind, ""), do: :mcp
+
+  defp sources_command(state, kind, args) do
+    {scope, rest} = scope_flag(args)
+
+    case String.split(rest, " ", parts: 2) do
+      [verb, target]
+      when verb in ["import", "link", "unlink", "remove", "check"] and target != "" ->
+        manage_source(state, kind, verb, String.trim(target), scope)
+
+      _ ->
+        {:error,
+         "usage: /#{kind} [import|link|unlink <path> | remove <name>" <>
+           check_usage(kind) <> "] [--workspace]"}
+    end
+  end
+
+  defp check_usage("mcp"), do: " | check <name>"
+  defp check_usage(_kind), do: ""
+
+  defp scope_flag(args) do
+    if String.contains?(args, "--workspace"),
+      do: {"workspace", args |> String.replace("--workspace", "") |> String.trim()},
+      else: {"user", args}
+  end
+
+  defp manage_source(state, kind, "import", path, scope),
+    do: add_source(state, kind, path, scope, false)
+
+  defp manage_source(state, kind, "link", path, scope),
+    do: add_source(state, kind, path, scope, true)
+
+  defp manage_source(state, kind, "unlink", path, scope),
+    do: remove_source(state, kind, %{include: Path.expand(path)}, scope)
+
+  defp manage_source(state, kind, "remove", name, scope),
+    do: remove_source(state, kind, %{name: name}, scope)
+
+  defp manage_source(state, "mcp", "check", name, _scope), do: check_server(state, name)
+
+  defp manage_source(_state, "skills", "check", _name, _scope),
+    do: {:error, "a skill has nothing to check; the page shows where it is"}
+
+  defp add_source(state, kind, path, scope, link?) do
+    params = %{scope: scope, from: Path.expand(path), link: link?}
+
+    case Client.manage_sources(state.session_id, kind <> ".add", params) do
+      {:ok, answer} -> {:mcp, added_notice(kind, answer)}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp added_notice(kind, answer) do
+    what = if kind == "mcp", do: "servers", else: "skills"
+    verb = if answer["linked"], do: "linked", else: "imported"
+    added = answer["added"] |> List.wrap() |> Enum.join(", ")
+    skipped = answer["skipped"] |> List.wrap() |> Enum.map(&"#{&1["name"]} (#{&1["reason"]})")
+
+    ["#{verb} #{what} #{if added == "", do: "(none)", else: added} into #{answer["path"]}"]
+    |> Kernel.++(if skipped == [], do: [], else: ["skipped " <> Enum.join(skipped, "; ")])
+    |> Kernel.++(List.wrap(answer["warnings"]))
+    |> Enum.join(" · ")
+  end
+
+  # A server taken out of its file is checked afterwards, which is what stops the one
+  # this session still runs under that name; a check that finds no server is the point.
+  defp remove_source(state, kind, what, scope) do
+    case Client.manage_sources(state.session_id, kind <> ".remove", Map.put(what, :scope, scope)) do
+      {:ok, %{"removed" => removed}} ->
+        if kind == "mcp", do: Enum.each(removed, &stop_removed(state, &1))
+        {:mcp, "removed #{Enum.join(removed, ", ")} from the #{scope} #{kind}"}
+
+      {:ok, _answer} ->
+        {:mcp, "removed"}
+
+      {:error, reason} ->
+        {:error, to_message(reason)}
+    end
+  end
+
+  defp stop_removed(state, name),
+    do:
+      Client.manage_sources(state.session_id, "mcp.check", %{
+        session_id: state.session_id,
+        name: name
+      })
+
+  # A check on this session's server reads its file again and starts what it says now,
+  # which is also how one that died is brought back.
+  defp check_server(state, name) do
+    case Client.manage_sources(state.session_id, "mcp.check", %{
+           session_id: state.session_id,
+           name: name
+         }) do
+      {:ok, %{"server" => server}} -> {:mcp, "#{name}: #{server["state"]}#{server_note(server)}"}
+      {:ok, _answer} -> {:mcp, "#{name}: checked"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp server_note(%{"error" => error}) when is_binary(error) and error != "", do: " — " <> error
+  defp server_note(%{"tools" => [_ | _] = tools}), do: ", #{length(tools)} tools"
+  defp server_note(_server), do: ""
+
+  # What the page's keys do to the selected entry. A server from `config.yaml` is
+  # edited by hand, as it always was.
+  defp mcp_selected(state), do: Enum.at(View.mcp_entries(state), state.mcp_cursor)
+
+  defp mcp_act(state, nil), do: state
+
+  defp mcp_act(state, result) do
+    case result do
+      {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
+      {:error, text} -> notice(state, text)
+    end
+  end
+
+  defp mcp_check_selected(state) do
+    case mcp_selected(state) do
+      {:server, server} -> check_server(state, server.name)
+      _other -> nil
+    end
+  end
+
+  defp mcp_toggle_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{layer: layer} = server} when layer in [:user, :workspace] ->
+        params = %{
+          scope: Atom.to_string(layer),
+          name: server.name,
+          server: %{disabled: not server.disabled?}
+        }
+
+        case Client.manage_sources(state.session_id, "mcp.add", params) do
+          {:ok, _} -> check_server(state, server.name)
+          {:error, reason} -> {:error, to_message(reason)}
+        end
+
+      {:server, _server} ->
+        {:error, "a server from config.yaml is enabled or disabled there"}
+
+      _other ->
+        nil
+    end
+  end
+
+  defp mcp_remove_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{layer: layer} = server} when layer in [:user, :workspace] ->
+        remove_source(state, "mcp", %{name: server.name}, Atom.to_string(layer))
+
+      {:server, _server} ->
+        {:error, "a server from config.yaml is removed there"}
+
+      {:skill, skill} ->
+        remove_source(state, "skills", %{name: skill.name}, Atom.to_string(skill.layer))
+
+      nil ->
+        nil
+    end
   end
 
   defp load_files(state, path) do
@@ -1197,11 +1386,14 @@ defmodule Troupe.UI.TUI.Server do
     do: %{state | mcp_cursor: max(state.mcp_cursor - 1, 0)}
 
   defp mcp_key(%Key{code: code}, state) when code in ["down", "j"] do
-    count = length(Model.mcp_servers(state.model))
+    count = length(View.mcp_entries(state))
     %{state | mcp_cursor: min(state.mcp_cursor + 1, max(count - 1, 0))}
   end
 
-  defp mcp_key(%Key{code: "r"}, state), do: open_mcp(state)
+  defp mcp_key(%Key{code: "r"}, state), do: open_mcp(state, state.mcp_cursor)
+  defp mcp_key(%Key{code: "c"}, state), do: mcp_act(state, mcp_check_selected(state))
+  defp mcp_key(%Key{code: "d"}, state), do: mcp_act(state, mcp_toggle_selected(state))
+  defp mcp_key(%Key{code: "x"}, state), do: mcp_act(state, mcp_remove_selected(state))
 
   defp mcp_key(_key, state), do: state
 
@@ -1969,7 +2161,7 @@ defmodule Troupe.UI.TUI.Server do
           text,
           state.commands ++
             @path_commands ++
-            ~w(settings help observer models watch agents sessions resume memory mcp goal loop quit)
+            ~w(settings help observer models watch agents sessions resume memory mcp skills goal loop quit)
         )
 
       true ->

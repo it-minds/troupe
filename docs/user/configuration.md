@@ -124,6 +124,38 @@ which trusts other workspaces too; it says which one still trusts it.
 never reads these keys from a project's file, trusted or not: a pod's provider and key
 come from its profile.
 
+## Your own MCP servers and skills
+
+Beside `config.yaml` there are two more files a person keeps, in the shape other tools
+already use, so what you have for Claude Code, Claude Desktop, Cursor or VS Code comes
+over as it is:
+
+```
+<config>/mcp.json              your MCP servers, on every workspace
+<config>/skills/<name>/SKILL.md   your skills
+<workspace>/.troupe/mcp.json   the workspace's servers, for whoever opens the repository
+<workspace>/.troupe/skills/    the workspace's skills
+```
+
+`mcp.json` is `{"mcpServers": {name: {"command", "args", "env"}}}` — or `{"url"}` —
+with one key of Troupe's own: `"include": ["~/.claude/.mcp.json"]` reads another file
+in place. `${VAR}` in an imported file becomes `{env:VAR}`, read as the rest of the
+configuration reads it. A `skills.json` beside a `skills/` directory does the same for
+directories of skills: `{"include": ["~/.claude/skills"]}`.
+
+The layers stack the way the config files do: the workspace's file over yours over
+`config.yaml`'s `mcp:`, an entry of the same name merged key by key, so a workspace can
+say `{"fs": {"disabled": true}}` and no more. The TUI's `/mcp` page and the desktop
+app's "Servers and skills" panel show every server and skill with the layer and file it
+came from, import a file (`/mcp import <path>`, `/skills import <path>`, or `link` to
+read it in place), remove one, and try a server before it is kept.
+
+A workspace's servers are commands a cloned repository would run, so a session starts
+them only after asking you — once per workspace when you answer `allow`, which is kept
+in Troupe's state directory and never in the repository, and asked again when a
+server's command changes. A workspace on `trusted_workspaces` is not asked. Your own
+skills are offered to every agent; a bundle's stay as its profiles list them.
+
 ## Old spellings
 
 Each setting has one name. The old ones still load until version 2, each with a warning

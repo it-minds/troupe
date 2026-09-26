@@ -73,6 +73,46 @@ defmodule Troupe.MCP.Stdio do
     :exit, _ -> {:error, "the MCP server #{name} is not running"}
   end
 
+  @doc """
+  Run a server once, outside any session, until it is ready or has failed; then stop
+  it and say what it offered. What `mcp.check` does before a server is kept: the
+  server is started under a session id of its own, waited for, and told to exit by
+  its stdin closing, as a session's end tells it.
+  """
+  @spec probe(String.t(), map(), Path.t() | nil, pos_integer()) :: map()
+  def probe(name, config, cwd, timeout \\ 20_000) do
+    session_id = "probe-" <> Integer.to_string(System.unique_integer([:positive]))
+
+    task =
+      Task.async(fn ->
+        case start_link(session_id: session_id, name: name, config: config, cwd: cwd) do
+          {:ok, pid} ->
+            status = await(session_id, name, timeout)
+            GenServer.stop(pid, :normal)
+            status
+
+          {:error, reason} ->
+            %{name: name, state: :error, tools: [], error: "could not start: #{inspect(reason)}"}
+        end
+      end)
+
+    Task.await(task, timeout + 5_000)
+  end
+
+  defp await(session_id, name, waited) do
+    case status(session_id, name) do
+      %{state: :connecting} when waited > 0 ->
+        Process.sleep(200)
+        await(session_id, name, waited - 200)
+
+      %{state: :connecting} = status ->
+        %{status | state: :error, error: "did not answer initialize in time"}
+
+      status ->
+        status
+    end
+  end
+
   defp call(session_id, name, message, default) do
     GenServer.call(Troupe.Registry.mcp_server(session_id, name), message)
   catch
