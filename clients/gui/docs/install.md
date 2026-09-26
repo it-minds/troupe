@@ -33,9 +33,12 @@ From PowerShell, step 1 is:
 Unblock-File .\Troupe_0.1.0_x64-setup.exe
 ```
 
-The installer is per-user (`installMode: currentUser`), so it needs no administrator and
-installs under `%LOCALAPPDATA%`. It will fetch the WebView2 runtime if Windows does not
-already have it; every Windows 11 and most Windows 10 machines do.
+The installer is per-user (`installMode: currentUser`), so it needs no administrator. It
+installs into `%LOCALAPPDATA%\Programs\troupe-desktop`. One from before 0.5.2 installed
+into `%LOCALAPPDATA%\Troupe`, which Windows, ignoring case, reads as the daemon's state
+directory `%LOCALAPPDATA%\troupe`; a newer one moves the app out of it and leaves the
+sessions where they are. It will fetch the WebView2 runtime if Windows does not already
+have it; every Windows 11 and most Windows 10 machines do.
 
 ## macOS
 
