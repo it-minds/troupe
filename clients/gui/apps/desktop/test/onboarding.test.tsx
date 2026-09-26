@@ -348,7 +348,7 @@ describe("each screen", () => {
     const local = flowAt("finish", { suggested_prompt: "Tell me what this project does, how it is built and tested, and where you would start reading." });
     const first = render(<Finish flow={local} {...idle} onAnswer={onAnswer} />);
     await shown("Ready");
-    expect(says("anthropic")).toBe(true);
+    expect(says("Anthropic")).toBe(true);
     expect(says("claude-opus-5 · claude-haiku-4-5 for small work")).toBe(true);
     expect(says("saved in /home/ada/.config/troupe/config.yaml")).toBe(true);
     expect(says("/home/ada/repo")).toBe(true);
