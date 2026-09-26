@@ -26,10 +26,10 @@ dependency up, never silence.
 
 | Dependency | Suites | Without it |
 |---|---|---|
-| PostgreSQL on 55432, `troupe_plane_test` migrated | all of the plane's | every test excluded, with the two commands to run |
+| PostgreSQL on 25432, `troupe_plane_test` migrated | all of the plane's | every test excluded, with the two commands to run |
 | PostgreSQL | the worker's control-channel failover test | skipped, flunks |
-| OpenBao on 58200 | plane tokens, protocol KMS, every `Troupe.Worker.SessionCase` suite | `setup_all` says so; each test flunks |
-| MinIO on 59000 | protocol object store and storage, worker sessions | same |
+| OpenBao on 28200 | plane tokens, protocol KMS, every `Troupe.Worker.SessionCase` suite | `setup_all` says so; each test flunks |
+| MinIO on 29000 | protocol object store and storage, worker sessions | same |
 | a kubeconfig with the CRDs | the operator's `:cluster` tests, the plane's enrolment test | excluded; `--include cluster` runs them |
 | a second BEAM node | the plane's cluster test | skipped, flunks |
 | `bubblewrap` | the sandbox tests | skipped, flunks |

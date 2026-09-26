@@ -311,7 +311,7 @@ defmodule Troupe.Worker.SessionCase do
   end
 
   defp bao_reachable? do
-    address = Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:58200"
+    address = Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:28200"
 
     match?(
       {:ok, %{status: 200}},

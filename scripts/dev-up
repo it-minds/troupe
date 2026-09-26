@@ -22,6 +22,6 @@ compose run --rm --no-deps minio-setup
 compose run --rm --no-deps openbao-setup
 
 echo
-echo "postgres  postgres://troupe:troupe@localhost:55432/troupe_plane_dev"
-echo "minio     http://localhost:59000  (console :59001, troupe / troupe-secret)"
-echo "openbao   http://localhost:58200  (dev root token: troupe-dev-root)"
+echo "postgres  postgres://troupe:troupe@localhost:25432/troupe_plane_dev"
+echo "minio     http://localhost:29000  (console :29001, troupe / troupe-secret)"
+echo "openbao   http://localhost:28200  (dev root token: troupe-dev-root)"

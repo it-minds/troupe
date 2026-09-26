@@ -56,7 +56,7 @@ if Mix.env() in [:dev, :test] do
     username: "troupe",
     password: "troupe",
     hostname: "localhost",
-    port: 55_432,
+    port: 25_432,
     database: "troupe_plane_#{Mix.env()}",
     pool_size: 10
 
@@ -79,7 +79,7 @@ if Mix.env() in [:dev, :test] do
   # runs a MinIO or an OpenBao does not notice.
   config :troupe_protocol,
     object_store: [
-      endpoint: "http://localhost:59000",
+      endpoint: "http://localhost:29000",
       bucket: "troupe-sessions",
       access_key_id: "troupe",
       secret_access_key: "troupe-secret",
@@ -88,7 +88,7 @@ if Mix.env() in [:dev, :test] do
 
   config :troupe_worker,
     kms: [
-      address: "http://localhost:58200",
+      address: "http://localhost:28200",
       token: "troupe-dev-root",
       mount: "secret"
     ]
@@ -99,7 +99,7 @@ if Mix.env() in [:dev, :test] do
   # sign rather than try the development root token against a real cluster.
   config :troupe_plane,
     transit: [
-      address: "http://localhost:58200",
+      address: "http://localhost:28200",
       token: "troupe-dev-root"
     ]
 end

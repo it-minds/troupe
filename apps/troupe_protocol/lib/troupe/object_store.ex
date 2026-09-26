@@ -34,7 +34,7 @@ defmodule Troupe.ObjectStore do
     config = Application.get_env(:troupe_protocol, :object_store, [])
 
     %__MODULE__{
-      endpoint: Keyword.get(config, :endpoint, "http://localhost:59000"),
+      endpoint: Keyword.get(config, :endpoint, "http://localhost:29000"),
       bucket: Keyword.get(config, :bucket, "troupe-sessions"),
       access_key_id: Keyword.get(config, :access_key_id, "troupe"),
       secret_access_key: Keyword.get(config, :secret_access_key, "troupe-secret"),

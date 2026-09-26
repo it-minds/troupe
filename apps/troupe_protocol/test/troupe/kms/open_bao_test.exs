@@ -239,7 +239,7 @@ defmodule Troupe.KMS.OpenBaoTest do
   defp requires_bao(%{team: _} = context), do: context
   defp requires_bao(_), do: flunk("no OpenBao; see the message from setup_all")
 
-  defp address, do: Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:58200"
+  defp address, do: Application.get_env(:troupe_worker, :kms, [])[:address] || "http://localhost:28200"
   defp root_token, do: Application.get_env(:troupe_worker, :kms, [])[:token] || "troupe-dev-root"
   defp mount, do: Application.get_env(:troupe_worker, :kms, [])[:mount] || "secret"
 

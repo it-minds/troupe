@@ -123,7 +123,7 @@ say "5. Rebuild from object storage"
 # The restored database has lost whatever happened after the restore point; object
 # storage has not. This is the step that makes a restore lossless rather than merely
 # recent, and it runs against the restored cluster before anything is switched over.
-RESTORED_URL="postgres://troupe:troupe@localhost:55433/$DB"
+RESTORED_URL="postgres://troupe:troupe@localhost:25433/$DB"
 
 if ! docker exec -i "$CONTAINER" psql -U troupe -p 5433 -d "$DB" -tAc "SELECT 1" >/dev/null 2>&1; then
   echo "the restored cluster is not answering on 5433" >&2

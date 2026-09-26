@@ -171,7 +171,7 @@ defmodule Troupe.Plane.TokensTest do
     }
   end
 
-  defp address, do: Application.get_env(:troupe_plane, :transit, [])[:address] || "http://localhost:58200"
+  defp address, do: Application.get_env(:troupe_plane, :transit, [])[:address] || "http://localhost:28200"
 
   defp reachable? do
     match?({:ok, %{status: 200}}, Req.request(method: :get, url: address() <> "/v1/sys/health", retry: false))

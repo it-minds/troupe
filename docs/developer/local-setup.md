@@ -30,14 +30,14 @@ and four gateway tests that spawn or `kill -9` a daemon. They pass on a Linux ru
 
 | Service | Image | Host port | Credentials | Notes |
 |---|---|---|---|---|
-| `postgres` | `postgres:16-alpine` | 55432 (5432 in the container); 55433 is mapped to 5433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; WAL archive volume chowned to 70:70 by a `busybox` init service (`docker-compose.yml:14-53`) |
-| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 59000 (S3), 59001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:74-85`) |
-| `openbao` | `openbao/openbao:2.4.1`, dev mode | 58200 | root token `troupe-dev-root` | `openbao-setup` enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) (`:106-119`); KV v2 is at `secret/` in dev mode |
+| `postgres` | `postgres:16-alpine` | 25432 (5432 in the container); 25433 is mapped to 5433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; WAL archive volume chowned to 70:70 by a `busybox` init service (`docker-compose.yml:17-56`) |
+| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 29000 (S3), 29001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:77-88`) |
+| `openbao` | `openbao/openbao:2.4.1`, dev mode | 28200 | root token `troupe-dev-root` | `openbao-setup` enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) (`:109-122`); KV v2 is at `secret/` in dev mode |
 
-`config/config.exs:61-70` points the dev and test repos at `localhost:55432`
+`config/config.exs:61-70` points the dev and test repos at `localhost:25432`
 (`troupe_plane_dev` / `troupe_plane_test`), `:86-96` points the object store at
-`localhost:59000`, and `:98-113` points both the worker's KMS and the plane's transit at
-`localhost:58200` with the dev root token — "for these two environments only".
+`localhost:29000`, and `:98-113` points both the worker's KMS and the plane's transit at
+`localhost:28200` with the dev root token — "for these two environments only".
 
 Stop them with `scripts/dev-down`; `scripts/dev-down --purge` also removes the volumes
 (`scripts/dev-down:7-11`).
@@ -53,14 +53,15 @@ mix check          # compile with warnings as errors, format, credo --strict, bo
 ## 3. Development services
 
 `scripts/dev-up` starts compose project `troupe-dev` on ports chosen not to collide with a
-Postgres or MinIO already on the machine; `scripts/dev-down` stops it (`--purge` drops the
+Postgres or MinIO already on the machine, and below 32768 so no outgoing connection is
+handed one first; `scripts/dev-down` stops it (`--purge` drops the
 volumes).
 
 | Service | Port | Credentials | Notes |
 |---|---|---|---|
-| PostgreSQL 16 | 55432 (55433 for the PITR drill's restored cluster) | `troupe` / `troupe` | WAL archiving on, for `scripts/pitr-drill` |
-| MinIO | 59000, console 59001 | `troupe` / `troupe-secret` | bucket `troupe-sessions`, versioned |
-| OpenBao, dev mode | 58200 | root token `troupe-dev-root` | `transit` with `troupe-session-tokens`; KV v2 at `secret/` |
+| PostgreSQL 16 | 25432 (25433 for the PITR drill's restored cluster) | `troupe` / `troupe` | WAL archiving on, for `scripts/pitr-drill` |
+| MinIO | 29000, console 29001 | `troupe` / `troupe-secret` | bucket `troupe-sessions`, versioned |
+| OpenBao, dev mode | 28200 | root token `troupe-dev-root` | `transit` with `troupe-session-tokens`; KV v2 at `secret/` |
 
 `config/config.exs` points the dev and test environments at these. Then
 `MIX_ENV=test mix ecto.create && MIX_ENV=test mix ecto.migrate` for the plane's suite.
