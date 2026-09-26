@@ -28,12 +28,18 @@ defmodule Troupe.Operator.Reconciler do
 
   # Only the kinds the operator creates. Listing everything in the namespace would make
   # the operator responsible for objects it never made.
+  #
+  # The `CiliumNetworkPolicy` is written only while `ciliumAvailable` is set, so switching
+  # it off has to take the policy away, or the profile says `NoCilium` beside FQDN rules
+  # that are still there. A cluster that never had Cilium has no such kind, and listing it
+  # fails: `list_managed/4` takes that as nothing to prune, like any listing that fails.
   @prunable [
     {"v1", "Service"},
     {"v1", "PersistentVolumeClaim"},
     {"networking.k8s.io/v1", "Ingress"},
     {"networking.k8s.io/v1", "NetworkPolicy"},
-    {"policy/v1", "PodDisruptionBudget"}
+    {"policy/v1", "PodDisruptionBudget"},
+    {"cilium.io/v2", "CiliumNetworkPolicy"}
   ]
 
   @field_manager "troupe-operator"
@@ -42,6 +48,10 @@ defmodule Troupe.Operator.Reconciler do
   def start_link(opts) do
     GenServer.start_link(__MODULE__, opts, name: Keyword.fetch!(opts, :name))
   end
+
+  @doc "The kinds a pass deletes once a profile no longer implies them, as `{apiVersion, kind}`."
+  @spec prunable() :: [{String.t(), String.t()}]
+  def prunable, do: @prunable
 
   @doc "What this reconciler has done, for tests and diagnostics."
   @spec info(GenServer.server()) :: map()
