@@ -74,6 +74,9 @@ defmodule Troupe.UI.TUI.Model do
           ended_at: integer() | nil
         }
 
+  @typedoc "A loop towards the goal while it runs: which one, and where it is."
+  @type loop :: %{id: String.t() | nil, iteration: non_neg_integer(), max: pos_integer() | nil}
+
   @typedoc "One line of the observer tree: an agent, with the window it belongs to."
   @type row :: %{
           window: window(),
@@ -99,7 +102,7 @@ defmodule Troupe.UI.TUI.Model do
           message: String.t() | nil,
           diff_stat: String.t() | nil,
           goal: String.t() | nil,
-          loop: %{iteration: non_neg_integer(), max: pos_integer() | nil} | nil,
+          loop: loop() | nil,
           worktree: map() | nil,
           unconfirmed: %{optional(String.t()) => String.t()},
           drawn_inputs: %{optional(String.t()) => String.t()},
@@ -458,7 +461,7 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(path)
         |> push(path, {:system, "loop: up to #{d.max_iterations} iterations towards the goal"})
-        |> Map.put(:loop, %{iteration: 0, max: d.max_iterations})
+        |> Map.put(:loop, %{id: d[:loop_id], iteration: 0, max: d.max_iterations})
 
       :loop_iteration ->
         %{max: max} = Map.get(w, :loop) || %{max: nil}
@@ -466,7 +469,7 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(path)
         |> push(path, {:system, "loop iteration #{d.iteration}#{if max, do: "/#{max}", else: ""}"})
-        |> Map.put(:loop, %{iteration: d.iteration, max: max})
+        |> Map.put(:loop, %{id: d[:loop_id], iteration: d.iteration, max: max})
 
       :loop_iteration_finished when d.outcome == "failed" ->
         push(
@@ -747,15 +750,29 @@ defmodule Troupe.UI.TUI.Model do
   def windows(%__MODULE__{} = m), do: Enum.map(m.order, &Map.fetch!(m.windows, &1))
 
   @doc """
-  The loop this screen's session is running, `%{iteration, max}`, as its events say, or
-  `nil` when none runs: the session's own window's, like `goal/1`.
+  The loop this screen's session is running, `%{id, iteration, max}`, as its events say,
+  or `nil` when none runs: the session's own window's, like `goal/1`.
   """
-  @spec loop(t()) :: %{iteration: non_neg_integer(), max: pos_integer() | nil} | nil
+  @spec loop(t()) :: loop() | nil
   def loop(%__MODULE__{windows: windows}) do
     case Map.get(windows, "root") do
       %{loop: %{} = loop} -> loop
       _ -> nil
     end
+  end
+
+  @doc """
+  Takes the loop `id` off the window: the session answered that none runs, though no
+  event has said so. A daemon that stopped mid-loop wrote no `loop_stopped`, and a
+  restore records how the loop ended only when the session is next activated. Only that
+  loop: one that started since the question was asked is its own events' to report.
+  """
+  @spec loop_ended(t(), String.t() | nil) :: t()
+  def loop_ended(%__MODULE__{} = m, id) do
+    update_window(m, "root", fn
+      %{loop: %{id: ^id}} = w -> %{w | loop: nil}
+      w -> w
+    end)
   end
 
   @doc """

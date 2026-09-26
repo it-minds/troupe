@@ -129,6 +129,10 @@ defmodule Troupe.RemoteTransportTest do
 
       assert RPC.describe(no_token) == "signed out: no_token"
       assert RPC.describe(no_scope) == "not allowed (needs the control scope)"
+
+      # Section 10 spells it `required_scope`, and nothing sends the older `scope`.
+      old_spelling = %{code: -32_004, message: "forbidden", data: %{"scope" => "control"}}
+      assert RPC.describe(old_spelling) == "not allowed"
     end
 
     test "what went wrong is said with why, not as the bare token" do

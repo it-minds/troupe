@@ -70,20 +70,36 @@ defmodule Troupe.Worker.ApprovalStatusTest do
     end
   end
 
+  test "a root waiting on the budget's question is waiting before the question is logged" do
+    # The agent parks in `waiting` and then asks: between the two, only its state says so.
+    # The daemon reads an agent in `waiting` as parked on a person, and so does this.
+    before_asking =
+      "questions"
+      |> recorded("budget_unattended")
+      |> Enum.take_while(&(&1.type != "question_asked"))
+
+    waiting = Event.ephemeral("agent_state", ["root"], %{"state" => "waiting"})
+    reported = replay_events(%{"parked" => before_asking ++ [waiting]})
+
+    assert %{"status" => "waiting", "pending_questions" => 0} = reported["parked"]
+  end
+
   # One manager per log, with no tree behind it and marked active so that it reports: the
   # lifecycle is a fold over the events a session publishes, and those are what each one
   # is sent here, in the order the session wrote them. The answer is the last report each
   # one made once they have all gone quiet, since a report is debounced.
-  defp replay(dir, names) do
+  defp replay(dir, names), do: replay_events(Map.new(names, &{&1, recorded(dir, &1)}))
+
+  defp replay_events(logs) do
     test = self()
 
-    for name <- names do
+    for {name, events} <- logs do
       session_id = "recorded-" <> name
       opts = [session_id: session_id, report: &send(test, {:report, &1})]
       manager = start_supervised!(Supervisor.child_spec({Manager, opts}, id: name))
       :sys.replace_state(manager, &%{&1 | status: :active})
 
-      for event <- recorded(dir, name), do: send(manager, {:troupe_event, session_id, event})
+      for event <- events, do: send(manager, {:troupe_event, session_id, event})
     end
 
     last_reports(%{})

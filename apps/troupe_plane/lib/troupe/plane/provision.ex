@@ -497,19 +497,26 @@ defmodule Troupe.Plane.Provision do
   end
 
   @doc """
-  The conditions a panel shows for a profile.
+  The conditions a panel shows for a profile, or `nil` where they are unknown.
 
   Read from the cluster where there is one, because the operator is what sets them and a
-  plane inventing its own would be a second opinion about the same question.
+  plane inventing its own would be a second opinion about the same question. None is an
+  answer: a plane with no cluster, or a profile the operator has not reconciled yet. A
+  cluster that could not be asked is not, and says so rather than looking like none.
   """
-  @spec conditions(Profile.t()) :: [map()]
+  @spec conditions(Profile.t()) :: [map()] | nil
   def conditions(%Profile{} = profile) do
     case live_resource(profile) do
       {:ok, resource} -> get_in(resource, ["status", "conditions"]) || []
-      {:error, _reason} -> []
+      {:error, :no_cluster} -> []
+      {:error, %K8s.Client.APIError{reason: "NotFound"}} -> []
+      {:error, _reason} -> nil
     end
   end
 
+  # An exit is an answer too. The client calls processes of its own, and one that is not
+  # there exits in whoever asked, which is the Workers page once a second: caught here, it
+  # is a cluster that did not answer rather than a page that goes down.
   defp live_resource(profile) do
     with {:ok, conn} <- connection() do
       operation =
@@ -520,5 +527,7 @@ defmodule Troupe.Plane.Provision do
 
       K8s.Client.run(conn, operation)
     end
+  catch
+    :exit, reason -> {:error, {:exit, reason}}
   end
 end
