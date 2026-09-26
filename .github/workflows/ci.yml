@@ -83,11 +83,11 @@ jobs:
       native: ${{ steps.plan.outputs.native }}
       images: ${{ steps.plan.outputs.images }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # On a pull request, against its base; on a push, against what `main` was before it.
       # A full run asks nothing: everything runs.
-      - uses: dorny/paths-filter@v3
+      - uses: dorny/paths-filter@v4
         id: filter
         if: ${{ !inputs.full }}
         with:
@@ -228,7 +228,7 @@ jobs:
     if: needs.changes.outputs.server == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -239,7 +239,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             deps
@@ -296,7 +296,7 @@ jobs:
       matrix:
         app: ${{ fromJSON(needs.changes.outputs.apps) }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -330,7 +330,7 @@ jobs:
       - name: Postgres, MinIO and OpenBao
         run: scripts/dev-up
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             deps
@@ -367,9 +367,9 @@ jobs:
     if: needs.changes.outputs.chart == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: Lint, with each values file that is meant to install
         run: |
@@ -422,7 +422,7 @@ jobs:
     if: needs.changes.outputs.protocol == 'true'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -433,11 +433,11 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.12"
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             deps
@@ -479,7 +479,7 @@ jobs:
       # The idle-shutdown test waits a minute without it.
       TROUPE_IDLE_TEST_MS: "1000"
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -492,7 +492,7 @@ jobs:
         with:
           version: ${{ env.ZIG_VERSION }}
 
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             clients/tui/deps
@@ -519,7 +519,7 @@ jobs:
       run:
         working-directory: clients/gui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
@@ -553,7 +553,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: pnpm/action-setup@v6
         with:
@@ -568,7 +568,7 @@ jobs:
       - run: pnpm install --frozen-lockfile
         working-directory: clients/gui
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       # Postgres, OpenBao, Dex and the plane — built from `docker/Dockerfile` here, not
       # pulled — in one compose project with no Kubernetes. The test drives Dex's device
@@ -602,7 +602,7 @@ jobs:
     name: every copy of the version agrees, every doc link resolves
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
@@ -629,7 +629,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -645,7 +645,7 @@ jobs:
         with:
           install_only: true
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       - name: A cluster whose CNI enforces policy
         run: scripts/kind-up
@@ -674,7 +674,7 @@ jobs:
           kubectl get pods -A -o wide > cluster-logs/pods.txt 2>&1 || true
           kubectl get events -A --sort-by=.lastTimestamp > cluster-logs/events.txt 2>&1 || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: failure()
         with:
           name: cluster-logs
