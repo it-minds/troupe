@@ -45,19 +45,20 @@ jobs:
           node-version-file: .tool-versions
           cache: pnpm
           cache-dependency-path: clients/gui/pnpm-lock.yaml
-      # `cargo metadata` fetches every locked crate to read its manifest. The runner has
-      # Rust; this keeps it from downloading the same crates on every run.
+      # Fetching is all it needs: the licences are in the packages' own metadata.
+      - run: mix deps.get
+      - run: mix deps.get
+        working-directory: clients/tui
+      # `cargo metadata` fetches every locked crate to read its manifest: the desktop app's,
+      # and those of the TUI's NIF, whose Cargo.lock `ex_ratatui` has just brought. The
+      # runner has Rust; this keeps it from downloading the same crates on every run.
       - uses: actions/cache@v4
         with:
           path: |
             ~/.cargo/registry/index
             ~/.cargo/registry/cache
-          key: ${{ runner.os }}-licences-cargo-${{ hashFiles('clients/gui/apps/desktop/src-tauri/Cargo.lock') }}
+          key: ${{ runner.os }}-licences-cargo-${{ hashFiles('clients/gui/apps/desktop/src-tauri/Cargo.lock', 'clients/tui/deps/ex_ratatui/native/ex_ratatui/Cargo.lock') }}
           restore-keys: ${{ runner.os }}-licences-cargo-
-      # Fetching is all it needs: the licences are in the packages' own metadata.
-      - run: mix deps.get
-      - run: mix deps.get
-        working-directory: clients/tui
       - run: pnpm install --frozen-lockfile
         working-directory: clients/gui
       - run: elixir scripts/licences.exs --check

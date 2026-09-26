@@ -11,6 +11,9 @@
 #   * `THIRD-PARTY-NOTICES.txt`, the texts: each shipped package's own LICENSE, COPYING and
 #     NOTICE files, or the standard text of the licence it declares when it ships none
 #     (`scripts/licence-texts/`, from SPDX), and where the source of an MPL-2.0 package is.
+#     Shipped means the GUI's runtime packages, not its build tools; the crates in the
+#     desktop app and in the TUI's precompiled NIF, not those that only build them; and,
+#     from `@components` below, what a build compiles in that no lock file names.
 #     Apache-2.0, MIT and BSD ask that these go with every binary copy, so every release
 #     artifact carries this file beside LICENSE and NOTICE: the daemon's archive, the TUI's
 #     binary, the desktop app, the images and the release page.
@@ -30,7 +33,9 @@
 #     `clients/tui`. A Hex package's licence is in `deps/<name>/hex_metadata.config`, a git
 #     dependency's in its `src/<name>.app.src`.
 #   * the GUI's pnpm workspace: `pnpm install` in `clients/gui`, then `pnpm licenses list`.
-#   * the desktop app's crates: `cargo metadata`, which fetches what it needs.
+#   * the desktop app's crates, and for the notices those of the TUI's NIF, whose
+#     Cargo.lock comes with `ex_ratatui` in `clients/tui/deps`: `cargo metadata`, which
+#     fetches what it needs.
 #
 # The document lists a package once per licence and leaves versions to the locks: a list
 # that changed with every bump would be regenerated without being read. It changes when a
@@ -91,6 +96,31 @@ defmodule Licences do
   # 3.2. The notices name the exact source of every package under one of them.
   @source_offered ~w(MPL-2.0)
 
+  # What a build compiles into a binary without any lock file naming it, for the notices.
+  # Kept by hand: each entry says what it is, what ships it, and which text it carries,
+  # from its own source at the version built, in `scripts/licence-texts/components/`. A
+  # version that moves (ezstd's `build_deps.sh` pins zstd, `native.yml` and the Dockerfile
+  # pin Zig, Burrito vendors XZ Embedded) is a text to fetch again.
+  @components [
+    {"zstd 1.5.7", "zstd.txt",
+     "compiled into ezstd's NIF, in the daemon, the TUI and the server images; " <>
+       "BSD-3-Clause OR GPL-2.0-only, used under BSD-3-Clause"},
+    {"The Zig standard library 0.16.0", "zig.txt",
+     "in the reaper every OS process runs under (the daemon, the TUI, the worker image) " <>
+       "and in the wrapper Burrito builds around the TUI; MIT"},
+    {"musl libc, as Zig 0.16.0 ships it", "musl.txt",
+     "linked into the Linux builds of the reaper and of Burrito's wrapper, and the C " <>
+       "library Burrito gives the TUI's runtime on Linux; MIT"},
+    {"The mingw-w64 runtime, as Zig 0.16.0 ships it", "mingw-w64.txt",
+     "linked into the Windows builds of the reaper and of Burrito's wrapper; ZPL-2.1"},
+    {"XZ Embedded", "xz-embedded.txt", "the decompressor in Burrito's wrapper; public domain"}
+  ]
+
+  # The TUI's terminal NIF, which `ex_ratatui` downloads precompiled: its crates are in the
+  # Cargo.lock the Hex package ships. They are in the notices, not in the policy's
+  # inventory.
+  @nif "clients/tui/deps/ex_ratatui/native/ex_ratatui/Cargo.toml"
+
   @headings %{
     hex: "Elixir: the umbrella and the TUI (Hex)",
     pnpm: "The GUI (pnpm)",
@@ -116,13 +146,16 @@ defmodule Licences do
     System.halt(2)
   end
 
-  # Every package, which is what the policy reads, and the ones whose texts ship. They
-  # differ only in the GUI: its build and test tools are pnpm packages too, and none of
-  # them ends up in its bundle.
+  # Every package, which is what the policy reads, and the ones whose texts ship. What
+  # ships is less: none of the GUI's build and test tools is in its bundle, and no crate
+  # that only builds something (a build script's, a procedural macro's) is in a binary.
+  # And more: the crates of the TUI's NIF, and what no lock file names.
   defp packages do
     hex = hex()
-    cargo = cargo()
-    {hex ++ pnpm([]) ++ cargo, hex ++ pnpm(["--prod"]) ++ cargo}
+    desktop = cargo(@crate)
+    nif = cargo(@nif)
+    shipped = Enum.filter(desktop ++ nif, & &1.shipped)
+    {hex ++ pnpm([]) ++ desktop, hex ++ pnpm(["--prod"]) ++ shipped ++ components()}
   end
 
   defp outputs(packages, shipped) do
@@ -262,12 +295,19 @@ defmodule Licences do
 
   # -- Cargo ----------------------------------------------------------------------------
 
-  defp cargo do
-    args = ["metadata", "--format-version", "1", "--locked", "--manifest-path", @crate]
-    json = run("cargo", args, ".", "install Rust (rustup.rs)")
+  # Every crate a manifest's Cargo.lock names but its own, each marked `shipped` when the
+  # binary contains it.
+  defp cargo(manifest) do
+    unless File.regular?(Path.join(@root, manifest)) do
+      fail("#{manifest} is not there; the NIF's comes with `mix deps.get` in clients/tui")
+    end
 
-    # A package with no source is a path dependency: ours.
-    for %{"source" => source} = crate <- JSON.decode!(json)["packages"], source != nil do
+    args = ["metadata", "--format-version", "1", "--locked", "--manifest-path", manifest]
+    metadata = run("cargo", args, ".", "install Rust (rustup.rs)") |> JSON.decode!()
+    root = metadata["resolve"]["root"]
+    shipped = shipped(metadata, root)
+
+    for %{"id" => id} = crate <- metadata["packages"], id != root do
       %{
         ecosystem: :cargo,
         name: crate["name"],
@@ -277,7 +317,53 @@ defmodule Licences do
         listed: true,
         dir: Path.dirname(crate["manifest_path"]),
         # `license-file`: a crate under a licence with no SPDX name says where its text is.
-        licence_file: crate["license_file"]
+        licence_file: crate["license_file"],
+        shipped: MapSet.member?(shipped, id)
+      }
+    end
+  end
+
+  # What the root reaches through normal dependencies, on any platform, short of a
+  # procedural macro: that runs while the binary is compiled, as a build script does, and
+  # neither it nor what it depends on is in the binary.
+  defp shipped(metadata, root) do
+    deps = Map.new(metadata["resolve"]["nodes"], &{&1["id"], &1["deps"]})
+
+    macros =
+      for %{"id" => id, "targets" => targets} <- metadata["packages"],
+          Enum.any?(targets, &("proc-macro" in &1["kind"])),
+          into: MapSet.new(),
+          do: id
+
+    reach(deps, macros, [root], MapSet.new([root]))
+  end
+
+  defp reach(_deps, _macros, [], seen), do: seen
+
+  defp reach(deps, macros, [id | rest], seen) do
+    next =
+      for dep <- deps[id],
+          Enum.any?(dep["dep_kinds"], &is_nil(&1["kind"])),
+          not MapSet.member?(macros, dep["pkg"]),
+          not MapSet.member?(seen, dep["pkg"]),
+          uniq: true,
+          do: dep["pkg"]
+
+    reach(deps, macros, next ++ rest, MapSet.union(seen, MapSet.new(next)))
+  end
+
+  defp components do
+    for {{name, file, where}, index} <- Enum.with_index(@components) do
+      %{
+        ecosystem: :component,
+        index: index,
+        name: name,
+        version: "",
+        licence: nil,
+        expression: nil,
+        listed: true,
+        where: where,
+        files: [Path.join([@root, @texts, "components", file])]
       }
     end
   end
@@ -317,12 +403,31 @@ defmodule Licences do
   def acceptable?(nil), do: false
 
   def acceptable?(expression) do
-    case expression |> tokens() |> any() do
-      {value, []} -> value
-      _ -> false
-    end
+    expression |> parse() |> allowed?()
   rescue
     _ -> false
+  end
+
+  # `{:or, left, right}`, `{:and, left, right}` or `{:id, licence}`; raises on anything else.
+  defp parse(expression) do
+    {tree, []} = expression |> tokens() |> any()
+    tree
+  end
+
+  defp allowed?({:id, id}), do: id in @allowed
+  defp allowed?({:and, left, right}), do: allowed?(left) and allowed?(right)
+  defp allowed?({:or, left, right}), do: allowed?(left) or allowed?(right)
+
+  # The licences a package is used under: both sides of an `AND`, and the sides of an `OR`
+  # the policy allows, or both when it allows neither (a package here by an exception).
+  defp taken({:id, id}), do: [id]
+  defp taken({:and, left, right}), do: taken(left) ++ taken(right)
+
+  defp taken({:or, left, right}) do
+    case Enum.filter([left, right], &allowed?/1) do
+      [] -> taken(left) ++ taken(right)
+      sides -> Enum.flat_map(sides, &taken/1)
+    end
   end
 
   defp tokens(expression) do
@@ -347,7 +452,7 @@ defmodule Licences do
     case all(tokens) do
       {left, ["OR" | rest]} ->
         {right, rest} = any(rest)
-        {left or right, rest}
+        {{:or, left, right}, rest}
 
       result ->
         result
@@ -358,7 +463,7 @@ defmodule Licences do
     case term(tokens) do
       {left, ["AND" | rest]} ->
         {right, rest} = all(rest)
-        {left and right, rest}
+        {{:and, left, right}, rest}
 
       result ->
         result
@@ -366,12 +471,12 @@ defmodule Licences do
   end
 
   defp term(["(" | rest]) do
-    {value, [")" | rest]} = any(rest)
-    {value, rest}
+    {tree, [")" | rest]} = any(rest)
+    {tree, rest}
   end
 
-  defp term([id, "WITH", _exception | rest]) when id not in @operators, do: {id in @allowed, rest}
-  defp term([id | rest]) when id not in @operators, do: {id in @allowed, rest}
+  defp term([id, "WITH", _exception | rest]) when id not in @operators, do: {{:id, id}, rest}
+  defp term([id | rest]) when id not in @operators, do: {{:id, id}, rest}
 
   # -- The document ---------------------------------------------------------------------
 
@@ -424,7 +529,9 @@ defmodule Licences do
     Not listed, because no lock file names them: what a build puts into a binary from
     outside a package manager, such as the Erlang/OTP runtime every release carries
     (Apache-2.0) and the zstd library that `ezstd` compiles into its NIF (BSD-3-Clause OR
-    GPL-2.0-only, used under BSD-3-Clause).
+    GPL-2.0-only, used under BSD-3-Clause). Nor are the crates of the terminal NIF the TUI
+    downloads precompiled with `ex_ratatui`. The notices carry the texts of all of these:
+    the NIF's crates from its own Cargo.lock, the rest from a list kept in the script.
 
     ## Reviewed exceptions
 
@@ -461,7 +568,7 @@ defmodule Licences do
 
   # -- The notices ----------------------------------------------------------------------
 
-  @order %{hex: 0, pnpm: 1, cargo: 2}
+  @order %{hex: 0, pnpm: 1, cargo: 2, component: 3}
   @kinds %{hex: "Hex packages", pnpm: "npm packages", cargo: "Rust crates"}
   @rule String.duplicate("=", 88)
   @thin String.duplicate("-", 88)
@@ -469,6 +576,15 @@ defmodule Licences do
   # A licence file at a package's root, by the names packages give them: LICENSE,
   # LICENSE-MIT, LICENCE.txt, COPYING, NOTICE, UNLICENSE and so on.
   @licence_file ~r/^(licen[cs]e|copying|copyright|notice|unlicen[cs]e)([-._ ].*)?$/i
+
+  # Apache-2.0's terms and conditions, as Troupe's LICENSE has them, spacing aside.
+  @apache_end "END OF TERMS AND CONDITIONS"
+  @apache_terms Path.join(@root, "LICENSE")
+                |> File.read!()
+                |> String.split(@apache_end)
+                |> hd()
+                |> String.split()
+                |> Enum.join(" ")
 
   defp notices(packages) do
     packages = packages |> Enum.filter(& &1.listed) |> Enum.sort_by(&sort_key/1)
@@ -492,6 +608,8 @@ defmodule Licences do
     Enum.join([preamble() | sources(packages)] ++ blocks, "\n\n") <> "\n"
   end
 
+  # The components come last, in the order they are listed.
+  defp sort_key(%{ecosystem: :component, index: index}), do: {@order[:component], index, ""}
   defp sort_key(p), do: {@order[p.ecosystem], p.name, p.version}
 
   defp preamble do
@@ -502,16 +620,19 @@ defmodule Licences do
     is built with the third-party packages below, each under its own licence, and this
     file carries each package's licence as the package ships it: the text of its LICENSE,
     COPYING and NOTICE files. A package that ships none is listed under the standard text
-    of the licence it declares, and says so.
+    of the licence it declares, and says so. Where a text has the Apache License's terms
+    word for word, they are not repeated: they are LICENSE, beside this file, and what
+    follows them, such as a copyright line, is kept.
 
     The packages are the ones the repository's lock files name: every Hex package, for the
-    daemon, the TUI and the server images, development and test tools included; every Rust
-    crate of the desktop app, for every platform; and the npm packages the GUI depends on
-    to run, which are what its bundle is made from. That is more than any one download or
-    image contains. Not listed, because no lock file names them: the Erlang/OTP runtime
-    every Elixir build carries (Apache-2.0, whose text is LICENSE), and the zstd library
-    that ezstd compiles into its NIF (BSD-3-Clause OR GPL-2.0-only, used under
-    BSD-3-Clause).
+    daemon, the TUI and the server images, development and test tools included; the npm
+    packages the GUI depends on to run, which are what its bundle is made from; and the
+    Rust crates in the desktop app and in the terminal NIF the TUI downloads precompiled
+    (ex_ratatui's), for every platform, less those that only build something. After them
+    come what a build compiles in without a lock file naming it: zstd, the Zig standard
+    library, musl, the mingw-w64 runtime and XZ Embedded. That is more than any one
+    download or image contains. The Erlang/OTP runtime every Elixir build carries is
+    Apache-2.0, whose text is LICENSE.
 
     Generated by `elixir scripts/licences.exs` from the lock files. The inventory, with the
     policy every licence is checked against, is docs/third-party-licences.md in Troupe's
@@ -560,8 +681,12 @@ defmodule Licences do
       shippers
       |> Enum.group_by(& &1.ecosystem)
       |> Enum.sort_by(fn {ecosystem, _} -> @order[ecosystem] end)
-      |> Enum.map(fn {ecosystem, ps} ->
-        wrap("#{@kinds[ecosystem]}: #{Enum.map_join(ps, ", ", & &1.name)}", "  ")
+      |> Enum.map(fn
+        {:component, ps} ->
+          Enum.map_join(ps, "\n", &wrap("#{&1.name}: #{&1.where}.", "  "))
+
+        {ecosystem, ps} ->
+          wrap("#{@kinds[ecosystem]}: #{Enum.map_join(ps, ", ", & &1.name)}", "  ")
       end)
 
     how =
@@ -582,13 +707,40 @@ defmodule Licences do
   end
 
   # What a package ships, or, when it ships nothing, the standard text of each licence it
-  # declares.
+  # is used under (`MIT OR LGPL-2.1-or-later` is used under MIT).
   defp texts(p) do
     case licence_files(p) do
-      [] -> for id <- ids(p.expression), do: {{:standard, id}, standard_text(id)}
-      files -> for file <- files, do: {:shipped, file |> File.read!() |> clean()}
+      [] ->
+        for id <- used_under(p.expression), do: {{:standard, id}, standard_text(id)}
+
+      files ->
+        for file <- files, do: {:shipped, file |> File.read!() |> clean() |> apache()}
     end
   end
+
+  # Most Apache-2.0 texts are its terms word for word, then the appendix: the standard one,
+  # or one with the package's copyright line filled in. Every artifact carries the terms in
+  # LICENSE, so a text that starts with them says so and keeps what follows: forty copies
+  # of the same ten kilobytes were most of the file.
+  defp apache(text) do
+    with [terms, rest] <- String.split(text, @apache_end, parts: 2),
+         true <- squeeze(terms) == @apache_terms do
+      "[The terms and conditions of the Apache License, Version 2.0, word for word as in " <>
+        "LICENSE.]" <> rest
+    else
+      _ -> text
+    end
+  end
+
+  defp used_under(nil), do: []
+
+  defp used_under(expression) do
+    expression |> parse() |> taken() |> Enum.uniq()
+  rescue
+    _ -> ids(expression)
+  end
+
+  defp licence_files(%{files: files}), do: files
 
   defp licence_files(p) do
     declared = if p[:licence_file], do: [p.licence_file], else: []
@@ -610,7 +762,7 @@ defmodule Licences do
 
     case File.read(Path.join(@root, path)) do
       {:ok, text} ->
-        clean(text)
+        text |> clean() |> apache()
 
       {:error, _} ->
         fail(
