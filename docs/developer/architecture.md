@@ -213,6 +213,7 @@ settles:
   `docs/design/themes/*.tokens.json` and refuses a theme whose token names differ. Theme
   and mode are `data-theme` and `data-mode` on the root, kept in the browser; Afterglow
   is the default and the design (Decision 702), the other three are palettes on it.
+  `pnpm icons` draws the desktop app's icons from `mark.ts` (Decision 703).
 
 ## 8. Things a reader will trip over
 
