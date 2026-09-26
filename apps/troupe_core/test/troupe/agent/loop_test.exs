@@ -34,11 +34,14 @@ defmodule Troupe.Agent.LoopTest do
       # and a dormant session — be rebuilt from the log alone. `input_accepted` carries
       # the author and the client's own `command_id`, and comes before the content so an
       # optimistic render reconciles before it has anything to reconcile against.
+      # `instructions_loaded` comes once, before the first model call: what the prompt
+      # was read from (Decision 706), and not again while it reads the same.
       assert [
                "agent_started",
                "session_created",
                "input_accepted",
                "user_input",
+               "instructions_loaded",
                "llm_request",
                "llm_response",
                "tool_call_started",
