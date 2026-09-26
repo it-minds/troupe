@@ -36,9 +36,10 @@ for release in ${releases[@]}; do
   # CrashLoopBackOff rather than as anything about architecture.
   if [ "$release" = "troupe_gui" ]; then
     # The GUI is built from its own directory, as CI builds it, with the path the chart
-    # mounts it at baked into its asset URLs.
+    # mounts it at baked into its asset URLs, and the root's licence files beside it.
     docker build --platform linux/amd64 \
       --file clients/gui/Dockerfile \
+      --build-context licences=. \
       --build-arg "TROUPE_GUI_BASE=${TROUPE_GUI_BASE:-/app}" \
       --tag "$image" clients/gui
   else

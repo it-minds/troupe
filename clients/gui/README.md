@@ -194,10 +194,11 @@ to the plane or to a worker. Nothing in the image holds a secret or needs tellin
 anything at runtime.
 
 It ships with the platform, not as a release of its own. The image is built from this
-directory alone, with it as the whole Docker context:
+directory, with it as the Docker context; the one other thing it reads is the
+repository's LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, as the `licences` context:
 
 ```sh
-docker build --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
+docker build --build-context licences=../.. --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
 ```
 
 and the platform's chart, [`charts/troupe`](../../charts/troupe), serves it: its `gui:`

@@ -74,4 +74,6 @@ need a reviewed exception, which the script's header explains. The `licences` ch
 which. After adding or removing a package, fetch everything (`mix deps.get` at the root
 and in `clients/tui`, `pnpm install` in `clients/gui`, and Rust installed for `cargo`),
 run `elixir scripts/licences.exs` and commit
-[docs/third-party-licences.md](docs/third-party-licences.md) with it.
+[docs/third-party-licences.md](docs/third-party-licences.md) and
+[THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt) with it. A package whose licence
+texts change needs the same: the notices carry them into every download and image.

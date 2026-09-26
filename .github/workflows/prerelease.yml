@@ -143,7 +143,10 @@ jobs:
 
           ${images}
           NOTES
-          gh release create "$TAG" --draft --prerelease --verify-tag --title "$TAG (untested)" --notes-file notes.md dist/troupe-*.tgz dist/install.sh dist/install.ps1
+          # The licence files too, beside the downloads that are one binary or an installer;
+          # each of those carries them inside as well.
+          gh release create "$TAG" --draft --prerelease --verify-tag --title "$TAG (untested)" --notes-file notes.md dist/troupe-*.tgz dist/install.sh dist/install.ps1 \
+            LICENSE NOTICE THIRD-PARTY-NOTICES.txt
 
   native:
     name: native builds

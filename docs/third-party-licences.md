@@ -5,7 +5,10 @@
      script. -->
 
 Every third-party package this repository locks, with the licence the package itself
-declares. Troupe is Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)).
+declares. Troupe is Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). The
+licence texts, as the shipped packages carry them, are in
+[THIRD-PARTY-NOTICES.txt](../THIRD-PARTY-NOTICES.txt), which every release artifact
+carries too.
 
 CI regenerates this on every pull request and fails when it differs from what is
 committed, or when a package is under a licence the policy at the top of
@@ -16,7 +19,9 @@ licence it has at the versions locked; the versions are in the lock files.
 Not listed, because no lock file names them: what a build puts into a binary from
 outside a package manager, such as the Erlang/OTP runtime every release carries
 (Apache-2.0) and the zstd library that `ezstd` compiles into its NIF (BSD-3-Clause OR
-GPL-2.0-only, used under BSD-3-Clause).
+GPL-2.0-only, used under BSD-3-Clause). Nor are the crates of the terminal NIF the TUI
+downloads precompiled with `ex_ratatui`. The notices carry the texts of all of these:
+the NIF's crates from its own Cargo.lock, the rest from a list kept in the script.
 
 ## Reviewed exceptions
 

@@ -144,7 +144,9 @@ the protocol alone is enough to be a client.
 ## Licence
 
 Apache-2.0: [LICENSE](LICENSE) and [NOTICE](NOTICE). The packages Troupe depends on, and
-their licences, are in [docs/third-party-licences.md](docs/third-party-licences.md).
+their licences, are in [docs/third-party-licences.md](docs/third-party-licences.md), and
+their licence texts in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which every
+download and image carries with LICENSE and NOTICE.
 [CONTRIBUTING.md](CONTRIBUTING.md) says how to contribute (every commit signed off, under
 the DCO), [SECURITY.md](SECURITY.md) how to report a vulnerability privately, and
 [CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) how we treat each other.

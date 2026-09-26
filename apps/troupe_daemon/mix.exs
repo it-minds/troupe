@@ -48,9 +48,10 @@ defmodule Troupe.Daemon.MixProject do
   #
   # A plain Mix release with the build host's ERTS, one per platform, as a tarball — not a
   # Burrito binary, because a daemon must not have Burrito's launcher halting the VM when
-  # the arguments are handled (DECISIONS.md here, 1). Two steps between `:assemble` and
-  # `:tar`: the reaper for the build host's triple into `troupe_core`'s `priv/`, and the
-  # `troupe-daemon` wrapper into `bin/`. Its runtime configuration is its own
+  # the arguments are handled (DECISIONS.md here, 1). Three steps between `:assemble` and
+  # `:tar`: the reaper for the build host's triple into `troupe_core`'s `priv/`, the
+  # `troupe-daemon` wrapper into `bin/`, and LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt
+  # into the root, which the archive must carry. Its runtime configuration is its own
   # (`config/runtime.exs` here): the platform's reads a pod's environment, and a laptop
   # has none of it.
   defp releases do
@@ -68,6 +69,7 @@ defmodule Troupe.Daemon.MixProject do
           :assemble,
           &Troupe.Daemon.Release.reaper/1,
           &Troupe.Daemon.Release.wrapper/1,
+          &Troupe.Release.licences/1,
           :tar
         ]
       ]

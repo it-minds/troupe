@@ -20,6 +20,8 @@
 #     running daemon if there is one and otherwise runs the same harness in its own process.
 #   * the desktop app (--gui): on Linux the release's AppImage, as ~/.local/bin/troupe-desktop
 #     with a menu entry; on macOS Troupe.app in ~/Applications.
+#   * LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, from the daemon's release, in
+#     ~/.local/share/doc/troupe.
 # Everything is downloaded and checked against the release's SHA256SUMS before anything is
 # replaced, and a daemon or TUI running from what is replaced is stopped first.
 #
@@ -51,6 +53,10 @@ MAC_APP="$HOME/Applications/Troupe.app"
 DATA_DIR="${XDG_DATA_HOME:-$HOME/.local/share}"
 DESKTOP_FILE="$DATA_DIR/applications/troupe.desktop"
 ICON="$DATA_DIR/icons/hicolor/128x128/apps/troupe.png"
+# LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt: the daemon's release carries them at its
+# root, and a copy goes here for the programs in $BIN_DIR, which is no place for them.
+DOC_DIR="$DATA_DIR/doc/troupe"
+LICENCE_FILES="LICENSE NOTICE THIRD-PARTY-NOTICES.txt"
 STATE_DIR="${TROUPE_STATE_HOME:-${XDG_STATE_HOME:-$HOME/.local/state}/troupe}"
 CONFIG_DIR="${TROUPE_CONFIG_HOME:-${XDG_CONFIG_HOME:-$HOME/.config}/troupe}"
 OS=$(uname -s)
@@ -205,7 +211,7 @@ clear_tui_payload() {
 # and bar the PATH line: a clean install puts everything back in the same place.
 remove_installed() {
   rm -f "$BIN" "$TUI" "$TUI.previous" "$GUI" "$GUI.previous" "$DESKTOP_FILE" "$ICON"
-  rm -rf "$LIB_DIR" "$LIB_DIR.previous" "$LIB_DIR.new"
+  rm -rf "$LIB_DIR" "$LIB_DIR.previous" "$LIB_DIR.new" "$DOC_DIR"
   if [ "$OS" = Darwin ]; then rm -rf "$MAC_APP"; fi
   clear_tui_payload
 }
@@ -514,6 +520,14 @@ install() {
   mkdir -p "$BIN_DIR"
   ln -sf "$LIB_DIR/bin/troupe-daemon" "$BIN"
   say "installed troupe-daemon $VERSION in $LIB_DIR"
+  # A release from before they were in the archive has none to copy.
+  rm -rf "$DOC_DIR"
+  if [ -f "$LIB_DIR/LICENSE" ]; then
+    mkdir -p "$DOC_DIR"
+    for doc in $LICENCE_FILES; do
+      if [ -f "$LIB_DIR/$doc" ]; then cp "$LIB_DIR/$doc" "$DOC_DIR/$doc"; fi
+    done
+  fi
 
   # One binary; the one it replaces is kept beside it for rollback. Burrito unpacks once
   # per version, so a payload left by a build of the same version would run instead.

@@ -14,5 +14,5 @@ Fixes #
 - [ ] Every commit is signed off (`git commit -s`, the DCO); the `dco` check fails otherwise.
 - [ ] The gate for what changed passes (`mix check`, the TUI's `mix check`, or the GUI's
       `pnpm build` and `pnpm test`), and generated files are regenerated.
-- [ ] A dependency added or removed: `elixir scripts/licences.exs` has regenerated
-      `docs/third-party-licences.md`.
+- [ ] A dependency added, removed or bumped: `elixir scripts/licences.exs` has regenerated
+      `docs/third-party-licences.md` and `THIRD-PARTY-NOTICES.txt`.

@@ -94,6 +94,11 @@ RUN apt-get update -y \
 
 ENV LANG=en_US.UTF-8 LANGUAGE=en_US:en LC_ALL=en_US.UTF-8
 
+# The licence, the notice, and the licence texts of the packages the release is built
+# from, which Apache-2.0, MIT and BSD ask to go with every copy. Where Debian keeps each
+# package's, owned by root like the rest of the image.
+COPY LICENSE NOTICE THIRD-PARTY-NOTICES.txt /usr/share/doc/troupe/
+
 # Non-root, and the uid the operator's pod spec asks for.
 RUN groupadd --gid 1000 troupe && useradd --uid 1000 --gid 1000 --create-home troupe
 WORKDIR /app

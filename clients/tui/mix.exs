@@ -73,11 +73,18 @@ defmodule Troupe.MixProject do
     ]
   end
 
+  # LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt go into the release before Burrito wraps
+  # it, so the one binary carries them; the installers put copies beside it.
   def releases do
     [
       troupe: [
         include_executables_for: [:unix],
-        steps: [:assemble, &ExRatatui.Burrito.verify_linux_nif/1, &Burrito.wrap/1],
+        steps: [
+          :assemble,
+          &Troupe.Release.licences/1,
+          &ExRatatui.Burrito.verify_linux_nif/1,
+          &Burrito.wrap/1
+        ],
         burrito: [
           targets: [
             linux_x86_64: [os: :linux, cpu: :x86_64] ++ custom_erts(),
