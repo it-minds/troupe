@@ -65,12 +65,20 @@ defmodule Troupe.Client do
           remote?: boolean()
         }
 
+  @typedoc """
+  One slash command as `commands.list` lists it (PROTOCOL.md §6): `name`, `aliases`,
+  `section`, `summary`, `usage`, `args`, `availability`, `source`, `detail`, `example`.
+  Kept as the wire map, because the palette is a view over it and nothing else.
+  """
+  @type command :: %{String.t() => term()}
+
   ## Session-scoped
 
   @callback subscribe(session_id()) :: :ok
   @callback unsubscribe(session_id()) :: :ok
   @callback events(session_id()) :: [Event.t()]
   @callback commands(session_id()) :: [String.t()]
+  @callback command_table(session_id()) :: [command()]
   @callback context(session_id()) :: {String.t(), Config.t()}
   @callback capability(session_id()) :: capability()
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
@@ -160,8 +168,17 @@ defmodule Troupe.Client do
   @spec events(session_id()) :: [Event.t()]
   def events(sid), do: impl(sid).events(sid)
 
+  @doc "The agents a slash command may start a branch on."
   @spec commands(session_id()) :: [String.t()]
   def commands(sid), do: impl(sid).commands(sid)
+
+  @doc """
+  Every command the session offers, built-ins and agents, as the harness lists them
+  (`commands.list`, Decision 698): what the palette shows, what Tab completes, and what
+  resolves an alias. Empty when the session's harness did not answer.
+  """
+  @spec command_table(session_id()) :: [command()]
+  def command_table(sid), do: impl(sid).command_table(sid)
 
   @spec context(session_id()) :: {String.t(), Config.t()}
   def context(sid), do: impl(sid).context(sid)

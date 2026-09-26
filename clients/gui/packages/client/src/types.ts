@@ -204,3 +204,50 @@ export interface FsFile {
   hash: string;
   [k: string]: unknown;
 }
+
+/** One argument of a slash command, for completion and the usage line. */
+export interface CommandArg {
+  name: string;
+  required: boolean;
+  kind: "window" | "file" | "text" | string;
+  [k: string]: unknown;
+}
+
+/**
+ * One slash command as `commands.list` lists it: the one table behind every client's
+ * palette (PROTOCOL.md §6). `availability` is what the command needs, for the client to
+ * judge and say rather than hide the row.
+ */
+export interface CommandEntry {
+  name: string;
+  aliases: string[];
+  section: "session" | "navigate" | "workspace" | "setup" | "agents" | "quit" | string;
+  summary: string;
+  usage: string;
+  args: CommandArg[];
+  availability: "always" | "window" | "local" | "plane" | string;
+  source: "builtin" | "agent" | string;
+  detail: string;
+  example: string | null;
+  [k: string]: unknown;
+}
+
+export interface CommandsList {
+  /** Grouped by section, in the order a palette shows them. */
+  commands: CommandEntry[];
+  [k: string]: unknown;
+}
+
+export interface GoalResult {
+  goal: string | null;
+  set_by: string | null;
+  set_at: string | null;
+  [k: string]: unknown;
+}
+
+export interface LoopStarted {
+  accepted: boolean;
+  loop_id: string;
+  max_iterations: number;
+  [k: string]: unknown;
+}

@@ -1,11 +1,14 @@
 import type { TroupeConnection } from "./connection.js";
 import type {
   BlobResponse,
+  CommandsList,
   DurableEvent,
   FsFile,
   FsListing,
   EventEnvelope,
+  GoalResult,
   LlmDeltaData,
+  LoopStarted,
   SessionCreateResult,
   SubscribeResult,
   TroupeEvent,
@@ -252,6 +255,39 @@ export class SessionView {
   /** Say who is looking. Costs a seat and nothing else. */
   async setPresence(state: "viewing" | "typing" | "away"): Promise<void> {
     await this.conn.call("presence.set", { session_id: this.sessionId, state });
+  }
+
+  /**
+   * `commands.list`: every slash command the session offers, built-ins and agents, as
+   * the harness lists them — what a palette is drawn from. Wakes nothing.
+   */
+  commands(): Promise<CommandsList> {
+    return this.conn.call<CommandsList>("commands.list", { session_id: this.sessionId });
+  }
+
+  /** `session.goal.get`. Read from the log; wakes nothing. */
+  getGoal(): Promise<GoalResult> {
+    return this.conn.call<GoalResult>("session.goal.get", { session_id: this.sessionId });
+  }
+
+  /** `session.goal.set`. Activating, like a profile switch; the effect is `goal_set`. */
+  async setGoal(text: string): Promise<void> {
+    await this.conn.call("session.goal.set", { command_id: this.conn.nextCommandId(), session_id: this.sessionId, text });
+  }
+
+  async clearGoal(): Promise<void> {
+    await this.conn.call("session.goal.clear", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
+  }
+
+  /** `session.loop.start`: up to `maxIterations` turns towards the goal, or the session's own cap. */
+  startLoop(maxIterations?: number): Promise<LoopStarted> {
+    const params: Record<string, unknown> = { command_id: this.conn.nextCommandId(), session_id: this.sessionId };
+    if (maxIterations !== undefined) params["max_iterations"] = maxIterations;
+    return this.conn.call<LoopStarted>("session.loop.start", params);
+  }
+
+  async stopLoop(): Promise<void> {
+    await this.conn.call("session.loop.stop", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
   }
 
   /** `fs.list`, resolved through the session's mounts. `path` defaults to the root. */

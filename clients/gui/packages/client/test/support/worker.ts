@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
+import { COMMANDS } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 export const BLOB_THRESHOLD = 16 * 1024;
@@ -374,6 +375,10 @@ export class FakeWorker {
           data: blob.subarray(start, end + 1).toString("base64"),
         });
       }
+
+      case "commands.list":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, { commands: COMMANDS });
 
       case "fs.list": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });

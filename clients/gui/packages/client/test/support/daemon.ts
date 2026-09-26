@@ -20,6 +20,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
+import { COMMANDS } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 interface Session {
@@ -37,6 +38,8 @@ interface Session {
   pendingApprovals: number;
   /** The same for questions. */
   pendingQuestions: number;
+  /** The session's goal (`session.goal.*`), once one was set. */
+  goal?: string | null;
 }
 
 interface Client {
@@ -353,8 +356,50 @@ export class FakeDaemon {
         return reply(ws, id, { accepted: true });
       }
 
+      // The goal and the loop, as the daemon keeps them (PROTOCOL.md §6): the answer is
+      // the acknowledgement and the event is the effect.
+      case "session.goal.set": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const text = String(params["text"] ?? "").trim();
+        if (!text) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "text" } });
+        session.goal = text;
+        session.log.append("goal_set", { text, command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true });
+      }
+
+      case "session.goal.clear": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        session.goal = null;
+        session.log.append("goal_cleared", { command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true });
+      }
+
+      case "session.goal.get":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, session.goal ? { goal: session.goal, set_by: this.principal.subject, set_at: new Date().toISOString() } : { goal: null, set_by: null, set_at: null });
+
+      case "session.loop.start": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (!session.goal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { needs: "goal", reason: "the session has no goal to loop towards" } });
+        const max = Number(params["max_iterations"] ?? 10);
+        session.log.append("loop_started", { loop_id: "loop-1", max_iterations: max, max_failures: 3, goal: session.goal, command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true, loop_id: "loop-1", max_iterations: max });
+      }
+
+      case "session.loop.stop":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, { accepted: true });
+
+      case "session.loop.get":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, { loop: null });
+
       case "presence.set":
         return reply(ws, id, { ok: true });
+
+      case "commands.list":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        return reply(ws, id, { commands: COMMANDS });
 
       case "workspace.recent":
         return reply(ws, id, {
