@@ -465,6 +465,21 @@ defmodule Troupe.Client.Daemon do
   def memory(_sid, other),
     do: {:error, "unknown /memory #{other}; use /memory, /memory refresh or /memory forget"}
 
+  # `/context`: the provenance of the prompt, as the daemon reads it now (Decision 124).
+  @impl true
+  def instructions(sid) do
+    case Worker.rpc(sid, "context.get", %{}) do
+      {:ok, %{"files" => _} = answer} ->
+        {:ok, Troupe.Client.Instructions.line(answer, workspace(sid))}
+
+      {:ok, other} ->
+        {:error, "unexpected context.get answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
+
   @impl true
   def fs_list(sid, path) do
     case Worker.fs_list(sid, path) do

@@ -156,6 +156,50 @@ in Troupe's state directory and never in the repository, and asked again when a
 server's command changes. A workspace on `trusted_workspaces` is not asked. Your own
 skills are offered to every agent; a bundle's stay as its profiles list them.
 
+## Instruction files
+
+A repository that carries an `AGENTS.md` has told coding agents how to work in it, and
+Troupe reads it the way the other tools do, with no setup of its own. Every agent's
+system prompt opens with these, in this order, each read from disk at every turn so an
+edit takes effect on the next one:
+
+1. `<config>/AGENTS.md` — your own, for every repository.
+2. `AGENTS.md` at the repository root (the nearest directory with a `.git`; a worktree
+   reads its own checkout's).
+3. `AGENTS.md` in each directory between the root and the directory the session works
+   in, the nearest last.
+4. `.troupe/memory.md`, the project brief Troupe's own agents write.
+
+Every file applies. Where two disagree, the nearer wins. In one directory `AGENTS.md`,
+`CLAUDE.md`, `GEMINI.md` and `.github/copilot-instructions.md` are the same file under
+other tools' names: the first that exists is read and the rest are skipped, and the
+session's log and `/context` say which, so nobody debugs a file that was never loaded.
+Not read yet: `.cursor/rules/*.mdc`, `@path` imports inside a file, and a nested
+`AGENTS.md` below the directory the session works in.
+
+The files share one budget, `instructions_max_chars` (16,000 characters). The nearest is
+kept whole first; a file the remainder cannot hold is cut, or left out, and the prompt
+says so where it happened. The brief has its own, `memory_max_chars`. `/context` in the
+terminal UI, and `context.get` over the protocol, list every file in force with its
+scope, its size, what reached the prompt and its share of the budget; the session's
+`instructions_loaded` event records the same whenever what was read changed.
+
+## Every file Troupe reads
+
+In one table, in the order each kind is read, and what happens when two say different
+things:
+
+| File | Layer | What it is for | On conflict |
+|---|---|---|---|
+| `<config>/config.yaml`, then `<workspace>/.troupe/config.yaml`, then `.troupe/config.local.yaml`, then the environment, then the command line | settings | every key above | later beats earlier; maps merge by key, `null` removes, a list replaces; trusted keys come from a workspace's files only once it is trusted |
+| `~/.config/opencode/opencode.jsonc` and `~/.local/share/opencode/auth.json` | settings | providers and the default model an opencode setup already has | read only when Troupe has no key of its own; never written |
+| `<config>/mcp.json`, then `<workspace>/.troupe/mcp.json` | MCP servers | your servers, then the workspace's, over `mcp:` in `config.yaml` | the same name merges key by key, the workspace's file last; a workspace's servers run only once you allow them |
+| `<config>/skills/<name>/SKILL.md`, `<workspace>/.troupe/skills/`, a profile's bundle | skills | what a skill tool may read | one name, the nearer layer's |
+| Troupe's built-in agents, a profile's bundle, `<config>/agents/*.md`, `<workspace>/.troupe/agents/*.md` | agents | the agents a session may run | a file at a higher layer replaces the same name below it |
+| `<workspace>/.troupe/workflows/<name>.json` | workflows | the steps `workflows.list` offers | one name, one file |
+| `<config>/AGENTS.md`, the repository root's `AGENTS.md`, one per directory down to the workspace (aliases `CLAUDE.md`, `GEMINI.md`, `.github/copilot-instructions.md`, first found wins) | instructions | what the people who work here wrote for agents | all apply; the nearer wins where two disagree; the nearest kept whole when the budget runs out |
+| `<workspace>/.troupe/memory.md` | instructions | the project brief Troupe's agents write | read after the instruction files; never authoritative, `read_file` and `grep` are |
+
 ## Old spellings
 
 Each setting has one name. The old ones still load until version 2, each with a warning
@@ -374,6 +418,7 @@ or the command line where one exists for it.
 | `memory_auto_refresh` | boolean | `true` | any | A new session in a git repository refreshes a missing or stale brief; never a headless run. |
 | `memory_max_chars` | integer ≥ 1 | `6000` | any | How much of the brief goes into a prompt. |
 | `memory_max_age_days` | integer ≥ 1 | `7` | any | How old the brief may be before it counts as stale. |
+| `instructions_max_chars` | integer ≥ 1 | `16000` | any | How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first. |
 
 ### This machine
 

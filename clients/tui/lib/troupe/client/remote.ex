@@ -171,6 +171,17 @@ defmodule Troupe.Client.Remote do
   @impl true
   def memory(_sid, _command), do: {:error, "the project brief lives on the worker"}
 
+  # The pod's checkout has instruction files of its own, and `context.get` is a session
+  # method a worker answers; the paths are the pod's, shown as they come.
+  @impl true
+  def instructions(sid) do
+    case Worker.rpc(sid, "context.get", %{}) do
+      {:ok, %{"files" => _} = answer} -> {:ok, Troupe.Client.Instructions.line(answer, nil)}
+      {:ok, other} -> {:error, "unexpected context.get answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
   @impl true
   def fs_list(sid, path) do
     case Worker.fs_list(sid, path) do

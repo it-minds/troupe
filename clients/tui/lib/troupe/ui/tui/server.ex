@@ -668,7 +668,7 @@ defmodule Troupe.UI.TUI.Server do
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
   @builtins ~w(cancel dismiss compact merge discard goal loop sessions hq observer files
-               upload copy memory watch settings models mcp skills help agents worktree quit)
+               upload copy memory context watch settings models mcp skills help agents worktree quit)
 
   @doc false
   @spec builtins() :: [String.t()]
@@ -783,6 +783,9 @@ defmodule Troupe.UI.TUI.Server do
 
   defp builtin("memory", args, state, _target),
     do: notice_of(Client.memory(state.session_id, String.trim(args)))
+
+  defp builtin("context", _args, state, _target),
+    do: notice_of(Client.instructions(state.session_id))
 
   defp builtin("goal", args, state, _target), do: goal_command(state.session_id, String.trim(args))
   defp builtin("loop", args, state, _target), do: loop_command(state.session_id, String.trim(args))
