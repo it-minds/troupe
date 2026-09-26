@@ -17,7 +17,7 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
 
   alias Troupe.Plane.Tokens
   alias Troupe.Protocol.Client
-  alias Troupe.Worker.{Auth, Drain, Harness}
+  alias Troupe.Worker.{Auth, Drain, Harness, Sessions}
 
   @moduletag timeout: 180_000
 
@@ -121,7 +121,7 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
       {:ok, client} = connect(context, jwt)
       {:ok, _} = Client.subscribe(client, "session:#{context.session_id}", from_seq: 0)
 
-      assert {:ok, _} = Troupe.Worker.Sessions.dormant(context.session_id)
+      assert {:ok, _} = Sessions.dormant(context.session_id)
       assert_receive {:troupe_event, _topic, _id, %{type: "session_dormant"}}, 30_000
 
       assert {:error, refused} =
@@ -133,7 +133,7 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
 
       assert refused.message == "not_found"
       assert refused.data["kind"] == "session"
-      assert Troupe.Worker.Sessions.whereis(context.session_id) == nil
+      assert Sessions.whereis(context.session_id) == nil
 
       {:ok, again} = connect(context, jwt)
 
