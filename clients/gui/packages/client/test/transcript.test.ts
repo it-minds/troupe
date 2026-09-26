@@ -307,35 +307,48 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
   });
 
   it("makes one budget question of the harness's own event and the question it rides on, whichever comes first", () => {
+    // The question's words and options are the harness's (troupe-remote Decision 699):
+    // what the limit is for and what it has cost, and sizes and scopes to pick from.
+    const question = "turns 40/40 (100%): the turn limit is a safety net against runaway loops and runaway spend.";
+    const options = [
+      { label: "+10 turns this run", description: "for the run in flight" },
+      { label: "no limit this session", description: "lift the turn limit" },
+      { label: "stop", description: "stop here" },
+    ];
+
     seq = 0;
     const first = foldAll([
       durable("budget_ask_started", { call_id: "budget-1", dimension: "turns", used: 40, limit: 40, detail: "turns 40/40 (100%)" }),
-      durable("question_asked", {
-        call_id: "budget-1",
-        agent_path: ["root"],
-        question: "turns 40/40 (100%) — continue?",
-        options: [{ label: "allow" }, { label: "always" }, { label: "deny" }],
-        multiple: false,
-      }),
+      durable("question_asked", { call_id: "budget-1", agent_path: ["root"], question, options, multiple: false }),
     ]);
 
     assert.equal(openQuestions(first).length, 1, "one entry, not two");
     const [q] = openQuestions(first);
     assert.equal(q!.asked, "budget");
-    assert.equal(q!.question, "turns 40/40 (100%)");
+    assert.equal(q!.question, question);
     assert.deepEqual(
       q!.options.map((o) => o.label),
-      ["allow", "always", "deny"],
+      ["+10 turns this run", "no limit this session", "stop"],
     );
 
-    // The other order — a client that subscribed between the two — is the same entry.
+    // The other order — a client that subscribed between the two — is the same entry,
+    // with the same words and options.
     seq = 0;
     const other = foldAll([
-      durable("question_asked", { call_id: "budget-1", agent_path: ["root"], question: "turns 40/40 (100%) — continue?", options: [], multiple: false }),
+      durable("question_asked", { call_id: "budget-1", agent_path: ["root"], question, options, multiple: false }),
       durable("budget_ask_started", { call_id: "budget-1", dimension: "turns", used: 40, limit: 40, detail: "turns 40/40 (100%)" }),
     ]);
     assert.equal(openQuestions(other).length, 1);
     assert.equal(openQuestions(other)[0]!.asked, "budget");
+    assert.equal(openQuestions(other)[0]!.question, question);
+    assert.equal(openQuestions(other)[0]!.options.length, 3);
+
+    // A daemon from before the question carried its options sends none; the entry says
+    // so, and the panel falls back to the three answers it listens for.
+    seq = 0;
+    const bare = foldAll([durable("budget_ask_started", { call_id: "budget-1", dimension: "turns", used: 40, limit: 40, detail: "turns 40/40 (100%)" })]);
+    assert.equal(openQuestions(bare)[0]!.question, "turns 40/40 (100%)");
+    assert.deepEqual(openQuestions(bare)[0]!.options, []);
 
     // Either answer event closes it; the second changes nothing.
     const closed = foldAll(

@@ -3,6 +3,9 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "additionalProperties": true,
   "properties": {
+    "amount": {
+      "type": "integer"
+    },
     "call_id": {
       "type": "string"
     },
@@ -13,6 +16,18 @@
       "type": "object"
     },
     "lifted": {
+      "type": "string"
+    },
+    "limit": {
+      "type": "string"
+    },
+    "note": {
+      "type": "string"
+    },
+    "path": {
+      "type": "string"
+    },
+    "scope": {
       "type": "string"
     }
   },

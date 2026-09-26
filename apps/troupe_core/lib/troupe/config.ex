@@ -125,6 +125,11 @@ defmodule Troupe.Config do
             # `%{owner:, team:}`. Set by the worker when the plane places the session,
             # empty for a local one where there is nobody to bill. Never from a file.
             attribution: %{},
+            # The limits the plane's terms set for a session on a pod, by the budget's
+            # name for them (`max_turns`, `wall_clock`): a ceiling the session may not
+            # raise itself past when its budget asks (Decision 699). `nil` on a laptop;
+            # a map, possibly empty, wherever the worker set the terms. Never from a file.
+            terms: nil,
             auto_approve: false,
             # Two switches a platform sets and a session may not move. Both arrive with
             # the activation and are re-read at every one, so turning one on reaches
@@ -329,6 +334,32 @@ defmodule Troupe.Config do
 
   @doc "Remove the old spellings of one setting: `Troupe.Config.Migrate.drop_spellings/2`."
   defdelegate drop_spellings(map, path), to: Migrate
+
+  @doc """
+  Set one top-level key in a config file and answer the path written: the file's other
+  keys are kept, the key's old spellings dropped, and the file as it was kept beside it
+  as `.previous`, all through `write_file/2`, the writer every settings screen uses. A
+  file that is not YAML is left alone and the reason answered; a missing one is made.
+
+  The map is rendered again, so comments in a hand-written file do not survive; the
+  `.previous` copy is where they went.
+  """
+  @spec write_key(Path.t(), [String.t()], term()) :: {:ok, Path.t()} | {:error, String.t()}
+  def write_key(path, [key] = key_path, value) do
+    with {:ok, map} <- existing(path),
+         map = map |> Migrate.drop_spellings(key_path) |> Map.put(key, value),
+         :ok <- Migrate.write(path, map) do
+      {:ok, path}
+    end
+  end
+
+  defp existing(path) do
+    case Layers.parse(path) do
+      :absent -> {:ok, %{}}
+      {:ok, map, _text} -> {:ok, map}
+      {:error, issue} -> {:error, Issue.format(issue)}
+    end
+  end
 
   @doc "Whether a project's file may set the key at `path` only in a trusted workspace."
   @spec gated?([String.t()]) :: boolean()

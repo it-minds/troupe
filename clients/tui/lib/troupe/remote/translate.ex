@@ -275,25 +275,33 @@ defmodule Troupe.Remote.Translate do
 
       # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
       # at the screen, with options a client may draw as a menu.
-      # The window already knows a `:budget` item and answers it with y / n / a, so the
-      # question the harness also wrote is not drawn a second time. A cancel ends it, but
-      # it is still owed: the next turn's gate asks it again under the same id, with a
-      # `question_asked` alone, and that one is drawn as the item it was.
+      # The window knows the budget question as a `:budget` item, and the question the
+      # harness also wrote fills it in: its words, and the options a person picks by digit
+      # or types back (Decision 120). Either event may come first for a client that
+      # subscribed between them, so each merges into what the other left and draws the
+      # item again, and the window replaces it by id. A cancel ends it, but it is still
+      # owed: the next turn's gate asks it again under the same id, with a
+      # `question_asked` alone, and that one draws the item again as it was.
       "question_asked" when budget_question? ->
-        asked_again(emit, call_id(data), memory)
+        budget_asked(
+          emit,
+          agent,
+          call_id(data),
+          %{question: to_string(data["question"] || ""), options: options(data)},
+          memory
+        )
 
-      type when type in ["question_asked", "question_answered"] and budget_question? ->
+      "question_answered" when budget_question? ->
         {[], memory}
 
       "budget_ask_started" ->
-        started = %{
-          call_id: call_id(data),
-          detail: data["detail"] || "budget exhausted",
-          dimension: dimension(data["dimension"])
-        }
-
-        {[emit.(:budget_ask_started, started)],
-         put_in(memory, [:budget, started.call_id], {:asked, agent, started})}
+        budget_asked(
+          emit,
+          agent,
+          call_id(data),
+          %{detail: data["detail"] || "budget exhausted", dimension: dimension(data["dimension"])},
+          memory
+        )
 
       "budget_ask_answered" ->
         {[emit.(:budget_ask_answered, %{call_id: call_id(data), decision: data["decision"]})],
@@ -487,17 +495,19 @@ defmodule Troupe.Remote.Translate do
     end
   end
 
-  # Drawn again only when a cancel had ended it. Asked again with no cancel between, after
-  # a restart, it never left the window.
-  defp asked_again(emit, id, memory) do
-    case memory.budget do
-      %{^id => {:ended, agent, started}} ->
-        {[emit.(:budget_ask_started, started)],
-         put_in(memory, [:budget, id], {:asked, agent, started})}
+  # The item as the window draws it, from whichever of its two events have come: the
+  # harness's own says which limit, and the question it rides on says the words and the
+  # options. Each draws it again with what it adds, and so does the question asked again
+  # after a cancel ended it; the window keeps one item per id.
+  defp budget_asked(emit, agent, id, fields, memory) do
+    known =
+      case memory.budget do
+        %{^id => {_state, _agent, started}} -> started
+        _ -> %{call_id: id, detail: "budget exhausted", dimension: nil, question: "", options: []}
+      end
 
-      _ ->
-        {[], memory}
-    end
+    started = Map.merge(known, fields)
+    {[emit.(:budget_ask_started, started)], put_in(memory, [:budget, id], {:asked, agent, started})}
   end
 
   # The model's own rule for what a cancel ends: the agent it reached and every one under it.

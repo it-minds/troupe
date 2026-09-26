@@ -357,13 +357,18 @@ defmodule Troupe.UI.TUI.Model do
           multiple: d[:multiple] == true
         })
 
+      # The budget question (Decision 120): its words and options come from the question
+      # it rides on, which the translation folds into this event.
       :budget_ask_started ->
         ask(w, %{
           kind: :budget,
           call_id: d.call_id,
           agent_path: path,
           detail: d[:detail] || "budget exhausted",
-          dimension: d[:dimension]
+          dimension: d[:dimension],
+          question: one_line(d[:question] || ""),
+          options: d[:options] || [],
+          multiple: false
         })
 
       t when t in [:budget_ask_answered, :tool_failures_ask_answered] ->
@@ -1458,13 +1463,11 @@ defmodule Troupe.UI.TUI.Model do
             [{:blank, ""}, {:pending, "#{who}QUESTION: #{q}"}] ++
               question_lines(item, selection)
 
+          # The budget question is drawn as the question it rides on (Decision 120): the
+          # harness's words, its options numbered, and an amount typed.
           %{kind: :budget} ->
-            [
-              {:blank, ""},
-              {:pending,
-               "#{who}BUDGET EXHAUSTED (#{Map.get(item, :detail, "a limit")}): continue anyway? " <>
-                 "(y one more slice / n stop / a lift this limit for the session)"}
-            ]
+            [{:blank, ""}, {:pending, "#{who}BUDGET: #{budget_words(item)}"}] ++
+              question_lines(item, selection)
 
           # Never raise here: the renderer's caller drops the frame on an
           # exception, which reads as a frozen terminal.
@@ -1474,6 +1477,10 @@ defmodule Troupe.UI.TUI.Model do
       end)
     ]
   end
+
+  # A daemon from before the question carried its words sends the limit alone.
+  defp budget_words(%{question: question}) when is_binary(question) and question != "", do: question
+  defp budget_words(item), do: "#{Map.get(item, :detail, "a limit is reached")} — continue?"
 
   # A question with no options is still just an input box.
   defp question_lines(%{options: []}, _selection),
@@ -1487,7 +1494,7 @@ defmodule Troupe.UI.TUI.Model do
       |> Enum.with_index(1)
       |> Enum.map(fn {opt, n} -> option_line(opt, n, item.multiple, opt.label in selected) end)
 
-    options ++ [{:system, hint(item.multiple)}]
+    options ++ [{:system, hint(item)}]
   end
 
   defp option_line(opt, n, multiple?, chosen?) do
@@ -1497,10 +1504,14 @@ defmodule Troupe.UI.TUI.Model do
     {tag, [{:bullet_marker, "  #{n}. "}, {tag, marker <> opt.label}, {:muted, detail}]}
   end
 
-  defp hint(true),
+  defp hint(%{kind: :budget}),
+    do:
+      "press a digit to choose · or type an amount (+25, +25 session, +25 workspace) and press Enter"
+
+  defp hint(%{multiple: true}),
     do: "digits toggle · Enter sends the ticked options · or type an answer and press Enter"
 
-  defp hint(false), do: "press a digit to choose · or type an answer and press Enter"
+  defp hint(_single), do: "press a digit to choose · or type an answer and press Enter"
 
   # The reader's ticks only count while they belong to the question on screen: a
   # question answered and replaced by another must not inherit them.

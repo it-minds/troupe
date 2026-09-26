@@ -95,6 +95,9 @@ defmodule Troupe.Agent.State do
     budget_ask_task: nil,
     budget_asks: 0,
     budget_ask_limit: nil,
+    # What the budget question was answered with for this run alone (Decision 699), by
+    # limit: given back at the turn's end, so the next one asks again. Folded.
+    budget_run_grant: %{},
     # The failure guard (Decision 687): failures in a row of each tool, by name, which a
     # success of that tool clears; and the questions it has asked, and what the one
     # outstanding is about, `{tool, failures}`. The counts are not replayed — a restart
@@ -149,6 +152,7 @@ defmodule Troupe.Agent.State do
           budget_ask_task: pid() | nil,
           budget_asks: non_neg_integer(),
           budget_ask_limit: Budget.exhaustion() | nil,
+          budget_run_grant: %{optional(Budget.exhaustion()) => pos_integer()},
           tool_failures: %{optional(String.t()) => pos_integer()},
           failure_asks: non_neg_integer(),
           failure_ask: {String.t(), pos_integer()} | nil,
