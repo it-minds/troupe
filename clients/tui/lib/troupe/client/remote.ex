@@ -60,7 +60,7 @@ defmodule Troupe.Client.Remote do
   @impl true
   def capability(sid) do
     status = Worker.status(sid)
-    Capability.of(status.state, status.scopes, status.up?)
+    Capability.of(status.state, status.scopes, status.up?, status.error)
   end
 
   @impl true
@@ -469,6 +469,8 @@ defmodule Troupe.Client.Remote do
   defp message(:read_only), do: "this session is read-only"
   defp message(:not_attached), do: "not attached to this session"
   defp message(:disconnected), do: "not connected to the worker"
+  defp message(:lost), do: "lost the session; trying again now"
+  defp message({:lost, why}), do: "lost the session: #{why}"
   defp message(:plane_down), do: "the plane is unreachable"
   defp message(:timeout), do: "the server did not answer in time"
   defp message(:logged_out), do: "not signed in; run troupe login <plane-url>"
