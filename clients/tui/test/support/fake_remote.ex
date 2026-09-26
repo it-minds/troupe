@@ -93,10 +93,13 @@ defmodule Troupe.FakeRemote do
   @spec break_refresh(pid(), boolean()) :: :ok
   def break_refresh(remote, broken? \\ true), do: GenServer.call(remote, {:break_refresh, broken?})
 
-  @doc "Fails the next call to `method` with `code`."
-  @spec fail_next(pid(), String.t(), integer(), String.t()) :: :ok
-  def fail_next(remote, method, code, message \\ "injected"),
-    do: GenServer.call(remote, {:fail_next, method, code, message})
+  @doc """
+  Fails the next call to `method` with `code`: `:times` calls in a row (default 1), with
+  `:data` as the error's `data` (default the call's params).
+  """
+  @spec fail_next(pid(), String.t(), integer(), String.t(), keyword()) :: :ok
+  def fail_next(remote, method, code, message \\ "injected", opts \\ []),
+    do: GenServer.call(remote, {:fail_next, method, code, message, opts})
 
   @doc "Tells subscribers of a session that their subscription is gone."
   @spec resync(pid(), String.t()) :: :ok
@@ -117,6 +120,29 @@ defmodule Troupe.FakeRemote do
   @doc "How many worker connections are open right now."
   @spec worker_connections(pid()) :: non_neg_integer()
   def worker_connections(remote), do: GenServer.call(remote, :worker_connections)
+
+  @doc """
+  Moves a session to `worker`, as a drain, a lost pod or an activation elsewhere does:
+  the plane names `worker` from now on, and every other worker answers `not_found` for
+  the session, as a pod does for one it does not hold.
+
+    * `:drop` (default `true`) closes the old workers' connections to the session;
+    * `:gone` lists workers that refuse connections from now on, as a removed pod does;
+    * `:held_by` is the worker that really has the session when it is not the one the
+      plane names, `nil` for none;
+    * `:state` is the session's state on the plane afterwards.
+  """
+  @spec move(pid(), String.t(), String.t(), keyword()) :: :ok
+  def move(remote, session_id, worker, opts \\ []),
+    do: GenServer.call(remote, {:move, session_id, worker, opts})
+
+  @doc "A worker `move/4` took away takes connections again."
+  @spec revive(pid(), String.t()) :: :ok
+  def revive(remote, worker), do: GenServer.call(remote, {:revive, worker})
+
+  @doc "The worker each open worker connection is to, one entry per connection."
+  @spec worker_paths(pid()) :: [String.t()]
+  def worker_paths(remote), do: GenServer.call(remote, :worker_paths)
 
   @doc "A session as the fixtures describe it, with sensible defaults."
   @spec session(keyword()) :: session()
@@ -181,7 +207,11 @@ defmodule Troupe.FakeRemote do
       plane_tokens: MapSet.new(),
       device: %{code: "DEV-CODE", user_code: "WXYZ-1234", approved?: false},
       refresh_broken?: false,
-      seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end)
+      seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end),
+      # The worker that really has a session, where `move/4` said it is not the one the
+      # plane names; and the workers that refuse connections.
+      holders: %{},
+      gone: MapSet.new()
     }
 
     owner = self()
@@ -252,8 +282,10 @@ defmodule Troupe.FakeRemote do
   def handle_call({:break_refresh, broken?}, _from, state),
     do: {:reply, :ok, %{state | refresh_broken?: broken?}}
 
-  def handle_call({:fail_next, method, code, message}, _from, state),
-    do: {:reply, :ok, %{state | failures: Map.put(state.failures, method, {code, message})}}
+  def handle_call({:fail_next, method, code, message, opts}, _from, state) do
+    failure = {code, message, Keyword.get(opts, :data), Keyword.get(opts, :times, 1)}
+    {:reply, :ok, %{state | failures: Map.put(state.failures, method, failure)}}
+  end
 
   def handle_call({:resync, session_id}, _from, state) do
     push(state, session_id, %{
@@ -284,20 +316,64 @@ defmodule Troupe.FakeRemote do
     {:reply, Enum.count(state.connections, fn {_pid, c} -> c.kind == :worker end), state}
   end
 
+  def handle_call({:move, session_id, worker, opts}, _from, state) do
+    state =
+      state
+      |> put_in([:sessions, session_id, :worker], worker)
+      |> put_in([:holders, session_id], Keyword.get(opts, :held_by, worker))
+      |> Map.update!(:gone, &MapSet.union(&1, MapSet.new(Keyword.get(opts, :gone, []))))
+
+    state =
+      case Keyword.fetch(opts, :state) do
+        {:ok, session_state} -> put_in(state.sessions[session_id][:state], session_state)
+        :error -> state
+      end
+
+    if Keyword.get(opts, :drop, true) do
+      for {pid, %{kind: :worker, path: path}} <- state.connections,
+          Map.get(state.subscriptions, pid) == session_id,
+          worker_name(path) != worker,
+          do: send(pid, :die)
+    end
+
+    {:reply, :ok, state}
+  end
+
+  def handle_call({:revive, worker}, _from, state),
+    do: {:reply, :ok, %{state | gone: MapSet.delete(state.gone, worker)}}
+
+  def handle_call(:worker_paths, _from, state) do
+    paths = for {_pid, %{kind: :worker, path: path}} <- state.connections, do: worker_name(path)
+    {:reply, paths, state}
+  end
+
   # One connection handler asking for an answer. Handlers are dumb on purpose:
   # every decision about the protocol is made here, in one place.
   def handle_call({:rpc, kind, method, params, pid}, _from, state) do
     state = %{state | calls: [{method, params} | state.calls]}
 
     case Map.pop(state.failures, method) do
-      {{code, message}, failures} ->
-        {:reply, {:error, code, message}, %{state | failures: failures}}
+      {{code, message, data, times}, failures} ->
+        failures =
+          if times > 1,
+            do: Map.put(failures, method, {code, message, data, times - 1}),
+            else: failures
+
+        reply = if data, do: {:error, code, message, data}, else: {:error, code, message}
+        {:reply, reply, %{state | failures: failures}}
 
       {nil, _failures} ->
         {reply, state} =
-          if refused?(kind, method, params),
-            do: {{:error, -32_602, "invalid_params"}, state},
-            else: dispatch(state, kind, method, params, pid)
+          cond do
+            refused?(kind, method, params) ->
+              {{:error, -32_602, "invalid_params"}, state}
+
+            sid = held_elsewhere(state, kind, method, params, pid) ->
+              {{:error, -32_005, "not_found", %{"kind" => "session", "id" => sid}}, state}
+
+            true ->
+              dispatch(state, kind, method, params, pid)
+          end
 
         {:reply, reply, state}
     end
@@ -306,10 +382,15 @@ defmodule Troupe.FakeRemote do
   def handle_call({:connected, kind, path, pid}, _from, state) do
     Process.monitor(pid)
 
-    if kind == :plane and not state.plane_up? do
-      {:reply, :refused, state}
-    else
-      {:reply, :ok, put_in(state.connections[pid], %{kind: kind, path: path})}
+    cond do
+      kind == :plane and not state.plane_up? ->
+        {:reply, :refused, state}
+
+      kind == :worker and MapSet.member?(state.gone, worker_name(path)) ->
+        {:reply, :refused, state}
+
+      true ->
+        {:reply, :ok, put_in(state.connections[pid], %{kind: kind, path: path})}
     end
   end
 
@@ -575,6 +656,30 @@ defmodule Troupe.FakeRemote do
 
   defp dispatch(state, _kind, _method, _params, _pid),
     do: {{:error, -32_601, "method not found"}, state}
+
+  # A pod answers `not_found` for a session it does not hold, before it runs anything:
+  # one that went dormant there, or that the plane placed on another pod.
+  defp held_elsewhere(state, :worker, method, params, pid) do
+    sid =
+      case {method, params} do
+        {"subscribe", %{"topic" => "session:" <> id}} -> id
+        {_method, %{"session_id" => id}} when is_binary(id) -> id
+        _other -> nil
+      end
+
+    with id when is_binary(id) <- sid,
+         %{worker: worker} <- state.sessions[id],
+         %{path: path} <- state.connections[pid] do
+      if Map.get(state.holders, id, worker) == worker_name(path), do: nil, else: id
+    else
+      _unknown -> nil
+    end
+  end
+
+  defp held_elsewhere(_state, _kind, _method, _params, _pid), do: nil
+
+  defp worker_name("/worker/" <> name), do: name
+  defp worker_name(path), do: path
 
   ## Events
 
@@ -976,7 +1081,8 @@ defmodule Troupe.FakeRemote do
         ws_loop(socket, owner, kind, "")
 
       :refused ->
-        respond(socket, 503, Jason.encode!(%{"error" => "plane is down"}))
+        down = if kind == :worker, do: "the worker is gone", else: "plane is down"
+        respond(socket, 503, Jason.encode!(%{"error" => down}))
         :gen_tcp.close(socket)
     end
   end
@@ -1040,6 +1146,13 @@ defmodule Troupe.FakeRemote do
                 "jsonrpc" => "2.0",
                 "id" => id,
                 "error" => %{"code" => code, "message" => message, "data" => %{"params" => params}}
+              }
+
+            {:error, code, message, data} ->
+              %{
+                "jsonrpc" => "2.0",
+                "id" => id,
+                "error" => %{"code" => code, "message" => message, "data" => data}
               }
           end
 

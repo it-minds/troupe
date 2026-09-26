@@ -358,6 +358,9 @@ defmodule Troupe.Plane.HarnessTest do
 
       assert result["mode"] == "read"
       assert is_binary(result["token"])
+      # The answer says the pod only serves the history, so a client opens the session
+      # for activation before its first activating command.
+      assert result["state"] == "dormant"
 
       # Still asleep, still epoch 1. A session that woke up because somebody looked at
       # it would never stay dormant.
@@ -391,6 +394,7 @@ defmodule Troupe.Plane.HarnessTest do
       assert Enum.all?(results, &match?({:ok, _}, &1))
       assert Sessions.get(session.id).epoch == 2
       assert results |> Enum.map(fn {:ok, r} -> r["epoch"] end) |> Enum.uniq() == [2]
+      assert results |> Enum.map(fn {:ok, r} -> r["state"] end) |> Enum.uniq() == ["active"]
     end
 
     test "a pod that cannot put the tree back parks the session read-only, and the next open says so",

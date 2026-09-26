@@ -9,8 +9,13 @@
 // duplicate at the boundary.
 //
 // Neither token is written down. The pod token lives in this object and dies with it.
+//
+// A session is not tied to its pod: a drain, a replaced pod or another client's activation
+// leaves it somewhere else (PROTOCOL.md §6, "A session that moves"). Every reconnection
+// asks the plane again, so a socket that goes follows the session by itself; a pod that is
+// still up and answers `not_found` for the session is followed with `retrying`.
 
-import { TroupeConnection } from "./connection.js";
+import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { normalizeEndpoint } from "./plane.js";
 import type { Attachment } from "./plane.js";
 import { SessionView } from "./session.js";
@@ -36,6 +41,14 @@ export interface AttachOptions {
 export type AttachStatus = "connecting" | "live" | "refreshing" | "reconnecting" | "closed" | "failed";
 
 const DEFAULT_BACKOFF = [250, 500, 1_000, 2_000, 5_000, 10_000];
+
+/**
+ * Whether a pod refused a command because it does not hold the session: `not_found`
+ * naming the session, which a pod answers before it runs anything.
+ */
+export function notHere(e: unknown): boolean {
+  return e instanceof TroupeRpcError && e.code === -32005 && e.data?.["kind"] === "session";
+}
 
 /**
  * One live session: a connection, a view, and the policy that keeps them.
@@ -73,6 +86,30 @@ export class SessionAttachment {
     return this.view.handle(envelope);
   }
 
+  /**
+   * Run a command, and when the pod says it does not hold the session, reopen through the
+   * plane and run it once more. The pod ran nothing, so a command that reuses its
+   * `command_id` is not run twice; a second refusal is the answer.
+   */
+  async retrying<T>(command: () => Promise<T>): Promise<T> {
+    try {
+      return await command();
+    } catch (e) {
+      if (!notHere(e) || this.stopped) throw e;
+      await this.follow("the pod no longer holds the session");
+      if (this.status !== "live") throw e;
+      return command();
+    }
+  }
+
+  /** Leave the socket that is up and reopen through the plane, as a drop would. */
+  private async follow(reason: string): Promise<void> {
+    const old = this.conn;
+    const reopened = this.reconnecting ?? this.reconnect(reason);
+    old?.close();
+    await reopened;
+  }
+
   async close(): Promise<void> {
     this.stopped = true;
     try {
@@ -95,7 +132,9 @@ export class SessionAttachment {
     if (!attachment.token) throw new Error(`the plane minted no token for ${this.sessionId}`);
     this.attachment = attachment;
 
-    const conn = await TroupeConnection.open(
+    // Only the socket in use reconnects when it closes: one left behind on purpose, for
+    // a pod that no longer holds the session, closes after its successor is up.
+    const conn: TroupeConnection = await TroupeConnection.open(
       {
         url: normalizeEndpoint(attachment.endpoint),
         token: attachment.token,
@@ -107,7 +146,9 @@ export class SessionAttachment {
         // The cursor is the client's, so resubscribing from it is the whole answer.
         onResyncRequired: () => void this.view.resubscribe().catch(() => this.reconnect("resync failed")),
         onAuthExpiring: () => void this.refresh(),
-        onClose: (reason) => void this.reconnect(reason),
+        onClose: (reason) => {
+          if (this.conn === conn) void this.reconnect(reason);
+        },
       },
     );
 
