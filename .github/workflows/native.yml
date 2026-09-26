@@ -125,7 +125,7 @@ jobs:
         # plane's database and Kubernetes clients (Decision 667).
         working-directory: apps/troupe_daemon
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
 
@@ -199,7 +199,7 @@ jobs:
           & "$inst\bin\troupe_daemon.bat" eval "b = :binary.list_to_bin(List.duplicate(0, 1000)); true = :ezstd.decompress(:ezstd.compress(b)) == b; IO.puts(:zstd_ok)"
           if ($LASTEXITCODE -ne 0) { throw "eval failed with $LASTEXITCODE" }
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.art.outputs.name }}
           path: dist/${{ steps.art.outputs.name }}
@@ -222,7 +222,7 @@ jobs:
         shell: bash
         working-directory: clients/tui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
 
@@ -296,7 +296,7 @@ jobs:
             "$BIN" run build "no finish" --headless --auto-approve
           test -f hello.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: ${{ steps.art.outputs.name }}
           path: clients/tui/burrito_out/${{ steps.art.outputs.name }}
@@ -310,10 +310,10 @@ jobs:
     # for it until the job ended.
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: troupe-*-linux_x86_64
           merge-multiple: true
@@ -367,7 +367,7 @@ jobs:
       run:
         working-directory: clients/gui
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.ref }}
 
@@ -426,14 +426,14 @@ jobs:
       # this only builds.
       - name: Build the bundles (unsigned)
         if: steps.signing.outputs.signed != 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         with:
           projectPath: clients/gui/apps/desktop
           args: --target ${{ matrix.target }}
 
       - name: Build the bundles (signed)
         if: steps.signing.outputs.signed == 'true'
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
           APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
@@ -469,7 +469,7 @@ jobs:
           done
 
       - name: Keep the installers
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: desktop-${{ matrix.target }}
           if-no-files-found: error
@@ -494,12 +494,12 @@ jobs:
       # Only what this workflow built. A release's run also holds the image builds'
       # `*.dockerbuild` records, and downloading everything meant one of those failing
       # after five retries stopped v0.3.1's publish — and would have attached them.
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: troupe-*
           path: dist
           merge-multiple: true
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           pattern: desktop-*
           path: dist

@@ -32,7 +32,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: erlef/setup-beam@v1
         with:
           elixir-version: ${{ env.ELIXIR_VERSION }}
@@ -52,7 +52,7 @@ jobs:
       # `cargo metadata` fetches every locked crate to read its manifest: the desktop app's,
       # and those of the TUI's NIF, whose Cargo.lock `ex_ratatui` has just brought. The
       # runner has Rust; this keeps it from downloading the same crates on every run.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             ~/.cargo/registry/index
