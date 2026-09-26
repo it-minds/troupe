@@ -758,8 +758,10 @@ or `project`. A worker answers from its bundle instead, so a client offers exact
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
-agent. `status` is `absent`, `stale` (older than `memory_max_age_days`, or the tracked
-file count drifted), `fresh` or `disabled` (`memory: false` in the workspace config).
+agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_days`, or
+the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
+config). A `librarian`'s run that ends as it meant to builds it, whether or not it
+rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. A client that finds it
 `absent` or `stale` may start a `librarian` session on the workspace, which is what
 `memory_auto_refresh` asks of it.
