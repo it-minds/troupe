@@ -494,8 +494,10 @@ defmodule Troupe.Plane.Identity do
     # The grant is what made those sessions allowed, and it is no longer there. They
     # become read-only rather than erased: history is history, and a team losing a grant
     # is not a reason to hide what it already did. A running one gives back its pod's slot
-    # and its budget slice on the way, as one that went dormant would have.
-    parked = team.id |> Sessions.active_for(profile) |> Enum.map(&Drain.park/1)
+    # and its budget slice on the way, as one that went dormant would have, and its pod is
+    # told to put it to sleep; one still waiting for room gives back its slice and is
+    # never placed (Decision 697).
+    parked = team.id |> Sessions.holding_for(profile) |> Enum.map(&Drain.withdraw/1)
     frozen = length(parked) + Sessions.read_only_for(team.id, profile)
 
     if frozen > 0 do
@@ -505,6 +507,17 @@ defmodule Troupe.Plane.Identity do
     end
 
     :ok
+  end
+
+  @doc """
+  Whether a team holds a grant on a profile.
+
+  Asked again wherever a session would start, not only when one is created: a grant can
+  go while its team's sessions sleep or wait for room.
+  """
+  @spec granted?(Team.t(), String.t()) :: boolean()
+  def granted?(%Team{} = team, profile) do
+    Repo.exists?(from(g in Grant, where: g.team_id == ^team.id and g.profile == ^profile))
   end
 
   @doc "Every grant on a profile, which is what the plane projects into its resource."

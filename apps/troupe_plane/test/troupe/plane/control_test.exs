@@ -472,14 +472,50 @@ defmodule Troupe.Plane.ControlTest do
       {:ok, _} = Placement.reserve("dev", "s-1")
       placed("s-2")
 
-      # Taking the grant away tells the pod nothing, so it can still put the session to
-      # sleep and say so, as often as it likes.
+      # Taking the grant away tells the pod to put the session to sleep, and the pod says
+      # it has, as often as it likes.
       :ok = Identity.revoke(team, "dev")
       assert placement("dev").capacities[pod.id] == 1
 
       assert {:ok, _} = call(worker, "session.dormant", %{"session_id" => "s-1"})
       assert {:ok, _} = call(worker, "session.dormant", %{"session_id" => "s-1"})
       assert placement("dev").capacities[pod.id] == 1
+    end
+
+    test "a pod's dormancy report leaves a read-only or an erased session as it is",
+         %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      team = team_with_grant("engineering", "dev", name: "engineering")
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-1",
+          owner_subject: "idp|alice",
+          profile: "dev",
+          team_id: team.id
+        })
+
+      {:ok, _} = Placement.reserve("dev", "s-1")
+      placed("s-2")
+
+      :ok = Identity.revoke(team, "dev")
+      {:ok, _} = Sessions.put_state("s-2", "erased")
+
+      # The pod was putting both to sleep as the plane parked one and erased the other.
+      for id <- ["s-1", "s-2"] do
+        assert {:ok, _} =
+                 call(worker, "session.dormant", %{
+                   "session_id" => id,
+                   "last_seq" => 7,
+                   "status" => "idle"
+                 })
+      end
+
+      assert %{state: "read_only", worker_id: nil} = Sessions.get("s-1")
+      assert %{state: "erased"} = Sessions.get("s-2")
+
+      # So the epoch bump that waking a session starts with still has nothing to bump.
+      assert {:error, :not_dormant} = Sessions.activate("s-1")
     end
 
     test "a pod that cannot put a tree back parks the session read-only, fenced on the epoch", %{port: port} do
@@ -731,11 +767,13 @@ defmodule Troupe.Plane.ControlTest do
 
   # The plane pushes notifications down this channel — `jwks.updated` the moment a
   # worker enrols — so a reply is the message carrying *this* id, not the next message
-  # to arrive. A client that assumed otherwise would read a push as its own answer.
+  # to arrive. A client that assumed otherwise would read a push as its own answer. The
+  # plane's requests carry ids too, counted on its side, so a message naming a method is
+  # a push whatever its id.
   defp answer(worker, id) do
     case read(worker) do
-      %{"id" => ^id} = message -> message
       %{"method" => _method} -> answer(worker, id)
+      %{"id" => ^id} = message -> message
       other -> other
     end
   end
