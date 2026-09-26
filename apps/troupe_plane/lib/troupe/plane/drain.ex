@@ -19,6 +19,7 @@ defmodule Troupe.Plane.Drain do
   alias Troupe.Plane.{Budget, Fleet, Placement, Sessions}
   alias Troupe.Plane.Control.Router
   alias Troupe.Plane.Fleet.Worker
+  alias Troupe.Plane.Sessions.Session
 
   require Logger
 
@@ -139,6 +140,26 @@ defmodule Troupe.Plane.Drain do
     Sessions.dormant(session_id)
     release_budget(session_id)
     session_id
+  end
+
+  @doc """
+  Like `strand/2`, for a session that is not going back to any pod: erased, its tree
+  gone, or its team's grant on the profile taken away. In the same order, and read-only
+  rather than dormant, because nothing activates it again.
+
+  The budget slice goes back here too, because nothing else is sure to give it back. A
+  pod reports dormancy, and the release that comes with it, only for a session it put to
+  sleep: an erased one is fenced and thrown away, and a revoked grant tells the pod
+  nothing. Every rung reloads the ledger's open reservations, so a slice left open is
+  held for good. A second release, such as a pod's `session.unrestorable` report after
+  this one, finds nothing to give back.
+  """
+  @spec park(Session.t()) :: String.t()
+  def park(%Session{} = session) do
+    Placement.release(session.profile, session.id)
+    Sessions.read_only(session.id)
+    Budget.release(session.team_id, session.id, answerable_for(session))
+    session.id
   end
 
   defp release_budget(session_id) do

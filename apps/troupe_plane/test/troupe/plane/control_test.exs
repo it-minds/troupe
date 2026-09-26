@@ -10,7 +10,7 @@ defmodule Troupe.Plane.ControlTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Bundles, Drain, Fleet, Placement, SCIM, Sessions, TeamBudget}
+  alias Troupe.Plane.{Bundles, Drain, Fleet, Identity, Placement, SCIM, Sessions, TeamBudget}
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
 
   @moduletag timeout: 60_000
@@ -452,6 +452,33 @@ defmodule Troupe.Plane.ControlTest do
                })
 
       assert Sessions.get("s-1").state == "read_only"
+      assert placement("dev").capacities[pod.id] == 1
+    end
+
+    test "a session whose team lost the grant gives its slot back once, whatever its pod says after",
+         %{port: port} do
+      worker = enrolled(port, "dev-token", "troupe-w-dev-0")
+      [pod] = Fleet.list_workers("dev")
+      team = team_with_grant("engineering", "dev", name: "engineering")
+
+      {:ok, _} =
+        Sessions.create(%{
+          id: "s-1",
+          owner_subject: "idp|alice",
+          profile: "dev",
+          team_id: team.id
+        })
+
+      {:ok, _} = Placement.reserve("dev", "s-1")
+      placed("s-2")
+
+      # Taking the grant away tells the pod nothing, so it can still put the session to
+      # sleep and say so, as often as it likes.
+      :ok = Identity.revoke(team, "dev")
+      assert placement("dev").capacities[pod.id] == 1
+
+      assert {:ok, _} = call(worker, "session.dormant", %{"session_id" => "s-1"})
+      assert {:ok, _} = call(worker, "session.dormant", %{"session_id" => "s-1"})
       assert placement("dev").capacities[pod.id] == 1
     end
 
