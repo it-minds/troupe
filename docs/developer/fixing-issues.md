@@ -195,7 +195,7 @@ Every row that applies must pass.
 | `apps/troupe_daemon`, `troupe_core`, `troupe_gateway`, `troupe_protocol` (anything the daemon ships) | targeted `mixw test <files>`, `mixw credo --strict` on touched files, then **install and verify** |
 | `clients/tui` | `mixw test` in `clients/tui`, then **install and verify** |
 | `apps/troupe_plane`, `troupe_worker`, `troupe_operator`, `troupe_a2a` (server only) | targeted `mixw test <files>`; `bash scripts/ci --gates` when it runs here. A test that prints `SKIPPED` for Postgres, OpenBao or MinIO is not a pass - name what could not run |
-| `clients/gui` | `pnpm -C clients/gui install`, `typecheck`, `test`; for UI behaviour, `pnpm -C clients/gui fake` and the desktop app's web dev server in a browser, checking the behaviour the issue describes. There is no Rust toolchain here, so no Tauri build: say so |
+| `clients/gui` | `pnpm -C clients/gui install`, `typecheck`, `test`; for UI behaviour, `pnpm -C clients/gui fake` and the desktop app's web dev server in a browser, checking the behaviour the issue describes. For a Tauri build, `pnpm tauri build --bundles nsis` works offline here; test-install a renamed build (`--config` productName and mainBinaryName) so the installed app is untouched |
 | docs only | links resolve, Mermaid renders if touched; no install |
 
 **Install and verify**, in PowerShell from the worktree root:
