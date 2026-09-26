@@ -249,7 +249,22 @@ defmodule Troupe.Gateway.ClientToolsTest do
   end
 
   describe "a registrant that goes away mid-call" do
-    test "the agent gets an error result inside the timeout and keeps running", context do
+    # The grace a parked call waits for its client to come back, short enough to test.
+    setup do
+      previous = Application.get_env(:troupe_core, :client_tool_grace_ms)
+      Application.put_env(:troupe_core, :client_tool_grace_ms, 400)
+
+      on_exit(fn ->
+        if previous,
+          do: Application.put_env(:troupe_core, :client_tool_grace_ms, previous),
+          else: Application.delete_env(:troupe_core, :client_tool_grace_ms)
+      end)
+
+      :ok
+    end
+
+    test "the agent gets an error result once the grace is up, naming the tool, and keeps running",
+         context do
       %{session: session} =
         start_session(context,
           steps: [{:tools, [{"client.notes.search", %{"q" => "the thing"}}]}],
@@ -266,7 +281,8 @@ defmodule Troupe.Gateway.ClientToolsTest do
       assert_receive {:troupe_request, _id, "tool.invoke", _params}, 15_000
 
       # A disappears without answering. The tool timeout is minutes; this must not wait
-      # for it, because a dropped connection is knowable immediately.
+      # for it, because a dropped connection is knowable immediately — only the grace,
+      # in case A is on its way back.
       started = System.monotonic_time(:millisecond)
       Client.close(ada)
 
@@ -281,7 +297,12 @@ defmodule Troupe.Gateway.ClientToolsTest do
       completed = Enum.find(events, &(&1.type == "tool_call_completed"))
       assert completed, "the agent never got a result for the call it was waiting on"
       assert completed.data["ok"] == false
-      assert completed.data["content"] =~ "disconnected"
+      # Once, and plainly: which tool, and that its client left rather than a bare
+      # transport word the model can do nothing with.
+      assert completed.data["content"] =~ "notes.search"
+      assert completed.data["content"] =~ "left"
+
+      assert elapsed >= 400, "failed the call before the grace was up"
 
       assert elapsed < 10_000,
              "took #{elapsed}ms to notice a dropped registrant; that is a hung turn"
@@ -298,6 +319,53 @@ defmodule Troupe.Gateway.ClientToolsTest do
       # B cannot invoke A's tool, because there is no longer any such tool.
       assert ClientTools.list(session.id) == []
       assert ClientTools.owner(session.id, "client.notes.search") == :error
+    end
+
+    test "a client that comes back inside the grace and offers the tool again is asked the same call",
+         context do
+      %{session: session} =
+        start_session(context,
+          steps: [{:tools, [{"client.notes.search", %{"q" => "the thing"}}]}],
+          default: {:text, "found it after all"}
+        )
+
+      ada = attach(context, @ada)
+      bob = attach(context, @bob)
+      {:ok, _} = Client.subscribe(bob, "session:#{session.id}", from_seq: 0)
+
+      {:ok, _} = register(ada, session.id)
+      {:ok, _} = input(ada, session.id, "search my notes", Client.command_id())
+
+      assert_receive {:troupe_request, _id, "tool.invoke", first}, 15_000
+
+      # A's laptop closes its lid mid-call. The registration goes as it always did — the
+      # tool is nobody's meanwhile — but the call is parked rather than failed.
+      Client.close(ada)
+      eventually(fn -> ClientTools.list(session.id) == [] end)
+
+      # A comes back on a fresh connection, consents again, and offers the tool again.
+      ada = attach(context, @ada)
+      {:ok, _} = register(ada, session.id)
+
+      # The parked call reaches the new connection as the same call: same id, same
+      # arguments. Nothing was failed and nothing was asked of the model in between.
+      assert_receive {:troupe_request, id, "tool.invoke", again}, 5_000
+      assert again["call_id"] == first["call_id"]
+      assert again["arguments"] == first["arguments"]
+      :ok = Client.respond(ada, id, %{"content" => "three notes, found after the nap"})
+
+      events = collect("session:#{session.id}", &(&1.type == "tool_call_completed"), 20_000)
+      completed = Enum.find(events, &(&1.type == "tool_call_completed"))
+      assert completed, "the parked call never completed"
+      assert completed.data["ok"] == true
+      assert completed.data["content"] =~ "found after the nap"
+
+      # The log says what happened to the registration in between: gone with the first
+      # connection, back with the second, and one call served across the two.
+      types = Enum.map(events, & &1.type)
+      assert "tools_unregistered" in types
+      assert Enum.count(types, &(&1 == "tools_registered")) == 2
+      assert Enum.count(types, &(&1 == "tool_call_started")) == 1
     end
   end
 

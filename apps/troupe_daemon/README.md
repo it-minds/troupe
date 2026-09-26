@@ -88,6 +88,7 @@ caches windows and prices in `models.json`.
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_BASE_URL`, `TROUPE_API_KEY` / `TROUPE_AUTH_TOKEN` | the session-wide provider |
 | `TROUPE_DAEMON_IDLE_MINUTES` | exit after this long with nothing running; `0` never (default 10) |
 | `TROUPE_SESSION_IDLE_MINUTES`, `TROUPE_SESSION_DETACHED_MINUTES` | when a session goes to sleep, watched and unwatched ([below](#how-long-it-stays-up)) |
+| `TROUPE_CLIENT_TOOL_GRACE_SECONDS` | how long a call to a client's own tool waits for that client to come back ([below](#how-long-it-stays-up)) |
 | `TROUPE_DAEMON_LOG` | `file` (default: `daemon.log` in the state directory) or `stderr` |
 | `TROUPE_LOG_LEVEL` | `debug`, `info`, `warning`, `error` |
 | `TROUPE_STATE_HOME`, `TROUPE_CONFIG_HOME` | where sessions and config live |
@@ -99,21 +100,28 @@ The daemon is not a distributed Erlang node (`rel/env.sh.eex` sets
 ## How long it stays up
 
 A daemon a client started has to go away by itself, and a laptop is not quiet until it
-has. A turn that is running — a model call, a tool — is never stopped for it, whether
-anybody is attached or not. Below that, each step down has one clock:
+has. This is the whole ladder, from a running turn down to the daemon's exit; each rung
+has one clock, and the three modules that keep them (`Troupe.Session.ClientTools`,
+`Troupe.Sessions.Index`, `Troupe.Gateway.Idle`) point here rather than saying it again.
 
-| Step | After this long | Set by | Default |
+| Rung | After this long | Set by | Default |
 |---|---|---|---|
-| a session sleeps, watched | idle or waiting on a person, with a client subscribed to it or in watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
+| a turn runs | never stopped for it — a model call or a tool, whether anybody is attached or not | | |
+| a tool call ends | the tool's own timeout: `shell_timeout_ms` for a shell command and for a client's own tool; the agent cuts any tool a minute after that, three minutes at least | `shell_timeout_ms` ([configuration](../../docs/user/configuration.md#tools)) | 2 min |
+| a client's own tool call whose client left is failed | nobody has offered the tool again within the grace, which comes out of the call's timeout; a client back inside it is asked the same call | `TROUPE_CLIENT_TOOL_GRACE_SECONDS` (`:troupe_core, :client_tool_grace_ms`); `0` fails it at once | 60 s |
+| a session sleeps, read | never, while a client is subscribed to it by name: a session is not stopped under the person looking at it, and the clocks below start when they leave | | |
+| a session sleeps, watched | idle or waiting on a person, with somebody following it but not reading it — a `fleet` subscriber, watch mode | `TROUPE_SESSION_IDLE_MINUTES` (`:troupe_core, :session_idle_ms`) | 30 min |
 | a session sleeps, unwatched | the same, with nobody watching it | `TROUPE_SESSION_DETACHED_MINUTES` (`:troupe_core, :detached_idle_ms`) | 2 min |
 | the daemon exits | no client connected and no session awake | `TROUPE_DAEMON_IDLE_MINUTES` (`:troupe_daemon, :idle_shutdown_ms`) | 10 min |
 
-`0` means never. A session that sleeps stops its tree and keeps its log: the next command
-that acts on it — input, an answer, an approval — brings it back, and an approval or a
-question it was waiting on is asked again rather than failed, so it can be answered days
-later. Reading it (listing, subscribing, its history) wakes nothing. In a session that is
-still awake, a call waiting on a person is failed as timed out after the tool's own
-timeout, three minutes — one reason an unwatched session sleeps before then.
+`0` means never on the minute clocks. A session that sleeps stops its tree and keeps its
+log: the next command that acts on it — input, an answer, an approval — brings it back,
+and an approval or a question it was waiting on is asked again rather than failed, so it
+can be answered days later. Reading it (listing, subscribing, its history) wakes nothing.
+In a session that is still awake, a call waiting on a person is failed as timed out after
+the tool's own timeout — one reason an unwatched session sleeps before then. What ended
+or was asked while nobody was reading a session is in its `session.list` row as `unseen`
+([PROTOCOL.md](../../PROTOCOL.md#sessionlist)), for the client that comes back.
 
 ## Building
 

@@ -226,14 +226,18 @@ defmodule Troupe.Gateway.Connection do
   @impl GenServer
   def terminate(_reason, state) do
     # Everyone still attached is told this person has gone before the subscriptions
-    # that would have carried the news are dropped.
+    # that would have carried the news are dropped, and the sessions this person was
+    # reading learn they have stopped: what happens in them from here on is news.
     announce_presence(state, "left")
+    state |> attached_sessions() |> Enum.each(&Troupe.detach/1)
 
     Enum.each(state.subscriptions, fn {_id, sub} -> Session.unsubscribe(sub.topic) end)
 
-    # Tool calls this client was serving die with it. `ClientTools` hears about the
-    # registration through its own monitor; what it cannot do is unblock a task already
-    # waiting on an answer, so that is done here, where the answer was going to arrive.
+    # Tool calls this client was serving are told it has gone. `ClientTools` hears about
+    # the registration through its own monitor; what it cannot do is unblock a task
+    # already waiting on an answer, so that is done here, where the answer was going to
+    # arrive. The task parks the call for a client that offers the tool again
+    # (`ClientTool`), so a reply here is not yet a failed call.
     Enum.each(state.outbound_requests, fn {_id, from} ->
       GenServer.reply(from, {:error, :disconnected})
     end)
@@ -759,9 +763,12 @@ defmodule Troupe.Gateway.Connection do
 
     # Presence, not a log entry: the other clients want to know somebody arrived, and a
     # session replayed a year from now does not. Announced once per session however many
-    # subscriptions this connection takes out on it.
+    # subscriptions this connection takes out on it — and the session itself is told, the
+    # same once, that somebody is reading it: it is not put to sleep under them, and what
+    # they read is not news to tell them afterwards.
     if subscription.session_id && not already? do
       Presence.publish(subscription.session_id, state.principal, "joined")
+      Troupe.attach(subscription.session_id)
     end
 
     # Replay first, then live: `Session.subscribe/1` registered this process before the
@@ -792,6 +799,7 @@ defmodule Troupe.Gateway.Connection do
     else
       Session.unsubscribe(subscription.topic)
       Presence.publish(id, state.principal, "left")
+      Troupe.detach(id)
       state
     end
   end
@@ -811,12 +819,18 @@ defmodule Troupe.Gateway.Connection do
   # that is ending because the client crashed reaches here too, which is the case that
   # matters: nobody else can tell the difference between a quiet person and a dead one.
   defp announce_presence(state, presence_state) do
+    state
+    |> attached_sessions()
+    |> Enum.each(&Presence.publish(&1, state.principal, presence_state))
+  end
+
+  # The sessions this connection is reading: each one it holds a subscription on by name.
+  defp attached_sessions(state) do
     state.subscriptions
     |> Map.values()
     |> Enum.map(& &1.session_id)
     |> Enum.reject(&is_nil/1)
     |> Enum.uniq()
-    |> Enum.each(&Presence.publish(&1, state.principal, presence_state))
   end
 
   defp deliver(state, session_id, %Event{} = event) do

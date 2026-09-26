@@ -8,7 +8,9 @@ defmodule Troupe.Gateway.Idle do
   dormant do not hold it open — they are durable in their logs and come back on the
   next activating command. Nor, for long, does one that is idle or waiting on a person:
   `Troupe.Sessions.Index` puts it to sleep, minutes after the last client has gone, since
-  an unanswered approval or question is as durable as the rest of its log.
+  an unanswered approval or question is as durable as the rest of its log. This is the
+  last rung of the ladder from a running turn to the daemon's exit, every clock of which
+  is set in one place: [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
   """
 
   use GenServer
