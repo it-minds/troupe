@@ -63,14 +63,15 @@ function word(s: string): string {
 }
 
 /**
- * Where a session runs. Private is a status colour; the other two are plain.
+ * Where a session runs. Private is a status colour; this computer has a colour of its
+ * own (`--local-*`, amber in Afterglow); the platform is plain.
  *
  * No glyph on the plain two: an eye means a state, and where a session runs is not one.
  */
 export function Where({ kind }: { kind: SessionKind }): JSX.Element {
   if (kind === "private") return <Pill status="private">Private</Pill>;
   return (
-    <span className="pill" title={kind === "team" ? "Runs on the platform" : "Runs on this computer"}>
+    <span className={`pill ${kind}`} title={kind === "team" ? "Runs on the platform" : "Runs on this computer"}>
       {kind === "team" ? "Team" : "This computer"}
     </span>
   );

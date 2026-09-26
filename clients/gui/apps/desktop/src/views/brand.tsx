@@ -72,8 +72,9 @@ export function Mask({ size = 24, label }: { size?: number; label?: string }): J
 /**
  * The lockup: the mask and the word.
  *
- * The platform writes its own name the way it writes an identifier — IBM Plex Mono,
- * lowercase, always. `troupe`, not `Troupe`.
+ * The word is set in the interface face at its blackest weight, and lowercase, always:
+ * `troupe`, not `Troupe`. The face and the weight are `.wordmark .word`'s, from the
+ * design file's `wordmark` role.
  */
 export function Wordmark({ size = 20 }: { size?: number }): JSX.Element {
   return (

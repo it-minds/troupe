@@ -1,0 +1,709 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin="crossorigin" />
+<link href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&amp;family=Figtree:wght@400;600;800;900&amp;family=VT323&amp;display=swap" rel="stylesheet" />
+<style>
+:root{
+  --font-ui:'Figtree',-apple-system,BlinkMacSystemFont,sans-serif;
+  --font-mono:'DM Mono',ui-monospace,Menlo,monospace;
+  --font-screen:'VT323',monospace;
+
+  --void:#0b0b12; --pit:#12121c; --riser:#1c1c2b; --flat:#242436; --deepblue:#000353;
+  --cream:#F4ECDB; --cream-dim:#E8DFD0; --grey:#a3a3b8; --grey-dim:#8a8aa0; --grey-deep:#6a6a82;
+  --pink:#FF0080; --pink-soft:#FF4DA6;
+  --cyan:oklch(0.72 0.19 195); --cyan-text:oklch(0.80 0.15 190); --cyan-line:oklch(0.55 0.12 195);
+  --amber:oklch(0.78 0.16 75); --amber-text:oklch(0.84 0.14 75); --amber-line:oklch(0.60 0.10 75);
+  --violet:#9C8BFF; --violet-line:#4A3F86;
+  --clay:#FF7E6E; --clay-line:#7E3628;
+
+  --rule:rgba(232,223,208,.18); --rule-strong:rgba(232,223,208,.42);
+  --t-mono-label:500 12px/1.3 var(--font-mono);
+  --t-screen:400 19px/1.1 var(--font-screen);
+  --s-1:4px; --s-2:8px; --s-3:12px; --s-4:16px; --s-5:22px; --s-6:28px; --s-7:38px; --s-8:52px;
+  color-scheme:dark;
+}
+html,body{margin:0;padding:0;background:var(--void);}
+body{font-family:var(--font-ui);color:var(--cream-dim);-webkit-font-smoothing:antialiased;}
+*{box-sizing:border-box;}
+a{color:var(--pink);text-decoration:none;}
+a:hover{color:var(--pink-soft);text-decoration:underline;}
+button{font-family:inherit;border:0;background:none;color:inherit;cursor:pointer;}
+:focus-visible{outline:2px solid var(--cyan);outline-offset:2px;}
+[data-nav][aria-current="page"]{border-left-color:var(--pink) !important;color:var(--cream) !important;background:var(--pit) !important;}
+[data-tab][aria-pressed="true"]{color:var(--void) !important;background:var(--cream-dim) !important;}
+[data-row]:hover{background:var(--riser);}
+[data-tile]:hover{transform:translate(-2px,-2px);box-shadow:8px 8px 0 var(--deepblue);}
+[data-btn]:hover{filter:brightness(1.1);}
+@keyframes ag-pulse{0%,100%{opacity:1}50%{opacity:.3}}
+@keyframes ag-caret{0%,45%{opacity:1}46%,100%{opacity:0}}
+@keyframes ag-scan{0%{transform:translateX(-100%)}100%{transform:translateX(320%)}}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{animation-duration:1ms !important;animation-iteration-count:1 !important;transition:none !important;}}
+/* Sticky only works when the panel is shorter than the viewport; below that it would
+   clamp to the top and bury the conversation it refers to. */
+@media (max-height:760px){[data-approval]{position:static !important;max-height:none !important;}}
+</style>
+</helmet>
+
+<div style="min-height:100vh;background:var(--void);color:var(--cream-dim)">
+
+  <!-- ============ LAUNCHER ============ -->
+  <sc-if value="{{ isLauncher }}" hint-placeholder-val="{{ false }}">
+    <div style="min-height:100vh;display:flex;flex-direction:column">
+      <div style="display:flex;align-items:center;gap:var(--s-3);padding:var(--s-2) var(--s-4);background:var(--pit);border-bottom:1px solid var(--rule)">
+        <span style="display:flex;gap:6px">
+          <span style="width:11px;height:11px;background:var(--pink)"></span>
+          <span style="width:11px;height:11px;background:var(--amber)"></span>
+          <span style="width:11px;height:11px;background:var(--cyan)"></span>
+        </span>
+        <span style="font:var(--t-mono-label);color:var(--grey-deep);letter-spacing:.1em">TROUPE · DESKTOP</span>
+      </div>
+
+      <main style="flex:1 1 auto;display:flex;flex-direction:column;justify-content:center;padding:var(--s-8) var(--s-6);max-width:1080px;margin:0 auto;width:100%">
+        <div style="display:flex;flex-wrap:wrap;align-items:flex-end;gap:var(--s-6);margin-bottom:var(--s-8)">
+          <svg width="108" height="108" viewBox="0 0 48 48" role="img" aria-label="Troupe" style="display:block;flex:0 0 auto">
+            <defs><clipPath id="ag-lm"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="var(--pink)" clip-path="url(#ag-lm)"></path>
+            <path d="M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z" fill="none" stroke="var(--cream)" stroke-width="2.6" stroke-linejoin="round"></path>
+            <path d="M24 8 L24 42" stroke="var(--cream)" stroke-width="1.4"></path>
+            <path d="M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z" fill="var(--cream)"></path>
+            <path d="M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z" fill="var(--void)"></path>
+          </svg>
+          <div style="flex:1 1 320px;min-width:0">
+            <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.16em;margin-bottom:var(--s-2)">// A COMPANY OF AGENTS · v2.4</div>
+            <h1 style="margin:0;font-size:clamp(52px,9vw,96px);font-weight:900;line-height:.9;letter-spacing:-.035em;color:var(--cream)">TROU<span style="color:var(--pink)">PE</span></h1>
+          </div>
+        </div>
+
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:var(--s-4);margin-bottom:var(--s-7)">
+          <button type="button" data-tile="1" onClick="{{ goNew }}" style="text-align:left;padding:var(--s-5);background:var(--cyan);color:var(--void);box-shadow:5px 5px 0 var(--deepblue);transition:transform .12s ease,box-shadow .12s ease">
+            <span style="display:block;font:var(--t-mono-label);letter-spacing:.12em;opacity:.7">01</span>
+            <span style="display:block;font-size:26px;font-weight:900;letter-spacing:-.02em;margin-top:var(--s-3)">New session</span>
+            <span style="display:block;font-size:14px;line-height:1.5;margin-top:var(--s-2);opacity:.82">Cast a troupe and hand it the first instruction.</span>
+          </button>
+          <button type="button" data-tile="1" onClick="{{ goSessions }}" style="text-align:left;padding:var(--s-5);background:var(--riser);color:var(--cream-dim);border:1px solid var(--rule-strong);box-shadow:5px 5px 0 var(--deepblue);transition:transform .12s ease,box-shadow .12s ease">
+            <span style="display:block;font:var(--t-mono-label);letter-spacing:.12em;color:var(--grey-dim)">02</span>
+            <span style="display:block;font-size:26px;font-weight:900;letter-spacing:-.02em;margin-top:var(--s-3);color:var(--cream)">Open a session</span>
+            <span style="display:block;font-size:14px;line-height:1.5;margin-top:var(--s-2);color:var(--grey)">14 remote · 3 on this machine</span>
+          </button>
+          <button type="button" data-tile="1" onClick="{{ goSession }}" style="text-align:left;padding:var(--s-5);background:var(--pink);color:var(--void);box-shadow:5px 5px 0 var(--deepblue);transition:transform .12s ease,box-shadow .12s ease">
+            <span style="display:block;font:var(--t-mono-label);letter-spacing:.12em;opacity:.7">03 · NEEDS YOU</span>
+            <span style="display:block;font-size:26px;font-weight:900;letter-spacing:-.02em;margin-top:var(--s-3)">2 approvals</span>
+            <span style="display:block;font-size:14px;line-height:1.5;margin-top:var(--s-2);opacity:.85">Oldest has waited 41 minutes.</span>
+          </button>
+        </div>
+
+        <div style="border-top:1px solid var(--rule);padding-top:var(--s-5);display:flex;flex-wrap:wrap;gap:var(--s-7)">
+          <div style="flex:1 1 300px;min-width:0">
+            <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;margin-bottom:var(--s-3)">// RECENT</div>
+            <div style="display:flex;flex-direction:column">
+              <button type="button" data-row="1" onClick="{{ goSession }}" style="display:flex;align-items:center;gap:var(--s-3);text-align:left;padding:var(--s-3);border-bottom:1px solid var(--rule)">
+                <span style="width:3px;height:26px;background:var(--pink);flex:0 0 auto"></span>
+                <span style="flex:1 1 auto;min-width:0;font-size:15px;font-weight:600;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Tilbud til Kolding Kommune</span>
+                <span style="font:var(--t-mono-label);color:var(--grey-dim)">REMOTE</span>
+              </button>
+              <button type="button" data-row="1" onClick="{{ goSession }}" style="display:flex;align-items:center;gap:var(--s-3);text-align:left;padding:var(--s-3);border-bottom:1px solid var(--rule)">
+                <span style="width:3px;height:26px;background:var(--cyan);flex:0 0 auto"></span>
+                <span style="flex:1 1 auto;min-width:0;font-size:15px;font-weight:600;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Feltinterviews — Aarhus Vand</span>
+                <span style="font:var(--t-mono-label);color:var(--grey-dim)">REMOTE</span>
+              </button>
+              <button type="button" data-row="1" onClick="{{ goSessions }}" style="display:flex;align-items:center;gap:var(--s-3);text-align:left;padding:var(--s-3);border-bottom:1px solid var(--rule)">
+                <span style="width:3px;height:26px;background:var(--amber);flex:0 0 auto"></span>
+                <span style="flex:1 1 auto;min-width:0;font-size:15px;font-weight:600;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Regnskabsafstemning Q3</span>
+                <span style="font:var(--t-mono-label);color:var(--amber-text)">LOCAL</span>
+              </button>
+            </div>
+          </div>
+
+          <div style="flex:0 1 300px;min-width:0">
+            <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;margin-bottom:var(--s-3)">// THIS MACHINE</div>
+            <dl style="margin:0;display:grid;grid-template-columns:auto 1fr;gap:var(--s-2) var(--s-4);font:var(--t-mono-label)">
+              <dt style="color:var(--grey-deep)">PLATFORM</dt><dd style="margin:0;color:var(--cyan-text)">● itm-prod reachable</dd>
+              <dt style="color:var(--grey-deep)">RUNTIME</dt><dd style="margin:0;color:var(--cream-dim)">local worker idle</dd>
+              <dt style="color:var(--grey-deep)">SIGNED IN</dt><dd style="margin:0;color:var(--cream-dim)">s.brandt@itm.dk</dd>
+              <dt style="color:var(--grey-deep)">DISK</dt><dd style="margin:0;color:var(--cream-dim)">2.1 GB of session files</dd>
+            </dl>
+            <button type="button" data-btn="1" onClick="{{ goSessions }}" style="margin-top:var(--s-4);padding:10px 18px;border:1px solid var(--rule-strong);color:var(--cream-dim);font-size:14px;font-weight:600">Settings</button>
+          </div>
+        </div>
+      </main>
+
+      <div style="padding:var(--s-3) var(--s-4);border-top:1px solid var(--rule);font:var(--t-mono-label);color:var(--grey-deep);display:flex;flex-wrap:wrap;gap:var(--s-4)">
+        <span>troupe 2.4 · build 4d81ba7</span>
+        <span style="margin-left:auto">⌘N new · ⌘O open · ⌘⇧A approvals</span>
+      </div>
+    </div>
+  </sc-if>
+
+  <!-- ============ SHELL (sessions + session) ============ -->
+  <sc-if value="{{ inApp }}" hint-placeholder-val="{{ true }}">
+    <div style="display:flex;flex-wrap:wrap;align-items:stretch;min-height:100vh">
+
+      <nav aria-label="Main" style="flex:1 1 210px;max-width:230px;background:var(--pit);border-right:1px solid var(--rule);padding:var(--s-5) 0;display:flex;flex-direction:column">
+        <button type="button" onClick="{{ goLauncher }}" style="display:flex;align-items:center;gap:var(--s-3);padding:0 var(--s-5) var(--s-5);text-align:left">
+          <svg width="26" height="26" viewBox="0 0 48 48" aria-hidden="true" style="display:block;flex:0 0 auto">
+            <defs><clipPath id="ag-nm"><rect x="24" y="0" width="24" height="48"></rect></clipPath></defs>
+            <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="var(--pink)" clip-path="url(#ag-nm)"></path>
+            <path d="M11 16 Q11 9 24 9 Q37 9 37 16 L37 25 Q37 34 24 40 Q11 34 11 25 Z" fill="none" stroke="var(--cream)" stroke-width="3" stroke-linejoin="round"></path>
+            <path d="M15.8 21 Q19.2 18.6 22.6 21 Q19.2 23.4 15.8 21 Z" fill="var(--cream)"></path>
+            <path d="M25.4 21 Q28.8 18.6 32.2 21 Q28.8 23.4 25.4 21 Z" fill="var(--void)"></path>
+          </svg>
+          <span style="font-size:19px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">troupe</span>
+        </button>
+        <button type="button" data-nav="1" aria-current="{{ nSessions }}" onClick="{{ goSessions }}" style="text-align:left;padding:11px 20px;border-left:3px solid transparent;color:var(--grey);font-size:15px">sessions</button>
+        <button type="button" data-nav="1" aria-current="{{ nSession }}" onClick="{{ goSession }}" style="text-align:left;padding:11px 20px;border-left:3px solid transparent;color:var(--grey);font-size:15px">stage</button>
+        <button type="button" data-nav="1" aria-current="false" onClick="{{ goNew }}" style="text-align:left;padding:11px 20px;border-left:3px solid transparent;color:var(--grey);font-size:15px">new</button>
+        <span style="margin-top:auto;padding:var(--s-5) 20px 0;font:var(--t-mono-label);color:var(--grey-deep);line-height:1.6">s.brandt@itm.dk<br />2 waiting on you</span>
+      </nav>
+
+      <div style="flex:999 1 520px;min-width:0;display:flex;flex-direction:column">
+
+        <!-- ---------- SESSIONS ---------- -->
+        <sc-if value="{{ isSessions }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:var(--s-5) var(--s-6);border-bottom:1px solid var(--rule)">
+            <div style="font:var(--t-mono-label);color:var(--grey-dim);letter-spacing:.1em">SESSIONS · 17 TOTAL</div>
+            <h1 style="margin:var(--s-1) 0 0;font-size:30px;font-weight:900;letter-spacing:-.025em;color:var(--cream)">Everything your troupe is holding</h1>
+          </div>
+
+          <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);padding:var(--s-4) var(--s-6);border-bottom:1px solid var(--rule)">
+            <button type="button" data-tab="1" aria-pressed="{{ fAll }}" onClick="{{ filtAll }}" style="padding:6px 14px;border:1px solid var(--rule-strong);color:var(--grey);font:var(--t-mono-label);letter-spacing:.08em">ALL</button>
+            <button type="button" data-tab="1" aria-pressed="{{ fRemote }}" onClick="{{ filtRemote }}" style="padding:6px 14px;border:1px solid var(--rule-strong);color:var(--grey);font:var(--t-mono-label);letter-spacing:.08em">REMOTE 14</button>
+            <button type="button" data-tab="1" aria-pressed="{{ fLocal }}" onClick="{{ filtLocal }}" style="padding:6px 14px;border:1px solid var(--rule-strong);color:var(--grey);font:var(--t-mono-label);letter-spacing:.08em">LOCAL 3</button>
+            <span style="margin-left:auto;font:var(--t-mono-label);color:var(--grey-deep);align-self:center">{{ filterNote }}</span>
+          </div>
+
+          <div style="flex:1 1 auto;overflow:auto">
+            <sc-if value="{{ showRemote }}" hint-placeholder-val="{{ true }}">
+              <div style="padding:var(--s-5) var(--s-6) var(--s-3);display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap">
+                <span style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em">// REMOTE · itm-prod</span>
+                <span style="font-size:14px;color:var(--grey)">Team, then profile, then session. A profile is what an agent of that kind may reach — permissions live there, not on the session.</span>
+              </div>
+              <sc-for list="{{ teams }}" as="t" hint-placeholder-count="2">
+                <div style="border-top:1px solid var(--rule-strong)">
+                  <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-3);padding:var(--s-4) var(--s-6) var(--s-2)">
+                    <span style="font-size:19px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">{{ t.team }}</span>
+                    <span style="font:var(--t-mono-label);color:var(--grey-deep);letter-spacing:.06em">{{ t.note }}</span>
+                  </div>
+                  <sc-for list="{{ t.profiles }}" as="p" hint-placeholder-count="2">
+                    <div style="padding-left:var(--s-6)">
+                      <div style="display:flex;flex-wrap:wrap;align-items:baseline;gap:var(--s-3);padding:var(--s-3) var(--s-6) var(--s-2) var(--s-4);border-left:1px solid var(--rule)">
+                        <span style="font-family:var(--font-mono);font-size:13px;color:var(--cyan-text)">{{ p.profile }}</span>
+                        <span style="font:var(--t-mono-label);color:var(--grey-deep);flex:1 1 220px;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">CAN REACH {{ p.reach }}</span>
+                        <span style="font:var(--t-mono-label);color:var(--grey-deep)">{{ p.count }}</span>
+                      </div>
+                      <sc-for list="{{ p.sessions }}" as="s" hint-placeholder-count="2">
+                        <button type="button" data-row="1" onClick="{{ s.open }}" style="width:100%;text-align:left;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-4) var(--s-6) var(--s-4) var(--s-4);border-top:1px solid var(--rule);border-left:3px solid {{ s.mark }};background:{{ s.rowBg }}">
+                          <svg width="22" height="22" viewBox="0 0 44 44" aria-hidden="true" style="display:block;flex:0 0 auto;color:{{ s.mark }}">
+                            <path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="{{ s.maskFill }}" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"></path>
+                            <path d="M15.8 21.4 Q18.4 19.2 21 21.4 Q18.4 23.6 15.8 21.4 Z" fill="{{ s.eye }}"></path>
+                            <path d="M23 21.4 Q25.6 19.2 28.2 21.4 Q25.6 23.6 23 21.4 Z" fill="{{ s.eye }}"></path>
+                          </svg>
+                          <span style="flex:1 1 240px;min-width:0">
+                            <span style="display:block;font-size:16px;font-weight:800;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.title }}</span>
+                            <span style="display:block;font-size:13px;color:var(--grey);margin-top:3px">{{ s.sub }}</span>
+                          </span>
+                          <span style="font:var(--t-mono-label);letter-spacing:.06em;padding:3px 8px;color:{{ s.visFg }};border:1px solid {{ s.visBd }}">{{ s.vis }}</span>
+                          <span style="font:var(--t-mono-label);letter-spacing:.06em;padding:3px 9px;color:{{ s.pillFg }};background:{{ s.pillBg }};border:1px solid {{ s.pillBd }}">{{ s.state }}</span>
+                          <span style="font:var(--t-mono-label);color:var(--grey-deep);flex:0 0 72px;text-align:right">{{ s.when }}</span>
+                        </button>
+                      </sc-for>
+                    </div>
+                  </sc-for>
+                </div>
+              </sc-for>
+              <p style="margin:0;padding:var(--s-4) var(--s-6) 0;font-size:13px;color:var(--grey-deep);max-width:74ch"><span style="color:var(--grey)">TEAM</span> means everyone on the team can open it. <span style="color:var(--violet)">PRIVATE</span> means only the people invited to it — a private session can still be shared, one person at a time. Neither changes what the profile may reach.</p>
+            </sc-if>
+
+            <sc-if value="{{ showLocal }}" hint-placeholder-val="{{ true }}">
+              <div style="padding:var(--s-6) var(--s-6) var(--s-3);display:flex;align-items:baseline;gap:var(--s-3);flex-wrap:wrap">
+                <span style="font:var(--t-screen);color:var(--amber-text);letter-spacing:.14em">// LOCAL · this machine</span>
+                <span style="font-size:14px;color:var(--grey)">Runs here, on your files. Stops when the app closes. Nobody else can join.</span>
+              </div>
+              <sc-for list="{{ local }}" as="s" hint-placeholder-count="3">
+                <button type="button" data-row="1" onClick="{{ s.open }}" style="width:100%;text-align:left;display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-4);padding:var(--s-4) var(--s-6);border-bottom:1px solid var(--rule);border-left:3px dashed {{ s.mark }};background:{{ s.rowBg }}">
+                  <svg width="22" height="22" viewBox="0 0 44 44" aria-hidden="true" style="display:block;flex:0 0 auto;color:{{ s.mark }}">
+                    <path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="{{ s.maskFill }}" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"></path>
+                    <path d="M15.8 21.4 Q18.4 19.2 21 21.4 Q18.4 23.6 15.8 21.4 Z" fill="{{ s.eye }}"></path>
+                    <path d="M23 21.4 Q25.6 19.2 28.2 21.4 Q25.6 23.6 23 21.4 Z" fill="{{ s.eye }}"></path>
+                  </svg>
+                  <span style="flex:1 1 260px;min-width:0">
+                    <span style="display:block;font-size:16px;font-weight:800;color:var(--cream);overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.title }}</span>
+                    <span style="display:block;font:var(--t-mono-label);color:var(--grey);margin-top:3px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">{{ s.sub }}</span>
+                  </span>
+                  <span style="font:var(--t-mono-label);letter-spacing:.06em;padding:3px 9px;color:{{ s.pillFg }};background:{{ s.pillBg }};border:1px solid {{ s.pillBd }}">{{ s.state }}</span>
+                  <span style="font:var(--t-mono-label);color:var(--grey-deep);flex:0 0 96px;text-align:right">{{ s.when }}</span>
+                </button>
+              </sc-for>
+              <p style="margin:0;padding:var(--s-4) var(--s-6) var(--s-7);font-size:13px;color:var(--grey-deep);max-width:70ch">A local session never leaves this machine — no cluster, no colleagues, no cost. Move one to the cluster from its own menu when you want it to keep running or want someone else in it.</p>
+            </sc-if>
+          </div>
+        </sc-if>
+
+        <!-- ---------- NEW ---------- -->
+        <sc-if value="{{ isNew }}" hint-placeholder-val="{{ false }}">
+          <div style="padding:var(--s-5) var(--s-6);border-bottom:1px solid var(--rule)">
+            <div style="font:var(--t-mono-label);color:var(--grey-dim);letter-spacing:.1em">NEW SESSION</div>
+            <h1 style="margin:var(--s-1) 0 0;font-size:30px;font-weight:900;letter-spacing:-.025em;color:var(--cream)">Cast a troupe</h1>
+          </div>
+          <div style="padding:var(--s-6);max-width:760px;display:flex;flex-direction:column;gap:var(--s-6)">
+            <div>
+              <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;margin-bottom:var(--s-3)">// WHERE IT RUNS</div>
+              <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+                <button type="button" data-tile="1" onClick="{{ pickRemote }}" style="flex:1 1 230px;text-align:left;padding:var(--s-4);border:1px solid {{ remoteBd }};background:{{ remoteBg }};box-shadow:4px 4px 0 var(--deepblue);transition:transform .12s ease,box-shadow .12s ease">
+                  <span style="display:block;font:var(--t-mono-label);letter-spacing:.1em;color:var(--cyan-text)">REMOTE</span>
+                  <span style="display:block;font-size:18px;font-weight:800;color:var(--cream);margin-top:6px">On the cluster</span>
+                  <span style="display:block;font-size:13px;color:var(--grey);margin-top:4px;line-height:1.5">Keeps running when you close the app. Colleagues can join and answer approvals.</span>
+                </button>
+                <button type="button" data-tile="1" onClick="{{ pickLocal }}" style="flex:1 1 230px;text-align:left;padding:var(--s-4);border:1px dashed {{ localBd }};background:{{ localBg }};box-shadow:4px 4px 0 var(--deepblue);transition:transform .12s ease,box-shadow .12s ease">
+                  <span style="display:block;font:var(--t-mono-label);letter-spacing:.1em;color:var(--amber-text)">LOCAL</span>
+                  <span style="display:block;font-size:18px;font-weight:800;color:var(--cream);margin-top:6px">On this machine</span>
+                  <span style="display:block;font-size:13px;color:var(--grey);margin-top:4px;line-height:1.5">Your files never leave. Stops when you quit. Only you.</span>
+                </button>
+              </div>
+            </div>
+            <sc-if value="{{ wantRemote }}" hint-placeholder-val="{{ true }}">
+              <div style="display:flex;flex-wrap:wrap;gap:var(--s-5)">
+                <div style="flex:1 1 220px;min-width:0">
+                  <label for="ag-team" style="display:block;font:var(--t-mono-label);color:var(--grey-dim);letter-spacing:.1em;margin-bottom:var(--s-2)">TEAM</label>
+                  <select id="ag-team" value="{{ team }}" onChange="{{ pickTeam }}" style="width:100%;min-height:44px;padding:0 var(--s-3);background:var(--void);border:1px solid var(--rule-strong);color:var(--cream);font-family:var(--font-ui);font-size:15px">
+                    <option>Salg</option>
+                    <option>Design</option>
+                    <option>Consulting</option>
+                  </select>
+                </div>
+                <div style="flex:1 1 220px;min-width:0">
+                  <label for="ag-profile" style="display:block;font:var(--t-mono-label);color:var(--grey-dim);letter-spacing:.1em;margin-bottom:var(--s-2)">PROFILE</label>
+                  <select id="ag-profile" style="width:100%;min-height:44px;padding:0 var(--s-3);background:var(--void);border:1px solid var(--rule-strong);color:var(--cream);font-family:var(--font-mono);font-size:14px">
+                    <sc-for list="{{ profiles }}" as="p" hint-placeholder-count="2">
+                      <option>{{ p.name }}</option>
+                    </sc-for>
+                  </select>
+                  <p style="margin:var(--s-2) 0 0;font:var(--t-mono-label);color:var(--grey-deep);line-height:1.6">CAN REACH {{ profileReach }}</p>
+                </div>
+              </div>
+
+              <div>
+                <span style="display:block;font:var(--t-mono-label);color:var(--grey-dim);letter-spacing:.1em;margin-bottom:var(--s-2);margin-top:var(--s-5)">WHO CAN SEE IT</span>
+                <div style="display:flex;flex-wrap:wrap;gap:var(--s-3)">
+                  <button type="button" onClick="{{ pickPublic }}" aria-pressed="{{ isPublic }}" style="flex:1 1 230px;text-align:left;padding:var(--s-4);border:1px solid {{ publicBd }};background:{{ publicBg }}">
+                    <span style="display:block;font:var(--t-mono-label);letter-spacing:.1em;color:var(--grey-dim)">TEAM</span>
+                    <span style="display:block;font-size:17px;font-weight:800;color:var(--cream);margin-top:5px">Everyone on {{ team }}</span>
+                    <span style="display:block;font-size:13px;color:var(--grey);margin-top:4px;line-height:1.5">They can open it, read it and answer its approvals.</span>
+                  </button>
+                  <button type="button" onClick="{{ pickPrivate }}" aria-pressed="{{ isPrivate }}" style="flex:1 1 230px;text-align:left;padding:var(--s-4);border:1px solid {{ privateBd }};background:{{ privateBg }}">
+                    <span style="display:block;font:var(--t-mono-label);letter-spacing:.1em;color:var(--violet)">PRIVATE</span>
+                    <span style="display:block;font-size:17px;font-weight:800;color:var(--cream);margin-top:5px">Only people you invite</span>
+                    <span style="display:block;font-size:13px;color:var(--grey);margin-top:4px;line-height:1.5">Starts with just you. You can share it with a colleague later.</span>
+                  </button>
+                </div>
+                <p style="margin:var(--s-3) 0 0;font-size:13px;color:var(--grey-deep);line-height:1.6;max-width:68ch">Either way the session can only reach what <span style="font-family:var(--font-mono);color:var(--cyan-text)">{{ profileName }}</span> is allowed to reach. Visibility decides who watches; the profile decides what happens.</p>
+              </div>
+            </sc-if>
+
+            <div>
+              <label for="ag-first" style="display:block;font:var(--t-mono-label);color:var(--grey-dim);letter-spacing:.1em;margin-bottom:var(--s-2)">FIRST INSTRUCTION</label>
+              <textarea id="ag-first" rows="4" placeholder="Skriv første udkast til tilbuddet til Kolding, med de to seneste som tonereference." style="width:100%;padding:var(--s-3);background:var(--void);border:1px solid var(--rule-strong);color:var(--cream);font-family:var(--font-ui);font-size:15px;line-height:1.6;resize:vertical"></textarea>
+            </div>
+            <div style="display:flex;flex-wrap:wrap;gap:var(--s-3);align-items:center">
+              <button type="button" data-btn="1" onClick="{{ goSession }}" style="padding:13px 24px;background:var(--cyan);color:var(--void);font-weight:800;font-size:15px;box-shadow:5px 5px 0 var(--deepblue)">raise the curtain</button>
+              <button type="button" data-btn="1" onClick="{{ goSessions }}" style="padding:12px 22px;border:1px solid var(--rule-strong);color:var(--cream-dim);font-weight:600;font-size:15px">cancel</button>
+              <span style="font:var(--t-mono-label);color:var(--grey-deep)">{{ startNote }}</span>
+            </div>
+          </div>
+        </sc-if>
+
+        <!-- ---------- SESSION / CHAT ---------- -->
+        <sc-if value="{{ isSession }}" hint-placeholder-val="{{ true }}">
+          <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:var(--s-4) var(--s-6);border-bottom:1px solid var(--rule)">
+            <div style="flex:1 1 260px;min-width:0">
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-2);font:var(--t-mono-label);letter-spacing:.08em;color:var(--grey-dim)">
+                <span>REMOTE</span><span style="color:var(--grey-deep)">/</span>
+                <span>SALG</span><span style="color:var(--grey-deep)">/</span>
+                <span style="color:var(--cyan-text)">tilbud-skrivning</span><span style="color:var(--grey-deep)">/</span>
+                <span style="color:var(--grey-deep)">ses_8f21c4</span>
+                <span style="padding:2px 8px;border:1px solid var(--rule);color:var(--grey-deep)">TEAM</span>
+              </div>
+              <h1 style="margin:3px 0 0;font-size:22px;font-weight:900;letter-spacing:-.02em;color:var(--cream);overflow-wrap:break-word">Tilbud til Kolding Kommune</h1>
+            </div>
+            <div style="display:flex;align-items:center;gap:var(--s-2)">
+              <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--cyan);color:var(--cyan-text);font:var(--t-mono-label)">MS</span>
+              <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px solid var(--violet);color:var(--violet);font:var(--t-mono-label)">JB</span>
+              <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:1px dashed var(--grey-dim);color:var(--grey-dim);font:var(--t-mono-label)">SB</span>
+              <span style="font:var(--t-mono-label);color:var(--grey-dim);margin-left:var(--s-1)">3 HERE</span>
+            </div>
+          </div>
+
+          <div style="flex:1 1 auto;display:flex;flex-wrap:wrap;align-items:flex-start;min-height:0">
+
+            <div style="flex:3 1 380px;min-width:0;padding:var(--s-6);display:flex;flex-direction:column;gap:var(--s-6);max-width:78ch">
+
+              <div>
+                <div style="display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)">
+                  <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--cyan);color:var(--cyan-text);font:var(--t-mono-label)">MS</span>
+                  <span style="font-size:14px;font-weight:800;color:var(--cyan-text)">Mette Sørensen</span>
+                  <span style="font:var(--t-mono-label);color:var(--grey-deep)">TUE 09:14</span>
+                </div>
+                <p style="margin:0;padding:var(--s-3) var(--s-4);background:var(--pit);border-left:2px solid var(--cyan);font-size:15px;line-height:1.65;color:var(--cream-dim)">Skriv første udkast til tilbuddet til Kolding. Brug de to seneste tilbud som tonereference, og hold leverancerne på maks. to sider.</p>
+              </div>
+
+              <div>
+                <div style="display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)">
+                  <span style="font-size:14px;font-weight:800;color:var(--cream)">Troupe</span>
+                  <span style="font:var(--t-mono-label);color:var(--grey-deep)">TUE 09:14</span>
+                </div>
+                <div style="font-size:15px;line-height:1.65;color:var(--cream-dim)">
+                  <p style="margin:0 0 var(--s-3)">Jeg har læst de to seneste tilbud og Koldings digitaliseringsstrategi. Sådan arbejder jeg:</p>
+                  <ol style="margin:0 0 var(--s-3);padding-left:22px;display:flex;flex-direction:column;gap:5px">
+                    <li>Match tonen fra Randers og Vejle — korte sætninger, ingen fagudtryk.</li>
+                    <li>Genbrug leverancemodellen, men kort fase ét ned.</li>
+                    <li>Tjek hver pris mod 2026-taksterne, før jeg skriver den.</li>
+                  </ol>
+                  <p style="margin:0">Jeg spørger dig, før jeg ændrer en fil.</p>
+                </div>
+              </div>
+
+              <button type="button" onClick="{{ toggleTool }}" aria-expanded="{{ toolExpanded }}" style="text-align:left;background:var(--void);border:1px solid var(--rule);padding:10px var(--s-3);display:flex;align-items:center;gap:var(--s-3);font-family:var(--font-mono);font-size:13px;color:var(--grey-dim)">
+                <span aria-hidden="true">{{ toolCaret }}</span>
+                <span style="color:var(--cyan-text)">read</span>
+                <span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">4 files in tilbud/</span>
+                <span style="color:var(--grey-deep)">1.2s</span>
+              </button>
+              <sc-if value="{{ toolOpen }}" hint-placeholder-val="{{ false }}">
+                <div style="margin-top:-18px;background:var(--void);border:1px solid var(--rule);border-top:0;padding:var(--s-3);font-family:var(--font-mono);font-size:12px;line-height:1.7;color:var(--grey)">
+                  tilbud/randers-selvbetjening.md — 1 842 ord<br />tilbud/vejle-borgerpanel.md — 2 311 ord<br />tilbud/skabelon-2026.md — 640 ord<br />tilbud/kolding-borgerservice.md — 118 ord
+                </div>
+              </sc-if>
+
+              <div>
+                <div style="display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)">
+                  <span aria-hidden="true" style="display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border:1px solid var(--violet);color:var(--violet);font:var(--t-mono-label)">JB</span>
+                  <span style="font-size:14px;font-weight:800;color:var(--violet)">Jonas Bak</span>
+                  <span style="font:var(--t-mono-label);color:var(--grey-deep)">YESTERDAY 16:02</span>
+                </div>
+                <p style="margin:0;padding:var(--s-3) var(--s-4);background:var(--pit);border-left:2px solid var(--violet);font-size:15px;line-height:1.65;color:var(--cream-dim)">Kolding har bedt om en tidligere prototype. Kan vi nå seks uger?</p>
+              </div>
+
+              <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:9px var(--s-3);border:1px solid var(--cyan-line);font:var(--t-mono-label);color:var(--cyan-text)">
+                <span aria-hidden="true">✓</span><span>ALLOWED BY METTE — created research/rate-card-2026.md</span><span style="margin-left:auto;color:var(--grey-deep)">16:20</span>
+              </div>
+
+              <sc-if value="{{ streaming }}" hint-placeholder-val="{{ true }}">
+                <div>
+                  <div style="display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)">
+                    <span style="font-size:14px;font-weight:800;color:var(--cream)">Troupe</span>
+                    <span style="display:inline-flex;align-items:center;gap:6px;font:var(--t-mono-label);color:var(--cyan-text)"><span style="width:6px;height:6px;background:currentColor;animation:ag-pulse 2.2s ease infinite"></span>WRITING</span>
+                  </div>
+                  <div aria-live="polite" style="font-size:15px;line-height:1.65;color:var(--cream-dim)">{{ streamText }}<span aria-hidden="true" style="display:inline-block;width:8px;height:1.05em;margin-left:2px;vertical-align:-2px;background:var(--cyan);animation:ag-caret 1s steps(1) infinite"></span></div>
+                </div>
+              </sc-if>
+
+              <sc-if value="{{ hasRecord }}" hint-placeholder-val="{{ false }}">
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:9px var(--s-3);font:var(--t-mono-label);border:1px solid {{ recBd }};color:{{ recFg }}">
+                  <span aria-hidden="true">{{ recGlyph }}</span><span>{{ recText }}</span><span style="margin-left:auto;color:var(--grey-deep)">JUST NOW</span>
+                </div>
+              </sc-if>
+
+              <sc-for list="{{ queued }}" as="q" hint-placeholder-count="0">
+                <div>
+                  <div style="display:flex;align-items:baseline;gap:var(--s-3);margin-bottom:var(--s-2)">
+                    <span style="font-size:14px;font-weight:800;color:var(--grey)">You</span>
+                    <span style="font:var(--t-mono-label);color:var(--amber-text);border:1px solid var(--amber-line);padding:2px 8px">QUEUED</span>
+                  </div>
+                  <p style="margin:0;padding:var(--s-3) var(--s-4);background:var(--pit);border-left:2px dashed var(--amber-line);font-size:15px;line-height:1.65;color:var(--grey)">{{ q.text }}</p>
+                </div>
+              </sc-for>
+
+              <!-- APPROVAL -->
+              <sc-if value="{{ approvalOpen }}" hint-placeholder-val="{{ true }}">
+                <section role="region" data-approval="1" aria-labelledby="ag-ap" style="position:sticky;bottom:var(--s-3);max-height:72vh;overflow-y:auto;background:var(--riser);border:1px solid var(--pink);border-top:4px solid var(--pink);box-shadow:0 -14px 40px rgba(255,0,128,.14)">
+                  <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);padding:var(--s-4) var(--s-4) var(--s-3)">
+                    <svg width="28" height="28" viewBox="0 0 44 44" aria-hidden="true" style="display:block;flex:0 0 auto;color:var(--pink);animation:ag-pulse 2.2s ease infinite">
+                      <path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="currentColor"></path>
+                      <path d="M15.8 21.4 Q18.4 19.2 21 21.4 Q18.4 23.6 15.8 21.4 Z" fill="var(--riser)"></path>
+                      <path d="M23 21.4 Q25.6 19.2 28.2 21.4 Q25.6 23.6 23 21.4 Z" fill="var(--riser)"></path>
+                    </svg>
+                    <span style="font:var(--t-mono-label);letter-spacing:.1em;background:var(--pink);color:var(--void);padding:3px 9px">NEEDS YOU</span>
+                    <h2 id="ag-ap" style="margin:0;flex:1 1 180px;min-width:0;font-size:22px;font-weight:900;letter-spacing:-.02em;color:var(--cream)">Change a file?</h2>
+                    <span style="font:var(--t-mono-label);color:var(--grey-deep)">STOPPED 12s AGO</span>
+                  </div>
+                  <p style="margin:0;padding:0 var(--s-4) var(--s-3);font-size:15px;line-height:1.6;color:var(--grey)">Draft wants to rewrite the delivery section so the prototype lands after six weeks instead of eight.</p>
+                  <div style="margin:0 var(--s-4);background:var(--void);border:1px solid var(--rule);font-family:var(--font-mono);font-size:12px;line-height:1.6;overflow:auto;max-height:30vh">
+                    <div style="padding:5px var(--s-3);border-bottom:1px solid var(--rule);color:var(--grey-dim)">tilbud/kolding-borgerservice.md <span style="color:var(--cyan-text)">+3</span> <span style="color:var(--clay)">−1</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);color:var(--grey)"><span aria-hidden="true" style="width:1ch">&nbsp;</span><span>Vi arbejder i to faser.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:rgba(255,126,110,.12);color:var(--clay);border-left:3px solid var(--clay-line)"><span aria-hidden="true" style="width:1ch">−</span><span>Første prototype leveres otte uger efter opstart.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3);background:rgba(0,220,220,.10);color:var(--cyan-text);border-left:3px solid var(--cyan-line)"><span aria-hidden="true" style="width:1ch">+</span><span>Første prototype leveres seks uger efter opstart.</span></div>
+                    <div style="display:flex;gap:var(--s-3);padding:0 var(--s-3) 5px;background:rgba(0,220,220,.10);color:var(--cyan-text);border-left:3px solid var(--cyan-line)"><span aria-hidden="true" style="width:1ch">+</span><span>Prototypen testes med fire borgere inden overdragelse.</span></div>
+                  </div>
+                  <div style="display:flex;flex-wrap:wrap;gap:var(--s-2);padding:var(--s-4)">
+                    <button type="button" data-btn="1" onClick="{{ allow }}" style="flex:1 1 150px;min-height:46px;padding:0 var(--s-5);background:var(--pink);color:var(--void);font-weight:800;font-size:15px;box-shadow:4px 4px 0 var(--deepblue)">Allow <span style="opacity:.6;font-family:var(--font-mono);font-size:12px">A</span></button>
+                    <button type="button" data-btn="1" onClick="{{ deny }}" style="flex:1 1 120px;min-height:46px;padding:0 var(--s-5);border:1px solid var(--rule-strong);color:var(--cream-dim);font-weight:600;font-size:15px">Deny <span style="opacity:.6;font-family:var(--font-mono);font-size:12px">D</span></button>
+                    <button type="button" data-btn="1" onClick="{{ allowAll }}" style="flex:1 1 100%;min-height:44px;padding:0 var(--s-5);border:1px solid var(--rule);color:var(--grey);font-size:14px">Allow every file change for this session</button>
+                  </div>
+                  <p style="margin:0;padding:0 var(--s-4) var(--s-4);font:var(--t-mono-label);color:var(--grey-deep)">METTE AND JONAS CAN ANSWER THIS TOO · FIRST ANSWER COUNTS</p>
+                </section>
+              </sc-if>
+
+              <!-- COMPOSER -->
+              <div style="background:var(--pit);border:1px solid var(--rule-strong);padding:var(--s-3)">
+                <label for="ag-msg" style="display:block;font:var(--t-mono-label);color:var(--grey-deep);letter-spacing:.06em;margin-bottom:var(--s-2)">{{ composerHint }}</label>
+                <textarea id="ag-msg" ref="{{ msgRef }}" rows="2" placeholder="Write to the troupe" style="width:100%;padding:var(--s-3);background:var(--void);border:1px solid var(--rule);color:var(--cream);font-family:var(--font-ui);font-size:15px;line-height:1.6;resize:vertical"></textarea>
+                <div style="display:flex;flex-wrap:wrap;align-items:center;gap:var(--s-3);margin-top:var(--s-2)">
+                  <span style="font:var(--t-mono-label);color:var(--grey-deep)">METTE AND JONAS SEE WHAT YOU SEND</span>
+                  <button type="button" data-btn="1" onClick="{{ send }}" style="margin-left:auto;min-height:42px;padding:0 var(--s-5);background:var(--cream-dim);color:var(--void);font-weight:800;font-size:14px">{{ sendLabel }}</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- BACKSTAGE -->
+            <aside aria-label="Backstage" style="flex:1 1 280px;min-width:0;max-width:380px;border-left:1px solid var(--rule);align-self:stretch;padding:var(--s-6) var(--s-5);display:flex;flex-direction:column;gap:var(--s-6)">
+              <div>
+                <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;border-bottom:1px solid var(--rule);padding-bottom:5px;margin-bottom:var(--s-3)">// THE COMPANY</div>
+                <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s-3);font-size:14px">
+                  <li style="display:flex;align-items:center;gap:var(--s-3)">
+                    <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto;color:var(--cyan)"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"></path><circle cx="18.4" cy="21.4" r="1.9" fill="currentColor"></circle><circle cx="25.6" cy="21.4" r="1.9" fill="currentColor"></circle></svg>
+                    <span style="color:var(--cream)">Lead</span><span style="margin-left:auto;font:var(--t-mono-label);color:var(--grey-deep)">PLAN</span>
+                  </li>
+                  <li style="display:flex;align-items:center;gap:var(--s-3);padding-left:var(--s-4);border-left:1px solid var(--rule);margin-left:9px">
+                    <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto;color:var(--cyan)"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linejoin="round"></path><circle cx="18.4" cy="21.4" r="1.9" fill="currentColor"></circle><circle cx="25.6" cy="21.4" r="1.9" fill="currentColor"></circle></svg>
+                    <span style="color:var(--cream)">Research</span><span style="margin-left:auto;font:var(--t-mono-label);color:var(--grey-deep)">RATE CARD</span>
+                  </li>
+                  <li style="display:flex;align-items:center;gap:var(--s-3);padding-left:var(--s-4);border-left:1px solid var(--rule);margin-left:9px">
+                    <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto;color:var(--pink);animation:ag-pulse 2.2s ease infinite"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="currentColor"></path><path d="M15.8 21.4 Q18.4 19.2 21 21.4 Q18.4 23.6 15.8 21.4 Z" fill="var(--void)"></path><path d="M23 21.4 Q25.6 19.2 28.2 21.4 Q25.6 23.6 23 21.4 Z" fill="var(--void)"></path></svg>
+                    <span style="color:var(--cream)">Draft</span><span style="margin-left:auto;font:var(--t-mono-label);color:var(--pink)">NEEDS YOU</span>
+                  </li>
+                  <li style="display:flex;align-items:center;gap:var(--s-3);padding-left:var(--s-4);border-left:1px solid var(--rule);margin-left:9px;color:var(--grey-deep)">
+                    <svg width="20" height="20" viewBox="0 0 44 44" aria-hidden="true" style="flex:0 0 auto"><path d="M13 18 Q13 12 22 12 Q31 12 31 18 L31 24 Q31 30 22 35 Q13 30 13 24 Z" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" opacity=".7"></path><path d="M16.4 21.6 Q18.4 23.2 20.4 21.6 M23.6 21.6 Q25.6 23.2 27.6 21.6" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"></path></svg>
+                    <span>Proofreading</span><span style="margin-left:auto;font:var(--t-mono-label)">IDLE</span>
+                  </li>
+                </ul>
+              </div>
+
+              <div>
+                <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;border-bottom:1px solid var(--rule);padding-bottom:5px;margin-bottom:var(--s-3)">// RUNNING ORDER</div>
+                <ol style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s-2);font-size:14px">
+                  <li style="display:flex;gap:var(--s-3);color:var(--grey-deep)"><span aria-hidden="true" style="color:var(--cyan)">✓</span><span style="text-decoration:line-through">Read the three most recent tilbud</span></li>
+                  <li style="display:flex;gap:var(--s-3);color:var(--cream);background:var(--pit);border-left:3px solid var(--pink);padding:var(--s-2) var(--s-3)"><span aria-hidden="true" style="color:var(--pink)">▸</span><span>Write Leverance og tidsplan<span style="display:block;font:var(--t-mono-label);color:var(--pink);margin-top:3px">IN PROGRESS</span></span></li>
+                  <li style="display:flex;gap:var(--s-3);color:var(--grey)"><span aria-hidden="true" style="color:var(--grey-deep)">○</span><span>Check every price against the 2026 rate card</span></li>
+                  <li style="display:flex;gap:var(--s-3);color:var(--grey)"><span aria-hidden="true" style="color:var(--grey-deep)">○</span><span>Export to PDF and hand it to Mette</span></li>
+                </ol>
+              </div>
+
+              <div>
+                <div style="font:var(--t-screen);color:var(--cyan-text);letter-spacing:.14em;border-bottom:1px solid var(--rule);padding-bottom:5px;margin-bottom:var(--s-3)">// FILES · 18</div>
+                <ul style="list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:var(--s-2);font-family:var(--font-mono);font-size:12px">
+                  <li style="display:flex;gap:var(--s-3);align-items:center"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cream-dim)">tilbud/kolding-borgerservice.md</span><span style="color:var(--pink);flex:0 0 auto">WAITING</span></li>
+                  <li style="display:flex;gap:var(--s-3);align-items:center"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cream-dim)">research/rate-card-2026.md</span><span style="color:var(--cyan-text);flex:0 0 auto">NEW</span></li>
+                  <li style="display:flex;gap:var(--s-3);align-items:center"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--cream-dim)">research/kolding-strategi.md</span><span style="color:var(--cyan-text);flex:0 0 auto">NEW</span></li>
+                  <li style="display:flex;gap:var(--s-3);align-items:center;color:var(--grey-deep)"><span style="flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">noter/spørgsmål-til-mette.md</span><span style="flex:0 0 auto">2D</span></li>
+                </ul>
+              </div>
+            </aside>
+          </div>
+        </sc-if>
+      </div>
+    </div>
+  </sc-if>
+</div>
+
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props="{&quot;$preview&quot;:{&quot;width&quot;:1280,&quot;height&quot;:900}}">
+const STREAM = "Jeg har nu skrevet afsnittet om leverance og tidsplan. Sætningerne er korte, og jeg har fjernet fagudtryk, som Kolding ikke bruger selv. Prisen på fase to stemmer med 2026-taksterne.";
+
+const TEAMS = [
+  { team:"Salg", note:"6 people · you are a member", profiles:[
+    { profile:"tilbud-skrivning", reach:"SharePoint Tilbud · CRM · rate card 2026", sessions:[
+      { title:"Tilbud til Kolding Kommune — digital borgerservice", sub:"Mette Sørensen · wants to change a file", state:"NEEDS YOU", when:"NOW", kind:"waiting", vis:"public" },
+      { title:"Prisforhandling — Vejle forlængelse", sub:"Mette Sørensen · shared with you and Lars", state:"ASLEEP", when:"4 D", kind:"asleep", vis:"private" }
+    ]},
+    { profile:"research-let", reach:"Web search only", sessions:[
+      { title:"Konkurrentoverblik — nordiske HR-platforme", sub:"Amira Haddad · reading 14 sources", state:"RUNNING", when:"3 MIN", kind:"running", vis:"public" }
+    ]}
+  ]},
+  { team:"Design", note:"11 people · you are a member", profiles:[
+    { profile:"design-docs", reach:"Figma · SharePoint Design · web search", sessions:[
+      { title:"Feltinterviews — Aarhus Vand", sub:"Jonas Bak · writing the interview guide", state:"RUNNING", when:"NOW", kind:"running", vis:"public" },
+      { title:"Onboarding-mails, dansk og engelsk", sub:"You · 18 files, 4 people", state:"ASLEEP", when:"6 D", kind:"asleep", vis:"public" }
+    ]}
+  ]},
+  { team:"Consulting", note:"24 people · you can read", profiles:[
+    { profile:"udbud", reach:"SharePoint Projekter · Jira", sessions:[
+      { title:"Udbudsmateriale — Region Midtjylland", sub:"Lars Vestergaard · you can read this one", state:"READ ONLY", when:"11 D", kind:"readonly", vis:"public" }
+    ]}
+  ]}
+];
+
+const LOCAL = [
+  { title:"Regnskabsafstemning Q3", sub:"~/Desktop/regnskab-q3 · 42 files", state:"NEEDS YOU", when:"41 MIN", kind:"waiting" },
+  { title:"Ryd op i kundelisten", sub:"~/Downloads/kunder.xlsx", state:"RUNNING", when:"NOW", kind:"running" },
+  { title:"Mine noter til MUS-samtaler", sub:"~/Documents/mus-2026 · private", state:"STOPPED", when:"2 D", kind:"stopped" }
+];
+
+const STYLE = {
+  waiting:  { mark:"var(--pink)",      fill:"var(--pink)",   eye:"var(--void)",  fg:"var(--void)",       bg:"var(--pink)",       bd:"var(--pink)",        row:"rgba(255,0,128,.07)" },
+  running:  { mark:"var(--cyan)",      fill:"none",          eye:"var(--cyan)",  fg:"var(--cyan-text)",  bg:"transparent",       bd:"var(--cyan-line)",   row:"transparent" },
+  asleep:   { mark:"var(--violet)",    fill:"none",          eye:"var(--violet)",fg:"var(--violet)",     bg:"transparent",       bd:"var(--violet-line)", row:"transparent" },
+  readonly: { mark:"var(--grey-deep)", fill:"none",          eye:"var(--grey-dim)",fg:"var(--grey-dim)", bg:"transparent",       bd:"var(--rule-strong)", row:"transparent" },
+  stopped:  { mark:"var(--grey-deep)", fill:"none",          eye:"var(--grey-dim)",fg:"var(--grey-dim)", bg:"transparent",       bd:"var(--rule-strong)", row:"transparent" }
+};
+
+class Component extends DCLogic {
+  state = { screen:'launcher', filter:'all', where:'remote', team:'Salg', vis:'public', tool:false, stream:'', queued:[], record:null };
+  msgRef = React.createRef();
+
+  componentDidMount() {
+    this.onKey = (e) => {
+      const t = e.target;
+      if (t && (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable)) return;
+      if (this.state.screen !== 'session' || this.state.record) return;
+      const k = e.key.toLowerCase();
+      if (k === 'a') { e.preventDefault(); this.answer('allowed'); }
+      if (k === 'd') { e.preventDefault(); this.answer('denied'); }
+    };
+    document.addEventListener('keydown', this.onKey);
+    this.runStream();
+  }
+  componentWillUnmount() { document.removeEventListener('keydown', this.onKey); clearInterval(this.timer); }
+
+  runStream() {
+    clearInterval(this.timer);
+    const words = STREAM.split(' ');
+    let i = 0;
+    this.setState({ stream: '' });
+    this.timer = setInterval(() => {
+      i += 1;
+      this.setState({ stream: words.slice(0, i).join(' ') });
+      if (i >= words.length) clearInterval(this.timer);
+    }, 95);
+  }
+
+  answer(kind) {
+    const map = {
+      allowed: { text:'ALLOWED BY YOU — changed tilbud/kolding-borgerservice.md', glyph:'✓', fg:'var(--cyan-text)', bd:'var(--cyan-line)' },
+      denied:  { text:'DENIED BY YOU — the file was not changed. The troupe will suggest something else.', glyph:'×', fg:'var(--clay)', bd:'var(--clay-line)' },
+      all:     { text:'ALLOWED FOR THIS SESSION BY YOU — file changes will not stop again here', glyph:'✓', fg:'var(--cyan-text)', bd:'var(--cyan-line)' }
+    };
+    this.setState({ record: map[kind] });
+  }
+
+  rows(list) {
+    return list.map((s) => {
+      const st = STYLE[s.kind];
+      const priv = s.vis === 'private';
+      return {
+        title:s.title, sub:s.sub, state:s.state, when:s.when,
+        mark:st.mark, maskFill:st.fill, eye:st.eye,
+        pillFg:st.fg, pillBg:st.bg, pillBd:st.bd, rowBg:st.row,
+        vis: priv ? 'PRIVATE' : 'TEAM',
+        visFg: priv ? 'var(--violet)' : 'var(--grey-deep)',
+        visBd: priv ? 'var(--violet-line)' : 'var(--rule)',
+        hasVis: !!s.vis,
+        open: () => { this.setState({ screen:'session', record:null }); this.runStream(); }
+      };
+    });
+  }
+
+  renderVals() {
+    const s = this.state;
+    const rec = s.record;
+    const remote = s.where === 'remote';
+    return {
+      isLauncher: s.screen === 'launcher',
+      inApp: s.screen !== 'launcher',
+      isSessions: s.screen === 'sessions',
+      isSession: s.screen === 'session',
+      isNew: s.screen === 'new',
+      nSessions: s.screen === 'sessions' ? 'page' : 'false',
+      nSession: s.screen === 'session' ? 'page' : 'false',
+      goLauncher: () => this.setState({ screen:'launcher' }),
+      goSessions: () => this.setState({ screen:'sessions' }),
+      goSession: () => { this.setState({ screen:'session', record:null }); this.runStream(); },
+      goNew: () => this.setState({ screen:'new' }),
+
+      fAll: s.filter === 'all' ? 'true' : 'false',
+      fRemote: s.filter === 'remote' ? 'true' : 'false',
+      fLocal: s.filter === 'local' ? 'true' : 'false',
+      filtAll: () => this.setState({ filter:'all' }),
+      filtRemote: () => this.setState({ filter:'remote' }),
+      filtLocal: () => this.setState({ filter:'local' }),
+      showRemote: s.filter !== 'local',
+      showLocal: s.filter !== 'remote',
+      filterNote: s.filter === 'local' ? 'NOTHING HERE LEAVES THIS MACHINE' : 'SORTED BY WHAT NEEDS YOU',
+      teams: TEAMS.map((t) => ({
+        team: t.team,
+        note: t.note,
+        profiles: t.profiles.map((p) => ({
+          profile: p.profile,
+          reach: p.reach,
+          count: p.sessions.length + (p.sessions.length === 1 ? ' session' : ' sessions'),
+          sessions: this.rows(p.sessions)
+        }))
+      })),
+      local: this.rows(LOCAL),
+
+      pickRemote: () => this.setState({ where:'remote' }),
+      pickLocal: () => this.setState({ where:'local' }),
+      remoteBd: remote ? 'var(--cyan)' : 'var(--rule-strong)',
+      remoteBg: remote ? 'rgba(0,220,220,.08)' : 'var(--riser)',
+      localBd: remote ? 'var(--rule-strong)' : 'var(--amber)',
+      localBg: remote ? 'var(--riser)' : 'rgba(255,180,61,.08)',
+      startNote: remote ? 'STARTING TAKES ABOUT TWENTY SECONDS' : 'STARTS IMMEDIATELY · NOTHING UPLOADS',
+
+      wantRemote: remote,
+      team: s.team,
+      pickTeam: (e) => this.setState({ team: e.target.value }),
+      profiles: ((TEAMS.filter((t) => t.team === s.team)[0] || TEAMS[0]).profiles).map((p) => ({ name: p.profile })),
+      profileName: (TEAMS.filter((t) => t.team === s.team)[0] || TEAMS[0]).profiles[0].profile,
+      profileReach: (TEAMS.filter((t) => t.team === s.team)[0] || TEAMS[0]).profiles[0].reach,
+      isPublic: s.vis === 'public' ? 'true' : 'false',
+      isPrivate: s.vis === 'private' ? 'true' : 'false',
+      pickPublic: () => this.setState({ vis:'public' }),
+      pickPrivate: () => this.setState({ vis:'private' }),
+      publicBd: s.vis === 'public' ? 'var(--cyan)' : 'var(--rule-strong)',
+      publicBg: s.vis === 'public' ? 'rgba(0,220,220,.08)' : 'var(--riser)',
+      privateBd: s.vis === 'private' ? 'var(--violet)' : 'var(--rule-strong)',
+      privateBg: s.vis === 'private' ? 'rgba(156,139,255,.10)' : 'var(--riser)',
+
+
+      toolOpen: s.tool,
+      toolExpanded: s.tool ? 'true' : 'false',
+      toolCaret: s.tool ? '▾' : '▸',
+      toggleTool: () => this.setState({ tool: !s.tool }),
+
+      streaming: true,
+      streamText: s.stream,
+      approvalOpen: !rec,
+      allow: () => this.answer('allowed'),
+      deny: () => this.answer('denied'),
+      allowAll: () => this.answer('all'),
+      hasRecord: !!rec,
+      recText: rec ? rec.text : '',
+      recGlyph: rec ? rec.glyph : '',
+      recFg: rec ? rec.fg : '',
+      recBd: rec ? rec.bd : '',
+
+      queued: s.queued,
+      composerHint: 'THE TROUPE IS WORKING · WHAT YOU SEND IS QUEUED',
+      sendLabel: 'Queue',
+      msgRef: this.msgRef,
+      send: () => {
+        const el = this.msgRef.current;
+        const text = el && el.value.trim() ? el.value.trim() : 'Husk at nævne, at vi kan starte 1. oktober.';
+        if (el) el.value = '';
+        this.setState({ queued: s.queued.concat([{ text: text }]) });
+      }
+    };
+  }
+}
+
+</script>
+</body>
+</html>

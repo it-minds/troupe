@@ -1,362 +1,364 @@
 {
   "$meta": {
-    "name": "Troupe — Limelight",
-    "id": "limelight",
+    "name": "Troupe — Afterglow",
+    "id": "afterglow",
     "version": "1.0.0",
-    "default": false,
-    "description": "Warm ink grounds — smoked oak and auditorium dark — with attention carried by limelight, the pale greenish-white of burning quicklime.",
-    "reservedColour": "status.waiting — limelight #CBEA5C / #6E7F12. Always takes dark text when filled.",
-    "defaultMode": "dark"
+    "default": true,
+    "description": "Void and pit under cream, and two lights on it: pink is you being asked, cyan is the machine working. The stage after the house lights go down.",
+    "reservedColour": "status.waiting — pink #FF0080 / #C4005F. Afterglow also spends it as the brand's accent: the mask's lit half, links and the current nav item. Denied and error are clay so they never read as the reserved colour.",
+    "defaultMode": "dark",
+    "source": "../afterglow.dc.html is the comp, and it is dark only. The dark values are its custom properties (the oklch cyan and amber converted to sRGB); the light values are derived from them: the ground inverts to cream and every accent darkens until it clears the same contrast floor as the other themes."
   },
   "$themeContract": "Every colour token carries a dark and a light value under one semantic name. Components read the name, never a hex. All four Troupe themes expose exactly this token set — swapping a theme swaps values only. A theme that needs a new token name is a redesign, not a theme.",
   "color": {
     "bg": {
       "stage": {
-        "dark": "#0B0A08",
-        "light": "#DED9CC"
+        "dark": "#0B0B12",
+        "light": "#E9E0CB"
       },
       "canvas": {
-        "dark": "#12110D",
-        "light": "#EFEADD"
+        "dark": "#0B0B12",
+        "light": "#F4ECDB"
       },
       "panel": {
-        "dark": "#1A1813",
-        "light": "#FAF6EC"
+        "dark": "#12121C",
+        "light": "#FAF5EA"
       },
       "raised": {
-        "dark": "#23201A",
-        "light": "#FFFDF7"
+        "dark": "#1C1C2B",
+        "light": "#FFFCF4"
       },
       "sunken": {
-        "dark": "#0C0B08",
-        "light": "#E4DECF"
+        "dark": "#0B0B12",
+        "light": "#ECE3CF"
       },
       "hover": {
-        "dark": "#2C2921",
-        "light": "#E7E1D1"
+        "dark": "#1C1C2B",
+        "light": "#ECE3CF"
       },
       "selected": {
-        "dark": "#262318",
-        "light": "#E9E4CF"
+        "dark": "#242436",
+        "light": "#E3D9C1"
       },
       "scrim": {
-        "dark": "rgba(6,5,3,0.70)",
-        "light": "rgba(24,20,12,0.42)"
+        "dark": "rgba(11,11,18,0.72)",
+        "light": "rgba(11,11,18,0.44)"
       },
       "shadow": {
-        "dark": "#0B0A08",
-        "light": "#DED9CC",
-        "description": "The one hard shadow: a flat block offset under a tile or a primary button. The stage colour, so it reads as depth rather than as a second colour."
+        "dark": "#000353",
+        "light": "#000353",
+        "description": "The one hard shadow: a flat block offset down and right under a tile or a primary button, never blurred. The offset is the component's; this is its colour."
       }
     },
     "text": {
       "primary": {
-        "dark": "#F1ECE0",
-        "light": "#14120C"
+        "dark": "#F4ECDB",
+        "light": "#0B0B12"
       },
       "body": {
-        "dark": "#F1ECE0",
-        "light": "#14120C",
-        "description": "Long-form reading. The same as primary here; Afterglow steps it down a shade."
+        "dark": "#E8DFD0",
+        "light": "#1C1C2B",
+        "description": "Long-form reading, a step below primary so the headings lead."
       },
       "secondary": {
-        "dark": "#C2BBA8",
-        "light": "#443F31"
+        "dark": "#A3A3B8",
+        "light": "#4A4A66"
       },
       "label": {
-        "dark": "#C2BBA8",
-        "light": "#443F31",
-        "description": "Form labels and the mono labels that name a region."
+        "dark": "#8A8AA0",
+        "light": "#5A5A76",
+        "description": "Form labels, breadcrumbs and the mono labels that name a region."
       },
       "muted": {
-        "dark": "#8D8673",
-        "light": "#615B4A"
+        "dark": "#7B7B94",
+        "light": "#5F5F78",
+        "description": "The comp's grey-deep (#6A6A82) lifted a step: at 3.7:1 on the void it was under the floor every theme is held to."
       },
       "inverse": {
-        "dark": "#0B0A08",
-        "light": "#FFFDF7"
+        "dark": "#0B0B12",
+        "light": "#FBF7EE"
       },
       "link": {
-        "dark": "#93B7E0",
-        "light": "#1F4F86"
+        "dark": "#FF0080",
+        "light": "#C4005F"
       },
       "linkHover": {
-        "dark": "#BCD5EE",
-        "light": "#123458"
+        "dark": "#FF4DA6",
+        "light": "#A3004F"
       }
     },
     "accent": {
-      "dark": "#93B7E0",
-      "light": "#1F4F86",
-      "description": "The brand where it is not a status: the current nav item's edge. The link blue, because the reserved colour here means waiting and nothing else."
+      "dark": "#FF0080",
+      "light": "#C4005F",
+      "description": "The brand where it is not a status: the current nav item's edge. Afterglow spends its reserved pink here; the other themes keep their reserved colour for waiting alone and use their link blue."
     },
     "border": {
       "hairline": {
-        "dark": "#2D2A21",
-        "light": "#CCC5B2"
+        "dark": "rgba(232,223,208,0.18)",
+        "light": "rgba(11,11,18,0.18)"
       },
       "strong": {
-        "dark": "#4A4534",
-        "light": "#9A927C"
+        "dark": "rgba(232,223,208,0.42)",
+        "light": "rgba(11,11,18,0.42)"
       },
       "focus": {
-        "dark": "#DCF470",
-        "light": "#454F05"
+        "dark": "#00C6C9",
+        "light": "#007A7C"
       },
       "divider": {
-        "dark": "#211F18",
-        "light": "#DBD5C4"
+        "dark": "rgba(232,223,208,0.18)",
+        "light": "rgba(11,11,18,0.18)"
       }
     },
     "status": {
       "running": {
-        "description": "An agent is working right now.",
+        "description": "An agent is working right now. Cyan: the machine's colour.",
         "fg": {
-          "dark": "#74BCCA",
-          "light": "#14565F"
+          "dark": "#00DBD3",
+          "light": "#006466"
         },
         "solid": {
-          "dark": "#74BCCA",
-          "light": "#14565F"
+          "dark": "#00C6C9",
+          "light": "#007779"
         },
         "bg": {
-          "dark": "#0D2127",
-          "light": "#D9EDF0"
+          "dark": "rgba(0,220,220,0.10)",
+          "light": "rgba(0,134,135,0.10)"
         },
         "border": {
-          "dark": "#215058",
-          "light": "#8AC0C8"
+          "dark": "#008687",
+          "light": "#4FB0B1"
         }
       },
       "waiting": {
         "description": "Stopped, waiting for a human decision. The reserved colour.",
         "fg": {
-          "dark": "#DCF470",
-          "light": "#454F05"
+          "dark": "#FF0080",
+          "light": "#C4005F"
         },
         "solid": {
-          "dark": "#CBEA5C",
-          "light": "#6E7F12"
+          "dark": "#FF0080",
+          "light": "#C4005F"
         },
         "bg": {
-          "dark": "#242B0D",
-          "light": "#EEF4C7"
+          "dark": "rgba(255,0,128,0.07)",
+          "light": "rgba(196,0,95,0.07)"
         },
         "border": {
-          "dark": "#65781A",
-          "light": "#A8BC3C"
+          "dark": "#FF0080",
+          "light": "#C4005F"
         }
       },
       "queued": {
-        "description": "Accepted but not yet started.",
+        "description": "Accepted but not yet started, and the list's idle fallback. Quiet grey, like the comp's STOPPED: the comp's amber QUEUED pill on a held message has no token of its own yet.",
         "fg": {
-          "dark": "#A39B88",
-          "light": "#5A5444"
+          "dark": "#8A8AA0",
+          "light": "#5A5A76"
         },
         "bg": {
-          "dark": "#1B1913",
-          "light": "#E6E1D2"
+          "dark": "rgba(138,138,160,0.08)",
+          "light": "rgba(90,90,118,0.08)"
         },
         "border": {
-          "dark": "#38342A",
-          "light": "#BCB49E"
+          "dark": "rgba(232,223,208,0.42)",
+          "light": "rgba(11,11,18,0.42)"
         }
       },
       "local": {
-        "description": "Runs on this machine and never leaves it. Where a session runs is not a state in this theme, so it takes the neutral of queued.",
+        "description": "Runs on this machine and never leaves it. The comp's amber.",
         "fg": {
-          "dark": "#A39B88",
-          "light": "#5A5444"
+          "dark": "#FFBC56",
+          "light": "#7A4E00"
         },
         "bg": {
-          "dark": "#1B1913",
-          "light": "#E6E1D2"
+          "dark": "rgba(242,166,24,0.08)",
+          "light": "rgba(163,119,52,0.10)"
         },
         "border": {
-          "dark": "#38342A",
-          "light": "#BCB49E"
+          "dark": "#A37734",
+          "light": "#C48F3F"
         }
       },
       "allowed": {
-        "description": "Decision record: the action was permitted.",
+        "description": "Decision record: the action was permitted. The machine may go on, so it is the machine's cyan.",
         "fg": {
-          "dark": "#A9C48C",
-          "light": "#3B5820"
+          "dark": "#00DBD3",
+          "light": "#006466"
         },
         "bg": {
-          "dark": "#1C2415",
-          "light": "#E5EFD7"
+          "dark": "rgba(0,220,220,0.10)",
+          "light": "rgba(0,134,135,0.10)"
         },
         "border": {
-          "dark": "#3F5330",
-          "light": "#9CBE84"
+          "dark": "#008687",
+          "light": "#4FB0B1"
         }
       },
       "denied": {
-        "description": "Decision record: the action was refused. Not an error.",
+        "description": "Decision record: the action was refused. Clay, not the reserved pink and not the error red.",
         "fg": {
-          "dark": "#E38D6D",
-          "light": "#8A3418"
+          "dark": "#FF7E6E",
+          "light": "#8E2F1F"
         },
         "bg": {
-          "dark": "#2C170D",
-          "light": "#FAE2D8"
+          "dark": "rgba(255,126,110,0.12)",
+          "light": "rgba(126,54,40,0.10)"
         },
         "border": {
-          "dark": "#6E3A22",
-          "light": "#D79E84"
+          "dark": "#7E3628",
+          "light": "#C97A6A"
         }
       },
       "dormant": {
-        "description": "Session asleep. Costs nothing, wakes on the next message.",
+        "description": "Session asleep. Costs nothing, wakes on the next message. Violet.",
         "fg": {
-          "dark": "#AC9EC6",
-          "light": "#4E4478"
+          "dark": "#9C8BFF",
+          "light": "#4A3F86"
         },
         "bg": {
-          "dark": "#1C182A",
-          "light": "#E8E5F2"
+          "dark": "rgba(156,139,255,0.10)",
+          "light": "rgba(74,63,134,0.10)"
         },
         "border": {
-          "dark": "#3C3757",
-          "light": "#B0AAD4"
+          "dark": "#4A3F86",
+          "light": "#8C80C9"
         }
       },
       "readonly": {
         "description": "Access withdrawn or archived. Readable, not writable.",
         "fg": {
-          "dark": "#A59D8E",
-          "light": "#47433A"
+          "dark": "#8A8AA0",
+          "light": "#5A5A76"
         },
         "bg": {
-          "dark": "#16150F",
-          "light": "#E7E2D5"
+          "dark": "rgba(138,138,160,0.08)",
+          "light": "rgba(90,90,118,0.08)"
         },
         "border": {
-          "dark": "#322F26",
-          "light": "#B8B1A0"
+          "dark": "rgba(232,223,208,0.42)",
+          "light": "rgba(11,11,18,0.42)"
         }
       },
       "private": {
-        "description": "Session belongs to one person; nobody can be added.",
+        "description": "Session belongs to one person, or to the people invited to it. Violet, like asleep: a quiet state, not an alarming one.",
         "fg": {
-          "dark": "#A9B39A",
-          "light": "#3B4A36"
+          "dark": "#9C8BFF",
+          "light": "#4A3F86"
         },
         "bg": {
-          "dark": "#14160F",
-          "light": "#E6EADD"
+          "dark": "rgba(156,139,255,0.10)",
+          "light": "rgba(74,63,134,0.10)"
         },
         "border": {
-          "dark": "#32372A",
-          "light": "#AAB59E"
+          "dark": "#4A3F86",
+          "light": "#8C80C9"
         }
       },
       "error": {
-        "description": "Something failed. Reserved for failure, never for denial.",
+        "description": "Something failed. Reserved for failure, never for denial: hotter than clay.",
         "fg": {
-          "dark": "#FF7C5E",
-          "light": "#9E2010"
+          "dark": "#FF6A55",
+          "light": "#A5261A"
         },
         "bg": {
-          "dark": "#2C130C",
-          "light": "#FADFD9"
+          "dark": "rgba(255,106,85,0.12)",
+          "light": "rgba(165,38,26,0.10)"
         },
         "border": {
-          "dark": "#7E3826",
-          "light": "#DC9A8C"
+          "dark": "#8A3A2E",
+          "light": "#D4877B"
         }
       },
       "offline": {
-        "description": "Connection lost or platform unreachable.",
+        "description": "Connection lost or platform unreachable. A dimmer tan than the amber of queued.",
         "fg": {
-          "dark": "#CBAB70",
-          "light": "#5C4818"
+          "dark": "#C9B27A",
+          "light": "#5D4A1E"
         },
         "bg": {
-          "dark": "#211B10",
-          "light": "#EFE8D5"
+          "dark": "rgba(201,178,122,0.10)",
+          "light": "rgba(93,74,30,0.08)"
         },
         "border": {
-          "dark": "#4E4227",
-          "light": "#C3B392"
+          "dark": "#7A6A40",
+          "light": "#B9A578"
         }
       }
     },
     "diff": {
       "addedBg": {
-        "dark": "#1A2313",
-        "light": "#E4EFD6"
+        "dark": "rgba(0,220,220,0.10)",
+        "light": "rgba(0,134,135,0.10)"
       },
       "addedText": {
-        "dark": "#B6D898",
-        "light": "#31501A"
+        "dark": "#00DBD3",
+        "light": "#006466"
       },
       "addedMarker": {
-        "dark": "#4C6B33",
-        "light": "#5C8238"
+        "dark": "#008687",
+        "light": "#4FB0B1"
       },
       "removedBg": {
-        "dark": "#2C1810",
-        "light": "#FAE2D8"
+        "dark": "rgba(255,126,110,0.12)",
+        "light": "rgba(126,54,40,0.10)"
       },
       "removedText": {
-        "dark": "#EFA183",
-        "light": "#7E2F14"
+        "dark": "#FF7E6E",
+        "light": "#8E2F1F"
       },
       "removedMarker": {
-        "dark": "#8A472C",
-        "light": "#B05A32"
+        "dark": "#7E3628",
+        "light": "#C97A6A"
       },
       "contextText": {
-        "dark": "#A09884",
-        "light": "#4F4A3C"
+        "dark": "#A3A3B8",
+        "light": "#4A4A66"
       },
       "gutterBg": {
-        "dark": "#100F0A",
-        "light": "#E6E0D0"
+        "dark": "#0B0B12",
+        "light": "#ECE3CF"
       },
       "gutterText": {
-        "dark": "#6E6857",
-        "light": "#6B6553"
+        "dark": "#6A6A82",
+        "light": "#5F5F78"
       },
       "hunkHeader": {
-        "dark": "#8D8673",
-        "light": "#5C5644"
+        "dark": "#8A8AA0",
+        "light": "#5A5A76"
       }
     },
     "person": {
       "1": {
-        "dark": "#8FB8E6",
-        "light": "#1B5299"
+        "dark": "#00DBD3",
+        "light": "#006466"
       },
       "2": {
-        "dark": "#D6A3E2",
-        "light": "#61338F"
+        "dark": "#9C8BFF",
+        "light": "#4A3F86"
       },
       "3": {
-        "dark": "#86C9A6",
-        "light": "#0A6B55"
+        "dark": "#FFBC56",
+        "light": "#7A4E00"
       },
       "4": {
-        "dark": "#E79BB4",
-        "light": "#96306A"
+        "dark": "#FF7E6E",
+        "light": "#8E2F1F"
       },
       "5": {
-        "dark": "#7FC6D6",
-        "light": "#0B6076"
+        "dark": "#E29BFF",
+        "light": "#7A2E96"
       },
       "6": {
-        "dark": "#C7BE7A",
+        "dark": "#B6C36E",
         "light": "#4E5B10"
       },
       "self": {
-        "dark": "#B0A896",
-        "light": "#47433A"
+        "dark": "#8A8AA0",
+        "light": "#5A5A76"
       },
       "agent": {
-        "dark": "#D8D2C2",
-        "light": "#221F16"
+        "dark": "#F4ECDB",
+        "light": "#0B0B12"
       }
     }
   },
@@ -364,23 +366,23 @@
     "none": "none",
     "raise": {
       "dark": "0 1px 2px rgba(0,0,0,0.55)",
-      "light": "0 1px 2px rgba(24,20,12,0.10)",
+      "light": "0 1px 2px rgba(11,11,18,0.12)",
       "use": "Menus and chips only."
     },
     "sheet": {
       "dark": "0 -8px 28px rgba(0,0,0,0.6)",
-      "light": "0 -8px 28px rgba(24,20,12,0.16)",
+      "light": "0 -8px 28px rgba(11,11,18,0.16)",
       "use": "Bottom sheet and mobile backstage."
     },
     "overlay": {
-      "dark": "0 16px 48px rgba(0,0,0,0.66)",
-      "light": "0 16px 48px rgba(24,20,12,0.22)",
+      "dark": "0 16px 48px rgba(0,0,0,0.68)",
+      "light": "0 16px 48px rgba(11,11,18,0.22)",
       "use": "Dialogs."
     },
     "footlight": {
-      "dark": "0 -1px 0 #CBEA5C, 0 -14px 34px rgba(203,234,92,0.14)",
-      "light": "0 -1px 0 #6E7F12, 0 -14px 34px rgba(110,127,18,0.13)",
-      "use": "The approval panel only."
+      "dark": "0 -14px 40px rgba(255,0,128,0.14)",
+      "light": "0 -14px 40px rgba(196,0,95,0.14)",
+      "use": "The approval panel only. The panel's own pink edges are borders; this is the glow under them."
     }
   },
   "typography": {
