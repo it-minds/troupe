@@ -1,0 +1,59 @@
+# Every commit a pull request brings is signed off: a `Signed-off-by:` line naming the
+# commit's author, which is how its author certifies the Developer Certificate of Origin
+# (https://developercertificate.org). `git commit -s` writes it. CONTRIBUTING.md says what
+# it means and how to fix a branch that lacks it.
+#
+# Pull requests into `main` and into a `development-*` chunk. Merge commits are skipped:
+# they bring nothing of their own, and a sign-off on one would certify nobody's work.
+name: dco
+
+on:
+  pull_request:
+    branches: [main, "development-*"]
+
+concurrency:
+  group: dco-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The rule starts here. Everything committed before it - the whole history up to the
+  # licence, and a chunk's commits made before that day, which reach `main` in the chunk's
+  # own pull request - is unsigned, and certifying it now would be a sign-off in name only.
+  # Commits whose author date is before this are not checked.
+  DCO_FROM: "2026-09-27T00:00:00Z"
+
+jobs:
+  dco:
+    name: commits are signed off
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Every commit from the cutoff has its author's Signed-off-by
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          from=$(date -u -d "$DCO_FROM" +%s)
+          checked=0 missing=0
+          for sha in $(git rev-list --no-merges "$BASE..$HEAD"); do
+            [ "$(git show -s --format=%at "$sha")" -ge "$from" ] || continue
+            checked=$((checked + 1))
+            email=$(git show -s --format=%ae "$sha")
+            signers=$(git show -s --format='%(trailers:key=Signed-off-by,valueonly)' "$sha")
+            case "${signers,,}" in
+              *"<${email,,}>"*) ;;
+              *)
+                missing=$((missing + 1))
+                echo "::error::$(git show -s --format='%h %s (%an <%ae>)' "$sha") has no Signed-off-by from its author"
+                ;;
+            esac
+          done
+          echo "$checked commit(s) authored from $DCO_FROM checked, $missing without a sign-off"
+          if [ "$missing" -gt 0 ]; then
+            echo "Sign off with 'git commit -s'. For a branch: git rebase --signoff $BASE, then push it again."
+            exit 1
+          fi

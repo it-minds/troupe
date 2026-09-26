@@ -17,6 +17,7 @@ defmodule Troupe.Daemon.MixProject do
       elixir: "~> 1.20",
       start_permanent: Mix.env() == :prod,
       description: "The local daemon: the harness on a laptop, under the TUI and the GUI",
+      package: [licenses: ["Apache-2.0"]],
       deps: deps(),
       releases: releases()
     ]

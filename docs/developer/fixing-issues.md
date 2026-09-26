@@ -216,6 +216,8 @@ The machine is always left with a working install: the verified build or the pre
   session's listing says what it has actually spent" - not `fix: ...`.
 - **No attribution.** No `Co-Authored-By:` trailer, no "Generated with ..." line; the
   message ends at its last real line. Pull requests go out under the maintainer's name.
+- **Signed off.** `git commit -s`: the `Signed-off-by:` line is the DCO, which the `dco`
+  check requires ([CONTRIBUTING.md](../../CONTRIBUTING.md)), and the only trailer a commit has.
 - PowerShell files are pure ASCII: Windows PowerShell 5.1 reads UTF-8 without a BOM as
   ANSI, and an em dash becomes a parse error.
 - Never force-push (push a new branch name instead), never merge, never close the issue
