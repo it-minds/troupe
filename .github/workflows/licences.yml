@@ -4,8 +4,10 @@
 # line in a lock file that nobody reads. `scripts/licences.exs --check` reads every
 # package the two Mix locks, the GUI's pnpm workspace and the desktop app's Cargo.lock
 # name, refuses any licence its policy does not allow unless a person has recorded a
-# reviewed exception, and fails when `docs/third-party-licences.md` is no longer what the
-# locks say. The policy and how to record an exception are at the top of the script.
+# reviewed exception, and fails when `docs/third-party-licences.md`, the licence texts in
+# `THIRD-PARTY-NOTICES.txt` (which every release artifact carries) or the chart's copies
+# of LICENSE and NOTICE are no longer what the locks and the root say. The policy and how
+# to record an exception are at the top of the script.
 #
 # Every pull request, into `main`, a `development-*` chunk or anything else, and no path
 # filter: a workflow skipped by `paths:` leaves its check pending, and the answer is one

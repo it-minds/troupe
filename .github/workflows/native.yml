@@ -170,6 +170,7 @@ jobs:
           INST=$(mktemp -d); tar -xzf "$GITHUB_WORKSPACE/dist/${{ steps.art.outputs.name }}" -C "$INST"
           BIN="$INST/bin/troupe-daemon"
           ls "$INST"/lib/troupe_core-*/priv/reaper/
+          ls "$INST"/LICENSE "$INST"/NOTICE "$INST"/THIRD-PARTY-NOTICES.txt
           "$BIN" version
           "$BIN" status && exit 1 || echo "not running, as expected"
           "$BIN" run &
@@ -191,6 +192,7 @@ jobs:
           tar -xzf "$env:GITHUB_WORKSPACE/dist/${{ steps.art.outputs.name }}" -C $inst
           Get-ChildItem "$inst\lib\troupe_core-*\priv\reaper"
           Get-ChildItem "$inst\lib\ezstd-*\priv"
+          Get-Item "$inst\LICENSE", "$inst\NOTICE", "$inst\THIRD-PARTY-NOTICES.txt"
           & "$inst\bin\troupe-daemon.cmd" version
           & "$inst\bin\troupe-daemon.cmd" status
           if ($LASTEXITCODE -ne 1) { throw "status should say not running (exit 1), got $LASTEXITCODE" }
@@ -258,6 +260,8 @@ jobs:
           if [ -n "${MATRIX_TARGET_ABI}" ]; then export TARGET_ABI="${MATRIX_TARGET_ABI}"; fi
           mix release --overwrite
           ls -la burrito_out
+          # What Burrito wrapped into the binary.
+          ls _build/prod/rel/troupe/LICENSE _build/prod/rel/troupe/NOTICE _build/prod/rel/troupe/THIRD-PARTY-NOTICES.txt
 
       - name: Name the artifact
         id: art
@@ -446,6 +450,23 @@ jobs:
         with:
           projectPath: clients/gui/apps/desktop
           args: --target ${{ matrix.target }} --config src-tauri/tauri.signing.conf.json
+
+      # `bundle.resources` puts LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt beside the app,
+      # because Apache-2.0 and the bundled packages' licences ask that they go with every
+      # copy. One installer per platform is opened to see that they are there.
+      - name: The installers carry the licences
+        shell: bash
+        working-directory: clients/gui/apps/desktop/src-tauri/target/${{ matrix.target }}/release/bundle
+        run: |
+          case "$RUNNER_OS" in
+            Linux) listing=$(dpkg-deb -c deb/*.deb) ;;
+            macOS) listing=$(find macos -path '*.app/Contents/Resources/*') ;;
+            Windows) listing=$(7z l nsis/*-setup.exe) ;;
+          esac
+          listing=$(tr -d '\r' <<<"$listing" | tr '\\' '/')
+          for f in LICENSE NOTICE THIRD-PARTY-NOTICES.txt; do
+            grep -Eq "(^|[/ ])$f\$" <<<"$listing" || { echo "$f is not in the installer:"; echo "$listing"; exit 1; }
+          done
 
       - name: Keep the installers
         uses: actions/upload-artifact@v4

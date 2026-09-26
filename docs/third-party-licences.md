@@ -5,7 +5,10 @@
      script. -->
 
 Every third-party package this repository locks, with the licence the package itself
-declares. Troupe is Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)).
+declares. Troupe is Apache-2.0 ([LICENSE](../LICENSE), [NOTICE](../NOTICE)). The
+licence texts, as the shipped packages carry them, are in
+[THIRD-PARTY-NOTICES.txt](../THIRD-PARTY-NOTICES.txt), which every release artifact
+carries too.
 
 CI regenerates this on every pull request and fails when it differs from what is
 committed, or when a package is under a licence the policy at the top of
