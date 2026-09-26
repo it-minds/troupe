@@ -90,6 +90,60 @@ defmodule Troupe.RemoteTranslateTest do
     assert Translate.command_id(durable("input_accepted", %{"command_id" => "cmd_1"})) == "cmd_1"
   end
 
+  # Issue #181: every copy of a line names the send's command id, and the window draws the
+  # line once, from whichever copy it sees first.
+  test "a line is drawn once, however many of its copies arrive" do
+    queued =
+      durable("input_queued", %{"command_id" => "cmd_1", "author" => "m", "text" => "and this"})
+
+    accepted = durable("input_accepted", %{"command_id" => "cmd_1", "author" => "m"})
+
+    taken =
+      durable("user_input", %{"source" => "user", "text" => "and this", "command_id" => "cmd_1"})
+
+    optimistic =
+      Troupe.Event.transient("s-1", "root", :input, %{
+        content: "and this",
+        source: :user,
+        command_id: "cmd_1",
+        optimistic: true
+      })
+
+    mid_turn = Enum.flat_map([queued, accepted, taken], &translate/1)
+    idle = Enum.flat_map([accepted, taken], &translate/1)
+
+    # Typed here, at a working agent and at an idle one.
+    assert %{transcript: [{:user, "and this"}]} = folded([optimistic | mid_turn])
+    assert %{transcript: [{:user, "and this"}]} = folded([optimistic | idle])
+    # Typed elsewhere, or rebuilt from the journal, which never has the optimistic copy.
+    assert %{transcript: [{:user, "and this"}], drawn_inputs: drawn} = folded(mid_turn)
+    # The `user_input` is the last copy, and the window forgets the id with it.
+    assert drawn == %{}
+
+    # Two lines that say the same thing are two lines, and a log written before the id was
+    # on `user_input` draws each of its lines.
+    again = durable("user_input", %{"source" => "user", "text" => "again"})
+
+    assert %{transcript: [{:user, "again"}, {:user, "again"}]} =
+             folded(translate(again) ++ translate(again))
+
+    # A copy that says something else is drawn too: a task edit sent mid-turn is queued as
+    # the edit and taken as the note the agent makes of it.
+    edit = durable("input_queued", %{"command_id" => "cmd_2", "author" => "m", "text" => "%Edit{}"})
+
+    note =
+      durable("user_input", %{
+        "source" => "tui_todo_edit",
+        "text" => "added a task",
+        "command_id" => "cmd_2"
+      })
+
+    assert %{transcript: [{:user, "%Edit{}"}, {:user, "added a task"}], drawn_inputs: drawn} =
+             folded(translate(edit) ++ translate(note))
+
+    assert drawn == %{}
+  end
+
   test "llm_response carries the whole message; its text and tool uses are kept" do
     data = %{
       "message" => %{
@@ -511,5 +565,20 @@ defmodule Troupe.RemoteTranslateTest do
 
     assert [%{type: :input, data: %{source: :loop}}] =
              translate(durable("user_input", %{"source" => "loop", "text" => "Loop iteration 2"}))
+  end
+
+  # The root window after `events`: its transcript, and the inputs it has drawn and not yet
+  # seen taken.
+  defp folded(events) do
+    spawned = %Troupe.Event{
+      session_id: "s-1",
+      agent_path: "root",
+      type: :branch_spawned,
+      data: %{name: "build", isolation: :remote},
+      ts: 1
+    }
+
+    [window] = "s-1" |> Model.rebuild("/w", [spawned | events]) |> Model.windows()
+    %{transcript: window.agents["root"].transcript, drawn_inputs: window.drawn_inputs}
   end
 end

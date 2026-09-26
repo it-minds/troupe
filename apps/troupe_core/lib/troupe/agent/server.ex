@@ -911,7 +911,7 @@ defmodule Troupe.Agent.Server do
       )
 
       state = %{state | queued: MapSet.delete(state.queued, meta.command_id)}
-      apply_input(state, source, content, actor)
+      apply_input(state, source, content, actor, meta.command_id)
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -935,14 +935,22 @@ defmodule Troupe.Agent.Server do
   defp rendered(_source, text) when is_binary(text), do: text
   defp rendered(_source, content), do: inspect(content)
 
-  defp apply_input(state, :user, text, actor) do
-    log(state, :user_input, %{"source" => "user", "text" => text}, actor)
+  # The `user_input` carries the command id its `input_accepted` did: it is the copy with
+  # the text, and what a client that drew the line when it was typed knows it by (#181).
+  defp apply_input(state, :user, text, actor, command_id) do
+    log(
+      state,
+      :user_input,
+      %{"source" => "user", "text" => text, "command_id" => command_id},
+      actor
+    )
+
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: :normal}
   end
 
-  defp apply_input(state, :watch, %Trigger{} = trigger, _actor) do
+  defp apply_input(state, :watch, %Trigger{} = trigger, _actor, command_id) do
     text = Trigger.render(trigger)
-    log(state, :user_input, %{"source" => "watch", "text" => text})
+    log(state, :user_input, %{"source" => "watch", "text" => text, "command_id" => command_id})
 
     # An `AI?` turn runs under the plan permission set so it cannot edit, then the
     # profile goes back. `turn_mode` is what `effective_definition/1` reads.
@@ -952,15 +960,26 @@ defmodule Troupe.Agent.Server do
 
   # An iteration of `/loop`: a user message the model reads like any other, logged as the
   # loop's rather than a person's, on a turn whose `turn_mode` offers `goal_complete`.
-  defp apply_input(state, :loop, %{text: text}, actor) do
-    log(state, :user_input, %{"source" => "loop", "text" => text}, actor)
+  defp apply_input(state, :loop, %{text: text}, actor, command_id) do
+    log(
+      state,
+      :user_input,
+      %{"source" => "loop", "text" => text, "command_id" => command_id},
+      actor
+    )
+
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: :loop}
   end
 
-  defp apply_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor) do
+  defp apply_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor, command_id) do
     {todos, note} = Todo.Edit.apply(edit, state.todos)
     log(state, :todo_updated, %{"items" => Enum.map(todos, &Todo.to_json/1), "source" => "tui"})
-    log(state, :user_input, %{"source" => "tui_todo_edit", "text" => note})
+
+    log(state, :user_input, %{
+      "source" => "tui_todo_edit",
+      "text" => note,
+      "command_id" => command_id
+    })
 
     %{
       state

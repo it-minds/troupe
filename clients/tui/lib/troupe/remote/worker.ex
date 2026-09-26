@@ -207,7 +207,6 @@ defmodule Troupe.Remote.Worker do
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       agent: nil,
-      own_commands: MapSet.new(),
       deltas: %{},
       delta_bytes: 0,
       flush_ref: nil,
@@ -256,7 +255,8 @@ defmodule Troupe.Remote.Worker do
     state = ensure_window(state)
 
     # The line goes on screen now, tagged with the command id the server will
-    # echo back; `input.accepted` is what clears the tag.
+    # echo back; `input.accepted` is what clears the tag, and the window draws
+    # none of the durable copies of the line, which carry the same id.
     notify(state, state.agent, :input, %{
       content: text,
       source: :user,
@@ -264,7 +264,6 @@ defmodule Troupe.Remote.Worker do
       optimistic: true
     })
 
-    state = %{state | own_commands: MapSet.put(state.own_commands, command)}
     activating(state, from, "input.send", %{text: text, command_id: command})
   end
 
@@ -646,31 +645,18 @@ defmodule Troupe.Remote.Worker do
         state
 
       kept ->
-        # Anything still buffered belongs before this event on screen.
+        # Anything still buffered belongs before this event on screen. The durable copy
+        # of a line typed here is published too: the window knows the line it drew by its
+        # command id, and a worker restarted since the send would not.
         state = flush_deltas(state)
-        command_id = Translate.command_id(params)
 
-        for event <- kept, publish?(state, event, command_id), do: publish(state, event)
+        for event <- kept, do: publish(state, event)
 
         %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
-        |> forget_command(params, command_id)
     end
   end
 
   defp durable(state, _params), do: state
-
-  # Our own input is already on screen from the optimistic render; publishing
-  # the durable copy too would show it twice. It is journaled either way, so a
-  # rebuild from the journal shows it exactly once.
-  defp publish?(state, %{type: :input, data: %{command_id: id}}, _command_id) when is_binary(id),
-    do: not MapSet.member?(state.own_commands, id)
-
-  defp publish?(_state, _event, _command_id), do: true
-
-  defp forget_command(state, %{"type" => "input.accepted"}, command_id) when is_binary(command_id),
-    do: %{state | own_commands: MapSet.delete(state.own_commands, command_id)}
-
-  defp forget_command(state, _params, _command_id), do: state
 
   defp ephemeral(state, %{"type" => type} = params) when type in ["llm.delta", "llm_delta"] do
     agent = Translate.agent_of(params) || state.agent || "session"
