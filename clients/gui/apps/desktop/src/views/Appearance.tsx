@@ -127,8 +127,8 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
       <header>
         <h1>{name ? `Welcome, ${name}.` : "Welcome."}</h1>
         <p>
-          Pick how Troupe looks. Every theme says the same things in the same places — one colour is reserved, in all three, for work that has
-          stopped and needs you. You can change this any time in Settings.
+          Pick how Troupe looks. Every theme says the same things in the same places — one colour is reserved, in each of them, for work that
+          has stopped and needs you. You can change this any time in Settings.
         </p>
       </header>
 
@@ -148,7 +148,7 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
             onDone();
           }}
         >
-          Skip — Signal, following my system
+          Skip — {THEMES[0]!.name}, following my system
         </button>
       </footer>
     </main>

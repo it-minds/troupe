@@ -64,7 +64,12 @@ export function Sessions({
 
   return (
     <>
-      <header className="toolbar">
+      <header className="screen-head">
+        <span className="count">Sessions · {rows.length} total</span>
+        <h1>Everything your troupe is holding</h1>
+      </header>
+
+      <div className="toolbar">
         <input
           className="search"
           type="search"
@@ -110,7 +115,7 @@ export function Sessions({
         <button className="primary" onClick={() => setStarting(true)}>
           Start a session
         </button>
-      </header>
+      </div>
 
       {error && (
         <div className="banner error">
@@ -170,6 +175,11 @@ export function Sessions({
   );
 }
 
+/**
+ * A row is the title over its facts, then the pills, then when: what the comp's row
+ * says, in its order — the profile and the cost are what a session *is*, the pills are
+ * where it runs and what it is doing, and the time sits at the edge to be scanned.
+ */
 function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void }): JSX.Element {
   return (
     <ul className="rows">
@@ -178,13 +188,17 @@ function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void
         return (
           <li key={r.id}>
             <button className={`row is-${status}`} onClick={() => onOpen(r.id)}>
-              <span className="subject">{r.title ?? r.id}</span>
+              <span className="subject">
+                <span className="title">{r.title ?? r.id}</span>
+                <span className="sub">
+                  {r.profile && <span>{r.profile}</span>}
+                  <Cost micros={r.costMicros} />
+                </span>
+              </span>
               <span className="meta">
-                <RowStatus row={r} />
                 <Where kind={r.kind} />
                 <Sync state={r.sync} />
-                <span className="when">{r.profile}</span>
-                <Cost micros={r.costMicros} />
+                <RowStatus row={r} />
                 <When iso={r.lastActiveAt} />
               </span>
             </button>

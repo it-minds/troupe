@@ -1,14 +1,14 @@
 // Which theme a person reads in, and whether it is light or dark.
 //
-// Two questions, deliberately not one. Three themes times two modes is six
+// Two questions, deliberately not one. Four themes times two modes is eight
 // combinations, but a person is not choosing between "Signal light" and "Footlight
 // dark" — they are choosing a palette, and separately saying whether their eyes want
-// light or dark right now. Six cards would make them compare things that are not
+// light or dark right now. Eight cards would make them compare things that are not
 // alternatives; two controls take ten seconds.
 //
 // Both answers become attributes on `<html>` and nothing else:
 //
-//   data-theme="signal" | "footlight" | "limelight"
+//   data-theme="afterglow" | "signal" | "footlight" | "limelight"
 //   data-mode="light" | "dark"        absent means follow the system
 //
 // `tokens.css` does the rest. There is no theme-specific component anywhere in this
@@ -23,7 +23,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { prefs } from "./shell";
 
-export type ThemeId = "signal" | "footlight" | "limelight";
+export type ThemeId = "afterglow" | "signal" | "footlight" | "limelight";
 export type Mode = "system" | "light" | "dark";
 
 export interface Theme {
@@ -37,13 +37,19 @@ export interface Theme {
 }
 
 /**
- * The three, in the order they are offered.
+ * The four, in the order they are offered.
  *
- * Signal leads because it ships as the default: neutral graphite has no blue cast, so a
- * screenshot, a diff or a chart pasted into a session keeps its own colour instead of
- * fighting the ground it lands on.
+ * Afterglow leads because it is the app's design (Decision 702): the type, the spacing
+ * and the square corners are its, in every theme. The other three are the palettes that
+ * came before it, kept on the same contract until the appearance screen is redrawn.
  */
 export const THEMES: readonly Theme[] = [
+  {
+    id: "afterglow",
+    name: "Afterglow",
+    blurb: "Void and pit under cream, and two lights on it: pink is you being asked, cyan is the machine working.",
+    reserved: "pink",
+  },
   {
     id: "signal",
     name: "Signal",
@@ -64,7 +70,7 @@ export const THEMES: readonly Theme[] = [
   },
 ];
 
-export const DEFAULT_THEME: ThemeId = "signal";
+export const DEFAULT_THEME: ThemeId = "afterglow";
 export const DEFAULT_MODE: Mode = "system";
 
 export const MODES: readonly { id: Mode; label: string; consequence: string }[] = [

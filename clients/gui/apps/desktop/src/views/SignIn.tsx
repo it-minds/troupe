@@ -139,7 +139,8 @@ export function SignIn({
 
   return (
     <main className="signin">
-      <header className="stack" style={{ gap: "var(--space-2)" }}>
+      <header className="stack">
+        <span className="screen">A company of agents</span>
         <Wordmark size={44} />
         <p>Sign in to see your team's sessions, and answer what is waiting for you.</p>
       </header>
@@ -160,7 +161,7 @@ export function SignIn({
             disabled={busy}
           />
         </label>
-        <button type="submit" disabled={busy || !planeUrl.trim()}>
+        <button type="submit" className="primary" disabled={busy || !planeUrl.trim()}>
           {busy ? status || "Signing in…" : "Sign in"}
         </button>
       </form>

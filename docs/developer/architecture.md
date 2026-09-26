@@ -211,8 +211,8 @@ settles:
   and a GUI mounted at a sub-path prefills the plane URL with its own origin.
 - **Design tokens are generated**: `pnpm tokens` writes `tokens.css` and `mark.ts` from
   `docs/design/themes/*.tokens.json` and refuses a theme whose token names differ. Theme
-  and mode are `data-theme` and `data-mode` on the root, kept in the browser; Signal is the
-  default.
+  and mode are `data-theme` and `data-mode` on the root, kept in the browser; Afterglow
+  is the default and the design (Decision 702), the other three are palettes on it.
 
 ## 8. Things a reader will trip over
 
