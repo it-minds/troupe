@@ -12,6 +12,8 @@ defmodule Troupe.MemoryClientTest do
   alias Troupe.Client
 
   @note {:tools, [{"remember", %{"section" => "note", "text" => "tests live under test/"}}]}
+  # A curated section stamps the brief as built; a note alone leaves it stale.
+  @overview {:tools, [{"remember", %{"section" => "overview", "text" => "a fixture repository"}}]}
 
   test "/memory shows the brief's state, /memory refresh has the librarian write it, /memory forget removes it" do
     # The same fake answers the session and the librarian branch: one note, then done.
@@ -38,7 +40,7 @@ defmodule Troupe.MemoryClientTest do
     {sid, _, _ws} =
       start_session!(
         workspace: git_init!(tmp_workspace()),
-        script: [@note, {:text, "recorded"}, {:finish, "ok"}],
+        script: [@overview, {:text, "recorded"}, {:finish, "ok"}],
         config: %{memory_auto_refresh: true}
       )
 
@@ -55,17 +57,18 @@ defmodule Troupe.MemoryClientTest do
     assert spawned.data.prompt =~ "no project brief yet"
 
     eventually(
-      fn -> match?({:ok, "project brief (stale, " <> _}, Client.memory(sid, "")) end,
+      fn -> match?({:ok, "project brief (fresh, " <> _}, Client.memory(sid, "")) end,
       10_000
     )
 
-    # A second session on the same workspace finds a brief and starts nothing.
+    # A second session on the same workspace finds a fresh brief and starts nothing. The
+    # branch would be in its journal already: creating a session records the librarian it
+    # starts before it returns, so before the test could subscribe to hear it.
     {sid2, _, _} =
       start_session!(workspace: workspace_of(sid), config: %{memory_auto_refresh: true})
 
-    refute_receive {:troupe_event,
-                    %{session_id: ^sid2, type: :branch_spawned, agent_path: "librarian-1"}},
-                   500
+    spawned = for %{type: :branch_spawned} = event <- Client.events(sid2), do: event.data.name
+    refute "librarian" in spawned
   end
 
   # What a brief describes is a repository: `troupe` opened in a home directory, or any

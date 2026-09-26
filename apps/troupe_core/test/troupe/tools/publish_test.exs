@@ -12,7 +12,6 @@ defmodule Troupe.Tools.PublishTest do
   use Troupe.SessionCase, async: true
 
   alias Troupe.Mounts
-  alias Troupe.Protocol.Event
   alias Troupe.Tools.{Import, Publish}
   alias Troupe.Workspace
 

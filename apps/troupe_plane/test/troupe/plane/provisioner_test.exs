@@ -270,7 +270,7 @@ defmodule Troupe.Plane.ProvisionerTest do
       assert {:ok, _} = Hosts.authenticate(host.secret, "build-box")
     end
 
-    test "and a team admin registers nothing", context do
+    test "and a team admin registers nothing" do
       {:ok, lead} = Identity.upsert_user(%{subject: "lead@example.test", display_name: "lead"})
       {:ok, _} = Identity.set_memberships(lead, ["platform"])
 

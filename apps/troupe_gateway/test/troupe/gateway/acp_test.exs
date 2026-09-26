@@ -81,11 +81,6 @@ defmodule Troupe.Gateway.ACPTest do
     :ok = :gen_tcp.send(socket, [line, "\n"])
   end
 
-  defp notify(socket, method, params) do
-    line = Jason.encode!(%{"jsonrpc" => "2.0", "method" => method, "params" => params})
-    :ok = :gen_tcp.send(socket, [line, "\n"])
-  end
-
   # Read until the frame answering this id arrives. Everything else on the way is the
   # other direction — `session/update` notifications, permission requests — and is not
   # this function's business.
