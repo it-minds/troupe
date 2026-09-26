@@ -4590,7 +4590,7 @@ dependencies = [
 
 [[package]]
 name = "troupe-desktop"
-version = "0.5.0"
+version = "0.5.1"
 dependencies = [
  "keyring",
  "serde",
