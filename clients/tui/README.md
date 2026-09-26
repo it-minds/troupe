@@ -169,6 +169,19 @@ and its tools. A server that fails to start is marked, not fatal — the rest
 still work; so is one whose `{env:VAR}` is not set, which is never started. A
 project's own `mcp:` starts nothing until the workspace is trusted.
 
+Servers you already have for Claude Code, Claude Desktop, Cursor or VS Code come
+over as they are: `/mcp import <path>` copies a `.mcp.json` into your own
+`mcp.json` beside `config.yaml`, `/mcp link <path>` reads it in place, and
+`/skills import <dir>` or `link` does the same for a directory of skills such as
+`~/.claude/skills`. `--workspace` on any of them writes the workspace's
+`.troupe/mcp.json` or `.troupe/skills/` instead, for whoever opens the
+repository. The page lists every server and skill with the layer it came from
+(`[user]`, `[workspace]`, `[config]`); `c` checks a server (and starts one written
+after the session began), `d` disables or enables it, `x` removes it. A
+workspace's own servers are commands a cloned repository would run, so the
+session asks before starting them — `deny`, `once` or `allow`, the last
+remembered for that workspace — and asks again when a command changes.
+
 If Troupe has no API key of its own, it reads the providers from opencode's
 `~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
 opencode's `model` as the default, so an existing opencode setup works with no
@@ -251,7 +264,7 @@ Inside the TUI, everything starts with `/`:
 | `/settings`, `/help` | settings page: tweak settings and read the curated help |
 | `/hq`, `/remote` | HQ: a plane's teams, profiles and sessions, with this machine's own listed alongside |
 | `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
-| `/mcp` | MCP servers: each one's state, tools and errors |
+| `/mcp`, `/skills` | your MCP servers and skills: each one's layer, state, tools and errors; `/mcp import <path>` copies a `.mcp.json`, `link` reads it in place, `remove <name>`, `check <name>`; the same verbs on `/skills` for a directory of skills; `--workspace` writes the workspace's files |
 | `/goal <text>` | set the session's goal: every later turn works towards it and the status line shows it; `/goal` shows it, `/goal clear` clears it |
 | `/loop [n]` | work towards the goal on its own, up to `n` turns (the config's `loop_max_iterations` without one), until the agent says the goal is met; the status line shows `loop 2/10`, and `/loop stop` stops it |
 | `/upload <path>` | send a local file into the session's own mount |

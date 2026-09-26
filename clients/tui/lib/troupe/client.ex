@@ -47,6 +47,13 @@ defmodule Troupe.Client do
           workspace: String.t() | nil
         }
 
+  @typedoc """
+  The person's own MCP servers and skills as the `/mcp` page lists them (troupe-remote
+  Decision 700): every server the layers give the session's workspace, with its live
+  state when the session runs it, and every skill with its layer.
+  """
+  @type sources :: %{servers: [map()], skills: [map()], warnings: [String.t()]}
+
   @typedoc "What a session allows right now, and why not when it does not."
   @type capability :: %{
           state: atom(),
@@ -89,6 +96,8 @@ defmodule Troupe.Client do
   @callback watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   @callback watch_status(session_id()) :: map()
   @callback mcp_status(session_id()) :: [map()]
+  @callback sources(session_id()) :: {:ok, sources()} | {:error, term()}
+  @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -234,6 +243,13 @@ defmodule Troupe.Client do
 
   @spec mcp_status(session_id()) :: [map()]
   def mcp_status(sid), do: impl(sid).mcp_status(sid)
+
+  @spec sources(session_id()) :: {:ok, sources()} | {:error, term()}
+  def sources(sid), do: impl(sid).sources(sid)
+
+  @doc "`mcp.add`, `mcp.remove`, `mcp.check`, `skills.add` or `skills.remove` on the session's workspace."
+  @spec manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def manage_sources(sid, method, params), do: impl(sid).manage_sources(sid, method, params)
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)
