@@ -1477,6 +1477,8 @@ defmodule Troupe.Agent.Server do
   end
 
   defp finish_turn(state, text) do
+    brief_checked(state)
+
     cond do
       State.subagent?(state) ->
         report_and_finish(state, text)
@@ -1488,6 +1490,15 @@ defmodule Troupe.Agent.Server do
         to_idle_or_done(state)
     end
   end
+
+  # A librarian's run checks the brief against the repository whether or not it rewrites
+  # any of it, so one that ends as it meant to, by answering or with `finish`, stamps the
+  # brief. Otherwise a brief it found nothing to change in would stay stale, and every new
+  # session would start another librarian on it (Decision 696).
+  defp brief_checked(%State{definition: %Definition{name: "librarian"}} = state),
+    do: Memory.checked(state.workspace.root_real)
+
+  defp brief_checked(_state), do: :ok
 
   # Resting is free: the budget is a question about the *next* model call, asked when that
   # call is about to be made (Decision 660), so an agent whose turn ended with the budget
@@ -1722,6 +1733,7 @@ defmodule Troupe.Agent.Server do
       state.finish_summary != nil ->
         summary = state.finish_summary
         state = fold_results(state, State.ordered_results(state))
+        brief_checked(state)
         report_and_finish(state, summary)
 
       true ->

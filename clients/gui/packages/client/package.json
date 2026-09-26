@@ -2,6 +2,7 @@
   "name": "@troupe/client",
   "version": "0.5.1-beta",
   "description": "Troupe protocol v1 client: JSON-RPC 2.0 over WebSocket, usable from a browser or Node",
+  "license": "Apache-2.0",
   "type": "module",
   "main": "./dist/index.js",
   "types": "./dist/index.d.ts",
