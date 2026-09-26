@@ -2,16 +2,17 @@
 // any of them.
 //
 // The list costs one `sessions.list`: the platform's index carries how many approvals
-// each session has open, so finding out what is waiting never replays a log. Answering
-// does need the session itself — an approval is a command on the machine running the
-// work, and there is no side door — so a row opens that session while it is on screen
-// and lets go again.
+// and questions each session has open, so finding out what is waiting never replays a
+// log. Answering does need the session itself — an approval or an answer is a command on
+// the machine running the work, and there is no side door — so a row opens that session
+// while it is on screen and lets go again.
 
 import type { JSX } from "react";
-import { awaitingApproval, openApprovals } from "@troupe/client";
+import { awaitingYou, openApprovals, openQuestions } from "@troupe/client";
 import type { AuthSession, DaemonClient, FleetRow } from "@troupe/client";
 import { useSessionView } from "../hooks";
 import { ApprovalPanel } from "./Approval";
+import { QuestionPanel } from "./Question";
 import { Loading, When, Where } from "./bits";
 
 export function Approvals({
@@ -28,7 +29,7 @@ export function Approvals({
   onOpen: (id: string) => void;
   onAnswered: () => void;
 }): JSX.Element {
-  const waiting = awaitingApproval(rows);
+  const waiting = awaitingYou(rows);
 
   return (
     <>
@@ -41,7 +42,7 @@ export function Approvals({
       {waiting.length === 0 ? (
         <div className="empty">
           <h2>Nothing is waiting for you</h2>
-          <p>When a session needs a decision — running a command, changing a file — it appears here and in the session itself.</p>
+          <p>When a session needs a decision — running a command, changing a file, answering its question — it appears here and in the session itself.</p>
         </div>
       ) : (
         <ul className="inbox">
@@ -84,7 +85,7 @@ function Waiting({
 }
 
 /**
- * One session's open approvals, answerable where they are.
+ * One session's open approvals and questions, answerable where they are.
  *
  * Opened in `read` mode: looking at what is waiting must not be what wakes a sleeping
  * session — answering is, and that is the person's choice. The attachment lasts as long
@@ -111,6 +112,7 @@ export function InlineApprovals({
   const { view, state, error } = useSessionView(auth, row.id, { daemon, kind: row.kind, mode: "read" });
 
   const open = openApprovals(state);
+  const questions = openQuestions(state);
   const answered = state.entries.find((e) => e.kind === "approval" && e.decision !== undefined);
 
   return (
@@ -139,7 +141,20 @@ export function InlineApprovals({
         />
       ))}
 
-      {view && open.length === 0 && answered && (
+      {/* The agent's questions and the harness's, as the session itself shows them. */}
+      {questions.map((entry) => (
+        <QuestionPanel
+          key={entry.callId}
+          entry={entry}
+          canAnswer={row.yourRole !== "viewer"}
+          onAnswer={async (text) => {
+            await view?.answerQuestion(entry.callId, text);
+            onAnswered();
+          }}
+        />
+      ))}
+
+      {view && open.length === 0 && questions.length === 0 && answered && (
         <div style={{ padding: "var(--space-4)" }}>
           <p className="note">
             Answered by {(answered as Extract<typeof answered, { kind: "approval" }>).resolvedBy ?? "somebody else"} already. Nothing is

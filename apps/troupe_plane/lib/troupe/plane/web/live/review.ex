@@ -89,7 +89,7 @@ defmodule Troupe.Plane.Web.Live.Review do
   defp outcome(run) do
     case run["state"] do
       "failed" -> "failed" <> reason(run)
-      "waiting" -> "waiting for somebody" <> approvals(run)
+      "waiting" -> "waiting for somebody" <> asked(run)
       other -> other
     end
   end
@@ -100,10 +100,16 @@ defmodule Troupe.Plane.Web.Live.Review do
   defp reason(%{"done_reason" => reason}) when is_binary(reason), do: " — #{reason}"
   defp reason(_run), do: ""
 
-  defp approvals(%{"pending_approvals" => count}) when is_integer(count) and count > 0,
-    do: " — #{count} waiting"
+  # An approval and a question are both a person's to answer, so the count is both.
+  defp asked(run) do
+    case open(run["pending_approvals"]) + open(run["pending_questions"]) do
+      0 -> ""
+      count -> " — #{count} waiting"
+    end
+  end
 
-  defp approvals(_run), do: ""
+  defp open(count) when is_integer(count) and count > 0, do: count
+  defp open(_count), do: 0
 
   @impl Phoenix.LiveView
   def render(assigns) do

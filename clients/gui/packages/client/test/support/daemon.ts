@@ -35,6 +35,8 @@ interface Session {
   watch: boolean;
   /** Approvals still open, which the daemon's row counts (and says `waiting` for). */
   pendingApprovals: number;
+  /** The same for questions. */
+  pendingQuestions: number;
 }
 
 interface Client {
@@ -165,6 +167,7 @@ export class FakeDaemon {
       lastActiveAt: now,
       watch: false,
       pendingApprovals: 0,
+      pendingQuestions: 0,
       ...opts,
     };
     session.log.append("session_created", {
@@ -449,6 +452,7 @@ export class FakeDaemon {
       kind: "local",
       ...(this.linked ? { owner: this.linked.subject } : {}),
       pending_approvals: s.pendingApprovals,
+      pending_questions: s.pendingQuestions,
       config: { watch: s.watch },
     };
   }

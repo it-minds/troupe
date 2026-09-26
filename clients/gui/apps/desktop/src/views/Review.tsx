@@ -173,8 +173,13 @@ export function Review({
 /** Failures first, then whatever is waiting on somebody, then most recent. */
 function worstFirst(a: FleetRow, b: FleetRow): number {
   if (wentWrong(a) !== wentWrong(b)) return wentWrong(a) ? -1 : 1;
-  if ((a.pendingApprovals > 0) !== (b.pendingApprovals > 0)) return a.pendingApprovals > 0 ? -1 : 1;
+  if (waitsOnSomebody(a) !== waitsOnSomebody(b)) return waitsOnSomebody(a) ? -1 : 1;
   return Date.parse(b.lastActiveAt ?? "0") - Date.parse(a.lastActiveAt ?? "0");
+}
+
+/** An approval or a question open: somebody has to answer it. */
+function waitsOnSomebody(row: FleetRow): boolean {
+  return row.pendingApprovals > 0 || row.pendingQuestions > 0;
 }
 
 function Run({
@@ -240,7 +245,7 @@ function Run({
         )}
       </div>
 
-      {row.pendingApprovals > 0 && <InlineApprovals auth={auth} daemon={daemon} row={row} onAnswered={onAnswered} />}
+      {waitsOnSomebody(row) && <InlineApprovals auth={auth} daemon={daemon} row={row} onAnswered={onAnswered} />}
 
       <footer className="run-actions">
         {reviewedBy ? (

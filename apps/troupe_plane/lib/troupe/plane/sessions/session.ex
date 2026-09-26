@@ -70,6 +70,7 @@ defmodule Troupe.Plane.Sessions.Session do
     field(:status, :string, default: "idle")
     field(:done_reason, :string)
     field(:pending_approvals, :integer, default: 0)
+    field(:pending_questions, :integer, default: 0)
     field(:cost_micros, :integer, default: 0)
 
     # How far the ledger has got through this session's log. A cursor between the pod's
@@ -146,6 +147,7 @@ defmodule Troupe.Plane.Sessions.Session do
     :status,
     :done_reason,
     :pending_approvals,
+    :pending_questions,
     :cost_micros,
     :usage_seq,
     :parent_session_id,
@@ -171,6 +173,7 @@ defmodule Troupe.Plane.Sessions.Session do
     |> validate_shape()
     |> validate_inclusion(:status, @statuses)
     |> validate_number(:pending_approvals, greater_than_or_equal_to: 0)
+    |> validate_number(:pending_questions, greater_than_or_equal_to: 0)
     |> validate_number(:cost_micros, greater_than_or_equal_to: 0)
     |> validate_number(:usage_seq, greater_than_or_equal_to: 0)
     |> check_constraint(:kind, name: :sessions_kind_shape)

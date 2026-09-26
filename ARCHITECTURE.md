@@ -285,8 +285,8 @@ and `TeamBudget` are one `:global` actor per profile and per team, which is why 
 replicas must cluster. `session.open read` never activates — a session that woke because
 somebody looked would never stay dormant — and in `activate` mode a conditional epoch bump
 decides the one caller that places it. `sessions.list` carries the status columns a pod
-reports (`status`, `done_reason`, `pending_approvals`, `cost_micros`), so a review queue is
-a listing and not a replay. There is no plane push to clients: `/rpc` is request and
+reports (`status`, `done_reason`, `pending_approvals`, `pending_questions`, `cost_micros`),
+so a review queue is a listing and not a replay. There is no plane push to clients: `/rpc` is request and
 answer.
 
 **Tokens for pods.** `aud` is **the pod's worker id** — an audience naming the profile

@@ -24,12 +24,12 @@ defmodule Troupe.Worker.Session.Manager do
   ## What the plane is told while a session runs
 
   Four facts that are lifecycle rather than content: `status` (`idle`, `thinking`,
-  `acting`, `waiting` when an approval is pending, `done`, `interrupted`), the
-  `done_reason`, how many approvals are pending, and the cost so far. They go out as
-  `session.status` notifications on change, at most twice a second per session, and
-  again in the dormancy report — which is what lets the plane list a review queue
-  without ever reading a log. Nothing about *what* the agent is doing crosses: not the
-  tool, not the todo, not a word of any message.
+  `acting`, `waiting` when an approval or a question is pending, `done`, `interrupted`),
+  the `done_reason`, how many approvals and questions are pending, and the cost so far.
+  They go out as `session.status` notifications on change, at most twice a second per
+  session, and again in the dormancy report — which is what lets the plane list a review
+  queue without ever reading a log. Nothing about *what* the agent is doing crosses: not
+  the tool, not the todo, not a word of any message.
   """
 
   use GenServer, restart: :temporary
@@ -81,7 +81,13 @@ defmodule Troupe.Worker.Session.Manager do
     activated_at: nil,
     dormant_after_ms: @dormant_after_ms,
     status_dirty: false,
-    lifecycle: %{state: "idle", done_reason: nil, interrupted: false, approvals: %{}}
+    lifecycle: %{
+      state: "idle",
+      done_reason: nil,
+      interrupted: false,
+      approvals: %{},
+      questions: %{}
+    }
   ]
 
   # -- api --------------------------------------------------------------------
@@ -476,8 +482,8 @@ defmodule Troupe.Worker.Session.Manager do
 
   # Where the root agent stands the moment the tree is up, read once rather than
   # inferred from events that arrived before this process subscribed. A session that
-  # came back interrupted, or with an approval outstanding from before it slept, is
-  # reported that way from its first heartbeat.
+  # came back interrupted, or with an approval or a question outstanding from before it
+  # slept, is reported that way from its first heartbeat.
   defp seed_lifecycle(state) do
     lifecycle =
       case Troupe.snapshot(state.session_id) do
@@ -492,18 +498,28 @@ defmodule Troupe.Worker.Session.Manager do
           state.lifecycle
       end
 
-    approvals = open_approvals(Summary.snapshot(state.session_id))
+    summary = Summary.snapshot(state.session_id)
+    approvals = open_asks(summary, "approvals", "approval_agents")
+    questions = open_asks(summary, "questions", "question_agents")
     interrupted = interrupted_on_restore?(state.session_id)
 
-    %{state | lifecycle: %{lifecycle | approvals: approvals, interrupted: interrupted}}
+    %{
+      state
+      | lifecycle: %{
+          lifecycle
+          | approvals: approvals,
+            questions: questions,
+            interrupted: interrupted
+        }
+    }
   end
 
-  # Each open approval with the path of the agent that asked, which is what a cancel
-  # after activation needs to find the ones under it. The projection keeps both; one it
-  # has no path for is the root's, which only a cancel of the root reaches.
-  defp open_approvals(summary) do
-    asked = Map.get(summary, "approval_agents", %{})
-    Map.new(Map.get(summary, "approvals", []), &{&1, Map.get(asked, &1, "root")})
+  # Each open approval or question with the path of the agent that asked, which is what a
+  # cancel after activation needs to find the ones under it. The projection keeps both;
+  # one it has no path for is the root's, which only a cancel of the root reaches.
+  defp open_asks(summary, key, agents) do
+    asked = Map.get(summary, agents, %{})
+    Map.new(Map.get(summary, key, []), &{&1, Map.get(asked, &1, "root")})
   end
 
   # The root's most recent restart, if it was interrupted and nothing has happened
@@ -545,47 +561,71 @@ defmodule Troupe.Worker.Session.Manager do
   end
 
   defp observe(state, %Event{type: "approval_requested", agent: path, data: %{"call_id" => id}}) do
-    status_changed(update_in(state.lifecycle.approvals, &Map.put(&1, id, Enum.join(path, "/"))))
+    open_ask(state, :approvals, id, path)
   end
 
-  # An approval ends with its decision, or with its call: a cancel closes each call it
-  # stops with a `tool_call_completed`, and so does a tool that timed out waiting.
+  # The agent's `ask_user`, or the budget's or the failure guard's question at the gate,
+  # which is asked again under the same id when a cancel ended it and it is still owed.
+  defp observe(state, %Event{type: "question_asked", agent: path, data: %{"call_id" => id}}) do
+    open_ask(state, :questions, id, path)
+  end
+
+  # An approval ends with its decision, a question with its answer, which for the gate's
+  # question the harness gives itself when nobody is there to ask.
   defp observe(state, %Event{type: type, data: %{"call_id" => id}})
-       when type in ["approval_decided", "approval_resolved", "tool_call_completed"] do
-    close_approvals(state, [id])
+       when type in ["approval_decided", "approval_resolved"] do
+    close_asks(state, :approvals, [id])
+  end
+
+  defp observe(state, %Event{type: type, data: %{"call_id" => id}})
+       when type in ["question_answered", "budget_ask_answered", "tool_failures_ask_answered"] do
+    close_asks(state, :questions, [id])
+  end
+
+  # Or either ends with its call: a cancel closes each call it stops with a
+  # `tool_call_completed`, and so does a tool that timed out waiting.
+  defp observe(state, %Event{type: "tool_call_completed", data: %{"call_id" => id}}) do
+    state |> close_asks(:approvals, [id]) |> close_asks(:questions, [id])
   end
 
   # Or with a cancel on the agent that asked or on one above it, which takes down every
   # agent under it without a word from them — the rule `Summary` and the TUI keep.
   defp observe(state, %Event{type: "cancelled", agent: path}) do
-    cancelled = Enum.join(path, "/")
-
-    ended =
-      for {id, asked} <- state.lifecycle.approvals,
-          asked == cancelled or String.starts_with?(asked, cancelled <> "/"),
-          do: id
-
-    close_approvals(state, ended)
+    state
+    |> close_asks(:approvals, asked_below(state.lifecycle.approvals, path))
+    |> close_asks(:questions, asked_below(state.lifecycle.questions, path))
   end
 
   defp observe(state, _event), do: state
 
-  # Reported only when one actually closed: every tool call ends with a
-  # `tool_call_completed`, and nearly none of them was waiting on anybody.
-  defp close_approvals(state, ids) do
-    open = Map.drop(state.lifecycle.approvals, ids)
-
-    if map_size(open) == map_size(state.lifecycle.approvals),
-      do: state,
-      else: status_changed(put_in(state.lifecycle.approvals, open))
+  defp open_ask(state, key, id, path) do
+    status_changed(update_in(state.lifecycle[key], &Map.put(&1, id, Enum.join(path, "/"))))
   end
 
-  # `waiting` outranks everything: a session with a question outstanding is waiting on
-  # a person whatever its agent is doing meanwhile. `interrupted` is an idle root that
-  # came back mid-turn and has not been asked to carry on.
-  defp lifecycle_status(%{approvals: approvals} = lifecycle) do
+  defp asked_below(open, path) do
+    cancelled = Enum.join(path, "/")
+
+    for {id, asked} <- open,
+        asked == cancelled or String.starts_with?(asked, cancelled <> "/"),
+        do: id
+  end
+
+  # Reported only when one actually closed: every tool call ends with a
+  # `tool_call_completed`, and nearly none of them was waiting on anybody.
+  defp close_asks(state, key, ids) do
+    open = Map.drop(state.lifecycle[key], ids)
+
+    if map_size(open) == map_size(state.lifecycle[key]),
+      do: state,
+      else: status_changed(put_in(state.lifecycle[key], open))
+  end
+
+  # `waiting` outranks everything: a session with an approval or a question outstanding is
+  # waiting on a person whatever its agent is doing meanwhile. `interrupted` is an idle
+  # root that came back mid-turn and has not been asked to carry on.
+  defp lifecycle_status(%{approvals: approvals, questions: questions} = lifecycle) do
     cond do
-      map_size(approvals) > 0 -> "waiting"
+      map_size(approvals) > 0 or map_size(questions) > 0 -> "waiting"
       lifecycle.state == "done" -> "done"
       lifecycle.interrupted -> "interrupted"
       lifecycle.state in ["thinking", "compacting"] -> "thinking"
@@ -599,6 +639,7 @@ defmodule Troupe.Worker.Session.Manager do
       "status" => lifecycle_status(state.lifecycle),
       "done_reason" => state.lifecycle.done_reason,
       "pending_approvals" => map_size(state.lifecycle.approvals),
+      "pending_questions" => map_size(state.lifecycle.questions),
       "cost_micros" => cost_micros(state.session_id)
     }
   end

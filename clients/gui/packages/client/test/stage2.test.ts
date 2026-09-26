@@ -9,7 +9,7 @@
 
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
-import { awaitingApproval, DaemonClient, DaemonSource, FleetStore, filterRows, rowFromDaemon } from "../src/index.js";
+import { awaitingApproval, awaitingYou, DaemonClient, DaemonSource, FleetStore, filterRows, rowFromDaemon } from "../src/index.js";
 import type { DaemonEndpoint, FleetRow, FleetSource } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
@@ -126,6 +126,29 @@ describe("the inbox in local mode", () => {
     assert.equal(inbox[0]?.pendingApprovals, 1);
     assert.equal(inbox[0]?.status, "waiting");
     assert.deepEqual(filterRows(store.current.rows, { needsApproval: true }), inbox);
+  });
+
+  // A session waiting on a question — an `ask_user`, or the budget's or the failure
+  // guard's — counted nothing the inbox read, so it never reached it. The row now counts
+  // `pending_questions` beside `pending_approvals`, and the inbox is either.
+  it("lists a local session waiting on a question beside one waiting on an approval", async () => {
+    const approval = daemon.seed("/home/ada/approval", { status: "waiting", pendingApprovals: 1 });
+    const question = daemon.seed("/home/ada/question", { status: "waiting", pendingQuestions: 1 });
+    const nothing = daemon.seed("/home/ada/nothing");
+
+    const store = new FleetStore([new DaemonSource(client)]);
+    await store.refresh();
+
+    const inbox = awaitingYou(store.current.rows).map((r) => r.id);
+    assert.ok(inbox.includes(approval.id) && inbox.includes(question.id), `inbox: ${inbox.join(", ")}`);
+    assert.ok(!inbox.includes(nothing.id));
+    const asked = store.current.rows.find((r) => r.id === question.id);
+    assert.equal(asked?.pendingQuestions, 1);
+    assert.equal(asked?.pendingApprovals, 0);
+    assert.equal(asked?.status, "waiting");
+
+    // The approvals alone are still there for whatever wants only those.
+    assert.ok(!awaitingApproval(store.current.rows).some((r) => r.id === question.id));
   });
 });
 
@@ -338,6 +361,7 @@ function teamRow(id: string): FleetRow {
     status: "idle",
     doneReason: null,
     pendingApprovals: 0,
+    pendingQuestions: 0,
     costMicros: 1_000,
     lastActiveAt: new Date().toISOString(),
     pinned: false,

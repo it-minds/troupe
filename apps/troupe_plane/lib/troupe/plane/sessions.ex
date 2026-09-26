@@ -496,6 +496,7 @@ defmodule Troupe.Plane.Sessions do
       [updated_at: now]
       |> put_status_field(:status, report["status"])
       |> put_status_field(:pending_approvals, report["pending_approvals"])
+      |> put_status_field(:pending_questions, report["pending_questions"])
       |> put_status_field(:cost_micros, report["cost_micros"])
       |> then(fn set ->
         if Map.has_key?(report, "done_reason"),
@@ -521,7 +522,8 @@ defmodule Troupe.Plane.Sessions do
     if status in Session.statuses(), do: Keyword.put(set, :status, status), else: set
   end
 
-  defp put_status_field(set, key, value) when key in [:pending_approvals, :cost_micros] do
+  defp put_status_field(set, key, value)
+       when key in [:pending_approvals, :pending_questions, :cost_micros] do
     if is_integer(value) and value >= 0, do: Keyword.put(set, key, value), else: set
   end
 

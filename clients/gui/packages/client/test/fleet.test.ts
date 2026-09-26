@@ -3,7 +3,7 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { awaitingApproval, filterRows, FleetStore, rowFromPlane, totalCostMicros } from "../src/index.js";
+import { awaitingApproval, awaitingYou, filterRows, FleetStore, rowFromPlane, totalCostMicros } from "../src/index.js";
 import type { FleetRow, FleetSource, SessionKind, SessionRow } from "../src/index.js";
 
 function planeRow(id: string, over: Partial<SessionRow> = {}): SessionRow {
@@ -140,10 +140,26 @@ describe("the fleet store", () => {
     assert.equal(totalCostMicros(rows), 150);
   });
 
+  // The inbox is every session waiting on its person, whichever way it asked.
+  it("puts a session waiting on a question in the inbox beside one waiting on an approval", () => {
+    const rows = [
+      row("a", "team", { status: "waiting", pendingApprovals: 1 }),
+      row("b", "local", { status: "waiting", pendingQuestions: 1 }),
+      row("c", "local", { status: "idle" }),
+      row("d", "team", { status: "waiting", pendingApprovals: 1, pendingQuestions: 2 }),
+    ];
+
+    assert.deepEqual(awaitingYou(rows).map((r) => r.id), ["a", "b", "d"]);
+    assert.deepEqual(awaitingApproval(rows).map((r) => r.id), ["a", "d"]);
+  });
+
   it("reads the plane's row without inventing anything", () => {
-    const r = rowFromPlane(planeRow("z", { title: "t", pending_approvals: 3, cost_micros: null, status: null }));
+    const r = rowFromPlane(planeRow("z", { title: "t", pending_approvals: 3, pending_questions: 2, cost_micros: null, status: null }));
     assert.equal(r.kind, "team");
     assert.equal(r.pendingApprovals, 3);
+    assert.equal(r.pendingQuestions, 2);
+    // A plane from before the column says nothing, which is none open.
+    assert.equal(rowFromPlane(planeRow("y")).pendingQuestions, 0);
     assert.equal(r.costMicros, null, "a cost nobody reported is not zero");
     assert.equal(r.status, null);
     assert.equal(r.sync, null, "a team session has no sync state");

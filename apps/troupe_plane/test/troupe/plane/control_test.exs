@@ -494,12 +494,14 @@ defmodule Troupe.Plane.ControlTest do
                  "status" => "waiting",
                  "done_reason" => nil,
                  "pending_approvals" => 1,
+                 "pending_questions" => 2,
                  "cost_micros" => 1234
                })
 
       session = Sessions.get("s-1")
       assert session.status == "waiting"
       assert session.pending_approvals == 1
+      assert session.pending_questions == 2
       assert session.cost_micros == 1234
       assert is_nil(session.done_reason)
 
@@ -514,7 +516,7 @@ defmodule Troupe.Plane.ControlTest do
 
       assert Sessions.get("s-1").status == "waiting"
 
-      # Finishing clears the approval count and names the reason.
+      # Finishing clears the counts and names the reason.
       assert {:ok, _} =
                call(worker, "session.status", %{
                  "session_id" => "s-1",
@@ -522,6 +524,7 @@ defmodule Troupe.Plane.ControlTest do
                  "status" => "done",
                  "done_reason" => "budget_exhausted",
                  "pending_approvals" => 0,
+                 "pending_questions" => 0,
                  "cost_micros" => 2000
                })
 
@@ -529,6 +532,7 @@ defmodule Troupe.Plane.ControlTest do
       assert session.status == "done"
       assert session.done_reason == "budget_exhausted"
       assert session.pending_approvals == 0
+      assert session.pending_questions == 0
     end
 
     test "going dormant applies the last status and gives the budget slice back", %{port: port} do
