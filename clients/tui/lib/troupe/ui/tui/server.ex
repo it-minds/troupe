@@ -747,7 +747,10 @@ defmodule Troupe.UI.TUI.Server do
   defp builtin("observer", _args, _state, _target), do: :observer
   defp builtin("files", _args, _state, _target), do: :files
   defp builtin("mcp", args, state, _target), do: sources_command(state, "mcp", String.trim(args))
-  defp builtin("skills", args, state, _target), do: sources_command(state, "skills", String.trim(args))
+
+  defp builtin("skills", args, state, _target),
+    do: sources_command(state, "skills", String.trim(args))
+
   defp builtin("sessions", args, _state, _target), do: {:sessions, args}
   defp builtin("hq", args, _state, _target), do: {:hq, args}
 
