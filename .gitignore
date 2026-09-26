@@ -17,3 +17,6 @@ erl_crash.dump
 
 # Worktrees a harness makes inside the workspace, for docs/developer/fixing-issues.md.
 /.worktrees/
+
+# A person's own Claude Code setup (settings, agents, skills, worktrees): local, not shared.
+/.claude/
