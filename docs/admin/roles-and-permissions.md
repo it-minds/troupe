@@ -69,8 +69,9 @@ caller's role on the session:
 The owner is `admin`; an ACL row gives its role; otherwise a `team`-visible session gives a
 team member `control` when the team's `members_may_control` is set, else `observe`.
 `session.grant` is for the owner or a team admin. Revoking a team's grant on a profile
-freezes its sessions read-only. Workers re-check the ACL on every command, so a revoked
-collaborator is refused before their token expires.
+freezes its sessions read-only: a running one is put to sleep on its pod, and one still
+waiting for a worker is never started. Workers re-check the ACL on every command, so a
+revoked collaborator is refused before their token expires.
 
 ## 6. How each surface authenticates
 

@@ -741,7 +741,8 @@ defmodule Troupe.Gateway.Connection do
       principal: state.principal,
       scopes: state.scopes,
       connection: self(),
-      next_subscription_id: "sub-#{state.next_subscription}"
+      next_subscription_id: "sub-#{state.next_subscription}",
+      activate: state.endpoint.activate
     }
   end
 

@@ -23,6 +23,10 @@ defmodule Troupe.Plane.Drain do
 
   require Logger
 
+  # What a pod gives one session to seal, upload its workspace and stop
+  # (`Troupe.Worker.Session.Manager.go_dormant/2`), as for an archive.
+  @sleep_ms 120_000
+
   @doc """
   Drain one pod and wait for it to be empty.
 
@@ -149,10 +153,11 @@ defmodule Troupe.Plane.Drain do
 
   The budget slice goes back here too, because nothing else is sure to give it back. A
   pod reports dormancy, and the release that comes with it, only for a session it put to
-  sleep: an erased one is fenced and thrown away, and a revoked grant tells the pod
-  nothing. Every rung reloads the ledger's open reservations, so a slice left open is
-  held for good. A second release, such as a pod's `session.unrestorable` report after
-  this one, finds nothing to give back.
+  sleep: an erased one is fenced and thrown away, a session still waiting for room has no
+  pod, and a revoked grant's report arrives after this (`withdraw/1`). Every rung reloads
+  the ledger's open reservations, so a slice left open is held for good. A second
+  release, such as a pod's `session.unrestorable` report after this one, finds nothing
+  to give back.
   """
   @spec park(Session.t()) :: String.t()
   def park(%Session{} = session) do
@@ -160,6 +165,39 @@ defmodule Troupe.Plane.Drain do
     Sessions.read_only(session.id)
     Budget.release(session.team_id, session.id, answerable_for(session))
     session.id
+  end
+
+  @doc """
+  `park/1` for a session its team's grant no longer covers, and then the pod running it
+  told to put it to sleep.
+
+  The plane decides at once: the row is read-only, and the slot and the slice are back.
+  The pod is told after that, with the `session.dormant` an archive sends, so it seals
+  the session, uploads its workspace and deletes its own copy, and its report of that
+  finds the row parked and leaves it so (`Sessions.dormant/2`). Not waited for, because a
+  pod takes as long as a seal and an upload take and a revoke can cover many sessions; a
+  pod that does not answer is logged. A session still waiting for room has no pod to tell.
+  """
+  @spec withdraw(Session.t()) :: String.t()
+  def withdraw(%Session{} = session) do
+    worker = session.worker_id && Fleet.get_worker(session.worker_id)
+    park(session)
+    if worker, do: put_to_sleep(worker, session.id)
+    session.id
+  end
+
+  defp put_to_sleep(worker, session_id) do
+    Task.start(fn ->
+      case Router.push(worker, "session.dormant", %{"session_id" => session_id}, @sleep_ms) do
+        {:ok, _slept} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "troupe plane: #{worker.pod_name} did not put #{session_id} to sleep: #{inspect(reason)}"
+          )
+      end
+    end)
   end
 
   defp release_budget(session_id) do

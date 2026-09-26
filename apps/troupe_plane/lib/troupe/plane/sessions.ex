@@ -222,16 +222,30 @@ defmodule Troupe.Plane.Sessions do
   discarded, and a dormant session went on naming the pod it was no longer on until a
   release happened to land. Every reader of `worker_id` filters on `state == "active"`,
   which is why it took a test asserting the row directly to see it.
+
+  A read-only or erased session is left as it is, and `{:error, :parked}` says so. The
+  plane parks and erases without waiting for the pod, so the pod's report of a dormancy
+  can arrive afterwards, and `dormant` is a state the next activation starts from — and
+  one that takes an erased session off the list a pod carries out when it enrols. The
+  state is read under the row's lock, so a park or an erasure landing at the same moment
+  is wholly before this or wholly after it (Decision 697).
   """
-  @spec dormant(String.t(), map()) :: {:ok, Session.t()} | {:error, term()}
+  @spec dormant(String.t(), map()) :: {:ok, Session.t()} | {:error, :parked | term()}
   def dormant(session_id, attrs \\ %{}) do
-    put_fields(session_id, Map.merge(attrs, %{state: "dormant"}), clear: [:worker_id])
+    unless_parked(session_id, fn ->
+      put_fields(session_id, Map.merge(attrs, %{state: "dormant"}), clear: [:worker_id])
+    end)
   end
 
-  @doc "Make a session read-only, because its profile is gone or its team lost the grant."
+  @doc """
+  Make a session read-only, because its profile is gone or its team lost the grant.
+
+  A prompt kept for a session that was waiting for room goes with it: it was held only to
+  be sent when the session was placed, and a read-only session never is.
+  """
   @spec read_only(String.t()) :: {:ok, Session.t()} | {:error, term()}
   def read_only(session_id) do
-    put_fields(session_id, %{state: "read_only"}, clear: [:worker_id])
+    put_fields(session_id, %{state: "read_only"}, clear: [:worker_id, :pending_prompt])
   end
 
   @doc """
@@ -282,16 +296,18 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
-  The sessions a team has running on a profile.
+  The sessions a team has running on a profile, or waiting for room on it.
 
-  What a revoked grant takes off their pods one at a time, each giving back its slot and
-  its budget slice, before `read_only_for/2` freezes the rest in one statement.
+  What a revoked grant parks one at a time, each giving back its slot and its budget
+  slice, before `read_only_for/2` freezes the rest in one statement. A waiting session
+  holds a slice from the moment it was created, and nothing else would give it back.
   """
-  @spec active_for(Ecto.UUID.t(), String.t()) :: [Session.t()]
-  def active_for(team_id, profile) do
+  @spec holding_for(Ecto.UUID.t(), String.t()) :: [Session.t()]
+  def holding_for(team_id, profile) do
     Repo.all(
       from(s in Session,
-        where: s.team_id == ^team_id and s.profile == ^profile and s.state == "active",
+        where:
+          s.team_id == ^team_id and s.profile == ^profile and s.state in ["active", "pending"],
         order_by: s.id
       )
     )
@@ -303,8 +319,8 @@ defmodule Troupe.Plane.Sessions do
   Reads still work — history is history, and a team losing a grant is not a reason to
   hide what it already did — but nothing activates again. Active sessions are included:
   the grant is what made them allowed, and it is no longer there. `Identity.revoke/2`
-  parks those first, because this statement clears the `worker_id` their slots are found
-  by and gives back no budget.
+  parks those first, and the waiting ones, because this statement clears the `worker_id`
+  their slots are found by and gives back no budget.
   """
   @spec read_only_for(Ecto.UUID.t(), String.t()) :: non_neg_integer()
   def read_only_for(team_id, profile) do
@@ -606,6 +622,27 @@ defmodule Troupe.Plane.Sessions do
       session -> session |> Session.changeset(attrs) |> Repo.update()
     end
   end
+
+  # A write that applies only while the session is neither read-only nor erased, the two
+  # states nothing brings a session back from. The row is locked while the state is read,
+  # so the write cannot land on top of a park or an erasure that committed in between.
+  defp unless_parked(session_id, write) do
+    Repo.transaction(fn ->
+      case Repo.one(from(s in Session, where: s.id == ^session_id, lock: "FOR UPDATE")) do
+        nil ->
+          Repo.rollback(:not_found)
+
+        %Session{state: state} when state in ["read_only", "erased"] ->
+          Repo.rollback(:parked)
+
+        %Session{} ->
+          written(write.())
+      end
+    end)
+  end
+
+  defp written({:ok, session}), do: session
+  defp written({:error, reason}), do: Repo.rollback(reason)
 
   @doc """
   Record a sealed segment, refusing one from an epoch the session has moved past.

@@ -330,16 +330,20 @@ defmodule Troupe.Plane.Control.Connection do
     # `worker_id` the placement actor gives the slot back by (Decision 690).
     Placement.release(state.worker.profile, session_id)
 
-    Sessions.dormant(session_id, %{
-      last_seq: params["last_seq"],
-      head_hash: params["head_hash"],
-      object_bytes: params["object_bytes"],
-      workspace_bytes: params["workspace_bytes"]
-    })
-
     # The dormancy report is the last word on the session until it wakes, and carries
-    # the same lifecycle fields a `session.status` would.
-    if Map.has_key?(params, "status"), do: Sessions.put_status(session_id, params)
+    # the same lifecycle fields a `session.status` would. About a session the plane has
+    # already parked or erased it changes nothing on the row: the plane stopped it, and
+    # the pod is only saying that it has (Decision 697).
+    dormant =
+      Sessions.dormant(session_id, %{
+        last_seq: params["last_seq"],
+        head_hash: params["head_hash"],
+        object_bytes: params["object_bytes"],
+        workspace_bytes: params["workspace_bytes"]
+      })
+
+    if match?({:ok, _}, dormant) and Map.has_key?(params, "status"),
+      do: Sessions.put_status(session_id, params)
 
     # Both reservations go back: the slot, above, and the slice of the team's budget. A
     # dormant session spends nothing, and a fleet of triggers whose slices were held

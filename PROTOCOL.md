@@ -898,7 +898,7 @@ while its session is working.
 | `pending` | not started | read it; wait. The session exists and has no worker yet |
 | `active` | running | everything |
 | `dormant` | stopped | read it; an activating command brings the tree back |
-| `read_only` | stopped | read it; activating commands return `forbidden`. A session is parked here when its team lost the grant or its profile is gone, and when a pod could not put its tree back because the directory it was recorded in is gone (Decision 661) |
+| `read_only` | stopped | read it; activating commands return `forbidden`. A session is parked here when its team lost the grant — running, dormant or still `pending` — or its profile is gone, and when a pod could not put its tree back because the directory it was recorded in is gone (Decision 661). A running one is put to sleep on its pod, as an archive does (§7) |
 | `erased` | gone | `not_found` |
 
 `pending` is a remote state and a short one. A `session.create` on a profile that is full
@@ -919,6 +919,14 @@ that woke up because somebody looked at it would never stay dormant.
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
 folding its log before taking effect, and the session logs `session_activated`.
+
+On a pod only the plane brings a session back: it places the session, bumps its epoch and
+tells the pod. An activating command for a session whose tree the pod is not running —
+whatever the pod has of it on disk — is answered `not_found` with `data.kind` of
+`session` and does not run, and a client opens the session through the plane's
+`session.open` in `activate` mode ("A session that moves", below). That open checks again
+that the session's team exists and holds a grant on its profile, and answers `forbidden`
+where it does not.
 
 #### Activation is about the session, not about the pod
 

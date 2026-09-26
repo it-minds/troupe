@@ -36,13 +36,14 @@ defmodule Troupe.Gateway.Dispatch do
     @moduledoc "Who is calling, and what they are allowed to do."
 
     @enforce_keys [:principal, :scopes, :connection]
-    defstruct [:principal, :scopes, :connection, :next_subscription_id]
+    defstruct [:principal, :scopes, :connection, :next_subscription_id, :activate]
 
     @type t :: %__MODULE__{
             principal: map(),
             scopes: [:observe | :control | :admin],
             connection: pid(),
-            next_subscription_id: String.t() | nil
+            next_subscription_id: String.t() | nil,
+            activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil
           }
   end
 
@@ -447,7 +448,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("input.send", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, text} <- fetch(params, "text"),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       # The client's own id travels with the input, so `input_queued` and
       # `input_accepted` name the very send an optimistic render is waiting on rather
       # than something that merely looks like it.
@@ -459,18 +460,18 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  defp handle("turn.cancel", params, _context) do
+  defp handle("turn.cancel", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.cancel(session_id)
       {:ok, %{"accepted" => true}}
     end
   end
 
-  defp handle("profile.switch", params, _context) do
+  defp handle("profile.switch", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, profile} <- fetch(params, "profile"),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.switch_profile(session_id, profile)
       {:ok, %{"accepted" => true}}
     end
@@ -483,7 +484,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.goal.set", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, text} <- goal_text(params),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.set_goal(session_id, text, actor(context), command_opts(params))
       {:ok, %{"accepted" => true}}
     end
@@ -491,7 +492,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp handle("session.goal.clear", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.clear_goal(session_id, actor(context), command_opts(params))
       {:ok, %{"accepted" => true}}
     end
@@ -514,7 +515,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("session.loop.start", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, max} <- loop_iterations(params),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       opts = [max_iterations: max] ++ command_opts(params)
 
       case Troupe.start_loop(session_id, actor(context), opts) do
@@ -563,7 +564,7 @@ defmodule Troupe.Gateway.Dispatch do
          {:ok, call_id} <- fetch(params, "call_id"),
          {:ok, decision} <- fetch(params, "decision"),
          {:ok, decision} <- parse_decision(decision),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.approve(session_id, call_id, decision, actor(context))
       {:ok, %{"accepted" => true}}
     end
@@ -574,17 +575,17 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("question.answer", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, call_id} <- fetch(params, "call_id"),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.answer(session_id, call_id, Map.get(params, "text") || "", actor(context))
       {:ok, %{"accepted" => true}}
     end
   end
 
-  defp handle("todo.edit", params, _context) do
+  defp handle("todo.edit", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, action} <- fetch(params, "action"),
          {:ok, edit} <- build_edit(action, params),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       Troupe.send_input(session_id, edit, :tui_todo_edit)
       {:ok, %{"accepted" => true}}
     end
@@ -611,7 +612,7 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("tools.register", params, context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, specs} <- tool_specs(params, context),
-         :ok <- activate(session_id) do
+         :ok <- activate(session_id, context) do
       subject = subject(context)
       consent = Map.get(params, "consent") || %{}
 
@@ -1084,8 +1085,12 @@ defmodule Troupe.Gateway.Dispatch do
   # An *activating* command brings a dormant session's tree back before it takes
   # effect. Reads deliberately do not: a session that woke up because someone looked at
   # it would never stay dormant, which is the point of dormancy.
-  defp activate(session_id) do
-    case Troupe.activate(session_id) do
+  #
+  # Through the endpoint's own activation where it has one. On a pod only the plane brings
+  # a session back, so there `not_found` is the answer for one with no tree running, and
+  # the client asks the plane where the session is (PROTOCOL.md §6, "A session that moves").
+  defp activate(session_id, %Context{activate: activate}) do
+    case (activate || (&Troupe.activate/1)).(session_id) do
       {:ok, _pid} -> :ok
       {:error, :not_found} -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
       {:error, reason} -> {:error, Error.new(:unavailable, %{reason: inspect(reason)})}

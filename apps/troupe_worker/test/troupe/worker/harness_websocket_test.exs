@@ -18,6 +18,7 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
   alias Troupe.Plane.Tokens
   alias Troupe.Protocol.Client
   alias Troupe.Worker.{Auth, Drain, Harness, Sessions}
+  alias Troupe.Worker.Session.Reader
 
   @moduletag timeout: 180_000
 
@@ -141,6 +142,49 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
                Client.subscribe(again, "session:#{context.session_id}", from_seq: 0)
     end
 
+    # Only the plane brings a session back on a pod. What a pod's volume can still hold
+    # for one it is not running: the working tree, when the pod stopped without putting
+    # the session to sleep, and a log a reader restored for the plane's `session.read`.
+    # Neither is a reason to start the session's tree here.
+    test "a session the pod does not run is not_found to an activating command, and nothing starts",
+         context do
+      {:ok, _} = activate(context)
+      assert {:ok, _} = Sessions.dormant(context.session_id)
+
+      File.mkdir_p!(context.workspace)
+      assert {:ok, %{source: :storage}} = Reader.open(context.session_id, reading(context))
+
+      jwt = token(context, role: "owner", session_id: context.session_id)
+      {:ok, client} = connect(context, jwt)
+
+      # The history is still served, which is what the reader is for.
+      assert {:ok, %{"head_seq" => head}} =
+               Client.subscribe(client, "session:#{context.session_id}", from_seq: 0)
+
+      assert head > 0
+
+      for {method, params} <- [
+            {"input.send", %{"text" => "run here anyway"}},
+            {"session.goal.set", %{"text" => "a goal"}},
+            {"turn.cancel", %{}}
+          ] do
+        assert {:error, refused} =
+                 Client.call(
+                   client,
+                   method,
+                   Map.merge(params, %{
+                     "command_id" => Client.command_id(),
+                     "session_id" => context.session_id
+                   })
+                 )
+
+        assert {refused.message, refused.data["kind"]} == {"not_found", "session"}, method
+      end
+
+      assert Troupe.agent_tree(context.session_id) == []
+      assert Sessions.whereis(context.session_id) == nil
+    end
+
     test "a closed frame takes the connection with it", context do
       {:ok, client} = connect(context, token(context, role: "owner"))
       before = connection_count()
@@ -164,6 +208,17 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
   defp get(context, path) do
     {:ok, response} = Req.get("http://127.0.0.1:#{context.http_port}#{path}", retry: false)
     {response.status, response.body}
+  end
+
+  # What the plane's `session.read` hands a reader on this pod.
+  defp reading(context) do
+    [
+      team: context.team,
+      epoch: 1,
+      store: context.store,
+      state_dir: context.state_dir,
+      workspace: context.workspace
+    ]
   end
 
   defp connection_count do
