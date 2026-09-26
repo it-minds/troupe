@@ -28,7 +28,8 @@ defmodule Troupe.MemoryClientTest do
     await_state("librarian-1", :done, 10_000)
 
     assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "tests live under test/"
-    assert {:ok, "project brief (stale, built never): Notes"} = Client.memory(sid, "")
+    today = Date.to_iso8601(Date.utc_today())
+    assert {:ok, "project brief (fresh, built " <> ^today <> "): Notes"} = Client.memory(sid, "")
 
     assert {:ok, "project brief forgotten; " <> _} = Client.memory(sid, "forget")
     refute File.exists?(Path.join(ws, ".troupe/memory.md"))
@@ -56,6 +57,8 @@ defmodule Troupe.MemoryClientTest do
     assert spawned.data.name == "librarian"
     assert spawned.data.prompt =~ "no project brief yet"
 
+    # The librarian wrote a note and nothing else, and came to rest: the brief is what it
+    # made of the repository, checked now, and not stale (Decision 696).
     eventually(
       fn -> match?({:ok, "project brief (fresh, " <> _}, Client.memory(sid, "")) end,
       10_000
@@ -69,6 +72,7 @@ defmodule Troupe.MemoryClientTest do
 
     spawned = for %{type: :branch_spawned} = event <- Client.events(sid2), do: event.data.name
     refute "librarian" in spawned
+    refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
   end
 
   # What a brief describes is a repository: `troupe` opened in a home directory, or any

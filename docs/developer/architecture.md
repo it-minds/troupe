@@ -152,7 +152,11 @@ already has, so a reconnect or a `resync_required` produces the same transcript.
 Deltas are coalesced per 33 ms and dropped past 64 KB. `Troupe.Remote.Translate` turns
 protocol events into the harness's own at the edge — the model and view never branch on
 "is this remote". Browsing opens with `session.open read`; the first activating action
-calls `session.open activate` once and reconnects to whatever endpoint comes back.
+calls `session.open activate` once and reconnects to whatever endpoint comes back. A
+session the plane moves to another pod is followed: a reconnect after a failure asks
+`session.open read` where it is first, a pod's `not_found` for the session sends an
+activating command once more wherever the plane opens it, and after ten tries in a row
+the worker stops and says so until the next command (TUI Decision 118).
 Merge, discard, watch mode, the brief and settings are local-only and answer a remote
 session with a sentence rather than failing silently.
 
@@ -168,7 +172,9 @@ settles:
 - **The view owns the cursor**; `SessionAttachment` swaps the socket underneath it. On
   `auth.expiring` it mints (`token.mint`) and hands the token over with `auth.refresh` on
   the same socket; on a drop it reconnects with backoff (250 ms to 10 s) and resubscribes
-  from the last `seq` it processed.
+  from the last `seq` it processed. Every reconnection asks the plane's `session.open`
+  again, so a session moved to another pod is followed, and a command its pod refuses as
+  `not_found` for the session runs once more after the reopen (`SessionAttachment.retrying`).
 - **Sign-in**: a browser uses authorization code + PKCE (Entra's `devicecode` endpoint
   sends no CORS headers), with `prompt=select_account` and, for a tenant-scoped Microsoft
   issuer, `domain_hint=organizations`; anything else uses the device grant. Redeeming a

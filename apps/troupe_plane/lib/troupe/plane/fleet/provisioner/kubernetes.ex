@@ -37,20 +37,22 @@ defmodule Troupe.Plane.Fleet.Provisioner.Kubernetes do
   def name, do: "kubernetes"
 
   @impl true
-  def guarantees(%Profile{} = profile) do
-    [:admission_policy, :network_policy, egress(profile), :disruption_budget]
+  def guarantees(%Profile{} = profile, opts \\ []) do
+    [:admission_policy, :network_policy, egress(profile, opts), :disruption_budget]
   end
 
   # Asked of the operator, per profile, because only it knows whether it has Cilium and
-  # whether the policy applied. Silence is the weaker answer: a profile not reconciled
-  # yet, a plane with no cluster to ask, and a bare profile that stands for Kubernetes in
+  # whether the policy applied: from the conditions the caller read, where it read them.
+  # Silence is the weaker answer: a profile not reconciled yet, a plane with no cluster to
+  # ask, a cluster that did not answer, and a bare profile that stands for Kubernetes in
   # general, which has no `WorkerProfile` to ask about.
-  defp egress(%Profile{name: nil}), do: :egress_checked_at_admission
+  defp egress(%Profile{name: nil}, _opts), do: :egress_checked_at_admission
 
-  defp egress(%Profile{} = profile) do
+  defp egress(%Profile{} = profile, opts) do
     reported? =
-      profile
-      |> Provision.conditions()
+      opts
+      |> Keyword.get_lazy(:conditions, fn -> Provision.conditions(profile) end)
+      |> List.wrap()
       |> Enum.any?(&match?(%{"type" => "EgressByHostname", "status" => "True"}, &1))
 
     if reported?, do: :fqdn_egress, else: :egress_checked_at_admission

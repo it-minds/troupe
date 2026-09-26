@@ -69,6 +69,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | the control listener workers dial | `plane.controlPort` |
 | `TROUPE_GROUPS_CLAIM` | `groups` | deployed `groups_claim` | `plane.groupsClaim` |
 | `TROUPE_PLATFORM_ADMIN_GROUP` | unset (nobody) | deployed `platform_admin_group` | `plane.platformAdminGroup` |
+| `TROUPE_DEPLOYMENT_BUDGET_MICROS` | `0` (no ceiling) | the deployment's monthly ceiling on everything the plane spends, in millionths; the console's `platform_budget_micros` may narrow it, never raise it | `plane.deploymentBudgetMicros` |
 | `TROUPE_SCIM_TOKEN` | unset | the deployment's SCIM bearer; the console can mint its own | `plane.scim.*` |
 | `TROUPE_PLANE_AUDIENCE` | `troupe-plane-api` | `aud` of plane tokens | none |
 | `TROUPE_PROVISIONING_MODE` | `direct` | `direct` or `gitops` | `plane.provisioningMode` |

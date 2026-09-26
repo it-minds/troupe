@@ -303,7 +303,8 @@ export class FakeWorker {
       }
 
       case "input.send": {
-        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        // What a pod says about a session it does not hold, as the gateway spells it.
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
         if (!client.token.scopes.includes("control")) {
           return reply(ws, id, null, { code: -32004, message: "forbidden", data: { required_scope: "control" } });
         }

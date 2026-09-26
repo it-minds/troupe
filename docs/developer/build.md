@@ -71,6 +71,7 @@ skips, and `shell` does not run. A release sets the two Linux triples.
 | `apps/troupe_plane/priv/static/theme.css` | `mix troupe.theme` (Signal by default), from `docs/design/themes/*.tokens.json` | `--check` |
 | `apps/troupe_plane/priv/static/brand/{favicon.ico,apple-touch-icon.png}` | `python scripts/brand-icons.py` (Pillow), when the mark changes | a test that they exist |
 | `docs/egress-allowlist.md` | `mix troupe.egress`, from what each component declares it dials | a test that it is current |
+| `docs/third-party-licences.md` | `elixir scripts/licences.exs`, from the two Mix locks, the pnpm workspace and `Cargo.lock`, once their packages are fetched | `--check` in `licences.yml`, which also refuses a licence outside the script's policy |
 | `clients/gui/apps/desktop/src/{tokens.css,mark.ts}` | `pnpm tokens`, from `clients/gui/docs/design/themes/*.tokens.json` | `pnpm tokens:check` |
 | `test/fixtures/logs/<version>/` | `mix troupe.fixtures.record <version>`, once per release; refuses to overwrite | `fold_test.exs` replays every version |
 

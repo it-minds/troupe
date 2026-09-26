@@ -17,7 +17,7 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
 
   alias Troupe.Plane.Tokens
   alias Troupe.Protocol.Client
-  alias Troupe.Worker.{Auth, Drain, Harness}
+  alias Troupe.Worker.{Auth, Drain, Harness, Sessions}
 
   @moduletag timeout: 180_000
 
@@ -109,6 +109,36 @@ defmodule Troupe.Worker.HarnessWebSocketTest do
                      30_000
 
       assert_receive {:troupe_event, _topic, _id, %{type: "llm_response"}}, 30_000
+    end
+
+    # What a client that is still connected sees when a drain, a fence or the idle timeout
+    # takes the session off this pod, and what it follows the session to another pod on
+    # (PROTOCOL.md §6, "A session that moves"): `not_found` naming the session, and the
+    # command not run.
+    test "a session this pod has put to sleep is not_found here, naming the session", context do
+      {:ok, _} = activate(context)
+      jwt = token(context, role: "owner", session_id: context.session_id)
+      {:ok, client} = connect(context, jwt)
+      {:ok, _} = Client.subscribe(client, "session:#{context.session_id}", from_seq: 0)
+
+      assert {:ok, _} = Sessions.dormant(context.session_id)
+      assert_receive {:troupe_event, _topic, _id, %{type: "session_dormant"}}, 30_000
+
+      assert {:error, refused} =
+               Client.call(client, "input.send", %{
+                 "command_id" => Client.command_id(),
+                 "session_id" => context.session_id,
+                 "text" => "still there?"
+               })
+
+      assert refused.message == "not_found"
+      assert refused.data["kind"] == "session"
+      assert Sessions.whereis(context.session_id) == nil
+
+      {:ok, again} = connect(context, jwt)
+
+      assert {:error, %{message: "not_found", data: %{"kind" => "session"}}} =
+               Client.subscribe(again, "session:#{context.session_id}", from_seq: 0)
     end
 
     test "a closed frame takes the connection with it", context do

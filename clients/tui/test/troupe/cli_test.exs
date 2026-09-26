@@ -261,6 +261,33 @@ defmodule Troupe.CLITest do
     assert [_once] = Regex.scan(~r/^root> < write early$/m, out)
   end
 
+  # A line sent while the agent works comes back twice, queued and then taken, and every
+  # copy names the send's command id: printed once, as the TUI draws it once (Decision
+  # 117), whether the printer saw it live or read it back from the journal.
+  test "headless printer prints a line sent mid-turn once, live and read back" do
+    script = [
+      {:tool, "shell", %{"command" => "sleep 2"}},
+      {:text_and_tools, "Slept.", []},
+      {:text_and_tools, "And that too.", []}
+    ]
+
+    {sid, _, _} = start_session!(script: script)
+    {live, _} = printer!(sid)
+
+    say!(sid, "go")
+    await_event("root", :tool_started, 10_000)
+    say!(sid, "and then this")
+    eventually(fn -> contents(live) =~ "root> And that too." end, 15_000)
+
+    {read_back, _} = printer!(sid)
+    eventually(fn -> contents(read_back) =~ "root> And that too." end)
+
+    for io <- [live, read_back] do
+      assert [_once] = Regex.scan(~r/^root> < go$/m, contents(io))
+      assert [_once] = Regex.scan(~r/^root> < and then this$/m, contents(io))
+    end
+  end
+
   # Nobody can press a key in headless mode: an approval the printer cannot answer is
   # denied, and the run still rests — with 3, because what the agent was refused may be
   # what the task needed.

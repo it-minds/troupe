@@ -209,8 +209,11 @@ Every row that applies must pass.
 `install-local.ps1` builds the checkout it lives in, so it builds the fixer's worktree,
 and it puts the toolchain on its own PATH, so a shell opened before the toolchain was
 installed still works.
-The first build in a fresh worktree fetches deps and takes several minutes. After
-`verify-local.ps1` passes, run the issue's own reproduction against the installed
+The first build in a fresh worktree fetches deps and takes several minutes.
+A TUI running on the machine is never stopped: `install-local.ps1` installs around it and
+warns that it holds the unpacked payload, and `verify-local.ps1` fails its daemon check
+while that TUI's embedded harness is the daemon `daemon.json` names, until it is closed.
+After `verify-local.ps1` passes, run the issue's own reproduction against the installed
 binaries (`troupe-daemon.cmd ...`, `troupe.exe ...`, or the desktop app against the
 installed daemon) and keep the command and its output.
 
@@ -224,6 +227,8 @@ The machine is always left with a working install: the verified build or the pre
   session's listing says what it has actually spent" - not `fix: ...`.
 - **No attribution.** No `Co-Authored-By:` trailer, no "Generated with ..." line; the
   message ends at its last real line. Pull requests go out under the maintainer's name.
+- **Signed off.** `git commit -s`: the `Signed-off-by:` line is the DCO, which the `dco`
+  check requires ([CONTRIBUTING.md](../../CONTRIBUTING.md)), and the only trailer a commit has.
 - PowerShell files are pure ASCII: Windows PowerShell 5.1 reads UTF-8 without a BOM as
   ANSI, and an em dash becomes a parse error.
 - Never force-push (push a new branch name instead), never merge, never close the issue

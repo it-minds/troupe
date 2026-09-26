@@ -11,6 +11,7 @@ defmodule Troupe.Umbrella.MixProject do
     [
       apps_path: "apps",
       version: @version,
+      package: [licenses: ["Apache-2.0"]],
       start_permanent: Mix.env() == :prod,
       deps: deps(),
       aliases: aliases(),

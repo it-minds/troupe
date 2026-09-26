@@ -113,8 +113,14 @@ defmodule Troupe.Plane.Fleet.Provisioner do
   """
   @callback describe(Profile.t()) :: {:ok, [worker_ref()]} | {:error, term()}
 
-  @doc "Which of the guarantees this substrate actually provides."
-  @callback guarantees(Profile.t()) :: [guarantee()]
+  @doc """
+  Which of the guarantees this substrate actually provides.
+
+  `opts` carries what the caller has already read about the profile, so that a listing
+  asks once: `conditions:`, the cluster's, as `Troupe.Plane.Provision.conditions/1`
+  answers them.
+  """
+  @callback guarantees(Profile.t(), keyword()) :: [guarantee()]
 
   @doc """
   The name an administrator sees and a profile row stores.
@@ -178,16 +184,17 @@ defmodule Troupe.Plane.Fleet.Provisioner do
   `given` is what the provisioner guarantees, weaker ones included; `missing` is every
   guarantee it does not give; `instead` maps a missing one to the weaker one given in its
   place; and `unenforced` is whether any is missing with nothing instead. One call, because
-  a Kubernetes provisioner asks the cluster to answer.
+  a Kubernetes provisioner asks the cluster to answer, and `opts` go to it: a caller that
+  has read the profile's conditions already passes them rather than have them read twice.
   """
-  @spec account(Profile.t()) :: %{
+  @spec account(Profile.t(), keyword()) :: %{
           given: [guarantee()],
           missing: [guarantee()],
           instead: %{guarantee() => guarantee()},
           unenforced: boolean()
         }
-  def account(%Profile{} = profile) do
-    given = __MODULE__.for(profile).guarantees(profile)
+  def account(%Profile{} = profile, opts \\ []) do
+    given = __MODULE__.for(profile).guarantees(profile, opts)
     missing = @guarantees -- given
 
     instead =
