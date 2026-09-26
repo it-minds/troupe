@@ -13,7 +13,7 @@ defmodule Troupe.Protocol.Endpoint do
   """
 
   @enforce_keys [:kind]
-  defstruct [:kind, :path, :port, :token, :authenticator, :guard, :narrow]
+  defstruct [:kind, :path, :port, :token, :authenticator, :guard, :narrow, :activate]
 
   @type t :: %__MODULE__{
           kind: :unix | :tcp | :remote,
@@ -22,7 +22,8 @@ defmodule Troupe.Protocol.Endpoint do
           token: String.t() | nil,
           authenticator: (map() -> {:ok, map(), [atom()]} | {:error, term()}) | nil,
           guard: (map(), String.t(), map() -> :ok | {:error, term()}) | nil,
-          narrow: (map() | nil, String.t(), map() -> map()) | nil
+          narrow: (map() | nil, String.t(), map() -> map()) | nil,
+          activate: (String.t() -> {:ok, pid()} | {:error, term()}) | nil
         }
 
   @doc "The endpoint this machine should use, honouring `TROUPE_DAEMON_SOCKET`."
@@ -69,7 +70,11 @@ defmodule Troupe.Protocol.Endpoint do
       guard: Keyword.get(opts, :guard),
       # Applied to an answer before it goes back, for the answers that are about more
       # than the caller may see: a listing of every session on a pod.
-      narrow: Keyword.get(opts, :narrow)
+      narrow: Keyword.get(opts, :narrow),
+      # What an activating command finds the session's tree with. Locally that brings a
+      # dormant session back from its log; on a pod only the plane does that, so a pod
+      # gives its own answer, and never restores.
+      activate: Keyword.get(opts, :activate)
     }
   end
 

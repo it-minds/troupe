@@ -143,4 +143,17 @@ the protocol alone is enough to be a client.
 
 ## Licence
 
-MIT.
+Apache-2.0: [LICENSE](LICENSE) and [NOTICE](NOTICE). The packages Troupe depends on, and
+their licences, are in [docs/third-party-licences.md](docs/third-party-licences.md), and
+their licence texts in [THIRD-PARTY-NOTICES.txt](THIRD-PARTY-NOTICES.txt), which every
+download and image carries with LICENSE and NOTICE.
+[CONTRIBUTING.md](CONTRIBUTING.md) says how to contribute (every commit signed off, under
+the DCO), [SECURITY.md](SECURITY.md) how to report a vulnerability privately, and
+[CODE_OF_CONDUCT.md](CODE_OF_CONDUCT.md) how we treat each other.
+
+**The name.** The licence grants no rights to the name "Troupe" or to its logo, the mask
+(section 6). Use the name to say truthfully what your work is: that it is built on
+Troupe, is a fork of it, packages it or works with it. Do not call a fork, a product or a
+service "Troupe", or use the name or the mask so that it looks as if the project or its
+maintainers made or endorse something they did not. A changed build you give to others
+carries a name of its own.

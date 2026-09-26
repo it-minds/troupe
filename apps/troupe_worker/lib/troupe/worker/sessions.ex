@@ -101,6 +101,32 @@ defmodule Troupe.Worker.Sessions do
     end
   end
 
+  @doc """
+  The running tree an activating command on this pod's harness is for.
+
+  In place of the core's lookup-or-restore, which would bring a dormant session back
+  from a log it found on this pod's disk — one a reader restored for the plane's
+  `session.read`, or one a pod that stopped without putting its sessions to sleep left
+  on its volume — with no placement, no epoch and no sealer. On a pod only the plane
+  brings a session back, by pushing `session.activate`, so this never restores: a session
+  with no tree here is `{:error, :not_found}`, and the client asks the plane where it is.
+  A manager still putting its tree back is waited for.
+  """
+  @spec running(String.t()) :: {:ok, pid()} | {:error, :not_found}
+  def running(session_id) do
+    case whereis(session_id) do
+      nil -> :ok
+      manager -> Manager.await(manager)
+    end
+
+    case Troupe.Registry.whereis({:session, session_id}) do
+      nil -> {:error, :not_found}
+      tree -> {:ok, tree}
+    end
+  catch
+    :exit, _gone -> {:error, :not_found}
+  end
+
   @doc "Put a session to sleep now, rather than waiting for it to go idle."
   @spec dormant(String.t()) :: {:ok, map()} | {:error, :not_active | term()}
   def dormant(session_id) do

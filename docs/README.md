@@ -9,11 +9,13 @@
 
 Also here: [deploying-on-scaleway.md](deploying-on-scaleway.md), the A2A facade
 ([a2a.md](a2a.md)), what the product dials ([egress-allowlist.md](egress-allowlist.md),
-generated), the console's design ([design/admin/DESIGN.md](design/admin/DESIGN.md)), and
+generated), what it depends on and under which licences
+([third-party-licences.md](third-party-licences.md), generated), the console's design ([design/admin/DESIGN.md](design/admin/DESIGN.md)), and
 two plans open issues build on: [plans/admin-surface.md](plans/admin-surface.md) and
 [program/control-panel.md](program/control-panel.md).
 
 At the root: [ARCHITECTURE.md](../ARCHITECTURE.md) (the design),
-[DECISIONS.md](../DECISIONS.md) (the judgment calls that still hold, by number) and
-[.github/CI.md](../.github/CI.md) (CI and releases). The clients document themselves:
+[DECISIONS.md](../DECISIONS.md) (the judgment calls that still hold, by number),
+[.github/CI.md](../.github/CI.md) (CI and releases) and
+[CONTRIBUTING.md](../CONTRIBUTING.md) (how to contribute). The clients document themselves:
 [clients/tui](../clients/tui/README.md) and [clients/gui](../clients/gui/README.md).

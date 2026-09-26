@@ -93,6 +93,14 @@ defmodule Troupe.Session.Log do
     GenServer.call(Troupe.Registry.log(session_id), {:cold_start, agent_path})
   end
 
+  @doc """
+  Claim a key for the session: `true` the first time, `false` for as long as its tree is
+  up. How something is said once a session rather than once an agent: the log lives as
+  long as the tree, and a subagent stops once it has reported.
+  """
+  @spec first?(String.t(), tuple()) :: boolean()
+  def first?(session_id, key), do: GenServer.call(Troupe.Registry.log(session_id), {:first, key})
+
   @doc "The log file's path, for diagnostics and `troupe resume`."
   @spec path(String.t()) :: Path.t()
   def path(session_id), do: GenServer.call(Troupe.Registry.log(session_id), :path)
@@ -260,6 +268,8 @@ defmodule Troupe.Session.Log do
   end
 
   def handle_call(:path, _from, state), do: {:reply, state.path, state}
+
+  def handle_call({:first, key}, _from, state), do: {:reply, Troupe.Registry.first?(key), state}
 
   defp decode_lines(contents) do
     contents

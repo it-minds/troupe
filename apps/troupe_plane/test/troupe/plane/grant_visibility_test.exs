@@ -125,6 +125,9 @@ defmodule Troupe.Plane.GrantVisibilityTest do
   end
 
   test "revoking takes it away again, and the sessions with it", context do
+    # A running session gives back its pod's slot and its budget slice on the way, which
+    # is the placement and budget actors' business.
+    start_supervised!(Troupe.Plane.Singleton)
     {:ok, _} = Admin.team_grant(context.root, "engineering", "dev")
 
     {:ok, running} =

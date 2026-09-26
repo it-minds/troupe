@@ -193,6 +193,14 @@ defmodule Troupe.Log.Fold do
     }
   end
 
+  # The note a root's failed request left in its conversation (Decision 693), a message
+  # like the rest. An `llm_error` written before it was has none, so every recorded
+  # fixture folds as it did.
+  defp agent_fold(agent, %Event{type: "llm_error", data: %{"note" => note}})
+       when is_binary(note) do
+    %{agent | "messages" => agent["messages"] + 1, "last_role" => "user"}
+  end
+
   defp agent_fold(agent, %Event{type: "agent_done", data: data}) do
     %{agent | "done_reason" => data["reason"]}
   end

@@ -62,6 +62,58 @@ defmodule Troupe.Tools.RememberTest do
     assert Memory.status(context.workspace, config) == :absent
   end
 
+  # A brief nobody has stamped is stale, and a client with `memory_auto_refresh` starts a
+  # librarian on it. A librarian that found nothing to rewrite, and wrote no section, left
+  # it unstamped, so every new session started another one (Decision 696).
+  test "a librarian's run stamps the brief it checked, whether or not it rewrote any of it",
+       context do
+    config = Troupe.Config.load(context.workspace)
+
+    # Nothing but a note, and the librarian ends its turn without a word written.
+    :ok = Memory.note(context.workspace, "root", "the ledger is a fold over the log")
+    assert Memory.status(context.workspace, config) == :stale
+    before = Memory.brief(context.workspace).sections
+
+    librarian!(context, [{:text, "The brief is still right."}])
+    assert Memory.status(context.workspace, config) == :fresh
+    assert %{built_at: %DateTime{}, sections: ^before} = Memory.brief(context.workspace)
+
+    # A brief a person wrote, with no stamp, and the librarian calls `finish` on it.
+    write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
+    assert Memory.status(context.workspace, config) == :stale
+
+    librarian!(context, [{:tools, [{"finish", %{"summary" => "nothing to change"}}]}])
+    assert Memory.status(context.workspace, config) == :fresh
+    assert %{sections: [{"Overview", "Written by hand."}]} = Memory.brief(context.workspace)
+  end
+
+  test "only a librarian's run that ended as it meant to stamps the brief", context do
+    config = Troupe.Config.load(context.workspace)
+    write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
+
+    # Another agent's turn is not a check of the brief, and neither is a failed request.
+    %{session: build} = start_session(context, steps: [{:text, "hi"}])
+    :ok = Troupe.subscribe(build.id)
+    Troupe.send_input(build.id, "hello")
+    await_event(build.id, :turn_ended)
+    assert Memory.status(context.workspace, config) == :stale
+
+    librarian!(context, [{:error, "the gateway is down"}])
+    assert Memory.status(context.workspace, config) == :stale
+  end
+
+  test "stamping a brief as checked changes no word of it, and makes none", context do
+    assert :ok = Memory.checked(context.workspace)
+    refute File.exists?(Memory.path(context.workspace))
+
+    :ok = Memory.note(context.workspace, "root", "a note")
+    text = Troupe.Memory.render(Memory.brief(context.workspace))
+    assert :ok = Memory.checked(context.workspace)
+
+    assert %{built_at: %DateTime{}} = brief = Memory.brief(context.workspace)
+    assert Troupe.Memory.render(%{brief | built_at: nil, head: nil, files: nil}) == text
+  end
+
   test "a worktree's brief is the repository's", context do
     repo = context.workspace
     {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: repo)
@@ -92,6 +144,20 @@ defmodule Troupe.Tools.RememberTest do
 
     assert {:ok, "project brief updated: Overview rewritten"} =
              Remember.run(%{"section" => "overview", "text" => "A thing."}, ctx)
+  end
+
+  # A librarian session on the test's workspace, told what a client tells it of a stale
+  # brief, run until its turn ends or it finishes.
+  defp librarian!(context, steps) do
+    %{session: %{id: id}} = start_session(context, agent: "librarian", steps: steps)
+    :ok = Troupe.subscribe(id)
+    Troupe.send_input(id, "The project brief is out of date. Revise it.")
+
+    receive do
+      {:troupe_event, ^id, %Event{type: type}} when type in ["turn_ended", "agent_done"] -> :ok
+    after
+      10_000 -> flunk("the librarian did not come to rest")
+    end
   end
 
   defp ctx(session, context) do

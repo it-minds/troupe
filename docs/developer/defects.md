@@ -33,37 +33,25 @@ the #85 fixer (PR #88), 2026-09-22.
 
 ### D8 - Test hygiene (low)
 
-- The `tmp_dir` tests in `apps/troupe_core` leave an untracked `apps/troupe_core/tmp/`,
-  and `.gitignore` does not cover it.
-- `apps/troupe_core/test/troupe/tools/publish_test.exs:15` has an unused
-  `alias Troupe.Protocol.Event`, and it warns on every test run.
 - The root `.formatter.exs` has no `subdirectories`, so `mix format --check-formatted`
   never checks `apps/`. Running `mix format` on an app file reflows unrelated lines.
 - Under WSL, 2 tests in `apps/troupe_gateway/test/troupe/gateway/files_test.exs` fail
   (`fs_changed` timing, no `inotifywait`), and `Troupe.Gateway.RestartTest` sometimes
   fails under load ("the daemon never came up", a second VM with a 30 s limit).
+- Load-dependent: core `Troupe.Watch.WatcherTest` "poll backend five writes inside the
+  debounce window produce one trigger", and the plane's `UsageTest` `enrolled/1`
+  (`{:error, :closed}`, probably a shared-database deadlock inside the control connection).
 - `clients/tui/test/troupe/worker_commands_test.exs` prints `spawn: Could not cd to
   /tmp/troupe-ws-N` after the todo.edit test: something starts a process in the
   session's workspace after the test deleted it.
-
-- Seed- or load-dependent: the TUI's `RemoteSessionTest` 10k-delta flood (4.8 MB against a
-  4 MB bound on seeds 936525 and 877736), and core `Session.LoopTest` "with
-  resume_on_restart the loop carries on" (the two outcomes in the other order).
 - `apps/troupe_protocol` can't run its suite from its own directory: `policy_test.exs`
-  needs `Troupe.Operator.Fixtures`, and `VersionTest` needs `troupe_core`.
-- The memory test "a second session finds a brief and starts nothing" refutes an event
-  that could only arrive before its subscription, so it can pass vacuously.
+  needs `Troupe.Operator.Fixtures`, and `VersionTest` needs `troupe_core`. Run it from the
+  root (`mix test apps/troupe_protocol/test`).
+- The TUI's `FakeRemote` answers `input.send` with the dotted `input.queued` and
+  `input.accepted` and never a `user_input`, so the remote session tests don't exercise
+  the real sequence.
 
-- Order- or load-dependent: core `CutShortTest` (`cut_short_test.exs:106`) once saw
-  `budget_ask_answered` after `budget_exhausted` in a full run, and the plane's
-  `UsageTest` `enrolled/1` sometimes gets `{:error, :closed}` from the control listener.
-- Unused aliases warn in `harness_test.exs` (`Principals`) and `triggers_test.exs` in the
-  plane.
-- Parallel plane suites on the shared `troupe_plane_test` database deadlock (Postgrex
-  `40P01`); run one at a time. A branch that adds a migration leaves the shared database
-  unmigrated for everyone else until someone runs `MIX_ENV=test mix ecto.migrate`.
-
-Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 and 4 (2026-09-25/26).
+Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 5.
 
 ### D9 - The admin docs describe a `subject_claim` setting the plane does not have (unconfirmed, medium)
 
@@ -75,102 +63,56 @@ the wrong person, or to none. To confirm: find whether the setting lives in the 
 `troupe-remote` or the live plane's image; otherwise the docs are wrong. Found by the #54
 fixer (PR #101), 2026-09-23.
 
-### D10 - The protocol's documents and the gateway disagree (low)
-
-- PROTOCOL.md says `fs.upload` answers `{path, size, hash}`; `Troupe.Gateway.Dispatch`
-  answers `{path, bytes}`. PROTOCOL.md's `blob.get` answer has a `range` that Dispatch
-  never sends. Found by the #99 fixer (PR #102).
-- Dispatch serves `agents.list`, `identity.get`, `identity.link` and `identity.unlink`, but
-  `Troupe.Protocol.Schema.commands/0` has no entry for them, so `protocol/schema/v1/`
-  has no JSON Schema for them. Found by the fixer of PR #110.
-- PROTOCOL.md's list of activating commands leaves out `tools.register`. Found by the
-  #119 fixer (PR #140), 2026-09-25.
-
-2026-09-23 and 2026-09-25.
-
-### D14 - Small leftovers of the budget and loop work (low)
-
-- A plane that stored `default_budget_period = daily` now runs on `monthly`, but the
-  Settings page marks the row "stored" until someone resets it (PR #103).
-- After a daemon crash mid-loop, the TUI status line shows `loop n/N` until the session
-  is activated and `loop_stopped interrupted` arrives (PR #108).
-
-### D15 - On Windows the desktop app installs into the daemon's state directory (low)
-
-The desktop app's NSIS setup (`installMode: currentUser` in
-`clients/gui/apps/desktop/src-tauri/tauri.conf.json`) installs into
-`%LOCALAPPDATA%\Troupe`. The daemon keeps its state in `%LOCALAPPDATA%\troupe`, and NTFS
-is case-insensitive, so both are one directory: `troupe-desktop.exe` and `uninstall.exe`
-sit beside `sessions\`, `identity.json` and `daemon.json`.
-
-- Nothing loses data today. Tauri's uninstaller deletes its own files by name and removes
-  the directory only when it is empty.
-- Anything that treats the install directory as the app's own takes the sessions and the
-  machine's identity with it: a bundler template that removes it recursively, a person
-  deleting "the app's folder", a cleanup tool. `install.ps1 -Uninstall -Purge` has to run
-  the app's uninstaller before it purges the state, and does.
-- Fix: give one of them another directory. For example, an NSIS hook or template that
-  installs under `%LOCALAPPDATA%\Programs\Troupe`, or a subdirectory for the daemon's
-  Windows state.
-- Found reviewing the installers (PR #121), 2026-09-24.
-
-### D18 - A session restored while a subagent waits on an approval may keep it open (unconfirmed, medium)
-
-On restore, the root's `delegate` call is closed as interrupted, but the child's own call
-gets no `tool_call_completed` or `cancelled`, so `Summary`, the worker and the GUI
-transcript would keep that approval open. The dormant listing counts only the root's
-approvals. To confirm: a subagent waiting on an approval, a daemon restart, then the fleet
-summary. Found by the #145 fixer (PR #150), 2026-09-25.
-
-### D19 - Restart leftovers in delegation (low)
-
-- When a restart re-runs a delegation, the old child's log has no `agent_done`, so a
-  listing may show that child as never finished.
-- A root's `llm_failed` note goes into the conversation but not the log, so after a
-  restart the model no longer sees "The previous model request failed".
-- `finish_summary` is not folded, so a `finish` whose batch had a sibling re-run after a
-  warm restart loses its summary and takes another model turn.
-
-Found by the #149 fixer (PR #151), 2026-09-25.
-
-### D21 - A remote session that moves to another pod isn't followed (medium)
-
-`Troupe.Remote.Worker.connect/1` reconnects to the endpoint it stored and never calls
-`session.open` again, so an active remote session whose plane moved it to another pod is
-not followed. The old -32012 "session moved" retry, removed in #163 because PROTOCOL.md
-section 10 has no such code, never fired for a real move either. Found by the #158 fixer
-(PR #163), 2026-09-26.
-
-### D22 - Revoking access or erasing a running session may keep its budget reservation (unconfirmed, medium)
-
-`Identity.revoke/2` calls `Sessions.read_only_for/2`, which takes active sessions off
-their pods with no `Placement.release` or `Budget.release`. `Erasure.erase/2` of a running
-session never releases the team/person budget slice: the worker's `session.erase` doesn't
-report dormancy, and `TeamBudget.load` reloads open reservations from the ledger. Placement
-recovers on its recount (#174); the budget slices would look held for good. To confirm:
-revoke a person with a running session, or erase one, then read the team's reserved
-amount. Found by the #173 fixer (PR #174), 2026-09-26.
-
-### D23 - Small leftovers of chunk 4 (low)
+### D23 - Small leftovers (low)
 
 - The config schema's `$id` (`https://troupe.dev/schema/config/v1.json`) isn't served, so
   an editor can't fetch it.
 - Killing `troupe.exe` on Windows can leave Burrito's `erl.exe` running.
-- `admin.profiles.list` (the Workers page, every second) reads each Kubernetes
-  WorkerProfile twice.
-- `Provision.conditions/1` handles only `{:error, _}`; an exit from the Kubernetes client
-  would crash the calling LiveView.
-- `PlatformBudget`'s moduledoc says the deployment cap comes from a Helm value; nothing
-  outside tests sets `:deployment_budget_micros`.
-- `Troupe.A2A.Plane.list_tasks/1` sends `sessions.list` a nested `filter` the plane
-  ignores; nothing calls it.
-- `RPC.scope_hint` still accepts the old `data.scope` spelling beside section 10's
-  `required_scope`, and the TUI's `FakeRemote` attaches `data.params` to every error, which
-  only the removed -32012 retry read.
-- The worker reports a root in agent state `waiting` as `idle` for the moment before the
-  question is logged.
+- `queue_input` logs a task edit's `input_queued` text as `inspect(%Todo.Edit{})`.
+- A worker command that is `waiting` can still be sent after its caller got
+  `{:error, :timeout}` at 35 s.
+- `scripts/verify-local.ps1` prints "To go back: install-local.ps1 -Rollback" even when
+  its only failure is another daemon answering, which could lead to rolling back a good
+  install.
+- The GUI's `BlobResponse` doc comment (`clients/gui/packages/client/src/types.ts`,
+  `session.ts`) still says a server may answer a shorter `range`.
 
-Found by the chunk 4 fixers, 2026-09-26.
+Found by the chunk 4 and 5 fixers, 2026-09-26.
+
+### D24 - The librarian can run in every session of a repository (medium)
+
+Since #201 a librarian run that ends normally stamps the brief. A run that fails (model
+error, budget, cancel) stamps nothing, so with `memory_auto_refresh` it runs again in every
+new session, and a repository with no brief whose librarian writes nothing gets one in
+every session too. Each spends tokens. A fix: record an attempt time and cap automatic
+refreshes (for example once per `memory_max_age_days`). Found by the fixer of PR #201,
+2026-09-26.
+
+### D25 - An ACP agent whose subprocess exits may run its task again (unconfirmed, medium)
+
+`Troupe.Agent.ACPAgent` starts under its parent's DynamicSupervisor with the default
+`use GenServer` child spec (`restart: :permanent`), so one whose subprocess exits stops
+`:normal` and is restarted, re-running its task. #198 (stopping a subagent once it has
+reported) narrows this but doesn't remove it. It should be `:temporary`. To confirm: an ACP
+agent whose subprocess exits once; count its task starts. Found by the fixer of PR #198,
+2026-09-26.
+
+### D26 - Small state leftovers in the GUI, A2A and headless runs (low)
+
+- The GUI transcript (`clients/gui/packages/client/src/transcript.ts`, `agent_done`) sets
+  the session's `doneReason` on any agent's `agent_done`, so a subagent finishing (or one
+  ended `interrupted` by a restore) makes the session view say "Finished".
+- The desktop app reconnects with `session.open` in activate mode, so any dropped socket
+  wakes a session that had gone to sleep on its own.
+- The desktop app starts the daemon with the app's install directory as its working
+  directory (`spawn_any` in `src-tauri/src/daemon.rs`), so the uninstaller probably can't
+  remove that directory while the daemon runs (unconfirmed).
+- An A2A task stays `working` after the failure guard stops its turn (`turn_ended`
+  reason `tool_failures`).
+- `troupe run --headless` exits at the first rest, so the reply to a line another client
+  queued mid-turn is never printed.
+
+Found by the chunk 5 fixers, 2026-09-26.
 
 ## Taken
 
@@ -194,7 +136,17 @@ Found by the chunk 4 fixers, 2026-09-26.
 | D20 - Small leftovers of the first-run and headless work (what remains is in D23) | PR #175 |
 | A pod's slot isn't given back when the pod reports a session asleep (found by the #135 fixer) | #173, PR #174 |
 | A session waiting on a question never reaches the desktop inbox (found by the D17 fixer) | #172, PR #176 |
-| A finished subagent stays in memory until its session stops (found by the #134 fixer) | #171 |
+| A finished subagent stays in memory until its session stops (found by the #134 fixer) | #171, PR #198 |
+| D10 - The protocol's documents and the gateway disagree | PR #196 |
+| D14 - Small leftovers of the budget and loop work | PR #197 |
+| D15 - On Windows the desktop app installs into the daemon's state directory | #185, PR #193 |
+| D18 - A session restored while a subagent waits on an approval may keep it open | #171, PR #198 |
+| D19 - Restart leftovers in delegation | #171, PR #198 |
+| D21 - A remote session that moves to another pod isn't followed | #184, PR #199 |
+| D22 - Revoking access or erasing a running session may keep its budget reservation | #190, PR #192 |
+| The TUI shows every typed line twice | #181, PR #194 |
+| A brief with only notes stays stale, so every session starts the librarian (found by the D8 fixer) | PR #201 |
+| `install-local.ps1` fails while a TUI is running, and `verify-local.ps1` accepts any daemon (found in chunk 5) | PR #200 |
 
 ## Checked and not a defect
 

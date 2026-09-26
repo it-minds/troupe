@@ -167,7 +167,10 @@ jobs:
           NOTES
           flags=(--draft --verify-tag --title "$TAG" --notes-file notes.md)
           [ "$PRERELEASE" = "true" ] && flags+=(--prerelease)
-          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1
+          # The licence files too, beside the downloads that are one binary or an installer;
+          # each of those carries them inside as well.
+          gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1 \
+            LICENSE NOTICE THIRD-PARTY-NOTICES.txt
 
       - uses: actions/upload-artifact@v4
         with:

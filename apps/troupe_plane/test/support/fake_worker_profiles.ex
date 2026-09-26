@@ -11,6 +11,10 @@ defmodule Troupe.Plane.FakeWorkerProfiles do
   `start/1` puts its connection where the plane looks for one, so everything else that
   reads `:k8s_conn` in the same test asks this too, and gets `NotFound` for any other kind.
   Only for tests that are not `async`: both are application environment.
+
+  Each read of a profile is sent to the test that started it, as `{FakeWorkerProfiles,
+  :read, name}`, for the tests that count them. A status of `:exit` is a client that
+  exits rather than answering, which is what a call to a process that is not there does.
   """
 
   @behaviour K8s.Client.Provider
@@ -20,13 +24,13 @@ defmodule Troupe.Plane.FakeWorkerProfiles do
   @group_version "troupe.dev/v1alpha1"
 
   @doc "Answer for these profiles' statuses, by name, for the rest of the test."
-  @spec start(%{String.t() => map()}) :: K8s.Conn.t()
+  @spec start(%{String.t() => map() | :exit}) :: K8s.Conn.t()
   def start(statuses) do
     conn = %K8s.Conn{url: "https://kubernetes.example.test", http_provider: __MODULE__}
 
     previous = Application.get_env(:troupe_plane, :k8s_conn)
     Application.put_env(:troupe_plane, :k8s_conn, conn)
-    Application.put_env(:troupe_plane, __MODULE__, statuses)
+    Application.put_env(:troupe_plane, __MODULE__, {self(), statuses})
 
     ExUnit.Callbacks.on_exit(fn ->
       Application.delete_env(:troupe_plane, __MODULE__)
@@ -72,23 +76,32 @@ defmodule Troupe.Plane.FakeWorkerProfiles do
   end
 
   def request(:get, %URI{path: path}, _body, _headers, _opts) do
-    with ["", "apis", "troupe.dev", "v1alpha1", "namespaces", namespace, "workerprofiles", name] <-
-           String.split(path, "/"),
-         {:ok, status} <- Map.fetch(Application.get_env(:troupe_plane, __MODULE__, %{}), name) do
-      {:ok,
-       %{
-         "apiVersion" => @group_version,
-         "kind" => "WorkerProfile",
-         "metadata" => %{"name" => name, "namespace" => namespace, "generation" => 1},
-         "spec" => %{},
-         "status" => status
-       }}
-    else
-      _other -> not_found()
+    case String.split(path, "/") do
+      ["", "apis", "troupe.dev", "v1alpha1", "namespaces", namespace, "workerprofiles", name] ->
+        {test, statuses} = Application.get_env(:troupe_plane, __MODULE__, {nil, %{}})
+        if test, do: send(test, {__MODULE__, :read, name})
+        profile(namespace, name, Map.get(statuses, name))
+
+      _other ->
+        not_found()
     end
   end
 
   def request(_method, _uri, _body, _headers, _opts), do: not_found()
+
+  defp profile(_namespace, _name, nil), do: not_found()
+  defp profile(_namespace, _name, :exit), do: exit(:noproc)
+
+  defp profile(namespace, name, status) do
+    {:ok,
+     %{
+       "apiVersion" => @group_version,
+       "kind" => "WorkerProfile",
+       "metadata" => %{"name" => name, "namespace" => namespace, "generation" => 1},
+       "spec" => %{},
+       "status" => status
+     }}
+  end
 
   @impl K8s.Client.Provider
   def stream(_method, _uri, _body, _headers, _opts), do: not_found()

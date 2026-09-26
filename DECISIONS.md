@@ -1514,3 +1514,223 @@ citation keeps meaning what it meant.
      its message. Proof: `Troupe.Daemon.CLITest`, `Troupe.Config.ExplainTest` and
      `TrustTest`, `Troupe.PathsTest`, `Troupe.Gateway.AutospawnTest`,
      `Troupe.Worker.UnrestorableTest`, and the installed build on this machine.
+
+692. **A `user_input` names the send it was taken from.** `input_queued` and
+     `input_accepted` carried the client's `command_id` and `user_input`, the copy with
+     the text, did not, so a client that draws a line as it is typed could not tell the
+     durable copy for the same line, and the TUI drew every typed line twice (issue #181).
+     The agent now writes the command id on the `user_input` of every input it takes, a
+     person's, the watcher's, a loop's iteration and a task edit alike: the id its
+     `input_accepted` has, which the agent generates where the caller had none. A
+     `harness` note, which nobody sent, has none. It is an added, optional field, which
+     PROTOCOL.md §11 allows. Neither the agent's replay nor the fold reads it, so a log
+     written before it replays as it did and no recorded fixture's hash moves. The GUI
+     keeps its pending send outside the stream and draws `user_input` once, and is
+     unaffected; the TUI draws a line once by it (clients/tui Decision 117).
+     - **Proof:** `Troupe.Agent.InputTest`, the loop's ids in `Troupe.Session.LoopTest`,
+       the watcher's in `Troupe.Watch.WatchSessionTest`, `Troupe.Session.LogSchemaTest`,
+       `Troupe.Log.FoldTest` and `mix troupe.schema.diff`.
+
+693. **A subagent is stopped once its parent has its result, and a restart closes what it
+     leaves behind: the calls of a child nothing starts again, a turn's results already
+     back, and a root's note about a failed request.** Issue #171, and D18 and D19 in
+     docs/developer/defects.md.
+     - **Stopped on report (#171).** A finished subagent kept its process, and with it its
+       whole conversation, until its session's tree stopped. Nothing addresses a finished
+       child by its process. Input, a cancel, the loop, the watcher and an approval's
+       answer go to the root. `read_branch` reads branches, which are sessions, off disk.
+       The TUI's agent detail and the desktop app build an agent from events. A restart
+       replays the root's own log, and a delegation it takes up again gets a new child
+       (688). `Troupe.snapshot/2` and `Troupe.agent_tree/1`, which the worker's drain and
+       the sleep rule (#166) walk, take a stopped child for what a `:done` one was, not
+       at work. So the parent stops the child's Node as soon as it has taken the result,
+       through its own `Agent.Children` as a cancel does. An idle time first would keep the
+       memory for nothing. The child writes `agent_done` and announces `done` before it
+       reports, so its parent's `tool_call_completed` always follows its `agent_done`, and
+       stopping it cuts nothing off.
+     - **An unpriced model's warning (689)** was claimed in the registry by the agent whose
+       call it was, and the claim went with that agent: a subagent that stops would have
+       left the next one to warn again, once a delegation. The session's `Log` now makes
+       the claim, and it lives as long as the tree.
+     - **A delegation a restart closes or takes up again (D18, D19).** Nothing starts its
+       child again, so the child never reports and never closes its own calls. After the
+       session came back, an approval it had waited on stayed open in `Summary`, the
+       worker's status and the desktop app's transcript (a test confirmed it), and its log
+       had no `agent_done`. The parent now writes, under that child and every agent below
+       it, a `tool_call_completed` with `ok: false` for each call still open, which is how
+       every reader already closes an approval or a question (#142, #145) and the per-call
+       half of what a cancel writes (#138). Then `agent_done`, with the new reason
+       `interrupted`, where the agent has none.
+     - **A turn a restart comes back in the middle of (D19).** The results that were back
+       before it were not put back. The next `tool_results` held only the calls re-run or
+       closed, which a provider refuses (every `tool_use` is owed a `tool_result`), and a
+       `finish` among them lost its summary and took another model turn. Replay now puts
+       the completed calls back from their `tool_call_completed`, with the summary of a
+       `finish` among them, when the restart re-runs or closes the rest; one that takes
+       nothing up leaves them, so a summary cannot outlive its turn (688). A call closed
+       as interrupted and one put back out to a person now reach the conversation in one
+       `tool_results`, not two.
+     - **A root's failed request (D19).** "The previous model request failed: ..." went
+       into the conversation and not into the log, so the conversation a restart rebuilt
+       did not have it. It rides in the `llm_error` as `note`, and replay folds it. Not a
+       `user_input` from the harness, as the other notes are: a client reads one of those
+       as the turn going on, and the A2A mapping would turn a failed task back to
+       `working`, while this note ends the turn.
+     - **Old logs** have no `note` and no `interrupted`, and replay as they did.
+       `Troupe.Log.Fold` counts a `note` as a message, and the recorded fixture hashes are
+       unchanged.
+     - **Proof:**
+       - `Troupe.Agent.DelegationTest`: five delegations with one still at work hold that
+         one alone (the agent tree and the registered processes counted), five in a row
+         hold none, and a stopped child is still read from its log, before and after its
+         parent restarts; each child's `agent_done` comes before its result is taken.
+       - `Troupe.Agent.ResilienceTest`: a restored session leaves no approval of its
+         subagent open, in `Summary` or the gate; the child a restart re-ran a delegation
+         past ends `interrupted` with nothing open; a root's failure note survives the
+         session coming back; a turn keeps the results already back when the session comes
+         back, a call closed as interrupted and one put back out to a person reach the
+         model together, and a `finish` among them ends a root, and a subagent with the
+         summary its parent is handed, after the agent restarts.
+       - `Troupe.Agent.CutShortTest`: a subagent cut short is stopped, and its session
+         still sleeps. `Troupe.Session.LocalPricingTest`: a model only subagents call is
+         said once a session. `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and
+         the note.
+       - The installed daemon, driven with a fake-provider script.
+     - **Not done here:** a subagent a cancel takes down still leaves its own calls open in
+       its own log; the `cancelled` on the agent above closes them for every reader (#145).
+
+694. **A session that leaves its pod for good gives back its slot and its budget slice,
+     each once, however it left.** Issue #190, D22 in docs/developer/defects.md, found
+     by the fixer of #173. A pod's dormancy report gives back both. Three other endings
+     gave back less, and a budget slice left open is held for good, because every rung
+     reloads the ledger's open reservations. A slot came back at the next refused
+     reserve (Decision 690); a slice never did.
+     - **A revoked grant.** `Identity.revoke/2` froze the team's sessions on the profile
+       with one `Sessions.read_only_for/2`, which clears `worker_id` and gives back
+       nothing. It now takes each running one off its pod first, then freezes the rest.
+     - **An erasure.** It gave back the slot but not the slice. The pod's `session.erase`
+       fences the session and throws it away without reporting it dormant.
+     - **A dormant session its pod will not take back.** Waking it reserves the slice
+       again before `session.activate` is pushed, and a refusal left the slice held. The
+       pod does report `workspace_gone` as `session.unrestorable`, which releases, but
+       only when that report arrives.
+     - **`Drain.park/1`** is `Drain.strand/2` for a session that is not going back to
+       any pod: the slot first, then the row read-only, then the slice at every rung.
+       Erasure, a revoked grant and a `workspace_gone` refusal park; any other refusal
+       strands, so the session is dormant again and holds nothing.
+     - **Once.** A second release finds nothing. `Placement.release/2` counts again, as
+       Decision 690 says, and a budget release is by session. So when a pod that went on
+       running a revoked session reports it dormant later, nothing goes back twice.
+     - **Since Decision 697** a revoked grant also puts the session to sleep on its pod,
+       leaves the row read-only when the pod reports it, and parks the team's sessions
+       still waiting for room.
+     - **Proof:** `Troupe.Plane.BudgetLadderTest`: revoking the grant of, or erasing, a
+       running session leaves nothing held by the team, the person, the ledger or the
+       pod. `Troupe.Plane.HarnessTest`: a pod that will not take back a dormant session,
+       with `workspace_gone` or without, leaves no slice held. `Troupe.Plane.ControlTest`:
+       a revoked session's pod reporting it dormant twice gives back one slot. All five
+       fail on the chunk's tip.
+
+695. **On Windows the desktop app installs into `%LOCALAPPDATA%\Programs\troupe-desktop`,
+     and a setup moves an install out of the daemon's state directory.** Issue #185, D15
+     in docs/developer/defects.md. Tauri's per-user NSIS setup installs into
+     `$LOCALAPPDATA\<productName>`, `%LOCALAPPDATA%\Troupe`, which NTFS reads as the
+     daemon's `%LOCALAPPDATA%\troupe`: the app and its uninstaller sat beside the
+     sessions and `identity.json`, one recursive delete of "the app's folder" from losing
+     them.
+     - **Where.** Under `%LOCALAPPDATA%\Programs`, where per-user programs go, but not in
+       `Programs\Troupe`: that is `Programs\troupe`, which `install.ps1` puts on the
+       `PATH`, and an `uninstall.exe` on the `PATH` is a command to type by accident.
+       `troupe-desktop` is named for the binary and sits beside `troupe-daemon`.
+     - **How.** An installer hook, `installer-hooks.nsh`, rather than a copy of Tauri's
+       template that would have to follow every Tauri release. It moves `$INSTDIR` when
+       it is `$LOCALAPPDATA\<productName>`, whether that is the default or the registry's
+       record of the last install: as the window opens, so the directory page shows the
+       new place, and again before the files are copied, which is all a silent setup
+       (`install.ps1 -Gui`) runs. Once the app is in, the old install's Start menu,
+       desktop and taskbar shortcuts are pointed at it, and the old install's two files
+       are deleted by name. The directory stays. The uninstaller is Tauri's, unchanged: it
+       deletes its own files by name and its directory only when that is empty.
+     - **Kept.** `install.ps1 -Uninstall -Purge` still runs the app's uninstaller before
+       it deletes the state, for an install from before 0.5.2 that no newer setup has
+       moved. A silent setup on a machine without the state directory still creates it,
+       empty, because the template enters the default directory before the hook runs; the
+       daemon would create it anyway.
+     - **Proof.** On this machine, with the product renamed (`TroupeD15`, binary
+       `troupe-desktop-d15`) so no setup could touch the installed app, and a stand-in
+       state directory at `%LOCALAPPDATA%\TroupeD15`. The chunk tip's setup installed
+       beside the stand-in state. The fixed one moved that install to
+       `Programs\troupe-desktop`, repointed its shortcuts and left the state byte for
+       byte: silent, silent with no shortcuts of its own (`/NS`), silent while the old
+       app ran, and through the window choosing "Do not uninstall". The directory page
+       showed the new place for that upgrade and for a fresh install; `/D=` naming the
+       state directory was overridden; a reinstall of the same version kept the new
+       install; its uninstaller left the state. Not run: the real product's setup, which
+       would have replaced the maintainer's install.
+
+696. **A librarian's run stamps the brief it checked, whether or not it rewrote any of
+     it.** The brief counts as built when a curated section is written (Decision 649),
+     one never built is stale, and a client with `memory_auto_refresh` starts a
+     librarian on a stale one. A librarian that found nothing to rewrite, or wrote only a
+     note, left the brief unbuilt or as old as it was: a brief of notes, or one a person
+     wrote by hand, stayed stale for good, and every new session in that repository
+     started another librarian and paid for it. Found in chunk 5; the TUI's test that said
+     a second session "starts nothing" listened for the librarian after it had started.
+     Now a `librarian` agent whose run ends as it meant to, by answering or with
+     `finish`, stamps the brief (`Troupe.Session.Memory.checked/1`: `built_at`, `head`
+     and `files`, and no word of the text), so the brief is stale again only when it is
+     older than `memory_max_age_days` or the repository has drifted. What is stamped is
+     the run, not what it wrote, because finding nothing to change is the librarian's
+     answer too; a run that failed, was cancelled or ran out of budget stamps nothing and
+     is tried again by the next session. The agent knows the profile by its name, as the
+     client does when it starts it, and the stamp makes no brief where there is none.
+     - **Proof:** `Troupe.Tools.RememberTest`: a brief of notes and a hand-written one,
+       each left fresh and word for word as it was by a librarian that wrote nothing,
+       while another agent's turn and a librarian's failed request stamp nothing. The
+       TUI's `Troupe.MemoryClientTest`, whose second session now reads its own journal
+       for the librarian. Both failed on the chunk's tip.
+
+697. **A team's grant on a profile holds wherever one of its sessions could run or
+     start: on the pod running it, in what that pod reports afterwards, when it is woken
+     and when it is placed after a wait.** Decision 694 made a revoke leave the team's
+     sessions on the profile read-only and give back what the running ones held. These
+     are the places that went on without looking at the row or the grant.
+     - **The pod.** `Identity.revoke/2` takes each running session through
+       `Drain.withdraw/1`: `Drain.park/1`, then the `session.dormant` an archive sends,
+       pushed to the pod running it, which seals the session, uploads its workspace and
+       deletes its own copy. The plane does not wait for it, because a pod takes as long
+       as a seal and an upload take and a revoke can cover many sessions; a pod that does
+       not answer is logged.
+     - **What the pod reports.** `Sessions.dormant/2` leaves a `read_only` or `erased`
+       row as it is and answers `{:error, :parked}`. It reads the state under the row's
+       lock, so a park or an erasure landing at the same moment is wholly before it or
+       wholly after it. The control connection applies a dormancy report's status only to
+       a row the report made dormant; the slot and the slice releases stay, and give back
+       nothing twice.
+     - **Sessions waiting for room.** A revoke parks them as well
+       (`Sessions.holding_for/2`), which gives back the slice each reserved when it was
+       created, and `Sessions.read_only/1` drops the prompt kept for one.
+     - **Waking and placing.** `session.open` in `activate` mode, for a session that is
+       not already running, and the scaler's `Harness.admit/1` check that the session's
+       team exists and holds a grant on its profile (`Identity.granted?/2`). A wake is
+       refused with `forbidden`. Admission checks before it reserves anything, parks the
+       session and answers `:no_grant` or `:no_team`, and the scaler goes on to the next
+       session, since no room was taken.
+     - **The pod's harness.** An activating command reaches a tree that is running on the
+       pod and never brings one back: the worker's endpoint gives the gateway
+       `Troupe.Worker.Sessions.running/1` in place of `Troupe.activate/1`, through the
+       endpoint's new `activate` option. A session with no tree there answers `not_found`
+       with `data.kind` of `session`, which a client follows to the plane (PROTOCOL.md §6,
+       "A session that moves"), whatever the pod has of it on disk. A manager still
+       putting its tree back is waited for. The local daemon's endpoint has no such
+       option and restores as before, and `session.create` on a pod, open only to a token
+       with no session (PROTOCOL.md §7), is unchanged.
+     - **Proof:** `Troupe.Plane.GrantEnforcementTest`: a revoke pushes `session.dormant`
+       to the pod and parks a waiting session with its slice back; a wake is refused with
+       the grant gone and with the team gone; admission parks instead of placing in both
+       cases, and the scaler places the next session. `Troupe.Plane.ControlTest`: a pod's
+       dormancy report leaves a revoked session read-only and an erased one erased.
+       `Troupe.Worker.PlaneLinkTest`: a revoke stops the session on a real pod, and the
+       pod's report leaves the row read-only. `Troupe.Worker.HarnessWebSocketTest`:
+       activating commands for a session the pod has only on disk answer `not_found` and
+       start nothing. All ten fail on the chunk's tip.

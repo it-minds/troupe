@@ -129,6 +129,11 @@ plane:
   # the provider's business and is never edited in Troupe.
   platformAdminGroup: troupe-platform-admins
   groupsClaim: groups
+  # A ceiling on everything this plane spends in a calendar month (UTC), in millionths,
+  # as every budget is. 0 is no ceiling. A platform admin's own ceiling on the Settings
+  # page may narrow this one and never raise it: this is the number the people paying
+  # for the platform agreed to.
+  deploymentBudgetMicros: 0
   # `name` joins the replicas into an Erlang cluster for the `:global` singletons;
   # `none` is correct for a single replica and keeps distribution off the network. The
   # chart refuses `replicas > 1` with `none`: unclustered replicas are not two replicas

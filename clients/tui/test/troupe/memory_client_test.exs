@@ -12,6 +12,8 @@ defmodule Troupe.MemoryClientTest do
   alias Troupe.Client
 
   @note {:tools, [{"remember", %{"section" => "note", "text" => "tests live under test/"}}]}
+  # A curated section stamps the brief as built; a note alone leaves it stale.
+  @overview {:tools, [{"remember", %{"section" => "overview", "text" => "a fixture repository"}}]}
 
   test "/memory shows the brief's state, /memory refresh has the librarian write it, /memory forget removes it" do
     # The same fake answers the session and the librarian branch: one note, then done.
@@ -26,7 +28,8 @@ defmodule Troupe.MemoryClientTest do
     await_state("librarian-1", :done, 10_000)
 
     assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "tests live under test/"
-    assert {:ok, "project brief (stale, built never): Notes"} = Client.memory(sid, "")
+    today = Date.to_iso8601(Date.utc_today())
+    assert {:ok, "project brief (fresh, built " <> ^today <> "): Notes"} = Client.memory(sid, "")
 
     assert {:ok, "project brief forgotten; " <> _} = Client.memory(sid, "forget")
     refute File.exists?(Path.join(ws, ".troupe/memory.md"))
@@ -38,7 +41,7 @@ defmodule Troupe.MemoryClientTest do
     {sid, _, _ws} =
       start_session!(
         workspace: git_init!(tmp_workspace()),
-        script: [@note, {:text, "recorded"}, {:finish, "ok"}],
+        script: [@overview, {:text, "recorded"}, {:finish, "ok"}],
         config: %{memory_auto_refresh: true}
       )
 
@@ -54,18 +57,22 @@ defmodule Troupe.MemoryClientTest do
     assert spawned.data.name == "librarian"
     assert spawned.data.prompt =~ "no project brief yet"
 
+    # The librarian wrote a note and nothing else, and came to rest: the brief is what it
+    # made of the repository, checked now, and not stale (Decision 696).
     eventually(
-      fn -> match?({:ok, "project brief (stale, " <> _}, Client.memory(sid, "")) end,
+      fn -> match?({:ok, "project brief (fresh, " <> _}, Client.memory(sid, "")) end,
       10_000
     )
 
-    # A second session on the same workspace finds a brief and starts nothing.
+    # A second session on the same workspace finds a fresh brief and starts nothing. The
+    # branch would be in its journal already: creating a session records the librarian it
+    # starts before it returns, so before the test could subscribe to hear it.
     {sid2, _, _} =
       start_session!(workspace: workspace_of(sid), config: %{memory_auto_refresh: true})
 
-    refute_receive {:troupe_event,
-                    %{session_id: ^sid2, type: :branch_spawned, agent_path: "librarian-1"}},
-                   500
+    spawned = for %{type: :branch_spawned} = event <- Client.events(sid2), do: event.data.name
+    refute "librarian" in spawned
+    refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
   end
 
   # What a brief describes is a repository: `troupe` opened in a home directory, or any

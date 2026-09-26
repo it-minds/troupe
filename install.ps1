@@ -10,7 +10,8 @@
       through TROUPE_DAEMON_COMMAND) and starts it when a session needs one.
     * troupe.exe, the terminal client (-Tui), beside the shim. It uses a running daemon if
       there is one and otherwise runs the same harness in its own process.
-    * the desktop app (-Gui), from the release's per-user setup, run silently.
+    * the desktop app (-Gui), from the release's per-user setup, run silently. It installs
+      into %LOCALAPPDATA%\Programs\troupe-desktop.
   Everything is downloaded and checked against the release's SHA256SUMS before anything is
   replaced, and Troupe processes running from what is replaced are stopped first.
 
@@ -59,6 +60,8 @@ $BinDir = if ($env:TROUPE_BIN_DIR) { $env:TROUPE_BIN_DIR } else { Join-Path $env
 $LibDir = if ($env:TROUPE_LIB_DIR) { $env:TROUPE_LIB_DIR } else { Join-Path $env:LOCALAPPDATA "Programs\troupe-daemon" }
 $Shim = Join-Path $BinDir "troupe-daemon.cmd"
 $TuiExe = Join-Path $BinDir "troupe.exe"
+# The daemon's release carries these at its root, and a copy goes beside the programs.
+$LicenceFiles = @("LICENSE", "NOTICE", "THIRD-PARTY-NOTICES.txt")
 $StateDir = if ($env:TROUPE_STATE_HOME) { $env:TROUPE_STATE_HOME } else { Join-Path $env:LOCALAPPDATA "troupe" }
 $ConfigDir = if ($env:TROUPE_CONFIG_HOME) { $env:TROUPE_CONFIG_HOME } else { Join-Path $env:APPDATA "troupe" }
 # Where the TUI's Burrito wrapper unpacks itself on first run, once per version.
@@ -195,11 +198,13 @@ function Uninstall-Desktop {
 
 # What this installer (or scripts/install-local.ps1) put on the machine, bar config and
 # state, and bar the PATH entry: a clean install puts everything back in the same place.
-# The desktop app's setup installs into %LOCALAPPDATA%\Troupe, which is the state directory
-# too; its uninstaller removes only its own files, so the state stays.
+# A desktop app set up before 0.5.2 is in %LOCALAPPDATA%\Troupe, which is the state
+# directory, until a newer setup moves it; its uninstaller removes only its own files, so
+# the state stays.
 function Remove-Installed {
   Remove-Item -Force -ErrorAction SilentlyContinue $Shim, $TuiExe, "$TuiExe.previous"
   Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $LibDir, "$LibDir.previous", "$LibDir.new"
+  foreach ($doc in $LicenceFiles) { Remove-Item -Force -ErrorAction SilentlyContinue (Join-Path $BinDir $doc) }
   foreach ($left in @($LibDir, $TuiExe)) {
     if (Test-Path $left) { Write-Warn "could not remove $left; something still runs from it" }
   }
@@ -322,7 +327,7 @@ if ($Uninstall) {
   Remove-Installed
   if ((Test-Path $BinDir) -and -not (Get-ChildItem $BinDir)) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $BinDir }
   Remove-FromUserPath
-  # After the desktop app's uninstaller, which shares the state directory.
+  # After the desktop app's uninstaller: one set up before 0.5.2 is in the state directory.
   if ($Purge) { Remove-Item -Recurse -Force -ErrorAction SilentlyContinue $ConfigDir, $StateDir }
   Write-Host "troupe uninstalled" -ForegroundColor Green
   return
@@ -471,6 +476,12 @@ try {
   New-Item -ItemType Directory -Force -Path $BinDir | Out-Null
   Set-Content -Path $Shim -Encoding ASCII -Value "@echo off`r`ncall `"$LibDir\bin\troupe-daemon.cmd`" %*`r`nexit /b %errorlevel%"
   Write-Host "installed troupe-daemon $Version in $LibDir"
+  # A release from before they were in the archive has none to copy.
+  foreach ($doc in $LicenceFiles) {
+    $target = Join-Path $BinDir $doc
+    Remove-Item -Force -ErrorAction SilentlyContinue $target
+    if (Test-Path (Join-Path $LibDir $doc)) { Copy-Item -Force (Join-Path $LibDir $doc) $target }
+  }
 
   # One binary; the one it replaces is kept beside it for rollback.
   if ($Tui) {

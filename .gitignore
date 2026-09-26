@@ -5,6 +5,8 @@
 erl_crash.dump
 *.ez
 /apps/*/priv/reaper/
+# ExUnit's `@tag :tmp_dir` makes these under the app a suite runs in.
+/apps/*/tmp/
 
 # Credentials for a real deployment: a kubeconfig is a cluster admin token and
 # `secrets.env` is the database password and the object store's keys. They live here so
@@ -15,3 +17,6 @@ erl_crash.dump
 
 # Worktrees a harness makes inside the workspace, for docs/developer/fixing-issues.md.
 /.worktrees/
+
+# A person's own Claude Code setup (settings, agents, skills, worktrees): local, not shared.
+/.claude/

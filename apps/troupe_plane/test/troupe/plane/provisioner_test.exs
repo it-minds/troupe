@@ -108,6 +108,42 @@ defmodule Troupe.Plane.ProvisionerTest do
     end
   end
 
+  describe "what the workers listing asks the cluster" do
+    setup do
+      {:ok, group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
+      {:ok, _} = Identity.enable_team(group, %{name: "platform"})
+      {:ok, user} = Identity.upsert_user(%{subject: "root@example.test", display_name: "root"})
+      {:ok, _} = Identity.set_memberships(user, ["platform"])
+      Application.put_env(:troupe_plane, :platform_admin_group, "platform")
+      on_exit(fn -> Application.delete_env(:troupe_plane, :platform_admin_group) end)
+
+      _dev = profile("dev")
+      %{actor: Admin.actor_for_subject("root@example.test")}
+    end
+
+    test "is each profile once, for its guarantees and its conditions both", context do
+      # The Workers page asks every second, and a profile's guarantee is read off the same
+      # conditions the page shows.
+      FakeWorkerProfiles.start(%{"dev" => FakeWorkerProfiles.egress_by_hostname(true)})
+
+      assert {:ok, [dev]} = Admin.profiles_list(context.actor)
+      assert dev.missing_guarantees == []
+      assert [%{"type" => "EgressByHostname"}] = dev.conditions
+
+      assert_received {FakeWorkerProfiles, :read, "dev"}
+      refute_received {FakeWorkerProfiles, :read, "dev"}
+    end
+
+    test "and a client that exits rather than answering leaves the profile unknown", context do
+      FakeWorkerProfiles.start(%{"dev" => :exit})
+
+      assert {:ok, [dev]} = Admin.profiles_list(context.actor)
+      assert dev.conditions == nil
+      # Unknown is the weaker answer, as silence is.
+      assert dev.missing_guarantees == ["fqdn_egress"]
+    end
+  end
+
   describe "granting a team a profile nothing enforces" do
     setup do
       {:ok, group} = Identity.upsert_group(%{external_id: "platform", display_name: "platform"})
@@ -270,7 +306,7 @@ defmodule Troupe.Plane.ProvisionerTest do
       assert {:ok, _} = Hosts.authenticate(host.secret, "build-box")
     end
 
-    test "and a team admin registers nothing", context do
+    test "and a team admin registers nothing" do
       {:ok, lead} = Identity.upsert_user(%{subject: "lead@example.test", display_name: "lead"})
       {:ok, _} = Identity.set_memberships(lead, ["platform"])
 

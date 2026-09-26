@@ -143,11 +143,16 @@ defmodule Troupe.Plane.Harness do
 
   Called by the scaler rather than by a client. A client that polled for its endpoint
   would be a client racing the thing that is about to give it one.
+
+  The team and its grant are checked before anything is reserved. A session whose team
+  lost the profile, or was removed, while it waited is parked read-only and gives back its
+  slice, and the answer is `{:error, :no_grant}` or `{:error, :no_team}`: not a refusal
+  for want of room, so the scaler goes on to the next.
   """
   @spec admit(Session.t()) :: {:ok, map()} | {:error, term()}
   def admit(%Session{} = session) do
-    with {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
-         team when not is_nil(team) <- team_of(session),
+    with {:ok, team} <- still_granted(session),
+         {:ok, %{worker: worker}} <- Placement.reserve(session.profile, session.id),
          {:ok, _pushed} <-
            start_on_pod(worker, session, team, nil, session.pending_prompt,
              on_failure: :requeue
@@ -156,8 +161,14 @@ defmodule Troupe.Plane.Harness do
       Logger.info("troupe plane: #{session.id} waited and is now on #{worker.pod_name}")
       {:ok, %{session_id: session.id, worker: worker.id}}
     else
-      nil ->
-        {:error, :no_team}
+      {:error, reason} when reason in [:no_grant, :no_team] ->
+        Drain.park(session)
+
+        Logger.info(
+          "troupe plane: #{session.id} waited on a profile its team may no longer use; read-only"
+        )
+
+        {:error, reason}
 
       {:error, reason} ->
         # Left pending by `on_failure: :requeue`, because this session's owner has already
@@ -1502,10 +1513,41 @@ defmodule Troupe.Plane.Harness do
     # the winner places the session and pushes it to a pod — the others wait for that to
     # land and are handed the same tree. A design where every caller placed would spend
     # the profile's capacity on one session.
-    case Sessions.activate(session.id) do
-      {:ok, bumped} -> start_elsewhere(bumped, user, role)
-      {:error, :not_dormant} -> join_running(session.id, user, role)
-      {:error, reason} -> {:error, Error.new(:not_found, %{reason: inspect(reason)})}
+    with :ok <- may_wake(session) do
+      case Sessions.activate(session.id) do
+        {:ok, bumped} -> start_elsewhere(bumped, user, role)
+        {:error, :not_dormant} -> join_running(session.id, user, role)
+        {:error, reason} -> {:error, Error.new(:not_found, %{reason: inspect(reason)})}
+      end
+    end
+  end
+
+  defp may_wake(session) do
+    case still_granted(session) do
+      {:ok, _team} ->
+        :ok
+
+      {:error, _no_grant_or_team} ->
+        {:error,
+         Error.new(:forbidden, %{
+           reason: "this session's team may no longer use #{session.profile}",
+           session_id: session.id
+         })}
+    end
+  end
+
+  # The grant is what lets a team's sessions run on a profile. Revoking it parks them, and
+  # this asks again wherever one would start — waking it, and placing it after a wait —
+  # so none starts on a grant that has gone, however its row got past the revoke: a pod's
+  # report that arrived after it, a race with it, or a team removed while the session
+  # waited, which leaves no team on the row at all (Decision 697).
+  defp still_granted(session) do
+    case team_of(session) do
+      nil ->
+        {:error, :no_team}
+
+      team ->
+        if Identity.granted?(team, session.profile), do: {:ok, team}, else: {:error, :no_grant}
     end
   end
 
@@ -1607,10 +1649,10 @@ defmodule Troupe.Plane.Harness do
       # The pod could not put the tree back and says why: the directory the session was
       # recorded in is gone, and nothing restores it. Not a blip worth another try, so the
       # session is parked read-only — history readable, nothing activates it again —
-      # rather than every open meeting the same failure (Decision 661).
+      # rather than every open meeting the same failure (Decision 661). What waking it
+      # took goes back here, whether or not the pod's own report of it arrives.
       {:error, %Error{data: %{"reason" => "workspace_gone"}} = reason} ->
-        Placement.release(session.profile, session.id)
-        Sessions.read_only(session.id)
+        Drain.park(session)
 
         {:error,
          Error.new(:forbidden, %{
@@ -1619,9 +1661,10 @@ defmodule Troupe.Plane.Harness do
            detail: inspect(reason)
          })}
 
+      # Dormant again, holding neither the slot nor the slice it was just given: the pod
+      # that refused it will not report a dormancy that would give them back.
       {:error, reason} ->
-        Placement.release(session.profile, session.id)
-        Sessions.dormant(session.id)
+        Drain.strand(worker, session.id)
 
         {:error,
          Error.new(:unavailable, %{
@@ -1651,10 +1694,15 @@ defmodule Troupe.Plane.Harness do
         {:error, _reason} -> {nil, nil}
       end
 
+    # `state` is the session's as this answer leaves it. `active` says the endpoint runs
+    # it; anything else says the pod only serves its history, so a client opens it with
+    # `activate` before its first activating command rather than sending that to a pod
+    # that does not hold the session (PROTOCOL.md §6, "A session that moves").
     %{
       "session_id" => session.id,
       "epoch" => session.epoch,
       "mode" => Keyword.get(opts, :mode, "activate"),
+      "state" => session.state,
       "endpoint" => worker.endpoint,
       "worker_id" => worker.id,
       "pod" => worker.pod_name,

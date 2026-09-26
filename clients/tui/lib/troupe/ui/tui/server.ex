@@ -189,7 +189,7 @@ defmodule Troupe.UI.TUI.Server do
         _ -> state
       end
 
-    {:ok, schedule_tick(state)}
+    {:ok, state |> recheck_loop() |> schedule_tick()}
   end
 
   @impl true
@@ -256,6 +256,22 @@ defmodule Troupe.UI.TUI.Server do
 
   def handle_info(:force_render, state),
     do: {:noreply, %{state | now: System.system_time(:millisecond), dirty: false}, render?: true}
+
+  # What the session said about the loop the status line shows (`recheck_loop/1`). Kept
+  # only while it runs; an error says nothing either way, and the next check asks again.
+  def handle_info({:loop_checked, sid, id, answer}, %{session_id: sid} = state) do
+    case answer do
+      {:ok, %{"state" => "running"}} ->
+        {:noreply, state, render?: false}
+
+      {:ok, _stopped_or_none} ->
+        state = %{state | model: Model.loop_ended(state.model, id), dirty: true}
+        {:noreply, schedule_tick(state), render?: false}
+
+      {:error, _reason} ->
+        {:noreply, state, render?: false}
+    end
+  end
 
   def handle_info(_msg, state), do: {:noreply, state, render?: false}
 
@@ -1020,7 +1036,7 @@ defmodule Troupe.UI.TUI.Server do
     }
 
     retire(previous)
-    notice(state, "resumed #{sid}")
+    state |> recheck_loop() |> notice("resumed #{sid}")
   end
 
   defp rename(previous, sid) do
@@ -1849,7 +1865,27 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
-    %{state | model: model}
+    state = %{state | model: model}
+    if event.type == :remote_status, do: recheck_loop(state), else: state
+  end
+
+  # The loop on the status line is the journal's, and a daemon that stopped mid-loop left
+  # the journal saying it runs: `loop_stopped interrupted` is written only when the
+  # session is next activated. So a screen that shows one asks the session, which knows
+  # its tree is not running, whenever it may know better than the journal does — when the
+  # screen opens, and when the connection says something about the session. From a task,
+  # so a connection still coming up never holds the screen.
+  defp recheck_loop(state) do
+    case Model.loop(state.model) do
+      nil ->
+        state
+
+      %{id: id} ->
+        server = self()
+        sid = state.session_id
+        _ = Task.start(fn -> send(server, {:loop_checked, sid, id, Client.loop(sid)}) end)
+        state
+    end
   end
 
   # When the mailbox is deep, collapse every queued delta in one pass rather than one message at a time.

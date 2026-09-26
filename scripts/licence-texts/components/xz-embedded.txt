@@ -1,0 +1,8 @@
+XZ Embedded, the files Burrito vendors in src/xz (revision
+3f438e15109229bb14ab45f285f4bff5412a9542). Each carries the same notice:
+
+Authors: Lasse Collin <lasse.collin@tukaani.org>
+         Igor Pavlov <https://7-zip.org/>
+
+This file has been put into the public domain.
+You can do whatever you want with this file.

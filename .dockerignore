@@ -1,5 +1,6 @@
-# What the image build never needs. The Dockerfile copies mix.exs, mix.lock, config/
-# and apps/ and nothing else, so most of this is about the context Docker tars
+# What the image build never needs. The Dockerfile copies mix.exs, mix.lock, config/,
+# apps/, and LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt (which the GUI's image reads from
+# here too) and nothing else, so most of this is about the context Docker tars
 # up before the first instruction runs — a checkout with `_build` and `deps` in it is a
 # gigabyte of that — and about not letting a laptop's build outputs into a Linux image.
 .git

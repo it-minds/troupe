@@ -33,7 +33,7 @@ defmodule Troupe.Worker.Harness do
 
   alias Troupe.Gateway.{Listener, Web}
   alias Troupe.Protocol.Endpoint
-  alias Troupe.Worker.{Auth, Drain}
+  alias Troupe.Worker.{Auth, Drain, Sessions}
 
   @default_http_port 4000
   @default_socket_port 4100
@@ -55,10 +55,14 @@ defmodule Troupe.Worker.Harness do
   def init(opts) do
     auth = Keyword.get(opts, :auth, Auth)
 
+    # An activating command reaches a tree that is running here and never brings one
+    # back: the plane places a session and bumps its epoch before a pod runs it, and a pod
+    # that woke one by itself would be running it outside both (`Sessions.running/1`).
     endpoint =
       Endpoint.remote(socket_port(opts), Auth.authenticator(auth),
         guard: Auth.guard(auth),
-        narrow: &Auth.narrow/3
+        narrow: &Auth.narrow/3,
+        activate: &Sessions.running/1
       )
 
     children = [

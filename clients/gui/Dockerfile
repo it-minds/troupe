@@ -5,7 +5,7 @@
 # worker from the browser. Nothing in this image holds a secret, talks to a database, or
 # needs to be told anything at runtime except where it is mounted.
 #
-#   docker build --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
+#   docker build --build-context licences=../.. --build-arg TROUPE_GUI_BASE=app -t troupe-gui .
 #
 # The value is written without slashes on purpose: a POSIX shell on Windows rewrites a
 # leading `/` into a drive path on its way to `--build-arg`, and the result is a bundle
@@ -16,6 +16,14 @@
 # it. An image built for `/app/` is not the same image as one built for `/`, and pretending
 # otherwise with a runtime substitution over minified output is the kind of cleverness
 # that fails on the one asset the regex missed.
+#
+# `--build-context licences=<the repository's root>` is the one thing read from outside
+# this directory: LICENSE, NOTICE and THIRD-PARTY-NOTICES.txt, which go into the image
+# because Apache-2.0 and the licences of the packages in the bundle ask that they go with
+# every copy. Only those three are sent. Without it the stage below stays empty, and the
+# build stops at the COPY that reads it: `lstat /LICENSE: no such file or directory`.
+
+FROM scratch AS licences
 
 FROM node:24-bookworm-slim AS build
 
@@ -51,6 +59,7 @@ FROM nginxinc/nginx-unprivileged:1.29-alpine AS runtime
 # capability to bind a port and no root in the container.
 COPY --from=build /src/apps/desktop/dist /usr/share/nginx/html
 COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+COPY --from=licences LICENSE NOTICE THIRD-PARTY-NOTICES.txt /usr/share/doc/troupe/
 
 EXPOSE 8080
 

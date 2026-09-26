@@ -137,7 +137,8 @@ whether Cilium is there:
 
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the
-`CiliumNetworkPolicy`.
+`CiliumNetworkPolicy`. Switching `ciliumAvailable` from `true` to `false` deletes the
+`CiliumNetworkPolicy` the operator wrote for each profile, at that profile's next reconcile.
 
 The operator says which on each profile, as the `EgressByHostname` condition, and the
 plane reads it there: the console's **Provisioners** screen and `admin.profiles.list` give

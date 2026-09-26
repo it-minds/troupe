@@ -20,6 +20,7 @@ defmodule Troupe.Plane.BudgetLadderTest do
     Identity,
     Ledger,
     PersonBudget,
+    Sessions,
     Settings,
     TeamBudget,
     Triggers
@@ -44,9 +45,9 @@ defmodule Troupe.Plane.BudgetLadderTest do
 
     team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 100 * @million)
     ada = person("ada@example.test", ["engineering"])
-    _pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 12)
+    pod = FakePod.enrol(Listener.port(), "dev-token", "troupe-w-dev-0", capacity: 12)
 
-    %{team: team, ada: ada}
+    %{team: team, ada: ada, pod: pod.worker_id}
   end
 
   describe "the ladder" do
@@ -246,7 +247,73 @@ defmodule Troupe.Plane.BudgetLadderTest do
     end
   end
 
+  # A pod's dormancy report gives back the slot and every rung's slice. A session that
+  # ends some other way has to give back the same, because nothing else will: every rung
+  # reloads the ledger's open reservations, so a row nobody closes is held for good.
+  describe "a running session that ends" do
+    test "because its team lost the grant gives back its slot and every slice", context do
+      {:ok, _} = set_person_cap(context.ada, 50 * @million)
+      id = running!(context, 10 * @million)
+
+      :ok = Identity.revoke(context.team, "dev")
+
+      assert Sessions.get(id).state == "read_only"
+      assert_given_back(context)
+    end
+
+    test "because it was erased gives back its slot and every slice", context do
+      {:ok, _} = set_person_cap(context.ada, 50 * @million)
+      id = running!(context, 10 * @million)
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => id}, as(context.ada))
+
+      # The pod's `session.erase` stops the session without reporting it dormant.
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^id}}, 5_000
+      assert_given_back(context)
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
+
+  defp as(user), do: %{user: user, platform_admin?: false}
+
+  defp running!(context, slice) do
+    params = %{
+      "profile" => "dev",
+      "team" => "engineering",
+      "terms" => %{"budget_micros" => slice}
+    }
+
+    assert {:ok, %{"session_id" => id}} = Harness.call("session.create", params, as(context.ada))
+    assert_receive {:pushed, "session.activate", _}, 5_000
+
+    assert %{reserved_micros: ^slice} = TeamBudget.inspect_state(context.team)
+    assert %{reserved_micros: ^slice} = PersonBudget.inspect_state(context.ada.subject)
+    assert slots(context) == 1
+    id
+  end
+
+  # All four read before asserting, so a failure says which of them is still held.
+  defp assert_given_back(context) do
+    held = %{
+      team: TeamBudget.inspect_state(context.team).reserved_micros,
+      person: PersonBudget.inspect_state(context.ada.subject).reserved_micros,
+      ledger: Ledger.open_reservations(),
+      slots: slots(context)
+    }
+
+    assert held == %{team: 0, person: 0, ledger: %{}, slots: 0}
+  end
+
+  # What the placement actor holds for the pod, without the reload
+  # `Placement.inspect_state/1` does first, which would hide a slot never given back.
+  defp slots(context) do
+    :global.whereis_name({Troupe.Plane.Placement, "dev"})
+    |> :sys.get_state()
+    |> Map.fetch!(:capacities)
+    |> Map.get(context.pod, 0)
+  end
 
   defp set_person_cap(user, micros), do: Identity.set_budget(user, micros)
 

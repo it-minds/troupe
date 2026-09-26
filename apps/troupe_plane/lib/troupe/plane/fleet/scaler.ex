@@ -172,13 +172,16 @@ defmodule Troupe.Plane.Fleet.Scaler do
 
   # Oldest first, one at a time, stopping at the first refusal. Placement is the only
   # thing that knows whether there is room, so this asks rather than deciding — and a
-  # refusal means the room is gone, which makes carrying on down the list pointless.
+  # refusal means the room is gone, which makes carrying on down the list pointless. A
+  # session parked because its team may no longer use the profile took no room, so the
+  # next one is asked.
   defp admit(%Profile{} = profile) do
     profile.name
     |> Sessions.pending_for()
     |> Enum.reduce_while([], fn session, admitted ->
       case Harness.admit(session) do
         {:ok, _endpoint} -> {:cont, [session.id | admitted]}
+        {:error, parked} when parked in [:no_grant, :no_team] -> {:cont, admitted}
         {:error, _no_room} -> {:halt, admitted}
       end
     end)

@@ -17,9 +17,10 @@ defmodule Troupe.Worker.PlaneLinkTest do
   alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.LLM.Fake
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
-  alias Troupe.Plane.{Fleet, Harness, Placement, Repo}
+  alias Troupe.Plane.{Fleet, Harness, Identity, Placement, Repo}
   alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions, as: PlaneSessions
+  alias Troupe.Plane.Sessions.Session, as: PlaneSession
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.PlaneHelper
   alias Troupe.Worker.RecordingProxy
@@ -293,6 +294,47 @@ defmodule Troupe.Worker.PlaneLinkTest do
       assert archived["last_seq"] == manifest["last_seq"]
       assert archived["head_hash"] == manifest["head_hash"]
       assert PlaneSessions.on_worker(worker.id) == []
+    end
+  end
+
+  describe "a grant taken away" do
+    test "stops the session on its pod, and the pod's report of it leaves it read-only",
+         context do
+      link = start_link!(context)
+      eventually(fn -> Link.connected?(link) end)
+      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end)
+
+      {:ok, group} =
+        Identity.upsert_group(%{external_id: "engineering", display_name: "engineering"})
+
+      {:ok, team} = Identity.enable_team(group, %{"name" => "engineering"})
+      {:ok, _} = Identity.grant(team, "dev")
+
+      {:ok, _} =
+        context.session_id
+        |> PlaneSessions.get()
+        |> PlaneSession.changeset(%{team_id: team.id})
+        |> Repo.update()
+
+      assert {:ok, _} = activate(context, report: Link.reporter(link))
+      run_turn(context.session_id, "hello")
+      assert {:ok, %{worker: _}} = Placement.reserve("dev", context.session_id)
+
+      :ok = Identity.revoke(team, "dev")
+
+      # The pod's copy goes the way an archive's does: sealed, uploaded, and gone from here.
+      eventually(fn -> Sessions.whereis(context.session_id) == nil end)
+      eventually(fn -> not File.exists?(context.workspace) end)
+
+      # One more round trip on the same socket, so the dormancy report the pod sent before
+      # it deleted its copy has reached the plane.
+      assert {:ok, %{"pong" => true}} = push(connection, "ping", %{})
+
+      {:ok, manifest} = Storage.get_manifest(context.store, context.session_id)
+      session = PlaneSessions.get(context.session_id)
+      assert session.state == "read_only"
+      assert is_nil(session.worker_id)
+      assert session.last_seq == manifest["last_seq"]
     end
   end
 

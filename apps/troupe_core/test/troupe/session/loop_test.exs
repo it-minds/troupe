@@ -79,8 +79,12 @@ defmodule Troupe.Session.LoopTest do
       assert started.data["goal"] == @goal
       assert started.data["command_id"] == "c-loop"
 
-      # The loop's inputs are the root's own turns, told apart from a person's.
-      assert sid |> events_of_type(:user_input) |> Enum.map(& &1.data["source"]) == ["loop", "loop"]
+      # The loop's inputs are the root's own turns, told apart from a person's, and each
+      # names its iteration's command id, as its `input_accepted` does.
+      assert sid
+             |> events_of_type(:user_input)
+             |> Enum.map(&{&1.data["source"], &1.data["command_id"]}) ==
+               [{"loop", "loop-1.1"}, {"loop", "loop-1.2"}]
 
       assert sid |> events_of_type(:input_accepted) |> Enum.map(&{&1.data["command_id"], &1.data["author"]}) ==
                [{"loop-1.1", "loop"}, {"loop-1.2", "loop"}]

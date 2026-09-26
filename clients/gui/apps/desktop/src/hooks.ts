@@ -353,34 +353,46 @@ export function useSessionView(
     };
   }, [auth, daemon, sessionId, mode, local]);
 
+  // A team session's command that its pod refuses because the session has moved goes
+  // after it through the plane and runs once more (PROTOCOL.md §6, "A session that
+  // moves"). A session on this computer has nowhere else to be.
+  const following = useCallback(<T,>(command: () => Promise<T>): Promise<T> => {
+    const a = attachment.current;
+    return a ? a.retrying(command) : command();
+  }, []);
+
   const send = useCallback(async (text: string) => {
     const v = ref.current;
     if (!v) throw new Error("not attached");
     const commandId = v.conn.nextCommandId();
     setState((s) => addPending(s, commandId, text));
     try {
-      await v.send(text, commandId);
+      await following(() => v.send(text, commandId));
     } catch (e) {
       setState((s) => dropPending(s, commandId));
       throw e;
     }
-  }, []);
+  }, [following]);
 
   const respond = useCallback(async (callId: string, decision: "allow" | "deny" | "allow_session") => {
-    await ref.current?.respondApproval(callId, decision);
-  }, []);
+    const v = ref.current;
+    if (v) await following(() => v.respondApproval(callId, decision));
+  }, [following]);
 
   const answer = useCallback(async (callId: string, text: string) => {
-    await ref.current?.answerQuestion(callId, text);
-  }, []);
+    const v = ref.current;
+    if (v) await following(() => v.answerQuestion(callId, text));
+  }, [following]);
 
   const cancel = useCallback(async () => {
-    await ref.current?.cancel();
-  }, []);
+    const v = ref.current;
+    if (v) await following(() => v.cancel());
+  }, [following]);
 
   const switchProfile = useCallback(async (profile: string) => {
-    await ref.current?.switchProfile(profile);
-  }, []);
+    const v = ref.current;
+    if (v) await following(() => v.switchProfile(profile));
+  }, [following]);
 
   const readBlob = useCallback(async (blob: string) => {
     const v = ref.current;

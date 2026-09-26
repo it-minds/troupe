@@ -44,12 +44,11 @@ flowchart LR
   default branch, so a fixer's `Fixes #N` into the chunk closes nothing. That pull request
   runs the full CI, and the person merges it.
 
-The per-harness entry points are thin and all point here:
+The per-harness entry points are thin and all point here. A person's own harness setup (for example `.claude/`) stays out of the repository:
 
 | Harness | Coordinator | Fixer |
 | --- | --- | --- |
 | Troupe | `.troupe/agents/fix-issues.md` | `.troupe/agents/issue-fixer.md` |
-| Claude Code | `.claude/skills/fix-issues/SKILL.md` (`/fix-issues`) | `.claude/agents/issue-fixer.md` |
 | anything that reads `AGENTS.md` | `AGENTS.md` -> this page | this page, section 2 |
 
 ## What may run at once
@@ -61,8 +60,16 @@ serial.** Fixers that never touch the install (GUI, docs, server-only) run along
 
 The coordinator hands the install out with a lock: a file `install-lock.txt` in its
 scratch directory, reading `free` or `held by #N`. A fixer that needs the install does
-its code and tests first, then waits for `free`, writes `held by #N`, and writes `free`
-back when it has verified or rolled back.
+its code and tests first, then waits for `free`. Writing the file is not atomic, and two
+fixers that both read `free` both write, so a fixer writes `held by #N`, waits a second,
+reads it again, and goes ahead only if it still says `#N`; otherwise it waits for `free`
+again. It writes `free` back when it has verified or rolled back.
+
+Besides the install, the plane's tests share one database, `troupe_plane_test`, so one
+plane suite runs at a time: two at once deadlock (Postgrex `40P01`). The suite does not
+migrate it, so a fixer who adds a plane migration applies it there
+(`MIX_ENV=test mix ecto.migrate` in `apps/troupe_plane`); until someone does, the plane
+tests fail on every branch that carries it.
 
 Scratch directories may be shared between fixers. Each fixer writes only under a
 subfolder named for its issue (`fix-<N>/`), and reads its pull request body back just
@@ -188,7 +195,7 @@ Every row that applies must pass.
 | `apps/troupe_daemon`, `troupe_core`, `troupe_gateway`, `troupe_protocol` (anything the daemon ships) | targeted `mixw test <files>`, `mixw credo --strict` on touched files, then **install and verify** |
 | `clients/tui` | `mixw test` in `clients/tui`, then **install and verify** |
 | `apps/troupe_plane`, `troupe_worker`, `troupe_operator`, `troupe_a2a` (server only) | targeted `mixw test <files>`; `bash scripts/ci --gates` when it runs here. A test that prints `SKIPPED` for Postgres, OpenBao or MinIO is not a pass - name what could not run |
-| `clients/gui` | `pnpm -C clients/gui install`, `typecheck`, `test`; for UI behaviour, `pnpm -C clients/gui fake` and the desktop app's web dev server in a browser, checking the behaviour the issue describes. There is no Rust toolchain here, so no Tauri build: say so |
+| `clients/gui` | `pnpm -C clients/gui install`, `typecheck`, `test`; for UI behaviour, `pnpm -C clients/gui fake` and the desktop app's web dev server in a browser, checking the behaviour the issue describes. For a Tauri build, `pnpm tauri build --bundles nsis` works offline here; test-install a renamed build (`--config` productName and mainBinaryName) so the installed app is untouched |
 | docs only | links resolve, Mermaid renders if touched; no install |
 
 **Install and verify**, in PowerShell from the worktree root:
@@ -201,8 +208,11 @@ Every row that applies must pass.
 `install-local.ps1` builds the checkout it lives in, so it builds the fixer's worktree,
 and it puts the toolchain on its own PATH, so a shell opened before the toolchain was
 installed still works.
-The first build in a fresh worktree fetches deps and takes several minutes. After
-`verify-local.ps1` passes, run the issue's own reproduction against the installed
+The first build in a fresh worktree fetches deps and takes several minutes.
+A TUI running on the machine is never stopped: `install-local.ps1` installs around it and
+warns that it holds the unpacked payload, and `verify-local.ps1` fails its daemon check
+while that TUI's embedded harness is the daemon `daemon.json` names, until it is closed.
+After `verify-local.ps1` passes, run the issue's own reproduction against the installed
 binaries (`troupe-daemon.cmd ...`, `troupe.exe ...`, or the desktop app against the
 installed daemon) and keep the command and its output.
 
@@ -216,6 +226,8 @@ The machine is always left with a working install: the verified build or the pre
   session's listing says what it has actually spent" - not `fix: ...`.
 - **No attribution.** No `Co-Authored-By:` trailer, no "Generated with ..." line; the
   message ends at its last real line. Pull requests go out under the maintainer's name.
+- **Signed off.** `git commit -s`: the `Signed-off-by:` line is the DCO, which the `dco`
+  check requires ([CONTRIBUTING.md](../../CONTRIBUTING.md)), and the only trailer a commit has.
 - PowerShell files are pure ASCII: Windows PowerShell 5.1 reads UTF-8 without a BOM as
   ANSI, and an em dash becomes a parse error.
 - Never force-push (push a new branch name instead), never merge, never close the issue

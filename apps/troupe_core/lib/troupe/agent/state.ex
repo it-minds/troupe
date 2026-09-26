@@ -2,7 +2,7 @@ defmodule Troupe.Agent.Call do
   @moduledoc "One outstanding tool call, from dispatch to result."
 
   @enforce_keys [:id, :name, :args]
-  defstruct [:id, :name, :args, :task_pid, :monitor, :timer, :child_ref, result: nil]
+  defstruct [:id, :name, :args, :task_pid, :monitor, :timer, :child_ref, :child_pid, result: nil]
 
   @type t :: %__MODULE__{
           id: String.t(),
@@ -12,6 +12,7 @@ defmodule Troupe.Agent.Call do
           monitor: reference() | nil,
           timer: reference() | nil,
           child_ref: reference() | nil,
+          child_pid: pid() | nil,
           result: Troupe.Tool.Result.t() | nil
         }
 end
