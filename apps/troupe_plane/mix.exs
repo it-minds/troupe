@@ -13,6 +13,7 @@ defmodule Troupe.Plane.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       description: "Control plane: identity, placement, budgets, admin (stage 2)",
+      package: [licenses: ["Apache-2.0"]],
       deps: deps()
     ]
   end

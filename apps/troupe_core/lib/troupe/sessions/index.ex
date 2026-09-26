@@ -301,8 +301,9 @@ defmodule Troupe.Sessions.Index do
   # running is one of the askers. Only the root's own calls are asked again when the tree
   # comes back; a delegation comes back interrupted, so a session with a subagent at work is
   # busy, and a subagent's question times out with its tool as it always has. One that
-  # finished or ran out of budget is not at work: it stays up, `:done`, and what it had to
-  # say is already its delegation's result (#134).
+  # finished or ran out of budget is not at work: what it had to say is already its
+  # delegation's result (#134), and its parent stops it on taking that (#171), so all it
+  # can be here is `:done` for the moment in between.
   defp parked_or_busy(session_id) do
     root = Session.root_path()
 

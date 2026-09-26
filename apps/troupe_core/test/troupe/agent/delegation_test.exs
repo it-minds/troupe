@@ -3,6 +3,7 @@ defmodule Troupe.Agent.DelegationTest do
 
   alias Troupe.Agent.{Definition, Definitions}
   alias Troupe.Agent.Node, as: AgentNode
+  alias Troupe.LLM.ToolResult
 
   # How many times `kill_until_gone/3` may kill the agent before giving up, and so also
   # how many answers the doomed child's script has to have.
@@ -374,6 +375,139 @@ defmodule Troupe.Agent.DelegationTest do
     end
   end
 
+  # A finished subagent kept its process, and with it its whole conversation, until its
+  # session's tree stopped (#171). What it had to say is its delegation's result and its own
+  # log, and nothing addresses a finished child by its process, so its parent stops it once
+  # it has the result.
+  describe "a subagent that has reported" do
+    test "is stopped, so a session holds only the children still at work", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools,
+               Enum.map(1..4, &{"delegate", %{"agent" => "general", "task" => "quick #{&1}"}}) ++
+                 [{"delegate", %{"agent" => "lingering", "task" => "slow"}}]},
+              {:text, "all five came back"}
+            ],
+            "general" => List.duplicate({:tools, [{"finish", %{"summary" => "quick"}}]}, 4),
+            "lingering" => [
+              {:tools,
+               [{"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 1_500}}]},
+              {:tools, [{"finish", %{"summary" => "slow"}}]}
+            ]
+          },
+          definitions: definitions_with(["lingering"])
+        )
+
+      sid = session.id
+      Troupe.subscribe(sid)
+      Troupe.send_input(sid, "five things, one slow")
+
+      await_results(sid, "quick", 4)
+      [lingering] = children_of(sid, "lingering")
+
+      # Four have reported and the fifth is still counting: the fifth is all that is left.
+      assert eventually(fn -> Troupe.agent_tree(sid) == [["root"], lingering] end)
+      assert eventually(fn -> length(AgentNode.descendants(sid, ["root"])) == 8 end)
+      assert %{active: 1} = DynamicSupervisor.count_children(Registry.children_sup(sid, ["root"]))
+
+      await_root_idle(sid, 10_000)
+
+      assert eventually(fn -> Troupe.agent_tree(sid) == [["root"]] end)
+      assert eventually(fn -> length(AgentNode.descendants(sid, ["root"])) == 4 end)
+      assert %{active: 0} = DynamicSupervisor.count_children(Registry.children_sup(sid, ["root"]))
+
+      # Each finished before its parent took its result, so nothing was cut off.
+      for path <- children_of(sid, "general") ++ children_of(sid, "lingering") do
+        assert Troupe.snapshot(sid, path) == {:error, :no_agent}
+        assert_reported_before_taken(sid, path)
+      end
+    end
+
+    test "does not pile up over a session's delegations", context do
+      %{session: session} =
+        start_session(context,
+          routes: %{
+            "root" =>
+              List.duplicate(
+                {:tools, [{"delegate", %{"agent" => "general", "task" => "one more"}}]},
+                5
+              ) ++
+                [{:text, "five in a row"}],
+            "general" => List.duplicate({:tools, [{"finish", %{"summary" => "done one"}}]}, 5)
+          }
+        )
+
+      sid = session.id
+      Troupe.subscribe(sid)
+      Troupe.send_input(sid, "delegate five times over")
+      await_root_idle(sid, 10_000)
+
+      paths = children_of(sid, "general")
+      assert length(paths) == 5
+      assert eventually(fn -> Troupe.agent_tree(sid) == [["root"]] end)
+      assert eventually(fn -> length(AgentNode.descendants(sid, ["root"])) == 4 end)
+      Enum.each(paths, &assert_reported_before_taken(sid, &1))
+    end
+
+    # Everything that reads a finished child reads its log: the parent's conversation, a
+    # restart's replay of it, and the child's own part of the log.
+    test "is still read from its log, before and after its parent restarts", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "look"}}]},
+              {:text, "it found it"}
+            ],
+            "general" => [
+              {:text_and_tools, "found it in lib/a.ex", [{"finish", %{"summary" => "lib/a.ex"}}]}
+            ]
+          }
+        )
+
+      sid = session.id
+      Troupe.subscribe(sid)
+      Troupe.send_input(sid, "delegate it")
+      await_root_idle(sid)
+
+      [child] = children_of(sid, "general")
+      assert eventually(fn -> Troupe.agent_tree(sid) == [["root"]] end)
+
+      child_log = sid |> Troupe.events() |> Enum.filter(&(&1.agent == child))
+      assert %{type: "agent_started"} = List.first(child_log)
+
+      assert %{type: "agent_done", data: %{"reason" => "finished", "summary" => "lib/a.ex"}} =
+               List.last(child_log)
+
+      before = Troupe.snapshot(sid).conversation
+
+      assert Enum.any?(before, fn message ->
+               Enum.any?(
+                 List.wrap(message.content),
+                 &match?(%ToolResult{content: "lib/a.ex"}, &1)
+               )
+             end)
+
+      calls = Fake.call_count(fake)
+
+      agent = Registry.agent_pid(sid, ["root"])
+      ref = Process.monitor(agent)
+      Process.exit(agent, :kill)
+      assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+      assert eventually(fn -> Registry.agent_pid(sid, ["root"]) not in [nil, agent] end)
+
+      # The replay is the conversation it had, and it neither delegates again nor asks the
+      # child for anything.
+      assert eventually(fn -> match?(%{state: :idle}, Troupe.snapshot(sid)) end)
+      assert Troupe.snapshot(sid).conversation == before
+      assert Fake.call_count(fake) == calls
+      assert Troupe.agent_tree(sid) == [["root"]]
+      assert [_one] = events_of_type(sid, "delegation_started")
+    end
+  end
+
   describe "depth cap" do
     test "delegating past the cap is an error result, not a crash", context do
       %{session: session} =
@@ -406,10 +540,72 @@ defmodule Troupe.Agent.DelegationTest do
     end
   end
 
-  defp definitions_with_doomed do
+  defp definitions_with_doomed, do: definitions_with(["doomed"])
+
+  defp definitions_with(names) do
     base = Definitions.load(System.tmp_dir!())
-    {:ok, doomed} = Definition.parse("doomed", "---\nmode: subagent\n---\nfail", :project)
-    Definitions.from_list(Definitions.all(base) ++ [doomed])
+
+    extra =
+      Enum.map(names, fn name ->
+        {:ok, definition} = Definition.parse(name, "---\nmode: subagent\n---\n#{name}", :project)
+        definition
+      end)
+
+    Definitions.from_list(Definitions.all(base) ++ extra)
+  end
+
+  defp children_of(session_id, agent) do
+    session_id
+    |> events_of_type("delegation_started")
+    |> Enum.filter(&(&1.data["agent"] == agent))
+    |> Enum.map(& &1.data["child_path"])
+  end
+
+  # Waits for `count` delegations to have come back with `content`.
+  defp await_results(session_id, content, count, timeout \\ 5_000) do
+    done? = fn ->
+      session_id
+      |> events_of_type("tool_call_completed")
+      |> Enum.count(&(&1.data["name"] == "delegate" and &1.data["content"] == content))
+      |> Kernel.>=(count)
+    end
+
+    assert eventually(done?, timeout),
+           "#{count} delegations never came back with #{inspect(content)}"
+  end
+
+  # The child wrote its `agent_done` before its parent wrote the result it had been handed,
+  # so a parent that stops the child the moment it has the result cuts nothing off.
+  defp assert_reported_before_taken(session_id, child_path) do
+    events = Troupe.events(session_id)
+
+    [started] =
+      Enum.filter(
+        events,
+        &(&1.type == "delegation_started" and &1.data["child_path"] == child_path)
+      )
+
+    [done] = Enum.filter(events, &(&1.type == "agent_done" and &1.agent == child_path))
+
+    [taken] =
+      Enum.filter(
+        events,
+        &(&1.type == "tool_call_completed" and &1.agent == started.agent and
+            &1.data["call_id"] == started.data["call_id"])
+      )
+
+    assert done.seq < taken.seq
+  end
+
+  defp eventually(fun, timeout \\ 5_000),
+    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
+
+  defp poll(fun, deadline) do
+    cond do
+      fun.() -> true
+      System.monotonic_time(:millisecond) > deadline -> false
+      true -> Process.sleep(10) && poll(fun, deadline)
+    end
   end
 
   # The root is idle only once every delegation has come back, so filtering by

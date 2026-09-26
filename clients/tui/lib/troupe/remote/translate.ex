@@ -217,13 +217,16 @@ defmodule Troupe.Remote.Translate do
       "user_input" when harness_note? ->
         {[emit.(:remote_note, %{text: "harness: " <> text_of(data)})], memory}
 
+      # A line sent while the agent works comes back twice, queued and then taken, and both
+      # copies name the send's command id; the window draws it once (Decision 117).
       type when type in ["input.queued", "input_queued", "user_input"] ->
         {[
            emit.(:input, %{
              content: text_of(data),
              source: source_atom(data["source"]),
              command_id: cid,
-             actor: actor_of(event)
+             actor: actor_of(event),
+             queued: type != "user_input"
            })
          ], memory}
 

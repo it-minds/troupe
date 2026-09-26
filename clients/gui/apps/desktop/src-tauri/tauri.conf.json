@@ -37,7 +37,7 @@
     "category": "DeveloperTool",
     "shortDescription": "The Troupe GUI",
     "longDescription": "The graphical client for Troupe. Speaks the public protocol and nothing else.",
-    "copyright": "",
+    "copyright": "Copyright 2026 The Troupe contributors",
     "publisher": "Objective MJ",
     "macOS": {
       "minimumSystemVersion": "10.15"

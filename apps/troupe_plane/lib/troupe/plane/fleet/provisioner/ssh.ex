@@ -49,7 +49,7 @@ defmodule Troupe.Plane.Fleet.Provisioner.SSH do
   list of four things, not a flag.
   """
   @impl true
-  def guarantees(%Profile{}), do: []
+  def guarantees(%Profile{}, _opts \\ []), do: []
 
   @doc """
   Reconcile the profile against its inventory, which is all there is to reconcile.

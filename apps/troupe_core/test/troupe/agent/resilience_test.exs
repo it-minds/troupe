@@ -3,7 +3,7 @@ defmodule Troupe.Agent.ResilienceTest do
 
   alias Troupe.Agent.Server, as: AgentServer
   alias Troupe.LLM.Message
-  alias Troupe.Session.Approvals
+  alias Troupe.Session.{Approvals, Summary}
 
   describe "tool isolation" do
     test "a tool that raises becomes an error result and the agent survives", context do
@@ -314,6 +314,221 @@ defmodule Troupe.Agent.ResilienceTest do
       [_first, _second, third] = Fake.requests_for(fake, "general")
       assert [task] = third.messages
       assert Message.text(task) == "second task"
+
+      # The child the restart took down is done in its own log too, with nothing left open
+      # (D19): it never reports and its path is never used again.
+      old = session.id |> Troupe.events() |> Enum.filter(&(&1.agent == ["root", "general#2"]))
+      assert %{type: "agent_done", data: %{"reason" => "interrupted"}} = List.last(old)
+      assert open_calls(old) == []
+    end
+  end
+
+  # A delegation the session stopped in the middle of is closed as interrupted when the
+  # session comes back, and nothing restarts its child. The child's own calls stayed open,
+  # so an approval it was waiting on stayed open in every reader that follows the log (D18).
+  describe "a delegation a restored session closes" do
+    test "closes what its subagent had open, so the subagent's approval is not left waiting",
+         context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [auto_approve: false],
+          routes: %{
+            "root" => [
+              {:tools, [{"delegate", %{"agent" => "general", "task" => "ask for it"}}]},
+              {:text, "never asked"}
+            ],
+            "general" => [
+              {:tools, [{"needs_approval", %{"note" => "child"}}]},
+              {:text, "never asked"}
+            ]
+          }
+        )
+
+      sid = session.id
+      Troupe.subscribe(sid)
+      Troupe.send_input(sid, "delegate it")
+      request = await_event(sid, :approval_requested)
+      child = request.agent
+      assert child == ["root", "general#1"]
+
+      reopen(context, sid, fake, auto_approve: false)
+
+      assert eventually(fn -> open_calls(events_of(sid, ["root"])) == [] end)
+      assert eventually(fn -> Summary.snapshot(sid)["approvals"] == [] end)
+      assert open_calls(events_of(sid, child)) == []
+      assert Approvals.pending(sid) == []
+
+      [closed] = sid |> events_of(child) |> Enum.filter(&(&1.type == "tool_call_completed"))
+      assert closed.data["call_id"] == request.data["call_id"]
+      refute closed.data["ok"]
+      assert closed.data["content"] =~ "interrupted"
+
+      assert %{type: "agent_done", data: %{"reason" => "interrupted"}} =
+               List.last(events_of(sid, child))
+
+      # Nothing was asked again: the child is not started, and the root takes no turn.
+      assert [_asked_once] = events_of_type(sid, "approval_requested")
+      assert Troupe.agent_tree(sid) == [["root"]]
+    end
+  end
+
+  # A failed request's note is part of the conversation the model is sent next, so it has
+  # to be in the log that rebuilds the conversation (D19).
+  describe "a root whose model request failed" do
+    test "still has the failure in its conversation after the session comes back", context do
+      %{session: session, fake: fake} =
+        start_session(context, steps: [{:error, {:api_error, "the gateway is down"}}])
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "try it")
+      await_rest(session.id)
+
+      conversation = Troupe.snapshot(session.id).conversation
+      assert Message.text(List.last(conversation)) =~ "The previous model request failed"
+      assert Message.text(List.last(conversation)) =~ "the gateway is down"
+
+      reopen(context, session.id, fake, [])
+
+      assert Troupe.snapshot(session.id).conversation == conversation
+    end
+  end
+
+  # The results of a turn's calls reach the conversation together, once the last is back.
+  # A restart in the middle kept only the calls it re-ran or closed, so the results already
+  # back went missing — the model is owed a result for every call it made — and a `finish`
+  # among them took another model turn instead of ending the agent (D19).
+  describe "a turn a restart takes up in the middle" do
+    test "keeps the results already back when the session comes back", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          steps: [
+            {:tools,
+             [
+               {"todo_read", %{}},
+               {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}
+             ]},
+            {:text, "never asked"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "read, then count slowly")
+      await_completed_call(session.id, "todo_read")
+      await_started_call(session.id, "slow")
+
+      reopen(context, session.id, fake, [])
+      assert eventually(fn -> open_calls(events_of(session.id, ["root"])) == [] end)
+
+      [results] = events_of_type(session.id, "tool_results")
+      assert [%{"content" => [read, count]}] = results.data["results"]
+      assert read["error"] in [nil, false]
+      assert count["error"] == true
+      assert count["content"] =~ "interrupted"
+
+      [_user, _calls, answered] = Troupe.snapshot(session.id).conversation
+      assert length(answered.content) == 2
+    end
+
+    test "a call closed as interrupted and one put back out to a person reach the model together",
+         context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [auto_approve: false],
+          steps: [
+            {:tools,
+             [
+               {"needs_approval", %{"note" => "one"}},
+               {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}
+             ]},
+            {:text, "both back"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "ask, then count slowly")
+      await_event(session.id, :approval_requested)
+      await_started_call(session.id, "slow")
+
+      reopen(context, session.id, fake, auto_approve: false)
+      assert eventually(fn -> Troupe.snapshot(session.id).outstanding == ["needs_approval"] end)
+
+      [again] = Approvals.pending(session.id)
+      Troupe.approve(session.id, again.call_id, :allow)
+      await_rest(session.id)
+
+      [results] = events_of_type(session.id, "tool_results")
+      assert [%{"content" => [approved, counted]}] = results.data["results"]
+      assert approved["content"] == "approved: one"
+      assert counted["error"] == true
+      assert counted["content"] =~ "interrupted"
+    end
+
+    test "a finish among them ends the agent with its summary, after the agent restarts",
+         context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          steps: [
+            {:tools,
+             [
+               {"finish", %{"summary" => "all done"}},
+               {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 1_000}}
+             ]},
+            {:text, "never asked"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "finish while counting")
+      await_completed_call(session.id, "finish")
+      await_started_call(session.id, "slow")
+
+      restart_agent(session.id)
+      await_state(session.id, [:done], 10_000)
+
+      assert [%{data: %{"reason" => "finished", "summary" => "all done"}}] =
+               events_of_type(session.id, "agent_done")
+
+      assert Fake.call_count(fake) == 1
+      [results] = events_of_type(session.id, "tool_results")
+      assert [%{"content" => [_finished, _counted]}] = results.data["results"]
+    end
+
+    test "a subagent's finish among them is what its parent is handed", context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          routes: %{
+            "root" => [
+              {:tools,
+               [{"delegate", %{"agent" => "general", "task" => "finish while counting"}}]},
+              {:text, "root done"}
+            ],
+            "general" => [
+              {:tools,
+               [
+                 {"finish", %{"summary" => "child result"}},
+                 {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 1_000}}
+               ]},
+              {:text, "never asked"}
+            ]
+          }
+        )
+
+      sid = session.id
+      Troupe.subscribe(sid)
+      Troupe.send_input(sid, "delegate it")
+      await_completed_call(sid, "finish")
+      await_started_call(sid, "slow")
+
+      restart_agent(sid, ["root", "general#1"])
+      await_rest(sid)
+
+      [result] =
+        sid
+        |> events_of_type("tool_call_completed")
+        |> Enum.filter(&(&1.agent == ["root"] and &1.data["name"] == "delegate"))
+
+      assert result.data["content"] == "child result"
+      assert [_asked_once] = Fake.requests_for(fake, "general")
     end
   end
 
@@ -658,12 +873,46 @@ defmodule Troupe.Agent.ResilienceTest do
 
   # One agent crashing inside a live session: its next start is a warm one, which
   # finishes whatever the log says it had started.
-  defp restart_agent(session_id) do
-    agent = Registry.agent_pid(session_id, ["root"])
+  defp restart_agent(session_id, path \\ ["root"]) do
+    agent = Registry.agent_pid(session_id, path)
     ref = Process.monitor(agent)
     Process.exit(agent, :kill)
     assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
-    await_new_agent(session_id, ["root"], agent, 5_000)
+    await_new_agent(session_id, path, agent, 5_000)
+  end
+
+  defp events_of(session_id, path),
+    do: session_id |> Troupe.events() |> Enum.filter(&(&1.agent == path))
+
+  # Started and never completed.
+  defp open_calls(events) do
+    events
+    |> Enum.reduce(MapSet.new(), fn
+      %{type: "tool_call_started", data: %{"call_id" => id}}, open -> MapSet.put(open, id)
+      %{type: "tool_call_completed", data: %{"call_id" => id}}, open -> MapSet.delete(open, id)
+      _event, open -> open
+    end)
+    |> MapSet.to_list()
+  end
+
+  defp eventually(fun, timeout \\ 5_000),
+    do: poll(fun, System.monotonic_time(:millisecond) + timeout)
+
+  defp poll(fun, deadline) do
+    cond do
+      fun.() -> true
+      System.monotonic_time(:millisecond) > deadline -> false
+      true -> Process.sleep(10) && poll(fun, deadline)
+    end
+  end
+
+  defp await_completed_call(session_id, name, timeout \\ 5_000) do
+    receive do
+      {:troupe_event, ^session_id, %Event{type: "tool_call_completed", data: %{"name" => ^name}}} ->
+        :ok
+    after
+      timeout -> raise "timed out waiting for the #{name} call to complete"
+    end
   end
 
   # The whole session going away and coming back, as it does across a daemon restart:

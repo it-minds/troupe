@@ -23,7 +23,7 @@ defmodule Troupe.Plane.Erasure do
   import Ecto.Query
 
   alias Troupe.Plane.Control.Router
-  alias Troupe.Plane.{Fleet, Identity, Placement, Repo, Sessions}
+  alias Troupe.Plane.{Drain, Fleet, Identity, Repo, Sessions}
   alias Troupe.Plane.Identity.Team
   alias Troupe.Plane.Sessions.{Session, Tombstone}
 
@@ -55,9 +55,9 @@ defmodule Troupe.Plane.Erasure do
     # destruction leaves an erasure that will be finished; a crash the other way round
     # leaves data nobody believes exists.
     with {:ok, tombstone} <- write_tombstone(session, opts) do
-      # The slot before the row: read-only clears the `worker_id` it is found by.
-      Placement.release(session.profile, session.id)
-      Sessions.read_only(session.id)
+      # Off its pod, giving back its slot and its budget slice. The pod's `session.erase`
+      # stops a running session without reporting it dormant, so nothing else would.
+      Drain.park(session)
       destroy(session, tombstone)
     end
   end

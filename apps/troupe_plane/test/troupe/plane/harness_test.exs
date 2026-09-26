@@ -358,6 +358,9 @@ defmodule Troupe.Plane.HarnessTest do
 
       assert result["mode"] == "read"
       assert is_binary(result["token"])
+      # The answer says the pod only serves the history, so a client opens the session
+      # for activation before its first activating command.
+      assert result["state"] == "dormant"
 
       # Still asleep, still epoch 1. A session that woke up because somebody looked at
       # it would never stay dormant.
@@ -391,6 +394,7 @@ defmodule Troupe.Plane.HarnessTest do
       assert Enum.all?(results, &match?({:ok, _}, &1))
       assert Sessions.get(session.id).epoch == 2
       assert results |> Enum.map(fn {:ok, r} -> r["epoch"] end) |> Enum.uniq() == [2]
+      assert results |> Enum.map(fn {:ok, r} -> r["state"] end) |> Enum.uniq() == ["active"]
     end
 
     test "a pod that cannot put the tree back parks the session read-only, and the next open says so",
@@ -404,7 +408,11 @@ defmodule Troupe.Plane.HarnessTest do
         "data" => %{"reason" => "workspace_gone", "detail" => "/var/lib/troupe/erased"}
       }
 
-      _pod = FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0", refuse: %{"session.activate" => gone})
+      %{worker_id: pod} =
+        FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0",
+          refuse: %{"session.activate" => gone}
+        )
+
       session = session!("s-erased", user, team, state: "dormant")
 
       assert {:error, error} =
@@ -418,11 +426,45 @@ defmodule Troupe.Plane.HarnessTest do
       assert parked.state == "read_only"
       assert is_nil(parked.worker_id)
 
+      # What waking it took is given back here, whether or not the pod's own
+      # `session.unrestorable` report arrives: this fake sends none.
+      assert TeamBudget.inspect_state(team).reserved_micros == 0
+      assert Map.get(placement("dev").capacities, pod, 0) == 0
+
       # The next open is refused before any pod is asked.
       assert {:error, %{message: "forbidden"}} =
                Harness.call("session.open", %{"session_id" => session.id, "mode" => "activate"}, context(user))
 
       refute_receive {:pushed, "session.activate", _}, 200
+    end
+
+    test "a pod that will not take a waking session back leaves it dormant, holding nothing",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 10_000_000)
+      user = person("ada@example.test", ["engineering"])
+      refused = %{"code" => -32_603, "message" => "internal_error"}
+
+      %{worker_id: pod} =
+        FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0",
+          refuse: %{"session.activate" => refused}
+        )
+
+      session = session!("s-refused", user, team, state: "dormant")
+
+      assert {:error, %{message: "unavailable"}} =
+               Harness.call(
+                 "session.open",
+                 %{"session_id" => session.id, "mode" => "activate"},
+                 context(user)
+               )
+
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      assert Sessions.get(session.id).state == "dormant"
+
+      # Waking it took a slot and a slice before the pod said no, and a dormant session
+      # holds neither.
+      assert TeamBudget.inspect_state(team).reserved_micros == 0
+      assert Map.get(placement("dev").capacities, pod, 0) == 0
     end
 
     test "a read-only session cannot be activated", context do

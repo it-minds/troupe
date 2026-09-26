@@ -7,15 +7,20 @@ defmodule Troupe.Remote.Worker do
 
     * the durable stream is gap-free — the subscription always resumes at
       `cursor + 1`, and the journal drops anything it has already seen, so a
-      reconnect, a `resync_required` and a `-32012` all produce the same
-      transcript as an unbroken connection;
+      reconnect, a `resync_required` and a move to another pod all produce the
+      same transcript as an unbroken connection;
     * nothing pushes back on the stream — durable events are published the
       moment they arrive, `llm.delta` is coalesced into one event per frame
       interval with a byte cap, and a TUI that cannot keep up costs this
       process nothing;
     * an activating action on a session that is not active opens it through the
       plane first (exactly once) and follows the endpoint it is given, which may
-      be a different worker than last time.
+      be a different worker than last time;
+    * a session that leaves its pod is followed (Decision 118): after a connection
+      that failed, the plane is asked where the session is before the next attempt;
+      a pod's `not_found` for the session sends an activating command once more, with
+      the same command id, wherever the plane opens it; and after ten tries in a row
+      the worker stops and says so, until the next command.
 
   It is supervised, so a crash reconnects and resumes from the journal's cursor.
   """
@@ -33,6 +38,13 @@ defmodule Troupe.Remote.Worker do
   # cannot keep up gets the completed message as a durable event anyway.
   @delta_cap 64 * 1024
   @max_waiting 64
+  # Attempts in a row that reach no session before a plane session is given up on: about
+  # a minute of backoff, long enough for a pod to be replaced.
+  @max_tries 10
+  # What is sent through `activating/4`: the commands that wake a session, and the only
+  # ones sent again after a pod said it does not hold the session.
+  @activating ~w(input.send approval.respond question.answer todo.edit profile.switch
+                 session.goal.set session.goal.clear session.loop.start fs.upload)
 
   @type mode :: :read | :activate
 
@@ -207,11 +219,15 @@ defmodule Troupe.Remote.Worker do
       team: Keyword.get(opts, :team),
       title: Keyword.get(opts, :title),
       agent: nil,
-      own_commands: MapSet.new(),
       deltas: %{},
       delta_bytes: 0,
       flush_ref: nil,
-      backoff: Backoff.new()
+      backoff: Backoff.new(Application.get_env(:troupe, :reconnect_backoff, [])),
+      # Failures since the session was last reached: the drop that started them, then
+      # each attempt. Above zero, the next attempt asks the plane where the session is.
+      misses: 0,
+      # Command ids already sent a second time after a pod did not hold the session.
+      resent: MapSet.new()
     }
 
     {:ok, state, {:continue, :connect}}
@@ -256,7 +272,8 @@ defmodule Troupe.Remote.Worker do
     state = ensure_window(state)
 
     # The line goes on screen now, tagged with the command id the server will
-    # echo back; `input.accepted` is what clears the tag.
+    # echo back; `input.accepted` is what clears the tag, and the window draws
+    # none of the durable copies of the line, which carry the same id.
     notify(state, state.agent, :input, %{
       content: text,
       source: :user,
@@ -264,7 +281,6 @@ defmodule Troupe.Remote.Worker do
       optimistic: true
     })
 
-    state = %{state | own_commands: MapSet.put(state.own_commands, command)}
     activating(state, from, "input.send", %{text: text, command_id: command})
   end
 
@@ -335,8 +351,11 @@ defmodule Troupe.Remote.Worker do
 
   ## Messages
 
+  # A reconnect scheduled before something else connected, as opening the session for an
+  # activating command does, is stale: one socket per session.
   @impl true
-  def handle_info(:connect, state), do: {:noreply, connect(state)}
+  def handle_info(:connect, %{socket: nil} = state), do: {:noreply, connect(state)}
+  def handle_info(:connect, state), do: {:noreply, state}
 
   def handle_info(:flush_deltas, state), do: {:noreply, flush_deltas(%{state | flush_ref: nil})}
 
@@ -345,7 +364,7 @@ defmodule Troupe.Remote.Worker do
       {nil, _pending} ->
         {:noreply, state}
 
-      {{from, _method}, pending} ->
+      {{from, _method, _params}, pending} ->
         {:noreply, reply_and(%{state | pending: pending}, from, {:error, :timeout})}
     end
   end
@@ -404,6 +423,15 @@ defmodule Troupe.Remote.Worker do
   defp do_command(%{status: :up} = state, from, method, params),
     do: {:noreply, send_request(state, from, method, params)}
 
+  # Given up on: the command is refused, since nothing is there to take it, and it is the
+  # signal to start trying again, from the plane.
+  defp do_command(%{error: {:lost, _reason}} = state, _from, _method, _params) do
+    send(self(), :connect)
+    state = %{state | misses: 1, error: nil, backoff: Backoff.reset(state.backoff)}
+    publish_status(state)
+    {:reply, {:error, :lost}, state}
+  end
+
   defp do_command(%{status: :down} = state, _from, _method, _params),
     do: {:reply, {:error, :disconnected}, state}
 
@@ -429,7 +457,7 @@ defmodule Troupe.Remote.Worker do
           state
           | socket: socket,
             next_id: id + 1,
-            pending: Map.put(state.pending, id, {from, method})
+            pending: Map.put(state.pending, id, {from, method, params})
         }
 
       {:error, reason} ->
@@ -451,6 +479,70 @@ defmodule Troupe.Remote.Worker do
   ## Connecting
 
   defp connect(state) do
+    case locate(state) do
+      {:ok, state} -> dial(state)
+      {:lost, reason, state} -> give_up(state, reason)
+    end
+  end
+
+  # Where the session is now. The first attempt goes where the session was opened; one
+  # after a failure asks the plane again, in `read` mode, which wakes nothing: a drain, a
+  # replaced pod or an activation elsewhere leaves the session on another pod, and the
+  # endpoint held here would be asked for ever (PROTOCOL.md §6, "A session that moves").
+  # A plane that does not answer leaves the endpoint as it was, since a live session does
+  # not need it; one that says the session is not there for this person ends the search.
+  defp locate(%{plane_url: nil} = state), do: {:ok, state}
+  defp locate(%{misses: 0} = state), do: {:ok, state}
+
+  defp locate(state) do
+    case Plane.call(state.plane_url, "session.open", %{session_id: state.session_id, mode: "read"}) do
+      {:ok, %{"endpoint" => endpoint} = result} when is_binary(endpoint) ->
+        {:ok, follow(state, result)}
+
+      {:ok, _no_endpoint} ->
+        {:ok, state}
+
+      {:error, %{code: _code} = error} ->
+        if RPC.reason(error) in [:not_found, :forbidden],
+          do: {:lost, "the plane says #{RPC.describe(error)}", state},
+          else: {:ok, state}
+
+      {:error, _unreachable} ->
+        {:ok, state}
+    end
+  end
+
+  defp follow(state, result) do
+    if is_binary(result["token"]),
+      do: Tokens.put_session_token(state.session_id, result["token"], name: state.tokens)
+
+    if result["endpoint"] != state.endpoint,
+      do: publish_note(state, "the session is on another worker now; following it there")
+
+    %{
+      state
+      | endpoint: result["endpoint"],
+        session_state: session_state(result["state"]) || state.session_state
+    }
+  end
+
+  # Stops trying and says why. The transcript stays, and the next command starts again.
+  defp give_up(state, why) do
+    for {from, _method, _params} <- state.waiting,
+        do: reply_and(state, from, {:error, {:lost, why}})
+
+    state = %{state | waiting: []} |> drop_socket() |> put_error({:lost, why})
+    publish_note(state, "lost the session: #{why}; type to try again")
+    publish_status(state)
+    state
+  end
+
+  defp said(reason) when is_binary(reason), do: reason
+  defp said({:rpc, text}) when is_binary(text), do: text
+  defp said({:upgrade, status}), do: "the worker answered #{status}"
+  defp said(reason), do: inspect(reason)
+
+  defp dial(state) do
     with {:ok, token, state} <- session_token(state),
          {:ok, socket} <-
            Socket.connect(Troupe.Remote.Discovery.worker_url(state.endpoint), [
@@ -515,16 +607,16 @@ defmodule Troupe.Remote.Worker do
       {nil, _pending} ->
         state
 
-      {{{:internal, :initialize}, _method}, pending} ->
+      {{{:internal, :initialize}, _method, _params}, pending} ->
         initialized(%{state | pending: pending}, result)
 
-      {{{:internal, :subscribe}, _method}, pending} ->
+      {{{:internal, :subscribe}, _method, _params}, pending} ->
         subscribed(%{state | pending: pending}, result)
 
-      {{{:internal, _other}, _method}, pending} ->
+      {{{:internal, _other}, _method, _params}, pending} ->
         %{state | pending: pending}
 
-      {{from, method}, pending} ->
+      {{from, method, _params}, pending} ->
         reply_and(%{state | pending: pending}, from, command_result(method, result))
     end
   end
@@ -534,14 +626,14 @@ defmodule Troupe.Remote.Worker do
       {nil, _pending} ->
         state
 
-      {{{:internal, _step}, _method}, pending} ->
+      {{{:internal, _step}, _method, _params}, pending} ->
         %{state | pending: pending}
         |> put_error({:rpc, RPC.describe(error)})
         |> drop_socket()
         |> schedule_reconnect()
 
-      {{from, _method}, pending} ->
-        failed(%{state | pending: pending}, from, error)
+      {{from, method, params}, pending} ->
+        failed(%{state | pending: pending}, from, method, params, error)
     end
   end
 
@@ -552,7 +644,7 @@ defmodule Troupe.Remote.Worker do
   defp dispatch({:notification, "event", params}, state) do
     case unwrap_event(params) do
       %{"ephemeral" => true} = event -> ephemeral(state, event)
-      event -> durable(state, event)
+      event -> state |> lifecycle(event) |> durable(event)
     end
   end
 
@@ -582,23 +674,84 @@ defmodule Troupe.Remote.Worker do
   defp command_result(_method, %{"accepted" => true}), do: :ok
   defp command_result(_method, result), do: {:ok, result}
 
-  defp failed(state, from, error) do
-    case RPC.reason(error) do
-      :unauthenticated ->
+  defp failed(state, from, method, params, error) do
+    cond do
+      not_here?(state, error) ->
+        not_here(state, from, method, params, error)
+
+      RPC.reason(error) == :unauthenticated ->
         state = reply_and(state, from, {:error, RPC.describe(error)})
         state |> drop_socket() |> schedule_reconnect()
 
-      _ ->
+      true ->
         reply_and(state, from, {:error, RPC.describe(error)})
     end
   end
+
+  # A pod's word for a session it does not hold: `not_found` naming the session, which it
+  # answers before it runs anything (PROTOCOL.md §6). A daemon session has nowhere else
+  # to be, so there it is only an error.
+  defp not_here?(%{plane_url: nil}, _error), do: false
+
+  defp not_here?(state, error) do
+    RPC.reason(error) == :not_found and
+      case error.data do
+        %{"kind" => "session"} -> true
+        %{"session_id" => session_id} -> session_id == state.session_id
+        _other -> false
+      end
+  end
+
+  # The session has left this pod. Nothing ran, so an activating command is sent once
+  # more, with the same command id, after the plane has opened the session wherever it is
+  # now; a second refusal of the same command is answered. Anything else is answered, and
+  # the connection goes after the session in `read` mode.
+  defp not_here(state, from, method, params, error) do
+    state = if state.session_state == :active, do: %{state | session_state: :dormant}, else: state
+    command = params[:command_id]
+
+    if method in @activating and is_binary(command) and not MapSet.member?(state.resent, command) do
+      case do_activating(%{state | resent: MapSet.put(state.resent, command)}, from, method, params) do
+        {:noreply, state} -> state
+        {:reply, reply, state} -> state |> reply_and(from, reply) |> follow_later(error)
+      end
+    else
+      state |> reply_and(from, {:error, RPC.describe(error)}) |> follow_later(error)
+    end
+  end
+
+  defp follow_later(state, error),
+    do: state |> put_error({:rpc, RPC.describe(error)}) |> drop_socket() |> schedule_reconnect()
+
+  # What the log says about the session's tree, so an activating command after the pod
+  # put the session to sleep (a drain, a fence, its idle timeout) goes through the plane
+  # again instead of to a pod that no longer holds it. Only what is new since the cursor
+  # counts, and only for a plane session: a daemon wakes its own sessions.
+  defp lifecycle(%{plane_url: plane, session_state: current} = state, %{"type" => type} = event)
+       when is_binary(plane) and current in [:active, :dormant] do
+    if (Translate.seq(event) || 0) > state.cursor do
+      case type do
+        type when type in ["session_dormant", "session.dormant"] ->
+          %{state | session_state: :dormant}
+
+        type when type in ~w(session_activated session.activated session_resumed session.resumed) ->
+          %{state | session_state: :active}
+
+        _other ->
+          state
+      end
+    else
+      state
+    end
+  end
+
+  defp lifecycle(state, _event), do: state
 
   defp initialized(state, result) when is_map(result) do
     state = %{
       state
       | status: :up,
         error: nil,
-        backoff: Backoff.reset(state.backoff),
         scopes: result["scopes"] || [],
         capabilities: result["capabilities"] || %{}
     }
@@ -623,9 +776,11 @@ defmodule Troupe.Remote.Worker do
     %{state | subscribed?: true}
   end
 
+  # The session is reached, which is what ends a run of failures: a pod that takes the
+  # handshake and then answers `not_found` to the subscription has not reached it.
   defp subscribed(state, result) do
     head = if is_map(result), do: result["head_seq"], else: nil
-    state = %{state | head_seq: head}
+    state = %{state | head_seq: head, misses: 0, backoff: Backoff.reset(state.backoff)}
 
     Enum.reduce(state.waiting, %{state | waiting: []}, fn {from, method, params}, acc ->
       send_request(acc, from, method, params)
@@ -646,31 +801,18 @@ defmodule Troupe.Remote.Worker do
         state
 
       kept ->
-        # Anything still buffered belongs before this event on screen.
+        # Anything still buffered belongs before this event on screen. The durable copy
+        # of a line typed here is published too: the window knows the line it drew by its
+        # command id, and a worker restarted since the send would not.
         state = flush_deltas(state)
-        command_id = Translate.command_id(params)
 
-        for event <- kept, publish?(state, event, command_id), do: publish(state, event)
+        for event <- kept, do: publish(state, event)
 
         %{state | cursor: max(state.cursor, Translate.seq(params) || state.cursor)}
-        |> forget_command(params, command_id)
     end
   end
 
   defp durable(state, _params), do: state
-
-  # Our own input is already on screen from the optimistic render; publishing
-  # the durable copy too would show it twice. It is journaled either way, so a
-  # rebuild from the journal shows it exactly once.
-  defp publish?(state, %{type: :input, data: %{command_id: id}}, _command_id) when is_binary(id),
-    do: not MapSet.member?(state.own_commands, id)
-
-  defp publish?(_state, _event, _command_id), do: true
-
-  defp forget_command(state, %{"type" => "input.accepted"}, command_id) when is_binary(command_id),
-    do: %{state | own_commands: MapSet.delete(state.own_commands, command_id)}
-
-  defp forget_command(state, _params, _command_id), do: state
 
   defp ephemeral(state, %{"type" => type} = params) when type in ["llm.delta", "llm_delta"] do
     agent = Translate.agent_of(params) || state.agent || "session"
@@ -768,12 +910,17 @@ defmodule Troupe.Remote.Worker do
            mode: to_string(mode)
          }) do
       {:ok, %{} = result} ->
-        Tokens.put_session_token(state.session_id, result["token"], name: state.tokens)
+        if is_binary(result["token"]),
+          do: Tokens.put_session_token(state.session_id, result["token"], name: state.tokens)
 
+        # Where the plane has just put it, so the next attempt goes straight there, and a
+        # worker that had given up is trying again.
         state = %{
           state
           | endpoint: result["endpoint"] || state.endpoint,
-            session_state: session_state(result["state"]) || :active
+            session_state: session_state(result["state"]) || :active,
+            misses: 0,
+            error: nil
         }
 
         publish_status(state)
@@ -796,7 +943,8 @@ defmodule Troupe.Remote.Worker do
   ## Housekeeping
 
   defp publish_status(state) do
-    capability = Capability.of(state.session_state, state.scopes, state.status == :up)
+    capability =
+      Capability.of(state.session_state, state.scopes, state.status == :up, state.error)
 
     notify(
       state,
@@ -845,7 +993,8 @@ defmodule Troupe.Remote.Worker do
   defp drop_socket(state, opts \\ []) do
     _ = state.socket && Socket.close(state.socket)
 
-    for {_id, {from, _method}} <- state.pending, do: reply_and(state, from, {:error, :disconnected})
+    for {_id, {from, _method, _params}} <- state.pending,
+        do: reply_and(state, from, {:error, :disconnected})
 
     waiting =
       if Keyword.get(opts, :keep_waiting, false) do
@@ -860,11 +1009,19 @@ defmodule Troupe.Remote.Worker do
     %{state | socket: nil, status: :down, pending: %{}, waiting: waiting, subscribed?: false}
   end
 
+  # A plane session is looked for ten times in a row after it was lost, and then given up
+  # on; a daemon session is tried for as long as it takes, since the daemon is the only
+  # place it can be (Decision 116 bounds a headless run on its own).
+  defp schedule_reconnect(%{plane_url: plane, misses: misses} = state)
+       when is_binary(plane) and misses >= @max_tries do
+    give_up(state, "#{@max_tries} tries reached no worker (#{said(state.error)})")
+  end
+
   defp schedule_reconnect(state) do
     {delay, backoff} = Backoff.next(state.backoff)
     Process.send_after(self(), :connect, delay)
     publish_status(state)
-    %{state | backoff: backoff, status: :down}
+    %{state | backoff: backoff, status: :down, misses: state.misses + 1}
   end
 
   defp put_error(state, reason) do

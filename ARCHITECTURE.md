@@ -86,7 +86,7 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 | thinking | cut at the output cap, or empty | note it and re-issue once, then done (`output_truncated`, `empty_reply`) |
 | thinking | refusal, model error | done (`refused`); a root's failed request rests it idle, a subagent's is done (`llm_error`) and hands its parent what it has; a context overflow compacts once and retries |
 | acting | each call | allowlist and permission check → error result, approval request, or a task |
-| acting | approval, answer, tool result, child result, a task's `DOWN` | record it; when none are outstanding, the next turn |
+| acting | approval, answer, tool result, child result, a task's `DOWN` | record it, and stop a child that has reported; when none are outstanding, the next turn |
 | compacting | summary | carry on the interrupted turn, or come to rest |
 | done | input | a root agent that finished takes it as a new turn; one out of budget stays done |
 | any | cancel | kill tasks and children, close their calls as errors → idle (`cancelled`) |
@@ -94,9 +94,11 @@ only synchronous calls out are to `Session.Log`, which never calls back.
 Input arriving while busy is postponed with `gen_statem`'s `:postpone`, not a hand-rolled
 queue, and delivered at the turn boundary. **Replay**: an agent's state is a fold over its
 own events; a crashed agent rebuilds from the log and finishes what it started, never
-re-running a completed call. **Budgets** — turns, input and output tokens, working time —
-are checked before every request; a child gets a share of the tokens and time its parent
-has left, and the turns its parent was first given. Past `warn_at` (0.8) a dimension logs
+re-running a completed call, and the results already back go to the model with the rest.
+A subagent is stopped once its parent has its result: from then on it is its log.
+**Budgets** — turns, input and output tokens, working time — are checked before every
+request; a child gets a share of the tokens and time its parent has left, and the turns
+its parent was first given. Past `warn_at` (0.8) a dimension logs
 one warning; at the ceiling the agent asks the person attached, a grant buys another
 slice, folded from the log (Decision 660), and `always` lifts the one limit asked about
 (Decision 687). **A tool that keeps failing** — ten times in a row, by default — stops the
@@ -131,7 +133,7 @@ breakpoint.
 |---|---|---|
 | a tool task | nothing; the agent gets `DOWN` or a timeout | an error result; the agent carries on |
 | the model stream | nothing | an `llm_error`; a root rests, a subagent ends `llm_error` and its parent gets what it had |
-| `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once), a delegation to a new child |
+| `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once), a delegation to a new child, and the old child's calls closed in the log |
 | a subagent's node, past its restart limit | nothing; the parent gets `DOWN` | an error result for that delegation only |
 | `Watcher`, `Files`, `Loop`, `Summary` | that child and those after it | a notice; a loop carries on from its log |
 | `Approvals`, `Log`, or the session past 3 restarts in 10 s | everything below it; the whole session | a restarted tree replays; a stopped one comes back dormant from its log |
@@ -139,8 +141,9 @@ breakpoint.
 | the reaper's Port | — | the reaper kills the process tree; an error result |
 
 An **interrupted** session makes no model call until someone activates it, and its
-unfinished calls are closed as errors naming the interruption: a crash loop that resumed
-by itself would spend money and re-run shell commands nobody is watching.
+unfinished calls are closed as errors naming the interruption, and so are those of any
+subagent it had at work, which ends `interrupted`: a crash loop that resumed by itself
+would spend money and re-run shell commands nobody is watching.
 `resume_on_restart: true` opts back in.
 
 ### 2.5 Agents, skills and the brief

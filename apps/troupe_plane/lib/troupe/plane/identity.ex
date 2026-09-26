@@ -15,7 +15,7 @@ defmodule Troupe.Plane.Identity do
   import Ecto.Query
 
   alias Ecto.Multi
-  alias Troupe.Plane.{Principals, Repo, Sessions, Settings}
+  alias Troupe.Plane.{Drain, Principals, Repo, Sessions, Settings}
 
   alias Troupe.Plane.Identity.{
     Entitlement,
@@ -493,8 +493,10 @@ defmodule Troupe.Plane.Identity do
 
     # The grant is what made those sessions allowed, and it is no longer there. They
     # become read-only rather than erased: history is history, and a team losing a grant
-    # is not a reason to hide what it already did.
-    frozen = Sessions.read_only_for(team.id, profile)
+    # is not a reason to hide what it already did. A running one gives back its pod's slot
+    # and its budget slice on the way, as one that went dormant would have.
+    parked = team.id |> Sessions.active_for(profile) |> Enum.map(&Drain.park/1)
+    frozen = length(parked) + Sessions.read_only_for(team.id, profile)
 
     if frozen > 0 do
       Logger.info(

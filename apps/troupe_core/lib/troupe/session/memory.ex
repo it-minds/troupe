@@ -64,6 +64,18 @@ defmodule Troupe.Session.Memory do
     end)
   end
 
+  @doc """
+  Stamps the brief as checked against the repository now, and changes no word of it: what
+  a librarian's run leaves when it found nothing to rewrite (Decision 696). A repository
+  with no readable brief is left as it is.
+  """
+  @spec checked(Path.t()) :: :ok | {:error, String.t()}
+  def checked(workspace) do
+    if brief(workspace),
+      do: mutate(workspace, &Memory.stamp(&1, head(workspace), tracked_files(workspace))),
+      else: :ok
+  end
+
   @doc "Deletes the brief."
   @spec forget(Path.t()) :: :ok
   def forget(workspace) do

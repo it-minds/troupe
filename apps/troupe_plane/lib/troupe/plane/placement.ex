@@ -100,7 +100,7 @@ defmodule Troupe.Plane.Placement do
         # it is empty. It is not hypothetical — `release/2` used to give a slot back only
         # when it found a `worker_id` to clear, and a pod's own dormancy report, an erasure
         # and an unrestorable session had each cleared it first (Decision 690). A grant
-        # taken away still takes sessions off their pods without a release at all.
+        # taken away took sessions off their pods without a release at all (Decision 694).
         #
         # So of a reserve's paths, the refusal and only the refusal pays for a group-by.
         # It is the one moment where being wrong is expensive and the one moment where the
