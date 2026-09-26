@@ -159,7 +159,7 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # the client's 96 and the app's 18, below
+pnpm test                        # the client's 100 and the app's 18, below
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
 pnpm icons:check                 # fails if the desktop app's icons are not the mask
