@@ -361,9 +361,11 @@ citation keeps meaning what it meant.
      plane and a rolling thirty days. Nothing is written at midnight. The period's start is
      worked out on every read (`Ledger.period_start/1`) and the ledger's cache is keyed by
      it, so the first read of a month is a new sum and not last month's remembered one.
-     `never` counts everything. A person's cap and the platform's have no period and count
-     everything too: a person's follows them between teams (471), and following a team's
-     period would give somebody in a `monthly` team and a `never` one two answers.
+     `never` counts everything. A person's cap and the platform's (with the deployment's)
+     are that same month, always, decided for #132 over leaving them all-time: an all-time
+     cap refuses somebody for good once they reach it. They do not borrow a team's period,
+     because a person's cap follows them between teams (471) and somebody in a `monthly`
+     team and a `never` one would get two answers (`Ledger.month_start/0`).
 
 497. **The plane holds the prompt while a session waits.** It is the only piece of
      session content the plane ever holds, it is held for seconds, and it is cleared the
@@ -1210,22 +1212,29 @@ citation keeps meaning what it meant.
        `troupe config migrate --write` — goes through `Troupe.Config.Migrate.write/2`,
        which writes the new spellings, `version: 1`, a `yaml-language-server` header
        naming the schema, and keeps the file it replaced as `.previous`. Loading never
-       rewrites a file, since a rewrite drops comments.
+       rewrites a file, since a rewrite drops comments. `troupe config trust` and
+       `untrust` (#161) change one list and nothing else, so they edit the file's own
+       lines instead (`Troupe.Config.Yaml.edit_list/4`), keep `.previous` all the same,
+       and change nothing when the edit does not read back as that one change.
      - **Maps merge by key** (RFC 7396): a map merges, `null` removes, a list replaces.
      - **`{env:VAR}` that is not set** refuses the provider or MCP server that reads it,
        naming the variable, and anywhere else refuses the load. A refused provider's
        target carries `{:refused, why}` as its key, which both adapters answer with that
        error and no request. `ANTHROPIC_API_KEY` and `OPENAI_API_KEY` are used only with
-       the vendor's own endpoint (`Troupe.LLM.Endpoint.vendor?/2`).
+       the vendor's own endpoint (`Troupe.LLM.Endpoint.vendor?/2`). The fallback to
+       opencode's providers reads their `baseURL`, `apiKey` and `authToken` the same
+       way, with opencode's `{file:path}` too, and refuses a provider whose variable is
+       not set or whose file cannot be read.
      - **Scopes and trust.** A key is `:any`, `:trusted` or `:user`. The trusted keys
        change approvals (`auto_approve`, `approvals`, the two `managed_*`), endpoints and
        credentials (`provider`, `base_url`, `api_key`, `auth`, `providers`), commands to
        run (`mcp`), or readable paths (`read_roots`, `state_dir`, `fake_script`). A
        workspace's `.troupe/config.yaml` and `config.local.yaml` set them only when the
        workspace, or a directory above it, is on `trusted_workspaces` in the user file,
-       the one `:user` key; otherwise they are ignored with a warning that says how to
-       trust it. A git worktree of a trusted checkout is trusted when the checkout's
-       `.git/worktrees/<name>/gitdir` names it back. A session on a pod (`kind: :team`)
+       the one `:user` key; otherwise they are ignored with a warning that names the
+       command to trust it, `troupe config trust`. A git worktree of a trusted checkout
+       is trusted when the checkout's `.git/worktrees/<name>/gitdir` names it back, and
+       `troupe config trust` in a worktree writes the checkout, which trusts them all. A session on a pod (`kind: :team`)
        resolves with `trust: :never`. The prompt that asks a person to trust a workspace
        comes with #60.
      - **Precedence** is unchanged, with `.troupe/config.local.yaml` between the project
@@ -1248,6 +1257,11 @@ citation keeps meaning what it meant.
          unset variable refusing a provider, the session provider, an MCP server and
          the load, the trust gate and its warning, trust from a parent directory and a
          worktree (and not from a borrowed `.git` file), and pods.
+       - `Troupe.Config.TrustTest` and `Troupe.Config.YamlTest`: `trust`, `untrust` and
+         `--list`, a file's comments and other keys surviving both, a worktree trusting
+         through its checkout, and a gated key following the list both ways.
+       - `Troupe.ConfigProvidersTest`: opencode's `{env:VAR}` and `{file:path}` read,
+         and an unset or unreadable one refusing that provider alone.
        - `Troupe.Config.ExplainTest`: `--explain` with every key, a ladder, JSON and
          masking; `validate`'s exit status; `migrate` and `--write` with `.previous`; the
          writer; the committed schema and reference current; every YAML example in
@@ -1384,3 +1398,119 @@ citation keeps meaning what it meant.
          agent's tool turn, and a `finish` in a cancelled turn.
        - `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and the witness.
        - The installed daemon, driven with a fake-provider script.
+
+689. **A model the catalog does not price is priced from `models.prices`, which a profile
+     sets for its pods as `llm.prices`; the gateway's figure still wins, then the
+     catalog's, and a model with no price anywhere is said once a session rather than
+     counted as free in silence.** Issue #160. A streamed response carries no cost
+     header: LiteLLM sends its headers before the first token, so `x-litellm-response-cost`
+     is absent. The harness then prices the call from the catalog (`priced_locally`),
+     and a pod has no catalog, nor does the catalog list every model a gateway serves
+     (`qwen3-235b`). Such a call had no `cost_micros`, the plane's ledger summed it as 0,
+     and no team or person budget ever counted it.
+     - **The key.** `models.prices.<model>: {input, output, cache_read, cache_write}`,
+       dollars per million tokens as a price list quotes them and opencode's `cost`
+       writes them, by the name a model is addressed with: the bare id for the
+       session-wide provider, `<provider>/<model>` for a named one, as `models.windows`
+       and the catalog are keyed. The cache rates default to the input rate, as the
+       catalog's do. A price missing either half prices nothing and warns; `0` is free,
+       a price. `TROUPE_MODEL_PRICES` takes the same map as JSON, checked entry by entry
+       as a file's value is. Scope `:any`: a price moves no request and runs nothing, and
+       on a pod the environment, where the profile's prices arrive, outranks a project's
+       file for every model it names.
+     - **Precedence.** The gateway's `cost_micros`, then the catalog's price, then the
+       configured one. Unlike a window (clients/tui Decision 60), a configured price does
+       not overrule the catalog: a window is a choice a person makes about a model, a
+       price is a fact about the bill, and the provider's own list is nearer the bill
+       than a copy of it in a file, which also goes stale without saying so.
+     - **Names.** A call is priced under the id the agent addressed, then the wire id,
+       then the id the provider answered as. The lookup was by the last two alone, so a
+       catalog keyed `portal/glm-5.2` never priced a call to `portal/glm-5.2`.
+       Micros are rounded rather than truncated.
+     - **Said once.** A call nobody prices is logged as a warning, naming the model and
+       the key that would price it, and emitted as `[:troupe, :llm, :unpriced]`, once a
+       session: the first agent to call the model claims it in the session's registry,
+       and the claim goes with that agent. Nothing new in the protocol: the call's
+       `llm_response` already has no `cost_micros`, which a reader treats as not known.
+       `troupe models` and `troupe-daemon models` show every model's price with its
+       source, `(catalog)` or `(models.prices)`, or `no price`, and list every id
+       `models.prices` names; `troupe config --explain models.prices` shows which file or
+       variable set each price.
+     - **The plane.** `WorkerProfile.spec.llm.prices`, in the resource's camelCase
+       (`cacheRead`, `cacheWrite`), declared in the CRD and set through
+       `admin.profile.put`; the operator hands it to the pods as `TROUPE_MODEL_PRICES`,
+       sorted so a reconcile rolls nothing. The console's profile editor carries it
+       through a save without showing it. A pod's usage batch carries the cost and not
+       where it came from, and the plane charges it like any other.
+     - **The live check** takes the gateway's rates from `TROUPE_NIGHTLY_MODEL_PRICES` and
+       marks a cost it worked out itself *priced here*; unset, the column still says
+       *not reported*. A fake-provider script may say `"cost_micros": null`, a gateway
+       that names no price, which is how both are tried offline.
+     - **Proof:**
+       - `Troupe.Session.LocalPricingTest`: a priced unknown model gets `cost_micros` and
+         `priced_locally`; the gateway's figure and the catalog's price each win over a
+         configured one; an unpriced model is said once across two calls.
+       - `Troupe.Config.PricesTest`: the file and `TROUPE_MODEL_PRICES`, merged by model,
+         the names, the precedence, `0`, a half price, a word for a number, bad JSON,
+         the report's sources and `no price`, and `--explain` as text and JSON.
+       - `Troupe.Operator.ResourcesTest`: the prices reach the pod in the config's names,
+         sorted, and a profile without them says nothing.
+       - `Troupe.Plane.UsageTest`: a cost the pod worked out itself spends a team's
+         budget and refuses the next reservation. `Troupe.Plane.PanelTest`: a save from
+         the profile editor keeps the prices.
+       - The installed daemon, with a fake-provider script that reports no cost and a
+         configured price.
+     - **Not done here:** editing prices in the console, and a price per model in the
+       desktop app's model settings; a plane report of the calls that cost nothing.
+
+690. **A pod's slot is given back before the session's row is marked, and a release that
+     finds nothing to give back counts the profile again.** Issue #173, found by the
+     fixer of #135. `Placement.release/2` finds a pod's slot by the session row's
+     `worker_id`, and `Sessions.dormant/2`, `read_only/1` and `unrestorable/2` all clear
+     that column. A pod's own `session.dormant` report, an erasure and a
+     `session.unrestorable` report each marked the row first. Their release found nothing,
+     and the placement actor went on counting a session that had left the pod. Only a
+     reserve about to be refused counted again, so until then the least-loaded pod was
+     chosen on counts that were too high.
+     - **The order.** The dormancy report and an erasure now release first, as
+       `Drain.strand/2` already did. The control connection's orphan path calls
+       `Drain.strand/2` rather than keep its own copy of it. The `unrestorable` report
+       cannot release first: it is fenced on the epoch, and a release ahead of the fence
+       would let a pod on a stale epoch give back a slot a newer epoch holds.
+     - **The recount.** A release whose session is on no pod reloads the actor's counts
+       from the database, as the refusal path does. That covers the `unrestorable`
+       report, and any caller that gets the order wrong again. It costs a group-by only
+       on a release that found nothing: a session never placed, or one given back
+       already. A second release of the same session finds nothing and recounts, so no
+       slot is given back twice. The refusal path keeps its recount for sessions taken off
+       their pods with no release at all, which a revoked grant's
+       `Sessions.read_only_for/2` still does.
+     - **Proof:** `Troupe.Plane.ControlTest`: a pod's dormancy report takes a full pod
+       from four to three without a recount, and the next reserve fits without one; an
+       `unrestorable` report gives its slot back; a session the plane strands and the pod
+       then reports dormant twice gives back one slot. `Troupe.Plane.HarnessTest`:
+       erasing one of two running sessions leaves the pod counting one.
+       `Troupe.Plane.PlacementTest`: a release after the row went dormant gives the slot
+       back at once. All but the one about giving back once fail on the chunk's tip.
+
+691. **What `troupe-daemon` prints names `troupe-daemon`'s commands, in ASCII, with paths
+     as Windows writes them.** D20 in docs/developer/defects.md. What loading warns about
+     is written once, naming `troupe config migrate` and `troupe config trust`, and both
+     programs print it. `config --explain`, `validate`, `migrate`, `trust` and `untrust`
+     now take `command:`, as `Config.describe/2` has since #153, and
+     `Troupe.Config.as_run_by/2` names the program printing. The text is rewritten where
+     it is printed rather than where it is written, because the loader does not know who
+     will print it, and the same warnings reach a session's clients; a migration's diff
+     is a file's own text and is left alone. The masked key and the model report's
+     separators are ASCII (`sk-a...op`, commas), because the Windows console shows
+     anything else as stray characters. `Troupe.Paths.display/1` also gives a drive
+     letter the case Windows shows (`File.cwd!/0` says `c:/`), and is used for every path
+     a config report prints, an issue's file included; what is stored, and the JSON,
+     keep the path as loaded. `troupe-daemon status` says where the sessions are kept,
+     which is what the TUI's help sends a person to it for. `Troupe.Protocol.Daemon`
+     starts a daemon on Windows with `start "" /b` through `cmd /s /c`: `start` read a
+     program's quoted path, which one in a directory with a space has to be, as a window
+     title, and started nothing. A worker's activation error that is an exception is
+     its message. Proof: `Troupe.Daemon.CLITest`, `Troupe.Config.ExplainTest` and
+     `TrustTest`, `Troupe.PathsTest`, `Troupe.Gateway.AutospawnTest`,
+     `Troupe.Worker.UnrestorableTest`, and the installed build on this machine.

@@ -171,8 +171,8 @@ const noRecordings = existsSync(recordings)
   ? false
   : "the recorded logs are at the repository's root, outside this build";
 
-function recorded(name: string): DurableEvent[] {
-  return readFileSync(new URL(`${name}.jsonl`, recordings), "utf8")
+function recorded(name: string, from: URL = recordings): DurableEvent[] {
+  return readFileSync(new URL(`${name}.jsonl`, from), "utf8")
     .split(/\r?\n/)
     .filter((line) => line.trim() !== "")
     .map((line) => JSON.parse(line) as DurableEvent);
@@ -197,6 +197,61 @@ describe("an approval in a recorded log", { skip: noRecordings }, () => {
     const open = foldAll(recorded("open"));
     assert.equal(openApprovals(open).length, 1);
     assert.equal(needsYou(open), true);
+  });
+});
+
+// The same for questions (test/fixtures/questions, #162): an `ask_user` whose tool timed
+// out, or whose turn was cancelled, by the agent that asked or by one above it; the
+// failure guard's and the budget's question in a session with nobody to ask, which the
+// harness answers itself; and those two cancelled while they waited. `budget_asked_again`
+// goes on from `budget_cancelled`: the next message makes the gate ask again, under the
+// same id. `open` stops while the question is still waiting.
+const questionRecordings = new URL("../../../../../test/fixtures/questions/", import.meta.url);
+const noQuestionRecordings = existsSync(questionRecordings)
+  ? false
+  : "the recorded logs are at the repository's root, outside this build";
+
+describe("a question in a recorded log", { skip: noQuestionRecordings }, () => {
+  it("is not open once its tool timed out, or a cancel reached the agent that asked", () => {
+    for (const name of ["timed_out", "cancelled", "subagent_cancelled", "failures_cancelled", "budget_cancelled"]) {
+      const state = foldAll(recorded(name, questionRecordings));
+      assert.deepEqual(openQuestions(state), [], name);
+      assert.equal(needsYou(state), false, name);
+      const question = state.entries.find((e) => e.kind === "question") as Extract<Entry, { kind: "question" }>;
+      assert.equal(question.closed, true, name);
+      assert.equal(question.answer, undefined, `${name}: nobody answered it`);
+    }
+  });
+
+  it("is closed by the harness's own answer when nobody is there to ask", () => {
+    for (const [name, answer] of [
+      ["failures_unattended", "stop"],
+      ["budget_unattended", "deny"],
+    ] as const) {
+      const state = foldAll(recorded(name, questionRecordings));
+      assert.deepEqual(openQuestions(state), [], name);
+      const question = state.entries.find((e) => e.kind === "question") as Extract<Entry, { kind: "question" }>;
+      assert.equal(question.answer, answer, name);
+    }
+  });
+
+  it("is closed by its answer, open while nobody has answered it, and open again when the gate asks again", () => {
+    const answered = foldAll(recorded("answered", questionRecordings));
+    assert.deepEqual(openQuestions(answered), []);
+    const question = answered.entries.find((e) => e.kind === "question") as Extract<Entry, { kind: "question" }>;
+    assert.equal(question.answer, "blue");
+    assert.equal(question.closed, false, "an answered question is an answer, not one that ended unanswered");
+
+    const open = foldAll(recorded("open", questionRecordings));
+    assert.equal(openQuestions(open).length, 1);
+    assert.equal(needsYou(open), true);
+
+    const again = foldAll(recorded("budget_asked_again", questionRecordings));
+    assert.deepEqual(
+      openQuestions(again).map((q) => [q.callId, q.asked]),
+      [["budget-1", "budget"]],
+    );
+    assert.equal(needsYou(again), true);
   });
 });
 
@@ -228,6 +283,27 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.deepEqual(openQuestions(answered), []);
     assert.equal((answered.entries[0] as Extract<Entry, { kind: "question" }>).answer, "blue, green");
     assert.equal(needsYou(answered), false);
+  });
+
+  it("ends a question with its call, or with a cancel of the agent that asked or of one above it", () => {
+    seq = 0;
+    const ask = (call_id: string, agent: string[]) => durable("question_asked", { call_id, agent_path: agent, question: `${call_id}?`, options: [], multiple: false }, agent);
+    const asked = foldAll([ask("a", ["root"]), ask("b", ["root", "explore"]), ask("c", ["root", "other"])]);
+    assert.equal(openQuestions(asked).length, 3);
+
+    const timedOut = fold(asked, durable("tool_call_completed", { call_id: "a", name: "ask_user", ok: false, content: "The tool timed out after 180000ms." }));
+    assert.deepEqual(
+      openQuestions(timedOut).map((e) => e.callId),
+      ["b", "c"],
+    );
+
+    // A subagent's cancel reaches it and what is under it, not its siblings.
+    const cancelled = fold(timedOut, durable("cancelled", {}, ["root", "explore"]));
+    assert.deepEqual(
+      openQuestions(cancelled).map((e) => e.callId),
+      ["c"],
+    );
+    assert.deepEqual(openQuestions(fold(cancelled, durable("cancelled"))), []);
   });
 
   it("makes one budget question of the harness's own event and the question it rides on, whichever comes first", () => {

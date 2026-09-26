@@ -32,6 +32,7 @@ defmodule Troupe.Sessions.Index do
           state: :active | :dormant | :read_only | :erased,
           status: atom(),
           pending_approvals: non_neg_integer(),
+          pending_questions: non_neg_integer(),
           tokens: non_neg_integer(),
           cost: float(),
           created_at: String.t() | nil,
@@ -298,8 +299,10 @@ defmodule Troupe.Sessions.Index do
   # Waiting on a person and on nothing else: the root agent has asked something — an
   # approval, a question, the budget's own question (Decision 660) — and every task it has
   # running is one of the askers. Only the root's own calls are asked again when the tree
-  # comes back; a delegation comes back interrupted, so a session with a subagent alive is
-  # busy, and a subagent's question times out with its tool as it always has.
+  # comes back; a delegation comes back interrupted, so a session with a subagent at work is
+  # busy, and a subagent's question times out with its tool as it always has. One that
+  # finished or ran out of budget is not at work: it stays up, `:done`, and what it had to
+  # say is already its delegation's result (#134).
   defp parked_or_busy(session_id) do
     root = Session.root_path()
 
@@ -307,14 +310,18 @@ defmodule Troupe.Sessions.Index do
       (Approvals.pending(session_id) ++ Questions.pending(session_id))
       |> Enum.count(&(&1.agent_path == root))
 
+    subagents = Troupe.agent_tree(session_id) -- [root]
+
     parked? =
-      asked > 0 and Troupe.agent_tree(session_id) == [root] and
+      asked > 0 and Enum.all?(subagents, &done_agent?(session_id, &1)) and
         length(Task.Supervisor.children(Registry.tasks(session_id, root))) <= asked
 
     if parked?, do: :parked, else: :busy
   catch
     :exit, _ -> :busy
   end
+
+  defp done_agent?(session_id, path), do: match?(%{state: :done}, Troupe.snapshot(session_id, path))
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 
@@ -358,26 +365,32 @@ defmodule Troupe.Sessions.Index do
     {:reply, workspaces, state}
   end
 
-  # A running session's entry, with the approvals it has open read when it is asked for:
-  # from the session's own summary projection, which already follows every way an
-  # approval ends (#142) and is what a worker reports to the plane from. Nothing here
-  # hears the session's events, so a count kept here would be one more reader to get it
-  # wrong.
+  # A running session's entry, with the approvals and questions it has open read when it
+  # is asked for: from the session's own summary projection, which already follows every
+  # way an approval (#142) or a question (#162) ends and is what a worker reports to the
+  # plane from. Nothing here hears the session's events, so a count kept here would be one
+  # more reader to get it wrong.
   defp live(state, session_id) do
     case Map.fetch(state.live, session_id) do
-      {:ok, entry} ->
-        open = session_id |> Summary.snapshot() |> Map.get("approvals", [])
-        entry |> Map.put(:pending_approvals, length(open)) |> waiting()
-
-      :error ->
-        nil
+      {:ok, entry} -> entry |> put_asked(Summary.snapshot(session_id)) |> waiting()
+      :error -> nil
     end
   end
 
+  defp put_asked(meta, summary) do
+    meta
+    |> Map.put(:pending_approvals, summary |> Map.get("approvals", []) |> length())
+    |> Map.put(:pending_questions, summary |> Map.get("questions", []) |> length())
+  end
+
   # `waiting` outranks whatever else a listing would say, as it does in what a worker
-  # reports: a session with an approval open is waiting on a person, whatever its agent
-  # is doing meanwhile. So a local row and a plane's row say the same of it.
-  defp waiting(%{pending_approvals: open} = meta) when open > 0, do: %{meta | status: :waiting}
+  # reports: a session with an approval or a question open is waiting on a person,
+  # whatever its agent is doing meanwhile. So a local row and a plane's row say the same
+  # of it.
+  defp waiting(%{pending_approvals: approvals, pending_questions: questions} = meta)
+       when approvals > 0 or questions > 0,
+       do: %{meta | status: :waiting}
+
   defp waiting(meta), do: meta
 
   # Live entries win: a session with a running tree knows more about itself than its
@@ -452,7 +465,6 @@ defmodule Troupe.Sessions.Index do
           profile: get_data(created, "profile", "build"),
           state: :dormant,
           status: status_from_log(events),
-          pending_approvals: open_approvals(events),
           tokens: total_tokens(events),
           cost: total_cost(events),
           created_at: first.ts,
@@ -460,21 +472,19 @@ defmodule Troupe.Sessions.Index do
           pinned: false
         }
 
-        [waiting(meta)]
+        [meta |> put_asked(root_asked(events)) |> waiting()]
     end
   end
 
-  # The root agent's approvals still open, folded by the summary projection's own rule:
-  # an approval ends with its decision, with its call's `tool_call_completed`, or with a
-  # cancel. The root's alone, like the status below, because those are what it asks again
-  # when it wakes; a delegation comes back interrupted, and what its subagent asked is
-  # owed to nobody.
-  defp open_approvals(events) do
+  # The root agent's approvals and questions still open, folded by the summary
+  # projection's own rules: an approval ends with its decision, a question with its
+  # answer, and either with its call's `tool_call_completed` or with a cancel. The root's
+  # alone, like the status below, because those are what it asks again when it wakes; a
+  # delegation comes back interrupted, and what its subagent asked is owed to nobody.
+  defp root_asked(events) do
     events
     |> Enum.filter(&(&1.agent == Session.root_path()))
     |> Enum.reduce(Summary.empty(), &Summary.fold(&2, &1))
-    |> Map.get("approvals", [])
-    |> length()
   end
 
   # What a session was in the middle of when it stopped, read from the log alone. A

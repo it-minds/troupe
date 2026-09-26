@@ -141,8 +141,9 @@ review queue (`needs_review` on `sessions.list` and `admin.sessions.list`);
   is unlimited.
 - **The period.** A `monthly` team counts what it spent since midnight UTC on the 1st of
   the month, and a team refused at its ceiling can start sessions again from then; `never`
-  counts everything. A person's cap and the platform's have no period: they count
-  everything, in every team.
+  counts everything. A person's cap and the platform's (and the deployment's) are always
+  monthly in the same way, whatever their teams' periods: a person's counts what they
+  spent this month in every team, the platform's what everybody did.
 - One budget actor per team, registered cluster-wide, which is why plane replicas must be
   clustered.
 - Costs come from the gateway's `x-litellm-response-cost` header; without one, tokens are

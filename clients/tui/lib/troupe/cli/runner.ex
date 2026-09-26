@@ -53,7 +53,10 @@ defmodule Troupe.CLI.Runner do
 
   @spec main([String.t()]) :: non_neg_integer()
   def main(argv) do
-    case CLI.parse(argv) do
+    case argv |> CLI.parse() |> needs_terminal(terminal?()) do
+      {:no_terminal, message} ->
+        fail(message)
+
       {:ok, %{mode: :version}} ->
         IO.puts(CLI.version())
         0
@@ -75,6 +78,15 @@ defmodule Troupe.CLI.Runner do
 
       {:ok, %{mode: :config_migrate} = args} ->
         print(Troupe.Config.migrate(args.workspace, args.path, write: args.write))
+
+      {:ok, %{mode: :config_trust} = args} ->
+        print(Troupe.Config.trust(args.path || args.workspace))
+
+      {:ok, %{mode: :config_untrust} = args} ->
+        print(Troupe.Config.untrust(args.path || args.workspace))
+
+      {:ok, %{mode: :config_trust_list}} ->
+        print(Troupe.Config.list_trusted())
 
       {:ok, %{mode: :config_pull} = args} ->
         Troupe.CLI.ModelConfig.pull(args.plane_url)
@@ -132,6 +144,33 @@ defmodule Troupe.CLI.Runner do
     end
   end
 
+  @doc """
+  A command line that would draw the terminal UI, when standard output is not a
+  terminal: `{:no_terminal, why}`. Anything else is passed on as it came.
+
+  Drawn into a file or a pipe, the UI is escape codes nobody reads, and nothing can press
+  the key that quits it, so the command never ends. It is refused before a session is
+  made, with the command a script wants instead.
+  """
+  @spec needs_terminal({:ok, CLI.args()} | {:error, String.t()}, boolean()) ::
+          {:ok, CLI.args()} | {:error, String.t()} | {:no_terminal, String.t()}
+  def needs_terminal({:ok, %{mode: mode} = args}, false)
+      when mode in [:tui, :resume] or (mode == :run and not args.headless) do
+    {:no_terminal,
+     "troupe: stdout is not a terminal; run a task with `troupe run \"task\" --headless`, " <>
+       "or set up a provider with `troupe config`"}
+  end
+
+  def needs_terminal(parsed, _terminal?), do: parsed
+
+  # Whether standard output is a terminal, as the VM found it at start.
+  defp terminal? do
+    case :io.getopts(:standard_io) do
+      opts when is_list(opts) -> Keyword.get(opts, :stdout, true)
+      _ -> true
+    end
+  end
+
   # `troupe --remote https://plane…` beats the plane last logged in to.
   defp plane(%{plane_url: url}) when is_binary(url), do: url
   defp plane(_args), do: nil
@@ -182,7 +221,7 @@ defmodule Troupe.CLI.Runner do
 
     case sid && Client.open_session({:local, args.workspace}, sid, :read, []) do
       {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
-      nil -> fail("no session to resume in #{args.workspace}")
+      nil -> fail("no session to resume in #{Troupe.Paths.display(args.workspace)}")
       {:error, reason} -> fail("could not resume: #{inspect(reason)}")
     end
   end

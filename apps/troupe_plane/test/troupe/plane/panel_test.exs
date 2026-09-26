@@ -15,6 +15,7 @@ defmodule Troupe.Plane.PanelTest do
     Admin,
     Audit,
     Bundles,
+    FakeWorkerProfiles,
     Fleet,
     Identity,
     Ledger,
@@ -525,6 +526,34 @@ defmodule Troupe.Plane.PanelTest do
       # A boolean is a value even when it is false: without this, unmounting the org
       # volume would be a change the form could express and never send.
       assert draft["spec"]["orgMount"] == false
+    end
+
+    # `llm.prices` is set through `admin.profile.put`, not on this page (Decision 689). A
+    # draft rebuilt from the form alone would drop it on the next save, and the profile's
+    # models would go back to costing nothing on the ledger.
+    test "keeps the prices it does not show, so a save from here does not drop them", context do
+      prices = %{"qwen3-235b" => %{"input" => 0.2, "output" => 0.6}}
+
+      {:ok, _} =
+        Fleet.put_profile(%{
+          name: "dev",
+          spec: %{"llm" => %{"model" => "qwen3-235b", "prices" => prices}}
+        })
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/profile/dev")
+
+      html =
+        view
+        |> element("form")
+        |> render_change(%{
+          "name" => "dev",
+          "llm.model" => "qwen3-235b",
+          "llm.smallModel" => "qwen3-32b"
+        })
+
+      assert html =~ "qwen3-32b"
+      refute html =~ "prices"
     end
 
     test "an MCP row with no url is a row being typed, not a server" do
@@ -1204,6 +1233,39 @@ You build."}
       assert html =~ "laptops"
     end
 
+    test "says a Kubernetes profile has egress by hostname only where the operator reports it",
+         context do
+      # `dev` is on a cluster whose operator wrote its FQDN rules, and `ux` on one without
+      # Cilium, where the allowlist is checked at admission and not on the wire.
+      FakeWorkerProfiles.start(%{
+        "dev" => FakeWorkerProfiles.egress_by_hostname(true),
+        "ux" => FakeWorkerProfiles.egress_by_hostname(false)
+      })
+
+      {:ok, view, html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/provisioners")
+
+      dev = view |> element("#guarantees-dev") |> render()
+      assert dev =~ "everything is enforced"
+      refute dev =~ "egress by hostname"
+
+      ux = view |> element("#guarantees-ux") |> render()
+      refute ux =~ "everything is enforced"
+      assert ux =~ "egress by hostname"
+      assert ux =~ "the egress allowlist is checked at admission, not on the wire"
+
+      # In general, before any profile, Kubernetes promises the weaker one: which a
+      # profile gets is the operator's to say, profile by profile, as above.
+      kubernetes = view |> element("#substrate-fqdn_egress") |> render()
+      assert kubernetes =~ "checked at admission"
+      assert html =~ "Egress by hostname is Cilium"
+
+      # And neither profile is one a team needs allowing onto: the allowlist is still
+      # admission's to enforce, which is not the case on somebody's build box.
+      refute html =~ "No team may be granted dev"
+      refute html =~ "No team may be granted ux"
+    end
+
     test "and says plainly that this is not a way around the policy", context do
       {:ok, _view, html} =
         context.conn |> sign_in(context.root.subject) |> live("/admin/provisioners")
@@ -1377,6 +1439,34 @@ You build."}
 
       assert html =~ "the platform&#39;s, or the deployment&#39;s" or
                html =~ "the platform's, or the deployment's"
+    end
+
+    test "each ceiling says what its spend counts over", context do
+      # Every bar here said "this period", including the person's and the platform's,
+      # which then counted everything ever spent (#132). They are the month now, and the
+      # team's is the team's own, which for this one never turns over.
+      actor = Admin.actor_for_subject(context.root.subject)
+      {:ok, _} = Admin.person_budget(actor, context.lead.subject, 40_000)
+      {:ok, _} = Admin.team_update(actor, "engineering", %{budget_period: "never"})
+      {:ok, _} = Settings.put("platform_budget_micros", 5_000_000, context.root.subject)
+      on_exit(&Settings.invalidate/0)
+
+      {:ok, view, _html} =
+        context.conn |> sign_in(context.root.subject) |> live("/admin/budgets")
+
+      view
+      |> element("#explain-budget")
+      |> render_submit(%{"team" => "engineering", "subject" => context.lead.subject})
+
+      figures =
+        Regex.scan(
+          ~r{<span class="budget__figures">(.*?)</span>}s,
+          view |> element(".ceilings") |> render()
+        )
+        |> Enum.map(&(&1 |> List.last() |> String.trim()))
+
+      # Narrowest first: the person's own, the team's, the platform's.
+      assert figures == ["0.00 / 0.04 monthly", "0.00 / 1.00 in total", "0.00 / 5.00 monthly"]
     end
 
     test "and a rung with no ceiling is not reported as the reason", context do

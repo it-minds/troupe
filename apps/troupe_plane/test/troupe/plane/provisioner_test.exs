@@ -15,7 +15,7 @@ defmodule Troupe.Plane.ProvisionerTest do
 
   use Troupe.Plane.DataCase, async: false
 
-  alias Troupe.Plane.{Admin, Enrolment, Fleet, Identity}
+  alias Troupe.Plane.{Admin, Enrolment, FakeWorkerProfiles, Fleet, Identity}
   alias Troupe.Plane.Fleet.{Host, Hosts, Provisioner}
 
   @moduletag timeout: 60_000
@@ -48,11 +48,45 @@ defmodule Troupe.Plane.ProvisionerTest do
   end
 
   describe "what a substrate guarantees" do
-    test "is everything on Kubernetes, because the cluster enforces it either way" do
+    test "is everything on Kubernetes where the operator says it wrote the FQDN rules" do
       dev = profile("dev")
+      FakeWorkerProfiles.start(%{"dev" => FakeWorkerProfiles.egress_by_hostname(true)})
 
+      assert :fqdn_egress in Provisioner.Kubernetes.guarantees(dev)
       assert Provisioner.missing(dev) == []
       refute Provisioner.unenforced?(dev)
+    end
+
+    test "is not egress by hostname on Kubernetes without Cilium, and says what is instead" do
+      dev = profile("dev")
+      FakeWorkerProfiles.start(%{"dev" => FakeWorkerProfiles.egress_by_hostname(false)})
+
+      # Without Cilium the allowlist is a check at admission and at every reconcile, and a
+      # worker reaches any public host on 443 and 80, so egress by hostname is not claimed.
+      given = Provisioner.Kubernetes.guarantees(dev)
+      refute :fqdn_egress in given
+      assert :egress_checked_at_admission in given
+
+      assert Provisioner.missing(dev) == [:fqdn_egress]
+
+      assert Provisioner.account(dev).instead == %{
+               fqdn_egress: :egress_checked_at_admission
+             }
+
+      # Less than egress by hostname, and not nothing: a profile in the cluster, whose
+      # allowlist admission still enforces, is not one a team needs allowing onto.
+      refute Provisioner.unenforced?(dev)
+    end
+
+    test "is the weaker one wherever the operator has not said, rather than the stronger" do
+      dev = profile("dev")
+
+      # No cluster to ask, which is a plane under test or one drafting profiles.
+      assert Provisioner.missing(dev) == [:fqdn_egress]
+
+      # And a cluster that has not reconciled this profile yet.
+      FakeWorkerProfiles.start(%{})
+      assert Provisioner.missing(dev) == [:fqdn_egress]
     end
 
     test "is nothing on a host, named one at a time" do
@@ -115,6 +149,10 @@ defmodule Troupe.Plane.ProvisionerTest do
     end
 
     test "a profile the cluster enforces is granted without any of that", context do
+      # Including without Cilium, which is this test: no operator has said `dev` has egress
+      # by hostname, so it has the allowlist checked at admission in its place, and that is
+      # missing egress by hostname but not unenforced.
+      assert Provisioner.missing(Fleet.get_profile("dev")) == [:fqdn_egress]
       assert {:ok, _team} = Admin.team_grant(context.actor, "delivery", "dev")
       assert "dev" in Enum.map(Identity.grants_for_team(context.team), & &1.profile)
     end

@@ -119,7 +119,12 @@ defmodule Troupe.Plane.ConsoleWalkthroughTest do
 
     assert html =~ "dev"
     assert html =~ "kubernetes"
-    assert html =~ "everything is enforced"
+
+    # No operator has reconciled `dev` here, so nothing says its workers have egress by
+    # hostname: the page names that and what they have in its place, rather than claim
+    # everything is enforced. It is still a profile a team may be granted as it stands.
+    assert html =~ "the egress allowlist is checked at admission, not on the wire"
+    refute html =~ "No team may be granted dev"
 
     # -- 6. Bundles: what a session on that profile gets ----------------------
     {:ok, bundles, _html} = live(conn, "/admin/bundles")

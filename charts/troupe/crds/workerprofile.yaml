@@ -56,6 +56,26 @@ spec:
                     smallModel:
                       type: string
                       description: Used only for conversation summarisation, where a cheaper model is enough.
+                    prices:
+                      type: object
+                      description: >-
+                        Dollars per million tokens, by model, for models the gateway does not
+                        price on a streamed call. The pods get them as TROUPE_MODEL_PRICES
+                        (models.prices); a model with no price counts as free on the ledger.
+                      additionalProperties:
+                        type: object
+                        required: [input, output]
+                        properties:
+                          input: {type: number, minimum: 0}
+                          output: {type: number, minimum: 0}
+                          cacheRead:
+                            type: number
+                            minimum: 0
+                            description: Absent means the input price.
+                          cacheWrite:
+                            type: number
+                            minimum: 0
+                            description: Absent means the input price.
                     secretRef:
                       type: object
                       properties:

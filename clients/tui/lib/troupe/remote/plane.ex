@@ -236,7 +236,7 @@ defmodule Troupe.Remote.Plane do
 
     case result do
       {:error, %{code: _code} = error} ->
-        if RPC.reason(error) == :unauthorized,
+        if RPC.reason(error) == :unauthenticated,
           do: {:noreply, reauthorize(state)},
           else: {:noreply, state}
 
@@ -426,7 +426,7 @@ defmodule Troupe.Remote.Plane do
 
       {{from, _method}, pending} ->
         state = reply_and(state, pending, from, {:error, error})
-        if RPC.reason(error) == :unauthorized, do: reauthorize(state), else: state
+        if RPC.reason(error) == :unauthenticated, do: reauthorize(state), else: state
     end
   end
 
@@ -492,7 +492,7 @@ defmodule Troupe.Remote.Plane do
   defp principal(%{"sub" => _subject} = me), do: me
   defp principal(_result), do: nil
 
-  defp refused?(%{code: _code} = error), do: RPC.reason(error) == :unauthorized
+  defp refused?(%{code: _code} = error), do: RPC.reason(error) == :unauthenticated
   defp refused?(_reason), do: false
 
   # There is nothing to subscribe to over `POST`: a plane with no socket cannot

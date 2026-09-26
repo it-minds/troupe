@@ -82,6 +82,19 @@ defmodule Troupe.Registry do
     end
   end
 
+  @doc """
+  Claim a key for the calling process: `true` the first time, `false` while the process
+  that claimed it lives. How something is said once a session rather than once an agent:
+  the first agent claims it, and the claim goes with that agent.
+  """
+  @spec first?(tuple()) :: boolean()
+  def first?(key) do
+    case Registry.register(@registry, key, nil) do
+      {:ok, _owner} -> true
+      {:error, {:already_registered, _pid}} -> false
+    end
+  end
+
   @spec agent_pid(String.t(), agent_path()) :: pid() | nil
   def agent_pid(session_id, path), do: whereis({:agent, session_id, path})
 

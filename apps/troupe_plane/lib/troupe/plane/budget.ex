@@ -8,6 +8,15 @@ defmodule Troupe.Plane.Budget do
   actually ask for unsayable: "this contractor may spend a hundred a month, whatever
   team they are in" and "nobody at all may take this deployment past a number".
 
+  ## A month is the calendar month in UTC
+
+  The person's and the platform's rungs count what was spent since midnight UTC on the
+  1st, so a person or a deployment at its ceiling starts sessions again then rather than
+  when somebody raises it. A team's rung counts its own `budget_period`: the same month
+  for `monthly`, everything for `never`. Every rung's summary names its period
+  (`budget_period`), because a figure without the period it covers cannot be read
+  against its ceiling.
+
   ## Absence means everything
 
   A scope with no cap set does not participate. Zero and `nil` both mean no ceiling,

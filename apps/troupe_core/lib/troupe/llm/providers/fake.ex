@@ -70,10 +70,12 @@ defmodule Troupe.LLM.Fake do
 
   A bare list is the shared script. An object carries `steps` and, optionally, `routes`:
   per-agent scripts keyed by agent name, which is what a session with subagents needs,
-  because one shared list cannot say which answer belongs to whom. Returned as the
-  options `start_link/1` takes.
+  because one shared list cannot say which answer belongs to whom. It may also carry
+  `cost_micros`, what the imaginary gateway charges per call, `null` for one that says
+  nothing, as a gateway streaming a response does. Returned as the options
+  `start_link/1` takes.
   """
-  @spec load_script!(Path.t()) :: [steps: [step()], routes: %{optional(String.t()) => [step()]}]
+  @spec load_script!(Path.t()) :: keyword()
   def load_script!(path) do
     path
     |> File.read!()
@@ -82,18 +84,24 @@ defmodule Troupe.LLM.Fake do
   end
 
   @doc false
-  @spec normalize_script(term()) :: [steps: [step()], routes: %{optional(String.t()) => [step()]}]
+  @spec normalize_script(term()) :: keyword()
   def normalize_script(%{} = script) do
     routes =
       script
       |> Map.get("routes", %{})
       |> Map.new(fn {agent, steps} -> {to_string(agent), Enum.map(steps, &normalize_step/1)} end)
 
-    [steps: script |> Map.get("steps", []) |> Enum.map(&normalize_step/1), routes: routes]
+    [steps: script |> Map.get("steps", []) |> Enum.map(&normalize_step/1), routes: routes] ++
+      script_cost(script)
   end
 
   def normalize_script(steps) when is_list(steps),
     do: [steps: Enum.map(steps, &normalize_step/1), routes: %{}]
+
+  defp script_cost(%{"cost_micros" => cost}) when is_nil(cost) or (is_integer(cost) and cost >= 0),
+    do: [cost_micros: cost]
+
+  defp script_cost(_script), do: []
 
   # `stop` overrides how the step's answer ended: `max_tokens` for a reply the output cap
   # cut, `refusal` for one the model declined to give.

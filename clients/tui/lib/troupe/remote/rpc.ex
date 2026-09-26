@@ -70,56 +70,80 @@ defmodule Troupe.Remote.RPC do
   defp params(%{"params" => %{} = params}), do: params
   defp params(_message), do: %{}
 
+  # PROTOCOL.md §10: each code, and the token its `message` carries.
+  @codes %{
+    -32_700 => :parse_error,
+    -32_600 => :invalid_request,
+    -32_601 => :method_not_found,
+    -32_602 => :invalid_params,
+    -32_603 => :internal_error,
+    -32_001 => :not_initialized,
+    -32_002 => :unsupported_version,
+    -32_003 => :unauthenticated,
+    -32_004 => :forbidden,
+    -32_005 => :not_found,
+    -32_006 => :conflict,
+    -32_007 => :stale_version,
+    -32_008 => :capacity,
+    -32_009 => :resync_required,
+    -32_010 => :unavailable,
+    -32_011 => :rate_limited,
+    -32_012 => :payload_too_large,
+    -32_013 => :consent_required,
+    -32_014 => :budget_exhausted
+  }
+
+  @doc "The contract's error table (PROTOCOL.md §10): each code and its token."
+  @spec codes() :: %{integer() => atom()}
+  def codes, do: @codes
+
   @doc """
-  The contract's error codes as atoms, so callers match on meaning rather than
-  numbers. Anything else comes back as `{:rpc, code}`.
+  The contract's error codes as the tokens PROTOCOL.md §10 gives them, so callers
+  match on meaning rather than numbers. Anything else comes back as `{:rpc, code}`.
   """
   @spec reason(map()) :: atom() | {:rpc, integer() | nil}
-  def reason(%{code: -32_001}), do: :unauthorized
+  def reason(%{code: code}), do: Map.get(@codes, code, {:rpc, code})
 
-  # The deployment this was built against answers an unauthenticated call with
-  # -32003 and a `reason` naming the token problem. The contract reserves -32003
-  # for a missing scope, so the two are told apart by that field: a token
-  # problem is refreshed, a scope problem is explained (Decision 81).
-  def reason(%{code: -32_003, data: %{"reason" => reason}})
-      when reason in ~w(no_token bad_signature expired expired_token invalid_token unauthenticated),
-      do: :unauthorized
-
-  def reason(%{code: -32_003}), do: :forbidden
-  def reason(%{code: -32_004}), do: :not_found
-  def reason(%{code: -32_009}), do: :conflict
-  def reason(%{code: -32_010}), do: :no_capacity
-  def reason(%{code: -32_012}), do: :session_moved
-  def reason(%{code: -32_601}), do: :method_not_found
-  def reason(%{code: code}), do: {:rpc, code}
-
-  @doc "What to tell the user about a failed call."
+  @doc """
+  What to tell the user about a failed call. The contract's `message` is a token, not
+  prose, and `data` says why (PROTOCOL.md §10): `conflict` on its own names a row of
+  the table, and nobody can act on it. A server that words its message keeps its words.
+  """
   @spec describe(map()) :: String.t()
   def describe(%{message: message} = error) when is_binary(message) and message != "" do
-    case reason(error) do
-      :unauthorized -> "signed out: #{message}"
-      :forbidden -> "not allowed: #{message}" <> scope_hint(error)
-      :no_capacity -> "unavailable: #{message}" <> reason_hint(error)
-      :conflict -> "conflict: #{message}"
-      :not_found -> "not found: #{message}"
-      _ -> message
-    end
+    reason = reason(error)
+    worded = if message == token(reason), do: nil, else: message
+    head = heading(reason) || if(worded, do: nil, else: message)
+    line = [head, worded, cause(error)] |> Enum.reject(&is_nil/1) |> Enum.join(": ")
+
+    if reason == :forbidden, do: line <> scope_hint(error), else: line
   end
 
   def describe(error), do: inspect(reason(error))
 
-  # -32010 (`unavailable`) carries what was unavailable in `data`: the reason, and
-  # sometimes the component. A message without them is "unavailable: unavailable".
-  defp reason_hint(%{data: %{"reason" => reason} = data}) when is_binary(reason) do
-    case data["component"] do
-      component when is_binary(component) -> " (#{component}: #{reason})"
-      _ -> " (#{reason})"
+  defp token(reason) when is_atom(reason), do: Atom.to_string(reason)
+  defp token(_reason), do: nil
+
+  defp heading(:unauthenticated), do: "signed out"
+  defp heading(:forbidden), do: "not allowed"
+  defp heading(:not_found), do: "not found"
+  defp heading(:unavailable), do: "unavailable"
+  defp heading(_reason), do: nil
+
+  # The server puts the cause in `data.reason`, the part that failed in `component` and
+  # what that part said in `detail`.
+  defp cause(%{data: %{} = data}) do
+    case Enum.filter([data["component"], data["reason"], data["detail"]], &said?/1) do
+      [] -> nil
+      said -> Enum.join(said, ": ")
     end
   end
 
-  defp reason_hint(_error), do: ""
+  defp cause(_error), do: nil
 
-  # -32003 says which scope was missing when it can; saying so is the whole
+  defp said?(value), do: is_binary(value) and value != ""
+
+  # -32004 says which scope was missing when it can; saying so is the whole
   # point of the code.
   defp scope_hint(%{data: %{"scope" => scope}}) when is_binary(scope),
     do: " (needs the #{scope} scope)"

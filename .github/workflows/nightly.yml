@@ -47,6 +47,7 @@ jobs:
       contents: read
     with:
       model: ${{ vars.TROUPE_NIGHTLY_MODEL || 'qwen3-235b' }}
+      prices: ${{ vars.TROUPE_NIGHTLY_MODEL_PRICES || '' }}
     secrets:
       base_url: ${{ secrets.TROUPE_NIGHTLY_BASE_URL }}
       api_key: ${{ secrets.TROUPE_NIGHTLY_API_KEY }}

@@ -229,6 +229,63 @@ defmodule Troupe.ConfigProvidersTest do
       assert config.model == "claude-sonnet-5"
     end
 
+    test "a key or URL in opencode.jsonc that says {env:VAR} or {file:path} is read as opencode reads it",
+         %{workspace: workspace, opencode: opencode} do
+      File.write!(Path.join(opencode, "secret-key"), "file-key-1234567890\n")
+
+      File.write!(Path.join(opencode, "opencode.jsonc"), """
+      {
+        "model": "envy/m",
+        "provider": {
+          "envy": {"options": {"baseURL": "https://{env:TROUPE_TEST_OC_HOST}/v1", "apiKey": "{env:TROUPE_TEST_OC_KEY}"}},
+          "filed": {"npm": "@ai-sdk/anthropic", "options": {"authToken": "{file:secret-key}"}}
+        }
+      }
+      """)
+
+      System.put_env("TROUPE_TEST_OC_KEY", "env-key-1234567890")
+      System.put_env("TROUPE_TEST_OC_HOST", "gw.example")
+      on_exit(fn -> Enum.each(~w(TROUPE_TEST_OC_KEY TROUPE_TEST_OC_HOST), &System.delete_env/1) end)
+
+      config = Config.load(workspace)
+
+      assert Config.target(config, "envy/m") |> Map.take([:base_url, :api_key]) ==
+               %{base_url: "https://gw.example/v1", api_key: "env-key-1234567890"}
+
+      assert Config.target(config, "filed/m") |> Map.take([:api_key, :auth]) == %{api_key: "file-key-1234567890", auth: :bearer}
+
+      # For a copy into config.yaml, which reads {env:VAR} itself but not {file:path}.
+      copied = OpenCode.providers(as_written: true)
+      assert copied["envy"].api_key == "{env:TROUPE_TEST_OC_KEY}"
+      assert copied["filed"].api_key == "file-key-1234567890"
+    end
+
+    test "an {env:VAR} that is not set, or a {file:path} that cannot be read, refuses that provider and no other",
+         %{workspace: workspace, opencode: opencode} do
+      File.write!(Path.join(opencode, "opencode.jsonc"), """
+      {
+        "model": "fine/m",
+        "provider": {
+          "fine": {"options": {"apiKey": "fine-key-1234567890"}},
+          "unset": {"options": {"apiKey": "{env:TROUPE_TEST_OC_UNSET}"}},
+          "missing": {"options": {"apiKey": "{file:no-such-key-file}"}}
+        }
+      }
+      """)
+
+      System.delete_env("TROUPE_TEST_OC_UNSET")
+      config = Config.load(workspace)
+
+      assert Config.target(config, "fine/m").api_key == "fine-key-1234567890"
+      assert {:refused, why} = Config.target(config, "unset/m").api_key
+      assert why =~ "provider.unset.options.apiKey reads {env:TROUPE_TEST_OC_UNSET}, and TROUPE_TEST_OC_UNSET is not set"
+      assert why =~ "the provider unset is refused until it is"
+      assert {:refused, why} = Config.target(config, "missing/m").api_key
+      assert why =~ "provider.missing.options.apiKey reads {file:no-such-key-file}, and #{Path.join(opencode, "no-such-key-file")}"
+      assert Enum.any?(config.warnings, &(&1 =~ "TROUPE_TEST_OC_UNSET is not set"))
+      refute Enum.any?(config.warnings, &(&1 =~ "provider.fine"))
+    end
+
     test "a config file's provider of the same name wins over opencode's", %{workspace: workspace, config_home: config_home} do
       File.write!(Path.join(config_home, "config.yaml"), """
       providers:

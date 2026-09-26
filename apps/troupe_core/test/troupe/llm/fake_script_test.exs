@@ -31,6 +31,24 @@ defmodule Troupe.LLM.FakeScriptTest do
              ]
   end
 
+  # A gateway streaming a response says nothing about its cost, which is what a smoke of
+  # `models.prices` against a packaged daemon has to reproduce (#160).
+  test "a script may say what the imaginary gateway charges, nothing included" do
+    assert Fake.normalize_script(%{"steps" => [], "cost_micros" => nil}) == [
+             steps: [],
+             routes: %{},
+             cost_micros: nil
+           ]
+
+    assert Fake.normalize_script(%{"steps" => [], "cost_micros" => 50}) == [
+             steps: [],
+             routes: %{},
+             cost_micros: 50
+           ]
+
+    assert Fake.normalize_script(%{"steps" => []}) == [steps: [], routes: %{}]
+  end
+
   test "a workspace config names the script, and a subagent answers from its own route",
        context do
     script = Path.join(context.base, "script.json")

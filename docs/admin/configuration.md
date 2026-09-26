@@ -40,7 +40,7 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
 | `TROUPE_WORKERS_TLS_SECRET` | unset | one TLS Secret shared by every pod Ingress; ignored when a cert issuer is set | `operator.tlsSecretName` |
 | `TROUPE_WORKERS_CERT_ISSUER` | unset | cert-manager ClusterIssuer per pod Ingress, secret `<profile>-<ordinal>-tls` | `operator.certIssuer` |
-| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)) | `operator.ciliumAvailable` |
+| `TROUPE_CILIUM_AVAILABLE` | false | writes a `CiliumNetworkPolicy` with FQDN rules per profile, and drops the public 443/80 rule from the worker NetworkPolicy ([Part E](#part-e--ports-and-network-policy)); each profile's `EgressByHostname` condition says whether it applied, and is what the plane reports | `operator.ciliumAvailable` |
 | `TROUPE_MAX_PORTS` | `65536` | `+Q` in every worker's `ERL_FLAGS` | `operator.maxPorts` |
 | `TROUPE_WORKERS_SCHEME`, `TROUPE_WORKERS_PORT` | `wss`, unset | scheme and port of the endpoint a pod advertises (kind uses `ws`, `30080`) | `operator.workersScheme`, `operator.workersPort` |
 | `TROUPE_DRAIN_TIMEOUT_SECONDS` | `300` | worker `terminationGracePeriodSeconds`; **not** put in the pod's env, so the worker's own drain wait stays 300 | `operator.drainTimeoutSeconds` |
@@ -106,6 +106,7 @@ Worker pods are created by the operator, so the chart sets none of these.
 | `TROUPE_ALLOWED_ORIGINS` | every origin | origins the WebSocket upgrade admits | from `TROUPE_WORKER_ALLOWED_ORIGINS` |
 | `TROUPE_BASE_URL` | unset | **the LLM endpoint** — not the plane's meaning of the name | from `llm.endpoint` |
 | `TROUPE_PROVIDER`, `TROUPE_MODEL`, `TROUPE_API_KEY` | core defaults | provider, model, and the key from `llm.secretRef` (not optional: a missing Secret is `CreateContainerConfigError`) | from `llm` |
+| `TROUPE_MODEL_PRICES` | unset | JSON `models.prices`: dollars per million tokens by model, for calls the gateway does not price. Unset, such a call costs nothing on the ledger | from `llm.prices` |
 | `<credentialRef>` | unset | one per MCP server with a secret, default `TROUPE_MCP_<NAME>_TOKEN` | optional `secretKeyRef` |
 | `TROUPE_HTTP_PORT`, `TROUPE_HARNESS_PORT`, `TROUPE_NODE_NAME`, `TROUPE_JWKS_PATH`, `TROUPE_TOKEN_ISSUER`, `TROUPE_MAX_FRAME_BYTES`, `TROUPE_DRAIN_TIMEOUT_SECONDS` | `4000`, `4100`, unset, unset, unset, 16 MiB, `300` | ports, identity and limits the operator leaves at their defaults | no |
 
@@ -284,7 +285,8 @@ every key are in [docs/user/configuration.md](../user/configuration.md); the sch
   what to write: one that is not YAML, a value of the wrong type, an enum value nobody
   knows, both spellings of one setting, or a file written for a newer Troupe.
 - **On a laptop**, a workspace's files set those keys only once the user's own file lists
-  the workspace under `trusted_workspaces`. `troupe config pull` writes the plane's
+  the workspace under `trusted_workspaces`, which `troupe config trust` in the workspace
+  adds. `troupe config pull` writes the plane's
   client defaults (Part C) into the user's file through the daemon, in the current
   spellings.
 - **A repository can check its own file** in CI: `troupe config validate

@@ -35,6 +35,29 @@ defmodule Troupe.RemoteTranslateTest do
     events
   end
 
+  # `troupe run build …` printed `spawned /root`: the session's own agent is `root` on the
+  # wire, and its window is named for the profile it was started with, as the window the
+  # worker opens before any event is.
+  test "the root window is named for the session's profile, when the client knows it" do
+    event = durable("user_input", %{"source" => "user", "text" => "hi"})
+
+    {[spawned, _input], _memory} =
+      Translate.durable("s-1", event, Translate.memory(:shared, "build"))
+
+    assert {spawned.type, spawned.agent_path, spawned.data.name} ==
+             {:branch_spawned, "root", "build"}
+
+    {[spawned, _input], _memory} = Translate.durable("s-1", event, Translate.memory(:remote))
+    assert spawned.data.name == "root"
+
+    branch = durable("user_input", %{"text" => "hi"}, %{"agent" => ["code-3"]})
+
+    {[spawned, _input], _memory} =
+      Translate.durable("s-1", branch, Translate.memory(:shared, "build"))
+
+    assert spawned.data.name == "code"
+  end
+
   test "an agent path arrives as a list and becomes this client's spelling" do
     [event] = translate(durable("user_input", %{"source" => "user", "text" => "hello"}))
     assert event.agent_path == "root"

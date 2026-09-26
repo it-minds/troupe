@@ -163,6 +163,26 @@ defmodule Troupe.Plane.HarnessTest do
       assert {:ok, %{"sessions" => []}} = Harness.call("sessions.list", %{}, context(stranger))
     end
 
+    # What the worker last reported, so an inbox is this listing and not a replay: a
+    # question waits on a person as an approval does (#172).
+    test "a row carries the approvals and the questions still open" do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      ada = person("ada@example.test", ["engineering"])
+      session = session!("s-asked", ada, team, [])
+
+      {:ok, _} =
+        Sessions.put_status(session.id, %{
+          "status" => "waiting",
+          "pending_approvals" => 0,
+          "pending_questions" => 1
+        })
+
+      assert {:ok, %{"sessions" => [row]}} = Harness.call("sessions.list", %{}, context(ada))
+
+      assert %{"status" => "waiting", "pending_approvals" => 0, "pending_questions" => 1} =
+               row
+    end
+
     test "a session nobody may see is not found rather than forbidden" do
       team = team_with_grant("engineering", "dev", name: "engineering")
       owner = person("grace@example.test", ["engineering"])
@@ -453,6 +473,136 @@ defmodule Troupe.Plane.HarnessTest do
                Harness.call("session.unpin", %{"session_id" => session.id}, context(owner))
 
       refute unpinned["pinned"]
+    end
+  end
+
+  describe "session.archive" do
+    # The fake pod answers the push and reports nothing, which is also what a pod whose
+    # tree had already stopped does; the plane gives the row back itself. A real pod's own
+    # report of its dormancy, ahead of its answer, is `plane_link_test.exs` in the worker.
+    test "the owner's puts a running session to sleep on its pod, gives back what it held, and is audited",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering", budget_micros: 1_000_000)
+      owner = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      params = %{"profile" => "dev", "terms" => %{"budget_micros" => 1_000_000}}
+      assert {:ok, %{"session_id" => id}} = Harness.call("session.create", params, context(owner))
+      assert_receive {:pushed, "session.activate", _}, 5_000
+      assert TeamBudget.inspect_state(team).reserved_micros == 1_000_000
+
+      assert {:ok, archived} =
+               Harness.call("session.archive", %{"session_id" => id}, context(owner))
+
+      assert_receive {:pushed, "session.dormant", %{"session_id" => ^id}}, 5_000
+      assert archived["id"] == id
+      assert archived["state"] == "dormant"
+      assert Sessions.get(id).worker_id == nil
+      assert TeamBudget.inspect_state(team).reserved_micros == 0
+
+      assert [event] = Audit.list(kind: "session", subject_id: id)
+      assert event.action == "session.archive"
+      assert event.actor == owner.subject
+      assert event.detail["pod"] == "troupe-w-dev-0"
+    end
+
+    test "is the owner's: a collaborator is refused and a stranger is not told it exists",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      watcher = person("grace@example.test", ["engineering"])
+      stranger = person("eve@example.test", [])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+      session = session!("s-running", owner, team, visibility: "team")
+
+      assert {:error, error} =
+               Harness.call("session.archive", %{"session_id" => session.id}, context(watcher))
+
+      assert error.message == "forbidden"
+
+      assert {:error, error} =
+               Harness.call("session.archive", %{"session_id" => session.id}, context(stranger))
+
+      assert error.message == "not_found"
+
+      refute_receive {:pushed, "session.dormant", _}, 200
+      assert Sessions.get(session.id).state == "active"
+      assert Audit.list(kind: "session", subject_id: session.id) == []
+    end
+
+    test "a session asleep already is answered as it is; one not on a pod yet is refused",
+         context do
+      team = team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      _pod = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      asleep = session!("s-asleep", owner, team, state: "dormant")
+
+      assert {:ok, %{"state" => "dormant"}} =
+               Harness.call("session.archive", %{"session_id" => asleep.id}, context(owner))
+
+      waiting = session!("s-waiting", owner, team, state: "pending")
+
+      assert {:error, error} =
+               Harness.call("session.archive", %{"session_id" => waiting.id}, context(owner))
+
+      assert error.message == "conflict"
+      assert Sessions.get(waiting.id).state == "pending"
+
+      refute_receive {:pushed, "session.dormant", _}, 200
+      assert Audit.list(kind: "session", subject_id: asleep.id) == []
+      assert Audit.list(kind: "session", subject_id: waiting.id) == []
+    end
+
+    test "a pod that does not put it to sleep leaves it running, and nothing is audited",
+         context do
+      team_with_grant("engineering", "dev", name: "engineering", budget_micros: 0)
+      owner = person("ada@example.test", ["engineering"])
+
+      FakePod.enrol(context.port, "dev-token", "troupe-w-dev-0",
+        refuse: %{"session.dormant" => %{"code" => -32_603, "message" => "internal_error"}}
+      )
+
+      assert {:ok, %{"session_id" => id}} =
+               Harness.call("session.create", %{"profile" => "dev"}, context(owner))
+
+      assert {:error, error} =
+               Harness.call("session.archive", %{"session_id" => id}, context(owner))
+
+      assert error.message == "unavailable"
+      assert_receive {:pushed, "session.dormant", %{"session_id" => ^id}}, 5_000
+
+      session = Sessions.get(id)
+      assert session.state == "active"
+      assert session.worker_id
+      assert Audit.list(kind: "session", subject_id: id) == []
+    end
+  end
+
+  describe "session.erase" do
+    test "erasing a running session gives its pod slot back", context do
+      team_with_grant("engineering", "dev", name: "engineering")
+      owner = person("ada@example.test", ["engineering"])
+      %{worker_id: pod} = fake_pod(context.port, "dev-token", "troupe-w-dev-0")
+
+      [erased, _kept] =
+        for _n <- 1..2 do
+          assert {:ok, %{"session_id" => id}} =
+                   Harness.call("session.create", %{"profile" => "dev"}, context(owner))
+
+          id
+        end
+
+      assert placement("dev").capacities[pod] == 2
+
+      assert {:ok, %{"erased" => true}} =
+               Harness.call("session.erase", %{"session_id" => erased}, context(owner))
+
+      assert_receive {:pushed, "session.erase", %{"session_id" => ^erased}}, 5_000
+
+      # The row was made read-only first, which cleared the `worker_id` the release gives
+      # the slot back by.
+      assert placement("dev").capacities[pod] == 1
     end
   end
 
@@ -1073,6 +1223,12 @@ defmodule Troupe.Plane.HarnessTest do
       capacity: Keyword.get(opts, :capacity, 4),
       disk_total_bytes: 1_000_000
     })
+  end
+
+  # What the placement actor holds, without the reload `Placement.inspect_state/1` does
+  # first, which would hide a slot that was never given back.
+  defp placement(profile) do
+    :sys.get_state(:global.whereis_name({Troupe.Plane.Placement, profile}))
   end
 
   # A worker that enrols for real over the control channel and forwards every push to

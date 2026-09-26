@@ -18,16 +18,36 @@ defmodule Troupe.Remote.Translate do
 
   require Logger
 
+  # The two model errors that are about the key (`Troupe.UI.ModelError`).
+  @key_errors ["no API key is configured", "the provider rejected the credentials"]
+  @plane_key_step "the model's key is the plane's, not this machine's: ask the plane's administrator"
+
   @typedoc """
   What the translator has to remember between events of one session, and what the
   window it opens says the session works in: `:remote` for a worker on a plane,
-  `:shared` or `:worktree` for a session in the daemon on this machine.
+  `:shared` or `:worktree` for a session in the daemon on this machine. `profile` is the
+  agent the session was started with, when the client knows it, which names the `root`
+  window as it names every other: `troupe run build …` prints `spawned /build`, not
+  `spawned /root`. `budget` is each budget question not yet answered: whether it is
+  still asked, who asked, and what its `budget_ask_started` said.
   """
-  @type memory :: %{agents: MapSet.t(), unknown: MapSet.t(), isolation: atom()}
+  @type memory :: %{
+          agents: MapSet.t(),
+          unknown: MapSet.t(),
+          isolation: atom(),
+          profile: String.t() | nil,
+          budget: %{String.t() => {:asked | :ended, String.t(), map()}}
+        }
 
-  @spec memory(atom()) :: memory()
-  def memory(isolation \\ :remote),
-    do: %{agents: MapSet.new(), unknown: MapSet.new(), isolation: isolation}
+  @spec memory(atom(), String.t() | nil) :: memory()
+  def memory(isolation \\ :remote, profile \\ nil),
+    do: %{
+      agents: MapSet.new(),
+      unknown: MapSet.new(),
+      isolation: isolation,
+      profile: profile,
+      budget: %{}
+    }
 
   @doc """
   One durable event as zero or more local events, plus the memory to carry on
@@ -137,7 +157,7 @@ defmodule Troupe.Remote.Translate do
     else
       spawned =
         durable_event(session_id, root, :branch_spawned, ts(event), %{
-          name: profile_name(root),
+          name: profile_name(root, memory),
           isolation: memory.isolation,
           prompt: ""
         })
@@ -148,9 +168,25 @@ defmodule Troupe.Remote.Translate do
 
   defp root(path), do: path |> String.split("/") |> hd()
 
-  # `code-3` is the third branch of the `code` profile, the same spelling a
-  # local session uses; a name with no suffix stands for itself.
-  defp profile_name(root) do
+  # A worker on a plane asks the model with the plane's key, which nothing on this
+  # machine sets: under a key error the next step is the plane's administrator, where a
+  # session on this machine gets `troupe config` (`Troupe.UI.ModelError`).
+  defp llm_error(message, :remote) do
+    if String.starts_with?(message, @key_errors),
+      do: %{message: message, next_step: @plane_key_step},
+      else: %{message: message}
+  end
+
+  defp llm_error(message, _isolation), do: %{message: message}
+
+  # The session's own agent is `root` on the wire whatever it is, and is named for the
+  # profile it was started with, as `Troupe.Remote.Worker` names the window it opens
+  # before any event. `code-3` is the third branch of the `code` profile, the same
+  # spelling a local session uses; a name with no suffix stands for itself.
+  defp profile_name("root", %{profile: profile}) when is_binary(profile) and profile != "",
+    do: profile
+
+  defp profile_name(root, _memory) do
     case Regex.run(~r/^(.*)-\d+$/, root) do
       [_, name] -> name
       _ -> root
@@ -203,7 +239,9 @@ defmodule Troupe.Remote.Translate do
       # Its own event rather than a note, so the status line can say the model failed
       # instead of spinning on "starting" — which is all an idle agent looked like.
       "llm_error" ->
-        {[emit.(:llm_error, %{message: data["reason"] || "the model call failed"})], memory}
+        {[
+           emit.(:llm_error, llm_error(data["reason"] || "the model call failed", memory.isolation))
+         ], memory}
 
       type when type in ["tool.started", "tool_call_started"] ->
         {[
@@ -235,22 +273,28 @@ defmodule Troupe.Remote.Translate do
       # `ask_user` (troupe-remote Decision 651): the agent hands a decision to the person
       # at the screen, with options a client may draw as a menu.
       # The window already knows a `:budget` item and answers it with y / n / a, so the
-      # question the harness also wrote is not drawn a second time.
+      # question the harness also wrote is not drawn a second time. A cancel ends it, but
+      # it is still owed: the next turn's gate asks it again under the same id, with a
+      # `question_asked` alone, and that one is drawn as the item it was.
+      "question_asked" when budget_question? ->
+        asked_again(emit, call_id(data), memory)
+
       type when type in ["question_asked", "question_answered"] and budget_question? ->
         {[], memory}
 
       "budget_ask_started" ->
-        {[
-           emit.(:budget_ask_started, %{
-             call_id: call_id(data),
-             detail: data["detail"] || "budget exhausted",
-             dimension: dimension(data["dimension"])
-           })
-         ], memory}
+        started = %{
+          call_id: call_id(data),
+          detail: data["detail"] || "budget exhausted",
+          dimension: dimension(data["dimension"])
+        }
+
+        {[emit.(:budget_ask_started, started)],
+         put_in(memory, [:budget, started.call_id], {:asked, agent, started})}
 
       "budget_ask_answered" ->
         {[emit.(:budget_ask_answered, %{call_id: call_id(data), decision: data["decision"]})],
-         memory}
+         %{memory | budget: Map.delete(memory.budget, call_id(data))}}
 
       # The failure guard's question (troupe-remote Decision 687) is drawn as the question it
       # rides on, the other way round from the budget's: its options are the harness's own
@@ -328,7 +372,7 @@ defmodule Troupe.Remote.Translate do
         {[
            emit.(:cancelled, %{}),
            emit.(:agent_state, %{to: :idle, reason: "cancelled"})
-         ], memory}
+         ], budget_cancelled(memory, agent)}
 
       "compacted" ->
         {[emit.(:remote_note, %{text: "context compacted"})], memory}
@@ -438,6 +482,31 @@ defmodule Troupe.Remote.Translate do
       _ ->
         {[], memory}
     end
+  end
+
+  # Drawn again only when a cancel had ended it. Asked again with no cancel between, after
+  # a restart, it never left the window.
+  defp asked_again(emit, id, memory) do
+    case memory.budget do
+      %{^id => {:ended, agent, started}} ->
+        {[emit.(:budget_ask_started, started)],
+         put_in(memory, [:budget, id], {:asked, agent, started})}
+
+      _ ->
+        {[], memory}
+    end
+  end
+
+  # The model's own rule for what a cancel ends: the agent it reached and every one under it.
+  defp budget_cancelled(memory, path) do
+    ended =
+      Map.new(memory.budget, fn {id, {state, agent, started}} ->
+        if agent == path or String.starts_with?(agent, path <> "/"),
+          do: {id, {:ended, agent, started}},
+          else: {id, {state, agent, started}}
+      end)
+
+    %{memory | budget: ended}
   end
 
   # Logged once per type, then rendered like any other note: an unknown event is

@@ -248,6 +248,37 @@ defmodule Troupe.Worker.UnattendedSessionTest do
       assert dormant["status"] == "idle"
       assert dormant["pending_approvals"] == 0
     end
+
+    # A question waits on a person as an approval does, and the plane was told nothing of
+    # one, so its review queue never listed a session waiting on an answer (#172).
+    test "a question is reported as waiting, asleep and awake, until a cancel ends it",
+         context do
+      context = requires_tier(context)
+      question = %{"question" => "Which colour?", "options" => ["red", "blue"]}
+      fake = scripted([{:tools, [{"ask_user", question}]}, {:text, "never asked"}])
+
+      assert {:ok, _} = activate(context, fake: fake, report: reporter_to(self()))
+      assert %{"pending_questions" => 0} = await_status()
+
+      Troupe.subscribe(context.session_id)
+      Troupe.send_input(context.session_id, "ask me something")
+
+      waiting = await_status(&(&1["status"] == "waiting"))
+      assert waiting["pending_questions"] == 1
+      assert waiting["pending_approvals"] == 0
+
+      # Still owed while it sleeps, and from the first report once it is awake again.
+      assert {:ok, _} = Sessions.dormant(context.session_id)
+      assert %{"status" => "waiting", "pending_questions" => 1} = await_dormant()
+
+      assert {:ok, _} = activate(context, fake: fake, epoch: 2, report: reporter_to(self()))
+      assert %{"status" => "waiting", "pending_questions" => 1} = await_status()
+
+      Troupe.cancel(context.session_id)
+
+      idle = await_status(&(&1["status"] == "idle"))
+      assert idle["pending_questions"] == 0
+    end
   end
 
   # -- helpers ----------------------------------------------------------------

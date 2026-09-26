@@ -39,6 +39,7 @@ Other `spec` fields:
 |---|---|
 | `llm.endpoint`, `.provider`, `.model` | becomes the worker's `TROUPE_BASE_URL`, `TROUPE_PROVIDER` (`openai` = Chat Completions, which a gateway serves; `anthropic`; `fake`), `TROUPE_MODEL`. The endpoint's host is an egress destination |
 | `llm.secretRef.{name,key}` | the Secret in the worker namespace injected as `TROUPE_API_KEY` (key `api-key`), not optional |
+| `llm.prices` | dollars per million tokens by model, `{"qwen3-235b": {"input": …, "output": …}}` with optional `cacheRead` and `cacheWrite`, injected as `TROUPE_MODEL_PRICES`. For a model the gateway does not price, which with LiteLLM is every streamed call: without a price its calls cost nothing on the ledger and no money budget applies to them. What the gateway says still wins. Set through the API; the console's editor keeps it but does not show it |
 | `egress.fqdns`, `egress.gitHosts` | extra hosts the pods may reach; each must match a policy pattern |
 | `configBundleChannel` | which bundle channel the profile follows (`stable`) |
 | `orgMount` | mount the policy's org volume at `/mnt/org`, always read-only |
@@ -78,8 +79,9 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
 | `UpgradePending` | the StatefulSet has a newer revision than the named pods run |
+| `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist by name and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
 
-`SecretMissing` and `UpgradePending` do not affect `Ready`. `kubectl -n troupe-system get
+`SecretMissing`, `UpgradePending` and `EgressByHostname` do not affect `Ready`. `kubectl -n troupe-system get
 wp` shows `Replicas`, `Ready`, `Violation`, `Age`.
 
 ## 3. Upgrades and drains
@@ -136,6 +138,12 @@ whether Cilium is there:
 `ciliumAvailable: true` on a cluster without Cilium fails closed: a worker reaches nothing
 outside the cluster, and the profile is `Ready: False` with `ApplyFailed` naming the
 `CiliumNetworkPolicy`.
+
+The operator says which on each profile, as the `EgressByHostname` condition, and the
+plane reads it there: the console's **Provisioners** screen and `admin.profiles.list` give
+a profile egress by hostname only where the condition is `True`, and otherwise name it as
+missing with the allowlist checked at admission in its place. A team is still granted such
+a profile without `allow_unenforced_workers`, which is for substrates outside Kubernetes.
 
 ## 5. TeamVolume
 

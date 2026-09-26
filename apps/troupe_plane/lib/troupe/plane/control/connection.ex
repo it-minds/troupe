@@ -18,6 +18,7 @@ defmodule Troupe.Plane.Control.Connection do
   alias Troupe.Plane.{
     Budget,
     Bundles,
+    Drain,
     Enrolment,
     Erasure,
     Fleet,
@@ -325,6 +326,10 @@ defmodule Troupe.Plane.Control.Connection do
   defp dispatch("session.dormant", params, state) do
     session_id = params["session_id"]
 
+    # The slot first, while the row still names this pod: marking it dormant clears the
+    # `worker_id` the placement actor gives the slot back by (Decision 690).
+    Placement.release(state.worker.profile, session_id)
+
     Sessions.dormant(session_id, %{
       last_seq: params["last_seq"],
       head_hash: params["head_hash"],
@@ -336,10 +341,9 @@ defmodule Troupe.Plane.Control.Connection do
     # the same lifecycle fields a `session.status` would.
     if Map.has_key?(params, "status"), do: Sessions.put_status(session_id, params)
 
-    # Both reservations go back: the slot, and the slice of the team's budget. A dormant
-    # session spends nothing, and a fleet of triggers whose slices were held through
-    # dormancy would pin a team's budget with sessions that are not running.
-    Placement.release(state.worker.profile, session_id)
+    # Both reservations go back: the slot, above, and the slice of the team's budget. A
+    # dormant session spends nothing, and a fleet of triggers whose slices were held
+    # through dormancy would pin a team's budget with sessions that are not running.
     release_budget(session_id)
     {:ok, %{"ok" => true}, state}
   end
@@ -353,6 +357,9 @@ defmodule Troupe.Plane.Control.Connection do
     session_id = params["session_id"]
 
     case Sessions.unrestorable(session_id, params["epoch"]) do
+      # Released after the fence rather than before it, so a pod on a stale epoch cannot
+      # give back a slot a newer one holds. The row is off its pod by now, so the release
+      # counts the profile again to find it.
       {:ok, _count} ->
         Placement.release(state.worker.profile, session_id)
         release_budget(session_id)
@@ -678,11 +685,7 @@ defmodule Troupe.Plane.Control.Connection do
       "troupe plane: #{session_id} is not on #{worker.pod_name} any more, marking it dormant"
     )
 
-    # The order is load-bearing and lives in one place now — `Drain.strand/1` — because it
-    # was fixed here once and was still the wrong way round in the other two callers.
-    Placement.release(worker.profile, session_id)
-    Sessions.dormant(session_id)
-    release_budget(session_id)
+    Drain.strand(worker, session_id)
   end
 
   defp enrol(params, state) do

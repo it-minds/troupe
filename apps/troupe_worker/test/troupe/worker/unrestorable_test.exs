@@ -14,6 +14,16 @@ defmodule Troupe.Worker.UnrestorableTest do
     assert %Error{message: "internal_error"} = Commands.activation_error({:unreadable_segment, "k", :enoent})
   end
 
+  # A profile whose config does not load: what the plane and the person see is what to fix,
+  # not `%Troupe.Config.Error{issues: [...]}`.
+  test "a config that does not load is its message" do
+    issue = %Troupe.Config.Issue{level: :error, source: "TROUPE_MAX_TURNS", message: "must be a whole number"}
+    error = %Troupe.Config.Error{issues: [issue]}
+
+    assert %Error{message: "internal_error", data: %{reason: reason}} = Commands.activation_error(error)
+    assert reason == "the configuration did not load: TROUPE_MAX_TURNS: must be a whole number"
+  end
+
   test "the manager reports a gone workspace to the plane, and nothing else" do
     assert %{
              "type" => "session.unrestorable",

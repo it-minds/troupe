@@ -13,7 +13,7 @@ say something the loader does not do.
 | user | `~/.config/troupe/config.yaml`; `%APPDATA%\troupe\config.yaml` on Windows; `$TROUPE_CONFIG_HOME/config.yaml` when that is set | this machine: providers, keys, the models you use |
 | project | `<workspace>/.troupe/config.yaml` | what a repository wants, committed with it |
 | local | `<workspace>/.troupe/config.local.yaml` | one person's settings for one repository, such as a key; add it to `.gitignore` |
-| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_FAKE_SCRIPT` | a provider for one shell, or for a pod |
+| environment | `TROUPE_PROVIDER`, `TROUPE_BASE_URL`, `TROUPE_API_KEY`, `TROUPE_AUTH`, `TROUPE_AUTH_TOKEN`, `TROUPE_MODEL`, `TROUPE_SMALL_MODEL`, `TROUPE_EXPENSIVE_MODEL`, `TROUPE_MODEL_PRICES` (`models.prices` as JSON), `TROUPE_FAKE_SCRIPT` | a provider for one shell, or for a pod |
 | command line | `--auto-approve`, `--watch`, `--full-send`, and what a client asks for | one session |
 
 Each layer beats the ones above it: the defaults, then the user file, the project file,
@@ -99,8 +99,8 @@ you trust the workspace:
 - commands to run: `mcp`
 - paths: `read_roots`, `state_dir`, `fake_script`
 
-Until then they are ignored with a warning, and the rest of the file applies. Trusting a
-workspace is a line in the user file:
+Until then they are ignored with a warning that names the command to run, and the rest
+of the file applies. Trusting a workspace is a line in the user file:
 
 ```yaml
 trusted_workspaces:
@@ -108,8 +108,19 @@ trusted_workspaces:
   - ~/src/work            # a directory trusts everything under it
 ```
 
-A git worktree of a trusted checkout is trusted too, which is where a branch session
-works. `trusted_workspaces` is read only from the user file. A session on a team's pod
+```sh
+troupe config trust [PATH]     # add the workspace (default: this directory)
+troupe config untrust [PATH]   # remove it
+troupe config trust --list     # what is on the list
+```
+
+`trust` and `untrust` change that one list and leave the rest of the file, comments
+included, as it was; the file as it was is kept beside it as `config.yaml.previous`.
+A list written in brackets is written out one item a line. A git worktree of a trusted
+checkout is trusted too, which is where a branch session works, and `trust` in a
+worktree adds the checkout. `untrust` does not remove a directory above the workspace,
+which trusts other workspaces too; it says which one still trusts it.
+`trusted_workspaces` is read only from the user file. A session on a team's pod
 never reads these keys from a project's file, trusted or not: a pod's provider and key
 come from its profile.
 
@@ -142,6 +153,7 @@ troupe config --explain --json      # the same for a program
 troupe config validate              # every file a session here would read; exits 1 on any problem
 troupe config validate .troupe/config.yaml
 troupe config migrate [--write]
+troupe config trust --list          # the workspaces whose own files set the trusted keys
 ```
 
 Secrets are masked everywhere. `troupe-daemon config` takes the same arguments.
@@ -191,6 +203,27 @@ models:
   cheap: gateway/claude-haiku-4-5
 ```
 
+A price for a model the catalog does not price, such as one a LiteLLM gateway serves
+and streams, in dollars per million tokens by the name the model is addressed with. What
+the gateway says a call cost still wins, and then the catalog's price
+(`troupe models --refresh`); a call none of the three prices counts as free, and the
+daemon's log says so once a session. `troupe models` shows each model's price and where
+it came from, or `no price`, and `troupe config --explain models.prices` which file set
+it.
+`TROUPE_MODEL_PRICES` takes the same map as JSON, which is how a profile's `llm.prices`
+reaches its pods.
+
+```yaml
+version: 1
+provider: openai
+base_url: https://llm-gw.example/v1
+api_key: "{env:GATEWAY_TOKEN}"
+models:
+  default: qwen3-235b
+  prices:
+    qwen3-235b: {input: 0.5, output: 1.5}   # what your gateway charges; these are an example
+```
+
 An unattended session that is told no rather than left waiting, on a smaller budget:
 
 ```yaml
@@ -237,6 +270,11 @@ or the command line where one exists for it.
 | `models.cheap` | string |  | any | The model for small jobs, compaction summaries among them. Unset: the default model. |
 | `models.expensive` | string |  | any | The model an agent asking for `expensive` gets. Unset: the default model. |
 | `models.windows` | map of name to integer ≥ 1 |  | any | Context windows for bare model ids, in tokens. |
+| `models.prices` | map of name to settings |  | any | Prices for models the provider's catalog does not price, by the name a model is addressed with. What a gateway says a call cost still wins, then the catalog's price. |
+| `models.prices.<model>.input` | number ≥ 0 |  | any | Dollars per million input tokens. |
+| `models.prices.<model>.output` | number ≥ 0 |  | any | Dollars per million output tokens. |
+| `models.prices.<model>.cache_read` | number ≥ 0 |  | any | Dollars per million prompt tokens read from the cache. Unset: the input price. |
+| `models.prices.<model>.cache_write` | number ≥ 0 |  | any | Dollars per million prompt tokens written to the cache. Unset: the input price. |
 | `max_tokens` | integer ≥ 1 | `8192` | any | The most output tokens one model call asks for. |
 | `context_window` | integer ≥ 1 | `200000` | any | The window assumed when neither a provider nor the catalog says. |
 | `compact_at` | number, 0 to 1 | `0.75` | any | The share of the window at which an agent summarises older turns. |

@@ -255,7 +255,11 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
               compact(%{
                 "name" => fields["llm.secretRef.name"],
                 "key" => fields["llm.secretRef.key"]
-              })
+              }),
+            # Set through `admin.profile.put` and not on this page, and carried through
+            # as it was loaded: a draft rebuilt from the form alone would drop them, and
+            # the profile's models would go back to costing nothing (Decision 689).
+            "prices" => fields["llm.prices"]
           }),
         "egress" =>
           compact(%{
@@ -358,6 +362,7 @@ defmodule Troupe.Plane.Web.Live.ProfileEditor do
       "llm.provider" => get_in(spec, ["llm", "provider"]),
       "llm.model" => get_in(spec, ["llm", "model"]),
       "llm.smallModel" => get_in(spec, ["llm", "smallModel"]),
+      "llm.prices" => get_in(spec, ["llm", "prices"]),
       "llm.secretRef.name" => get_in(spec, ["llm", "secretRef", "name"]),
       "llm.secretRef.key" => get_in(spec, ["llm", "secretRef", "key"]),
       "egress.fqdns" => joined(get_in(spec, ["egress", "fqdns"])),

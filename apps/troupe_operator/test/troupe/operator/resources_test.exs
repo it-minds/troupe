@@ -601,6 +601,31 @@ defmodule Troupe.Operator.ResourcesTest do
       assert namespace_rule("troupe-system", 9000) in rules
     end
 
+    test "egress by hostname is reported only where the CiliumNetworkPolicy was written and applied",
+         %{profile: profile, policy: policy} do
+      # The plane shows this per profile and has no other way to know it, so each case is
+      # pinned: a `True` here is a guarantee the console will claim.
+      without = Resources.for_profile(profile, policy, %Settings{cilium_available: false})
+
+      assert {false, "NoCilium", message} = Resources.egress_by_hostname(without, [])
+      assert message =~ "checked at admission"
+      assert message =~ "any public host on 443 and 80"
+
+      with_cilium = Resources.for_profile(profile, policy, %Settings{cilium_available: true})
+      assert {true, "CiliumFQDN", _message} = Resources.egress_by_hostname(with_cilium, [])
+
+      # `ciliumAvailable: true` on a cluster without Cilium: the NetworkPolicy applies and
+      # the CiliumNetworkPolicy is refused, so there are no rules by hostname to speak of.
+      failed = all(with_cilium, "CiliumNetworkPolicy")
+
+      assert {false, "CiliumPolicyNotApplied", _message} =
+               Resources.egress_by_hostname(with_cilium, failed)
+
+      # Any other failure is `Ready`'s business and leaves the FQDN rules standing.
+      other = all(with_cilium, "PodDisruptionBudget")
+      assert {true, "CiliumFQDN", _message} = Resources.egress_by_hostname(with_cilium, other)
+    end
+
     test "a wildcard in the profile's egress becomes a pattern, and an exact name stays a name",
          %{policy: policy} do
       resources =
@@ -720,6 +745,40 @@ defmodule Troupe.Operator.ResourcesTest do
         |> Map.fetch!("env")
 
       refute Enum.find(env, &String.starts_with?(&1["name"], "TROUPE_MCP_"))
+    end
+  end
+
+  # A gateway streaming a response says nothing of its cost, and a pod has no catalog, so
+  # without these a profile's models cost nothing on the ledger (#160, Decision 689).
+  describe "model prices" do
+    test "reach the pod as models.prices, in the config's own names", %{
+      policy: policy,
+      settings: settings
+    } do
+      llm = %{
+        "endpoint" => "https://llm.internal.test/v1",
+        "secretRef" => %{"name" => "llm-credentials", "key" => "api-key"},
+        "prices" => %{
+          "qwen3-235b" => %{"input" => 0.2, "output" => 0.6, "cacheRead" => 0.05},
+          "glm-5.2" => %{"input" => 1, "output" => 3}
+        }
+      }
+
+      env =
+        [llm: llm]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, settings)
+        |> container()
+        |> Map.fetch!("env")
+
+      # Sorted, so the same prices are the same value on every reconcile and roll nothing.
+      assert Enum.find(env, &(&1["name"] == "TROUPE_MODEL_PRICES"))["value"] ==
+               ~s|{"glm-5.2":{"input":1,"output":3},"qwen3-235b":{"input":0.2,"output":0.6,"cache_read":0.05}}|
+    end
+
+    test "are not mentioned by a profile that has none", %{resources: resources} do
+      refute Enum.find(container(resources)["env"], &(&1["name"] == "TROUPE_MODEL_PRICES"))
     end
   end
 

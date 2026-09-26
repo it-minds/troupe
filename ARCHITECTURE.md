@@ -269,15 +269,15 @@ thumbprint, so plane and workers agree with nothing kept in step).
 ingress, with their projected ServiceAccount token; a `TokenReview` validates it and **the
 namespace decides the profile**, so a pod can only enrol as what it is. Upward flow
 heartbeats, the session *index* (ids, epochs, sequence numbers, head hashes), status
-columns and usage batches; downward, idempotent pushes — activate, drain, erase, fence,
-JWKS and ACL changes, `config.updated` — routed to whichever replica holds the pod. Bundles
-and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}` answers a
-short-lived JWT for *that session owner's* key slots, the subject read off the session row,
-so a pod naming a session it does not hold gets `not_found`.
+columns and usage batches; downward, idempotent pushes — activate, dormant, drain, erase,
+fence, JWKS and ACL changes, `config.updated` — routed to whichever replica holds the pod.
+Bundles and key-manager assertions are fetched, not pushed: `kms.assertion {session_id}`
+answers a short-lived JWT for *that session owner's* key slots, the subject read off the
+session row, so a pod naming a session it does not hold gets `not_found`.
 
 **The harness API** (`/rpc`) is a fleet API: `me`, `teams.list`, `profiles.list`,
-`sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, pin,
-erase, `session.grant`, `session.review`, `trigger.fire`. `session.create` is a sequence
+`sessions.list`, `session.get`, `session.create`, `session.open`, `token.mint`, archive,
+pin, erase, `session.grant`, `session.review`, `trigger.fire`. `session.create` is a sequence
 of reservations, each given back if a later one fails: row → capacity (`Placement`) →
 budget (`TeamBudget`) → push to the pod → token. The row comes first because a placement
 is a conditional write against it, which survives the replica that made it. `Placement`
@@ -285,8 +285,8 @@ and `TeamBudget` are one `:global` actor per profile and per team, which is why 
 replicas must cluster. `session.open read` never activates — a session that woke because
 somebody looked would never stay dormant — and in `activate` mode a conditional epoch bump
 decides the one caller that places it. `sessions.list` carries the status columns a pod
-reports (`status`, `done_reason`, `pending_approvals`, `cost_micros`), so a review queue is
-a listing and not a replay. There is no plane push to clients: `/rpc` is request and
+reports (`status`, `done_reason`, `pending_approvals`, `pending_questions`, `cost_micros`),
+so a review queue is a listing and not a replay. There is no plane push to clients: `/rpc` is request and
 answer.
 
 **Tokens for pods.** `aud` is **the pod's worker id** — an audience naming the profile
@@ -340,7 +340,9 @@ object storage, the model, the profile's MCP servers and git hosts. Plain Networ
 cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
 than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for, a
 DNS rule through Cilium's proxy so it can learn addresses, and no wide rule beside it,
-since Cilium admits the union of every policy on a pod.
+since Cilium admits the union of every policy on a pod. Which of the two a profile has is
+its `EgressByHostname` condition, and the plane claims egress by hostname for a profile
+only where that condition says so.
 
 ### 6.4 The admin surface
 
@@ -397,10 +399,13 @@ own token. It holds no database and no credential of its own ([docs/a2a.md](docs
 
 **Cost is a fold over the log, not a second thing to write down.** Every `llm_response`
 carries the model and, behind a gateway, its request id and cost, read from response
-headers (`x-litellm-call-id`, `x-litellm-response-cost`). **Troupe has no price table**:
-the gateway has priced the call, and a reconciliation compares the ledger with it by
-request id; where the gateway said nothing, tokens are recorded at zero cost with a
-synthetic id `seq:<session>:<n>` that the reconciliation counts as unmetered.
+headers (`x-litellm-call-id`, `x-litellm-response-cost`). **Troupe keeps no price table
+of its own**: the gateway prices a call where it can, and a reconciliation compares the
+ledger with it by request id. A streamed response carries no cost header, so the harness
+prices such a call itself, from the provider's catalog or else from `models.prices` (a
+profile's `llm.prices`), and marks it `priced_locally` (Decision 689). A call nobody
+priced is recorded at zero cost and said once a session in the log; one with no request
+id gets a synthetic id `seq:<session>:<n>` that the reconciliation counts as unmetered.
 
 On a pod, `Session.Log` hands each event to a usage fold that writes an ETS row from the
 log's own process — no mailbox on the turn path — drained in batches over the control

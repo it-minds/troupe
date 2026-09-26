@@ -104,9 +104,10 @@ defmodule Troupe.Plane.Settings do
       group: :administration,
       type: :integer,
       fallback: 0,
-      summary: "A ceiling on everything this plane spends, in millionths. 0 is no ceiling.",
+      summary:
+        "A ceiling on everything this plane spends in a month, in millionths. 0 is no ceiling.",
       consequence:
-        "Above every team's. It only ever narrows: where the deployment was given a tighter ceiling, that one binds and this is ignored. A reservation refused here names which of the two it was.",
+        "Above every team's, and counted over the calendar month in UTC, so it turns over on the 1st. It only ever narrows: where the deployment was given a tighter ceiling, that one binds and this is ignored. A reservation refused here names which of the two it was.",
       effect: :immediate
     },
     %Setting{
@@ -114,9 +115,9 @@ defmodule Troupe.Plane.Settings do
       group: :team_defaults,
       type: :integer,
       fallback: 0,
-      summary: "The spend ceiling a person gets, in millionths, across every team.",
+      summary: "The spend ceiling a person gets per month, in millionths, across every team.",
       consequence:
-        "Applied to people who have not been given one of their own. 0 is unlimited, which is what everybody gets today unless you set this.",
+        "Applied to people who have not been given one of their own. It counts the calendar month in UTC and turns over on the 1st. 0 is unlimited, which is what everybody gets today unless you set this.",
       effect: :immediate
     },
     %Setting{

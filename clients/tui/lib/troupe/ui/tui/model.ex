@@ -316,64 +316,49 @@ defmodule Troupe.UI.TUI.Model do
           push(acc, path, {:tool, new_tool(tu.id, tu.name, summarize_input(tu.name, tu.input))})
         end)
 
-      # The call is over, and so is an approval it was still waiting for: a cancel closes
-      # each call it stops with one of these, and so does a tool that timed out waiting.
-      # Neither is ever answered.
+      # The call is over, and so is an approval or a question it was still waiting for: a
+      # cancel closes each call it stops with one of these, and so does a tool that timed
+      # out waiting. Neither is ever answered.
       :tool_call_completed ->
-        %{w | pending: Enum.reject(w.pending, &(&1.kind == :approval and &1.call_id == d.call_id))}
+        ended? = &(&1.kind in [:approval, :question] and &1.call_id == d.call_id)
+
+        %{w | pending: Enum.reject(w.pending, ended?)}
         |> ensure_agent(path)
         |> update_agent(path, fn a ->
           %{a | transcript: Enum.map(a.transcript, &complete_tool(&1, d))}
         end)
 
       :approval_requested ->
-        pending =
-          w.pending ++
-            [
-              %{
-                kind: :approval,
-                call_id: d.call_id,
-                agent_path: path,
-                name: d.name,
-                preview: d.preview
-              }
-            ]
-
-        %{w | pending: pending}
+        w
+        |> ask(%{
+          kind: :approval,
+          call_id: d.call_id,
+          agent_path: path,
+          name: d.name,
+          preview: d.preview
+        })
         |> update_agent(path, fn a ->
           %{a | transcript: Enum.map(a.transcript, &attach_preview(&1, d))}
         end)
 
       :question_asked ->
-        pending =
-          w.pending ++
-            [
-              %{
-                kind: :question,
-                call_id: d.call_id,
-                agent_path: path,
-                question: one_line(d.question),
-                options: question_options(d),
-                multiple: d[:multiple] == true
-              }
-            ]
-
-        %{w | pending: pending}
+        ask(w, %{
+          kind: :question,
+          call_id: d.call_id,
+          agent_path: path,
+          question: one_line(d.question),
+          options: question_options(d),
+          multiple: d[:multiple] == true
+        })
 
       :budget_ask_started ->
-        pending =
-          w.pending ++
-            [
-              %{
-                kind: :budget,
-                call_id: d.call_id,
-                agent_path: path,
-                detail: d[:detail] || "budget exhausted",
-                dimension: d[:dimension]
-              }
-            ]
-
-        %{w | pending: pending}
+        ask(w, %{
+          kind: :budget,
+          call_id: d.call_id,
+          agent_path: path,
+          detail: d[:detail] || "budget exhausted",
+          dimension: d[:dimension]
+        })
 
       t when t in [:budget_ask_answered, :tool_failures_ask_answered] ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
@@ -433,7 +418,7 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(path)
         |> push(path, {:system, "LLM error: #{d.message}"})
-        |> push_step(path, ModelError.next_step(d.message))
+        |> push_step(path, ModelError.next_step(d))
         |> Map.put(:model_errors, Map.put(Map.get(w, :model_errors, %{}), path, d.message))
 
       :todo_updated ->
@@ -718,6 +703,12 @@ defmodule Troupe.UI.TUI.Model do
 
   defp push_step(w, _path, nil), do: w
   defp push_step(w, path, step), do: push(w, path, {:system, step})
+
+  # One entry per call: a call re-run after the daemon restarted asks again under the same
+  # id, and is still the one thing to answer, where it used to be drawn twice. The new
+  # asking replaces the old, at the end, as the most recent.
+  defp ask(w, item),
+    do: %{w | pending: Enum.reject(w.pending, &(&1.call_id == item.call_id)) ++ [item]}
 
   defp push_entry(w, path, entry),
     do: update_agent(w, path, fn a -> %{a | transcript: a.transcript ++ [entry]} end)
@@ -1004,11 +995,13 @@ defmodule Troupe.UI.TUI.Model do
     }
   end
 
+  # A reply's usage arrives in this module's shape: `Troupe.Remote.Translate` reads the
+  # wire's `input_tokens` and `output_tokens`, and a journal holds what it translated.
   # An `assistant_message` written before the cache figures existed simply has none.
   defp used(reported) do
     %{
-      input: Map.get(reported, :input_tokens, 0),
-      output: Map.get(reported, :output_tokens, 0),
+      input: Map.get(reported, :input, 0),
+      output: Map.get(reported, :output, 0),
       cache_read: Map.get(reported, :cache_read, 0),
       cache_write: Map.get(reported, :cache_write, 0)
     }

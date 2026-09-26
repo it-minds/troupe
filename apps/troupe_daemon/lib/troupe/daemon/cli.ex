@@ -8,6 +8,8 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
       troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
       troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
+      troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
+      troupe-daemon config untrust [PATH]   take that back
       troupe-daemon config import-opencode   copy opencode's providers into config.yaml
       troupe-daemon models [--refresh]  every model this machine can address
       troupe-daemon version
@@ -32,12 +34,18 @@ defmodule Troupe.Daemon.CLI do
   alias Troupe.Protocol.Daemon
   alias Troupe.Protocol.Endpoint
 
+  # What the config reports call this program, for the commands they suggest.
+  @command "troupe-daemon"
+
   @type command ::
           :status
           | :config
           | {:config_explain, String.t() | nil, boolean()}
           | {:config_validate, String.t() | nil}
           | {:config_migrate, String.t() | nil, boolean()}
+          | {:config_trust, String.t() | nil}
+          | {:config_untrust, String.t() | nil}
+          | :config_trust_list
           | :config_import_opencode
           | {:models, refresh: boolean()}
           | :version
@@ -86,6 +94,14 @@ defmodule Troupe.Daemon.CLI do
     end
   end
 
+  def parse(["config", "trust", "--list"]), do: :config_trust_list
+  def parse(["config", "trust"]), do: {:config_trust, nil}
+  def parse(["config", "untrust"]), do: {:config_untrust, nil}
+  def parse(["config", "trust", "-" <> _ = flag]), do: unknown(["config", "trust", flag])
+  def parse(["config", "trust", path]), do: {:config_trust, path}
+  def parse(["config", "untrust", "-" <> _ = flag]), do: unknown(["config", "untrust", flag])
+  def parse(["config", "untrust", path]), do: {:config_untrust, path}
+
   def parse(["config" | flags]) when flags != [] do
     case {flags -- ["--explain", "--json"], "--explain" in flags or "--json" in flags} do
       {[], true} -> {:config_explain, nil, "--json" in flags}
@@ -115,6 +131,7 @@ defmodule Troupe.Daemon.CLI do
 
       :not_running ->
         IO.puts("troupe-daemon is not running")
+        IO.puts(state_line())
         1
     end
   end
@@ -122,18 +139,27 @@ defmodule Troupe.Daemon.CLI do
   def main(:config) do
     case Config.resolve(File.cwd!()) do
       {:ok, config, _layers} ->
-        IO.puts(Config.describe(config))
+        IO.puts(Config.describe(config, command: @command))
         0
 
       {:error, error} ->
-        IO.puts(:stderr, Exception.message(error))
+        IO.puts(:stderr, Config.as_run_by(Exception.message(error), @command))
         1
     end
   end
 
-  def main({:config_explain, key, json?}), do: print(Config.explain(File.cwd!(), key, json: json?))
-  def main({:config_validate, path}), do: print(Config.validate(File.cwd!(), path))
-  def main({:config_migrate, path, write?}), do: print(Config.migrate(File.cwd!(), path, write: write?))
+  # The same reports `troupe config` prints, naming this program's commands.
+  def main({:config_explain, key, json?}),
+    do: print(Config.explain(File.cwd!(), key, json: json?, command: @command))
+
+  def main({:config_validate, path}), do: print(Config.validate(File.cwd!(), path, command: @command))
+
+  def main({:config_migrate, path, write?}),
+    do: print(Config.migrate(File.cwd!(), path, write: write?, command: @command))
+
+  def main({:config_trust, path}), do: print(Config.trust(path || File.cwd!(), command: @command))
+  def main({:config_untrust, path}), do: print(Config.untrust(path || File.cwd!(), command: @command))
+  def main(:config_trust_list), do: print(Config.list_trusted())
 
   # What the installers run when a person says yes to copying opencode's config: the same
   # write `config.import` makes, from a VM that has the daemon's environment.
@@ -152,11 +178,11 @@ defmodule Troupe.Daemon.CLI do
   def main({:models, refresh: refresh?}) do
     case Config.resolve(File.cwd!()) do
       {:ok, config, _layers} ->
-        IO.puts(Config.describe(if refresh?, do: refresh(config), else: config))
+        IO.puts(Config.describe(if(refresh?, do: refresh(config), else: config), command: @command))
         0
 
       {:error, error} ->
-        IO.puts(:stderr, Exception.message(error))
+        IO.puts(:stderr, Config.as_run_by(Exception.message(error), @command))
         1
     end
   end
@@ -196,7 +222,7 @@ defmodule Troupe.Daemon.CLI do
       :not_running ->
         IO.puts(
           :stderr,
-          "troupe-daemon did not come up; see the log under #{Troupe.Paths.state_dir()}"
+          "troupe-daemon did not come up; see the log under #{Troupe.Paths.display(Troupe.Paths.state_dir())}"
         )
     end
 
@@ -252,10 +278,11 @@ defmodule Troupe.Daemon.CLI do
     end
   end
 
-  # The lines under "running at": the WebSocket a graphical client dials, and the file
-  # every client reads its token from. Never the tokens themselves — they admit a client
-  # to every session on this machine, `daemon.json` is readable by this user alone, and a
-  # terminal's scrollback, or whatever collects it, is not.
+  # The lines under "running at": the WebSocket a graphical client dials, the file every
+  # client reads its token from, and the directory the sessions are kept in. Never the
+  # tokens themselves — they admit a client to every session on this machine,
+  # `daemon.json` is readable by this user alone, and a terminal's scrollback, or whatever
+  # collects it, is not.
   defp where do
     websocket =
       case Endpoint.discover_ws() do
@@ -263,8 +290,12 @@ defmodule Troupe.Daemon.CLI do
         {:error, :not_running} -> []
       end
 
-    websocket ++ ["  tokens     #{Endpoint.discovery_path()}"]
+    websocket ++ ["  tokens     #{Troupe.Paths.display(Endpoint.discovery_path())}", state_line()]
   end
+
+  # Where `sessions/` is, which the TUI's help sends a person here to find: the
+  # platform's state directory, or `TROUPE_STATE_HOME`, read as the daemon reads it.
+  defp state_line, do: "  state      #{Troupe.Paths.display(Troupe.Paths.state_dir())}"
 
   @spec usage() :: String.t()
   def usage do
@@ -275,6 +306,8 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon config --explain [KEY] [--json]   every setting, or KEY's, and which file set it
     troupe-daemon config validate [PATH]   check the config files, or one; exits 1 on any problem
     troupe-daemon config migrate [--write] [PATH]   show, or make, the rewrite to the current spellings
+    troupe-daemon config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
+    troupe-daemon config untrust [PATH]   take that back
     troupe-daemon config import-opencode   copy opencode's providers into config.yaml
     troupe-daemon models [--refresh]  every model this machine can address
     troupe-daemon version

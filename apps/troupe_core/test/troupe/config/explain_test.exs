@@ -42,7 +42,7 @@ defmodule Troupe.Config.ExplainTest do
       assert text =~ ~r/models\.default\s+user-model\s+user/
       assert text =~ ~r/models\.cheap\s+project-cheap\s+project/
       assert text =~ ~r/max_tokens\s+8192\s+default/
-      assert text =~ ~r/\napi_key\s+sk-f…56 \(from/
+      assert text =~ ~r/\napi_key\s+sk-f\.\.\.56 \(from/
       refute text =~ "sk-from-the-environment-123456"
       # Every key in the table is there.
       for spec <- Schema.keys(), not match?({:object, _}, spec.type), do: assert(text =~ spec.key)
@@ -58,7 +58,7 @@ defmodule Troupe.Config.ExplainTest do
       assert text =~ ~r/project\s+20\s+.*config\.yaml  <- in effect/
 
       {text, 0} = Config.explain(ctx.ws, "api_key", ctx.opts)
-      assert text =~ "api_key = sk-f…56 (from {env:TROUPE_EXPLAIN_TEST_KEY})"
+      assert text =~ "api_key = sk-f...56 (from {env:TROUPE_EXPLAIN_TEST_KEY})"
       refute text =~ "sk-from-the-environment-123456"
     end
 
@@ -90,7 +90,7 @@ defmodule Troupe.Config.ExplainTest do
       assert keys["max_turns"]["layer"] == "project"
       assert keys["max_turns"]["source"] == Path.join(ctx.ws, ".troupe/config.yaml")
       assert Enum.map(keys["max_turns"]["ladder"], & &1["layer"]) == ["default", "user", "project"]
-      assert keys["api_key"]["value"] == "sk-f…56"
+      assert keys["api_key"]["value"] == "sk-f...56"
       assert hd(tl(keys["api_key"]["ladder"]))["from"] == "{env:TROUPE_EXPLAIN_TEST_KEY}"
       refute json =~ "sk-from-the-environment-123456"
     end
@@ -147,6 +147,23 @@ defmodule Troupe.Config.ExplainTest do
       assert config.model == "user-model"
       assert layers.warnings == []
       assert {_text, 0} = Config.migrate(ctx.ws, nil, ctx.opts)
+    end
+
+    # The loader's warnings are written naming `troupe`; `troupe-daemon` has the same
+    # commands, and what it prints names them. A file's own text is shown as it is.
+    test "printed by troupe-daemon, every command it suggests is troupe-daemon's", ctx do
+      File.write!(ctx.user, File.read!(ctx.user) <> "# `troupe config` wrote this\n")
+      opts = Keyword.put(ctx.opts, :command, "troupe-daemon")
+
+      {text, 0} = Config.migrate(ctx.ws, nil, opts)
+      assert text =~ "run `troupe-daemon config migrate --write`"
+      assert text =~ "# `troupe config` wrote this"
+
+      {text, 1} = Config.validate(ctx.ws, nil, opts)
+      assert text =~ "`troupe-daemon config migrate` rewrites the old spellings."
+
+      assert {"qqqqqq is not a setting Troupe knows; `troupe-daemon config --explain` lists them all", 1} =
+               Config.explain(ctx.ws, "qqqqqq", opts)
     end
 
     test "rewrites yes and no as the booleans they mean", ctx do

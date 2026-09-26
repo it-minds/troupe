@@ -4,7 +4,9 @@ defmodule Troupe.Config.Explain do
   the configuration is, where each value came from, and what is wrong with it.
 
   Shared by `troupe` and `troupe-daemon`, which only parse their arguments and print
-  what comes back. Every command answers `{text, exit_status}`.
+  what comes back. Every command answers `{text, exit_status}`, and takes `command:`, the
+  program printing it (`"troupe"` unless it says `"troupe-daemon"`), so that the
+  commands the text suggests are that program's (`Troupe.Config.as_run_by/2`).
 
   `--explain` shows every key with its value, secrets masked, and the layer that set
   it; with a key, the whole ladder for that key: its default, then each layer that gave
@@ -35,18 +37,22 @@ defmodule Troupe.Config.Explain do
          {:ok, selected, note} <- layers |> rows() |> select(key) do
       if json?,
         do: {Jason.encode!(json(layers, selected), pretty: true), 0},
-        else: {text(layers, selected, key, note), 0}
+        else: as_run_by({text(layers, selected, key, note), 0}, opts)
     else
       {:error, %Config.Error{} = error} when json? ->
         {Jason.encode!(%{"errors" => Enum.map(error.issues, &Issue.to_json/1)}, pretty: true), 1}
 
       {:error, %Config.Error{} = error} ->
-        {Exception.message(error), 1}
+        as_run_by({Exception.message(error), 1}, opts)
 
       {:error, message} ->
-        {message, 1}
+        as_run_by({message, 1}, opts)
     end
   end
+
+  defp as_run_by({text, code}, opts), do: {Config.as_run_by(text, command(opts)), code}
+
+  defp command(opts), do: Keyword.get(opts, :command, "troupe")
 
   @doc "Every key the configuration has, in the reference's order, with where it came from."
   @spec rows(Layers.Result.t()) :: [row()]
@@ -164,9 +170,9 @@ defmodule Troupe.Config.Explain do
 
   defp text(layers, rows, key, note) do
     header = [
-      "configuration for #{layers.workspace || "no workspace"}" <> trust(layers),
+      "configuration for #{if layers.workspace, do: shown(layers.workspace), else: "no workspace"}" <> trust(layers),
       Enum.map_join(layers.files, "\n", fn file ->
-        "  #{String.pad_trailing(Atom.to_string(file.layer), 8)} #{file.path}" <>
+        "  #{String.pad_trailing(Atom.to_string(file.layer), 8)} #{shown(file.path)}" <>
           if(file.exists?, do: "", else: " (none)")
       end)
     ]
@@ -184,7 +190,8 @@ defmodule Troupe.Config.Explain do
 
   defp trust(%{workspace: nil}), do: ""
   defp trust(%{trusted?: true}), do: " (trusted)"
-  defp trust(%{trusted?: false}), do: " (not trusted: its files set no key marked trusted)"
+  defp trust(%{trusted?: false}),
+    do: " (not trusted: its files set no key marked trusted; `troupe config trust` trusts it)"
 
   defp table(rows) do
     width = rows |> Enum.map(&String.length(&1.key)) |> Enum.max(fn -> 10 end) |> min(44)
@@ -194,7 +201,8 @@ defmodule Troupe.Config.Explain do
     end)
   end
 
-  defp clip(text) when byte_size(text) > 34, do: String.slice(text, 0, 33) <> "…"
+  # ASCII, as `Config.mask/1` is: the table is printed to a console.
+  defp clip(text) when byte_size(text) > 34, do: String.slice(text, 0, 31) <> "..."
   defp clip(text), do: text
 
   defp by(%{layer: :default}), do: "default"
@@ -212,7 +220,7 @@ defmodule Troupe.Config.Explain do
       |> Enum.map(fn {entry, i} ->
         line =
           "  #{String.pad_trailing(Atom.to_string(entry.layer), 8)} #{String.pad_trailing(shown(entry, spec), 30)}" <>
-            if(entry.source, do: " #{entry.source}", else: "")
+            if(entry.source, do: " #{shown(entry.source)}", else: "")
 
         cond do
           entry.ignored -> String.trim_trailing(line) <> "\n           ignored: #{entry.ignored}"
@@ -279,20 +287,21 @@ defmodule Troupe.Config.Explain do
   @spec validate(Path.t() | nil, Path.t() | nil, keyword()) :: {String.t(), non_neg_integer()}
   def validate(workspace, path \\ nil, opts \\ [])
 
-  def validate(_workspace, path, _opts) when is_binary(path) do
+  def validate(_workspace, path, opts) when is_binary(path) do
     path = Path.expand(path)
     found = Layers.check(layer_of(path), path)
-    report(found.errors ++ found.warnings, "#{Troupe.Paths.display(path)} is valid")
+    as_run_by(report(found.errors ++ found.warnings, "#{shown(path)} is valid"), opts)
   end
 
   def validate(workspace, nil, opts) do
     case Config.resolve(workspace, [], Keyword.take(opts, [:user_path])) do
       {:error, error} ->
-        report(error.issues, nil)
+        as_run_by(report(error.issues, nil), opts)
 
       {:ok, _config, layers} ->
-        read = layers.files |> Enum.filter(& &1.exists?) |> Enum.map_join(", ", &Troupe.Paths.display(&1.path))
-        report(layers.refusals ++ layers.warnings, "valid: " <> if(read == "", do: "no config files", else: read))
+        read = layers.files |> Enum.filter(& &1.exists?) |> Enum.map_join(", ", &shown(&1.path))
+        ok = "valid: " <> if(read == "", do: "no config files", else: read)
+        as_run_by(report(layers.refusals ++ layers.warnings, ok), opts)
     end
   end
 
@@ -323,7 +332,7 @@ defmodule Troupe.Config.Explain do
   @doc """
   Show the rewrite each file needs to use only the new spellings; with `write: true`,
   make it, keeping each file as it was beside it as `<name>.previous`. Without a path,
-  every file a session in `workspace` reads.
+  every file a session in `workspace` reads. Options: `:write`, `:user_path`, `:command`.
   """
   @spec migrate(Path.t() | nil, Path.t() | nil, keyword()) :: {String.t(), non_neg_integer()}
   def migrate(workspace, path \\ nil, opts \\ []) do
@@ -346,9 +355,12 @@ defmodule Troupe.Config.Explain do
 
     changed? = Enum.any?(results, &(elem(&1, 2) == :changed))
 
+    # Only the footer names a command: the diffs above it are the files' own text.
     footer =
       if changed? and not write?,
-        do: "\n\nrun `troupe config migrate --write` to make these changes; each file is kept as <name>.previous",
+        do:
+          "\n\nrun `#{command(opts)} config migrate --write` to make these changes; " <>
+            "each file is kept as <name>.previous",
         else: ""
 
     {text <> footer <> "\n", if(Enum.any?(results, &(elem(&1, 1) != 0)), do: 1, else: 0)}
@@ -360,18 +372,20 @@ defmodule Troupe.Config.Explain do
         {message, 1, :error}
 
       {:ok, %{changed?: false}} ->
-        {"#{path}: uses the current spellings; nothing to change", 0, :current}
+        {"#{shown(path)}: uses the current spellings; nothing to change", 0, :current}
 
       {:ok, plan} ->
-        diff = "--- #{path}\n+++ #{path} (migrated)\n" <> Migrate.diff(plan.text, plan.migrated)
+        diff = "--- #{shown(path)}\n+++ #{shown(path)} (migrated)\n" <> Migrate.diff(plan.text, plan.migrated)
         if write?, do: write(path, plan, diff), else: {diff, 0, :changed}
     end
   end
 
   defp write(path, plan, diff) do
     case Migrate.write_text(path, plan.migrated) do
-      :ok -> {diff <> "\nwritten; the file as it was is #{path}.previous", 0, :written}
+      :ok -> {diff <> "\nwritten; the file as it was is #{shown(path)}.previous", 0, :written}
       {:error, message} -> {diff <> "\n" <> message, 1, :error}
     end
   end
+
+  defp shown(path), do: Troupe.Paths.display(path)
 end

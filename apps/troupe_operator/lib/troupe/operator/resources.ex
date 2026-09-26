@@ -66,6 +66,37 @@ defmodule Troupe.Operator.Resources do
     |> MapSet.new()
   end
 
+  @doc """
+  Whether a profile's workers have egress by hostname, as its `EgressByHostname`
+  condition says it: the objects `for_profile/3` produced, and those of them that did not
+  apply.
+
+  The plane shows this per profile and cannot work it out for itself. Whether there is a
+  `CiliumNetworkPolicy` at all is this installation's setting, and whether the cluster
+  took it is this pass's apply; both are the operator's to know. Anything short of both
+  is an allowlist checked at admission and at every reconcile, which is less, and the
+  condition says which it is rather than leave the plane to claim the stronger one.
+  """
+  @spec egress_by_hostname([map()], [map()]) :: {boolean(), String.t(), String.t()}
+  def egress_by_hostname(desired, failed) do
+    cilium? = &(&1["kind"] == "CiliumNetworkPolicy")
+
+    cond do
+      not Enum.any?(desired, cilium?) ->
+        {false, "NoCilium",
+         "no CiliumNetworkPolicy: the egress allowlist is checked at admission and at " <>
+           "every reconcile, not on the wire, and a worker reaches any public host on 443 and 80"}
+
+      Enum.any?(failed, cilium?) ->
+        {false, "CiliumPolicyNotApplied",
+         "the CiliumNetworkPolicy did not apply, so nothing limits egress to the allowlist by hostname"}
+
+      true ->
+        {true, "CiliumFQDN",
+         "a worker reaches the hosts its profile names and nothing else outside the cluster"}
+    end
+  end
+
   # -- namespace and identity -------------------------------------------------
 
   # `troupe.dev/workers=true` is what the plane's own NetworkPolicy selects on: the
@@ -709,7 +740,8 @@ defmodule Troupe.Operator.Resources do
         %{"name" => "TROUPE_PROVIDER", "value" => profile.llm_provider}
       ] ++
         model_env("TROUPE_MODEL", profile.llm_model) ++
-        model_env("TROUPE_SMALL_MODEL", profile.llm_small_model)
+        model_env("TROUPE_SMALL_MODEL", profile.llm_small_model) ++
+        prices_env(profile)
 
     key =
       if profile.llm_secret_name do
@@ -733,6 +765,37 @@ defmodule Troupe.Operator.Resources do
 
   defp model_env(_name, nil), do: []
   defp model_env(name, value), do: [%{"name" => name, "value" => value}]
+
+  # The profile's prices, as the `models.prices` a pod's config reads from
+  # `TROUPE_MODEL_PRICES` (Decision 689): a gateway streaming a response says nothing of
+  # its cost, and a pod has no catalog, so without these a model's calls cost nothing on
+  # the ledger and no money budget applies to them. Sorted and in the config's own key
+  # names, so the value is the same on every reconcile and rolls nothing.
+  defp prices_env(%Profile{llm_prices: prices}) when map_size(prices) == 0, do: []
+
+  defp prices_env(%Profile{llm_prices: prices}) do
+    value =
+      prices
+      |> Enum.sort()
+      |> Enum.map(fn {model, price} -> {model, price_config(price)} end)
+      |> Jason.OrderedObject.new()
+      |> Jason.encode!()
+
+    [%{"name" => "TROUPE_MODEL_PRICES", "value" => value}]
+  end
+
+  defp price_config(price) do
+    [
+      {"input", "input"},
+      {"output", "output"},
+      {"cacheRead", "cache_read"},
+      {"cacheWrite", "cache_write"}
+    ]
+    |> Enum.flat_map(fn {field, key} ->
+      if is_number(price[field]), do: [{key, price[field]}], else: []
+    end)
+    |> Jason.OrderedObject.new()
+  end
 
   # The profile's MCP servers, as a pod learns them before any bundle arrives: the list
   # itself in `TROUPE_MCP_SERVERS`, and one variable per credential.

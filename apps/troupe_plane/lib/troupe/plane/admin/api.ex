@@ -80,7 +80,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "spec",
       type: :object,
       description:
-        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount. Replicas, sessionsPerPod, resources and storage are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
+        "The rest of the WorkerProfile spec, in the resource's own camelCase: llm, egress, mcpServers, configBundleChannel, orgMount. llm.prices is dollars per million tokens by model, as {\"<model>\": {\"input\": 0.5, \"output\": 1.5}}, for models the gateway does not price: a model with no price counts as free against every budget. Replicas, sessionsPerPod, resources and storage are not among them: the plane writes those from the size class and from what is running. Read the profile first and send it back changed rather than composing one from nothing."
     }
   ]
 
@@ -320,7 +320,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.provisioners.list",
       function: :provisioners,
       summary:
-        "What can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget. A profile on a substrate that gives none of them may only be granted to a team a platform admin has allowed.",
+        "What can make a worker, and which guarantee each substrate does not give: admission policy, network policy, egress by hostname, disruption budget. Where a weaker one stands in for a missing one, `instead` names it: Kubernetes has egress by hostname only where the operator reports Cilium for a profile, and otherwise the allowlist checked at admission. A profile on a substrate that gives none of them may only be granted to a team a platform admin has allowed.",
       risk: :read
     },
     %Method{
@@ -1052,7 +1052,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.person.budget",
       function: :person_budget,
       summary:
-        "Set or clear a person's own spend ceiling, in millionths, across every team they are in. 0 or absent is no ceiling.",
+        "Set or clear a person's own monthly spend ceiling, in millionths, across every team they are in. It counts the calendar month in UTC and turns over on the 1st. 0 or absent is no ceiling.",
       risk: :write,
       arguments: [
         %Argument{
@@ -1072,7 +1072,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.budget.explain",
       function: :budget_explain,
       summary:
-        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, and which rung set it.",
+        "Every spend ceiling that applies to a person, narrowest first: which would bind, what each has left, the period its spend is counted over, and which rung set it.",
       risk: :read,
       arguments: [
         %Argument{

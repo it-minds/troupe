@@ -75,6 +75,15 @@ defmodule Troupe.CLITest do
 
     assert {:ok, %{mode: :config_pull}} = CLI.parse(["config", "pull"])
     assert CLI.usage() =~ "troupe config --explain"
+
+    assert {:ok, %{mode: :config_trust, path: nil}} = CLI.parse(["config", "trust"])
+    assert {:ok, %{mode: :config_trust, path: "../r"}} = CLI.parse(["config", "trust", "../r"])
+    assert {:ok, %{mode: :config_trust_list}} = CLI.parse(["config", "trust", "--list"])
+    assert {:ok, %{mode: :config_untrust, path: nil}} = CLI.parse(["config", "untrust"])
+    assert {:ok, %{mode: :config_untrust, path: "../r"}} = CLI.parse(["config", "untrust", "../r"])
+    assert {:error, _} = CLI.parse(["config", "untrust", "--list"])
+    assert {:error, _} = CLI.parse(["config", "trust", "a", "b"])
+    assert CLI.usage() =~ "troupe config trust [PATH]"
   end
 
   test "config --explain and validate answer from the files, with the exit status" do
@@ -158,6 +167,65 @@ defmodule Troupe.CLITest do
 "),
              &String.starts_with?(&1, "root> ")
            )
+  end
+
+  # `troupe run "task" --headless` asks for the `build` agent and printed `spawned /root`.
+  test "a headless run's window is named for the agent it runs" do
+    {sid, _, _} = start_session!(script: [{:finish, "done"}], profile: "build")
+    {io, _pid} = printer!(sid)
+
+    say!(sid, "go")
+    assert_receive {:rest, 0}, 15_000
+    assert contents(io) =~ "root> spawned /build (shared)"
+    refute contents(io) =~ "spawned /root"
+  end
+
+  # The daemon can go — stopped, or crashed — and a run must not wait for ever on a rest
+  # that cannot come. A connection back within the bound costs nothing.
+  test "headless printer ends a run 1 when the daemon's connection stays down" do
+    {sid, _, _} = start_session!(script: [])
+    eventually(fn -> Client.capability(sid).up? end)
+    {:ok, io} = StringIO.open("")
+    me = self()
+
+    {:ok, pid} =
+      Printer.start_link(
+        session_id: sid,
+        target: "root",
+        io: io,
+        reconnect_ms: 1_000,
+        on_rest: fn code -> send(me, {:rest, code}) end
+      )
+
+    send(pid, {:troupe_event, connection(sid, false)})
+    send(pid, {:troupe_event, connection(sid, true)})
+    refute_receive {:rest, _}, 1_500
+
+    send(pid, {:troupe_event, connection(sid, false)})
+    assert_receive {:rest, 1}, 5_000
+
+    out = contents(io)
+    assert out =~ "root> lost the connection to the daemon; waiting 1 s for it"
+
+    assert out =~
+             "root> exit 1: lost the connection to the daemon, and it did not come back within 1 s"
+  end
+
+  # The terminal UI drawn into a file never ends: nothing can press the key that quits it.
+  test "a command line that draws the terminal UI is refused without a terminal" do
+    for argv <- [[], ["resume"], ["run", "x"], ["--remote"], ["--watch"]] do
+      assert {:no_terminal, message} = Runner.needs_terminal(CLI.parse(argv), false)
+      assert message =~ "`troupe run \"task\" --headless`"
+      assert message =~ "`troupe config`"
+      refute message =~ "\n"
+      assert {:ok, _args} = Runner.needs_terminal(CLI.parse(argv), true)
+    end
+
+    for argv <- [["run", "x", "--headless"], ["config"], ["models"], ["--version"], ["daemon"]] do
+      assert {:ok, _args} = Runner.needs_terminal(CLI.parse(argv), false)
+    end
+
+    assert {:error, _} = Runner.needs_terminal(CLI.parse(["--bogus"]), false)
   end
 
   # A session starts working the moment it is created, before anything can subscribe to
@@ -389,5 +457,20 @@ defmodule Troupe.CLITest do
   defp contents(io) do
     {_, out} = StringIO.contents(io)
     out
+  end
+
+  # What the session's worker publishes when its connection goes down or comes back.
+  defp connection(sid, up?) do
+    Troupe.Event.transient(sid, "root", :remote_status, %{
+      state: :active,
+      scopes: ["observe", "control", "admin"],
+      can_input?: up?,
+      can_approve?: up?,
+      reason: if(up?, do: nil, else: "reconnecting to the worker"),
+      up?: up?,
+      remote?: true,
+      endpoint: "ws://127.0.0.1:1/v1/socket",
+      plane_url: nil
+    })
   end
 end

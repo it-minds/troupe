@@ -6,6 +6,10 @@ defmodule Troupe.Worker.PlaneLinkTest do
   worker seals reaches the plane's index with the same hash, that nothing a session said
   crosses the wire on the way, and that losing the plane is something a worker recovers
   from by itself.
+
+  It also takes the plane's `session.archive` to a real pod, because what that method
+  answers is the row after the pod's own report of its dormancy, and the report has to
+  cross the socket before the answer does.
   """
 
   use Troupe.Worker.SessionCase, async: false
@@ -13,7 +17,8 @@ defmodule Troupe.Worker.PlaneLinkTest do
   alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.LLM.Fake
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
-  alias Troupe.Plane.{Fleet, Repo}
+  alias Troupe.Plane.{Fleet, Harness, Placement, Repo}
+  alias Troupe.Plane.Identity.User
   alias Troupe.Plane.Sessions, as: PlaneSessions
   alias Troupe.Worker.Plane.Link
   alias Troupe.Worker.PlaneHelper
@@ -228,6 +233,66 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
       assert {:ok, again} = push(connection, "session.dormant", params)
       assert again["already_dormant"]
+    end
+
+    test "session.dormant puts a running session to sleep, and the plane has heard by the answer",
+         context do
+      link = start_link!(context)
+      eventually(fn -> Link.connected?(link) end)
+      connection = eventually(fn -> List.first(Connections.for_profile("dev")) end)
+
+      assert {:ok, _} = activate(context, report: Link.reporter(link))
+      run_turn(context.session_id, "hello")
+
+      params = %{"session_id" => context.session_id}
+      assert {:ok, slept} = push(connection, "session.dormant", params)
+      assert slept["last_seq"] > 0
+
+      assert Sessions.whereis(context.session_id) == nil
+      refute File.exists?(context.workspace)
+
+      # Not `eventually`: the pod reports its dormancy down the same socket before it
+      # answers, which is what lets the plane's `session.archive` answer with the row.
+      session = PlaneSessions.get(context.session_id)
+      assert session.state == "dormant"
+      assert session.last_seq == slept["last_seq"]
+
+      assert {:ok, again} = push(connection, "session.dormant", params)
+      assert again["already_dormant"]
+    end
+  end
+
+  describe "archiving through the plane" do
+    test "the owner's session.archive reaches the pod and the session goes dormant", context do
+      link = start_link!(context)
+      eventually(fn -> Link.connected?(link) end)
+
+      assert {:ok, _} = activate(context, report: Link.reporter(link))
+      run_turn(context.session_id, "hello")
+
+      # On this pod as far as the plane knows, the way `session.create` puts it there.
+      assert {:ok, %{worker: worker}} = Placement.reserve("dev", context.session_id)
+
+      owner = %User{subject: "someone@example.test"}
+
+      assert {:ok, archived} =
+               Harness.call(
+                 "session.archive",
+                 %{"session_id" => context.session_id},
+                 %{user: owner, platform_admin?: false}
+               )
+
+      # The pod's copy: no tree, and nothing in plaintext on its volume.
+      assert Sessions.whereis(context.session_id) == nil
+      refute File.exists?(context.workspace)
+
+      # The answer is the row after the pod's own report: dormant, off the pod, at the
+      # head it sealed last.
+      {:ok, manifest} = Storage.get_manifest(context.store, context.session_id)
+      assert archived["state"] == "dormant"
+      assert archived["last_seq"] == manifest["last_seq"]
+      assert archived["head_hash"] == manifest["head_hash"]
+      assert PlaneSessions.on_worker(worker.id) == []
     end
   end
 

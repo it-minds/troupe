@@ -1,10 +1,13 @@
 defmodule Troupe.Plane.BudgetPeriodTest do
   @moduledoc """
-  A `monthly` ceiling turns over at midnight UTC on the 1st; a `never` one does not.
+  A `monthly` ceiling turns over at midnight UTC on the 1st; a `never` one does not. A
+  person's cap and the platform's turn over then too, whatever their teams' periods.
 
   It used to be `never` whatever the team said: the ledger summed a team's spend over all
   time and nothing read the period, so a team that reached its ceiling stayed refused
-  until somebody raised it — while Overview told them the period would turn over.
+  until somebody raised it — while Overview told them the period would turn over. A
+  person's cap and the platform's stayed that way longer (#132), while the console called
+  them "a hundred a month".
 
   The clock is set either side of the boundary rather than waited for. The charges are
   dated by the calls they record, as a pod's are, so what crosses midnight is the clock
@@ -14,7 +17,19 @@ defmodule Troupe.Plane.BudgetPeriodTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakePod, Harness, Identity, Ledger, Singleton, TeamBudget}
+
+  alias Troupe.Plane.{
+    FakePod,
+    Harness,
+    Identity,
+    Ledger,
+    PersonBudget,
+    PlatformBudget,
+    Settings,
+    Singleton,
+    TeamBudget
+  }
+
   alias Troupe.Plane.Ledger.Cache
 
   @moduletag timeout: 60_000
@@ -90,6 +105,84 @@ defmodule Troupe.Plane.BudgetPeriodTest do
     # And September's total is still September's.
     at(@september)
     assert Ledger.spent_micros(context.team.id) == 10 * @million
+  end
+
+  describe "a person's cap" do
+    # In a team with room to spare that never turns over, so the only rung that can refuse
+    # is the person's own, and whatever gives them a session in October is not the team.
+    setup context do
+      {:ok, team} =
+        Identity.update_team(context.team, %{
+          budget_period: "never",
+          budget_micros: 100 * @million
+        })
+
+      {:ok, _} = Identity.set_budget(context.ada, 10 * @million)
+
+      %{team: team}
+    end
+
+    test "turns over on the 1st, in a team that never does", context do
+      at(@september)
+      spend_the_budget_in_september(context)
+
+      assert {:error, error} = create(context.ada)
+      assert error.message == "budget_exhausted"
+      assert error.data.scope == :person
+
+      at(@october)
+
+      assert {:ok, _endpoint} = create(context.ada)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+    end
+
+    test "is this month's spend, to the ledger and to the person's actor", context do
+      at(@september)
+      spend_the_budget_in_september(context)
+
+      assert Ledger.spent_micros_for(context.ada.subject) == 10 * @million
+      assert PersonBudget.inspect_state(context.ada.subject).spent_micros == 10 * @million
+
+      at(@october)
+
+      assert Ledger.spent_micros_for(context.ada.subject) == 0
+      assert %{spent_micros: 0} = PersonBudget.inspect_state(context.ada.subject)
+      assert PersonBudget.inspect_state(context.ada.subject).remaining_micros == 10 * @million
+
+      # One charge, two periods: the team's ceiling never turns over and still counts it.
+      assert Ledger.spent_micros(context.team) == 10 * @million
+    end
+  end
+
+  describe "the platform's ceiling" do
+    setup context do
+      {:ok, team} =
+        Identity.update_team(context.team, %{
+          budget_period: "never",
+          budget_micros: 100 * @million
+        })
+
+      {:ok, _} = Settings.put("platform_budget_micros", 10 * @million, "root@example.test")
+      on_exit(&Settings.invalidate/0)
+
+      %{team: team}
+    end
+
+    test "turns over on the 1st", context do
+      at(@september)
+      spend_the_budget_in_september(context)
+
+      assert {:error, error} = create(context.ada)
+      assert error.message == "budget_exhausted"
+      assert error.data.scope == :platform
+      assert PlatformBudget.inspect_state().spent_micros == 10 * @million
+
+      at(@october)
+
+      assert %{spent_micros: 0} = PlatformBudget.inspect_state()
+      assert {:ok, _endpoint} = create(context.ada)
+      assert_receive {:pushed, "session.activate", _}, 5_000
+    end
   end
 
   # -- helpers ----------------------------------------------------------------

@@ -34,6 +34,7 @@ defmodule Troupe.Config.Schema do
           | :version
           | :effort
           | :fraction
+          | :price
           | {:integer, non_neg_integer()}
           | {:enum, [String.t()]}
           | {:list, type()}
@@ -65,6 +66,17 @@ defmodule Troupe.Config.Schema do
         :effort,
         "How hard the model should think: `none`, `minimal`, `low`, `medium`, `high`, `xhigh`, or a thinking budget in tokens."
       )
+    ]
+  end
+
+  # Dollars per million tokens, the way a price list quotes them and opencode's `cost`
+  # writes them.
+  defp price_entry do
+    [
+      spec("input", :price, "Dollars per million input tokens."),
+      spec("output", :price, "Dollars per million output tokens."),
+      spec("cache_read", :price, "Dollars per million prompt tokens read from the cache. Unset: the input price."),
+      spec("cache_write", :price, "Dollars per million prompt tokens written to the cache. Unset: the input price.")
     ]
   end
 
@@ -149,6 +161,14 @@ defmodule Troupe.Config.Schema do
              spec("windows", {:map, {:integer, 1}}, "Context windows for bare model ids, in tokens.",
                default: %{},
                field: :windows
+             ),
+             spec(
+               "prices",
+               {:map, {:object, price_entry()}},
+               "Prices for models the provider's catalog does not price, by the name a model is addressed with. " <>
+                 "What a gateway says a call cost still wins, then the catalog's price.",
+               default: %{},
+               field: :prices
              )
            ]},
           "Which model each role uses."
@@ -468,6 +488,7 @@ defmodule Troupe.Config.Schema do
   def describe_type(:version), do: "#{@version}"
   def describe_type(:effort), do: "an effort level such as medium, or a number of tokens"
   def describe_type(:fraction), do: "a number above 0 and at most 1"
+  def describe_type(:price), do: "a number, 0 or more"
   def describe_type({:integer, 0}), do: "a whole number, 0 or more"
   def describe_type({:integer, min}), do: "a whole number, at least #{min}"
   def describe_type({:enum, values}), do: "one of #{Enum.join(values, ", ")}"
@@ -545,6 +566,8 @@ defmodule Troupe.Config.Schema do
   defp json_type(:fraction, _spec),
     do: [{"type", ["number", "null"]}, {"exclusiveMinimum", 0}, {"maximum", 1}]
 
+  defp json_type(:price, _spec), do: [{"type", ["number", "null"]}, {"minimum", 0}]
+
   defp json_type({:integer, min}, _spec), do: [{"type", ["integer", "null"]}, {"minimum", min}]
   defp json_type({:enum, values}, _spec), do: [{"enum", values ++ [nil]}]
 
@@ -618,7 +641,7 @@ defmodule Troupe.Config.Schema do
   end
 
   defp rows(prefix, %{type: {:map, {:object, children}}} = spec) do
-    path = prefix ++ [spec.key, if(spec.key == "models", do: "<model>", else: "<name>")]
+    path = prefix ++ [spec.key, if(spec.key in ["models", "prices"], do: "<model>", else: "<name>")]
     [row(prefix ++ [spec.key], spec)] ++ Enum.flat_map(children, &rows(path, inherit(&1, spec)))
   end
 
@@ -636,6 +659,7 @@ defmodule Troupe.Config.Schema do
   defp short_type(:version), do: "integer"
   defp short_type(:effort), do: "string or integer"
   defp short_type(:fraction), do: "number, 0 to 1"
+  defp short_type(:price), do: "number ≥ 0"
   defp short_type({:integer, 0}), do: "integer ≥ 0"
   defp short_type({:integer, min}), do: "integer ≥ #{min}"
   defp short_type({:enum, values}), do: Enum.map_join(values, " \\| ", &"`#{&1}`")

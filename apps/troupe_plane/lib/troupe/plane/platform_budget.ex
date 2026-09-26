@@ -7,6 +7,10 @@ defmodule Troupe.Plane.PlatformBudget do
   plane has spent and promised, across every team. Two actors for two caps on one total
   would be two answers to one question.
 
+  Spent this month: both caps count the calendar month in UTC and turn over at midnight
+  UTC on the 1st, as a person's does. A deployment at its ceiling starts sessions again
+  on the 1st rather than staying stopped until somebody raises the number.
+
   ## A stored ceiling may only narrow
 
   The deployment's cap comes from a Helm value and is the floor of the argument: an
@@ -157,6 +161,7 @@ defmodule Troupe.Plane.PlatformBudget do
   defp summary(state) do
     base = %{
       scope: :platform,
+      budget_period: "monthly",
       spent_micros: state.spent_micros,
       reserved_micros: reserved(state),
       node: node()

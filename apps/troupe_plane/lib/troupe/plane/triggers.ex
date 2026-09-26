@@ -750,6 +750,7 @@ defmodule Troupe.Plane.Triggers do
       "status" => session && session.status,
       "done_reason" => session && session.done_reason,
       "pending_approvals" => session && session.pending_approvals,
+      "pending_questions" => session && session.pending_questions,
       "cost_micros" => session && session.cost_micros,
       "reviewed_by" => run.reviewed_by,
       "reviewed_at" => run.reviewed_at && DateTime.to_iso8601(run.reviewed_at)

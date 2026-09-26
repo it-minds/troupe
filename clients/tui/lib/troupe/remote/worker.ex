@@ -199,7 +199,7 @@ defmodule Troupe.Remote.Worker do
       subscribed?: false,
       scopes: [],
       capabilities: %{},
-      memory: Translate.memory(Keyword.get(opts, :isolation, :remote)),
+      memory: Translate.memory(Keyword.get(opts, :isolation, :remote), Keyword.get(opts, :profile)),
       profile: Keyword.get(opts, :profile) || "session",
       # What the root window says the session works in: a worker on the plane unless the
       # caller knows better, as the daemon's client does of its own sessions.
@@ -540,8 +540,8 @@ defmodule Troupe.Remote.Worker do
         |> drop_socket()
         |> schedule_reconnect()
 
-      {{from, method}, pending} ->
-        failed(%{state | pending: pending}, from, method, error)
+      {{from, _method}, pending} ->
+        failed(%{state | pending: pending}, from, error)
     end
   end
 
@@ -582,15 +582,9 @@ defmodule Troupe.Remote.Worker do
   defp command_result(_method, %{"accepted" => true}), do: :ok
   defp command_result(_method, result), do: {:ok, result}
 
-  defp failed(state, from, method, error) do
+  defp failed(state, from, error) do
     case RPC.reason(error) do
-      :session_moved ->
-        case reopen(state, :activate) do
-          {:ok, state} -> queue(state, from, method, moved_params(error))
-          {:error, reason, state} -> reply_and(state, from, {:error, reason})
-        end
-
-      :unauthorized ->
+      :unauthenticated ->
         state = reply_and(state, from, {:error, RPC.describe(error)})
         state |> drop_socket() |> schedule_reconnect()
 
@@ -598,11 +592,6 @@ defmodule Troupe.Remote.Worker do
         reply_and(state, from, {:error, RPC.describe(error)})
     end
   end
-
-  # A moved session has to be retried with the same command id, so a command the
-  # old worker had already accepted is not run twice.
-  defp moved_params(%{data: %{"params" => %{} = params}}), do: params
-  defp moved_params(_error), do: %{}
 
   defp initialized(state, result) when is_map(result) do
     state = %{

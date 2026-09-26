@@ -16,6 +16,8 @@ defmodule Troupe.CLI do
       troupe config --explain [KEY] [--json]  every setting, or KEY's, and which file set it (secrets masked)
       troupe config validate [PATH]   check the config files, or one; exits 1 on any problem
       troupe config migrate [--write] [PATH]  show, or make, the rewrite to the current spellings
+      troupe config trust [PATH]   let a workspace's own files set the trusted keys; --list shows them
+      troupe config untrust [PATH] take that back
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
       troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
@@ -33,6 +35,9 @@ defmodule Troupe.CLI do
             | :config_explain
             | :config_validate
             | :config_migrate
+            | :config_trust
+            | :config_untrust
+            | :config_trust_list
             | :config_pull
             | :models
             | :login
@@ -57,6 +62,7 @@ defmodule Troupe.CLI do
           explain: boolean(),
           json: boolean(),
           write: boolean(),
+          list: boolean(),
           key: String.t() | nil,
           path: String.t() | nil
         }
@@ -86,7 +92,8 @@ defmodule Troupe.CLI do
           all: :boolean,
           explain: :boolean,
           json: :boolean,
-          write: :boolean
+          write: :boolean,
+          list: :boolean
         ]
       )
 
@@ -112,6 +119,7 @@ defmodule Troupe.CLI do
       explain: Keyword.get(opts, :explain, false),
       json: Keyword.get(opts, :json, false),
       write: Keyword.get(opts, :write, false),
+      list: Keyword.get(opts, :list, false),
       key: nil,
       path: nil
     }
@@ -166,6 +174,16 @@ defmodule Troupe.CLI do
 
   defp parse_rest(["config", "migrate", path], base),
     do: {:ok, %{base | mode: :config_migrate, path: path}}
+
+  defp parse_rest(["config", "trust"], %{list: true} = base),
+    do: {:ok, %{base | mode: :config_trust_list}}
+
+  # No PATH is the workspace: the current directory, or `--workspace`.
+  defp parse_rest(["config", "trust" | path], %{list: false} = base) when length(path) <= 1,
+    do: {:ok, %{base | mode: :config_trust, path: List.first(path)}}
+
+  defp parse_rest(["config", "untrust" | path], %{list: false} = base) when length(path) <= 1,
+    do: {:ok, %{base | mode: :config_untrust, path: List.first(path)}}
 
   defp parse_rest(["config"], base), do: {:ok, %{base | mode: :config}}
   defp parse_rest(["config", "pull"], base), do: {:ok, %{base | mode: :config_pull}}

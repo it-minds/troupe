@@ -50,6 +50,7 @@ export interface DaemonSessionRow {
   kind?: string;
   owner?: string;
   pending_approvals?: number;
+  pending_questions?: number;
   [k: string]: unknown;
 }
 
@@ -405,6 +406,7 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     status: row.status ?? null,
     doneReason: (row["done_reason"] as string | undefined) ?? null,
     pendingApprovals: row.pending_approvals ?? 0,
+    pendingQuestions: row.pending_questions ?? 0,
     // The daemon reports whole currency units where the plane reports micros.
     costMicros: typeof row.cost === "number" ? Math.round(row.cost * 1_000_000) : null,
     lastActiveAt: row.last_active_at ?? null,

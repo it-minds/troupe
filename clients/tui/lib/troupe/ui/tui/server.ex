@@ -766,6 +766,20 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # `/todo cancel 2` and `/todo complete 2` are the second task as the side panel numbers
+  # the window's list; the item's id, which the screen never shows, is what the daemon is
+  # sent. Anything that is not a place on the list is taken to be an id already.
+  defp todo_id(w, "/todo " <> command) do
+    [_action, ref] = String.split(command, " ", parts: 2)
+    ref = String.trim(ref)
+    todos = w.agents |> Map.get(w.path, %{todos: []}) |> Map.get(:todos, [])
+
+    case Integer.parse(ref) do
+      {n, ""} when n >= 1 and n <= length(todos) -> Enum.at(todos, n - 1).id || ref
+      _ -> ref
+    end
+  end
+
   # Errors cross the client as strings or as reasons; the notice line takes text.
   defp to_message(reason) when is_binary(reason), do: reason
   defp to_message(reason), do: inspect(reason)
@@ -1543,7 +1557,10 @@ defmodule Troupe.UI.TUI.Server do
 
     cond do
       String.starts_with?(text, "/todo cancel ") ->
-        Client.edit_todo(sid, path, {:cancel, String.trim_leading(text, "/todo cancel ")})
+        Client.edit_todo(sid, path, {:cancel, todo_id(w, text)})
+
+      String.starts_with?(text, "/todo complete ") ->
+        Client.edit_todo(sid, path, {:complete, todo_id(w, text)})
 
       String.starts_with?(text, "/todo add ") ->
         Client.edit_todo(sid, path, {:add, String.trim_leading(text, "/todo add ")})

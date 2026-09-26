@@ -46,6 +46,8 @@ defmodule Troupe.Session.Summary do
   # below: a log whose approvals all ended folds to exactly the map it folded to before
   # this was kept, and every recorded fixture hash still holds.
   @approval_agents "approval_agents"
+  # The same for each question still open.
+  @question_agents "question_agents"
 
   @spec start_link(keyword()) :: GenServer.on_start()
   def start_link(opts) do
@@ -156,7 +158,7 @@ defmodule Troupe.Session.Summary do
   end
 
   defp diff(published, snapshot) do
-    for {key, value} <- Map.delete(snapshot, @approval_agents),
+    for {key, value} <- Map.drop(snapshot, [@approval_agents, @question_agents]),
         Map.get(published, key) != value,
         into: %{},
         do: {key, value}
@@ -194,11 +196,12 @@ defmodule Troupe.Session.Summary do
     Map.put(snapshot, "tool", data["name"])
   end
 
-  # The call is over, and so is any approval it was still waiting for: a cancel closes
-  # each call it stops with one of these, and so does a tool that timed out waiting, and
-  # neither is ever decided.
+  # The call is over, and so is any approval or question it was still waiting for: a
+  # cancel closes each call it stops with one of these, and so does a tool that timed out
+  # waiting, and neither is ever answered.
   def fold(snapshot, %Event{type: "tool_call_completed", data: data}) do
-    snapshot |> Map.put("tool", nil) |> close_approvals([data["call_id"]])
+    ids = [data["call_id"]]
+    snapshot |> Map.put("tool", nil) |> close_approvals(ids) |> close_questions(ids)
   end
 
   def fold(snapshot, %Event{type: "llm_response", data: data}) do
@@ -230,21 +233,39 @@ defmodule Troupe.Session.Summary do
       when type in ["approval_decided", "approval_resolved"] do
     snapshot
     |> Map.update("approvals", [], &List.delete(&1, data["call_id"]))
-    |> forget_agents([data["call_id"]])
+    |> forget_agents(@approval_agents, [data["call_id"]])
+  end
+
+  # A question for a person: the agent's `ask_user`, or the budget's or the failure
+  # guard's at the gate. Asked again under the same id, as the gate asks one a cancel
+  # ended, it is open again.
+  #
+  # Added to the map by the first question rather than declared in `@empty`, as `taint`
+  # is below: a log that never asked one folds to exactly the map it folded to before
+  # questions were counted here, and every recorded fixture hash still holds.
+  def fold(snapshot, %Event{type: "question_asked", agent: path, data: data}) do
+    id = data["call_id"]
+    asked = Enum.join(path, "/")
+
+    snapshot
+    |> Map.update("questions", [id], &Enum.uniq(&1 ++ [id]))
+    |> Map.update(@question_agents, %{id => asked}, &Map.put(&1, id, asked))
+  end
+
+  # Answered by a person, or, for the gate's question, by the harness itself when nobody
+  # is there to ask.
+  def fold(snapshot, %Event{type: type, data: data})
+      when type in ["question_answered", "budget_ask_answered", "tool_failures_ask_answered"] do
+    close_questions(snapshot, [data["call_id"]])
   end
 
   # A cancel stops the agent it reached and every agent under it, and one it took down
-  # never logs another word — so an approval anywhere in that subtree ends here. The same
-  # rule the TUI keeps for what it shows as pending.
+  # never logs another word — so an approval or a question anywhere in that subtree ends
+  # here. The same rule the TUI keeps for what it shows as pending.
   def fold(snapshot, %Event{type: "cancelled", agent: path}) do
-    cancelled = Enum.join(path, "/")
-
-    ended =
-      for {id, asked} <- Map.get(snapshot, @approval_agents, %{}),
-          asked == cancelled or String.starts_with?(asked, cancelled <> "/"),
-          do: id
-
-    close_approvals(snapshot, ended)
+    snapshot
+    |> close_approvals(asked_below(snapshot, @approval_agents, path))
+    |> close_questions(asked_below(snapshot, @question_agents, path))
   end
 
   # A tool running on somebody's laptop is something every other participant is entitled
@@ -270,15 +291,31 @@ defmodule Troupe.Session.Summary do
   # and a projection that gained an empty `approvals` from it would be a different map
   # from the one every recorded fixture hash was taken over.
   defp close_approvals(%{"approvals" => open} = snapshot, ids) do
-    snapshot |> Map.put("approvals", open -- ids) |> forget_agents(ids)
+    snapshot |> Map.put("approvals", open -- ids) |> forget_agents(@approval_agents, ids)
   end
 
   defp close_approvals(snapshot, _ids), do: snapshot
 
-  defp forget_agents(snapshot, ids) do
-    case Map.drop(Map.get(snapshot, @approval_agents, %{}), ids) do
-      agents when map_size(agents) == 0 -> Map.delete(snapshot, @approval_agents)
-      agents -> Map.put(snapshot, @approval_agents, agents)
+  # Likewise only once a question has been asked, for the same reason.
+  defp close_questions(%{"questions" => open} = snapshot, ids) do
+    snapshot |> Map.put("questions", open -- ids) |> forget_agents(@question_agents, ids)
+  end
+
+  defp close_questions(snapshot, _ids), do: snapshot
+
+  # What the agent a cancel reached asked, and what every agent under it asked.
+  defp asked_below(snapshot, key, path) do
+    cancelled = Enum.join(path, "/")
+
+    for {id, asked} <- Map.get(snapshot, key, %{}),
+        asked == cancelled or String.starts_with?(asked, cancelled <> "/"),
+        do: id
+  end
+
+  defp forget_agents(snapshot, key, ids) do
+    case Map.drop(Map.get(snapshot, key, %{}), ids) do
+      agents when map_size(agents) == 0 -> Map.delete(snapshot, key)
+      agents -> Map.put(snapshot, key, agents)
     end
   end
 end

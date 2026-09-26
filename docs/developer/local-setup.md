@@ -101,7 +101,7 @@ writes `protocol/schema/config/v1.json` and the reference in
 it and commit the result after changing a key. `TROUPE_PROVIDER=fake` and
 `TROUPE_FAKE_SCRIPT` run the daemon without a model; so do `provider: fake` and
 `fake_script:` in a workspace's own file, once the workspace is on the user file's
-`trusted_workspaces` (Decision 686).
+`trusted_workspaces` (Decision 686), which `troupe config trust` there puts it on.
 
 ## 6. Development variables
 

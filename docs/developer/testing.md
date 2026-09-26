@@ -88,4 +88,7 @@ temporary directory once per run and passes `state_dir` through config, because
 - `scripts/live-check task|delegate|loop`: one headless run against a real model, and
   what it has to show; the nightly runs all three against the gateway
   ([CI.md](../../.github/CI.md#the-live-check)). With `TROUPE_PROVIDER=fake` and a
-  `TROUPE_FAKE_SCRIPT` it runs offline, which is how a change to it is tried first.
+  `TROUPE_FAKE_SCRIPT` it runs offline, which is how a change to it is tried first. Its
+  cost column is the gateway's price, else the one `TROUPE_MODEL_PRICES` gives (*priced
+  here*); a script with `"cost_micros": null` answers as a gateway streaming a response
+  does, with no price, which is how that column is tried offline.

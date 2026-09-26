@@ -280,7 +280,9 @@ first given again — a checkpoint every slice. It is a stop where the budget is
 (`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
 session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
 never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again. `always` lifts only the limit it was asked about (Decision 687).
+delegate again. It ends `budget_exhausted` with no further model call and nothing left
+running, and a `done` subagent keeps no session awake. `always` lifts only the limit it
+was asked about (Decision 687).
 
 A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
 counts each tool's failures in a row; a success of that tool clears its count. At
@@ -297,7 +299,7 @@ Under `approvals: deny` the agent answers `stop` itself. A subagent does not ask
 | `approval_requested` | `call_id`, `tool`, `args`, `agent_path` — open until its `approval_decided`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no decision), or a `cancelled` on the agent that asked or on one above it |
 | `approval_decided` | `call_id`, `tool`, `decision`, `actor` |
 | `approval_resolved` | `call_id`, `resolved_by` |
-| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer` |
+| `question_asked` | `call_id`, `agent_path`, `question`, `options` (`[{label, description}]`), `multiple` — the agent's `ask_user`; answered with `question.answer`. Open until its `question_answered`, its call's `tool_call_completed` (a cancel, or a tool that timed out waiting, ends the call with no answer), or a `cancelled` on the agent that asked or on one above it. The budget's and the failure guard's question have no call; each also ends with its `budget_ask_answered` or `tool_failures_ask_answered`, the only word there is when nobody is there to ask, and one a cancel ended is asked again at the next turn with another `question_asked` under the same `call_id` |
 | `question_answered` | `call_id`, `text`, `actor` |
 | `session_dormant` | `last_seq` |
 | `session_activated` | `epoch`, `pod` |
@@ -340,6 +342,10 @@ it billed: `{"request_id": "…", "cost_micros": 18400}`. Both keys are optional
 whole object is absent where the gateway said nothing, which is a fact a reader may act
 on — tokens with no cost — rather than a cost of zero. A client that shows spend should
 treat an absent `gateway` as "not known" and a `cost_micros` of `0` as "free".
+`"priced_locally": true` beside a `cost_micros` says the harness worked the cost out
+itself, because the gateway did not say: from the provider's catalog, or from the
+`models.prices` its configuration holds (Decision 689). A reconciliation against the
+gateway's own records should expect those to differ from it a little.
 
 Neither key is present in events written before this release. A reader folding an old
 log gets the tokens and no cost, which is what was true.
@@ -407,7 +413,8 @@ with no replay.
 - **`detail`** delivers every event for the session, durable and ephemeral.
 - **`summary`** delivers only `summary_diff` ephemerals plus session lifecycle
   events. A summary carries: per-agent state and profile, current todo item, active
-  tool, tokens, cost, pending approvals, and last error. Summary diffs are throttled
+  tool, tokens, cost, pending approvals, pending questions (`questions`, from a session's
+  first `question_asked` on), and last error. Summary diffs are throttled
   to at most 4 per second.
 - **`fleet`** carries only session lifecycle events — created, state changes,
   archived, erased — for every session the principal can see. `fleet` ignores
@@ -515,14 +522,17 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"pending_approvals", "tokens", "cost", "created_at", "last_active_at", "pinned"}]}`
+"pending_approvals", "pending_questions", "tokens", "cost", "created_at", "last_active_at",
+"pinned"}]}`
 
 `filter.parent` selects the branches of one session.
 
 `pending_approvals` counts the approvals still open (see `approval_requested` for when one
-ends), and `status` is `waiting` while there is one, whatever else it would say: the two
-columns a plane's `sessions.list` row carries, so an inbox is a listing and not a replay.
-A dormant session counts the root agent's, which are what it asks again when it wakes.
+ends), `pending_questions` the questions (see `question_asked`: the agent's `ask_user`, the
+budget's and the failure guard's), and `status` is `waiting` while either is not zero,
+whatever else it would say: the columns a plane's `sessions.list` row carries, so an inbox
+is a listing and not a replay. A dormant session counts the root agent's, which are what it
+asks again when it wakes.
 
 #### `session.get` → one session object plus `head_seq`.
 
@@ -894,13 +904,13 @@ so. The plane has already asked for another worker; `retry_after_ms` says when t
 again. A refusal happens only where a person set a ceiling, and then it quotes the number
 they set.
 
-A session goes `dormant` on its own idle timeout, or on `session.archive`. Waiting on a
-person counts as idle, and a local daemon's timeout is shorter for a session no client is
-subscribed to ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log
-stays, and so does everything a client can learn from it: `session.list`,
-`session.get`, `blob.get` and `subscribe` all work on a dormant session and start
-nothing. That is deliberate — a session that woke up because somebody looked at it
-would never stay dormant.
+A session goes `dormant` on its own idle timeout, or on `session.archive`: the daemon's for
+a local session, the plane's for a pod session (§7). Waiting on a person counts as idle,
+and a local daemon's timeout is shorter for a session no client is subscribed to
+([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log stays, and so
+does everything a client can learn from it: `session.list`, `session.get`, `blob.get` and
+`subscribe` all work on a dormant session and start nothing. That is deliberate — a session
+that woke up because somebody looked at it would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
@@ -1023,10 +1033,16 @@ keeps the whole table.
 session's row, its key, its placement and its retention, so a worker refuses
 `session.archive`, `session.pin`, `session.unpin` and `session.erase` to a token for one
 session with `forbidden`, `data.method` naming it and `data.reason` of
-`done through the plane`. A client pins, unpins and erases a pod session with the
-plane's methods of the same names; the plane's erasure reaches the pod over its control
-channel and deletes the pod's copy along with the key and the objects. A pod session goes
-dormant on its own idle timeout.
+`done through the plane`. A client archives, pins, unpins and erases a pod session with
+the plane's methods of the same names, each `{session_id}` and each for the session's
+owner. The plane's archive pushes `session.dormant` to the pod holding the session, which
+seals it, uploads its workspace, deletes its own copy and reports it dormant, giving back
+its slot and its budget slice; the answer is the session's row, `dormant`, and the next
+activating command brings it back on whichever pod has room. A session that is not
+running is answered as it stands, one still `pending` is refused with `conflict`, and one
+whose pod does not answer stays as it was, with `unavailable`. The plane's erasure reaches
+the pod over the same control channel and deletes the pod's copy along with the key and
+the objects.
 
 ### `auth.expiring` (notification, server → client)
 

@@ -168,7 +168,7 @@ defmodule Troupe.Config.ModelSettings do
   @spec import_opencode(Path.t() | nil) :: {:ok, description()} | {:error, String.t()}
   def import_opencode(workspace \\ nil) do
     path = Config.user_path()
-    providers = OpenCode.providers()
+    providers = OpenCode.providers(as_written: true)
 
     with :ok <- any_providers(providers),
          {:ok, raw} <- parse_existing(path) do

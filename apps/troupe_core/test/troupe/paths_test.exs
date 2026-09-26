@@ -36,6 +36,12 @@ defmodule Troupe.PathsTest do
       assert Paths.display(joined, {:win32, :nt}) == "C:\\Users\\me\\AppData\\Roaming\\troupe\\config.yaml"
     end
 
+    # What `File.cwd!/0` answers on Windows, and so every workspace a command defaults to.
+    test "on Windows, the current directory prints with the drive letter Windows shows" do
+      assert Paths.display("c:/Users/me/my repo", {:win32, :nt}) == "C:\\Users\\me\\my repo"
+      assert Paths.display("TROUPE_MODEL", {:win32, :nt}) == "TROUPE_MODEL"
+    end
+
     test "anywhere else a path is shown as it is" do
       assert Paths.display("/home/me/.config/troupe/config.yaml", {:unix, :linux}) ==
                "/home/me/.config/troupe/config.yaml"

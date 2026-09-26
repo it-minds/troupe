@@ -20,11 +20,16 @@ defmodule Troupe.Config.Issue do
           message: String.t()
         }
 
-  @doc "The issue as one line: `source:line: message`."
+  @doc """
+  The issue as one line: `source:line: message`, a file as this platform writes it
+  (`Troupe.Paths.display/1`). `source` itself, and the JSON, keep the path as loaded.
+  """
   @spec format(t()) :: String.t()
   def format(%__MODULE__{source: nil, message: message}), do: message
-  def format(%__MODULE__{source: source, line: nil, message: message}), do: "#{source}: #{message}"
-  def format(%__MODULE__{source: source, line: line, message: message}), do: "#{source}:#{line}: #{message}"
+  def format(%__MODULE__{source: source, line: nil, message: message}), do: "#{shown(source)}: #{message}"
+  def format(%__MODULE__{source: source, line: line, message: message}), do: "#{shown(source)}:#{line}: #{message}"
+
+  defp shown(source), do: Troupe.Paths.display(source)
 
   @doc "The issue as JSON."
   @spec to_json(t()) :: map()

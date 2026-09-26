@@ -7,8 +7,7 @@ defmodule Troupe.FakeRemote do
 
   It is deliberately a server rather than a stub: the interesting behaviours in
   the contract are things a stub cannot express — a connection dying mid-stream,
-  a replay from a cursor, a session that moves to another worker, a token that
-  expires while the socket stays up.
+  a replay from a cursor, a token that expires while the socket stays up.
 
   ## Driving it
 
@@ -94,11 +93,7 @@ defmodule Troupe.FakeRemote do
   @spec break_refresh(pid(), boolean()) :: :ok
   def break_refresh(remote, broken? \\ true), do: GenServer.call(remote, {:break_refresh, broken?})
 
-  @doc """
-  Fails the next call to `method` with `code`. `-32012` is answered specially:
-  the session is moved to another worker first, so the client's re-open finds a
-  different endpoint.
-  """
+  @doc "Fails the next call to `method` with `code`."
   @spec fail_next(pid(), String.t(), integer(), String.t()) :: :ok
   def fail_next(remote, method, code, message \\ "injected"),
     do: GenServer.call(remote, {:fail_next, method, code, message})
@@ -186,8 +181,7 @@ defmodule Troupe.FakeRemote do
       plane_tokens: MapSet.new(),
       device: %{code: "DEV-CODE", user_code: "WXYZ-1234", approved?: false},
       refresh_broken?: false,
-      seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end),
-      moves: 0
+      seq: Map.new(sessions, fn {id, session} -> {id, highest(session.events)} end)
     }
 
     owner = self()
@@ -297,9 +291,7 @@ defmodule Troupe.FakeRemote do
 
     case Map.pop(state.failures, method) do
       {{code, message}, failures} ->
-        state = %{state | failures: failures}
-        {reply, state} = injected(state, method, params, code, message)
-        {:reply, reply, state}
+        {:reply, {:error, code, message}, %{state | failures: failures}}
 
       {nil, _failures} ->
         {reply, state} =
@@ -485,7 +477,7 @@ defmodule Troupe.FakeRemote do
           }}, state}
 
       :error ->
-        {{:error, -32_004, "no such session"}, state}
+        {{:error, -32_005, "no such session"}, state}
     end
   end
 
@@ -583,21 +575,6 @@ defmodule Troupe.FakeRemote do
 
   defp dispatch(state, _kind, _method, _params, _pid),
     do: {{:error, -32_601, "method not found"}, state}
-
-  # -32012 is only honest if the session really has moved: the client's re-open
-  # has to come back with an endpoint it was not already connected to.
-  defp injected(state, _method, _params, -32_012, message) do
-    state = %{state | moves: state.moves + 1}
-
-    sessions =
-      Map.new(state.sessions, fn {id, session} ->
-        {id, %{session | worker: "w#{state.moves + 1}"}}
-      end)
-
-    {{:error, -32_012, message}, %{state | sessions: sessions}}
-  end
-
-  defp injected(state, _method, _params, code, message), do: {{:error, code, message}, state}
 
   ## Events
 
