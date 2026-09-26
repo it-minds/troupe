@@ -2640,6 +2640,7 @@ defmodule Troupe.Agent.Server do
         children =
           for %Event{type: "delegation_started", agent: agent, data: data} <- events,
               agent == state.agent_path and data["call_id"] in delegations,
+              match?([_ | _], data["child_path"]),
               do: data["child_path"]
 
         events

@@ -1572,8 +1572,9 @@ citation keeps meaning what it meant.
          subagent open, in `Summary` or the gate; the child a restart re-ran a delegation
          past ends `interrupted` with nothing open; a root's failure note survives the
          session coming back; a turn keeps the results already back when the session comes
-         back, and a `finish` among them ends a root, and a subagent with the summary its
-         parent is handed, after the agent restarts.
+         back, a call closed as interrupted and one put back out to a person reach the
+         model together, and a `finish` among them ends a root, and a subagent with the
+         summary its parent is handed, after the agent restarts.
        - `Troupe.Agent.CutShortTest`: a subagent cut short is stopped, and its session
          still sleeps. `Troupe.Session.LocalPricingTest`: a model only subagents call is
          said once a session. `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and
