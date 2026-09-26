@@ -26,7 +26,8 @@ defmodule Troupe.MemoryClientTest do
     await_state("librarian-1", :done, 10_000)
 
     assert File.read!(Path.join(ws, ".troupe/memory.md")) =~ "tests live under test/"
-    assert {:ok, "project brief (stale, built never): Notes"} = Client.memory(sid, "")
+    today = Date.to_iso8601(Date.utc_today())
+    assert {:ok, "project brief (fresh, built " <> ^today <> "): Notes"} = Client.memory(sid, "")
 
     assert {:ok, "project brief forgotten; " <> _} = Client.memory(sid, "forget")
     refute File.exists?(Path.join(ws, ".troupe/memory.md"))
@@ -54,18 +55,19 @@ defmodule Troupe.MemoryClientTest do
     assert spawned.data.name == "librarian"
     assert spawned.data.prompt =~ "no project brief yet"
 
+    # The librarian wrote a note and nothing else, and came to rest: the brief is what it
+    # made of the repository, checked now, and not stale (Decision 696).
     eventually(
-      fn -> match?({:ok, "project brief (stale, " <> _}, Client.memory(sid, "")) end,
+      fn -> match?({:ok, "project brief (fresh, " <> _}, Client.memory(sid, "")) end,
       10_000
     )
 
-    # A second session on the same workspace finds a brief and starts nothing.
+    # A second session on the same workspace finds a brief and starts nothing. The
+    # librarian is started while the session is created, so it would be in the journal.
     {sid2, _, _} =
       start_session!(workspace: workspace_of(sid), config: %{memory_auto_refresh: true})
 
-    refute_receive {:troupe_event,
-                    %{session_id: ^sid2, type: :branch_spawned, agent_path: "librarian-1"}},
-                   500
+    refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
   end
 
   # What a brief describes is a repository: `troupe` opened in a home directory, or any
