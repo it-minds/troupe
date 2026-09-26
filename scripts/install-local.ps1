@@ -13,6 +13,11 @@
   starts it again here: the desktop app starts one when a session needs it, and the TUI
   embeds the harness when none is running.
 
+  A running TUI is never stopped: it is somebody's terminal. Its program is renamed aside
+  when it is in the way, and the payload it runs from is left alone and named in a warning
+  at the end, with what to do once it has exited. The script still exits 0 then, because
+  the new binaries are in place.
+
   The previous install is kept as `<dir>.previous` and `troupe.exe.previous`, which is
   what `install.ps1` does and what makes going back one step a rename.
 
@@ -93,6 +98,94 @@ function Stop-RunningDaemon {
   if ($running) { Start-Sleep -Milliseconds 500 }
 }
 
+# Said again at the end, after the build's output, where they cannot be missed.
+$Warnings = @()
+
+# Programs running from under any of $Prefixes, by the path of their executable: a TUI
+# started from $BinDir, or the BEAM of an unpacked TUI payload and what it spawned.
+function Get-RunningFrom([string[]]$Prefixes) {
+  foreach ($p in Get-Process) {
+    $path = $null
+    try { $path = $p.Path } catch { }
+    if (-not $path) { continue }
+    foreach ($prefix in $Prefixes) {
+      if ($path.StartsWith($prefix, [StringComparison]::OrdinalIgnoreCase)) { $p; break }
+    }
+  }
+}
+
+# A line per process, with when it started, so a person can tell which terminal it is.
+function Format-Running($Procs) {
+  foreach ($p in $Procs) {
+    $started = "?"
+    try { $started = $p.StartTime.ToString("yyyy-MM-dd HH:mm") } catch { }
+    "    pid $($p.Id)  started $started  $($p.Path)"
+  }
+}
+
+# Remove a TUI binary. Windows will not delete the program of a running process, but will
+# rename it, so one a TUI is running is moved aside instead, for a later run to remove.
+function Remove-OrSetAside([string]$Path) {
+  if (-not (Test-Path -LiteralPath $Path)) { return }
+  try { Remove-Item -Force -LiteralPath $Path -ErrorAction Stop; return } catch { }
+  $aside = "$Path.in-use-$(Get-Date -Format yyyyMMdd-HHmmss)"
+  Move-Item -LiteralPath $Path $aside
+  Write-Host "$Path is the program of a running troupe, so it is set aside as $aside"
+  Write-Host "until a later run finds it free. troupe running from ${BinDir}:"
+  Format-Running @(Get-RunningFrom @($Tui)) | ForEach-Object { Write-Host $_ }
+}
+
+# What an earlier run set aside, once nothing runs it.
+function Clear-SetAside {
+  Get-ChildItem -LiteralPath $BinDir -Filter "troupe.exe.*in-use*" -ErrorAction SilentlyContinue | ForEach-Object {
+    $leftover = $_.FullName
+    try { Remove-Item -Force -LiteralPath $leftover -ErrorAction Stop; Write-Host "removed $leftover" }
+    catch { Write-Host "keeping ${leftover}: a troupe still runs it" }
+  }
+}
+
+# Burrito extracts its payload once per version, so without this a rebuild at the same
+# version keeps running the previous build. On Windows the data dir is %APPDATA%.
+#
+# A payload a TUI is running from is left whole. Its BEAM holds erts\bin open, so it cannot
+# go, and deleting what can would pull files out from under that TUI. Nor is it marked to be
+# unpacked again: a troupe started before that TUI exits would then unpack over it.
+function Clear-TuiPayload {
+  foreach ($base in (Join-Path $env:APPDATA ".burrito"), (Join-Path $env:LOCALAPPDATA ".burrito")) {
+    if (-not (Test-Path $base)) { continue }
+    foreach ($dir in @(Get-ChildItem -Path $base -Directory -Filter "troupe_*" -ErrorAction SilentlyContinue)) {
+      $payload = $dir.FullName
+      $inUse = @(Get-RunningFrom @("$payload\"))
+      if ($inUse.Count -gt 0) {
+        $script:Warnings += (@(
+            "$payload is in use, so it is left as it is:"
+            Format-Running (@(Get-RunningFrom @($Tui)) + $inUse)
+            "troupe unpacks its payload once per version: until this one goes, troupe runs the build"
+            "that unpacked it, not the one installed now. Once these have exited:"
+            "    Remove-Item -Recurse -Force '$payload'; troupe --version"
+            "or install again with this script, which removes it."
+          ) -join "`n")
+        continue
+      }
+      Write-Host "removing payload cache $payload"
+      # The marker Burrito checks goes first, so a removal stopped halfway still unpacks
+      # afresh on the next start instead of running what is left.
+      try {
+        Remove-Item -Force -LiteralPath (Join-Path $payload "_metadata.json") -ErrorAction SilentlyContinue
+        Remove-Item -Recurse -Force -LiteralPath $payload -ErrorAction Stop
+      }
+      catch { $script:Warnings += "could not remove all of ${payload}: $($_.Exception.Message)`nthe next troupe unpacks over what is left." }
+    }
+  }
+}
+
+function Show-Warnings {
+  if ($Warnings.Count -eq 0) { return }
+  Write-Host ""
+  foreach ($w in $Warnings) { Write-Warning $w }
+  Write-Host "the binaries are in place, so this still exits 0."
+}
+
 if ($Rollback) {
   Stop-RunningDaemon
   if (Test-Path "$LibDir.previous") {
@@ -102,9 +195,13 @@ if ($Rollback) {
   }
   else { Write-Host "no $LibDir.previous to restore" }
   if (Test-Path "$Tui.previous") {
-    Move-Item -Force "$Tui.previous" $Tui
+    Clear-SetAside
+    Remove-OrSetAside $Tui
+    Move-Item "$Tui.previous" $Tui
     Write-Host "restored $Tui from .previous"
+    Clear-TuiPayload
   }
+  Show-Warnings
   exit 0
 }
 
@@ -226,19 +323,13 @@ Set-Content -Path $Shim -Encoding ASCII -Value "@echo off`r`ncall `"$LibDir\bin\
 Write-Host "installed troupe-daemon $Version to $LibDir ($Shim)"
 
 if ($TuiBuilt) {
-  if (Test-Path $Tui) { Move-Item -Force $Tui "$Tui.previous" }
+  Clear-SetAside
+  # troupe.exe itself may be running too; a rename is all it needs.
+  Remove-OrSetAside "$Tui.previous"
+  if (Test-Path $Tui) { Move-Item $Tui "$Tui.previous" }
   Copy-Item -Force $TuiBuilt $Tui
   Write-Host "installed troupe $Version to $Tui"
-
-  # Burrito extracts its payload once per version, so without this a rebuild at the same
-  # version keeps running the previous build. On Windows the data dir is %APPDATA%.
-  foreach ($base in (Join-Path $env:APPDATA ".burrito"), (Join-Path $env:LOCALAPPDATA ".burrito")) {
-    if (-not (Test-Path $base)) { continue }
-    Get-ChildItem -Path $base -Directory -Filter "troupe_*" -ErrorAction SilentlyContinue | ForEach-Object {
-      Write-Host "removing payload cache $($_.FullName)"
-      Remove-Item -Recurse -Force $_.FullName
-    }
-  }
+  Clear-TuiPayload
 }
 
 Add-ToUserPath
@@ -246,6 +337,8 @@ Add-ToUserPath
 Write-Host ""
 & $Shim version
 if (-not $NoTui) { & $Tui --version }
+Show-Warnings
 Write-Host ""
 Write-Host "done. The desktop app starts the daemon when it needs one; troupe in a workspace starts the TUI."
 Write-Host "to go back:  .\scripts\install-local.ps1 -Rollback"
+exit 0

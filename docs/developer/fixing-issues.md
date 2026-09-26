@@ -201,8 +201,11 @@ Every row that applies must pass.
 `install-local.ps1` builds the checkout it lives in, so it builds the fixer's worktree,
 and it puts the toolchain on its own PATH, so a shell opened before the toolchain was
 installed still works.
-The first build in a fresh worktree fetches deps and takes several minutes. After
-`verify-local.ps1` passes, run the issue's own reproduction against the installed
+The first build in a fresh worktree fetches deps and takes several minutes.
+A TUI running on the machine is never stopped: `install-local.ps1` installs around it and
+warns that it holds the unpacked payload, and `verify-local.ps1` fails its daemon check
+while that TUI's embedded harness is the daemon `daemon.json` names, until it is closed.
+After `verify-local.ps1` passes, run the issue's own reproduction against the installed
 binaries (`troupe-daemon.cmd ...`, `troupe.exe ...`, or the desktop app against the
 installed daemon) and keep the command and its output.
 
