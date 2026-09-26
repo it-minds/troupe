@@ -2,6 +2,7 @@
 name = "troupe-desktop"
 version = "0.5.1"
 description = "The Troupe GUI"
+license = "Apache-2.0"
 authors = ["Troupe"]
 edition = "2021"
 rust-version = "1.77.2"

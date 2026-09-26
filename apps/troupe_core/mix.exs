@@ -15,6 +15,7 @@ defmodule Troupe.Core.MixProject do
       compilers: Mix.compilers() ++ [:reaper],
       start_permanent: Mix.env() == :prod,
       description: "Session actor trees: agents, tools, providers, and the log",
+      package: [licenses: ["Apache-2.0"]],
       deps: deps()
     ]
   end

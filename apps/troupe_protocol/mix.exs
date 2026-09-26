@@ -13,6 +13,7 @@ defmodule Troupe.Protocol.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       description: "Wire format: JSON-RPC messages, events, schemas, and a client",
+      package: [licenses: ["Apache-2.0"]],
       deps: deps()
     ]
   end
