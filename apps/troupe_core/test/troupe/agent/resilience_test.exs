@@ -429,6 +429,40 @@ defmodule Troupe.Agent.ResilienceTest do
       assert length(answered.content) == 2
     end
 
+    test "a call closed as interrupted and one put back out to a person reach the model together",
+         context do
+      %{session: session, fake: fake} =
+        start_session(context,
+          config_overrides: [auto_approve: false],
+          steps: [
+            {:tools,
+             [
+               {"needs_approval", %{"note" => "one"}},
+               {"count", %{"path" => "marks.txt", "mark" => "slow", "delay_ms" => 2_000}}
+             ]},
+            {:text, "both back"}
+          ]
+        )
+
+      Troupe.subscribe(session.id)
+      Troupe.send_input(session.id, "ask, then count slowly")
+      await_event(session.id, :approval_requested)
+      await_started_call(session.id, "slow")
+
+      reopen(context, session.id, fake, auto_approve: false)
+      assert eventually(fn -> Troupe.snapshot(session.id).outstanding == ["needs_approval"] end)
+
+      [again] = Approvals.pending(session.id)
+      Troupe.approve(session.id, again.call_id, :allow)
+      await_rest(session.id)
+
+      [results] = events_of_type(session.id, "tool_results")
+      assert [%{"content" => [approved, counted]}] = results.data["results"]
+      assert approved["content"] == "approved: one"
+      assert counted["error"] == true
+      assert counted["content"] =~ "interrupted"
+    end
+
     test "a finish among them ends the agent with its summary, after the agent restarts",
          context do
       %{session: session, fake: fake} =
