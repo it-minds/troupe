@@ -377,22 +377,27 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
 
     // A question for a person. The harness's budget question rides on the same path under
     // a `budget-<n>` id with an event of its own beside it, so the entry is made from
-    // whichever arrives first and the other only fills it in. A question the harness asks
-    // at the gate before a model call (the budget's, the failure guard's) is still owed
-    // after a cancel ended it, and is asked again under the same id at the next turn: the
-    // entry it had is open again.
+    // whichever arrives first and the other fills it in: the harness's own event says
+    // which limit, the question says the words and the options — sizes and scopes to
+    // pick, and an amount can be typed (troupe-remote Decision 699). A question the
+    // harness asks at the gate before a model call (the budget's, the failure guard's) is
+    // still owed after a cancel ended it, and is asked again under the same id at the
+    // next turn: the entry it had is open again.
     case "budget_ask_started": {
       const callId = str(d.data["call_id"]);
       if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
-      return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"))] };
+      return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"), [])] };
     }
 
     case "question_asked": {
       const callId = str(d.data["call_id"]);
-      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
       if (callId.startsWith("budget-")) {
-        return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["question"], "budget exhausted"))] };
+        const question = str(d.data["question"], "budget exhausted");
+        const options = optionsOf(d.data["options"]);
+        if (hasQuestion(state, callId)) return { ...next, entries: fillBudget(reopen(state.entries, callId), callId, question, options) };
+        return { ...next, entries: [...state.entries, budgetQuestion(base, callId, question, options)] };
       }
+      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
       return {
         ...next,
         entries: [
@@ -571,9 +576,12 @@ export function needsYou(state: TranscriptState): boolean {
   return rootState(state) === "waiting" || openApprovals(state).length > 0 || openQuestions(state).length > 0;
 }
 
-const BUDGET_OPTIONS: QuestionOption[] = [
+/**
+ * The answers a daemon from before the question carried its options listened for, in
+ * case a budget question arrives with none (troupe-remote Decisions 660 and 687).
+ */
+export const LEGACY_BUDGET_OPTIONS: QuestionOption[] = [
   { label: "allow", description: "one more slice: the same budget again, then ask again" },
-  // The limit the question names, and no other (troupe-remote Decision 687).
   { label: "always", description: "lift this limit for the rest of the session; the others still ask" },
   { label: "deny", description: "stop here" },
 ];
@@ -593,8 +601,13 @@ function reopen(entries: Entry[], callId: string): Entry[] {
   return entries.map((en) => (en.kind === "question" && en.callId === callId && en.closed && en.answer === undefined ? { ...en, closed: false } : en));
 }
 
-function budgetQuestion(base: { seq: number; agent: string[] }, callId: string, detail: string): Entry {
-  return { kind: "question", ...base, callId, question: detail, options: BUDGET_OPTIONS, multiple: false, asked: "budget", answer: undefined, closed: false };
+function budgetQuestion(base: { seq: number; agent: string[] }, callId: string, question: string, options: QuestionOption[]): Entry {
+  return { kind: "question", ...base, callId, question, options, multiple: false, asked: "budget", answer: undefined, closed: false };
+}
+
+/** The budget question's own words and options, once the question it rides on arrives. */
+function fillBudget(entries: Entry[], callId: string, question: string, options: QuestionOption[]): Entry[] {
+  return entries.map((en) => (en.kind === "question" && en.callId === callId && en.asked === "budget" ? { ...en, question, options } : en));
 }
 
 function optionsOf(v: unknown): QuestionOption[] {

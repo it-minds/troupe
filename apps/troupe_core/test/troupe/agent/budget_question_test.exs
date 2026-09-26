@@ -3,25 +3,40 @@ defmodule Troupe.Agent.BudgetQuestionTest do
   A spent budget is a question for the person attached, not a stop (Decision 660): `allow`
   buys the same slice again, `always` lifts the one limit it was asked about (Decision
   687), `deny` ends the agent; a contract budget and an unattended session behave as
-  before; `full_send` never asks.
+  before; `full_send` never asks. An answer says how much more and for how long
+  (Decision 699, issue #183): a typed amount raises the limit that asked, for this run,
+  this session or this workspace, nonsense is asked back, and a pod's terms are a ceiling.
   """
 
   use Troupe.SessionCase, async: true
 
   alias Troupe.Agent.Server
   alias Troupe.Budget
+  alias Troupe.Config
   alias Troupe.Session.Log
 
   defp tools(n), do: List.duplicate({:tools, [{"todo_read", %{}}]}, n)
   defp finish(summary), do: {:text_and_tools, "done", [{"finish", %{"summary" => summary}}]}
 
-  defp run(context, steps, overrides) do
-    %{session: session, fake: fake} = start_session(context, steps: steps, config_overrides: overrides)
+  defp run(context, steps, overrides, opts \\ []) do
+    %{session: session, fake: fake} =
+      start_session(context, [steps: steps, config_overrides: overrides] ++ opts)
+
     sid = session.id
     :ok = Troupe.subscribe(sid)
     Troupe.send_input(sid, "keep going")
     {sid, fake}
   end
+
+  defp await_answered(sid, call_id) do
+    assert_receive {:troupe_event, ^sid,
+                    %Event{type: "budget_ask_answered", data: %{"call_id" => ^call_id} = answered}},
+                   10_000
+
+    answered
+  end
+
+  defp labels(asked), do: Enum.map(asked["options"], &label/1)
 
   defp await_question(sid, call_id) do
     assert_receive {:troupe_event, ^sid, %Event{type: "question_asked", data: %{"call_id" => ^call_id} = asked}},
@@ -44,7 +59,18 @@ defmodule Troupe.Agent.BudgetQuestionTest do
 
     asked = await_question(sid, "budget-1")
     assert asked["question"] =~ "turns 2/2 (100%)"
-    assert Enum.map(asked["options"], &label/1) == ["allow", "always", "deny"]
+
+    assert labels(asked) == [
+             "+5 turns this run",
+             "+10 turns this run",
+             "+25 turns this run",
+             "+10 turns this session",
+             "+25 turns this session",
+             "no limit this session",
+             "+25 turns this workspace",
+             "stop"
+           ]
+
     assert [%{data: %{"dimension" => "turns", "used" => 2, "limit" => 2}}] = events_of_type(sid, :budget_ask_started)
 
     Troupe.answer(sid, "budget-1", "allow")
@@ -86,8 +112,8 @@ defmodule Troupe.Agent.BudgetQuestionTest do
 
     asked = await_question(sid, "budget-1")
     assert asked["question"] =~ "input tokens"
-    always = Enum.find(asked["options"], &(label(&1) == "always"))
-    assert (always["description"] || always[:description]) == "lift the input-token limit for the rest of the session"
+    lift = Enum.find(asked["options"], &(label(&1) == "no limit this session"))
+    assert (lift["description"] || lift[:description]) =~ "lift the input-token limit for the rest of this session"
 
     Troupe.answer(sid, "budget-1", "always")
 
@@ -195,6 +221,167 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     assert state.budget.max_turns == 4
     assert state.budget_asks == 2
     assert state.budget_ask_pending == "budget-2", "the unanswered question is still owed"
+  end
+
+  # -- how much, and for how long (Decision 699) ----------------------------------
+
+  test "a typed amount raises the limit that asked instead of stopping, in every spelling", context do
+    for text <- ["50", "+50", "50 turns"] do
+      {sid, fake} = run(context, tools(6) ++ [finish("ok")], [max_turns: 2], cost_micros: 100_000)
+
+      asked = await_question(sid, "budget-1")
+      assert asked["question"] =~ "safety net against runaway loops and runaway spend"
+      assert asked["question"] =~ "This session has used 2 turns and $0.20 so far"
+      assert asked["question"] =~ "10 turns more would cost roughly $1.00 at the current rate"
+
+      Troupe.answer(sid, "budget-1", text)
+
+      answered = await_answered(sid, "budget-1")
+
+      assert %{"decision" => "raise", "scope" => "session", "limit" => "max_turns", "amount" => 50} = answered,
+             text
+
+      assert await_done(sid)["reason"] == "finished"
+      assert Fake.call_count(fake) == 7
+      assert %{"budget" => %{"turns" => 7, "max_turns" => 52}} = Server.summary(snapshot_state(sid), :done)
+    end
+  end
+
+  test "the other dimensions take their own units", context do
+    {sid, _fake} = run(context, tools(6) ++ [finish("ok")], max_input_tokens: 150, max_turns: 40)
+    assert await_question(sid, "budget-1")["question"] =~ "input tokens"
+    Troupe.answer(sid, "budget-1", "+50k tokens")
+    assert %{"decision" => "raise", "limit" => "max_input_tokens", "amount" => 50_000} = await_answered(sid, "budget-1")
+    assert await_done(sid)["reason"] == "finished"
+
+    {slow, _fake} = run(context, tools(6) ++ [finish("ok")], max_turns: 40, wall_clock_ms: 1)
+    assert await_question(slow, "budget-1")["question"] =~ "wall clock"
+    Troupe.answer(slow, "budget-1", "+15 min")
+    assert %{"decision" => "raise", "limit" => "wall_clock", "amount" => 900_000} = await_answered(slow, "budget-1")
+    assert await_done(slow)["reason"] == "finished"
+  end
+
+  test "nonsense is asked back with the reason, never read as a stop", context do
+    {sid, fake} = run(context, tools(6), max_turns: 2)
+
+    await_question(sid, "budget-1")
+    Troupe.answer(sid, "budget-1", "banana")
+
+    assert %{"decision" => "unclear", "note" => note} = await_answered(sid, "budget-1")
+    assert note =~ "`banana` is not an amount"
+
+    again = await_question(sid, "budget-2")
+    assert String.starts_with?(again["question"], note)
+    assert "stop" in labels(again)
+    assert Fake.call_count(fake) == 2
+
+    Troupe.answer(sid, "budget-2", "stop")
+    assert await_done(sid)["limit"] == "max_turns"
+  end
+
+  test "a raise for this run is given back when the turn ends, so the next run asks again", context do
+    {sid, fake} = run(context, tools(2) ++ [{:text, "resting"}, {:text, "and again"}], max_turns: 2)
+
+    await_question(sid, "budget-1")
+    Troupe.answer(sid, "budget-1", "+10 turns this run")
+    assert %{"decision" => "raise", "scope" => "run", "amount" => 10} = await_answered(sid, "budget-1")
+
+    # The turn goes on to its reply and rests; what it did not use of the ten is gone.
+    await_event(sid, :turn_ended, 10_000)
+    assert Fake.call_count(fake) == 3
+    assert snapshot_state(sid).budget.max_turns == 3
+    assert snapshot_state(sid).budget_run_grant == %{}
+
+    Troupe.send_input(sid, "more")
+    assert await_question(sid, "budget-2")["question"] =~ "turns 3/3"
+    Troupe.answer(sid, "budget-2", "+10 turns this session")
+    await_event(sid, :turn_ended, 10_000)
+    assert snapshot_state(sid).budget.max_turns == 13
+
+    # A session-wide raise is kept across turns, and the checkpoint does not come back
+    # until it is spent.
+    Troupe.send_input(sid, "once more")
+    await_event(sid, :turn_ended, 10_000)
+    assert Fake.call_count(fake) == 5
+    assert length(events_of_type(sid, :budget_ask_started)) == 2
+  end
+
+  test "a raise is folded, so a restarted agent keeps it and a run's is still given back", context do
+    {sid, _fake} = run(context, tools(2) ++ [{:text, "resting"}], max_turns: 2)
+
+    await_question(sid, "budget-1")
+    Troupe.answer(sid, "budget-1", "+10 this run")
+    await_answered(sid, "budget-1")
+    await_event(sid, :turn_ended, 10_000)
+
+    agent = Troupe.Registry.agent_pid(sid, ["root"])
+    ref = Process.monitor(agent)
+    Process.exit(agent, :kill)
+    assert_receive {:DOWN, ^ref, :process, ^agent, :killed}, 2_000
+
+    {_state_name, state} = :sys.get_state(await_new_agent(sid, agent, 50))
+    assert state.budget.max_turns == 3
+    assert state.budget_run_grant == %{}
+  end
+
+  test "this workspace writes the limit to .troupe/config.yaml and the next session starts with it", context do
+    path = Config.project_path(context.workspace)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, "# kept for the team\ndefault_agent: build\n")
+
+    {sid, _fake} = run(context, tools(6) ++ [finish("ok")], max_turns: 2)
+
+    asked = await_question(sid, "budget-1")
+    assert "+25 turns this workspace" in labels(asked)
+    assert asked["question"] =~ "+25 workspace"
+
+    Troupe.answer(sid, "budget-1", "+25 workspace")
+
+    assert %{"decision" => "raise", "scope" => "workspace", "amount" => 25, "path" => ^path} =
+             await_answered(sid, "budget-1")
+
+    assert await_done(sid)["reason"] == "finished"
+
+    assert {:ok, %{"max_turns" => 27, "default_agent" => "build"}} = YamlElixir.read_from_file(path)
+    assert File.read!(path <> ".previous") =~ "kept for the team"
+
+    # The next session in this workspace starts with the raised limit.
+    %{session: next} = start_session(context, steps: [finish("ok")])
+    {_state_name, state} = :sys.get_state(Troupe.Registry.agent_pid(next.id, ["root"]))
+    assert state.budget.max_turns == 27
+  end
+
+  test "on a pod the terms are a ceiling and the workspace is not a scope", context do
+    {sid, fake} = run(context, tools(6), max_turns: 2, terms: %{max_turns: 2})
+
+    asked = await_question(sid, "budget-1")
+    assert asked["question"] =~ "runs under its team's terms, which set the turn limit at 2 turns"
+    assert labels(asked) == ["stop"]
+
+    Troupe.answer(sid, "budget-1", "+50")
+    assert %{"decision" => "unclear", "note" => note} = await_answered(sid, "budget-1")
+    assert note =~ "the team's terms cap the turn limit at 2 turns"
+
+    await_question(sid, "budget-2")
+    Troupe.answer(sid, "budget-2", "stop")
+    assert await_done(sid)["limit"] == "max_turns"
+    assert Fake.call_count(fake) == 2
+
+    # A limit the terms did not set may be raised for the run or the session, and no more.
+    {loose, _fake} = run(context, tools(6) ++ [finish("ok")], max_turns: 2, terms: %{})
+    asked = await_question(loose, "budget-1")
+    refute Enum.any?(labels(asked), &String.contains?(&1, "workspace"))
+    assert asked["question"] =~ "On a pod a raise lasts this run or this session"
+
+    Troupe.answer(loose, "budget-1", "+10 workspace")
+    assert %{"decision" => "unclear", "note" => note} = await_answered(loose, "budget-1")
+    assert note =~ "on a pod"
+
+    await_question(loose, "budget-2")
+    Troupe.answer(loose, "budget-2", "+10")
+    assert %{"decision" => "raise", "scope" => "session"} = await_answered(loose, "budget-2")
+    assert await_done(loose)["reason"] == "finished"
+    refute File.exists?(Config.project_path(context.workspace))
   end
 
   defp await_new_agent(_sid, _old, 0), do: flunk("the agent was not restarted")

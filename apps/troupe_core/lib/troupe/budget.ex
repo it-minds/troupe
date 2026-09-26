@@ -158,6 +158,42 @@ defmodule Troupe.Budget do
     }
   end
 
+  @doc """
+  Raise one limit by `amount` — turns, tokens, or milliseconds of wall clock — which is
+  what a sized answer to the budget question does (Decision 699). The allowance as
+  first given is pinned first, so a later `allow` still buys the first slice and not the
+  raised one.
+  """
+  @spec extend(t(), exhaustion(), pos_integer()) :: t()
+  def extend(%__MODULE__{} = b, limit, amount) when is_integer(amount) and amount > 0 do
+    b = %{b | original: original(b)}
+    Map.update!(b, field(limit), &(&1 + amount))
+  end
+
+  @doc """
+  Take back what is left of a raise that was for one run only (Decision 699): the limit
+  comes down by `amount`, but never below what has been used, so the next run meets the
+  checkpoint again rather than stopping the moment it starts.
+  """
+  @spec reclaim(t(), exhaustion(), pos_integer()) :: t()
+  def reclaim(%__MODULE__{} = b, limit, amount) when is_integer(amount) and amount > 0 do
+    Map.update!(b, field(limit), &max(&1 - amount, used(b, limit)))
+  end
+
+  @doc "What has been used of one limit, in that limit's unit."
+  @spec used(t(), exhaustion()) :: non_neg_integer()
+  def used(%__MODULE__{} = b, :max_turns), do: b.turns
+  def used(%__MODULE__{} = b, :max_input_tokens), do: b.input_tokens
+  def used(%__MODULE__{} = b, :max_output_tokens), do: b.output_tokens
+  def used(%__MODULE__{} = b, :wall_clock), do: elapsed(b)
+
+  @doc "The struct field one limit lives in."
+  @spec field(exhaustion()) :: atom()
+  def field(:max_turns), do: :max_turns
+  def field(:max_input_tokens), do: :max_input_tokens
+  def field(:max_output_tokens), do: :max_output_tokens
+  def field(:wall_clock), do: :wall_clock_ms
+
   @doc "The allowance as first given: what a grant adds."
   @spec original(t()) :: slice()
   def original(%__MODULE__{original: %{} = slice}), do: slice

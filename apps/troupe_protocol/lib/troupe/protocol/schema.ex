@@ -206,12 +206,20 @@ defmodule Troupe.Protocol.Schema do
       },
       # `allow` (one more slice, `grant` says how much), `always` (the limit asked about,
       # named in `lifted`, is lifted for this agent and its subagents; the others still
-      # ask — Decision 687) or `deny` (`budget_exhausted` follows).
+      # ask — Decision 687), `raise` (`limit` goes up by `amount` for `scope` — `run`,
+      # `session` or `workspace`, the last also written to the file `path` names —
+      # Decision 699), `unclear` (the answer could not be read, `note` says why, and the
+      # question is asked again under the next id) or `deny` (`budget_exhausted` follows).
       "budget_ask_answered" => %{
         "call_id" => required(:string),
         "decision" => required(:string),
         "grant" => optional(:object),
-        "lifted" => optional(:string)
+        "lifted" => optional(:string),
+        "scope" => optional(:string),
+        "limit" => optional(:string),
+        "amount" => optional(:integer),
+        "path" => optional(:string),
+        "note" => optional(:string)
       },
       # One tool has failed `failures` times in a row and the agent asks before its next
       # model call whether the turn goes on (Decision 687). The question itself is a

@@ -267,22 +267,24 @@ Durable:
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task`. The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
-| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
-| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
+| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
+| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
 | `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit` |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
-`waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
-first given again — a checkpoint every slice. It is a stop where the budget is a contract
-(`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
-session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
-never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again. It ends `budget_exhausted` with no further model call and nothing left
+`waiting` until the answer, input queues meanwhile, and the answer says how much more and
+for how long (Decision 699) — a checkpoint every time. It is a stop where the budget is a
+contract (`budget_asks: false`, which the plane's terms set) and never asked under
+`full_send`; a session with `approvals: deny` answers no itself, as it does an `ask_user`.
+A subagent never asks: it hands its parent what it found, labelled partial, and the parent
+may delegate again. It ends `budget_exhausted` with no further model call and nothing left
 running, and a `done` subagent keeps no session awake: its parent stops it on taking its
-result. `always` lifts only the limit it was asked about (Decision 687).
+result. `always` lifts only the limit it was asked about (Decision 687). On a pod the
+terms are a ceiling: a raise past a limit they set is refused with the reason, and the
+workspace is not a scope there.
 
 A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
 counts each tool's failures in a row; a success of that tool clears its count. At

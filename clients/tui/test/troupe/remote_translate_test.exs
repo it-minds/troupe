@@ -367,30 +367,62 @@ defmodule Troupe.RemoteTranslateTest do
     assert answered.data == %{call_id: "q1", text: "blue"}
   end
 
-  test "the budget question is its own item, the question it rides on is not drawn twice, and the harness's notes are notes" do
-    [started] =
-      translate(
+  test "the budget question is one item, filled in by the question it rides on, and the harness's notes are notes" do
+    memory = Translate.remember(Translate.memory(), "root")
+
+    {[started], memory} =
+      Translate.durable(
+        "s-1",
         durable("budget_ask_started", %{
           "call_id" => "budget-1",
           "dimension" => "turns",
           "used" => 40,
           "limit" => 40,
           "detail" => "turns 40/40 (100%)"
-        })
+        }),
+        memory
       )
 
     assert started.type == :budget_ask_started
-    assert started.data == %{call_id: "budget-1", detail: "turns 40/40 (100%)", dimension: :turns}
 
-    assert translate(
-             durable("question_asked", %{
-               "call_id" => "budget-1",
-               "agent_path" => ["root"],
-               "question" => "turns 40/40 (100%) — continue?",
-               "options" => [%{"label" => "allow"}, %{"label" => "always"}, %{"label" => "deny"}],
-               "multiple" => false
-             })
-           ) == []
+    assert started.data == %{
+             call_id: "budget-1",
+             detail: "turns 40/40 (100%)",
+             dimension: :turns,
+             question: "",
+             options: []
+           }
+
+    # The question the harness wrote beside it draws the same item again, now with its
+    # words and its options (Decision 120); the window keeps one per id.
+    {[filled], _memory} =
+      Translate.durable(
+        "s-1",
+        durable("question_asked", %{
+          "call_id" => "budget-1",
+          "agent_path" => ["root"],
+          "question" => "turns 40/40 (100%): the turn limit is a safety net.",
+          "options" => [
+            %{"label" => "+10 turns this run", "description" => "for the run"},
+            %{"label" => "stop"}
+          ],
+          "multiple" => false
+        }),
+        memory
+      )
+
+    assert filled.type == :budget_ask_started
+
+    assert filled.data == %{
+             call_id: "budget-1",
+             detail: "turns 40/40 (100%)",
+             dimension: :turns,
+             question: "turns 40/40 (100%): the turn limit is a safety net.",
+             options: [
+               %{label: "+10 turns this run", description: "for the run"},
+               %{label: "stop", description: nil}
+             ]
+           }
 
     assert translate(durable("question_answered", %{"call_id" => "budget-1", "text" => "allow"})) ==
              []

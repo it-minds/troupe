@@ -1858,13 +1858,6 @@ defmodule Troupe.UI.TUI.Server do
       nil ->
         put_win(state, code)
 
-      # The budget question is a question the harness asks (troupe-remote Decision 660):
-      # the same three keys, answered in the words it listens for. `a` lifts the limit the
-      # question is about, for this agent and its subagents, and no other limit and no
-      # other branch — a branch is a session now (troupe-remote Decision 687).
-      %{kind: :budget, call_id: call_id} ->
-        send_answer(state, call_id, %{"y" => "allow", "n" => "deny", "a" => "always"}[code])
-
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
 
@@ -1905,11 +1898,12 @@ defmodule Troupe.UI.TUI.Server do
 
   # A digit picks an offered option: with a single-choice question it is the
   # answer, with `multiple` it toggles a tick that Enter later sends. Only while
-  # such a question is on screen — otherwise digits are ordinary typed text.
+  # such a question is on screen — otherwise digits are ordinary typed text. The
+  # budget question is one such (Decision 120).
   defp window_key(%Key{code: <<d>>}, path, %{win_text: ""} = state) when d in ?1..?9 do
     w = Map.fetch!(state.model.windows, path)
 
-    case pending_of(w, state.pane.agent || path, [:question]) do
+    case pending_of(w, state.pane.agent || path, [:question, :budget]) do
       %{options: options} = q when options != [] ->
         case Enum.at(options, d - ?1) do
           nil -> state
@@ -1960,7 +1954,7 @@ defmodule Troupe.UI.TUI.Server do
       String.starts_with?(text, "/upload ") ->
         upload(sid, String.trim(String.trim_leading(text, "/upload ")))
 
-      question = pending_of(w, state.pane.agent || path, [:question]) ->
+      question = pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
 
       true ->
@@ -1981,11 +1975,13 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(key, _path, state), do: editing_key(key, state)
 
-  # y/n/a answers approvals and the budget question — a delegated subagent raises
-  # both, and its pending item lives in the branch's window like the root's. When
-  # more than one is outstanding the agent whose pane is open wins, so the keys
-  # answer the request the reader is looking at rather than the oldest one.
-  defp answerable(w, viewed), do: pending_of(w, viewed, [:approval, :budget])
+  # y/n/a answers approvals — a delegated subagent raises them too, and its pending
+  # item lives in the branch's window like the root's. When more than one is
+  # outstanding the agent whose pane is open wins, so the keys answer the request the
+  # reader is looking at rather than the oldest one. The budget question is answered
+  # by digit or by typing, never by one of these letters (Decision 120): an amount typed
+  # in a person's own words — `no limit` — must not stop the session on its first key.
+  defp answerable(w, viewed), do: pending_of(w, viewed, [:approval])
 
   # A single-choice question is answered by the digit itself; a multiple-choice
   # one accumulates ticks until Enter, and re-pressing a digit unticks it.

@@ -93,4 +93,42 @@ defmodule Troupe.BudgetTest do
       assert Budget.check(%{slice | input_tokens: 10_000}) == :ok
     end
   end
+
+  # A sized answer to the budget question (Decision 699).
+  describe "a raise" do
+    test "lifts one limit by the amount and leaves the first allowance for a later allow" do
+      raised = spent() |> Budget.extend(:max_turns, 25)
+
+      assert raised.max_turns == 27
+      assert {:exhausted, :max_input_tokens} = Budget.check(raised)
+      assert Budget.original(raised).turns == 2
+      assert Budget.grant(raised).max_turns == 29
+    end
+
+    test "on the clock is in milliseconds" do
+      raised = spent() |> Budget.extend(:wall_clock, 15 * 60_000)
+      assert raised.wall_clock_ms == 1_000 + 15 * 60_000
+    end
+
+    test "for one run is given back down to what was used, so the next run asks again" do
+      budget = spent() |> Budget.extend(:max_turns, 10)
+      after_three = %{budget | turns: 5}
+
+      reclaimed = Budget.reclaim(after_three, :max_turns, 10)
+      assert reclaimed.max_turns == 5
+      assert {:exhausted, :max_turns} = Budget.check(reclaimed)
+
+      # Nothing used of it: back to where it was.
+      assert Budget.reclaim(budget, :max_turns, 10).max_turns == 2
+      # A raise for the session in the same turn is not taken back with it.
+      both = budget |> Budget.extend(:max_turns, 25) |> Budget.reclaim(:max_turns, 10)
+      assert both.max_turns == 27
+    end
+
+    test "on the clock gives back down to the time already run" do
+      budget = spent() |> Budget.extend(:wall_clock, 60_000) |> Budget.reclaim(:wall_clock, 60_000)
+      assert budget.wall_clock_ms >= 3_600_000
+      assert {:exhausted, :wall_clock} = Budget.check(%{budget | lifted: [:max_turns, :max_input_tokens, :max_output_tokens]})
+    end
+  end
 end

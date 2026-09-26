@@ -36,6 +36,7 @@ export {
   rootState,
   openApprovals,
   openQuestions,
+  LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
 export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember, QuestionOption } from "./transcript.js";
 export { FleetStore, PlaneSource, rowFromPlane, filterRows, awaitingApproval, awaitingYou, totalCostMicros } from "./fleet.js";
