@@ -99,8 +99,9 @@ defmodule Troupe.Protocol.Schema do
         # one and not the other.
         "gateway" => optional(:object)
       },
-      # `reason` is a sentence a person can act on (Decision 659), not a term.
-      "llm_error" => %{"reason" => required(:string)},
+      # `reason` is a sentence a person can act on (Decision 659), not a term. `note` is a
+      # root's: what its conversation was told, which a replay puts back (Decision 693).
+      "llm_error" => %{"reason" => required(:string), "note" => optional(:string)},
       # A reply the output cap cut (`max_tokens`) or that said nothing (`empty`): `note`
       # when the model was asked again, `calls` when tool calls cut mid-argument were
       # answered with an error, `final` when it had been asked once already and the agent

@@ -244,7 +244,7 @@ defmodule Troupe.Agent.Server do
           "incomplete_calls" => Enum.map(incomplete, fn {id, _name, _args} -> id end)
         })
 
-        {state, action}
+        {if(takes_up_turn?(action), do: open_batch(state, events), else: state), action}
     end
   end
 
@@ -274,6 +274,11 @@ defmodule Troupe.Agent.Server do
   # The number the next child takes (Decision 688), a head of its own for the same reason.
   defp fold_event(%Event{type: "delegation_started", data: data}, state),
     do: %{state | child_seq: child_seq(state, data["child_path"])}
+
+  # The note a root's failed request left in its conversation (Decision 693). A log written
+  # before the note was, has none, and replays as it always did.
+  defp fold_event(%Event{type: "llm_error", data: %{"note" => note}}, state) when is_binary(note),
+    do: %{state | conversation: state.conversation ++ [Message.user(note)]}
 
   defp fold_event(%Event{type: type, data: data}, state) do
     case type do
@@ -486,6 +491,67 @@ defmodule Troupe.Agent.Server do
         do: {data["call_id"], data["name"], data["args"]}
   end
 
+  # The turn a restart came back in the middle of: the model's calls whose results were back
+  # before it. They reach the conversation with the ones it re-runs or closes, since the
+  # model is owed a result for every call it made, and a `finish` among them still ends the
+  # agent once the rest are back (Decision 693). Only a conversation that ends on the model's
+  # calls has a turn open; `tool_results` closes one. And only an action that re-runs or
+  # closes calls takes it up: one that takes nothing up would leave a `finish` summary
+  # standing to end some later turn (Decision 688).
+  defp takes_up_turn?({:resume, _pending, _stopped}), do: true
+  defp takes_up_turn?({action, _calls}), do: action in [:interrupted, :rerun]
+  defp takes_up_turn?(_action), do: false
+
+  defp open_batch(state, events) do
+    with %Message{role: :assistant} = message <- List.last(state.conversation),
+         [_ | _] = uses <- Message.tool_uses(message) do
+      turn = events |> Enum.reverse() |> Enum.take_while(&(&1.type != "llm_response"))
+
+      started =
+        for %Event{type: "tool_call_started", data: data} <- turn,
+            into: %{},
+            do: {data["call_id"], data}
+
+      back =
+        for %Event{type: "tool_call_completed", data: %{"call_id" => id} = data} <- turn,
+            Map.has_key?(started, id),
+            into: %{},
+            do: {id, returned(state, started[id], data)}
+
+      %{
+        state
+        | pending: back,
+          call_order: Enum.map(uses, & &1.id),
+          finish_summary: finished_with(back)
+      }
+    else
+      _ -> state
+    end
+  end
+
+  defp returned(state, started, completed) do
+    result = %Result{
+      call_id: completed["call_id"],
+      name: completed["name"],
+      ok?: completed["ok"] == true,
+      content: Blobs.resolve(state.session_id, state.workspace.root_real, completed["content"])
+    }
+
+    %Call{
+      id: completed["call_id"],
+      name: completed["name"],
+      args: started["args"] || %{},
+      result: result
+    }
+  end
+
+  defp finished_with(back) do
+    Enum.find_value(Map.values(back), fn
+      %Call{name: "finish", args: %{"summary" => summary}, result: %Result{ok?: true}} -> summary
+      _call -> nil
+    end)
+  end
+
   # Whether the last thing that happened to a turn was a cancel: no input, model call or
   # tool call since. A turn the failure guard stopped (Decision 687) counts as one — the
   # harness cancelled it, and taking it up again after a restart is the loop it stopped.
@@ -521,22 +587,10 @@ defmodule Troupe.Agent.Server do
   # it would look incomplete again on the next restart, forever.
   def idle(:internal, :interrupted, state), do: {:keep_state, state}
 
+  # The results fold in with the turn's others that were back before the restart.
   def idle(:internal, {:interrupted, calls}, state) do
-    results =
-      Enum.map(calls, fn {call_id, name, _args} ->
-        Result.error(call_id, name, "interrupted: the session stopped before this finished")
-      end)
-
-    Enum.each(results, fn result ->
-      log(state, :tool_call_completed, %{
-        "call_id" => result.call_id,
-        "name" => result.name,
-        "ok" => false,
-        "content" => result.content
-      })
-    end)
-
-    {:keep_state, fold_results(state, results)}
+    state = close_interrupted(state, calls)
+    {:keep_state, fold_results(state, State.ordered_results(state))}
   end
 
   def idle(:internal, {:rerun, calls}, state) do
@@ -547,14 +601,9 @@ defmodule Troupe.Agent.Server do
 
   # Some were waiting for a person and some were not. The ones that were not are closed
   # off first, so the model has a `tool_result` for every `tool_use` it emitted, and then
-  # the waiting ones go back out.
+  # the waiting ones go back out; the turn's results fold in together once they are back.
   def idle(:internal, {:resume, pending, stopped}, state) do
-    actions = [
-      {:next_event, :internal, {:interrupted, stopped}},
-      {:next_event, :internal, {:rerun, pending}}
-    ]
-
-    {:keep_state, state, actions}
+    state |> close_interrupted(stopped) |> dispatch_reruns(pending)
   end
 
   def idle({:call, from}, :snapshot, state), do: reply_snapshot(from, :idle, state)
@@ -641,6 +690,7 @@ defmodule Troupe.Agent.Server do
         state
         |> charge_child_usage(child_result)
         |> complete_call(call, child_result_to_result(call, child_result))
+        |> stop_child(call)
         |> maybe_next_turn()
     end
   end
@@ -1269,9 +1319,10 @@ defmodule Troupe.Agent.Server do
   # A call nobody priced counts as free wherever spend is added up — a team's budget on
   # the plane among them — so a model with no price anywhere is said once a session, to
   # the log and as telemetry, rather than left to look free. Once a session and not once
-  # an agent: the first agent to call it claims it, and the others find it claimed.
+  # an agent: the first agent to call it claims it for the session, and the others find it
+  # claimed, a subagent that has since stopped among them (Decision 693).
   defp unpriced(%State{} = state, model) do
-    if Registry.first?({:unpriced, state.session_id, model}) do
+    if Log.first?(state.session_id, {:unpriced, state.session_id, model}) do
       Logger.warning(
         "troupe: #{model} has no price, so its calls count as free in session #{state.session_id}: " <>
           "the gateway did not say what they cost, and neither the catalog nor models.prices prices it. " <>
@@ -1399,14 +1450,12 @@ defmodule Troupe.Agent.Server do
   # hears what there was — labelled partial, so it can act on it and see that it is
   # partial — rather than nothing.
   defp finish_short(state, reason, summary) do
-    if state.parent do
-      send(
-        state.parent,
-        {:child_result, state.parent_ref, {:partial, summary, Budget.usage(state.budget)}}
-      )
-    end
-
-    enter_done(state, reason, %{"summary" => summary})
+    enter_done(
+      state,
+      reason,
+      %{"summary" => summary},
+      {:partial, summary, Budget.usage(state.budget)}
+    )
   end
 
   # The prompt no longer fits. The conversation is not lost — it is all in the log — but
@@ -1434,14 +1483,17 @@ defmodule Troupe.Agent.Server do
   # waits for a person to say try again, and nobody talks to a subagent but its parent,
   # which was left waiting on the delegation for ever (Decision 688).
   defp llm_failed(state, message) do
-    log(state, :llm_error, %{"reason" => message})
-
     if State.subagent?(state) do
+      log(state, :llm_error, %{"reason" => message})
       finish_short(state, :llm_error, failed_summary(state, message))
     else
       # The failure goes into the conversation so the next turn can react to it, rather
-      # than vanishing into a log the model cannot read.
+      # than vanishing into a log the model cannot read, and into the log with the error,
+      # so the conversation a restart rebuilds has it too (Decision 693). Not a `user_input`
+      # from the harness: a client reads one of those as the turn going on, and this one
+      # ends it.
       note = "The previous model request failed: #{message}. Try a different approach."
+      log(state, :llm_error, %{"reason" => message, "note" => note})
       to_idle_or_done(%{state | conversation: state.conversation ++ [Message.user(note)]})
     end
   end
@@ -2181,7 +2233,7 @@ defmodule Troupe.Agent.Server do
           "task" => task
         })
 
-        updated = %{call | child_ref: child_ref, monitor: monitor}
+        updated = %{call | child_ref: child_ref, child_pid: node_pid, monitor: monitor}
 
         %{
           state
@@ -2196,6 +2248,17 @@ defmodule Troupe.Agent.Server do
         %{state | child_seq: seq}
     end
   end
+
+  # A child that has reported is stopped (issue #171). What it found is its delegation's
+  # result, what it did is its own log, and nothing talks to a subagent but its parent, so
+  # kept up it held only its conversation, until the session's tree stopped. It wrote
+  # `agent_done` before reporting, so stopping it here cuts nothing off.
+  defp stop_child(state, %Call{child_pid: pid}) when is_pid(pid) do
+    DynamicSupervisor.terminate_child(children_sup(state), pid)
+    state
+  end
+
+  defp stop_child(state, _call), do: state
 
   defp find_call_by_child(state, child_ref) do
     Enum.find_value(state.pending, fn {_id, call} ->
@@ -2231,9 +2294,7 @@ defmodule Troupe.Agent.Server do
   # parent everything it managed to say, labelled as cut short, is far more useful
   # than a bare error — the parent can act on partial findings, and it can see that
   # they are partial.
-  defp report_partial(%State{parent: nil}, _limit), do: :ok
-
-  defp report_partial(state, limit) do
+  defp out_of_budget(state, limit) do
     summary =
       case last_assistant_text(state) do
         "" ->
@@ -2244,10 +2305,7 @@ defmodule Troupe.Agent.Server do
             "be incomplete]\n\n" <> text
       end
 
-    send(
-      state.parent,
-      {:child_result, state.parent_ref, {:partial, summary, Budget.usage(state.budget)}}
-    )
+    {:partial, summary, Budget.usage(state.budget)}
   end
 
   defp last_assistant_text(%State{conversation: conversation}) do
@@ -2269,15 +2327,19 @@ defmodule Troupe.Agent.Server do
   end
 
   defp report_and_finish(state, summary) do
-    if state.parent do
-      send(
-        state.parent,
-        {:child_result, state.parent_ref, {:ok, summary, Budget.usage(state.budget)}}
-      )
-    end
-
-    enter_done(state, :finished, %{"summary" => summary})
+    enter_done(
+      state,
+      :finished,
+      %{"summary" => summary},
+      {:ok, summary, Budget.usage(state.budget)}
+    )
   end
+
+  defp report(%State{parent: parent, parent_ref: ref}, result)
+       when is_pid(parent) and result != nil,
+       do: send(parent, {:child_result, ref, result})
+
+  defp report(_state, _result), do: :ok
 
   # -- compaction -------------------------------------------------------------
 
@@ -2459,18 +2521,24 @@ defmodule Troupe.Agent.Server do
     end)
   end
 
-  defp enter_done(state, reason, data) do
+  # A subagent reports last, once everything it has to say is written and its state
+  # announced: its parent stops it as soon as it has the result (#171).
+  defp enter_done(state, reason, data, result \\ nil) do
     state = clear_llm(state)
 
     log(state, :agent_done, Map.put(data, "reason", Atom.to_string(reason)))
 
-    if reason == :budget_exhausted do
-      log(state, :budget_exhausted, data)
-      report_partial(state, data["limit"])
-    end
+    result =
+      if reason == :budget_exhausted do
+        log(state, :budget_exhausted, data)
+        out_of_budget(state, data["limit"])
+      else
+        result
+      end
 
     state = %{state | done_reason: reason}
     publish_state(state, :done)
+    report(state, result)
     {:next_state, :done, state}
   end
 
@@ -2516,13 +2584,96 @@ defmodule Troupe.Agent.Server do
 
   # -- reruns -----------------------------------------------------------------
 
+  # Beside the turn's calls that were back before the restart, which `open_batch/2` put
+  # back, rather than in place of them.
   defp dispatch_reruns(state, calls) do
-    tool_uses =
-      Enum.map(calls, fn {id, name, args} ->
-        %ToolUse{id: id, name: name, input: args || %{}}
-      end)
+    ids = Enum.map(calls, fn {id, _name, _args} -> id end)
 
-    dispatch_tools(state, tool_uses)
+    state =
+      calls
+      |> Enum.map(fn {id, name, args} -> %ToolUse{id: id, name: name, input: args || %{}} end)
+      |> Enum.reduce(close_children(state, calls), &dispatch_tool/2)
+      |> Map.update!(:call_order, &Enum.uniq(&1 ++ ids))
+
+    publish_state(state, :acting)
+    maybe_next_turn(state, :thinking)
+  end
+
+  defp close_interrupted(state, calls) do
+    state = close_children(state, calls)
+
+    Enum.reduce(calls, state, fn {call_id, name, args}, acc ->
+      result =
+        Result.error(call_id, name, "interrupted: the session stopped before this finished")
+
+      log(acc, :tool_call_completed, %{
+        "call_id" => call_id,
+        "name" => name,
+        "ok" => false,
+        "content" => result.content
+      })
+
+      call = %Call{id: call_id, name: name, args: args || %{}, result: result}
+
+      %{
+        acc
+        | pending: Map.put(acc.pending, call_id, call),
+          call_order: Enum.uniq(acc.call_order ++ [call_id])
+      }
+    end)
+  end
+
+  # A delegation a restart closes or takes up again has a child nothing starts again: its
+  # path names that child alone (Decision 688), and its Node went with the tree or with
+  # this agent's. It never reports and never closes what it had open, so its part of the
+  # log is closed here, and the part of every agent under it: each call still open, which
+  # is how every reader closes an approval or a question the call waited on, and
+  # `agent_done` (Decision 693).
+  defp close_children(state, calls) do
+    case for({id, "delegate", _args} <- calls, do: id) do
+      [] ->
+        state
+
+      delegations ->
+        events = Log.replay(state.session_id)
+
+        children =
+          for %Event{type: "delegation_started", agent: agent, data: data} <- events,
+              agent == state.agent_path and data["call_id"] in delegations,
+              do: data["child_path"]
+
+        events
+        |> Enum.filter(&under?(&1.agent, children))
+        |> Enum.group_by(& &1.agent)
+        |> Enum.sort_by(fn {path, _events} -> -length(path) end)
+        |> Enum.each(fn {path, own} -> close_child(state, path, own) end)
+
+        state
+    end
+  end
+
+  defp under?(path, children) when is_list(path),
+    do: Enum.any?(children, &List.starts_with?(path, &1))
+
+  defp under?(_path, _children), do: false
+
+  defp close_child(state, path, events) do
+    for {call_id, name, _args} <- incomplete_calls(events) do
+      Log.append(state.session_id, path, :tool_call_completed, %{
+        "call_id" => call_id,
+        "name" => name,
+        "ok" => false,
+        "content" => "interrupted: the agent that delegated this restarted before it finished"
+      })
+    end
+
+    if not done?(events),
+      do: Log.append(state.session_id, path, :agent_done, %{"reason" => "interrupted"})
+  end
+
+  defp done?(events) do
+    last = events |> Enum.filter(&(&1.type in ["agent_done", "agent_woken"])) |> List.last()
+    match?(%Event{type: "agent_done"}, last)
   end
 
   # -- plumbing ---------------------------------------------------------------
