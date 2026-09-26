@@ -778,11 +778,13 @@ One brief per repository: a worktree's is the main checkout's. A client that fin
 {"session_id": "s-9f"}
 ```
 → `{"servers": [{"name": "filesystem", "state": "ready", "tools": ["read_file", "list_directory"],
-"error": null}]}`
+"error": null, "layer": "workspace", "source": "/home/me/project/.troupe/mcp.json"}]}`
 
-The MCP servers the session's own workspace configuration names (`mcp:` in
-`.troupe/config.yaml`), as distinct from a pod's bundle servers: `state` is
-`connecting`, `ready`, `error` or `stopped`. Their tools are `mcp.<server>.<tool>` like
+The MCP servers the session runs of its own — `mcp:` in `config.yaml` (`layer`
+`config`), the user's `mcp.json` (`user`) and the workspace's `.troupe/mcp.json`
+(`workspace`), `source` naming the file — as distinct from a pod's bundle servers:
+`state` is `connecting`, `ready`, `error`, `stopped`, `pending` (the workspace's trust
+question below is unanswered) or `disabled`. Their tools are `mcp.<server>.<tool>` like
 every other MCP tool.
 
 #### `workflows.list`
@@ -848,6 +850,97 @@ depending on opencode's config. A provider the file already names is kept as it 
 listed under `kept`; opencode's default model becomes `models.default` only when the file
 has none. `from` is `opencode`, the only source; with no opencode providers the call fails
 with `invalid_params`. Nothing is written when nothing would change.
+
+#### `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.list`, `skills.add`, `skills.remove`
+
+The person's own MCP servers and skills, in two layers the daemon reads for every local
+session: the user's (`mcp.json` and `skills/` beside `config.yaml`) and the workspace's
+(`.troupe/mcp.json` and `.troupe/skills/`), over `config.yaml`'s `mcp:`. **The daemon's
+only**, like `config.*`: a worker answers `method_not_found`, since a pod's servers are
+its bundle's. `scope` is `user` (the default) or `workspace`, the latter needing a
+`workspace`. Both clients manage the one set through these.
+
+```json
+{"workspace": "/home/me/project", "session_id": "s-9f"}
+```
+`mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
+"transport", "command", "args", "url", "cd", "env", "permission", "disabled",
+"refused", "trust", "state", "tools", "error"}], "warnings": [...]}` — every server the
+layers give the workspace, merged by name, the workspace's file over the user's over
+`config.yaml`. `layer` is `config`, `user` or `workspace` and `source` the file; `env` is
+the names of its variables, never their values; `refused` says why one will not start
+(an unset `{env:VAR}`); `trust` is `trusted` or `pending` for a workspace-level server
+and null otherwise. With `session_id`, each server also carries the `state`, `tools` and
+`error` that `mcp.status` reports for the session, and a server the session runs that no
+file names any more is listed too.
+
+```json
+{"command_id": "c-14", "scope": "user", "from": "/home/me/.claude/.mcp.json", "link": false}
+```
+`mcp.add` (`admin`) → `{"path", "from", "added": ["fs"], "skipped": [{"name",
+"reason"}], "warnings", "linked"}`. Imports another tool's file — Claude Code's and
+Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers` — copying its servers into
+the layer's `mcp.json`, or with `link: true` reading it in place from then on. `${VAR}`
+and `${env:VAR}` become `{env:VAR}`; a server with a `${input:…}` is skipped and said
+so; `headers` are dropped with a warning. Importing again updates.
+
+```json
+{"command_id": "c-15", "scope": "workspace", "workspace": "/home/me/project",
+ "name": "fs", "server": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}}
+```
+The same call with `name` and `server` writes one entry, merged onto what the layer has
+under that name — `{"disabled": true}` alone turns one off without restating its
+command — and answers `{"name", "path", "entry", "warnings"}`, the entry's `env` as
+names. A name has lower-case letters, digits, `-` and `_`, and no dot.
+
+```json
+{"command_id": "c-16", "scope": "user", "name": "fs"}
+```
+`mcp.remove` (`admin`) → `{"path", "removed": ["fs"]}`. `include` in place of `name`
+unlinks a linked file, and `removed` names every server it gave. A server that comes
+only from a linked file is refused with `invalid_params` naming the file.
+
+```json
+{"session_id": "s-9f", "name": "fs"}
+```
+`mcp.check` (`admin`) → `{"server": {"name", "layer", "source", "state", "tools",
+"error"}}`. With a `session_id`, the session reads its files again for that server and
+starts what they say now — which is how one that died is brought back, one just written
+is started, and one now `disabled` is stopped — and answers once it is ready or has
+failed; a workspace-level server whose command changed is asked about again first, and
+answers `pending`. With `workspace` and `name`, or with `name` and a `server` that was
+never written, the server is run once on its own, asked for its tools, and stopped. A
+stdio server that does not answer `initialize` within twenty seconds is `error`.
+
+```json
+{"workspace": "/home/me/project"}
+```
+`skills.list` (`observe`; `workspace` optional) → `{"skills": [{"name", "description",
+"layer", "source", "dir", "linked"}]}`, the workspace's over the user's by name.
+
+```json
+{"command_id": "c-17", "scope": "user", "from": "/home/me/.claude/skills", "link": true}
+```
+`skills.add` (`admin`) → `{"path", "from", "added", "skipped", "linked"}`. `from` is a
+directory of skills, such as `~/.claude/skills`, or one skill's directory (one holding a
+`SKILL.md`): copied into the layer's `skills/`, or with `link` read in place through the
+layer's `skills.json`. A directory whose name is not one a skill may have is skipped.
+
+```json
+{"command_id": "c-18", "scope": "user", "name": "review"}
+```
+`skills.remove` (`admin`) → `{"path", "removed"}`; `include` unlinks a linked directory,
+as for servers.
+
+**Trust.** A workspace-level server is a command a cloned repository would run, so a
+local session starts the workspace's servers only once somebody attached has answered
+the question the session asks — a `question_asked` with `call_id` `mcp-trust-<hash>` and
+the options `deny`, `once` and `allow`, answered through `question.answer` like an
+`ask_user`, so any client can. `allow` is remembered per checkout in the daemon's state
+directory, never in the repository, beside a fingerprint of what would run, so a changed
+command asks again; `once` runs them for the session; `deny` leaves them `stopped` until
+the next session. A workspace on `trusted_workspaces` is not asked. Under
+`managed_mcp_servers_only` no local server starts, and `mcp.status` says so for each.
 
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
@@ -1001,9 +1094,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -1061,7 +1154,8 @@ require `session_id` (§6) but the four below: `session.get`, `input.send`, `tur
 `mcp.status`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
-`worktree.*`, `watch.set`, `identity.*` and `config.*` — and a token for one session is
+`worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
+but `mcp.status` — and a token for one session is
 refused it with `forbidden` and `data.method` naming it. A method a worker does not have
 is `method_not_found`, whatever the token, and `initialize` and `auth.refresh` belong to
 the connection. The plane mints every token for a pod with a `session_id`; one without is
