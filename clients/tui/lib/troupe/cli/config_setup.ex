@@ -24,7 +24,8 @@ defmodule Troupe.CLI.ConfigSetup do
 
   Plain `troupe` asks the same questions before it opens a session on a machine with no
   settings and no key (`before_session/2`), so a first run meets the setup rather than a
-  model error.
+  model error — unless the daemon says the first run was done already (`setup.get`), in
+  the desktop app or by hand, in which case nothing is asked.
   """
 
   alias Troupe.CLI.ModelConfig
@@ -99,6 +100,11 @@ defmodule Troupe.CLI.ConfigSetup do
         io.say.("No provider is set up yet: run `troupe config` to set one up.")
         :ok
 
+      # A first run done in the desktop app is recorded once, for both clients; the
+      # daemon says so, and this asks nothing (TUI Decision 123).
+      done_elsewhere?(io) ->
+        :ok
+
       true ->
         # The daemon may know better: a file, or a key in its own environment.
         case io.call.("config.get", %{}) do
@@ -117,6 +123,10 @@ defmodule Troupe.CLI.ConfigSetup do
         end
     end
   end
+
+  # A daemon from before the first run's questions has no `setup.get`, and answers
+  # `method_not_found`: then nothing says it was done, and the questions are asked.
+  defp done_elsewhere?(io), do: match?({:ok, %{"needed" => false}}, io.call.("setup.get", %{}))
 
   defp report(io) do
     io.say.(io.describe.())

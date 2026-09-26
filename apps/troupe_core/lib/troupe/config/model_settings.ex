@@ -24,7 +24,9 @@ defmodule Troupe.Config.ModelSettings do
   alias Troupe.LLM.Catalog
   alias Troupe.LLM.Catalog.Store
 
-  @providers ~w(anthropic openai)
+  # The fake too, so a packaged binary's first run can be driven to a written file with
+  # no model behind it (Decision 705); a screen offers the first two.
+  @providers ~w(anthropic openai fake)
   @auths ~w(api_key bearer)
   @roles ~w(default cheap expensive)
 
@@ -476,16 +478,22 @@ defmodule Troupe.Config.ModelSettings do
   defp failure(provider, name, reason) do
     %{
       "provider" => if(name in [nil, "(session)"], do: provider, else: name),
-      "reason" => reason(reason)
+      "reason" => describe_failure(reason)
     }
   end
 
-  defp reason({:http, 401}), do: "401 unauthorized: the key was refused"
-  defp reason({:http, 403}), do: "403 forbidden: the key may not list models"
-  defp reason({:http, 404}), do: "404: no model listing at that URL; check the base URL"
-  defp reason({:http, status}), do: "HTTP #{status}"
-  defp reason(:no_base_url), do: "an OpenAI-compatible provider needs a base URL"
-  defp reason(other), do: inspect(other)
+  @doc """
+  Why a provider would not list its models, as a person reads it. The words a settings
+  screen shows beside an empty list, and what a first run's key check says
+  (`Troupe.Setup.check_key/1`).
+  """
+  @spec describe_failure(term()) :: String.t()
+  def describe_failure({:http, 401}), do: "401 unauthorized: the key was refused"
+  def describe_failure({:http, 403}), do: "403 forbidden: the key may not list models"
+  def describe_failure({:http, 404}), do: "404: no model listing at that URL; check the base URL"
+  def describe_failure({:http, status}), do: "HTTP #{status}"
+  def describe_failure(:no_base_url), do: "an OpenAI-compatible provider needs a base URL"
+  def describe_failure(other), do: inspect(other)
 
   defp string(value) when is_binary(value) and value != "", do: value
   defp string(_value), do: nil

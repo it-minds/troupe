@@ -859,7 +859,8 @@ because it sends a key to a URL of the caller's choosing.
  "auth": "bearer", "api_key": "sk-...", "models": {"default": "glm-5.2", "cheap": "qwen3.6-35b"}}
 ```
 `config.set` (`admin`) → the `config.get` answer after the write. `provider` is
-`anthropic` or `openai` (anything speaking Chat Completions). An absent `api_key` keeps
+`anthropic` or `openai` (anything speaking Chat Completions), or `fake`, the scripted
+model a packaged build is tried with. An absent `api_key` keeps
 the saved one and `""` removes it; a `base_url` of null or `""` removes it; a model role
 set to null is removed. Keys it does not own are kept, but the file is rewritten, so
 comments are not: the file before the save is kept as `config.yaml.previous`. A file
@@ -877,6 +878,55 @@ depending on opencode's config. A provider the file already names is kept as it 
 listed under `kept`; opencode's default model becomes `models.default` only when the file
 has none. `from` is `opencode`, the only source; with no opencode providers the call fails
 with `invalid_params`. Nothing is written when nothing would change.
+
+#### `setup.get`, `setup.answer`
+
+A first run's questions (Decision 705), asked one step at a time so that the terminal
+client and the desktop app ask the same things in the same order, and a person who
+answered in one is not asked again in the other. **The daemon's only**, like `config.*`:
+a worker answers `method_not_found`. The daemon holds one flow in progress; every
+answer moves it one step on, and the key a person gives at one step is the key written
+at a later one, without ever travelling back to a client.
+
+```json
+{}
+```
+`setup.get` (`observe`) → `{"needed", "completed", "step", "steps": [{"name",
+"done"}], "answers", "detected", "key_storage", "offered", "suggested", "check",
+"suggested_prompt", "session"}`. `needed` says whether a client should offer the
+questions: nothing recorded, no `config.yaml`, and no model that can be asked.
+`completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
+client in the daemon's state directory. `step` is the step to answer next — `where`,
+`provider`, `key`, `models`, `workspace`, `finish` — and `steps` the ones this path
+takes, since a plane finishes at once and reused settings skip the key and the models.
+`detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
+`OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
+`config` (the file, as `config.get` reports it, plus `usable`) and `plane` (`url`,
+`linked`). `key_storage` says where a key goes: `{"kind": "file", "path", "keychain":
+false}`, there being no keychain in the daemon. `answers` holds every answered step as
+it was accepted; the key step is `{"source": "typed" | "env" | "none", "var"}`, never
+the key.
+
+```json
+{"command_id": "c-20", "step": "key", "answer": {"api_key": "sk-..."}}
+```
+`setup.answer` (`admin`) → the `setup.get` answer after the move. `step` is the current
+step, or one already answered, which goes back to it and forgets what came after; an
+`answer` of `{"back": true}` goes back to a step and takes no answer, for a screen
+whose person wants the question again. Each step's `answer`:
+
+| step | answer | what it does |
+| --- | --- | --- |
+| `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
+| `provider` | `{"provider": "anthropic" \| "openai", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
+| `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
+| `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
+| `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist; writes `auto_approve`. `ask` is the default |
+| `finish` | `{"start"?: true, "prompt"?}` | records the run as done; for a local setup starts a session in the workspace with `prompt`, or `suggested_prompt`, and answers it as `session` (`session.create`'s answer, or `{"error"}`) |
+
+A bad answer is `invalid_params` with `data.reason` in one sentence, and the flow stays
+where it was. After `finish` the next `setup.get` is a fresh flow with `needed` false,
+which is what a client's "Setup" entry re-runs.
 
 #### `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.list`, `skills.add`, `skills.remove`
 
@@ -1121,9 +1171,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add`, `skills.remove` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or

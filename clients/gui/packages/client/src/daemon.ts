@@ -16,6 +16,7 @@ import { SessionView } from "./session.js";
 import type { ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
+import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
 import type { EventEnvelope, Principal, SessionCreateResult, ToolInvoke } from "./types.js";
 
 /** What `daemon.json` says about the WebSocket the daemon serves for graphical clients. */
@@ -407,6 +408,22 @@ export class DaemonClient {
   /** Write the model settings. The next session reads them; nothing has to restart. */
   setModelConfig(params: ConfigSetParams): Promise<ModelConfig> {
     return this.command<ModelConfig>("config.set", { ...params });
+  }
+
+  /**
+   * The first run's questions, as far as they have been answered (troupe Decision 705).
+   *
+   * The daemon holds the flow, so a screen that closes and reopens finds the answers
+   * still there, and the key typed at one step is written at a later one without ever
+   * coming back here.
+   */
+  setup(): Promise<SetupFlow> {
+    return this.call<SetupFlow>("setup.get");
+  }
+
+  /** Answer one step; the answer is the flow one step on. `admin`: it may send a key to a provider and write the settings. */
+  answerSetup(step: SetupStepName, answer: SetupAnswer): Promise<SetupFlow> {
+    return this.command<SetupFlow>("setup.answer", { step, answer });
   }
 
   /**

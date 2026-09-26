@@ -16,7 +16,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   alias Troupe.Agent.Definitions
   alias Troupe.Config.ModelSettings
-  alias Troupe.Gateway.{ClientTool, Commands, LocalSources, Plane, Presence, Private, Session, Worktrees}
+  alias Troupe.Gateway.{ClientTool, Commands, LocalSources, Plane, Presence, Private, Session, Setup, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.LLM.Provider
@@ -115,6 +115,11 @@ defmodule Troupe.Gateway.Dispatch do
     "config.models" => :admin,
     "config.set" => :admin,
     "config.import" => :admin,
+    # A first run's questions (Decision 705): reading where it stands says nothing
+    # secret; answering sends a key to a provider, writes the settings and starts a
+    # session, so it takes what `config.set` takes.
+    "setup.get" => :observe,
+    "setup.answer" => :admin,
     # The person's own MCP servers and skills (Decision 700): the daemon's only. Adding,
     # removing and checking are `admin`, since each names a command this machine runs.
     "mcp.list" => :observe,
@@ -853,6 +858,14 @@ defmodule Troupe.Gateway.Dispatch do
   defp handle("mcp." <> _ = method, params, _context), do: local_sources(method, params)
   defp handle("skills." <> _ = method, params, _context), do: local_sources(method, params)
 
+  # A first run's questions (Decision 705): the daemon's alone, since they write the
+  # settings file and start a session on this machine.
+  defp handle("setup." <> _ = method, params, context) do
+    if Process.whereis(Troupe.Gateway.Daemon),
+      do: setup(method, params, context),
+      else: {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
   end
@@ -887,6 +900,45 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp settings_result({:error, reason}),
     do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
+  defp setup("setup.get", _params, _context), do: {:ok, Setup.get()}
+
+  # The last step starts the first session as `session.create` would, under the caller,
+  # and reports it beside the finished flow; a session that could not start is said so
+  # rather than undoing a first run that is otherwise done.
+  defp setup("setup.answer", params, context) do
+    with {:ok, step} <- fetch(params, "step"),
+         {:ok, answer} <- answer_object(Map.get(params, "answer")) do
+      case Setup.answer(step, answer, subject: context.principal["subject"]) do
+        {:ok, %{step: "done", session: %{} = wanted} = flow} ->
+          {:ok, flow |> Troupe.Setup.report() |> Map.put("session", first_session(wanted, params, context))}
+
+        {:ok, flow} ->
+          {:ok, Troupe.Setup.report(flow)}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: reason})}
+      end
+    end
+  end
+
+  defp answer_object(nil), do: {:ok, %{}}
+  defp answer_object(answer) when is_map(answer), do: {:ok, answer}
+  defp answer_object(_other), do: {:error, Error.new(:invalid_params, %{reason: "answer must be an object"})}
+
+  defp first_session(wanted, params, context) do
+    create = %{
+      "command_id" => params["command_id"] <> ":session",
+      "workspace" => wanted["workspace"],
+      "prompt" => wanted["prompt"],
+      "worktree" => "never"
+    }
+
+    case handle("session.create", create, context) do
+      {:ok, created} -> Map.merge(wanted, created)
+      {:error, %Error{data: data}} -> Map.put(wanted, "error", to_string(data[:reason] || data["reason"] || "refused"))
+    end
+  end
 
   defp workspace_param(%{"workspace" => workspace}) when is_binary(workspace) and workspace != "",
     do: Path.expand(workspace)

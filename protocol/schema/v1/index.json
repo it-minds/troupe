@@ -40,6 +40,8 @@
     "commands/session.loop.stop.json",
     "commands/session.pin.json",
     "commands/session.unpin.json",
+    "commands/setup.answer.json",
+    "commands/setup.get.json",
     "commands/skills.add.json",
     "commands/skills.list.json",
     "commands/skills.remove.json",

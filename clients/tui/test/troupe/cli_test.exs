@@ -24,6 +24,8 @@ defmodule Troupe.CLITest do
 
     assert {:ok, %{mode: :resume, session_id: "abc"}} = CLI.parse(["resume", "abc"])
     assert {:ok, %{mode: :resume, session_id: nil}} = CLI.parse(["resume"])
+    assert {:ok, %{mode: :doctor}} = CLI.parse(["doctor"])
+    assert CLI.usage() =~ "troupe doctor"
     assert {:ok, %{mode: :version}} = CLI.parse(["--version"])
     assert {:error, _} = CLI.parse(["--bogus"])
     assert {:error, _} = CLI.parse(["run"])
