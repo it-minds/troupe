@@ -604,12 +604,14 @@ defmodule Troupe.UI.TUI.Model do
     }
   end
 
+  # A result's trailing newlines are not lines: a command that ends its output with
+  # two or three of them would draw that many blank rows under it (issue #182).
   defp complete_tool({:tool, %{id: id} = t}, %{call_id: id} = d) do
     result =
       (d.content || "")
       |> String.slice(0, @result_cap)
       |> sanitize()
-      |> String.replace_suffix("\n", "")
+      |> String.trim_trailing()
 
     status = if d.ok, do: :ok, else: :error
     t = %{t | status: status, result: result, lines: String.split(result, "\n")}
@@ -1319,19 +1321,37 @@ defmodule Troupe.UI.TUI.Model do
   @doc """
   Assistant text as lines: fenced code becomes a highlighted block with a rule
   above and below it, headings, bullets, quotes and horizontal rules get their
-  own kind, and the rest is prose with inline code and bold picked out.
+  own kind, and the rest is prose with inline code and bold picked out. A blank
+  line beside a fence, or at either end of the message, is dropped: the rules
+  already set the block apart, and each one was a blank row (issue #182).
   """
   @spec markdown(String.t()) :: [line()]
-  def markdown(text) when is_binary(text), do: text |> String.split("\n") |> block([])
+  def markdown(text) when is_binary(text),
+    do: text |> String.split("\n") |> trim_blank() |> block([])
+
+  defp trim_blank(lines) do
+    lines
+    |> Enum.drop_while(&blank?/1)
+    |> Enum.reverse()
+    |> Enum.drop_while(&blank?/1)
+    |> Enum.reverse()
+  end
+
+  defp blank?(line), do: String.trim(line) == ""
 
   defp block([], acc), do: Enum.reverse(acc)
 
   defp block(["```" <> info | rest], acc) do
     {code, after_code} = Enum.split_while(rest, &(not fence?(&1)))
-    block(Enum.drop(after_code, 1), Enum.reverse(code_block(code, info)) ++ acc)
+    rest = after_code |> Enum.drop(1) |> Enum.drop_while(&blank?/1)
+    block(rest, Enum.reverse(code_block(code, info)) ++ Enum.drop_while(acc, &blank_prose?/1))
   end
 
   defp block([line | rest], acc), do: block(rest, [prose(line) | acc])
+
+  # The blank lines already emitted before a fence: prose with nothing in it.
+  defp blank_prose?({:text, [{:text, text}]}), do: blank?(text)
+  defp blank_prose?(_line), do: false
 
   defp fence?(line), do: line |> String.trim() |> String.starts_with?("```")
 
