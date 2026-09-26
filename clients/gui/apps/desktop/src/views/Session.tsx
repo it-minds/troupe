@@ -27,6 +27,8 @@ import { useProfiles, useSessionView } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
+import { CommandPalette } from "./CommandPalette";
+import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
 import { LocalControls } from "./LocalControls";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
@@ -38,6 +40,7 @@ export function Session({
   row,
   sessionId,
   onBack,
+  onGo,
 }: {
   /** The plane, for a team session and its profiles. Null in local mode. */
   auth: AuthSession | null;
@@ -47,6 +50,8 @@ export function Session({
   row: FleetRow | undefined;
   sessionId: string;
   onBack: () => void;
+  /** Leave for another screen, for the palette's Navigate and Setup commands. */
+  onGo?: (screen: PaletteScreen) => void;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -56,14 +61,44 @@ export function Session({
   const view = useSessionView(auth, sessionId, { daemon, kind });
   const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
+  const [pane, setPane] = useState<"tasks" | "files">("tasks");
+  const [palette, setPalette] = useState(false);
   const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);
 
+  // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   return (
     <section className="session">
+      {palette && (
+        <CommandPalette
+          view={view}
+          local={kind !== "team"}
+          onClose={() => setPalette(false)}
+          actions={{
+            go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
+            showFiles: () => {
+              setBackstage(true);
+              setPane("files");
+            },
+            transcript: () => transcriptText(view.state),
+          }}
+        />
+      )}
+
       <Header
         row={row}
         sessionId={sessionId}
@@ -101,14 +136,21 @@ export function Session({
           {readOnly ? (
             <ReadOnly />
           ) : (
-            <Composer view={view} dormant={dormant} busy={isBusy(view.state)} live={view.status === "live"} />
+            <Composer view={view} dormant={dormant} busy={isBusy(view.state)} live={view.status === "live"} onCommands={() => setPalette(true)} />
           )}
         </div>
 
-        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} />}
+        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} pane={pane} onPane={setPane} />}
       </div>
     </section>
   );
+}
+
+/** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
+function transcriptText(state: TranscriptState): string {
+  return state.entries
+    .flatMap((e) => (e.kind === "user" ? [`${e.author ?? "You"}: ${e.text}`] : e.kind === "assistant" ? [`Troupe: ${e.text}`] : []))
+    .join("\n\n");
 }
 
 function Header({
@@ -516,23 +558,27 @@ function Backstage({
   daemon,
   row,
   self,
+  pane,
+  onPane,
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
   self: string | undefined;
+  /** Which pane is up: the session's, so `/files` from the palette can open it. */
+  pane: "tasks" | "files";
+  onPane: (pane: "tasks" | "files") => void;
 }): JSX.Element {
-  const [pane, setPane] = useState<"tasks" | "files">("tasks");
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
 
   return (
     <aside className="backstage">
       <section>
         <div className="tabs">
-          <button aria-selected={pane === "tasks"} onClick={() => setPane("tasks")}>
+          <button aria-selected={pane === "tasks"} onClick={() => onPane("tasks")}>
             Tasks
           </button>
-          <button aria-selected={pane === "files"} onClick={() => setPane("files")}>
+          <button aria-selected={pane === "files"} onClick={() => onPane("files")}>
             Files
           </button>
         </div>
@@ -597,7 +643,20 @@ function Backstage({
   );
 }
 
-function Composer({ view, dormant, busy, live }: { view: SessionHandle; dormant: boolean; busy: boolean; live: boolean }): JSX.Element {
+function Composer({
+  view,
+  dormant,
+  busy,
+  live,
+  onCommands,
+}: {
+  view: SessionHandle;
+  dormant: boolean;
+  busy: boolean;
+  live: boolean;
+  /** Open the command palette: `/` on an empty draft, or the button. */
+  onCommands: () => void;
+}): JSX.Element {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -632,6 +691,11 @@ function Composer({ view, dormant, busy, live }: { view: SessionHandle; dormant:
             e.preventDefault();
             void submit();
           }
+          // A slash on an empty draft is a command, not a message: the palette says which.
+          if (e.key === "/" && draft === "") {
+            e.preventDefault();
+            onCommands();
+          }
         }}
       />
       <div className="row">
@@ -643,6 +707,9 @@ function Composer({ view, dormant, busy, live }: { view: SessionHandle; dormant:
             Stop
           </button>
         )}
+        <button type="button" onClick={onCommands} title="Every command, filtered as you type (Ctrl-K, or / on an empty line)">
+          / Commands
+        </button>
         <span className="spacer" />
         <p className="hint">
           {dormant

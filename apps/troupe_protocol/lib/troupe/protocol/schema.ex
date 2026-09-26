@@ -537,6 +537,9 @@ defmodule Troupe.Protocol.Schema do
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
       "agents.list" => %{"workspace" => required(:string)},
+      # The slash commands a client may offer for a session, agents included; reading
+      # the table wakes nothing.
+      "commands.list" => %{"session_id" => required(:string)},
       "memory.get" => %{"workspace" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
