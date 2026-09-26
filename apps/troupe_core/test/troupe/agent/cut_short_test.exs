@@ -88,7 +88,7 @@ defmodule Troupe.Agent.CutShortTest do
         assert requests == Enum.count(child, &(&1.type == "llm_request"))
         assert requests <= @steps
 
-        at_rest(sid, @child)
+        stopped(sid, @child)
 
         # With nobody watching, the session sleeps: nothing is owed on the subagent's behalf.
         index = sweep(context, session, @short)
@@ -157,11 +157,11 @@ defmodule Troupe.Agent.CutShortTest do
       assert %{state: :waiting} = Troupe.snapshot(sid)
 
       assert delegate_result(sid).data["content"] =~ "ran out of budget (max_turns)"
-      at_rest(sid, @child)
+      stopped(sid, @child)
       requests = Fake.call_count(fake)
 
-      # Parked on a person, and the subagent that is still up has nothing running: asleep,
-      # and asked the question again when it wakes.
+      # Parked on a person, with the subagent it handed its result gone: asleep, and asked
+      # the question again when it wakes.
       index = sweep(context, session, @short)
       asleep(sid)
       assert %{state: :dormant, status: :waiting} = GenServer.call(index, {:get, sid})
@@ -227,6 +227,14 @@ defmodule Troupe.Agent.CutShortTest do
     assert %{llm_ref: nil, llm_timer: nil, budget_ask_task: nil} = data
     assert Enum.all?(Map.values(data.pending), &(is_nil(&1.timer) and &1.result != nil))
     assert {:message_queue_len, 0} = Process.info(pid, :message_queue_len)
+  end
+
+  # A subagent that has handed its parent its result is stopped (#171): nothing of it is
+  # left running, the Node that held its tasks and subagents included.
+  defp stopped(sid, path) do
+    eventually(fn ->
+      path not in Troupe.agent_tree(sid) and is_nil(Registry.whereis({:node, sid, path}))
+    end)
   end
 
   # The root is idle only once every delegation has come back.

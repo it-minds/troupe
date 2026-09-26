@@ -266,6 +266,10 @@ spec:
               value: {{ .Values.plane.platformAdminGroup | quote }}
             - name: TROUPE_GROUPS_CLAIM
               value: {{ .Values.plane.groupsClaim | quote }}
+            # `int64` because a large number arrives from YAML as a float, and quoted as one
+            # it would read `1e+09`.
+            - name: TROUPE_DEPLOYMENT_BUDGET_MICROS
+              value: {{ .Values.plane.deploymentBudgetMicros | int64 | quote }}
             - name: TROUPE_OIDC_ISSUER
               value: {{ .Values.plane.oidc.issuer | quote }}
             - name: TROUPE_OIDC_CLIENT_ID

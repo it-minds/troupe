@@ -10,6 +10,7 @@ defmodule Troupe.Session.LocalPricingTest do
 
   use Troupe.SessionCase, async: true
 
+  alias Troupe.Agent.{Definition, Definitions}
   alias Troupe.LLM.Catalog
   alias Troupe.Session.Log
 
@@ -161,5 +162,60 @@ defmodule Troupe.Session.LocalPricingTest do
     assert 2 == session_id |> Log.replay() |> Enum.count(&(&1.type == "llm_response"))
     assert_receive {:unpriced, %{session_id: ^session_id, model: "fake-model"}}
     refute_receive {:unpriced, %{session_id: ^session_id}}, 100
+  end
+
+  # The claim is the session's rather than the claiming agent's: a subagent that called the
+  # model first has stopped by the time the next one calls it (#171), and the claim stays.
+  test "a model only subagents call is said once a session, not once a delegation", context do
+    test = self()
+    handler = "unpriced-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:troupe, :llm, :unpriced],
+      fn _event, _measurements, meta, _config -> send(test, {:unpriced, meta}) end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler) end)
+
+    {:ok, pricey} =
+      Definition.parse(
+        "pricey",
+        "---\nmode: subagent\nmodel: unpriced-model\n---\npricey",
+        :project
+      )
+
+    definitions =
+      Definitions.from_list(Definitions.all(Definitions.load(System.tmp_dir!())) ++ [pricey])
+
+    %{session: session} =
+      start_session(context,
+        routes: %{
+          "root" => [
+            {:tools, [{"delegate", %{"agent" => "pricey", "task" => "one"}}]},
+            {:tools, [{"delegate", %{"agent" => "pricey", "task" => "two"}}]},
+            {:text, "done"}
+          ],
+          "pricey" => [
+            {:tools, [{"finish", %{"summary" => "one"}}]},
+            {:tools, [{"finish", %{"summary" => "two"}}]}
+          ]
+        },
+        cost_micros: nil,
+        definitions: definitions
+      )
+
+    Troupe.subscribe(session.id)
+    Troupe.send_input(session.id, "delegate twice")
+    await_event(session.id, :turn_ended, 10_000)
+
+    session_id = session.id
+
+    assert [_one, _two] =
+             session_id |> Log.replay() |> Enum.filter(&(&1.type == "delegation_started"))
+
+    assert_receive {:unpriced, %{session_id: ^session_id, model: "unpriced-model"}}
+    refute_receive {:unpriced, %{session_id: ^session_id, model: "unpriced-model"}}, 100
   end
 end

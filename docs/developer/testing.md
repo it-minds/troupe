@@ -54,7 +54,8 @@ temporary directory once per run and passes `state_dir` through config, because
 - `apps/troupe_gateway/test/conformance/` — `troupe.py` and `conformance.py`.
 - Fakes: a pod on the control channel, an enrolment verifier with no API server and a
   second plane node (plane); a stub plane and a fake worker (A2A); `WorkerProfile` and
-  `TroupePolicy` maps as the API server hands them over (operator).
+  `TroupePolicy` maps as the API server hands them over, and `FakeCluster`, an API server
+  in memory that a reconcile pass runs against (operator).
 
 ## 4. Checks that are tests in all but name
 

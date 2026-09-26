@@ -1,0 +1,56 @@
+name: Bug
+description: Troupe does something it should not, or does not do something it should.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: >-
+        A security problem does not go here: report it privately, as
+        [SECURITY.md](https://github.com/it-minds/troupe/blob/main/SECURITY.md) says.
+  - type: dropdown
+    id: part
+    attributes:
+      label: Which part
+      options:
+        - the daemon (troupe-daemon)
+        - the terminal UI (troupe)
+        - the desktop app
+        - the web app at /app
+        - the plane or the admin console
+        - the operator, the workers or the chart
+        - an install script
+        - the documentation
+        - something else
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Version
+      description: "`troupe --version`, `troupe-daemon version`, or the image tag."
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: Platform
+      description: The operating system, or the Kubernetes distribution and version.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what you expected
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: How to reproduce it
+      description: The shortest sequence of steps or commands that shows it.
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: The command's output or the daemon's log, if there is one. Take out tokens and keys first.
+      render: text

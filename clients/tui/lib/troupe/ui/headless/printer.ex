@@ -62,6 +62,8 @@ defmodule Troupe.UI.Headless.Printer do
       io: io,
       streaming: %{},
       seen: MapSet.new(),
+      # The lines printed for inputs the agent has not yet taken, by command id.
+      printed_inputs: %{},
       # What the exit code needs to know by the time the target rests.
       failed: false,
       refused: MapSet.new(),
@@ -221,6 +223,22 @@ defmodule Troupe.UI.Headless.Printer do
     state
   end
 
+  # One line per input, however many copies of it arrive, as the TUI draws it (Decision
+  # 117). A line sent while the agent works is written as `input_queued` and then as the
+  # `user_input` the agent takes it as, both naming the send's command id, and a line sent
+  # from this VM is rendered as it goes as well. The first copy prints the line, and the
+  # `user_input`, always the last, forgets the id. A copy that says something else prints
+  # too: a task edit is queued as the edit and taken as the agent's note of it.
+  defp print(%{type: :input, agent_path: p, data: %{command_id: id, content: text} = d}, state)
+       when is_binary(id) do
+    state = if state.printed_inputs[id] == text, do: state, else: say(state, p, "< #{text}")
+
+    if Map.get(d, :optimistic, false) or Map.get(d, :queued, false),
+      do: %{state | printed_inputs: Map.put(state.printed_inputs, id, text)},
+      else: %{state | printed_inputs: Map.delete(state.printed_inputs, id)}
+  end
+
+  # A log written before `user_input` carried the id prints each copy it has.
   defp print(%{type: :input, agent_path: p, data: d}, state),
     do: say(state, p, "< #{d.content}")
 

@@ -1,0 +1,13 @@
+Troupe
+Copyright 2026 The Troupe contributors
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+Troupe depends on third-party packages, each under its own licence. The packages and
+their licences are listed in docs/third-party-licences.md.
+
+The following notices are carried because the Apache License, section 4(d), asks that a
+component's NOTICE travel with it:
+
+telemetry (https://github.com/beam-telemetry/telemetry)
+Copyright (c) 2018, Chris McCord and Erlang Solutions

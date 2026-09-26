@@ -62,7 +62,9 @@ apps in the same pull request as the client change that needs it. A LiveView cal
 - **Commit messages and pull request titles** state the behaviour that is now true, in
   plain prose — "A session's listing says what it has actually spent" — with a body saying
   what was wrong, what changed and why. No conventional-commit prefixes, no ticket numbers,
-  and no attribution trailers. Nothing enforces this.
+  and no attribution trailers. Nothing enforces this. What is enforced is the one trailer a
+  commit does carry: `Signed-off-by:`, from `git commit -s`, which the `dco` check requires
+  ([CONTRIBUTING.md](../../CONTRIBUTING.md#sign-off-dco)).
 
 ## 5. Naming
 

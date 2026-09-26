@@ -179,18 +179,20 @@ defmodule Troupe.Plane.Web.Live.Layout do
 
   The console's own states are `Troupe.Plane.Web.Live.Status`; these are the cluster's,
   reported verbatim on a profile, and they keep the cluster's vocabulary rather than
-  being translated into a state the cluster did not claim.
+  being translated into a state the cluster did not claim. `nil` is a cluster that could
+  not be asked, which is said as such rather than as a profile with none.
   """
   attr(:conditions, :list, default: [])
 
   def conditions(assigns) do
     ~H"""
     <ul class="conditions">
-      <li :for={condition <- @conditions} class={condition_class(condition)}>
+      <li :for={condition <- @conditions || []} class={condition_class(condition)}>
         {condition["type"]}
         <span :if={condition["message"]}>— {condition["message"]}</span>
       </li>
       <li :if={@conditions == []} class="muted">no conditions reported</li>
+      <li :if={is_nil(@conditions)} class="muted">unknown: the cluster did not answer</li>
     </ul>
     """
   end

@@ -100,6 +100,69 @@ defmodule Troupe.LoopClientTest do
     end)
   end
 
+  describe "after the daemon stopped mid-loop" do
+    # A daemon that dies writes nothing more: the log still says the loop runs, and the
+    # `loop_stopped interrupted` a restore records is written only when the session is
+    # next activated. The screen asks the session, which knows its tree is not running.
+    setup do
+      {sid, _, _} =
+        start_session!(
+          auto_approve: false,
+          script: [{:tools, [{"write_file", %{"path" => "notes.md", "content" => "notes"}}]}]
+        )
+
+      with_goal(sid)
+      :ok = Client.start_loop(sid, 2)
+      await_event("root", :loop_iteration)
+      await_event("root", :approval_requested)
+      %{sid: sid}
+    end
+
+    test "a screen opened on the session shows no loop running", %{sid: sid} do
+      crash(sid)
+      {pid, session} = start_tui(sid)
+
+      eventually(fn ->
+        line = status_line(pid, session, sid)
+        line =~ "goal: the notes exist" and not (line =~ "loop 1/2")
+      end)
+
+      # The transcript still says what ran before the daemon stopped.
+      assert screen_text(pid, session) =~ "loop iteration 1/2"
+    end
+
+    test "a screen open through it asks again when its connection says so", %{sid: sid} do
+      {pid, session} = start_tui(sid)
+      eventually(fn -> status_line(pid, session, sid) =~ "loop 1/2" end)
+
+      crash(sid)
+      send(pid, {:troupe_event, status_event(sid, %{up?: true})})
+
+      eventually(fn ->
+        line = status_line(pid, session, sid)
+        line =~ "goal: the notes exist" and not (line =~ "loop 1/2")
+      end)
+    end
+  end
+
+  # What a crash leaves: the session's tree gone, and nothing in its log about it, not
+  # even the `session_dormant` that stopping it properly writes.
+  defp crash(sid) do
+    :ok = Troupe.Sessions.stop_session(sid)
+    assert {:ok, %{"state" => "stopped", "reason" => "interrupted"}} = Client.loop(sid)
+  end
+
+  # What the worker publishes when its connection comes up.
+  defp status_event(sid, data) do
+    %Troupe.Event{
+      session_id: sid,
+      agent_path: "root",
+      type: :remote_status,
+      ts: System.system_time(:millisecond),
+      data: data
+    }
+  end
+
   # The status line is the one row that names the session.
   defp status_line(pid, session, sid) do
     pid |> screen(session) |> Enum.find("", &String.contains?(&1, sid))

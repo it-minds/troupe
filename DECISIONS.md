@@ -1515,6 +1515,90 @@ citation keeps meaning what it meant.
      `TrustTest`, `Troupe.PathsTest`, `Troupe.Gateway.AutospawnTest`,
      `Troupe.Worker.UnrestorableTest`, and the installed build on this machine.
 
+692. **A `user_input` names the send it was taken from.** `input_queued` and
+     `input_accepted` carried the client's `command_id` and `user_input`, the copy with
+     the text, did not, so a client that draws a line as it is typed could not tell the
+     durable copy for the same line, and the TUI drew every typed line twice (issue #181).
+     The agent now writes the command id on the `user_input` of every input it takes, a
+     person's, the watcher's, a loop's iteration and a task edit alike: the id its
+     `input_accepted` has, which the agent generates where the caller had none. A
+     `harness` note, which nobody sent, has none. It is an added, optional field, which
+     PROTOCOL.md §11 allows. Neither the agent's replay nor the fold reads it, so a log
+     written before it replays as it did and no recorded fixture's hash moves. The GUI
+     keeps its pending send outside the stream and draws `user_input` once, and is
+     unaffected; the TUI draws a line once by it (clients/tui Decision 117).
+     - **Proof:** `Troupe.Agent.InputTest`, the loop's ids in `Troupe.Session.LoopTest`,
+       the watcher's in `Troupe.Watch.WatchSessionTest`, `Troupe.Session.LogSchemaTest`,
+       `Troupe.Log.FoldTest` and `mix troupe.schema.diff`.
+
+693. **A subagent is stopped once its parent has its result, and a restart closes what it
+     leaves behind: the calls of a child nothing starts again, a turn's results already
+     back, and a root's note about a failed request.** Issue #171, and D18 and D19 in
+     docs/developer/defects.md.
+     - **Stopped on report (#171).** A finished subagent kept its process, and with it its
+       whole conversation, until its session's tree stopped. Nothing addresses a finished
+       child by its process. Input, a cancel, the loop, the watcher and an approval's
+       answer go to the root. `read_branch` reads branches, which are sessions, off disk.
+       The TUI's agent detail and the desktop app build an agent from events. A restart
+       replays the root's own log, and a delegation it takes up again gets a new child
+       (688). `Troupe.snapshot/2` and `Troupe.agent_tree/1`, which the worker's drain and
+       the sleep rule (#166) walk, take a stopped child for what a `:done` one was, not
+       at work. So the parent stops the child's Node as soon as it has taken the result,
+       through its own `Agent.Children` as a cancel does. An idle time first would keep the
+       memory for nothing. The child writes `agent_done` and announces `done` before it
+       reports, so its parent's `tool_call_completed` always follows its `agent_done`, and
+       stopping it cuts nothing off.
+     - **An unpriced model's warning (689)** was claimed in the registry by the agent whose
+       call it was, and the claim went with that agent: a subagent that stops would have
+       left the next one to warn again, once a delegation. The session's `Log` now makes
+       the claim, and it lives as long as the tree.
+     - **A delegation a restart closes or takes up again (D18, D19).** Nothing starts its
+       child again, so the child never reports and never closes its own calls. After the
+       session came back, an approval it had waited on stayed open in `Summary`, the
+       worker's status and the desktop app's transcript (a test confirmed it), and its log
+       had no `agent_done`. The parent now writes, under that child and every agent below
+       it, a `tool_call_completed` with `ok: false` for each call still open, which is how
+       every reader already closes an approval or a question (#142, #145) and the per-call
+       half of what a cancel writes (#138). Then `agent_done`, with the new reason
+       `interrupted`, where the agent has none.
+     - **A turn a restart comes back in the middle of (D19).** The results that were back
+       before it were not put back. The next `tool_results` held only the calls re-run or
+       closed, which a provider refuses (every `tool_use` is owed a `tool_result`), and a
+       `finish` among them lost its summary and took another model turn. Replay now puts
+       the completed calls back from their `tool_call_completed`, with the summary of a
+       `finish` among them, when the restart re-runs or closes the rest; one that takes
+       nothing up leaves them, so a summary cannot outlive its turn (688). A call closed
+       as interrupted and one put back out to a person now reach the conversation in one
+       `tool_results`, not two.
+     - **A root's failed request (D19).** "The previous model request failed: ..." went
+       into the conversation and not into the log, so the conversation a restart rebuilt
+       did not have it. It rides in the `llm_error` as `note`, and replay folds it. Not a
+       `user_input` from the harness, as the other notes are: a client reads one of those
+       as the turn going on, and the A2A mapping would turn a failed task back to
+       `working`, while this note ends the turn.
+     - **Old logs** have no `note` and no `interrupted`, and replay as they did.
+       `Troupe.Log.Fold` counts a `note` as a message, and the recorded fixture hashes are
+       unchanged.
+     - **Proof:**
+       - `Troupe.Agent.DelegationTest`: five delegations with one still at work hold that
+         one alone (the agent tree and the registered processes counted), five in a row
+         hold none, and a stopped child is still read from its log, before and after its
+         parent restarts; each child's `agent_done` comes before its result is taken.
+       - `Troupe.Agent.ResilienceTest`: a restored session leaves no approval of its
+         subagent open, in `Summary` or the gate; the child a restart re-ran a delegation
+         past ends `interrupted` with nothing open; a root's failure note survives the
+         session coming back; a turn keeps the results already back when the session comes
+         back, a call closed as interrupted and one put back out to a person reach the
+         model together, and a `finish` among them ends a root, and a subagent with the
+         summary its parent is handed, after the agent restarts.
+       - `Troupe.Agent.CutShortTest`: a subagent cut short is stopped, and its session
+         still sleeps. `Troupe.Session.LocalPricingTest`: a model only subagents call is
+         said once a session. `Troupe.Log.FoldTest`: the fixture hashes, unchanged, and
+         the note.
+       - The installed daemon, driven with a fake-provider script.
+     - **Not done here:** a subagent a cancel takes down still leaves its own calls open in
+       its own log; the `cancelled` on the agent above closes them for every reader (#145).
+
 694. **A session that leaves its pod for good gives back its slot and its budget slice,
      each once, however it left.** Issue #190, D22 in docs/developer/defects.md, found
      by the fixer of #173. A pod's dormancy report gives back both. Three other endings
@@ -1547,3 +1631,25 @@ citation keeps meaning what it meant.
        with `workspace_gone` or without, leaves no slice held. `Troupe.Plane.ControlTest`:
        a revoked session's pod reporting it dormant twice gives back one slot. All five
        fail on the chunk's tip.
+
+696. **A librarian's run stamps the brief it checked, whether or not it rewrote any of
+     it.** The brief counts as built when a curated section is written (Decision 649),
+     one never built is stale, and a client with `memory_auto_refresh` starts a
+     librarian on a stale one. A librarian that found nothing to rewrite, or wrote only a
+     note, left the brief unbuilt or as old as it was: a brief of notes, or one a person
+     wrote by hand, stayed stale for good, and every new session in that repository
+     started another librarian and paid for it. Found in chunk 5; the TUI's test that said
+     a second session "starts nothing" listened for the librarian after it had started.
+     Now a `librarian` agent whose run ends as it meant to, by answering or with
+     `finish`, stamps the brief (`Troupe.Session.Memory.checked/1`: `built_at`, `head`
+     and `files`, and no word of the text), so the brief is stale again only when it is
+     older than `memory_max_age_days` or the repository has drifted. What is stamped is
+     the run, not what it wrote, because finding nothing to change is the librarian's
+     answer too; a run that failed, was cancelled or ran out of budget stamps nothing and
+     is tried again by the next session. The agent knows the profile by its name, as the
+     client does when it starts it, and the stamp makes no brief where there is none.
+     - **Proof:** `Troupe.Tools.RememberTest`: a brief of notes and a hand-written one,
+       each left fresh and word for word as it was by a librarian that wrote nothing,
+       while another agent's turn and a librarian's failed request stamp nothing. The
+       TUI's `Troupe.MemoryClientTest`, whose second session now reads its own journal
+       for the librarian. Both failed on the chunk's tip.

@@ -1652,10 +1652,15 @@ defmodule Troupe.Plane.Harness do
         {:error, _reason} -> {nil, nil}
       end
 
+    # `state` is the session's as this answer leaves it. `active` says the endpoint runs
+    # it; anything else says the pod only serves its history, so a client opens it with
+    # `activate` before its first activating command rather than sending that to a pod
+    # that does not hold the session (PROTOCOL.md §6, "A session that moves").
     %{
       "session_id" => session.id,
       "epoch" => session.epoch,
       "mode" => Keyword.get(opts, :mode, "activate"),
+      "state" => session.state,
       "endpoint" => worker.endpoint,
       "worker_id" => worker.id,
       "pod" => worker.pod_name,
