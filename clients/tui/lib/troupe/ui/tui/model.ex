@@ -105,6 +105,7 @@ defmodule Troupe.UI.TUI.Model do
           loop: loop() | nil,
           worktree: map() | nil,
           unconfirmed: %{optional(String.t()) => String.t()},
+          drawn_inputs: %{optional(String.t()) => String.t()},
           warnings: %{optional(atom()) => map()}
         }
 
@@ -162,6 +163,8 @@ defmodule Troupe.UI.TUI.Model do
           loop: nil,
           worktree: nil,
           unconfirmed: %{},
+          # The lines drawn for inputs the agent has not yet taken, by command id.
+          drawn_inputs: %{},
           warnings: %{}
         }
 
@@ -236,7 +239,7 @@ defmodule Troupe.UI.TUI.Model do
       :input when d.source in [:user, :watch] ->
         w
         |> ensure_agent(path)
-        |> push(path, {:user, d.content})
+        |> draw_input(path, d)
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
         |> Map.put(:ended_at, nil)
         |> unconfirmed(d)
@@ -552,6 +555,23 @@ defmodule Troupe.UI.TUI.Model do
     do: %{w | unconfirmed: Map.put(w.unconfirmed, id, text)}
 
   defp unconfirmed(w, _data), do: w
+
+  # One line per input, however many copies of it arrive (Decision 117). A line typed here
+  # is drawn as it is sent, one sent while the agent works is written as `input_queued`,
+  # and every one is written as the `user_input` the agent takes it as: all of them name
+  # the send's command id. The first copy draws the line, and the `user_input`, always the
+  # last, forgets the id. A copy that says something else is drawn as well: a task edit
+  # is queued as the edit and taken as the agent's note of it.
+  defp draw_input(w, path, %{command_id: id, content: text} = d) when is_binary(id) do
+    w = if w.drawn_inputs[id] == text, do: w, else: push(w, path, {:user, text})
+
+    if Map.get(d, :optimistic, false) or Map.get(d, :queued, false),
+      do: %{w | drawn_inputs: Map.put(w.drawn_inputs, id, text)},
+      else: %{w | drawn_inputs: Map.delete(w.drawn_inputs, id)}
+  end
+
+  # A log written before `user_input` carried the id draws each copy it has.
+  defp draw_input(w, path, d), do: push(w, path, {:user, d.content})
 
   # An agent that is gone never logs `approval_answered`/`question_answered`, so
   # its request would sit in `pending` forever: unanswerable (Approvals dropped

@@ -44,6 +44,9 @@ defmodule Troupe.Watch.WatchSessionTest do
 
     [input] = events_of_type(session.id, "user_input")
     assert input.data["source"] == "watch"
+    # The watcher's input has a command id of its own, as a person's does (issue #181).
+    [accepted] = events_of_type(session.id, "input_accepted")
+    assert input.data["command_id"] == accepted.data["command_id"]
     assert input.data["text"] =~ "AI? comment"
     assert input.data["text"] =~ "why is this zero?"
   end

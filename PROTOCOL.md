@@ -246,7 +246,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` note, which nobody sent, and from a log written before 0.5.2 |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
@@ -549,7 +549,9 @@ asks again when it wakes.
 {"command_id": "c-1", "session_id": "s-9f", "text": "make the tests pass"}
 ```
 → `{"accepted": true}`. If the agent is busy this produces a durable `input_queued`;
-when taken it produces `input_accepted`. A root agent that has *finished* is woken by
+when taken it produces `input_accepted` and then the `user_input` with the text, and all
+three carry the `command_id`, which is how a client that drew the line when it was typed
+knows each of them for the same line. A root agent that has *finished* is woken by
 input: `agent_woken`, then the turn as usual. One whose budget is exhausted is not, and
 writes `input_after_done` instead.
 
