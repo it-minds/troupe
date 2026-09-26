@@ -538,6 +538,12 @@ jobs:
       - name: The committed design tokens match the design file
         run: pnpm tokens:check
 
+      # The bundler needs the desktop app's icons as files, so they are committed too,
+      # generated from the same design file. After the tokens, so that a stale `mark.ts`
+      # is reported as itself and not as nineteen wrong icons.
+      - name: The committed desktop icons are the mask
+        run: pnpm icons:check
+
       - run: pnpm typecheck
 
       # The protocol client has to be built before the app typechecks against its types

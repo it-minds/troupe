@@ -212,7 +212,7 @@ settles:
 - **Design tokens are generated**: `pnpm tokens` writes `tokens.css` and `mark.ts` from
   `docs/design/themes/*.tokens.json` and refuses a theme whose token names differ. Theme
   and mode are `data-theme` and `data-mode` on the root, kept in the browser; Signal is the
-  default.
+  default. `pnpm icons` draws the desktop app's icons from `mark.ts` (Decision 703).
 
 ## 8. Things a reader will trip over
 

@@ -14,6 +14,8 @@
     "fake": "tsx scripts/fake-deployment.ts",
     "tokens": "tsx scripts/tokens.ts",
     "tokens:check": "tsx scripts/tokens.ts && git diff --exit-code apps/desktop/src/tokens.css apps/desktop/src/mark.ts",
+    "icons": "tsx scripts/icons.ts",
+    "icons:check": "tsx scripts/icons.ts --check",
     "first-token": "tsx scripts/first-token.ts"
   },
   "devDependencies": {
