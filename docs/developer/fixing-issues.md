@@ -44,12 +44,11 @@ flowchart LR
   default branch, so a fixer's `Fixes #N` into the chunk closes nothing. That pull request
   runs the full CI, and the person merges it.
 
-The per-harness entry points are thin and all point here:
+The per-harness entry points are thin and all point here. A person's own harness setup (for example `.claude/`) stays out of the repository:
 
 | Harness | Coordinator | Fixer |
 | --- | --- | --- |
 | Troupe | `.troupe/agents/fix-issues.md` | `.troupe/agents/issue-fixer.md` |
-| Claude Code | `.claude/skills/fix-issues/SKILL.md` (`/fix-issues`) | `.claude/agents/issue-fixer.md` |
 | anything that reads `AGENTS.md` | `AGENTS.md` -> this page | this page, section 2 |
 
 ## What may run at once
