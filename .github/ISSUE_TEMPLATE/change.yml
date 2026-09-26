@@ -1,0 +1,20 @@
+name: Feature or change
+description: Something Troupe should do, or do differently.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: The problem
+      description: What you are trying to do, and what gets in the way.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What you propose
+      description: How it could work. A sketch is enough.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What else you considered

@@ -13,6 +13,8 @@ this adds only what an agent working in the repository must not miss.
   (where, what, severity, who found it). Read it before touching code it names.
 - **No attribution** in commits or pull requests: no `Co-Authored-By:` trailer, no
   "Generated with ..." line.
+- **Sign off** every commit (`git commit -s`): the DCO, which CI checks
+  ([CONTRIBUTING.md](CONTRIBUTING.md)). The sign-off is the person's who submits the work.
 - **PowerShell scripts are ASCII only**; Windows PowerShell 5.1 misreads UTF-8 without a BOM.
 - The gate is `mix check` ([conventions.md](docs/developer/conventions.md)); the CI job
   on a machine is `scripts/ci`.
