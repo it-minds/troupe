@@ -10,7 +10,7 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Layout.Rect
   alias ExRatatui.Style
   alias ExRatatui.Text.{Line, Span}
-  alias ExRatatui.Widgets.{Block, Paragraph, Scrollbar}
+  alias ExRatatui.Widgets.{Block, Clear, Paragraph, Scrollbar}
   alias ExRatatui.Widgets.Block.Title
   alias Troupe.Client
   alias Troupe.Settings
@@ -63,6 +63,17 @@ defmodule Troupe.UI.TUI.View do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     mcp_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
+  end
+
+  # The palette is a popup over the session (Decision 119): the screen is drawn as it was
+  # where the palette was opened from, the command box shows the filter being typed, and
+  # the popup sits over the rest.
+  def render(%{focus: :palette} = state, frame) do
+    behind = render(%{state | focus: state.palette.return_to}, frame)
+    {_line, cmd_rect} = List.last(behind)
+
+    Enum.drop(behind, -1) ++
+      [command_line(state, cmd_rect, cmd_rect.height)] ++ palette_popup(state, frame, cmd_rect)
   end
 
   def render(state, frame) do
@@ -841,6 +852,199 @@ defmodule Troupe.UI.TUI.View do
     }
   end
 
+  ## Command palette
+
+  @doc """
+  The palette's rows for the filter typed so far, and the cursor over them: each row is
+  the table's entry with whether this client can run it now — `:ok`, `{:window, why}`
+  (acts on a window, and none is activated) or `{:no, why}` (a session on this machine
+  only, or a plane). Rows keep the table's order, so sections stay together.
+  """
+  @spec palette_view(map()) :: {[%{entry: Client.command(), status: term()}], non_neg_integer()}
+  def palette_view(%{palette: %{query: query, cursor: cursor, return_to: return_to}} = state) do
+    query = String.downcase(query)
+
+    rows =
+      state.commands
+      |> Enum.filter(&matches?(&1, query))
+      |> Enum.map(&%{entry: &1, status: availability(&1, return_to, state)})
+
+    {rows, min(cursor, max(length(rows) - 1, 0))}
+  end
+
+  # Names, aliases and summaries, as the filter is typed: `mer` finds `/merge`.
+  defp matches?(_entry, ""), do: true
+
+  defp matches?(entry, query) do
+    String.contains?(entry["name"], query) or
+      Enum.any?(entry["aliases"], &String.contains?(&1, query)) or
+      String.contains?(String.downcase(entry["summary"]), query)
+  end
+
+  defp availability(%{"availability" => "window", "name" => name}, return_to, _state) do
+    if match?({:window, _}, return_to),
+      do: :ok,
+      else: {:window, "acts on a window: activate one (1-9), or name one — /#{name} 2"}
+  end
+
+  defp availability(%{"availability" => "local"}, _return_to, state) do
+    if Client.remote?(state.session_id),
+      do: {:no, "only for a session on this machine; this one runs on a plane"},
+      else: :ok
+  end
+
+  defp availability(%{"availability" => "plane"}, _return_to, _state),
+    do: {:no, "needs a plane: troupe login first"}
+
+  defp availability(_entry, _return_to, _state), do: :ok
+
+  # Centred above the status line and the command box, split into the list and the
+  # selected command's detail — beside it where the screen is wide, below it where not.
+  defp palette_popup(state, frame, cmd_rect) do
+    {rows, cursor} = palette_view(state)
+    top_height = max(cmd_rect.y - 1, 3)
+    width = frame.width |> Kernel.-(4) |> min(120) |> max(min(frame.width, 24))
+    height = top_height |> Kernel.-(2) |> min(34) |> max(min(top_height, 6))
+
+    rect = %Rect{
+      x: div(frame.width - width, 2),
+      y: max(div(top_height - height, 2), 0),
+      width: width,
+      height: height
+    }
+
+    [list_rect, detail_rect] =
+      if width >= 90,
+        do: Layout.split(rect, :horizontal, [{:fill, 3}, {:fill, 2}]),
+        else: Layout.split(rect, :vertical, [{:fill, 1}, {:length, min(9, div(height, 2))}])
+
+    [
+      {%Clear{}, rect},
+      {palette_list(rows, cursor, state, list_rect), list_rect},
+      {palette_detail(Enum.at(rows, cursor), state, detail_rect), detail_rect}
+    ]
+  end
+
+  # One row per command under its section's heading; the cursor's row is the list's
+  # selection, which the widget keeps in view.
+  defp palette_list(rows, cursor, state, rect) do
+    width = max(rect.width - 4, 10)
+
+    name_w =
+      rows |> Enum.map(&String.length(&1.entry["name"])) |> Enum.max(fn -> 6 end) |> Kernel.+(2)
+
+    tagged =
+      rows
+      |> Enum.with_index()
+      |> Enum.chunk_by(fn {row, _i} -> row.entry["section"] end)
+      |> Enum.flat_map(fn [{first, _} | _] = chunk ->
+        [
+          {nil, section_line(first.entry["section"], width)}
+          | Enum.map(chunk, fn {row, i} -> {i, palette_line(row, name_w, width)} end)
+        ]
+      end)
+
+    {items, selected} =
+      case tagged do
+        [] -> {[nothing_line(state)], nil}
+        _ -> {Enum.map(tagged, &elem(&1, 1)), Enum.find_index(tagged, &(elem(&1, 0) == cursor))}
+      end
+
+    %ExRatatui.Widgets.List{
+      items: items,
+      selected: selected,
+      highlight_symbol: "▸ ",
+      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      block: %Block{
+        title: " commands — #{length(rows)} of #{length(state.commands)} ",
+        borders: [:all],
+        border_type: :double
+      }
+    }
+  end
+
+  defp section_line(section, width) do
+    label = "─ " <> String.capitalize(section) <> " "
+
+    Line.new([
+      Span.new(label <> String.duplicate("─", max(width - String.length(label), 0)),
+        style: %Style{fg: :dark_gray}
+      )
+    ])
+  end
+
+  # A command this client cannot run now is greyed rather than hidden; the detail says why.
+  defp palette_line(%{entry: entry, status: status}, name_w, width) do
+    style = if status == :ok, do: %Style{}, else: %Style{fg: :dark_gray}
+    name = String.pad_trailing("/" <> entry["name"], name_w)
+    summary = Model.wrap(entry["summary"], max(width - name_w, 8), :char) |> List.first() || ""
+
+    Line.new([
+      Span.new(name, style: Map.put(style, :modifiers, [:bold])),
+      Span.new(summary, style: style)
+    ])
+  end
+
+  defp nothing_line(%{commands: []}),
+    do:
+      Line.new([
+        Span.new("the session's harness did not answer commands.list",
+          style: %Style{fg: :dark_gray}
+        )
+      ])
+
+  defp nothing_line(%{palette: %{query: query}}),
+    do:
+      Line.new([
+        Span.new("nothing matches /#{query} — Enter runs it as typed",
+          style: %Style{fg: :dark_gray}
+        )
+      ])
+
+  defp palette_detail(nil, %{commands: []}, _rect) do
+    %Paragraph{
+      text:
+        "No commands to list: the session's harness did not answer, or is older than this client.\n\nA command typed in full still runs; Esc goes back.",
+      wrap: true,
+      block: %Block{title: " detail ", borders: [:all]}
+    }
+  end
+
+  defp palette_detail(nil, _state, _rect) do
+    %Paragraph{
+      text:
+        "Nothing matches. Enter runs what you typed, as it would on the command line; Backspace narrows the filter; Esc goes back.",
+      wrap: true,
+      block: %Block{title: " detail ", borders: [:all]}
+    }
+  end
+
+  defp palette_detail(%{entry: entry, status: status}, _state, _rect) do
+    example = if entry["example"], do: ["", "for example: " <> entry["example"]], else: []
+    now = if status == :ok, do: [], else: ["", "not now: " <> elem(status, 1)]
+
+    lines =
+      [entry["summary"], "", entry["detail"]] ++
+        example ++
+        ["", source_word(entry["source"]) <> " · " <> availability_word(entry["availability"])] ++
+        now
+
+    %Paragraph{
+      text: Enum.join(lines, "\n"),
+      wrap: true,
+      block: %Block{title: " " <> entry["usage"] <> " ", borders: [:all]}
+    }
+  end
+
+  defp source_word("builtin"), do: "built-in"
+  defp source_word(other), do: other
+
+  defp availability_word("always"), do: "always available"
+  defp availability_word("window"), do: "acts on the activated window, or one named"
+  defp availability_word("local"), do: "for a session on this machine"
+  defp availability_word("plane"), do: "needs a plane"
+  defp availability_word(other), do: other
+
   defp settings_command_line(%{settings: %{picker: p} = s}) when p != nil do
     {s.status || "",
      " choose a model — ↑↓ move · Enter picks · Esc back · `troupe config` lists them all "}
@@ -878,7 +1082,7 @@ defmodule Troupe.UI.TUI.View do
   defp strip([], rect, state) do
     text =
       "No branches. Type a command: " <>
-        Enum.map_join(state.commands, "  ", &("/" <> &1)) <> "  /help"
+        Enum.map_join(state.agents, "  ", &("/" <> &1)) <> "  /help"
 
     [{%Paragraph{text: text, style: %Style{fg: :dark_gray}, wrap: true}, rect}]
   end
@@ -1369,8 +1573,18 @@ defmodule Troupe.UI.TUI.View do
     {text, title} =
       case state.focus do
         :command ->
-          {{:edit, {"/" <> state.cmd_text, state.cmd_pos + 1}},
+          # The box shows the slash; a line that carries its own (one the palette put
+          # there, or a typed one) is not shown with two.
+          prompt = if String.starts_with?(state.cmd_text, "/"), do: "", else: "/"
+
+          {{:edit, {prompt <> state.cmd_text, state.cmd_pos + String.length(prompt)}},
            if(multiline?(state.cmd_text), do: pasted_title(state.cmd_text), else: " command ")}
+
+        :palette ->
+          query = state.palette.query
+
+          {{:edit, {"/" <> query, String.length(query) + 1}},
+           " commands — type to filter · ↑↓ move · Enter runs · Tab puts it on the line · Esc back "}
 
         {:window, path} ->
           target = if state.pane.agent in [nil, path], do: "", else: " to the branch root"
@@ -1404,7 +1618,7 @@ defmodule Troupe.UI.TUI.View do
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}
       end
 
-    focused_cmd? = state.focus == :command
+    focused_cmd? = state.focus in [:command, :palette]
 
     {%Paragraph{
        text: input_box_text(state, text, box_rows),

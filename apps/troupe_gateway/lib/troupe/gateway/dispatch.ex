@@ -60,6 +60,7 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.upload" => :control,
     "workspace.recent" => :observe,
     "agents.list" => :observe,
+    "commands.list" => :observe,
     "workflows.list" => :observe,
     "memory.get" => :observe,
     "mcp.status" => :observe,
@@ -378,6 +379,17 @@ defmodule Troupe.Gateway.Dispatch do
         |> Enum.sort_by(& &1["name"])
 
       {:ok, %{"agents" => agents}}
+    end
+  end
+
+  # The slash commands a client may offer for this session (Decision 698): the harness's
+  # table, then one entry per primary agent, described by its definition. The agents are
+  # the ones `agents.list` answers for the session's workspace, so the two never disagree.
+  defp handle("commands.list", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, session} <- lookup(session_id) do
+      agents = session.workspace |> Path.expand() |> Definitions.load() |> Definitions.primaries()
+      {:ok, %{"commands" => Troupe.Commands.list(agents: agents)}}
     end
   end
 

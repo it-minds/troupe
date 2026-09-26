@@ -3,6 +3,7 @@
     "commands/agents.list.json",
     "commands/approval.respond.json",
     "commands/blob.get.json",
+    "commands/commands.list.json",
     "commands/config.get.json",
     "commands/config.import.json",
     "commands/config.models.json",

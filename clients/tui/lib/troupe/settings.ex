@@ -428,13 +428,9 @@ defmodule Troupe.Settings do
        ]},
       {"Commands",
        [
-         "/settings        this page",
-         "/sessions        every session in this directory",
-         "/files           the session's files",
-         "/hq              teams, profiles and sessions on a plane",
-         "/watch on|off    act on AI! and AI? comments",
-         "/cancel          stop the agent mid-turn",
-         "/dismiss         let go of the session on screen"
+         "/help            every command, what it does and how to type it",
+         "/ (empty line)   the same list, filtered as you type",
+         "/settings        this page"
        ]},
       {"Where things live",
        [

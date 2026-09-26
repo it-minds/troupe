@@ -753,6 +753,31 @@ machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `g
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
 `profile` may name wherever the session will run.
 
+#### `commands.list`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
+"source", "detail", "example"}]}`
+
+The slash commands a client may offer for the session — the one table behind every
+client's palette, so `/help` in the terminal and the desktop app show the same list and
+adding a command is one change in the harness. Entries come grouped by `section`, in
+the order a palette shows them: `session`, `navigate`, `workspace`, `setup`, `agents`,
+`quit`. Each has a `name`, its `aliases`, a one-line `summary`, how it is typed
+(`usage`: `/upload <path>`), its `args` (`{"name", "required", "kind"}`, where `kind`
+is `window`, `file` or `text`, for completion), a longer `detail`, an `example` or
+null, and where it came from: `source` is `builtin` or `agent`. The agents are the
+primary ones `agents.list` answers with for the session's workspace, described by their
+definition; they take a `prompt` and start a branch on it, which a client without
+branches shows as such.
+
+`availability` is what the command needs, for a client to judge and say rather than
+hide the row: `always`; `window` (acts on a window — the activated one, or one named
+as an argument); `local` (a session on this machine: a pod has no checkout, watcher or
+project brief of the person's to act on); `plane` (needs a plane). A client runs what
+it can and shows the rest greyed with the reason. Reading the table wakes nothing.
+
 #### `memory.get`
 ```json
 {"workspace": "/home/me/project"}
@@ -1001,7 +1026,7 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
 | `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import` |
 
@@ -1058,7 +1083,7 @@ ACL of each session a request names.
 require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
-`mcp.status`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+`mcp.status`, `commands.list`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
 `worktree.*`, `watch.set`, `identity.*` and `config.*` — and a token for one session is

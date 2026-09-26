@@ -248,7 +248,8 @@ Inside the TUI, everything starts with `/`:
 | `/dismiss`, `/merge`, `/discard` `[n]` | act on the activated window or the one on tile `n` (a path works too) |
 | `/agents` | list the agents you can dispatch |
 | `/resume`, `/sessions` | this directory's sessions, newest first: Enter switches the window to one (`/resume <n\|ID>` goes straight there) |
-| `/settings`, `/help` | settings page: tweak settings and read the curated help |
+| `/help`, `/` on an empty line, Ctrl-K | the command palette: every command with a one-line description, filtered as you type |
+| `/settings` | settings page: tweak settings and read the curated help |
 | `/hq`, `/remote` | HQ: a plane's teams, profiles and sessions, with this machine's own listed alongside |
 | `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
 | `/mcp` | MCP servers: each one's state, tools and errors |
@@ -356,9 +357,23 @@ explicit: starting a session reads the cache and never the network.
 setting, Esc goes back. The last entry types a model by hand for anything the
 config does not mention. The cheap model has the same menu on the settings page.
 
+### Command palette
+
+`/` on an empty command line, Ctrl-K with nothing typed, or `/help` opens a popup
+over the session listing every command in sections — Session, Navigate, Workspace,
+Setup, Agents (one entry per agent, with its description), Quit — each with a
+one-line description, and the selected one explained beside it with an example.
+Typing filters by name, alias or description (`mer` narrows to `/merge`); `↑`/`↓`
+and PgUp/PgDn move; Enter runs the command, or leaves it on the line when it needs an
+argument; Tab or Space leave it on the line too, so `/merge 2` types exactly as it
+always did; Esc goes back. A command that cannot run right now — one that acts on a
+window when none is activated, or a local one in a plane session — is shown greyed
+with the reason rather than hidden. The list is the daemon's (`commands.list`), so the
+desktop app shows the same one.
+
 ### Settings page
 
-`/settings` (or `/help`) opens a page listing every tweakable setting with its
+`/settings` opens a page listing every tweakable setting with its
 current value, and a curated help text next to it: what the selected setting
 does, plus the commands, keys and concepts worth knowing. `↑`/`↓` moves, Enter
 toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the
