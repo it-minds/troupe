@@ -191,9 +191,22 @@ defmodule Troupe.Commands do
         usage: "/models",
         detail: "The settings page opened on the default model, with its menu up."
       ),
-      entry("mcp", "setup", "MCP servers: each one's state, tools and errors",
-        usage: "/mcp",
-        detail: "The servers the workspace's .troupe/config.yaml names, as the session sees them."
+      entry("mcp", "setup", "Your MCP servers: each one's layer, state, tools and errors",
+        usage: "/mcp [import|link|remove|check <target>] [--workspace]",
+        args: [arg("verb", false, "text"), arg("target", false, "path")],
+        detail:
+          "Servers from your mcp.json, the workspace's .troupe/mcp.json and the bundle. " <>
+            "import copies a .mcp.json, link reads it in place, remove and check take a " <>
+            "server name; --workspace writes the workspace's file.",
+        example: "/mcp import .mcp.json"
+      ),
+      entry("skills", "setup", "Your skills: each one's layer, description and source",
+        usage: "/skills [import|link|remove <target>] [--workspace]",
+        args: [arg("verb", false, "text"), arg("target", false, "path")],
+        detail:
+          "Skills from your skills/ directory, the workspace's .troupe/skills/ and the " <>
+            "bundle; import copies a directory of skills, link reads it in place.",
+        example: "/skills link ~/.claude/skills"
       ),
       entry("help", "setup", "This list: every command, what it does and how to type it",
         aliases: ["?"],

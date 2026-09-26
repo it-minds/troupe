@@ -257,7 +257,17 @@ defmodule Troupe.Protocol.Bundle do
   def read_skill(dir, name) do
     # A backslash is a separator here, as it is to the glob below, so the manifest is read
     # from the directory whose files are listed and the files are relative to it.
-    skill_dir = Path.join([String.replace(dir, "\\", "/"), "skills", name])
+    read_skill_dir(Path.join([String.replace(dir, "\\", "/"), "skills", name]), name)
+  end
+
+  @doc """
+  One skill from its own directory, wherever that is: the bundle's `skills/<name>`, or
+  a directory a person keeps skills in (`Troupe.Skills.Local`).
+  """
+  @spec read_skill_dir(Path.t(), String.t()) ::
+          {:ok, %{name: String.t(), body: String.t(), files: [String.t()]}} | {:error, :not_found}
+  def read_skill_dir(skill_dir, name) do
+    skill_dir = String.replace(skill_dir, "\\", "/")
     manifest = Path.join(skill_dir, "SKILL.md")
 
     with true <- AgentDefinition.valid_name?(name),
@@ -281,13 +291,22 @@ defmodule Troupe.Protocol.Bundle do
 
   @doc "Name and description of every skill in a materialised directory, for a prompt."
   @spec list_skills(Path.t()) :: [%{name: String.t(), description: String.t()}]
-  def list_skills(dir) do
-    dir
+  def list_skills(dir), do: list_skills_in(Path.join(dir, "skills"))
+
+  @doc """
+  Every `<root>/<name>/SKILL.md` under a directory of skills, by name, with the
+  description its frontmatter gives and the directory it is in. A directory whose
+  name is not one a skill may have is passed over, as the plane would have refused it.
+  """
+  @spec list_skills_in(Path.t()) :: [%{name: String.t(), description: String.t(), dir: Path.t()}]
+  def list_skills_in(root) do
+    root
     |> Glob.escape()
-    |> Path.join("skills/*/SKILL.md")
+    |> Path.join("*/SKILL.md")
     |> Path.wildcard()
     |> Enum.map(fn manifest ->
-      name = manifest |> Path.dirname() |> Path.basename()
+      dir = Path.dirname(manifest)
+      name = Path.basename(dir)
       {frontmatter, _body} = manifest |> File.read!() |> AgentDefinition.split_frontmatter()
 
       description =
@@ -296,8 +315,9 @@ defmodule Troupe.Protocol.Bundle do
           _ -> ""
         end
 
-      %{name: name, description: description}
+      %{name: name, description: description, dir: dir}
     end)
+    |> Enum.filter(&AgentDefinition.valid_name?(&1.name))
     |> Enum.sort_by(& &1.name)
   end
 

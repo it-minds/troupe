@@ -705,76 +705,127 @@ defmodule Troupe.UI.TUI.View do
   defp human_size(size) when is_integer(size), do: "#{size} B"
   defp human_size(_size), do: ""
 
-  ## MCP page
+  ## MCP page (troupe-remote Decision 700)
+
+  @doc """
+  The rows the `/mcp` page lists, in order: every server the layers give the workspace,
+  then every skill. What the page's cursor and keys index.
+  """
+  @spec mcp_entries(map()) :: [{:server, map()} | {:skill, map()}]
+  def mcp_entries(%{mcp_page: %{servers: servers, skills: skills}}),
+    do: Enum.map(servers, &{:server, &1}) ++ Enum.map(skills, &{:skill, &1})
+
+  def mcp_entries(_state), do: []
 
   defp mcp_page(state, rect) do
-    servers = Model.mcp_servers(state.model)
+    entries = mcp_entries(state)
     [list_rect, detail_rect] = Layout.split(rect, :horizontal, [{:fill, 2}, {:fill, 3}])
 
     items =
-      case servers do
+      case entries do
         [] ->
           [
-            "No MCP servers configured.",
+            "No MCP servers or skills yet.",
             "",
-            "Add servers to .troupe/config.yaml under 'mcp':",
+            "/mcp import <path>    copy a .mcp.json (Claude Code, Cursor, VS Code, Claude Desktop)",
+            "/mcp link <path>      read one in place",
+            "/skills import <dir>  copy a directory of skills, such as ~/.claude/skills",
+            "/skills link <dir>    read one in place",
             "",
-            "Example:",
-            "  mcp:",
-            "    filesystem:",
-            "      command: npx",
-            "      args: [\"-y\", \"@modelcontextprotocol/server-filesystem\", \"/tmp\"]"
-          ]
+            "Add --workspace to write the workspace's .troupe/ files instead of yours.",
+            "Or write mcp.json beside config.yaml by hand: {\"mcpServers\": {...}}."
+          ] ++ mcp_warnings(state)
 
         list ->
-          Enum.map(list, &mcp_server_line/1)
+          Enum.map(list, &mcp_line/1) ++ mcp_warnings(state)
       end
 
     list = %ExRatatui.Widgets.List{
       items: items,
-      selected: if(servers == [], do: nil, else: min(state.mcp_cursor, length(servers) - 1)),
+      selected: if(entries == [], do: nil, else: min(state.mcp_cursor, length(entries) - 1)),
       highlight_symbol: "▸ ",
       highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
       block: %Block{
-        title: " MCP servers ",
+        title: " MCP servers and skills ",
         borders: [:all],
         border_type: :double
       }
     }
 
     detail = %Paragraph{
-      text: mcp_detail(state, Enum.at(servers, state.mcp_cursor)),
-      wrap: false,
+      text: mcp_detail(Enum.at(entries, state.mcp_cursor)),
+      wrap: true,
       block: %Block{title: mcp_detail_title(), borders: [:all]}
     }
 
     [{list, list_rect}, {detail, detail_rect}]
   end
 
-  defp mcp_server_line(%{name: name, state: state, tools: tools}),
-    do: "#{mcp_glyph(state)} #{name} (#{tools} tools)"
+  defp mcp_warnings(%{mcp_page: %{warnings: [_ | _] = warnings}}),
+    do: [""] ++ Enum.map(warnings, &("! " <> &1))
 
-  defp mcp_glyph(:ready), do: "✓"
-  defp mcp_glyph(:connecting), do: "…"
-  defp mcp_glyph(:error), do: "✗"
-  defp mcp_glyph(:stopped), do: "○"
-  defp mcp_glyph(_), do: " "
+  defp mcp_warnings(_state), do: []
 
-  defp mcp_detail_title, do: " ↑↓ move · r refreshes · Esc back "
+  defp mcp_line({:server, %{name: name, layer: layer} = server}),
+    do: "#{mcp_glyph(server)} #{name}  [#{layer}]  #{mcp_summary(server)}"
 
-  defp mcp_detail(_state, nil), do: "Select a server to see its tools."
+  defp mcp_line({:skill, %{name: name, layer: layer, description: description}}),
+    do: "◆ #{name}  [#{layer}]  #{clip(description, 48)}"
 
-  defp mcp_detail(_state, %{name: name, state: state, tools: tools, error: error}) do
-    parts =
-      [
-        field("name", name),
-        field("state", state),
-        field("tools", tools)
-      ]
+  defp mcp_glyph(%{disabled?: true}), do: "–"
+  defp mcp_glyph(%{state: :ready}), do: "✓"
+  defp mcp_glyph(%{state: :connecting}), do: "…"
+  defp mcp_glyph(%{state: :error}), do: "✗"
+  defp mcp_glyph(%{state: :stopped}), do: "○"
+  defp mcp_glyph(%{state: :pending}), do: "?"
+  defp mcp_glyph(%{state: :disabled}), do: "–"
+  defp mcp_glyph(_server), do: "·"
 
-    parts = if error, do: parts ++ [field("error", error)], else: parts
-    Enum.join(parts, "\n")
+  defp mcp_summary(%{disabled?: true}), do: "disabled"
+  defp mcp_summary(%{state: nil}), do: "not in this session yet — c starts it"
+  defp mcp_summary(%{state: :ready, tools: tools}), do: "#{length(tools)} tools"
+  defp mcp_summary(%{state: state}), do: to_string(state)
+
+  defp mcp_detail_title,
+    do: " ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "
+
+  defp mcp_detail(nil), do: "Select a server or a skill to see where it comes from."
+
+  defp mcp_detail({:server, server}) do
+    [
+      field("name", server.name),
+      field("layer", server.layer),
+      field("source", server.source || "(this session)"),
+      transport_field(server),
+      field("state", server.state || "not started in this session"),
+      field("tools", Enum.join(server.tools, ", ")),
+      if(server.error, do: field("error", server.error)),
+      if(server.trust, do: field("trust", server.trust)),
+      if(server.disabled?, do: field("disabled", "yes"))
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
   end
+
+  defp mcp_detail({:skill, skill}) do
+    [
+      field("name", skill.name),
+      field("layer", skill.layer),
+      field("source", skill.source),
+      if(skill.linked?, do: field("linked", "read in place")),
+      "",
+      skill.description
+    ]
+    |> Enum.reject(&is_nil/1)
+    |> Enum.join("\n")
+  end
+
+  defp transport_field(%{url: url}) when is_binary(url), do: field("url", url)
+
+  defp transport_field(%{command: command, args: args}) when is_binary(command),
+    do: field("command", Enum.join([command | args], " "))
+
+  defp transport_field(_server), do: field("command", "(none)")
 
   ## Settings page
 
@@ -1612,7 +1663,7 @@ defmodule Troupe.UI.TUI.View do
           {"", " files — ↑↓ move · Enter opens · ← up · r reloads · Esc back "}
 
         :mcp ->
-          {"", " mcp — ↑↓ move · r refreshes · Esc back "}
+          {"", " mcp — ↑↓ move · r reload · c check · d enable/disable · x remove · Esc back "}
 
         :hq ->
           {hq_text(state), Troupe.UI.HQ.footer(state.hq)}

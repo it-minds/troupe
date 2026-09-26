@@ -162,6 +162,13 @@ defmodule Troupe.Client.Remote do
   def mcp_status(_sid), do: []
 
   @impl true
+  def sources(_sid), do: {:error, "a remote session's MCP servers and skills are its profile's"}
+
+  @impl true
+  def manage_sources(_sid, _method, _params),
+    do: {:error, "a remote session's MCP servers and skills are its profile's"}
+
+  @impl true
   def memory(_sid, _command), do: {:error, "the project brief lives on the worker"}
 
   @impl true

@@ -67,6 +67,64 @@ export interface RecentWorkspace {
   sessions: number;
 }
 
+/** Which file a server or a skill came from (troupe-remote Decision 700). `session` is one a session still runs that no file names. */
+export type SourceLayer = "config" | "user" | "workspace" | "session";
+/** Which layer a write goes to: the user's files, or a workspace's `.troupe/`. */
+export type SourceScope = "user" | "workspace";
+
+/** One MCP server as `mcp.list` reports it. `env` is the names of its variables; the values never leave the daemon. */
+export interface LocalServer {
+  name: string;
+  layer: SourceLayer;
+  source: string | null;
+  transport?: "stdio" | "http";
+  command?: string | null;
+  args?: string[];
+  url?: string | null;
+  cd?: string | null;
+  env?: string[];
+  permission?: "ask" | "auto";
+  disabled?: boolean;
+  /** Why the daemon will not start it: an unset `{env:VAR}`, or no transport. */
+  refused?: string | null;
+  /** For a workspace-level server: whether somebody has approved it there. */
+  trust?: "trusted" | "pending" | null;
+  /** From the session named in the call, or from a check; null when nothing has run it. */
+  state: string | null;
+  tools: string[];
+  error: string | null;
+}
+
+/** One skill as `skills.list` reports it. */
+export interface LocalSkill {
+  name: string;
+  description: string;
+  layer: SourceLayer;
+  source: string;
+  dir: string;
+  linked: boolean;
+}
+
+/** What `mcp.add` and `skills.add` answer for a file or a directory brought in. */
+export interface ImportResult {
+  path: string;
+  from: string;
+  added: string[];
+  skipped: Array<{ name: string; reason: string }>;
+  warnings?: string[];
+  linked: boolean;
+}
+
+export interface RemoveResult {
+  path: string;
+  removed: string[];
+}
+
+export interface ScopedParams {
+  scope?: SourceScope;
+  workspace?: string;
+}
+
 export interface CreateLocalParams {
   workspace: string;
   profile?: string;
@@ -364,6 +422,53 @@ export class DaemonClient {
 
   unregisterTools(sessionId: string, names: string[]): Promise<unknown> {
     return this.command("tools.unregister", { session_id: sessionId, names });
+  }
+
+  /**
+   * Your own MCP servers, from the daemon's layers (troupe-remote Decision 700).
+   *
+   * With a `workspace`, its `.troupe/mcp.json` is read over your own file; with a
+   * `session_id`, each server carries the state it has in that session.
+   */
+  listServers(opts: { workspace?: string; session_id?: string } = {}): Promise<{ servers: LocalServer[]; warnings: string[] }> {
+    return this.call("mcp.list", { ...opts });
+  }
+
+  /** Bring another tool's `.mcp.json` in: copied into the layer's file, or read in place with `link`. */
+  importServers(params: ScopedParams & { from: string; link?: boolean }): Promise<ImportResult> {
+    return this.command<ImportResult>("mcp.add", { ...params });
+  }
+
+  /** Write one server, merged onto what the layer has under that name: `{ disabled: true }` alone turns one off. */
+  writeServer(params: ScopedParams & { name: string; server: Record<string, unknown> }): Promise<{ name: string; path: string; entry: Record<string, unknown>; warnings: string[] }> {
+    return this.command("mcp.add", { ...params });
+  }
+
+  /** Take a server out of its file, or unlink a linked file with `include`. */
+  removeServer(params: ScopedParams & ({ name: string } | { include: string })): Promise<RemoveResult> {
+    return this.command<RemoveResult>("mcp.remove", { ...params });
+  }
+
+  /**
+   * Try a server. In a session it is read again from its files and started, which is
+   * also how one that died is brought back; otherwise it is run once and stopped.
+   * `admin`, as it runs a command on this computer.
+   */
+  checkServer(params: { session_id?: string; workspace?: string; name: string; server?: Record<string, unknown> }): Promise<{ server: LocalServer }> {
+    return this.call("mcp.check", { ...params });
+  }
+
+  listSkills(workspace?: string): Promise<{ skills: LocalSkill[] }> {
+    return this.call("skills.list", workspace ? { workspace } : {});
+  }
+
+  /** Bring a directory of skills in, such as `~/.claude/skills`: copied, or read in place with `link`. */
+  importSkills(params: ScopedParams & { from: string; link?: boolean }): Promise<ImportResult> {
+    return this.command<ImportResult>("skills.add", { ...params });
+  }
+
+  removeSkill(params: ScopedParams & ({ name: string } | { include: string })): Promise<RemoveResult> {
+    return this.command<RemoveResult>("skills.remove", { ...params });
   }
 }
 

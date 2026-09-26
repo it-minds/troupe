@@ -73,7 +73,14 @@ export type {
   DaemonHooks,
   DaemonIdentity,
   DaemonSessionRow,
+  ImportResult,
+  LocalServer,
+  LocalSkill,
   RecentWorkspace,
+  RemoveResult,
+  ScopedParams,
+  SourceLayer,
+  SourceScope,
   Worktree,
 } from "./daemon.js";
 export {

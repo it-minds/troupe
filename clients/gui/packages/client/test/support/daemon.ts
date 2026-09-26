@@ -61,6 +61,33 @@ export interface FakeDaemonOptions {
   overrides?: Array<{ source: "project" | "env" | "opencode"; detail: string }>;
 }
 
+/** One MCP server in a fake layer file (troupe-remote Decision 700). `env` values stay here, as the real daemon keeps them. */
+export interface FakeServer {
+  name: string;
+  layer: "user" | "workspace";
+  source: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  disabled?: boolean;
+}
+
+export interface FakeSkill {
+  name: string;
+  description: string;
+  layer: "user" | "workspace";
+  source: string;
+  dir: string;
+  linked: boolean;
+}
+
+/** What the fake finds at a path a test names: the stand-in for the daemon reading a file or a directory. */
+export interface Importable {
+  servers?: Record<string, Record<string, unknown>>;
+  skills?: Array<{ name: string; description: string }>;
+}
+
 /** What the fake daemon's settings file holds. The key is here and nowhere in an answer. */
 export interface FakeModelSettings {
   exists: boolean;
@@ -110,6 +137,11 @@ export class FakeDaemon {
     api_key: null,
     models: { default: null, cheap: null, expensive: null },
   };
+  /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
+  servers: FakeServer[] = [];
+  skills: FakeSkill[] = [];
+  /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
+  importable: Record<string, Importable> = {};
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -403,6 +435,15 @@ export class FakeDaemon {
         if (!this.modelSettings) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
         return this.config(ws, id, method, params);
 
+      case "mcp.list":
+      case "mcp.add":
+      case "mcp.remove":
+      case "mcp.check":
+      case "skills.list":
+      case "skills.add":
+      case "skills.remove":
+        return this.sources(ws, id, method, params);
+
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
     }
@@ -451,6 +492,142 @@ export class FakeDaemon {
       if (role in models) s.models[role] = models[role] || null;
     }
     return reply(ws, id, this.configJson());
+  }
+
+  /**
+   * The person's own servers and skills (troupe-remote Decision 700), with the daemon's
+   * shapes: a layer's file written by scope, an import reading what `importable` says
+   * is at the path, `env` answered as names, a check answering `ready` with one tool
+   * for anything but a command that does not exist.
+   */
+  private sources(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    const scope = (params["scope"] as "user" | "workspace" | undefined) ?? "user";
+    const workspace = typeof params["workspace"] === "string" ? params["workspace"] : null;
+    const dir = `/home/${this.osUser}/.config/troupe`;
+    const layerPath = (what: "mcp.json" | "skills") => (scope === "workspace" ? `${workspace}/.troupe/${what}` : `${dir}/${what}`);
+    if (scope === "workspace" && !workspace) return invalid("the workspace scope needs a workspace");
+
+    const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || Boolean(workspace));
+    const liveOf = (s: FakeServer) => (s.disabled ? { state: "disabled", tools: [], error: null } : { state: "ready", tools: ["greet"], error: null });
+    const serverJson = (s: FakeServer, live: boolean) => ({
+      name: s.name,
+      layer: s.layer,
+      source: s.source,
+      transport: s.url ? "http" : "stdio",
+      command: s.command ?? null,
+      args: s.args ?? [],
+      url: s.url ?? null,
+      cd: null,
+      env: Object.keys(s.env ?? {}).sort(),
+      permission: "ask",
+      disabled: Boolean(s.disabled),
+      refused: null,
+      trust: s.layer === "workspace" ? "trusted" : null,
+      ...(live ? liveOf(s) : { state: null, tools: [], error: null }),
+    });
+
+    switch (method) {
+      case "mcp.list":
+        return reply(ws, id, { servers: visible(this.servers).map((s) => serverJson(s, typeof params["session_id"] === "string")), warnings: [] });
+
+      case "mcp.add": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const from = params["from"];
+        if (typeof from === "string") {
+          const found = this.importable[from];
+          if (!found?.servers) return invalid(`could not read ${from}: no such file or directory`);
+          const path = layerPath("mcp.json");
+          const added: string[] = [];
+          const skipped: Array<{ name: string; reason: string }> = [];
+          for (const [name, raw] of Object.entries(found.servers)) {
+            if (!raw["command"] && !raw["url"]) {
+              skipped.push({ name, reason: "has neither a command nor a url" });
+              continue;
+            }
+            this.servers = this.servers.filter((s) => !(s.name === name && s.layer === scope));
+            this.servers.push({ name, layer: scope, source: params["link"] ? from : path, ...(raw as Omit<FakeServer, "name" | "layer" | "source">) });
+            added.push(name);
+          }
+          return reply(ws, id, { path, from, added: added.sort(), skipped, warnings: [], linked: Boolean(params["link"]) });
+        }
+        const name = params["name"];
+        const raw = params["server"];
+        if (typeof name !== "string" || typeof raw !== "object" || raw === null) return invalid("mcp.add takes a file to import (from) or a server to write (name and server)");
+        if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) return invalid(`${JSON.stringify(name)} is not a server name: lower-case letters, digits, - and _, and no dot`);
+        const existing = this.servers.find((s) => s.name === name && s.layer === scope);
+        const merged: FakeServer = { ...(existing ?? { name, layer: scope, source: layerPath("mcp.json") }), ...(raw as Partial<FakeServer>), name, layer: scope };
+        this.servers = [...this.servers.filter((s) => s !== existing), merged];
+        const { name: _n, layer: _l, source: _s, env, ...entry } = merged;
+        return reply(ws, id, { name, path: merged.source, entry: { ...entry, ...(env ? { env: Object.keys(env).sort() } : {}) }, warnings: [] });
+      }
+
+      case "mcp.remove": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const path = layerPath("mcp.json");
+        if (typeof params["include"] === "string") {
+          const gone = this.servers.filter((s) => s.layer === scope && s.source === params["include"]);
+          if (gone.length === 0) return invalid(`${path} does not include ${params["include"]}`);
+          this.servers = this.servers.filter((s) => !gone.includes(s));
+          return reply(ws, id, { path, removed: gone.map((s) => s.name).sort() });
+        }
+        const name = String(params["name"] ?? "");
+        const own = this.servers.find((s) => s.name === name && s.layer === scope);
+        if (!own) return invalid(`${path} has no server named ${name}`);
+        if (own.source !== path) return invalid(`${name} comes from ${own.source}, which ${path} links; edit that file, or unlink it with include: ${JSON.stringify(own.source)}`);
+        this.servers = this.servers.filter((s) => s !== own);
+        return reply(ws, id, { path, removed: [name] });
+      }
+
+      case "mcp.check": {
+        const name = String(params["name"] ?? "");
+        const given = params["server"] as Record<string, unknown> | undefined;
+        const known = this.servers.find((s) => s.name === name);
+        if (!given && !known) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "mcp_server", name } });
+        const command = given ? String(given["command"] ?? "") : (known?.command ?? "");
+        const base = known ? serverJson(known, false) : { name, layer: "request", source: "request" };
+        if (command.startsWith("no-such")) return reply(ws, id, { server: { ...base, state: "error", tools: [], error: `could not start: {:not_found, "${command}"}` } });
+        if (known?.disabled) return reply(ws, id, { server: { ...base, state: "disabled", tools: [], error: null } });
+        return reply(ws, id, { server: { ...base, state: "ready", tools: ["greet"], error: null } });
+      }
+
+      case "skills.list":
+        return reply(ws, id, { skills: visible(this.skills) });
+
+      case "skills.add": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const from = String(params["from"] ?? "");
+        const found = this.importable[from];
+        if (!found?.skills) return invalid(`${from} is not a directory`);
+        const link = Boolean(params["link"]);
+        const path = link ? `${scope === "workspace" ? `${workspace}/.troupe` : dir}/skills.json` : layerPath("skills");
+        const added: string[] = [];
+        for (const skill of found.skills) {
+          this.skills = this.skills.filter((s) => !(s.name === skill.name && s.layer === scope));
+          this.skills.push({ ...skill, layer: scope, source: link ? from : layerPath("skills"), dir: `${link ? from : layerPath("skills")}/${skill.name}`, linked: link });
+          added.push(skill.name);
+        }
+        return reply(ws, id, { path, from, added: added.sort(), skipped: [], linked: link });
+      }
+
+      case "skills.remove": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        if (typeof params["include"] === "string") {
+          const gone = this.skills.filter((s) => s.layer === scope && s.linked && s.source === params["include"]);
+          this.skills = this.skills.filter((s) => !gone.includes(s));
+          return reply(ws, id, { path: `${dir}/skills.json`, removed: gone.map((s) => s.name).sort() });
+        }
+        const name = String(params["name"] ?? "");
+        const own = this.skills.find((s) => s.name === name && s.layer === scope);
+        if (!own) return invalid(`${layerPath("skills")} has no skill named ${name}`);
+        if (own.linked) return invalid(`${name} comes from ${own.source}, which links it; unlink it with include: ${JSON.stringify(own.source)}`);
+        this.skills = this.skills.filter((s) => s !== own);
+        return reply(ws, id, { path: layerPath("skills"), removed: [name] });
+      }
+
+      default:
+        return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+    }
   }
 
   private configJson(): Record<string, unknown> {
