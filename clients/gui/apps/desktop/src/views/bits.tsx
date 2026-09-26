@@ -11,13 +11,18 @@ import type { JSX, ReactNode } from "react";
 import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
-/** The nine states a session can be in, as the design names them. */
-export type Status = "running" | "waiting" | "queued" | "allowed" | "denied" | "dormant" | "readonly" | "error" | "offline" | "private";
+/**
+ * The states a session can be in, as the design names them. `idle` is the one without a
+ * colour of its own: doing nothing is the absence of a state, drawn in the chrome's grey,
+ * so that `queued` — accepted, not started — can keep the comp's amber for a held message.
+ */
+export type Status = "running" | "waiting" | "queued" | "idle" | "allowed" | "denied" | "dormant" | "readonly" | "error" | "offline" | "private";
 
 const WORDS: Record<Status, string> = {
   running: "Working",
   waiting: "Waiting for you",
   queued: "Queued",
+  idle: "Idle",
   allowed: "Allowed",
   denied: "Denied",
   dormant: "Asleep",
@@ -40,8 +45,11 @@ export function Pill({ status, children, title }: { status: Status; children?: s
  * What a row's state is, in the design's words rather than the protocol's.
  *
  * An approval or a question waiting on somebody outranks everything else — that is the
- * one state the whole colour scheme is built around — and a session that stopped on an
- * error outranks the fact that it is technically idle.
+ * one state the whole colour scheme is built around, and it holds from the first second:
+ * a session whose only open question is the workspace's trust question, asked before
+ * the agent has done anything, is waiting on a person like any other — and a session
+ * that stopped on an error outranks the fact that it is technically idle. What is left
+ * is idle or stopped, which is not a state so much as the absence of one.
  */
 export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprovals" | "pendingQuestions" | "doneReason">): Status {
   if (row.pendingApprovals > 0 || row.pendingQuestions > 0 || row.status === "waiting") return "waiting";
@@ -49,13 +57,13 @@ export function statusOf(row: Pick<FleetRow, "state" | "status" | "pendingApprov
   if (row.doneReason === "budget_exhausted" || row.doneReason === "llm_error" || row.status === "interrupted") return "error";
   if (row.status && ["thinking", "acting", "compacting"].includes(row.status)) return "running";
   if (row.state === "dormant") return "dormant";
-  return "queued";
+  return "idle";
 }
 
 export function RowStatus({ row }: { row: FleetRow }): JSX.Element {
   const status = statusOf(row);
   const detail = row.doneReason ?? row.status ?? row.state;
-  return <Pill status={status} title={`${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "queued" ? word(detail) : undefined}</Pill>;
+  return <Pill status={status} title={`${row.state}${row.status ? ` · ${row.status}` : ""}`}>{status === "idle" ? word(detail) : undefined}</Pill>;
 }
 
 function word(s: string): string {
@@ -126,7 +134,8 @@ export function When({ iso }: { iso: string | null }): JSX.Element {
   );
 }
 
-function relative(at: number): string {
+/** A moment as a distance from now, in the coarsest unit that still says something. */
+export function relative(at: number): string {
   // A time the server did not give, or gave in a shape `Date.parse` does not read, is not a number of days.
   if (!Number.isFinite(at)) return "—";
   const seconds = Math.round((Date.now() - at) / 1000);

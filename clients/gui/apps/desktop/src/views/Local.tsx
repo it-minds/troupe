@@ -55,9 +55,9 @@ export function Local({
 }): JSX.Element {
   return (
     <>
-      <header className="toolbar">
-        <h2>This computer</h2>
-        <span className="spacer" />
+      <header className="screen-head">
+        <span className="count">Settings</span>
+        <h1>This computer</h1>
         <DaemonStatus daemon={daemon} />
       </header>
 
@@ -78,7 +78,7 @@ function DaemonStatus({ daemon }: { daemon: DaemonState }): JSX.Element {
   if (daemon.status === "connected") return <Pill status="running">Connected</Pill>;
   if (daemon.status === "searching") return <Pill status="queued">Looking</Pill>;
   if (daemon.status === "error") return <Pill status="error">Not answering</Pill>;
-  if (daemon.status === "absent") return <Pill status="dormant">Not running</Pill>;
+  if (daemon.status === "absent") return <Pill status="idle">Not running</Pill>;
   return <Pill status="offline">No way to find it</Pill>;
 }
 

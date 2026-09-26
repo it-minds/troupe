@@ -1,15 +1,15 @@
 // Choosing a theme: once on first sign-in, and afterwards whenever you like.
 //
-// One screen, three cards, a light/dark control, and a sentence saying it can be
+// One screen, four cards, a light/dark control, and a sentence saying it can be
 // changed later. Four rules from docs/design/themes/THEMES.md are what make it a
 // ten-second screen rather than a puzzle, and each one is visible in the markup:
 //
 //   1. The default is preselected. Someone who presses Continue without reading gets
-//      Signal and loses nothing. Skipping is allowed and means the same thing.
+//      Afterglow and loses nothing. Skipping is allowed and means the same thing.
 //   2. The previews are real. Each card shows the session row that needs you, an
 //      approval and the cast — the three things a person looks at all day. Swatches
 //      tell you nothing about whether you can work in a theme.
-//   3. Light and dark is a separate control, not six cards. Theme and mode are
+//   3. Light and dark is a separate control, not eight cards. Theme and mode are
 //      different questions, and the mode control defaults to "follow my system".
 //   4. The copy says it is changeable, which removes all the weight from the decision.
 //
@@ -161,15 +161,18 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
  */
 export function AppearanceSettings(props: Appearance): JSX.Element {
   return (
-    <div className="listing">
-      <div className="appearance">
-        <header>
-          <h1>Appearance</h1>
+    <>
+      <header className="screen-head">
+        <span className="count">Settings</span>
+        <h1>Appearance</h1>
+      </header>
+      <div className="listing">
+        <div className="appearance">
           <p>Yours alone. Other people in your sessions see them in their own theme, and nothing about a theme changes what anything means.</p>
-        </header>
-        <Chooser {...props} />
+          <Chooser {...props} />
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
@@ -177,11 +180,11 @@ function Chooser(props: Appearance): JSX.Element {
   return (
     <div className="chooser">
       <section>
-        <h2>Theme</h2>
+        <h2 className="screen">Theme</h2>
         <ThemeCards theme={props.theme} resolved={props.resolved} setTheme={props.setTheme} />
       </section>
       <section className="mode">
-        <h2>Light or dark</h2>
+        <h2 className="screen">Light or dark</h2>
         <ModeChoice mode={props.mode} setMode={props.setMode} />
       </section>
     </div>

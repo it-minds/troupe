@@ -159,7 +159,7 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # the client's 77 and the app's 4, below
+pnpm test                        # the client's 96 and the app's 18, below
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
 pnpm icons:check                 # fails if the desktop app's icons are not the mask
@@ -336,8 +336,8 @@ apps/desktop/src
   theme.ts        which theme and mode this person reads in; the only place that knows
   tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
   mark.ts         the mask's geometry, generated from the same files — do not edit
-  views/          SignIn · Sessions · Session · Approval · Approvals · Files · Review
-                  Local (Models) · Admin (Fleet · Bundles · Teams · Automation · Audit · Settings)
+  views/          SignIn · Launcher · Sessions · StartSession · Session · Approval · Question
+                  Approvals · Files · Review · CommandPalette · Local (Models · Servers) · Appearance
 ```
 
 `SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so
