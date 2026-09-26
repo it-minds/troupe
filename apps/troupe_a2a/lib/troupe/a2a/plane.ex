@@ -148,15 +148,6 @@ defmodule Troupe.A2A.Plane do
   def get_session(caller, session_id),
     do: rpc(caller, "session.get", %{"session_id" => session_id})
 
-  @doc "Every session the caller can see that an A2A call created."
-  @spec list_tasks(caller()) :: {:ok, [map()]} | {:error, Error.t()}
-  def list_tasks(caller) do
-    with {:ok, %{"sessions" => sessions}} <-
-           rpc(caller, "sessions.list", %{"filter" => %{"origin" => "a2a"}}) do
-      {:ok, sessions}
-    end
-  end
-
   @spec archive_session(caller(), String.t()) :: {:ok, map()} | {:error, Error.t()}
   def archive_session(caller, session_id),
     do: rpc(caller, "session.archive", %{"session_id" => session_id})

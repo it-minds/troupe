@@ -13,7 +13,8 @@ defmodule Troupe.Plane.PlatformBudget do
 
   ## A stored ceiling may only narrow
 
-  The deployment's cap comes from a Helm value and is the floor of the argument: an
+  The deployment's cap comes from a Helm value (`plane.deploymentBudgetMicros`, which the
+  chart passes as `TROUPE_DEPLOYMENT_BUDGET_MICROS`) and is the floor of the argument: an
   operator who could raise it from inside the console could raise it past whatever the
   people paying for this agreed to. So a platform admin's cap applies when it is
   *tighter* and is ignored when it is not — the ladder's rule, a lower rung may only

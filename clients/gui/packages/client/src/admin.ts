@@ -50,7 +50,8 @@ export interface AdminProfile {
   sessions_per_pod: number | null;
   channel: string | null;
   image: string | null;
-  conditions: Array<{ type?: string; status?: string; reason?: string; message?: string; [k: string]: unknown }>;
+  /** `null` where the plane could not ask the cluster, which is not the same as none. */
+  conditions: Array<{ type?: string; status?: string; reason?: string; message?: string; [k: string]: unknown }> | null;
   pods: AdminPod[];
   capacity: number;
   active_sessions: number;
