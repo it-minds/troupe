@@ -40,9 +40,9 @@
     "copyright": "Copyright 2026 The Troupe contributors",
     "publisher": "Objective MJ",
     "resources": {
-      "../../../../LICENSE": "LICENSE",
-      "../../../../NOTICE": "NOTICE",
-      "../../../../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
+      "../../../../../LICENSE": "LICENSE",
+      "../../../../../NOTICE": "NOTICE",
+      "../../../../../THIRD-PARTY-NOTICES.txt": "THIRD-PARTY-NOTICES.txt"
     },
     "macOS": {
       "minimumSystemVersion": "10.15"
