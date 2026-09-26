@@ -62,7 +62,7 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `scheduler could not fire <trigger> ...` | a cron firing failed to create its session |
 | `erasure of <id> is pending: ...` | no healthy pod could erase; it runs at the next enrolment |
 | `troupe operator: refusing <profile>: <violations>` | a policy violation; nothing was created |
-| `troupe operator: pruning <kind>/<name>` | a scale-down or a revoked grant took an object away |
+| `troupe operator: pruning <kind>/<name>` | a scale-down, a revoked grant or `ciliumAvailable` switched off took an object away |
 
 `troupe_core` also emits `:telemetry` events — `[:troupe, :llm, :start|:stop]`,
 `[:troupe, :tool, :stop]`, `[:troupe, :agent, :transition]` — and nothing attaches to them.
