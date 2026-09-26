@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# `config/config.exs` names localhost:55432, localhost:59000 and localhost:58200 for
+# `config/config.exs` names localhost:25432, localhost:29000 and localhost:28200 for
 # Postgres, MinIO and OpenBao, because on a developer's machine `scripts/dev-up`
 # publishes them there. Inside a container on the compose network the same three are
 # `postgres:5432`, `minio:9000` and `openbao:8200` — so the loopback addresses the
@@ -12,13 +12,13 @@ forward() {
 }
 
 if [ "${TROUPE_TOOLBOX_FORWARD:-1}" = "1" ]; then
-  forward 55432 postgres:5432
-  forward 59000 minio:9000
-  forward 58200 openbao:8200
+  forward 25432 postgres:5432
+  forward 29000 minio:9000
+  forward 28200 openbao:8200
 
   # socat binds asynchronously, and a `mix test` that starts first sees a connection
   # refused that reads like a database which is not running.
-  for port in 55432 59000 58200; do
+  for port in 25432 29000 28200; do
     for _ in $(seq 100); do
       (exec 3<>"/dev/tcp/127.0.0.1/${port}") 2>/dev/null && break
       sleep 0.05

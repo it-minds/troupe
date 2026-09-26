@@ -15,8 +15,8 @@ FROM hexpm/elixir:${ELIXIR_VERSION}-erlang-${OTP_VERSION}-debian-${DEBIAN_VERSIO
 # build-essential and git: Hex packages with NIFs. inotify-tools: the native watch
 # backend, without which the watch done item is proven by polling and is therefore not
 # proven. bubblewrap: `Troupe.SandboxTest` is the only proof one session cannot see
-# another's workspace. socat: the configuration names `localhost:55432`,
-# `localhost:59000` and `localhost:58200`, and inside a container those three loopback
+# another's workspace. socat: the configuration names `localhost:25432`,
+# `localhost:29000` and `localhost:28200`, and inside a container those three loopback
 # ports have to be carried to the compose network — see `dev/toolbox/entrypoint`.
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \

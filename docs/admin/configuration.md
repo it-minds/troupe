@@ -16,8 +16,8 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 ## Part A — Environment variables
 
 - Everything in `config/runtime.exs` is inside `if config_env() == :prod`; in `dev` and
-  `test` the values come from `config/config.exs` (Postgres on `localhost:55432`, MinIO on
-  `:59000`, OpenBao on `:58200` with root token `troupe-dev-root`).
+  `test` the values come from `config/config.exs` (Postgres on `localhost:25432`, MinIO on
+  `:29000`, OpenBao on `:28200` with root token `troupe-dev-root`).
 - Five `*_AUTOSTART` flags decide which supervision tree starts (operator, plane, worker,
   daemon, A2A). The image runs `/app/bin/${RELEASE_NAME} start`, `RELEASE_NAME` baked in at
   build time.

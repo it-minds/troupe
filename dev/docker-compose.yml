@@ -1,9 +1,12 @@
 # The things Troupe's plane and workers talk to, for development and tests.
 #
 # Deliberately on their own ports and their own project name: a developer's machine
-# usually has a Postgres and a MinIO already, and neither should notice this one. In a
-# real installation these are managed services or in-cluster; nothing here is a
-# deployment reference.
+# usually has a Postgres and a MinIO already, and neither should notice this one.
+# The host ports are below 32768, outside the range Linux (32768-60999) and Windows
+# (49152-65535) hand out to outgoing connections: a port in that range can already be
+# held by a checkout or an image pull, and the service then fails to start with
+# "address already in use". In a real installation these are managed services or
+# in-cluster; nothing here is a deployment reference.
 name: troupe-dev
 
 services:
@@ -39,10 +42,10 @@ services:
       - -c
       - archive_timeout=60
     ports:
-      - "55432:5432"
+      - "25432:5432"
       # Where `scripts/pitr-drill` brings a restored cluster up, beside the live one, so
       # a rebuild can be run against it before anything is switched over.
-      - "55433:5433"
+      - "25433:5433"
     volumes:
       - postgres-data:/var/lib/postgresql/data
       - wal-archive:/var/lib/postgresql/wal-archive
@@ -63,8 +66,8 @@ services:
       MINIO_ROOT_USER: troupe
       MINIO_ROOT_PASSWORD: troupe-secret
     ports:
-      - "59000:9000"
-      - "59001:9001"
+      - "29000:9000"
+      - "29001:9001"
     volumes:
       - minio-data:/data
     healthcheck:
@@ -95,7 +98,7 @@ services:
       BAO_DEV_ROOT_TOKEN_ID: troupe-dev-root
       BAO_ADDR: http://0.0.0.0:8200
     ports:
-      - "58200:8200"
+      - "28200:8200"
     cap_add:
       - IPC_LOCK
     healthcheck:

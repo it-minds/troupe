@@ -296,14 +296,6 @@ jobs:
       matrix:
         app: ${{ fromJSON(needs.changes.outputs.apps) }}
     steps:
-      # First, before anything opens a connection. The dev stack's host ports (55432,
-      # 55433, 59000, 59001, 58200) are all inside Linux's ephemeral range, so an
-      # outgoing connection — a checkout, an image pull — can be handed one of them
-      # first, and Postgres then fails to start with "address already in use". It did,
-      # on one leg of eight. Reserved ports are never handed out as ephemeral ones.
-      - name: Keep the dev stack's ports out of the ephemeral range
-        run: sudo sysctl -w net.ipv4.ip_local_reserved_ports=55432,55433,58200,59000,59001
-
       - uses: actions/checkout@v4
 
       - uses: erlef/setup-beam@v1
