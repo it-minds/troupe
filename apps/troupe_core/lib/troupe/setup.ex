@@ -205,9 +205,13 @@ defmodule Troupe.Setup do
     end
   end
 
-  @doc "Where a key this flow is given ends up: the user's file, there being no keychain here."
+  @doc """
+  Where a key this flow is given ends up: the user's file, there being no keychain here.
+  The path as a person on this platform writes it, since a screen shows it.
+  """
   @spec key_storage() :: map()
-  def key_storage, do: %{"kind" => "file", "path" => Config.user_path(), "keychain" => false}
+  def key_storage,
+    do: %{"kind" => "file", "path" => Troupe.Paths.display(Config.user_path()), "keychain" => false}
 
   # -- the report -----------------------------------------------------------------
 

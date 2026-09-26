@@ -56,7 +56,7 @@ defmodule Troupe.Gateway.SetupTest do
 
       assert report["key_storage"] == %{
                "kind" => "file",
-               "path" => ctx.config_file,
+               "path" => Troupe.Paths.display(ctx.config_file),
                "keychain" => false
              }
 
