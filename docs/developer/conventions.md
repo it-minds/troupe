@@ -10,7 +10,8 @@ enforced, this says so.
 `test <app>` jobs run the same steps plus the generated-file checks
 ([build.md §3](build.md#3-generated-committed-files)); `scripts/ci` is the CI job on a
 machine. The clients have their own gates: `mix check` in `clients/tui` (with
-`troupe.xref`), and `pnpm typecheck`, `test`, `tokens:check` in `clients/gui`. A package
+`troupe.xref`), and `pnpm typecheck`, `test`, `tokens:check`, `icons:check` in
+`clients/gui`. A package
 both the TUI and the umbrella lock must be the same version in both lock files;
 `elixir scripts/locks-agree.exs` checks it.
 

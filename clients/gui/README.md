@@ -162,6 +162,7 @@ know it.
 pnpm test                        # the client's 77 and the app's 4, below
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
+pnpm icons:check                 # fails if the desktop app's icons are not the mask
 ```
 
 The client's tests cover stage 1 and 2's done items, PKCE, the fold, the fleet store and
@@ -248,6 +249,9 @@ pod's running digest for that reason, and CI never publishes a floating tag.
 one token contract — and `example.dc.html` is every surface in one file.
 `apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts` are **generated** from
 `docs/design/themes/*.tokens.json` by `pnpm tokens` and committed; do not edit them.
+So is everything in `apps/desktop/src-tauri/icons/` — the app's icon on every platform,
+the installer's images and the disk image's background — by `pnpm icons`, from `mark.ts`
+and Signal's dark values; `scripts/icons.ts` says which and why.
 
 Three rules carry most of the weight, and a change that breaks one of them is a bug:
 
