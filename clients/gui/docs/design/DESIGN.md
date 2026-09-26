@@ -4,9 +4,22 @@ The browser client for Troupe. This document is the reasoning behind the token f
 
 Files:
 
-- `themes/` — the system as data. Three themes from one token contract, and [`themes/THEMES.md`](themes/THEMES.md) for what a theme may change and what it may not. **Signal is the default**; the palette tables in §2 below are Footlight's, which is where this document started and is still one of the three.
-- `example.dc.html` — all six surfaces, self-contained, keyboard-usable, works at 380px. Opens directly in a browser.
+- `themes/` — the system as data. Four themes from one token contract, and [`themes/THEMES.md`](themes/THEMES.md) for what a theme may change and what it may not. **Afterglow is the default**; the palette tables in §2 below are Footlight's, which is where this document started and is still one of the four.
+- `afterglow.dc.html` — the Afterglow comp: the launcher, the session list, a new session and a session, dark only. The app is drawn to it (§0).
+- `example.dc.html` — all six surfaces of the design before Afterglow, self-contained, keyboard-usable, works at 380px. Opens directly in a browser.
 - `DESIGN.md` — this file.
+
+---
+
+## 0. Afterglow
+
+The app's design is **Afterglow** (`afterglow.dc.html`, issue #52). It keeps everything this document argues for — one reserved colour with one meaning, status as glyph then word then colour, structure from rules and alignment, the mask and its four rules — and changes the surface they are drawn on. Where a section below and Afterglow disagree, Afterglow wins, and `themes/afterglow.tokens.json` is the record of what it says.
+
+- **Type.** Figtree for the interface and for reading, at the black weights (800, 900) every title is set in; DM Mono for anything literal; VT323, the screen face, for the `// LABEL` that names a region of a screen. Labels, pills, counts and times are mono, upper case and tracked — the trope §3 bans, taken back on purpose, because the comp is built on it. `typography.role` in the token file is the scale, generated as one `--t-<role>` shorthand each.
+- **Structure.** Square: every radius is zero. Spacing runs 4, 8, 12, 16, 22, 28, 38, 52. Depth is one flat block of `--bg-shadow` offset under a tile or a primary button, never a blur; the footlight under the approval is the one glow. A tile lifts two pixels under the pointer and nothing else moves.
+- **Colour.** Void and pit under cream. Pink is the reserved colour and, through `--accent` and `--link`, the brand as well: the mask's lit half, links, the current nav item. Cyan is the machine working, and the one filled button on a screen. Amber is this machine (`--local-*`). Violet is asleep and private; clay is denied.
+- **Themes.** Afterglow is the default and its structure is every theme's; Signal, Footlight and Limelight are palettes on it (`themes/THEMES.md`; Decision 702 in the repository's `DECISIONS.md`).
+- **Drawn so far.** The shell, the session list and sign-in. The session view, questions and approvals, settings and the launcher the comp opens on are the second part of #52, on the same tokens.
 
 ---
 
@@ -30,6 +43,8 @@ Two moods, held at once: long calm reading (canvas, 15px/1.62 body, 68ch measure
 
 ### Typeface
 
+*Superseded by §0: Afterglow sets Figtree, DM Mono and VT323.* What follows is the reasoning the earlier design gave, kept because the argument for a sans and a mono that are siblings still holds.
+
 **IBM Plex Sans** and **IBM Plex Mono**. Two families, one voice. Plex has the drafted, engineered quality the direction wants without being neutral to the point of anonymity, it carries Danish diacritics (æ ø å) at every weight, and the sans and mono are metrically siblings, which matters when a file path sits inline in a sentence.
 
 ---
@@ -38,7 +53,7 @@ Two moods, held at once: long calm reading (canvas, 15px/1.62 body, 68ch measure
 
 Every colour token carries a dark and a light value under one semantic name. Components never choose between them; the theme does. Ratios below are measured against the surface the colour is actually used on.
 
-The hexes in this section are **Footlight's**. There are three themes — Signal, Footlight and Limelight — and each one answers every token name below with its own values and clears the same contrast floor in both modes; `themes/THEMES.md` has the audit table. What does not change between them is everything this document argues for: which token a component reads, what the reserved colour *means*, and the rule that a status is a glyph, then a word, then a colour. Where the text below says "amber", read "the reserved colour" — it is amber in Footlight, magenta in Signal and lime in Limelight, and in all three it means *stopped, a person must decide* and is used for nothing else.
+The hexes in this section are **Footlight's**. There are four themes — Afterglow, Signal, Footlight and Limelight — and each one answers every token name below with its own values and clears the same contrast floor in both modes; `themes/THEMES.md` has the audit table. What does not change between them is everything this document argues for: which token a component reads, what the reserved colour *means*, and the rule that a status is a glyph, then a word, then a colour. Where the text below says "amber", read "the reserved colour" — it is pink in Afterglow, amber in Footlight, magenta in Signal and lime in Limelight, and in all four it means *stopped, a person must decide*. In three of them it is used for nothing else; Afterglow lends the hue to the brand as well, through `--accent` and `--link` (§0).
 
 ### Ground and ink
 
@@ -310,7 +325,7 @@ Things that were genuinely arguable, and the call I made.
 
 1. **Kept the technical-theatre palette, repurposed the amber.** Extending the existing document keeps the platform recognisable. But in a document amber was atmosphere; here it is reserved, at token level, for "stopped, waiting for a person". That is the single change that makes approvals work in a list of thirty sessions on a phone. Everything else in the palette went quieter to pay for it.
 
-2. **Dark is the default mode, and "follow my system" is the default answer.** Light and dark are both first-class and generated from the same tokens, but a tool people sit in all day watching output stream defaults dark when the system has no opinion. This originally put a toggle in the header; it now lives in **Appearance**, with the theme, because there are three themes and two questions to answer rather than one switch to flip — see `themes/THEMES.md`.
+2. **Dark is the default mode, and "follow my system" is the default answer.** Light and dark are both first-class and generated from the same tokens, but a tool people sit in all day watching output stream defaults dark when the system has no opinion. This originally put a toggle in the header; it now lives in **Appearance**, with the theme, because there are four themes and two questions to answer rather than one switch to flip — see `themes/THEMES.md`.
 
 3. **The agent tree is demoted.** It is the most technically interesting surface and, for consultants and project managers, the least actionable. It is a compact indented status list in the backstage column, below tasks, and it is the first thing to fall below the fold on a phone. If it turns out people use it to decide anything, promote it — but the brief's audience says otherwise.
 

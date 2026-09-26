@@ -7,16 +7,18 @@
 // being one, so they are generated and the generated file is committed.
 // `pnpm tokens:check` fails if it is stale, which is what CI runs.
 //
-// Three themes, one contract. Every theme file exposes *exactly* the same token names;
+// Four themes, one contract. Every theme file exposes *exactly* the same token names;
 // a theme swaps values and nothing else. That is enforced here rather than trusted: a
 // theme that has grown or lost a token fails the build, because a component that reads
-// `--waiting-solid` must get an answer in all three.
+// `--waiting-solid` must get an answer in all four. The structure — type, space, radii,
+// borders, motion, sizes, the mark — is one design rather than a theme's to vary, so
+// every file carries the same copy and a file that drifts fails the build too.
 //
 // The output is keyed on two attributes on the document root, which are separate
 // questions and are never merged into one:
 //
-//   data-theme="signal" | "footlight" | "limelight"    which palette
-//   data-mode="light" | "dark" | absent                absent means follow the system
+//   data-theme="afterglow" | "signal" | "footlight" | "limelight"    which palette
+//   data-mode="light" | "dark" | absent                              absent means follow the system
 //
 // Selectors are attribute-only — `[data-theme="x"]`, not `:root[data-theme="x"]` — so a
 // nested element can carry a theme of its own. That is what makes the live previews on
@@ -35,8 +37,8 @@ type Mode = "dark" | "light";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const themeDir = `${root}docs/design/themes`;
 
-/** Signal ships as the default: neutral graphite never fights a pasted screenshot. */
-const DEFAULT_THEME = "signal";
+/** Afterglow ships as the default: it is the app's design (issue #52), the others are palettes on it. */
+const DEFAULT_THEME = "afterglow";
 
 const themes = readdirSync(themeDir)
   .filter((f) => f.endsWith(".tokens.json"))
@@ -77,6 +79,7 @@ function colours(tokens: Record<string, any>, mode: Mode): string[] {
   }
   s.put("link", c.text.link);
   s.put("link-hover", c.text.linkHover);
+  s.put("accent", c.accent);
   s.blank();
   s.put("border-hairline", c.border.hairline);
   s.put("border-strong", c.border.strong);
@@ -119,18 +122,35 @@ function colours(tokens: Record<string, any>, mode: Mode): string[] {
   return s.lines;
 }
 
+/** `bodyStrong` reads as `--t-body-strong`, the way the rest of the sheet is named. */
+const kebab = (name: string) => name.replace(/[A-Z]/g, (ch) => `-${ch.toLowerCase()}`);
+
 /**
  * Everything a theme is not allowed to touch: type, space, radii, borders, motion,
- * sizes, breakpoints. Emitted once, from the default theme's file, because all three
+ * sizes, breakpoints. Emitted once, from the default theme's file, because all four
  * carry identical values and a difference here would be a redesign, not a theme.
  */
 function structure(tokens: Record<string, any>): string[] {
   const s = new Sheet(null);
+  const type = tokens["typography"];
 
-  s.put("font-sans", tokens["typography"].family.sans.value);
-  s.put("font-mono", tokens["typography"].family.mono.value);
+  for (const [k, v] of Object.entries<any>(type.family)) s.put(`font-${k}`, v.value);
   s.blank();
-  for (const [k, v] of Object.entries<string>(tokens["space"])) s.put(`space-${k}`, v);
+  // Each type role as one `font` shorthand, so a component sets `font: var(--t-micro)`
+  // and gets the family, weight, size and line height the design file gave that role.
+  // Tracking cannot ride in the shorthand, so a role that has any gets its own token.
+  for (const [k, v] of Object.entries<any>(type.role)) {
+    s.put(`t-${kebab(k)}`, `${v.weight} ${v.size}/${v.lineHeight} var(--font-${v.family})`);
+  }
+  for (const [k, v] of Object.entries<any>(type.role)) {
+    if (v.letterSpacing && v.letterSpacing !== "0") s.put(`tracking-${kebab(k)}`, v.letterSpacing);
+  }
+  for (const [k, v] of Object.entries<any>(type.measure)) s.put(`measure-${k}`, v.value);
+  s.blank();
+  for (const [k, v] of Object.entries<string>(tokens["space"])) {
+    if (k.startsWith("$")) continue;
+    s.put(`space-${k}`, v);
+  }
   s.blank();
   for (const [k, v] of Object.entries<string>(tokens["radius"])) {
     if (k.startsWith("$") || k === "note") continue;
@@ -183,6 +203,18 @@ for (const theme of themes.slice(1)) {
 
 const base = themes.find((t) => t.id === DEFAULT_THEME)!;
 
+// The structure is emitted from the default theme alone, so the copies the other files
+// carry would drift unnoticed if nothing read them. Comparing them is cheap; a theme
+// file that disagrees about the type scale is a redesign hiding in a palette.
+const STRUCTURE = ["typography", "space", "radius", "border", "motion", "breakpoint", "zIndex", "size", "mark"];
+for (const theme of themes) {
+  for (const key of STRUCTURE) {
+    if (JSON.stringify(theme.tokens[key]) !== JSON.stringify(base.tokens[key])) {
+      throw new Error(`${theme.id} carries its own \`${key}\`: the structure is one design, and only ${DEFAULT_THEME}.tokens.json may change it.`);
+    }
+  }
+}
+
 const blocks = themes.map((theme) => {
   const meta = theme.tokens["$meta"];
   const dark = trim(colours(theme.tokens, "dark"));
@@ -213,8 +245,10 @@ const css = `/* Generated from docs/design/themes/*.tokens.json by scripts/token
    hand: run \`pnpm tokens\` instead. The design files are the source of truth for every
    colour, radius and duration in the product.
 
-   Three themes, one contract. Every theme exposes exactly the same token names, so a
+   Four themes, one contract. Every theme exposes exactly the same token names, so a
    component reads \`--waiting-solid\` and never a hex, and never branches on a theme.
+   The structure — type, space, radii, borders, motion, sizes — is one design, emitted
+   once from the default theme's file; the others carry the same copy.
 
    Two attributes on the document root, because they are two questions:
 

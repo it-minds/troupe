@@ -32,8 +32,9 @@ the NIF's crates from its own Cargo.lock, the rest from a list kept in the scrip
 | cargo | `dtoa-short` | MPL-2.0 | Used by `cssparser`. As `cssparser`. |
 | cargo | `selectors` | MPL-2.0 | Tauri's HTML handling, with `cssparser`. As `cssparser`. |
 | cargo | `option-ext` | MPL-2.0 | Tauri's `dirs`, through `dirs-sys`. As `cssparser`. |
-| pnpm | `@fontsource/ibm-plex-mono` | OFL-1.1 | The IBM Plex fonts the GUI ships. OFL-1.1 allows bundling a font with software; the font stays under it, unchanged and never sold on its own. |
-| pnpm | `@fontsource/ibm-plex-sans` | OFL-1.1 | As `@fontsource/ibm-plex-mono`. |
+| pnpm | `@fontsource/figtree` | OFL-1.1 | The fonts the GUI ships (Decision 702: Figtree, DM Mono and VT323). OFL-1.1 allows bundling a font with software; the font stays under it, unchanged and never sold on its own. |
+| pnpm | `@fontsource/dm-mono` | OFL-1.1 | As `@fontsource/figtree`. |
+| pnpm | `@fontsource/vt323` | OFL-1.1 | As `@fontsource/figtree`. |
 | pnpm | `caniuse-lite` | CC-BY-4.0 | Browser-support data the GUI's build tools read. It does not ship. |
 
 ## Elixir: the umbrella and the TUI (Hex)
@@ -100,7 +101,7 @@ tools included.
 
 ## The GUI (pnpm)
 
-130 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
+131 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
 depends on the machine.
@@ -136,8 +137,9 @@ depends on the machine.
 | `@csstools/css-syntax-patches-for-csstree` | MIT-0 |
 | `@csstools/css-tokenizer` | MIT |
 | `@exodus/bytes` | MIT |
-| `@fontsource/ibm-plex-mono` | OFL-1.1 |
-| `@fontsource/ibm-plex-sans` | OFL-1.1 |
+| `@fontsource/dm-mono` | OFL-1.1 |
+| `@fontsource/figtree` | OFL-1.1 |
+| `@fontsource/vt323` | OFL-1.1 |
 | `@jridgewell/gen-mapping` | MIT |
 | `@jridgewell/remapping` | MIT |
 | `@jridgewell/resolve-uri` | MIT |

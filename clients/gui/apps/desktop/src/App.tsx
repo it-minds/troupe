@@ -143,7 +143,7 @@ export function App(): JSX.Element {
   return (
     <div className="app">
       <div className="rail">
-        <Wordmark size={20} />
+        <Wordmark size={24} />
         <nav>
           <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
             Sessions <span className="count muted">{snapshot.rows.length}</span>

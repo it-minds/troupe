@@ -1,4 +1,4 @@
-// Generated from docs/design/themes/signal.tokens.json by scripts/tokens.ts. Do not
+// Generated from docs/design/themes/afterglow.tokens.json by scripts/tokens.ts. Do not
 // edit by hand: run `pnpm tokens`.
 //
 // The mask. One silhouette, split down the middle: the filled half is what the agent did alone, the hollow half is what still needs a person.
