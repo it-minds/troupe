@@ -159,8 +159,8 @@ defmodule Troupe.Worker.AuthTest do
 
   defp unscoped_token, do: %{"sub" => "owner@example.test", "role" => "owner"}
 
-  # Every method the protocol describes and every one the dispatcher serves: a few are in
-  # only one of the two.
+  # Every method the protocol describes and every one the dispatcher serves, so that a
+  # method added to only one of the two is still held to the table.
   defp methods do
     (Map.keys(Schema.commands()) ++ Map.keys(Dispatch.methods()))
     |> Enum.uniq()

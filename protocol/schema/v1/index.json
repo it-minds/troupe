@@ -1,5 +1,6 @@
 {
   "documents": [
+    "commands/agents.list.json",
     "commands/approval.respond.json",
     "commands/blob.get.json",
     "commands/config.get.json",
@@ -10,6 +11,9 @@
     "commands/fs.list.json",
     "commands/fs.read.json",
     "commands/fs.upload.json",
+    "commands/identity.get.json",
+    "commands/identity.link.json",
+    "commands/identity.unlink.json",
     "commands/initialize.json",
     "commands/input.send.json",
     "commands/mcp.status.json",

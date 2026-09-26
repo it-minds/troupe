@@ -135,7 +135,7 @@ defmodule Troupe.Plane.ConsoleCoverageTest do
             module = screen_module(screen),
             not Code.ensure_loaded?(module),
             function <- Console.reached_by(screen),
-            Map.get(Console.owed(), function) != screen,
+            {function, screen} not in Console.owed(),
             do: "#{function} is placed on #{screen}, which does not exist"
 
       assert premature == [], Enum.join(premature, "\n")

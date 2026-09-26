@@ -61,8 +61,16 @@ serial.** Fixers that never touch the install (GUI, docs, server-only) run along
 
 The coordinator hands the install out with a lock: a file `install-lock.txt` in its
 scratch directory, reading `free` or `held by #N`. A fixer that needs the install does
-its code and tests first, then waits for `free`, writes `held by #N`, and writes `free`
-back when it has verified or rolled back.
+its code and tests first, then waits for `free`. Writing the file is not atomic, and two
+fixers that both read `free` both write, so a fixer writes `held by #N`, waits a second,
+reads it again, and goes ahead only if it still says `#N`; otherwise it waits for `free`
+again. It writes `free` back when it has verified or rolled back.
+
+Besides the install, the plane's tests share one database, `troupe_plane_test`, so one
+plane suite runs at a time: two at once deadlock (Postgrex `40P01`). The suite does not
+migrate it, so a fixer who adds a plane migration applies it there
+(`MIX_ENV=test mix ecto.migrate` in `apps/troupe_plane`); until someone does, the plane
+tests fail on every branch that carries it.
 
 Scratch directories may be shared between fixers. Each fixer writes only under a
 subfolder named for its issue (`fix-<N>/`), and reads its pull request body back just

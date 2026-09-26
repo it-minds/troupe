@@ -703,10 +703,12 @@ be linking has a much larger problem than the label.
 ```json
 {"session_id": "s-9f", "blob": "sha256:1f3a…", "range": [0, 65535]}
 ```
-→ `{"blob", "size", "range": [0, 65535], "encoding": "base64", "data": "…"}`
+→ `{"blob", "size", "encoding": "base64", "data": "…"}`
 
-`range` is an inclusive byte range and is optional; omit it for the whole blob.
-Servers may cap a single response and will say so with a shorter `range` than asked.
+`range` is an inclusive byte range and is optional; omit it for the whole blob. The
+answer is the bytes in that range, stopping at the blob's end, and `size` is the whole
+blob's, so a client reading a blob in pieces counts the bytes it decoded and asks for the
+next range until it has `size`. A range that starts past the end answers with no bytes.
 
 #### `fs.list`
 ```json
@@ -734,11 +736,12 @@ or a file larger than the server's cap, is `invalid_params`.
 ```json
 {"command_id": "c-9", "session_id": "s-9f", "path": "notes.md", "content": "…"}
 ```
-→ `{"path", "size", "hash"}`
+→ `{"path", "bytes"}`: the path relative to the workspace, and how many bytes were
+written.
 
 Needs `control`: putting a file into a workspace is steering the session. The write is
-recorded as an `fs_changed` event whose actor is the client that uploaded it, not the
-session.
+recorded as an `fs_changed` event, carrying the file's `hash` and `size`, whose actor is
+the client that uploaded it, not the session.
 
 #### `agents.list`
 ```json
@@ -917,8 +920,9 @@ does everything a client can learn from it: `session.list`, `session.get`, `blob
 that woke up because somebody looked at it would never stay dormant.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
-`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`, `question.answer` and `todo.edit`. Each brings a dormant session's tree back by
-folding its log before taking effect, and the session logs `session_activated`.
+`session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
+`question.answer`, `todo.edit` and `tools.register`. Each brings a dormant session's tree
+back by folding its log before taking effect, and the session logs `session_activated`.
 
 On a pod only the plane brings a session back: it places the session, bumps its epoch and
 tells the pod. An activating command for a session whose tree the pod is not running —
@@ -1131,6 +1135,7 @@ Needs `control`.
 
 ```json
 {"jsonrpc": "2.0", "id": 7, "method": "tools.register", "params": {
+  "command_id": "c-8", "session_id": "s-9f",
   "tools": [
     {"name": "notes.search", "description": "Search my local notes.",
      "schema": {"type": "object", "properties": {"q": {"type": "string"}}}}

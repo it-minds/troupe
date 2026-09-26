@@ -28,7 +28,7 @@ defmodule Troupe.Plane.LoginGroupsTest do
     assert Identity.group_ids_for(ada) == []
   end
 
-  test "a token with no groups claim at all leaves memberships as they were", %{ada: ada} do
+  test "a token with no groups claim at all leaves memberships as they were" do
     for claims <- [%{"sub" => "idp|ada"}, %{"sub" => "idp|ada", "groups" => nil}] do
       {:ok, ada, _} = Login.from_claims(claims)
       assert Identity.group_ids_for(ada) == ["eng", "platform"], "a groupless token changed memberships: #{inspect(claims)}"

@@ -39,7 +39,7 @@ defmodule Troupe.Plane.ScalingTest do
   end
 
   describe "the size class" do
-    test "decides the seven numbers that left the admin surface", context do
+    test "decides the seven numbers that left the admin surface" do
       {:ok, standard} = Fleet.put_profile(%{name: "dev", size_class: "standard"})
       assert standard.sessions_per_pod == 4
 
@@ -104,7 +104,7 @@ defmodule Troupe.Plane.ScalingTest do
   end
 
   describe "a profile with nothing running" do
-    test "goes to zero, but not before the grace period", context do
+    test "goes to zero, but not before the grace period" do
       {:ok, _} = Fleet.put_profile(%{name: "dev", size_class: "standard", replicas: 2})
 
       # First tick: found empty, clock started, worker kept. A profile whose last session
@@ -134,7 +134,7 @@ defmodule Troupe.Plane.ScalingTest do
       assert [%{want: 1}] = Scaler.tick(DateTime.add(now, 600, :second))
     end
 
-    test "keeps its worker where somebody asked for one warm", context do
+    test "keeps its worker where somebody asked for one warm" do
       {:ok, _} = Fleet.put_profile(%{name: "dev", warm_workers: 1, replicas: 1})
 
       now = ~U[2026-09-16 12:00:00.000000Z]

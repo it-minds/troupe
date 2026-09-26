@@ -12,7 +12,7 @@ defmodule Troupe.Plane.TriggersTest do
   use Troupe.Plane.DataCase, async: false
 
   alias Troupe.Plane.Control.{Connections, Listener}
-  alias Troupe.Plane.{FakePod, Harness, Identity, Principals, Repo, Sessions, Triggers}
+  alias Troupe.Plane.{FakePod, Harness, Identity, Repo, Sessions, Triggers}
   alias Troupe.Plane.Triggers.{Cron, Revision, Scheduler, Template}
 
   @moduletag timeout: 60_000
