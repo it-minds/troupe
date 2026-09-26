@@ -961,7 +961,7 @@ defmodule Troupe.Agent.Server do
       )
 
       state = %{state | queued: MapSet.delete(state.queued, meta.command_id)}
-      apply_input(state, source, content, actor)
+      apply_input(state, source, content, actor, meta.command_id)
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
       state
@@ -985,14 +985,22 @@ defmodule Troupe.Agent.Server do
   defp rendered(_source, text) when is_binary(text), do: text
   defp rendered(_source, content), do: inspect(content)
 
-  defp apply_input(state, :user, text, actor) do
-    log(state, :user_input, %{"source" => "user", "text" => text}, actor)
+  # The `user_input` carries the command id its `input_accepted` did: it is the copy with
+  # the text, and what a client that drew the line when it was typed knows it by (#181).
+  defp apply_input(state, :user, text, actor, command_id) do
+    log(
+      state,
+      :user_input,
+      %{"source" => "user", "text" => text, "command_id" => command_id},
+      actor
+    )
+
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: :normal}
   end
 
-  defp apply_input(state, :watch, %Trigger{} = trigger, _actor) do
+  defp apply_input(state, :watch, %Trigger{} = trigger, _actor, command_id) do
     text = Trigger.render(trigger)
-    log(state, :user_input, %{"source" => "watch", "text" => text})
+    log(state, :user_input, %{"source" => "watch", "text" => text, "command_id" => command_id})
 
     # An `AI?` turn runs under the plan permission set so it cannot edit, then the
     # profile goes back. `turn_mode` is what `effective_definition/1` reads.
@@ -1002,15 +1010,26 @@ defmodule Troupe.Agent.Server do
 
   # An iteration of `/loop`: a user message the model reads like any other, logged as the
   # loop's rather than a person's, on a turn whose `turn_mode` offers `goal_complete`.
-  defp apply_input(state, :loop, %{text: text}, actor) do
-    log(state, :user_input, %{"source" => "loop", "text" => text}, actor)
+  defp apply_input(state, :loop, %{text: text}, actor, command_id) do
+    log(
+      state,
+      :user_input,
+      %{"source" => "loop", "text" => text, "command_id" => command_id},
+      actor
+    )
+
     %{state | conversation: state.conversation ++ [Message.user(text)], turn_mode: :loop}
   end
 
-  defp apply_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor) do
+  defp apply_input(state, :tui_todo_edit, %Todo.Edit{} = edit, _actor, command_id) do
     {todos, note} = Todo.Edit.apply(edit, state.todos)
     log(state, :todo_updated, %{"items" => Enum.map(todos, &Todo.to_json/1), "source" => "tui"})
-    log(state, :user_input, %{"source" => "tui_todo_edit", "text" => note})
+
+    log(state, :user_input, %{
+      "source" => "tui_todo_edit",
+      "text" => note,
+      "command_id" => command_id
+    })
 
     %{
       state
@@ -1510,6 +1529,8 @@ defmodule Troupe.Agent.Server do
   end
 
   defp finish_turn(state, text) do
+    brief_checked(state)
+
     cond do
       State.subagent?(state) ->
         report_and_finish(state, text)
@@ -1521,6 +1542,15 @@ defmodule Troupe.Agent.Server do
         to_idle_or_done(state)
     end
   end
+
+  # A librarian's run checks the brief against the repository whether or not it rewrites
+  # any of it, so one that ends as it meant to, by answering or with `finish`, stamps the
+  # brief. Otherwise a brief it found nothing to change in would stay stale, and every new
+  # session would start another librarian on it (Decision 696).
+  defp brief_checked(%State{definition: %Definition{name: "librarian"}} = state),
+    do: Memory.checked(state.workspace.root_real)
+
+  defp brief_checked(_state), do: :ok
 
   # Resting is free: the budget is a question about the *next* model call, asked when that
   # call is about to be made (Decision 660), so an agent whose turn ended with the budget
@@ -1755,6 +1785,7 @@ defmodule Troupe.Agent.Server do
       state.finish_summary != nil ->
         summary = state.finish_summary
         state = fold_results(state, State.ordered_results(state))
+        brief_checked(state)
         report_and_finish(state, summary)
 
       true ->

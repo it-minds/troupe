@@ -69,6 +69,18 @@ defmodule Troupe.Plane.SettingsTest do
 
       assert Settings.get("default_budget_micros") == 0
     end
+
+    test "and is not reported as the value in force" do
+      # `daily` was a budget period once. A plane that stored it runs on the deployment's
+      # `monthly`, and the Settings page said "changed here" of a value nothing reads.
+      assert {:ok, _} = Settings.put("default_budget_period", "never", "root@example.test")
+      Repo.update_all(Troupe.Plane.Settings.Stored, set: [value: "daily"])
+      Settings.invalidate()
+
+      setting = Enum.find(Settings.all(), &(&1.key == "default_budget_period"))
+      assert setting.value == "monthly"
+      assert setting.source == :deployed
+    end
   end
 
   describe "what will not be changed from here" do

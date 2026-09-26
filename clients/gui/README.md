@@ -42,6 +42,9 @@ Things the client library knows that the protocol document does not say loudly:
 * Command ids are made unique across clients with a random prefix, not just per connection.
 * `auth.expiring` arrives two minutes before the pod token expires; renew with `token.mint`
   on the plane and `auth.refresh` on the same socket — never by reconnecting.
+* A session can move to another pod, and its old pod then answers `not_found` with
+  `data.kind` of `session`. Ask the plane's `session.open` where it is, on every reconnection
+  and after that answer (`SessionAttachment` does both).
 
 ## Run it
 

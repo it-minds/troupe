@@ -72,7 +72,14 @@ defmodule Troupe.Protocol.Schema do
         "interrupted" => optional(:boolean),
         "incomplete_calls" => optional({:array, :string})
       },
-      "user_input" => %{"source" => required(:string), "text" => required(:string)},
+      # `command_id` is the send the input was taken from, as its `input_accepted` names it:
+      # what a client that drew the line when it was typed knows it by. A harness note,
+      # which nobody sent, has none, and neither has a log written before it did.
+      "user_input" => %{
+        "source" => required(:string),
+        "text" => required(:string),
+        "command_id" => optional(:string)
+      },
       "input_queued" => %{
         "command_id" => required(:string),
         "author" => required(:string),

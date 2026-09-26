@@ -1515,6 +1515,22 @@ citation keeps meaning what it meant.
      `TrustTest`, `Troupe.PathsTest`, `Troupe.Gateway.AutospawnTest`,
      `Troupe.Worker.UnrestorableTest`, and the installed build on this machine.
 
+692. **A `user_input` names the send it was taken from.** `input_queued` and
+     `input_accepted` carried the client's `command_id` and `user_input`, the copy with
+     the text, did not, so a client that draws a line as it is typed could not tell the
+     durable copy for the same line, and the TUI drew every typed line twice (issue #181).
+     The agent now writes the command id on the `user_input` of every input it takes, a
+     person's, the watcher's, a loop's iteration and a task edit alike: the id its
+     `input_accepted` has, which the agent generates where the caller had none. A
+     `harness` note, which nobody sent, has none. It is an added, optional field, which
+     PROTOCOL.md §11 allows. Neither the agent's replay nor the fold reads it, so a log
+     written before it replays as it did and no recorded fixture's hash moves. The GUI
+     keeps its pending send outside the stream and draws `user_input` once, and is
+     unaffected; the TUI draws a line once by it (clients/tui Decision 117).
+     - **Proof:** `Troupe.Agent.InputTest`, the loop's ids in `Troupe.Session.LoopTest`,
+       the watcher's in `Troupe.Watch.WatchSessionTest`, `Troupe.Session.LogSchemaTest`,
+       `Troupe.Log.FoldTest` and `mix troupe.schema.diff`.
+
 693. **A subagent is stopped once its parent has its result, and a restart closes what it
      leaves behind: the calls of a child nothing starts again, a turn's results already
      back, and a root's note about a failed request.** Issue #171, and D18 and D19 in
@@ -1582,3 +1598,25 @@ citation keeps meaning what it meant.
        - The installed daemon, driven with a fake-provider script.
      - **Not done here:** a subagent a cancel takes down still leaves its own calls open in
        its own log; the `cancelled` on the agent above closes them for every reader (#145).
+
+696. **A librarian's run stamps the brief it checked, whether or not it rewrote any of
+     it.** The brief counts as built when a curated section is written (Decision 649),
+     one never built is stale, and a client with `memory_auto_refresh` starts a
+     librarian on a stale one. A librarian that found nothing to rewrite, or wrote only a
+     note, left the brief unbuilt or as old as it was: a brief of notes, or one a person
+     wrote by hand, stayed stale for good, and every new session in that repository
+     started another librarian and paid for it. Found in chunk 5; the TUI's test that said
+     a second session "starts nothing" listened for the librarian after it had started.
+     Now a `librarian` agent whose run ends as it meant to, by answering or with
+     `finish`, stamps the brief (`Troupe.Session.Memory.checked/1`: `built_at`, `head`
+     and `files`, and no word of the text), so the brief is stale again only when it is
+     older than `memory_max_age_days` or the repository has drifted. What is stamped is
+     the run, not what it wrote, because finding nothing to change is the librarian's
+     answer too; a run that failed, was cancelled or ran out of budget stamps nothing and
+     is tried again by the next session. The agent knows the profile by its name, as the
+     client does when it starts it, and the stamp makes no brief where there is none.
+     - **Proof:** `Troupe.Tools.RememberTest`: a brief of notes and a hand-written one,
+       each left fresh and word for word as it was by a librarian that wrote nothing,
+       while another agent's turn and a librarian's failed request stamp nothing. The
+       TUI's `Troupe.MemoryClientTest`, whose second session now reads its own journal
+       for the librarian. Both failed on the chunk's tip.

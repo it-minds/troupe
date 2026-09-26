@@ -246,7 +246,7 @@ Durable:
 | `session_created` | `workspace`, `profile`, `visibility`, `bundle_version`, `kind` (`team`/`local`), `owner`, `origin`, `parent` |
 | `agent_started` | `profile`, `mode`, `bundle_version` |
 | `agent_restarted` | `replayed_events` |
-| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text` |
+| `user_input` | `source` (`user`/`watch`/`tui_todo_edit`/`loop`/`harness` — `loop` is an iteration of `session.loop.start`, and `harness` the note the harness gives a model whose reply was cut or empty, or that keeps calling a tool that fails), `text`, `command_id` — the send it was taken from, as its `input_accepted` names it; absent from a `harness` note, which nobody sent, and from a log written before 0.5.2 |
 | `input_queued` | `command_id`, `author`, `text` |
 | `input_accepted` | `command_id`, `author` |
 | `llm_request` | `model`, `message_count`, `tools`, `profile` |
@@ -549,7 +549,9 @@ asks again when it wakes.
 {"command_id": "c-1", "session_id": "s-9f", "text": "make the tests pass"}
 ```
 → `{"accepted": true}`. If the agent is busy this produces a durable `input_queued`;
-when taken it produces `input_accepted`. A root agent that has *finished* is woken by
+when taken it produces `input_accepted` and then the `user_input` with the text, and all
+three carry the `command_id`, which is how a client that drew the line when it was typed
+knows each of them for the same line. A root agent that has *finished* is woken by
 input: `agent_woken`, then the turn as usual. One whose budget is exhausted is not, and
 writes `input_after_done` instead.
 
@@ -758,8 +760,10 @@ or `project`. A worker answers from its bundle instead, so a client offers exact
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
-agent. `status` is `absent`, `stale` (older than `memory_max_age_days`, or the tracked
-file count drifted), `fresh` or `disabled` (`memory: false` in the workspace config).
+agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_days`, or
+the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
+config). A `librarian`'s run that ends as it meant to builds it, whether or not it
+rewrote any of it.
 One brief per repository: a worktree's is the main checkout's. A client that finds it
 `absent` or `stale` may start a `librarian` session on the workspace, which is what
 `memory_auto_refresh` asks of it.
@@ -931,6 +935,29 @@ session is exactly as dormant afterwards as it was before.
 The two questions are separate everywhere it matters: a session is active or dormant
 whatever its profile is running, and a profile has workers or none whatever its sessions
 are doing.
+
+#### A session that moves
+
+A pod session is not tied to its pod. A drain, a pod replaced for a new image, a pod that
+was lost and another client's activation all leave it dormant where it was — with a
+`session_dormant` in its log wherever there was time to write one — and its next
+activation places it wherever there is room. Nothing is sent to say so, and there is no
+error code for it. What a client connected to the old pod sees is one of three things:
+the connection closes and does not come back, `initialize` is refused, or the pod answers
+**`not_found` with `data.kind` of `session`**, which is what a pod says about a session
+it does not hold. It says so before it runs anything, so a command answered that way did
+not happen.
+
+The plane knows where the session is, and a client asks it rather than the old pod: after
+a connection that failed, and after that `not_found`, it calls the plane's `session.open`
+with the session id again and connects to the `endpoint` with the `token` it is given,
+subscribing from its cursor as after any reconnect. It asks in `read` mode, which wakes
+nothing. The answer's `state` is the session's as the plane has it: `active` means the
+endpoint runs the session, and anything else that the pod only serves its history, so an
+activating command goes through `session.open` in `activate` mode first. An activating
+command the old pod answered `not_found` may then be sent again, once, with the same
+`command_id`. A client gives up after a bounded number of tries and says so, and it stops
+at once when the plane answers `not_found` or `forbidden`.
 
 ### After a restart
 

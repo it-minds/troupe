@@ -13,6 +13,7 @@ defmodule Troupe.Gateway.MixProject do
       elixirc_paths: elixirc_paths(Mix.env()),
       start_permanent: Mix.env() == :prod,
       description: "The daemon: transports, connections, subscriptions, scopes",
+      package: [licenses: ["Apache-2.0"]],
       deps: deps()
     ]
   end
