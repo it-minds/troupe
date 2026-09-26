@@ -520,6 +520,7 @@ defmodule Troupe.Protocol.Schema do
       "workspace.recent" => %{"limit" => optional(:integer)},
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
+      "agents.list" => %{"workspace" => required(:string)},
       "memory.get" => %{"workspace" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
@@ -563,6 +564,17 @@ defmodule Troupe.Protocol.Schema do
         "session_id" => required(:string),
         "tools" => optional({:array, :string})
       },
+      # Who the machine's user is: a label on what they do, for local transports, since a
+      # pod knows who is calling from the token. `plane_token` is held in memory only.
+      "identity.get" => %{},
+      "identity.link" => %{
+        "command_id" => required(:string),
+        "subject" => required(:string),
+        "display_name" => optional(:string),
+        "plane_url" => optional(:string),
+        "plane_token" => optional(:string)
+      },
+      "identity.unlink" => %{"command_id" => required(:string)},
       # The machine's model settings — the daemon's only; a worker answers
       # `method_not_found`. The key goes in through `config.models` and `config.set` and
       # never comes back out: `config.get` reports `api_key_set`.
