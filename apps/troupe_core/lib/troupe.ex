@@ -321,13 +321,26 @@ defmodule Troupe do
   @spec unsubscribe(String.t()) :: :ok
   def unsubscribe(session_id), do: Events.unsubscribe(session_id)
 
-  @doc "A read-only snapshot of one agent. Never used inside the loop."
+  @doc """
+  A read-only snapshot of one agent. Never used inside the loop.
+
+  An agent that stops between the lookup and the call, as one does when its session goes
+  to sleep, is `{:error, :no_agent}` like one that was never there, so the sweeper and
+  the worker that ask can't be taken down by the timing.
+  """
   @spec snapshot(String.t(), [String.t()]) :: map() | {:error, :no_agent}
   def snapshot(session_id, agent_path \\ ["root"]) do
     case Registry.agent_pid(session_id, agent_path) do
       nil -> {:error, :no_agent}
-      pid -> Agent.snapshot(pid)
+      pid -> snapshot_of(pid)
     end
+  end
+
+  defp snapshot_of(pid) do
+    Agent.snapshot(pid)
+  catch
+    :exit, {reason, _call} when reason in [:noproc, :normal, :shutdown] -> {:error, :no_agent}
+    :exit, {{:shutdown, _}, _call} -> {:error, :no_agent}
   end
 
   @doc "Every live agent path in a session, root first."

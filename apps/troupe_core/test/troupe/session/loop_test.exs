@@ -309,7 +309,8 @@ defmodule Troupe.Session.LoopTest do
     end
 
     test "a session that comes back from a stop marks its loop interrupted and runs nothing", context do
-      %{sid: sid} = start_with_goal(context, delay_ms: 300, steps: [{:text, "slow"}])
+      # The first iteration's reply never arrives before the stop, however slow the machine.
+      %{sid: sid} = start_with_goal(context, delay_ms: 30_000, steps: [{:text, "slow"}])
 
       {:ok, _} = Troupe.start_loop(sid, nil, max_iterations: 3)
       await_event(sid, :llm_request)
@@ -326,7 +327,8 @@ defmodule Troupe.Session.LoopTest do
     end
 
     test "with resume_on_restart the loop carries on after the session comes back", context do
-      %{sid: sid} = start_with_goal(context, delay_ms: 300, steps: [{:text, "slow"}])
+      # As above: the stop lands inside the first iteration, so it is the one that failed.
+      %{sid: sid} = start_with_goal(context, delay_ms: 30_000, steps: [{:text, "slow"}])
 
       {:ok, _} = Troupe.start_loop(sid, nil, max_iterations: 2)
       await_event(sid, :llm_request)
