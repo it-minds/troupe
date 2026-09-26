@@ -176,11 +176,7 @@ defmodule Licences do
         "exception for #{ecosystem} #{name} (#{licence}) matches no package: delete it"
       end
 
-    stale =
-      for {path, contents} <- outputs(packages, shipped),
-          File.read(Path.join(@root, path)) != {:ok, contents} do
-        "#{path} is not current: run `elixir scripts/licences.exs` and commit it"
-      end
+    stale = stale(packages, shipped)
 
     for line <- refused, do: IO.puts(:stderr, "refused: #{line}")
     for line <- unused ++ stale, do: IO.puts(:stderr, line)
@@ -200,6 +196,13 @@ defmodule Licences do
         """)
 
         System.halt(1)
+    end
+  end
+
+  defp stale(packages, shipped) do
+    for {path, contents} <- outputs(packages, shipped),
+        File.read(Path.join(@root, path)) != {:ok, contents} do
+      "#{path} is not current: run `elixir scripts/licences.exs` and commit it"
     end
   end
 
