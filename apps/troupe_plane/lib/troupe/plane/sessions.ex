@@ -282,11 +282,29 @@ defmodule Troupe.Plane.Sessions do
   end
 
   @doc """
+  The sessions a team has running on a profile.
+
+  What a revoked grant takes off their pods one at a time, each giving back its slot and
+  its budget slice, before `read_only_for/2` freezes the rest in one statement.
+  """
+  @spec active_for(Ecto.UUID.t(), String.t()) :: [Session.t()]
+  def active_for(team_id, profile) do
+    Repo.all(
+      from(s in Session,
+        where: s.team_id == ^team_id and s.profile == ^profile and s.state == "active",
+        order_by: s.id
+      )
+    )
+  end
+
+  @doc """
   Make every session a team has on a profile read-only, because the grant is gone.
 
   Reads still work — history is history, and a team losing a grant is not a reason to
   hide what it already did — but nothing activates again. Active sessions are included:
-  the grant is what made them allowed, and it is no longer there.
+  the grant is what made them allowed, and it is no longer there. `Identity.revoke/2`
+  parks those first, because this statement clears the `worker_id` their slots are found
+  by and gives back no budget.
   """
   @spec read_only_for(Ecto.UUID.t(), String.t()) :: non_neg_integer()
   def read_only_for(team_id, profile) do
