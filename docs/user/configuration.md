@@ -216,8 +216,12 @@ that names the new one, and a file that uses both spellings of one setting is re
 Loading never rewrites a file, because a rewrite drops its comments. `troupe config
 migrate` prints, for each file, the rewrite that stops the warnings, and `troupe config
 migrate --write` makes it and keeps the file as it was beside it as
-`config.yaml.previous`. The terminal UI's settings page and the desktop app's model
-settings write only the new spellings, the same way.
+`config.yaml.previous`.
+
+The terminal UI's settings page, the desktop app's model settings and a budget raised
+for a workspace do not rewrite a file: they change the lines of the settings they set,
+written by the new names, and leave every other line, comments included, as it was. The
+file before the save is kept as `config.yaml.previous` all the same.
 
 ## Seeing what is in effect
 

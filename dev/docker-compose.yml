@@ -7,6 +7,10 @@
 # held by a checkout or an image pull, and the service then fails to start with
 # "address already in use". In a real installation these are managed services or
 # in-cluster; nothing here is a deployment reference.
+#
+# The three that stay up restart with Docker, so after the WSL VM or the machine
+# restarts the stack is back once Docker is, without `scripts/dev-up`. The one-shot
+# setup services do not: what they write is on a volume and survives.
 name: troupe-dev
 
 services:
@@ -22,6 +26,7 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    restart: unless-stopped
     depends_on:
       wal-archive-permissions:
         condition: service_completed_successfully
@@ -61,6 +66,7 @@ services:
   # one. A third party's tag can be moved, so each is pinned by digest as well.
   minio:
     image: pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372
+    restart: unless-stopped
     command: server /data --console-address ":9001"
     environment:
       MINIO_ROOT_USER: troupe
@@ -91,8 +97,30 @@ services:
       echo 'bucket ready'
       "
 
+  # Dev mode gives us KV v2 at `secret/` and nothing else, and keeps it in memory, so
+  # every start is an empty OpenBao. The plane signs session tokens through transit
+  # rather than holding a private key, so the engine and the signing key have to exist
+  # before anything can mint one: the container writes them itself each time it starts,
+  # and is healthy only once the key is there.
   openbao:
     image: openbao/openbao:2.4.1
+    restart: unless-stopped
+    # The image's own entrypoint, with the seeding started beside it: it waits for the
+    # server, then writes the engine and the key. Started from a subshell that exits at
+    # once, so it is dumb-init's to reap and not the server's. `sh` is only `$0`.
+    entrypoint:
+      - /usr/bin/dumb-init
+      - /bin/sh
+      - -c
+      - |
+        ( (
+          export BAO_ADDR=http://127.0.0.1:8200 BAO_TOKEN=troupe-dev-root
+          until bao status >/dev/null 2>&1; do sleep 1; done
+          bao secrets enable -path=transit transit
+          bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256
+        ) & )
+        exec /bin/sh /usr/local/bin/docker-entrypoint.sh "$$@"
+      - sh
     command: server -dev -dev-root-token-id=troupe-dev-root -dev-listen-address=0.0.0.0:8200
     environment:
       BAO_DEV_ROOT_TOKEN_ID: troupe-dev-root
@@ -102,28 +130,10 @@ services:
     cap_add:
       - IPC_LOCK
     healthcheck:
-      test: ["CMD", "bao", "status", "-address=http://127.0.0.1:8200"]
+      test: ["CMD-SHELL", "BAO_TOKEN=troupe-dev-root bao read -address=http://127.0.0.1:8200 -field=name transit/keys/troupe-session-tokens"]
       interval: 2s
       timeout: 3s
       retries: 30
-
-  # Dev mode gives us KV v2 at `secret/` and nothing else. The plane signs session
-  # tokens through transit rather than holding a private key, so the engine and the
-  # signing key have to exist before anything can mint one.
-  openbao-setup:
-    image: openbao/openbao:2.4.1
-    depends_on:
-      openbao:
-        condition: service_healthy
-    environment:
-      BAO_ADDR: http://openbao:8200
-      BAO_TOKEN: troupe-dev-root
-    entrypoint: >
-      /bin/sh -c "
-      bao secrets enable -path=transit transit 2>/dev/null || true;
-      bao write -f transit/keys/troupe-session-tokens type=ecdsa-p256 2>/dev/null || true;
-      echo 'transit ready'
-      "
 
 volumes:
   postgres-data:

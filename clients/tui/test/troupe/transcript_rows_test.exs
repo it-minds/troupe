@@ -119,6 +119,78 @@ defmodule Troupe.TranscriptRowsTest do
     end
   end
 
+  # What the harness's own `read_file` returns for a file in a scratch workspace: each
+  # line as its number, a tab and the line, with the range read and the cut, if any.
+  defp read_file!(files, args, config \\ nil) do
+    {:ok, workspace} = Troupe.Workspace.new(tmp_workspace(files))
+
+    ctx = %Troupe.Tool.Ctx{
+      session_id: "s-1",
+      agent_path: ["root"],
+      workspace: workspace,
+      call_id: "c1",
+      agent_pid: self(),
+      config: config
+    }
+
+    {:ok, content} = Troupe.Tools.ReadFile.run(args, ctx)
+    content
+  end
+
+  defp read_rows(content, args) do
+    model =
+      fold([
+        {"tool_call_started", %{"call_id" => "c1", "name" => "read_file", "args" => args}},
+        {"tool_call_completed",
+         %{"call_id" => "c1", "name" => "read_file", "ok" => true, "content" => content}}
+      ])
+
+    # The call's own rows, as the screen shows them: its entry is the pane's first.
+    g = geometry(model, 100)
+
+    g.blocks
+    |> Enum.concat()
+    |> Model.rows(g.inner_w, 0, hd(g.heights))
+    |> Enum.map(&(&1 |> Model.line_text() |> String.trim_trailing()))
+  end
+
+  # Decision 52's numbered body, which never appeared (defects D27): the TUI split a
+  # five-column number off each line while `read_file` writes `N<tab>line`. The tab's
+  # stop moves as the number grows a digit, and the code keeps its own tab in both.
+  test "a read_file result is drawn as source, its numbers in a gutter of their own" do
+    file = %{"big.txt" => Enum.map_join(1..1_001, "\n", &"\tline #{&1}") <> "\n"}
+    args = %{"path" => "big.txt", "offset" => 998, "limit" => 4}
+
+    assert [
+             "✓ read_file big.txt" <> _,
+             "  (lines 998-1001 of 1002)",
+             "  998 │     line 998",
+             "  999 │     line 999",
+             " 1000 │     line 1000",
+             " 1001 │     line 1001"
+           ] = read_rows(read_file!(file, args), args)
+
+    # A whole file that ends in a newline, and one cut at the size cap, which says so
+    # under its last whole line.
+    file = %{"Makefile" => "all:\n\tgo build ./...\n"}
+    args = %{"path" => "Makefile"}
+
+    assert [
+             "✓ read_file Makefile" <> _,
+             "    1 │ all:",
+             "    2 │     go build ./...",
+             "    3 │"
+           ] = read_rows(read_file!(file, args), args)
+
+    cut = read_file!(file, args, %Troupe.Config{tool_output_limit: 20})
+
+    assert [
+             "✓ read_file Makefile" <> _,
+             "    1 │ all:",
+             "  [truncated: " <> _
+           ] = read_rows(cut, args)
+  end
+
   describe "Model.markdown/1" do
     test "drops the blank lines beside a fence and at the ends of a message, keeps a paragraph break" do
       kinds = fn text -> text |> Model.markdown() |> Enum.map(&elem(&1, 0)) end
@@ -198,14 +270,19 @@ defmodule Troupe.TranscriptRowsTest do
              ] = Enum.slice(rows, start, 9)
 
       # A tab-indented file: its four lines and nothing else between the read and the
-      # finish, whatever its tabs expand to.
+      # finish, numbered in a gutter, with each line's own tab kept (defects D27).
       {read, [finish | _]} =
         rows
         |> Enum.drop(start + 9)
         |> Enum.split_while(&(not String.starts_with?(&1, "✓ finish")))
 
-      assert length(read) == 4
-      assert Enum.all?(read, &(&1 != ""))
+      assert read == [
+               "    1 │ all:",
+               "    2 │     go build ./...",
+               "    3 │     echo done",
+               "    4 │"
+             ]
+
       assert finish =~ "finish"
 
       GenServer.stop(pid)

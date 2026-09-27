@@ -29,8 +29,30 @@ defmodule Troupe.Config.WriteKeyTest do
 
     assert {:ok, ^path} = Config.write_key(path, ["max_turns"], 65)
 
-    assert read(path) == %{"version" => 1, "default_agent" => "review", "max_turns" => 65}
+    assert read(path) == %{"default_agent" => "review", "max_turns" => 65}
     assert File.read!(path <> ".previous") =~ "# the team's settings"
+  end
+
+  test "changes the key's own line and nothing else, comments included", %{path: path} do
+    File.mkdir_p!(Path.dirname(path))
+
+    text = """
+    # the team's settings
+
+    default_agent: review   # reviews first
+    max_turns: 40           # raised once already
+    wall_clock_ms: 900000
+    """
+
+    File.write!(path, text)
+
+    assert {:ok, ^path} = Config.write_key(path, ["max_turns"], 65)
+    assert File.read!(path) == String.replace(text, "max_turns: 40 ", "max_turns: 65 ")
+
+    # A key the file does not have is added after its last key, and nothing else moves.
+    assert {:ok, ^path} = Config.write_key(path, ["max_depth"], 3)
+    assert File.read!(path) == String.replace(text, "max_turns: 40 ", "max_turns: 65 ") <> "max_depth: 3\n"
+    assert File.read!(path <> ".previous") =~ "max_turns: 65"
   end
 
   test "makes a file that is not there", %{path: path} do

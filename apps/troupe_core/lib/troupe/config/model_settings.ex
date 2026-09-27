@@ -122,10 +122,9 @@ defmodule Troupe.Config.ModelSettings do
   @doc """
   Writes the choices into the user's file and answers what `describe/1` now says.
 
-  Only the keys this screen owns are touched; everything else in the file is kept. The
-  file is rewritten, so comments do not survive: the previous file is kept beside it as
-  `config.yaml.previous`, the first thing to reach for when a hand-written file lost
-  something it cared about.
+  Only the keys this screen owns are touched, and only on their own lines: the file's
+  comments and every other key stay as they were (`Troupe.Config.Migrate.write/2`). The
+  previous file is kept beside it as `config.yaml.previous` all the same.
 
     * `api_key` absent keeps the saved key; `""` removes it.
     * `base_url` `nil` or `""` removes it, and with it the provider's own default applies.
@@ -423,9 +422,10 @@ defmodule Troupe.Config.ModelSettings do
     if block == %{}, do: Map.delete(raw, "models"), else: Map.put(raw, "models", block)
   end
 
-  # Through the one writer every config file goes through: the new spellings only,
-  # `version: 1`, a header, the old file kept as `.previous`, and on Unix readable by
-  # the user alone, since the key is in there (Decision 686).
+  # Through the one writer every config file goes through: the file's own lines edited
+  # where a key changed (a new file gets `version: 1` and a header), the old file kept as
+  # `.previous`, and on Unix readable by the user alone, since the key is in there
+  # (Decision 686).
   defp save(path, updated), do: Migrate.write(path, updated)
 
   # -- validation ---------------------------------------------------------------
