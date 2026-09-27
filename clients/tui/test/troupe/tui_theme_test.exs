@@ -245,6 +245,19 @@ defmodule Troupe.TUIThemeTest do
     assert text =~ "No branches. Type a command:"
   end
 
+  test "a session nobody has spoken to wears the mask in its window, and loses it at the first line" do
+    started = [{"session_created", %{"kind" => "local", "profile" => "build"}}]
+    theme = %{depth: :truecolor, mode: :dark}
+    blocks = fn cells -> Enum.filter(cells, &(&1.symbol in ["▀", "▄", "█"])) end
+
+    fresh = draw(fold(started), theme, focus: :command)
+    assert blocks.(fresh) != []
+    assert Enum.any?(fresh, &(&1.bg == {:rgb, 255, 0, 128} or &1.fg == {:rgb, 255, 0, 128}))
+
+    spoken = started ++ [{"user_input", %{"source" => "user", "text" => "hello"}}]
+    assert blocks.(draw(fold(spoken), theme, focus: :command)) == []
+  end
+
   test "HQ wears the lockup over its lists, and a session waiting on you is pink in it" do
     session = fn id, status ->
       %{

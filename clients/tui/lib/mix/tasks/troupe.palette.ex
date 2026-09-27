@@ -342,13 +342,17 @@ defmodule Mix.Tasks.Troupe.Palette do
     # #{role.use}
     #{role.name}: %{
       token: #{inspect(role.token)},
-      dark: #{inspect(role.dark)},
-      light: #{inspect(role.light)},
+      dark: #{mode_source(role.dark)},
+      light: #{mode_source(role.light)},
       x16: #{inspect(role.x16)}
     }
     """
     |> String.trim_trailing()
   end
+
+  # Written out key by key: `inspect/1` orders a small map's atom keys by when the atoms
+  # were made, which differs between a mix task and a test run.
+  defp mode_source(%{rgb: rgb, x256: n}), do: "%{rgb: #{inspect(rgb)}, x256: #{n}}"
 
   defp mask_source({cut, rows}) do
     "def mask(#{inspect(cut)}), do: [\n#{Enum.map_join(rows, ",\n", &inspect/1)}\n]"

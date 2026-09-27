@@ -1205,7 +1205,38 @@ defmodule Troupe.UI.TUI.View do
     shown
     |> Enum.with_index(1)
     |> Enum.zip(rects)
-    |> Enum.map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+  end
+
+  # A session nobody has said anything to yet is the TUI's empty state: its one window
+  # says it started and little else, so the mask and the word stand in the middle of it
+  # until the first line is typed. Not wrapped: wrapping trims a line's leading blanks,
+  # and those are the picture.
+  defp lockup(w, rect, used, state) do
+    {mask_w, mask_h} = Theme.mask_size(:large)
+    {inner_w, inner_h} = {rect.width - 2, rect.height - 2}
+    height = mask_h + 2
+    top = max(div(inner_h - height, 2), used + 1)
+
+    if fresh?(w) and inner_w >= mask_w + 2 and top + height <= inner_h do
+      area = %Rect{x: rect.x + 1, y: rect.y + 1 + top, width: inner_w, height: height}
+
+      mark =
+        Theme.mask(:large, state.theme) ++
+          [Line.new([]), Line.new([Span.new("troupe", style: Theme.style(nil, [:bold]))])]
+
+      [{%Paragraph{text: mark, alignment: :center}, area}]
+    else
+      []
+    end
+  end
+
+  defp fresh?(w) do
+    w.pending == [] and
+      w.agents
+      |> Map.get(w.path, %{transcript: []})
+      |> Map.get(:transcript, [])
+      |> Enum.all?(&match?({:system, _}, &1))
   end
 
   defp window_tile(w, n, rect, state) do
@@ -1222,7 +1253,7 @@ defmodule Troupe.UI.TUI.View do
 
     shown = shown_state(w)
 
-    %Paragraph{
+    tile = %Paragraph{
       text: styled(rows),
       wrap: false,
       style: text_style(w),
@@ -1234,7 +1265,8 @@ defmodule Troupe.UI.TUI.View do
         border_style: border_style(shown, state)
       }
     }
-    |> then(&{&1, rect})
+
+    [{tile, rect} | lockup(w, rect, length(rows), state)]
   end
 
   # Whether a window waits on you: something is pending in it. The window's own state
