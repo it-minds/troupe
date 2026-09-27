@@ -631,6 +631,16 @@ defmodule Troupe.Protocol.Schema do
         "from" => required(:string),
         "workspace" => optional(:string)
       },
+      # A first run's questions (Decision 705) — the daemon's only, like the settings
+      # they write; a worker answers `method_not_found`. `answer` is the named step's
+      # answer, whose shape the step decides; the key goes in through it and never
+      # comes back out.
+      "setup.get" => %{},
+      "setup.answer" => %{
+        "command_id" => required(:string),
+        "step" => required(:string),
+        "answer" => optional(:object)
+      },
       # The person's own MCP servers and skills (Decision 700) — the daemon's only, like
       # the settings; a worker answers `method_not_found`. A file is named to import
       # (`from`, copied, or read in place with `link`), or one server is written

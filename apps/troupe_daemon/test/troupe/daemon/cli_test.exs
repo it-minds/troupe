@@ -50,6 +50,7 @@ defmodule Troupe.Daemon.CLITest do
     assert CLI.parse(["version"]) == :version
     assert CLI.parse(["--version"]) == :version
     assert CLI.parse(["models", "--refresh"]) == {:models, refresh: true}
+    assert CLI.parse(["doctor"]) == :doctor
     assert CLI.parse(["config", "import-opencode"]) == :config_import_opencode
     assert CLI.parse(["config", "--explain"]) == {:config_explain, nil, false}
     assert CLI.parse(["config", "--explain", "max_turns", "--json"]) == {:config_explain, "max_turns", true}
@@ -223,6 +224,22 @@ defmodule Troupe.Daemon.CLITest do
       assert out =~ "`troupe config` and the desktop app (This computer > Models) write the same file."
       refute out =~ "Run `troupe config`"
     end
+  end
+
+  # One line per check, and the exit status says whether a session could run: a fresh
+  # account fails on the provider and is told the file; the fake provider passes.
+  test "doctor prints a line per check and exits 1 on a failure", %{base: base} do
+    no_key_environment(base)
+
+    out = capture_io(fn -> assert CLI.main(:doctor) == 1 end)
+    assert out =~ ~r/^FAIL  provider +anthropic has no key, so no model can be asked; write a provider into /m
+    assert out =~ ~r/^ok    daemon +not running; a client starts one$/m
+    refute out =~ "troupe config"
+
+    File.write!(Path.join([base, "config", "config.yaml"]), "provider: fake\n")
+    out = capture_io(fn -> assert CLI.main(:doctor) == 0 end)
+    assert out =~ ~r/^ok    provider +fake, claude-sonnet-5, no key needed$/m
+    assert out =~ ~r/^ok    key +the fake provider asks nobody$/m
   end
 
   # A fresh account: no provider, key or opencode in the environment, whatever the

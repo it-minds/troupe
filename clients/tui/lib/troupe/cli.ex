@@ -20,6 +20,7 @@ defmodule Troupe.CLI do
       troupe config untrust [PATH] take that back
       troupe config pull [PLANE_URL]  save the plane's default provider and models here (never a key)
       troupe models [--refresh]    list every model, its window and its price
+      troupe doctor                check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
       troupe daemon [ARGS]         the local daemon: `run` (default), `status`, `config`, `models`, `version`
       troupe --version
   """
@@ -40,6 +41,7 @@ defmodule Troupe.CLI do
             | :config_trust_list
             | :config_pull
             | :models
+            | :doctor
             | :login
             | :logout
             | :whoami
@@ -192,6 +194,7 @@ defmodule Troupe.CLI do
     do: {:ok, %{base | mode: :config_pull, plane_url: url}}
 
   defp parse_rest(["models"], base), do: {:ok, %{base | mode: :models}}
+  defp parse_rest(["doctor"], base), do: {:ok, %{base | mode: :doctor}}
   defp parse_rest(["resume"], base), do: {:ok, %{base | mode: :resume}}
   defp parse_rest(["resume", sid], base), do: {:ok, %{base | mode: :resume, session_id: sid}}
   defp parse_rest(other, _base), do: {:error, "unknown arguments: #{Enum.join(other, " ")}"}

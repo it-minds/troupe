@@ -23,6 +23,8 @@ import { Approvals } from "./views/Approvals";
 import { Launcher } from "./views/Launcher";
 import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
+import { FirstRun, SetupScreen, useSetupNeeded } from "./views/Onboarding";
+import type { SetupOutcome } from "./views/Onboarding";
 import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
@@ -38,6 +40,7 @@ type Where =
   | { screen: "review" }
   | { screen: "local" }
   | { screen: "appearance" }
+  | { screen: "setup" }
   | { screen: "session"; id: string };
 
 /** How often an app working offline asks whether the plane is back. */
@@ -66,6 +69,9 @@ export function App(): JSX.Element {
   // inherit an answer the first one gave.
   const [chosen, setChosen] = useState(false);
   const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
+  // A fresh machine in local mode meets the first run's questions (Decision 705); the
+  // daemon says whether they are needed, once per connection.
+  const setup = useSetupNeeded(mode === "local" ? daemon.client : null);
 
   const signOut = useCallback(async () => {
     await auth?.signOut();
@@ -123,6 +129,23 @@ export function App(): JSX.Element {
 
   if (mode === "plane" && !auth) {
     return <SignIn onSignedIn={setAuth} onLocalOnly={() => setLocalOnly(true)} onOffline={() => setOffline(true)} />;
+  }
+
+  // Where a run ends: on the session it started, on the list, or at the sign-in screen
+  // for a plane — which is local-only turned off again.
+  const setupDone = (outcome: SetupOutcome): void => {
+    setup.done();
+    refresh();
+    if (outcome.plane !== null) {
+      if (outcome.plane) prefs.set("planeUrl", outcome.plane);
+      setLocalOnly(false);
+    } else {
+      setWhere(outcome.sessionId ? { screen: "session", id: outcome.sessionId } : { screen: "sessions" });
+    }
+  };
+
+  if (mode === "local" && daemon.client && setup.needed === true) {
+    return <FirstRun client={daemon.client} appearance={appearance} onDone={setupDone} />;
   }
 
   if (auth && !chosen && !hasChosen(auth.me?.subject)) {
@@ -194,6 +217,9 @@ export function App(): JSX.Element {
           </button>
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
+          </button>
+          <button aria-current={where.screen === "setup" ? "page" : undefined} onClick={() => setWhere({ screen: "setup" })}>
+            Setup
           </button>
         </nav>
         <span className="spacer" />
@@ -282,6 +308,8 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
+
+        {where.screen === "setup" && <SetupScreen client={daemon.client} onDone={setupDone} />}
 
         {where.screen === "approvals" && (
           <Approvals
