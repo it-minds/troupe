@@ -189,11 +189,12 @@ defmodule Troupe.ModelConfigTest do
       assert Model.activity_line(window, "root", 0, 10) =~ "starting"
     end
 
+    # The live idle: a turn that ended, as the log says it, is a window at rest.
     test "a subagent still working is reported under an idle root" do
       model =
         Model.rebuild("s-1", "/w", [
           event(:branch_spawned, %{name: "build", isolation: :shared}),
-          event(:agent_state, %{to: :idle}),
+          Event.transient("s-1", "root", :agent_state, %{to: :idle}),
           %Event{
             session_id: "s-1",
             agent_path: "root/librarian",
