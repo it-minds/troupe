@@ -49,6 +49,20 @@ export interface TroupeShell {
   findDaemon?: () => Promise<DaemonEndpoint | null>;
   /** Stage 2: pick a workspace directory. */
   pickDirectory?: () => Promise<string | null>;
+  /**
+   * The operating system's notifications. A browser has its own `Notification`, and a
+   * webview has one that does nothing: WebView2 refuses the permission unless the host
+   * answers for it. So a shell brings its own, and `notify.ts` prefers it.
+   */
+  notifications?: ShellNotifications;
+}
+
+export type NotifyPermission = "granted" | "denied" | "default";
+
+export interface ShellNotifications {
+  permission(): Promise<NotifyPermission>;
+  request(): Promise<NotifyPermission>;
+  send(title: string, body: string): Promise<void>;
 }
 
 declare global {

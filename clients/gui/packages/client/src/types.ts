@@ -124,6 +124,21 @@ export interface LlmDeltaData {
   [k: string]: unknown;
 }
 
+/**
+ * What happened in a session while nobody was reading it (PROTOCOL.md §6, `session.list`):
+ * the root agent's turns that ended, and the approvals and questions it raised, counted
+ * from when the last subscriber left; `since` is the first of them, `null` with nothing to
+ * say. Empty while a client is subscribed, and cleared by the next subscription — never
+ * by a listing. A daemon from before it says nothing, so every reader of it is optional.
+ */
+export interface Unseen {
+  turns: number;
+  approvals: number;
+  questions: number;
+  since: string | null;
+  [k: string]: unknown;
+}
+
 export interface SessionSummary {
   id: string;
   workspace: string;
@@ -136,6 +151,7 @@ export interface SessionSummary {
   created_at?: string;
   last_active_at?: string;
   pinned?: boolean;
+  unseen?: Unseen;
   [k: string]: unknown;
 }
 
@@ -249,5 +265,21 @@ export interface LoopStarted {
   accepted: boolean;
   loop_id: string;
   max_iterations: number;
+  [k: string]: unknown;
+}
+
+/** The session's latest loop, as `session.loop.get` reads it from the log. */
+export interface LoopInfo {
+  loop_id: string;
+  state: "running" | "stopped" | string;
+  iteration: number;
+  max_iterations: number | null;
+  failures?: number;
+  reason: string | null;
+  detail?: string | null;
+  summary?: string | null;
+  goal?: string | null;
+  started_by?: string | null;
+  started_at?: string | null;
   [k: string]: unknown;
 }

@@ -36,10 +36,23 @@ export {
   rootState,
   openApprovals,
   openQuestions,
+  loopEnding,
+  settleLoop,
   LEGACY_BUDGET_OPTIONS,
 } from "./transcript.js";
-export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember, QuestionOption } from "./transcript.js";
-export { FleetStore, PlaneSource, rowFromPlane, filterRows, awaitingApproval, awaitingYou, totalCostMicros } from "./fleet.js";
+export type { Entry, TranscriptState, PendingInput, BlobRef, TodoItem, PresenceMember, QuestionOption, LoopState } from "./transcript.js";
+export {
+  FleetStore,
+  PlaneSource,
+  rowFromPlane,
+  filterRows,
+  awaitingApproval,
+  awaitingYou,
+  totalCostMicros,
+  hasUnseen,
+  describeUnseen,
+  unseenSummary,
+} from "./fleet.js";
 export type { FleetRow, FleetSource, FleetFilter, FleetSnapshot, SessionKind, SyncState } from "./fleet.js";
 export { AdminApi, bundleErrors, requiredRole } from "./admin.js";
 export type {

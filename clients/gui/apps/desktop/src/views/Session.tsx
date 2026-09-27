@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState } from "@troupe/client";
+import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState, settleLoop, unseenSummary } from "@troupe/client";
 import type {
   AttachStatus,
   AuthSession,
@@ -20,6 +20,8 @@ import type {
   DaemonClient,
   Entry,
   FleetRow,
+  LoopInfo,
+  LoopState,
   ProfileOffering,
   TranscriptState,
 } from "@troupe/client";
@@ -30,6 +32,7 @@ import { AnswerRecord, QuestionPanel } from "./Question";
 import { CommandPalette } from "./CommandPalette";
 import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
+import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
@@ -71,6 +74,10 @@ export function Session({
   // Everyone else here, by name: who could answer an approval first, and who reads
   // what is sent.
   const others = view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject);
+  // The loop as its events say, and as the session answers for the one case they cannot:
+  // a session that stopped mid-loop records the interruption only when it wakes.
+  const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
+  const [away, seenAway] = useAway(sessionId, row);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -112,9 +119,13 @@ export function Session({
         onBack={onBack}
         onToggleBackstage={() => setBackstage((b) => !b)}
         onSwitch={(p) => void view.switchProfile(p)}
+        loop={loop}
+        canChange={!readOnly}
+        view={view}
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
+      {away && <Away summary={away} onSeen={seenAway} />}
 
       <div className="stagearea">
         <div className="conversation">
@@ -133,7 +144,16 @@ export function Session({
           {readOnly ? (
             <ReadOnly />
           ) : (
-            <Composer view={view} dormant={dormant} busy={isBusy(view.state)} live={view.status === "live"} others={others} onCommands={() => setPalette(true)} />
+            <Composer
+              view={view}
+              dormant={dormant}
+              busy={isBusy(view.state)}
+              looping={loop?.state === "running"}
+              live={view.status === "live"}
+              others={others}
+              onCommands={() => setPalette(true)}
+              onSent={seenAway}
+            />
           )}
         </div>
 
@@ -151,9 +171,9 @@ function transcriptText(state: TranscriptState): string {
 }
 
 /**
- * The head: where the session is, as a breadcrumb in mono, over its title; who is
- * here; and the controls. The subject column is where a goal line goes once the
- * session has one to show.
+ * The head: where the session is, as a breadcrumb in mono, over its title and the goal
+ * it works towards; who is here; and the controls, with the loop beside the status
+ * while one runs.
  */
 function Header({
   row,
@@ -165,6 +185,9 @@ function Header({
   onBack,
   onToggleBackstage,
   onSwitch,
+  loop,
+  canChange,
+  view,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
@@ -175,6 +198,10 @@ function Header({
   onBack: () => void;
   onToggleBackstage: () => void;
   onSwitch: (p: string) => void;
+  loop: LoopState | undefined;
+  /** Whether this person may set the goal and start or stop a loop: not a reader's. */
+  canChange: boolean;
+  view: SessionHandle;
 }): JSX.Element {
   const working = rootState(state);
   const here = state.presence.filter((p) => p.subject);
@@ -213,6 +240,7 @@ function Header({
           )}
         </div>
         <h1 className="title">{row?.title ?? sessionId}</h1>
+        <GoalLine goal={state.goal} loop={loop} canChange={canChange} onSet={view.setGoal} onClear={view.clearGoal} onStartLoop={view.startLoop} />
       </div>
 
       {here.length > 0 && <Here members={here} self={self} />}
@@ -227,6 +255,8 @@ function Header({
         ) : (
           <Pill status="idle">Idle</Pill>
         )}
+
+        <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
 
         {/* The profiles are the plane's. With no plane there are none to switch to, and an
             empty control is a broken one. */}
@@ -310,6 +340,51 @@ function Banners({
       )}
     </>
   );
+}
+
+/**
+ * What happened here while nobody was reading it (issue #119), as the list's row said it
+ * when the session was opened: the only moment it can be read, since opening the session
+ * is what clears it. Kept for this visit until it is seen — dismissed, or answered by
+ * sending something — and not again, because the daemon has cleared it.
+ */
+function useAway(sessionId: string, row: FleetRow | undefined): [string | null, () => void] {
+  const [away, setAway] = useState<{ id: string; summary: string | null } | null>(null);
+  useEffect(() => {
+    if (!row || away?.id === sessionId) return;
+    setAway({ id: sessionId, summary: unseenSummary(row) });
+  }, [sessionId, row, away?.id]);
+  const summary = away?.id === sessionId ? away.summary : null;
+  return [summary, () => setAway((a) => (a ? { ...a, summary: null } : a))];
+}
+
+function Away({ summary, onSeen }: { summary: string; onSeen: () => void }): JSX.Element {
+  return (
+    <div className="banner away" role="status">
+      <p>While you were away: {summary}.</p>
+      <button type="button" className="link" onClick={onSeen}>
+        Seen
+      </button>
+    </div>
+  );
+}
+
+/** `session.loop.get`, once per attachment. It reads the log and wakes nothing. */
+function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined {
+  const [answer, setAnswer] = useState<LoopInfo | null | undefined>(undefined);
+  useEffect(() => {
+    setAnswer(undefined);
+    if (!view) return;
+    let live = true;
+    view
+      .getLoop()
+      .then((a) => live && setAnswer(a))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [view]);
+  return answer;
 }
 
 function Stream({
@@ -685,18 +760,23 @@ function Composer({
   view,
   dormant,
   busy,
+  looping,
   live,
   others,
   onCommands,
+  onSent,
 }: {
   view: SessionHandle;
   dormant: boolean;
   busy: boolean;
+  /** A loop towards the goal is running: what is sent goes between two iterations. */
+  looping: boolean;
   live: boolean;
   /** Everyone else here, who reads what is sent. */
   others: string[];
   /** Open the command palette: `/` on an empty draft, or the button. */
   onCommands: () => void;
+  onSent: () => void;
 }): JSX.Element {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
@@ -708,6 +788,7 @@ function Composer({
     setError(null);
     try {
       await view.send(text);
+      onSent();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setDraft(text);
@@ -725,11 +806,13 @@ function Composer({
       <p className="hint">
         {dormant
           ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
-          : busy
-            ? "The session is working. What you send is queued and goes next."
-            : !live
-              ? "Not connected. What you send is held and goes when the connection comes back."
-              : "Enter sends, Shift+Enter starts a new line."}
+          : looping
+            ? "A loop is working towards the goal. What you send goes between two of its iterations."
+            : busy
+              ? "The session is working. What you send is queued and goes next."
+              : !live
+                ? "Not connected. What you send is held and goes when the connection comes back."
+                : "Enter sends, Shift+Enter starts a new line."}
       </p>
       <textarea
         value={draft}

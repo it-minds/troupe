@@ -10,6 +10,8 @@
 //   the local daemon       reading `daemon.json` to find the port and token of the
 //                          daemon on this computer, starting it if it is not running,
 //                          and picking a directory to work in
+//   notifications          WebView2 refuses a page's own, so a session that finishes or
+//                          asks while nobody is looking is said through the OS's
 //
 // Each one is reached through `TroupeShell` in `src/shell.ts`, which the shell installs
 // on `window.troupe` at startup. Nothing else in the bundle knows this process exists.
@@ -23,6 +25,7 @@ pub fn run() {
         .plugin(tauri_plugin_http::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_notification::init())
         .invoke_handler(tauri::generate_handler![
             secrets::secret_get,
             secrets::secret_set,

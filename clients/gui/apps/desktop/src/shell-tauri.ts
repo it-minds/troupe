@@ -21,9 +21,11 @@
 //                 outside anything a page may open, and a page cannot start a program
 //   pickDirectory a workspace is a directory, and a browser build can only take a path
 //                 somebody typed
+//   notifications the page's own `Notification` is refused in WebView2, so the OS's are
+//                 reached through the notification plugin
 
 import type { DaemonEndpoint, TokenStore } from "@troupe/client";
-import type { TroupeShell } from "./shell";
+import type { NotifyPermission, ShellNotifications, TroupeShell } from "./shell";
 
 /** True inside a Tauri webview. v2 injects this before any of our code runs. */
 export function inTauri(): boolean {
@@ -74,6 +76,27 @@ async function pickDirectory(): Promise<string | null> {
 }
 
 /**
+ * The OS's notifications. On a desktop the plugin grants without asking, since the OS
+ * has its own switch for each app; the question is still asked the same way, so a shell
+ * that one day must ask is answered by the same code.
+ */
+function notifications(): ShellNotifications {
+  const plugin = () => import("@tauri-apps/plugin-notification");
+  const state = (s: string): NotifyPermission => (s === "granted" || s === "denied" ? s : "default");
+  return {
+    async permission() {
+      return (await (await plugin()).isPermissionGranted()) ? "granted" : "default";
+    },
+    async request() {
+      return state(await (await plugin()).requestPermission());
+    },
+    async send(title, body) {
+      (await plugin()).sendNotification({ title, body });
+    },
+  };
+}
+
+/**
  * Install the shell on `window.troupe`, which is where `shell.ts` looks for it.
  * Called from `main.tsx` before the app renders, and only inside the shell.
  */
@@ -97,6 +120,7 @@ export async function installShell(): Promise<void> {
     signInFlow: "device",
     findDaemon,
     pickDirectory,
+    notifications: notifications(),
   };
   (globalThis as { window?: Window }).window!.troupe = shell;
 }

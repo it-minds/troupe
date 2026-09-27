@@ -11,6 +11,7 @@
 // closing the window loses a cache and nothing else.
 
 import type { PlaneClient, SessionRow, SessionsFilter } from "./plane.js";
+import type { Unseen } from "./types.js";
 
 /** Where a session runs, which is the one thing a person must be able to see at a glance. */
 export type SessionKind = "team" | "local" | "private";
@@ -40,6 +41,11 @@ export interface FleetRow {
   origin: { kind?: string; trigger?: string; [k: string]: unknown } | null;
   reviewedBy: string | null;
   sync: SyncState | null;
+  /**
+   * What happened while nobody was reading the session, where the source counts it — a
+   * daemon since #119; a plane's rows and an older daemon's say nothing.
+   */
+  unseen?: Unseen | null;
   /** The source's own row, for anything a view needs that this shape does not carry. */
   raw: unknown;
 }
@@ -279,4 +285,45 @@ export function awaitingYou(rows: FleetRow[]): FleetRow[] {
 
 export function totalCostMicros(rows: FleetRow[]): number {
   return rows.reduce((n, r) => n + (r.costMicros ?? 0), 0);
+}
+
+/** Whether a row has anything to say about while nobody was reading it. */
+export function hasUnseen(unseen: Unseen | null | undefined): unseen is Unseen {
+  return Boolean(unseen && (unseen.turns > 0 || unseen.approvals > 0 || unseen.questions > 0));
+}
+
+const plural = (n: number, one: string): string => `${n} ${one}${n === 1 ? "" : "s"}`;
+
+/**
+ * "2 turns finished, 1 question waiting": counts in a line. A request is `waiting` while
+ * the row still has one of its kind open, and `asked` when it ended while nobody was
+ * there — timed out, or answered by somebody else.
+ */
+export function describeUnseen(
+  counts: Pick<Unseen, "turns" | "approvals" | "questions">,
+  open: Pick<FleetRow, "pendingApprovals" | "pendingQuestions"> = { pendingApprovals: 0, pendingQuestions: 0 },
+): string {
+  return [
+    counts.turns > 0 ? `${plural(counts.turns, "turn")} finished` : null,
+    counts.approvals > 0 ? `${plural(counts.approvals, "approval")} ${open.pendingApprovals > 0 ? "waiting" : "asked"}` : null,
+    counts.questions > 0 ? `${plural(counts.questions, "question")} ${open.pendingQuestions > 0 ? "waiting" : "asked"}` : null,
+  ]
+    .filter(Boolean)
+    .join(", ");
+}
+
+/**
+ * "2 turns finished, 1 question waiting since 14:02": a row's `unseen`, for the line a
+ * person reads on coming back. The clock is the local one, with the day in front when it
+ * was not today. Null with nothing to say.
+ */
+export function unseenSummary(row: Pick<FleetRow, "unseen" | "pendingApprovals" | "pendingQuestions">, now: Date = new Date()): string | null {
+  const unseen = row.unseen;
+  if (!hasUnseen(unseen)) return null;
+  const said = describeUnseen(unseen, row);
+  const at = unseen.since ? new Date(unseen.since) : null;
+  if (!at || Number.isNaN(at.getTime())) return said;
+  const clock = `${String(at.getHours()).padStart(2, "0")}:${String(at.getMinutes()).padStart(2, "0")}`;
+  const today = at.toDateString() === now.toDateString();
+  return `${said} since ${today ? clock : `${at.toLocaleDateString(undefined, { day: "numeric", month: "short" })} ${clock}`}`;
 }

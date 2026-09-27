@@ -8,6 +8,7 @@ import type {
   EventEnvelope,
   GoalResult,
   LlmDeltaData,
+  LoopInfo,
   LoopStarted,
   SessionCreateResult,
   SubscribeResult,
@@ -288,6 +289,11 @@ export class SessionView {
 
   async stopLoop(): Promise<void> {
     await this.conn.call("session.loop.stop", { command_id: this.conn.nextCommandId(), session_id: this.sessionId });
+  }
+
+  /** `session.loop.get`: the latest loop, read from the log; wakes nothing. */
+  async getLoop(): Promise<LoopInfo | null> {
+    return (await this.conn.call<{ loop: LoopInfo | null }>("session.loop.get", { session_id: this.sessionId })).loop;
   }
 
   /** `fs.list`, resolved through the session's mounts. `path` defaults to the root. */

@@ -3,7 +3,18 @@
 
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { awaitingApproval, awaitingYou, filterRows, FleetStore, rowFromPlane, totalCostMicros } from "../src/index.js";
+import {
+  awaitingApproval,
+  awaitingYou,
+  describeUnseen,
+  filterRows,
+  FleetStore,
+  hasUnseen,
+  rowFromDaemon,
+  rowFromPlane,
+  totalCostMicros,
+  unseenSummary,
+} from "../src/index.js";
 import type { FleetRow, FleetSource, SessionKind, SessionRow } from "../src/index.js";
 
 function planeRow(id: string, over: Partial<SessionRow> = {}): SessionRow {
@@ -163,5 +174,30 @@ describe("the fleet store", () => {
     assert.equal(r.costMicros, null, "a cost nobody reported is not zero");
     assert.equal(r.status, null);
     assert.equal(r.sync, null, "a team session has no sync state");
+  });
+});
+
+describe("what happened while nobody was reading (issue #119)", () => {
+  const daemonRow = (unseen?: Record<string, unknown>) =>
+    rowFromDaemon({ id: "s", workspace: "/w", branch: null, profile: null, state: "active", status: "idle", created_at: null, last_active_at: null, pending_questions: 1, ...(unseen ? { unseen } : {}) } as never);
+
+  it("reads a daemon's `unseen`, and a daemon from before it as nothing to say", () => {
+    const counted = daemonRow({ turns: 2, approvals: 0, questions: 1, since: "2026-09-27T12:02:00Z" });
+    assert.deepEqual(counted.unseen, { turns: 2, approvals: 0, questions: 1, since: "2026-09-27T12:02:00Z" });
+    assert.equal(hasUnseen(counted.unseen), true);
+    assert.equal(daemonRow().unseen, null);
+    assert.equal(hasUnseen(daemonRow().unseen), false);
+    assert.equal(hasUnseen(daemonRow({ turns: 0, approvals: 0, questions: 0, since: null }).unseen), false);
+    assert.equal(unseenSummary(daemonRow()), null);
+  });
+
+  it("says it in a line: waiting while still open, asked once it ended, since when on the local clock", () => {
+    const since = new Date(2026, 8, 27, 14, 2);
+    const row = { unseen: { turns: 2, approvals: 1, questions: 1, since: since.toISOString() }, pendingApprovals: 0, pendingQuestions: 1 };
+    assert.equal(unseenSummary(row, new Date(2026, 8, 27, 15, 0)), "2 turns finished, 1 approval asked, 1 question waiting since 14:02");
+    assert.equal(describeUnseen({ turns: 1, approvals: 0, questions: 0 }), "1 turn finished");
+    // Not today: the day goes in front of the clock.
+    const day = since.toLocaleDateString(undefined, { day: "numeric", month: "short" });
+    assert.equal(unseenSummary(row, new Date(2026, 8, 28, 9, 0)), `2 turns finished, 1 approval asked, 1 question waiting since ${day} 14:02`);
   });
 });
