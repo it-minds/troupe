@@ -175,9 +175,8 @@ defmodule Troupe.Config.ExplainTest do
   end
 
   describe "what a writer writes" do
-    test "the new spellings only, version 1, and a header that names the schema", ctx do
+    test "a new file: the new spellings only, version 1, and a header that names the schema", ctx do
       path = Path.join(ctx.base, "written.yaml")
-      File.write!(path, "# a note\nold: 1\n")
 
       :ok = Config.write_file(path, %{"model" => "m", "small_model" => "c", "auth_token" => "t", "x-mine" => 1})
       text = File.read!(path)
@@ -188,7 +187,21 @@ defmodule Troupe.Config.ExplainTest do
       assert written["models"] == %{"default" => "m", "cheap" => "c"}
       assert {written["api_key"], written["auth"]} == {"t", "bearer"}
       refute Enum.any?(~w(model small_model auth_token), &Map.has_key?(written, &1))
-      assert File.read!(path <> ".previous") == "# a note\nold: 1\n"
+    end
+
+    test "a file that is there is edited: what the writer brings in the new spellings, the rest as it was",
+         ctx do
+      path = Path.join(ctx.base, "written.yaml")
+      File.write!(path, "# a note\nold: 1\nsmall_model: kept   # the file's own\n")
+
+      :ok =
+        Config.write_file(path, %{"model" => "m", "small_model" => "kept", "auth_token" => "t", "x-mine" => 1})
+
+      # The file's own old spelling is left for `troupe config migrate`; the writer's are not.
+      assert File.read!(path) ==
+               "# a note\nsmall_model: kept   # the file's own\napi_key: t\nauth: bearer\nmodels:\n  default: m\nx-mine: 1\n"
+
+      assert File.read!(path <> ".previous") == "# a note\nold: 1\nsmall_model: kept   # the file's own\n"
     end
 
     test "refuses a map that spells one setting two ways", ctx do
