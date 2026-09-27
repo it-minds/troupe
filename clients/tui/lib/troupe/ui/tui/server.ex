@@ -667,7 +667,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(cancel dismiss compact merge discard goal loop sessions hq observer files
+  @builtins ~w(cancel dismiss merge discard goal loop sessions hq observer files
                upload copy memory context watch settings models mcp skills help agents worktree quit)
 
   @doc false
@@ -762,15 +762,6 @@ defmodule Troupe.UI.TUI.Server do
 
   defp builtin("dismiss", _args, state, target),
     do: with_target(target.(), &Client.dismiss(state.session_id, &1))
-
-  defp builtin("compact", _args, state, target) do
-    with_target(target.(), fn path ->
-      case Client.compact(state.session_id, path) do
-        :ok -> {:notice, "compacting #{path}"}
-        other -> other
-      end
-    end)
-  end
 
   defp builtin("merge", _args, state, target),
     do: with_target(target.(), &Client.merge(state.session_id, &1))
@@ -2332,9 +2323,9 @@ defmodule Troupe.UI.TUI.Server do
   @doc """
   Tab completion on the command line: command names (`wor` → `worktree `), window paths
   for the commands whose first argument is a window — `/merge`, `/discard`, `/cancel`,
-  `/dismiss`, `/compact`, `/copy` as the table has them (repeated Tab cycles through the
-  matches) — and `@file` paths anywhere. `/merge` and `/discard` only offer worktree
-  branches that have finished and are neither merged nor discarded.
+  `/dismiss`, `/copy` as the table has them (repeated Tab cycles through the matches) —
+  and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches that
+  have finished and are neither merged nor discarded.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -2429,7 +2420,6 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp eligible?("cancel", w), do: w.state != :dismissed
-  defp eligible?("compact", w), do: w.state != :dismissed
   defp eligible?("dismiss", w), do: w.state in [:done_unread, :failed_unread]
   # Any window has a transcript worth copying, dismissed ones included.
   defp eligible?("copy", _w), do: true

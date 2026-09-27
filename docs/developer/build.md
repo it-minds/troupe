@@ -68,11 +68,12 @@ skips, and `shell` does not run. A release sets the two Linux triples.
 | `protocol/schema/v1/**` | `mix troupe.schema.gen` from `Troupe.Protocol.Schema` | `mix troupe.schema.diff` (add-only), then regenerate and `git diff --exit-code` |
 | `apps/troupe_plane/priv/static/app.js` | `mix troupe.admin.assets`, from the Phoenix, Phoenix HTML and LiveView bundles in `deps/` | `--check` in the `lint` job |
 | `apps/troupe_plane/priv/static/tokens.css`, `priv/design/statuses.json` | `mix troupe.admin.tokens`, from `docs/design/admin/tokens.json` | `--check` |
-| `apps/troupe_plane/priv/static/theme.css` | `mix troupe.theme` (Signal by default), from `docs/design/themes/*.tokens.json` | `--check` |
+| `apps/troupe_plane/priv/static/theme.css` | `mix troupe.theme` (Signal by default), from `clients/gui/docs/design/themes/*.tokens.json` | `--check` |
 | `apps/troupe_plane/priv/static/brand/{favicon.ico,apple-touch-icon.png}` | `python scripts/brand-icons.py` (Pillow), when the mark changes | a test that they exist |
 | `docs/egress-allowlist.md` | `mix troupe.egress`, from what each component declares it dials | a test that it is current |
 | `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt`, `charts/troupe/{LICENSE,NOTICE}` | `elixir scripts/licences.exs`, from the two Mix locks, the pnpm workspace and `Cargo.lock`, once their packages are fetched: the inventory, the licence texts the shipped packages carry, and the chart's copies of the root's | `--check` in `licences.yml`, which also refuses a licence outside the script's policy |
 | `clients/gui/apps/desktop/src/{tokens.css,mark.ts}` | `pnpm tokens`, from `clients/gui/docs/design/themes/*.tokens.json` | `pnpm tokens:check` |
+| `clients/tui/lib/troupe/ui/tui/palette.ex` | `mix troupe.palette` in `clients/tui`, from `clients/gui/docs/design/themes/afterglow.tokens.json`: the TUI's colours by role, with their xterm-256 and sixteen-colour stand-ins, and the mask in two cuts (Decision 716) | `--check`, in the TUI's `mix check` |
 | `clients/gui/apps/desktop/src-tauri/icons/*` | `pnpm icons`, from `mark.ts` and the Signal tokens: every icon the bundler wants, the NSIS images and the dmg background (Decision 703) | `pnpm icons:check`, on the pixels |
 | `test/fixtures/logs/<version>/` | `mix troupe.fixtures.record <version>`, once per release; refuses to overwrite | `fold_test.exs` replays every version |
 

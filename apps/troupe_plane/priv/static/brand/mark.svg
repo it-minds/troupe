@@ -1,5 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 48 48" width="48" height="48" role="img" aria-label="Troupe">
-  <!-- The mask, from docs/design/themes (Signal). One silhouette split down the middle:
+  <!-- The mask, from clients/gui/docs/design/themes (Signal). One silhouette split down the middle:
        the filled half is what the agent did alone, the hollow half is what still needs a
        person. Light falls from the right - never mirror it. Self-contained rather than
        reading the page's tokens, because this file is also loaded as an <img>. -->

@@ -162,11 +162,12 @@ defmodule Troupe.Plane.Web.Diagrams do
   The rules for `approval/0`, which is the only drawing licensed to spend the reserved
   colour — pass this as `:extra_css` on the page that shows that figure, and nowhere else.
 
-  `docs/design/themes/THEMES.md` reserves magenta for one meaning — *stopped, a person
-  must decide* — and reserves the meaning rather than a count. The approval picture is
-  that sentence drawn, so it wears the `waiting` status tokens exactly as an approval pill
-  in the console does. The solid variant stays with the mask; nothing else on either page
-  may touch the hue, and `front_page_assets_test.exs` pins both halves of that.
+  `clients/gui/docs/design/themes/THEMES.md` reserves magenta for one meaning — *stopped,
+  a person must decide* — and reserves the meaning rather than a count. The approval
+  picture is that sentence drawn, so it wears the `waiting` status tokens exactly as an
+  approval pill in the console does. The solid variant stays with the mask; nothing else
+  on either page may touch the hue, and `front_page_assets_test.exs` pins both halves of
+  that.
 
   Kept out of `Troupe.Plane.Web.Page.css/0` on purpose: a stylesheet shared by both pages
   would put the hue's rules on `/`, where there is no approval to spend them on. Dead

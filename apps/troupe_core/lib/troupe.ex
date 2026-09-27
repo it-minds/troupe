@@ -361,6 +361,23 @@ defmodule Troupe do
     :exit, {{:shutdown, _}, _call} -> {:error, :no_agent}
   end
 
+  @doc """
+  The agent definitions a running session was started with, asked of its root agent: on
+  a pod its bundle's, narrowed by the team's grant, where loading them again from the
+  workspace would give this build's own. A session that is not running is
+  `{:error, :no_agent}`, and asking wakes nothing.
+  """
+  @spec definitions(String.t()) :: {:ok, Troupe.Agent.Definitions.t()} | {:error, :no_agent}
+  def definitions(session_id) do
+    case Registry.agent_pid(session_id, Session.root_path()) do
+      nil -> {:error, :no_agent}
+      pid -> {:ok, Agent.definitions(pid)}
+    end
+  catch
+    :exit, {reason, _call} when reason in [:noproc, :normal, :shutdown] -> {:error, :no_agent}
+    :exit, {{:shutdown, _}, _call} -> {:error, :no_agent}
+  end
+
   @doc "Every live agent path in a session, root first."
   @spec agent_tree(String.t()) :: [[String.t()]]
   def agent_tree(session_id) do

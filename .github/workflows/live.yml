@@ -50,7 +50,7 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - uses: erlef/setup-beam@v1
         with:
@@ -66,7 +66,7 @@ jobs:
         run: sudo apt-get update && sudo apt-get install -y xz-utils p7zip-full
 
       # Both Mix projects' dependencies and builds, and the ERTS Burrito downloads.
-      - uses: actions/cache@v4
+      - uses: actions/cache@v6
         with:
           path: |
             deps
@@ -86,7 +86,7 @@ jobs:
       - name: Pack
         run: tar -czf troupe-live.tar.gz -C "$RUNNER_TEMP/troupe" .
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: troupe-live
           path: troupe-live.tar.gz
@@ -109,9 +109,9 @@ jobs:
       # models cost nothing as far as the log can tell (#160).
       TROUPE_MODEL_PRICES: ${{ inputs.prices }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: troupe-live
 

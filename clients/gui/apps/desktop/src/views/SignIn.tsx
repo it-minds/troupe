@@ -9,6 +9,10 @@
 // preference — Microsoft Entra refuses a browser's request for a device code outright,
 // and a page cannot even be told why.
 //
+// The address is asked once. A first run that chose a plane has recorded it (the
+// `planeUrl` preference, which a sign-in keeps too), and finishing that run signs in there
+// straight away: the field is filled and the provider's page, or its code, comes next.
+//
 // And a door that is not a sign-in at all. Where this host can reach the daemon on this
 // computer, "Use this computer only" skips the plane for good (until the setting says
 // otherwise), and a plane that does not answer is offered the same way out for now,
@@ -44,10 +48,16 @@ const SECRETS: Record<string, string> = {
 };
 
 export function SignIn({
+  signInNow = false,
   onSignedIn,
   onLocalOnly,
   onOffline,
 }: {
+  /**
+   * The first run has just named the plane and the person pressed "Finish and sign in":
+   * sign in to the address it recorded rather than ask for it again.
+   */
+  signInNow?: boolean;
   onSignedIn: (auth: AuthSession) => void;
   /** "Use this computer only": turn the setting on, and never ask about a plane again. */
   onLocalOnly: () => void;
@@ -68,6 +78,7 @@ export function SignIn({
 
   // Two things happen on load, in this order: finish a sign-in the provider is sending
   // back, or sign back in from what the store already holds. Either way, no questions.
+  // Then, when the first run has just said where, the sign-in there starts by itself.
   useEffect(() => {
     let live = true;
     const url = prefs.get("planeUrl", likelyPlaneUrl());
@@ -88,8 +99,9 @@ export function SignIn({
     })()
       .then((signedIn) => {
         if (!live) return;
-        if (signedIn) onSignedIn(signedIn);
-        else setRestoring(false);
+        if (signedIn) return onSignedIn(signedIn);
+        setRestoring(false);
+        if (signInNow) void signIn(url);
       })
       .catch((e: unknown) => {
         if (!live) return;
@@ -101,15 +113,15 @@ export function SignIn({
     return () => {
       live = false;
     };
-  }, [onSignedIn]);
+  }, [onSignedIn, signInNow]);
 
-  const signIn = async (): Promise<void> => {
+  const signIn = async (url: string = planeUrl): Promise<void> => {
     setBusy(true);
     setError(null);
     setUnreachable(false);
     setDevice(null);
-    prefs.set("planeUrl", planeUrl);
-    const auth = newSession(planeUrl);
+    prefs.set("planeUrl", url);
+    const auth = newSession(url);
     try {
       const found = await auth.discover();
       setDiscovery(found);

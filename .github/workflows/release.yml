@@ -35,7 +35,7 @@ jobs:
       prerelease: ${{ steps.version.outputs.prerelease }}
     steps:
       # Two commits deep, so the push can be compared with what `main` was before it.
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
 
@@ -101,9 +101,9 @@ jobs:
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
       # The chart's own version and its appVersion are the release's, so an install of
       # this file pulls the images just built rather than whatever `values.yaml` was
@@ -172,7 +172,7 @@ jobs:
           gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1 \
             LICENSE NOTICE THIRD-PARTY-NOTICES.txt
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: chart
           path: dist/troupe-*.tgz
@@ -232,11 +232,11 @@ jobs:
       group: deploy-production
       cancel-in-progress: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: azure/setup-helm@v4
+      - uses: azure/setup-helm@v5
 
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: chart
           path: dist

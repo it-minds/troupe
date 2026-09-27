@@ -11,9 +11,9 @@
 
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
-import { filterRows, hasUnseen, unseenSummary } from "@troupe/client";
+import { filterRows } from "@troupe/client";
 import type { FleetRow, SessionKind } from "@troupe/client";
-import { Cost, RowStatus, statusOf, Sync, When, Where } from "./bits";
+import { Cost, RowStatus, statusOf, Sync, Unread, When, Where } from "./bits";
 
 export function Sessions({
   rows,
@@ -187,20 +187,3 @@ function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void
     </ul>
   );
 }
-
-/**
- * What happened while nobody was reading the session (issue #119), as a marker: how many
- * things, and the sentence behind them. It goes when the session is opened, which is
- * what clears it at the daemon; a listing never does.
- */
-function Unread({ row }: { row: FleetRow }): JSX.Element | null {
-  const summary = unseenSummary(row);
-  if (!summary || !hasUnseen(row.unseen)) return null;
-  const n = row.unseen.turns + row.unseen.approvals + row.unseen.questions;
-  return (
-    <span className="pill new" title={`While you were away: ${summary}`} aria-label={`While you were away: ${summary}`}>
-      {n} new
-    </span>
-  );
-}
-

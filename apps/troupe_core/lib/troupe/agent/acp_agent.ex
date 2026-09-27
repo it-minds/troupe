@@ -31,7 +31,10 @@ defmodule Troupe.Agent.ACPAgent do
   never learns they exist.
   """
 
-  use GenServer
+  # `:temporary`, as a subagent's `Agent.Node` is: one whose program exits stops, and a
+  # supervisor that started it again would run its task a second time for a parent that
+  # already has its answer. The parent has had its report, or turns the `:DOWN` into one.
+  use GenServer, restart: :temporary
 
   alias Troupe.LLM.Usage
   alias Troupe.Workspace

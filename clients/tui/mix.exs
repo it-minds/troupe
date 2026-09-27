@@ -68,6 +68,8 @@ defmodule Troupe.MixProject do
         "format --check-formatted",
         "credo --strict",
         "troupe.xref",
+        # The colours and the mask are generated from the design tokens (issue #228).
+        "troupe.palette --check",
         "test"
       ]
     ]

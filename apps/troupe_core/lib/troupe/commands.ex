@@ -72,15 +72,6 @@ defmodule Troupe.Commands do
             "the daemon, where /sessions still lists it.",
         example: "/dismiss 3"
       ),
-      entry("compact", "session", "Compact a window's context",
-        usage: "/compact [window]",
-        args: [window()],
-        availability: "window",
-        detail:
-          "Asks the window's session to shrink its context. A session on this machine " <>
-            "compacts by itself when its context nears compact_at, and a remote one compacts " <>
-            "on its plane, so this answers with which."
-      ),
       entry("merge", "session", "Land a worktree branch on the checkout",
         usage: "/merge [window]",
         args: [window()],
@@ -216,7 +207,7 @@ defmodule Troupe.Commands do
             "bundle; import copies a directory of skills, link reads it in place.",
         example: "/skills link ~/.claude/skills"
       ),
-      entry("help", "setup", "This list: every command, what it does and how to type it",
+      entry("help", "setup", "Every command, what it does and how to type it",
         aliases: ["?"],
         usage: "/help",
         detail:

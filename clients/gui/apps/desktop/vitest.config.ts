@@ -1,5 +1,5 @@
 import { defineConfig, mergeConfig } from "vitest/config";
-import app from "./vite.config";
+import app from "./vite.config.ts";
 
 // The app's tests run on the app's own Vite configuration — the same `@troupe/client`
 // alias to source, the same `import.meta.env` — with jsdom for a page. The client's

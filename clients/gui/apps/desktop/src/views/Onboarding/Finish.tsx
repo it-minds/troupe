@@ -1,6 +1,7 @@
 // Step 7: what was set up, in a few lines, and the first session — started by the
 // daemon in the chosen directory with a prompt suited to it. A plane's first run ends
-// on the sign-in screen instead, since signing in is not the daemon's to do.
+// on the sign-in screen instead, since signing in is not the daemon's to do; with the
+// plane's address given, that screen signs in to it without asking for it again.
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -31,7 +32,11 @@ export function Finish({ flow, busy, error, onAnswer, onBack }: StepProps): JSX.
       <StepFrame
         flow={flow}
         title="Sign in next"
-        lede="Nothing is written on this computer for a plane: your organisation's Troupe provides the models and runs the sessions. Finishing here takes you to the sign-in screen."
+        lede={
+          url
+            ? "Nothing is written on this computer for a plane: your organisation's Troupe provides the models and runs the sessions. Finishing here signs you in to it."
+            : "Nothing is written on this computer for a plane: your organisation's Troupe provides the models and runs the sessions. Finishing here takes you to the sign-in screen."
+        }
         error={error}
       >
         <dl className="facts wide">

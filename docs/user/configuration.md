@@ -216,8 +216,12 @@ that names the new one, and a file that uses both spellings of one setting is re
 Loading never rewrites a file, because a rewrite drops its comments. `troupe config
 migrate` prints, for each file, the rewrite that stops the warnings, and `troupe config
 migrate --write` makes it and keeps the file as it was beside it as
-`config.yaml.previous`. The terminal UI's settings page and the desktop app's model
-settings write only the new spellings, the same way.
+`config.yaml.previous`.
+
+The terminal UI's settings page, the desktop app's model settings and a budget raised
+for a workspace do not rewrite a file: they change the lines of the settings they set,
+written by the new names, and leave every other line, comments included, as it was. The
+file before the save is kept as `config.yaml.previous` all the same.
 
 ## Seeing what is in effect
 
@@ -415,7 +419,7 @@ or the command line where one exists for it.
 | `loop_max_iterations` | integer ≥ 1 | `10` | any | Turns `/loop` runs when not told. |
 | `loop_max_failures` | integer ≥ 1 | `3` | any | Failed turns in a row that stop a loop. |
 | `memory` | boolean | `true` | any | Agents read and write the project brief, `.troupe/memory.md`. |
-| `memory_auto_refresh` | boolean | `true` | any | A new session in a git repository refreshes a missing or stale brief; never a headless run. |
+| `memory_auto_refresh` | boolean | `true` | any | A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run. |
 | `memory_max_chars` | integer ≥ 1 | `6000` | any | How much of the brief goes into a prompt. |
 | `memory_max_age_days` | integer ≥ 1 | `7` | any | How old the brief may be before it counts as stale. |
 | `instructions_max_chars` | integer ≥ 1 | `16000` | any | How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first. |

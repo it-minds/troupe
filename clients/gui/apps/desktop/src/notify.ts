@@ -21,6 +21,13 @@
 // the page's `Notification` in a browser. Asked once, on the first thing the person does
 // here rather than out of nowhere at start, and a refusal is kept: nothing asks again by
 // itself. The preference beside the appearance settings turns it off.
+//
+// A notification leads to its session. A browser says when one is clicked, and the click
+// brings the window forward and opens the session. The shell's cannot: the notification
+// plugin reports a click only on a phone, since on a desktop it shows the toast and lets
+// go of the handle that would hear it. So there the window coming to the front shortly
+// after a notification, however it got there, is taken as the answer to it, and opens the
+// session the last one was about.
 
 import { useEffect, useState } from "react";
 import { describeUnseen } from "@troupe/client";
@@ -50,12 +57,13 @@ function backend(): Backend | null {
   return {
     permission: async () => N.permission as Permission,
     request: async () => (await N.requestPermission()) as Permission,
-    // One per session: a later one replaces what is still up rather than stacking.
+    // One per session: a later one replaces what is still up rather than stacking. The
+    // tag is the session, which a click opens.
     send: (title, body, tag) => {
       const n = new N(title, { body, tag });
       n.onclick = () => {
-        globalThis.focus?.();
         n.close();
+        answered(tag);
       };
     },
   };
@@ -63,12 +71,19 @@ function backend(): Backend | null {
 
 // -- state ----------------------------------------------------------------------------
 
+/** How soon after a notification the window coming to the front counts as answering it. */
+export const ANSWER_MS = 15_000;
+
 let permission: Permission = "default";
 const counts = new Map<string, Unseen>();
 const titles = new Map<string, string>();
 const looping = new Set<string>();
 const said = new Set<string>();
 const listeners = new Set<() => void>();
+/** Opens a session; the app's, while it is mounted. */
+let opener: ((sessionId: string) => void) | null = null;
+/** The last notification said while the window was not in front, until it comes back. */
+let unanswered: { sessionId: string; at: number } | null = null;
 
 function changed(): void {
   for (const l of listeners) l();
@@ -88,7 +103,24 @@ function say(sessionId: string, key: string, body: string): void {
   if (said.has(key)) return;
   said.add(key);
   if (!notificationsOn() || permission !== "granted") return;
-  backend()?.send(titles.get(sessionId) ?? sessionId, body, sessionId);
+  const b = backend();
+  if (!b) return;
+  b.send(titles.get(sessionId) ?? sessionId, body, sessionId);
+  if (!focused()) unanswered = { sessionId, at: Date.now() };
+}
+
+/** A notification was clicked: the window to the front, and its session open. */
+function answered(sessionId: string): void {
+  unanswered = null;
+  globalThis.focus?.();
+  opener?.(sessionId);
+}
+
+/** The window came to the front: soon enough after a notification, that is its answer. */
+function cameBack(): void {
+  const last = unanswered;
+  unanswered = null;
+  if (last && Date.now() - last.at <= ANSWER_MS) opener?.(last.sessionId);
 }
 
 // -- the two ways news arrives --------------------------------------------------------
@@ -174,11 +206,20 @@ async function prepare(): Promise<void> {
 
 /**
  * The app's half: what the list says, every time it is polled, and the session on
- * screen, which the rows leave to its own events.
+ * screen, which the rows leave to its own events. `open` is where a notification that
+ * was answered leads.
  */
-export function useNotifications(rows: FleetRow[], onScreen: string | null): void {
+export function useNotifications(rows: FleetRow[], onScreen: string | null, open: (sessionId: string) => void): void {
   useEffect(() => void prepare(), []);
   useEffect(() => noticeRows(rows, onScreen), [rows, onScreen]);
+  useEffect(() => {
+    opener = open;
+    globalThis.addEventListener?.("focus", cameBack);
+    return () => {
+      if (opener === open) opener = null;
+      globalThis.removeEventListener?.("focus", cameBack);
+    };
+  }, [open]);
 }
 
 /** The preference, for the settings screen: on or off, and what the OS or browser says. */
@@ -209,4 +250,5 @@ export function resetNotifications(): void {
   titles.clear();
   looping.clear();
   said.clear();
+  unanswered = null;
 }
