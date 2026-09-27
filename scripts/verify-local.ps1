@@ -14,8 +14,9 @@
   The daemon it starts is stopped again at the end, and only that one. Another that
   answers in its place -- a TUI that found no daemon serves its own harness -- fails the
   check and is left running. Exit status 0 is a pass; anything else names the check that
-  failed. An issue's own reproduction is not here -- it goes after this, and is written up
-  in the pull request.
+  failed. Only a failed check of the installed build itself ends with the rollback hint:
+  another daemon in the way says nothing about the install. An issue's own reproduction
+  is not here -- it goes after this, and is written up in the pull request.
 .EXAMPLE
   .\scripts\verify-local.ps1
   .\scripts\verify-local.ps1 -NoTui          # after install-local.ps1 -NoTui
@@ -37,8 +38,12 @@ $Tui = Join-Path $BinDir "troupe.exe"
 $Version = (Get-Content (Join-Path $Root "VERSION") -Raw).Trim()
 
 $failures = @()
+# Checks that failed because something else on the machine was in the way, not because
+# of the installed build. They fail the run, but rolling back would not fix them.
+$blocked = @()
 function Pass($what) { Write-Host "PASS  $what" }
 function Fail($what) { Write-Host "FAIL  $what"; $script:failures += $what }
+function Blocked($what) { Write-Host "FAIL  $what"; $script:blocked += $what }
 
 function Stop-OurDaemon {
   Get-Process erl, erlsrv, beam.smp -ErrorAction SilentlyContinue |
@@ -111,7 +116,7 @@ try {
   elseif ($answers) {
     $other = Get-DaemonListener
     if ($other) {
-      Fail "troupe-daemon status sees a daemon that is not the one installed in $LibDir"
+      Blocked "troupe-daemon status sees a daemon that is not the one installed in $LibDir"
       Write-Host "      pid $($other.Id), listening on port $($other.Port): $($other.Path)"
       Write-Host "      run defers to a daemon that already answers, so the installed one was not started."
       Write-Host "      A TUI that finds no daemon serves its own harness: close it and run this again."
@@ -139,8 +144,14 @@ finally {
 }
 
 Write-Host ""
+$failed = $failures.Count + $blocked.Count
 if ($failures.Count -gt 0) {
-  Write-Host "$($failures.Count) check(s) failed. To go back:  .\scripts\install-local.ps1 -Rollback"
+  Write-Host "$failed check(s) failed. To go back:  .\scripts\install-local.ps1 -Rollback"
+  exit 1
+}
+if ($blocked.Count -gt 0) {
+  Write-Host "$failed check(s) failed, none of them about the installed build: another daemon was in the"
+  Write-Host "way (above). Do not roll back for this; close that daemon and run this again."
   exit 1
 }
 Write-Host "all checks passed for $Version"
