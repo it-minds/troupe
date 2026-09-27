@@ -129,7 +129,7 @@ export function Session({
 
       <div className="stagearea">
         <div className="conversation">
-          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} />
+          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
@@ -392,12 +392,15 @@ function Stream({
   self,
   local,
   readBlob,
+  onSetup,
 }: {
   state: TranscriptState;
   self: string | undefined;
   /** A session on this computer, whose model settings are this person's to change. */
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
+  /** Leave for the Setup screen, offered under a model error a first run can fix. */
+  onSetup?: (() => void) | undefined;
 }): JSX.Element {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -410,7 +413,7 @@ function Stream({
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
 
       {state.entries.map((e) => (
-        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} />
+        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
       ))}
 
       {state.thinking && (
@@ -451,11 +454,13 @@ function StreamEntry({
   self,
   local,
   readBlob,
+  onSetup,
 }: {
   entry: Entry;
   self: string | undefined;
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
+  onSetup?: (() => void) | undefined;
 }): JSX.Element | null {
   switch (entry.kind) {
     case "user": {
@@ -511,7 +516,20 @@ function StreamEntry({
       return (
         <>
           <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" ? "error" : ""}`}>{entry.text}</p>
-          {step && <p className="note">{step}</p>}
+          {step && (
+            <p className="note">
+              {step}
+              {/* The first run's questions fix both, one step at a time (Decision 705). */}
+              {onSetup && (
+                <>
+                  {" "}
+                  <button type="button" className="link" onClick={onSetup}>
+                    Run setup
+                  </button>
+                </>
+              )}
+            </p>
+          )}
         </>
       );
     }

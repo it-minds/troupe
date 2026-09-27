@@ -205,7 +205,15 @@ report and then the same choices, and plain `troupe` asks them before it opens a
 on a machine with no settings and no key. The installers end with the same check.
 
 Whatever finds no key says so with one next step, `troupe config`: the report's last
-line, a headless run's model error, and the first turn in the TUI.
+line, a headless run's model error, and the first turn in the TUI. A first run finished
+in the desktop app is recorded by the daemon, and plain `troupe` asks nothing then.
+
+`troupe doctor` checks the setup and prints one line per check: the config files load,
+the default model's provider has a key, the key is accepted (a real request, the
+provider's model listing), where the key is kept, whether a daemon is running,
+`troupe-daemon` and `troupe` on the PATH, and every plane you are logged in to. A line
+that says `FAIL` makes the exit status 1; `warn` does not. `troupe-daemon doctor` prints
+the same lines.
 
 ## Use
 
@@ -217,6 +225,7 @@ troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
 troupe models [--refresh]               # every model, its window and its price
+troupe doctor                           # check the setup, one line per check; exits 1 on a failure
 troupe login PLANE_URL                  # sign in to a Troupe Remote plane (device flow)
 troupe logout [PLANE_URL] [--all]       # forget a plane's credentials
 troupe whoami [PLANE_URL]               # who the plane says you are, and your teams

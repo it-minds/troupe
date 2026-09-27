@@ -15,8 +15,8 @@ import type { CommandEntry } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
 import { loopError } from "./Goal";
 
-/** The screens a command can leave the session for. */
-export type PaletteScreen = "sessions" | "local" | "appearance";
+/** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
+export type PaletteScreen = "sessions" | "local" | "appearance" | "setup";
 
 export interface PaletteActions {
   go: (screen: PaletteScreen) => void;

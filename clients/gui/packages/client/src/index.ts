@@ -123,3 +123,15 @@ export type {
   ModelRole,
   ModelsParams,
 } from "./config.js";
+export { APPROVAL_CHOICES, PROVIDER_KINDS, describeCheck, nextStep, previousStep, setupError, setupUnsupported, vendorKeyVar } from "./setup.js";
+export type {
+  ProviderKind,
+  SetupAnswer,
+  SetupCheck,
+  SetupCompleted,
+  SetupDetected,
+  SetupFlow,
+  SetupSession,
+  SetupStep,
+  SetupStepName,
+} from "./setup.js";

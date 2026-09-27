@@ -12,6 +12,8 @@
 //   it can be told who you are   `identity.link` changes the actor on everything after
 //   it keeps the model settings  `config.set` writes them, `config.get` reads them back
 //                                without the key, and `config.models` asks a provider
+//   it asks the first run's      `setup.get` says where it stands and `setup.answer`
+//   questions                    moves it a step, checking a key and writing the settings
 //
 // It implements the protocol rather than imitating a screen, for the same reason the
 // fake worker does: a test that passes against a fake that agrees with the client by
@@ -66,6 +68,32 @@ export interface FakeDaemonOptions {
   modelSettings?: boolean;
   /** Things with a stronger claim than the file, as `config.get` reports them. */
   overrides?: Array<{ source: "project" | "env" | "opencode"; detail: string }>;
+  /**
+   * True is a machine nobody has set up: no settings, no record of a first run, so
+   * `setup.get` says the questions are needed. The default is a machine whose first
+   * run is done, which is what every other test wants in front of it.
+   */
+  firstRun?: boolean;
+  /** Variables set where the daemon runs, which the key step may keep a key in. */
+  env?: Record<string, string>;
+  /** What the machine's opencode config holds, as the daemon detects it. */
+  opencode?: { providers: string[]; default: string | null };
+}
+
+/** The first run in progress, as the fake daemon holds it. The key is here and in no answer. */
+interface FakeSetupFlow {
+  step: string;
+  answers: Record<string, Record<string, unknown>>;
+  key: string | null;
+  offered: Array<Record<string, unknown>>;
+  suggested: { default: string | null; cheap: string | null };
+  check: { state: string; reason: string | null } | null;
+}
+
+const SETUP_STEPS = ["where", "provider", "key", "models", "workspace", "finish"] as const;
+
+function freshSetup(): FakeSetupFlow {
+  return { step: "where", answers: {}, key: null, offered: [], suggested: { default: null, cheap: null }, check: null };
 }
 
 /** One MCP server in a fake layer file (troupe-remote Decision 700). `env` values stay here, as the real daemon keeps them. */
@@ -149,6 +177,12 @@ export class FakeDaemon {
   skills: FakeSkill[] = [];
   /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
   importable: Record<string, Importable> = {};
+  /** The record of a finished first run, as `setup.get` reports it; null until `finish`. */
+  setupCompleted: { completed_at: string; choice: string; subject: string | null } | null;
+  /** The first run in progress. */
+  setup: FakeSetupFlow = freshSetup();
+  /** Directories the workspace step accepts; anything else "is not a directory". */
+  directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -157,6 +191,8 @@ export class FakeDaemon {
   private readonly osUser: string;
   private readonly modelSettings: boolean;
   private readonly overrides: NonNullable<FakeDaemonOptions["overrides"]>;
+  private readonly env: Record<string, string>;
+  private readonly opencode: { providers: string[]; default: string | null };
   private nextId = 1;
 
   constructor(opts: FakeDaemonOptions = {}) {
@@ -165,6 +201,9 @@ export class FakeDaemon {
     this.osUser = opts.osUser ?? "ada";
     this.modelSettings = opts.modelSettings ?? true;
     this.overrides = opts.overrides ?? [];
+    this.env = opts.env ?? {};
+    this.opencode = opts.opencode ?? { providers: [], default: null };
+    this.setupCompleted = opts.firstRun ? null : { completed_at: "2026-09-01T08:00:00Z", choice: "local", subject: null };
   }
 
   get principal(): { subject: string; display_name: string; kind: string } {
@@ -520,6 +559,11 @@ export class FakeDaemon {
         if (!this.modelSettings) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
         return this.config(ws, id, method, params);
 
+      case "setup.get":
+      case "setup.answer":
+        if (!this.modelSettings) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+        return this.setupCall(ws, id, method, params);
+
       case "mcp.list":
       case "mcp.add":
       case "mcp.remove":
@@ -577,6 +621,184 @@ export class FakeDaemon {
       if (role in models) s.models[role] = models[role] || null;
     }
     return reply(ws, id, this.configJson());
+  }
+
+  /**
+   * The first run's questions (troupe Decision 705), with the daemon's semantics: a step
+   * is the current one or one already answered (which forgets what came after), a key
+   * is checked before anything is written — right when it looks like one, refused
+   * otherwise — the settings are written at the models step, `auto_approve` at the
+   * workspace step, and `finish` records the run and starts the session.
+   */
+  private setupCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    if (method === "setup.get") return reply(ws, id, this.setupJson());
+    if (!params["command_id"]) return invalid("command_id is required");
+
+    const step = String(params["step"] ?? "");
+    const answer = (params["answer"] ?? {}) as Record<string, unknown>;
+    const flow = this.setup;
+    const index = SETUP_STEPS.indexOf(step as (typeof SETUP_STEPS)[number]);
+    if (index < 0) return invalid(`${JSON.stringify(step)} is not a step; the steps are ${SETUP_STEPS.join(", ")}`);
+    if (step !== flow.step && !(step in flow.answers)) return invalid(`the current step is ${flow.step}; answer it, or a step already answered`);
+
+    // Going back forgets what came after, the key included.
+    for (const later of SETUP_STEPS.slice(index)) delete flow.answers[later];
+    if (index <= SETUP_STEPS.indexOf("key")) {
+      flow.key = null;
+      flow.offered = [];
+      flow.suggested = { default: null, cheap: null };
+      flow.check = null;
+    }
+    flow.step = step;
+    if (answer["back"] === true) return reply(ws, id, this.setupJson());
+
+    const advance = (accepted: Record<string, unknown>, next: string) => {
+      flow.answers[step] = accepted;
+      flow.step = next;
+    };
+
+    switch (step) {
+      case "where": {
+        if (answer["choice"] === "local") advance({ choice: "local" }, "provider");
+        else if (answer["choice"] === "plane") advance({ choice: "plane", plane_url: (answer["plane_url"] as string) || null }, "finish");
+        else return invalid("choice must be local or plane");
+        break;
+      }
+      case "provider": {
+        if (answer["reuse"] === "opencode") {
+          if (this.opencode.providers.length === 0) return invalid("there are no providers in opencode's config to copy");
+          this.settings.exists = true;
+          advance({ reuse: "opencode", providers: this.opencode.providers }, "workspace");
+          break;
+        }
+        if (answer["reuse"] === "config") {
+          if (!this.settings.exists || !this.settings.api_key) return invalid("there is no config.yaml through which a model can be asked; set a provider up instead");
+          advance({ reuse: "config", path: this.configJson()["path"] }, "workspace");
+          break;
+        }
+        const provider = String(answer["provider"] ?? "");
+        if (!OFFERS[provider]) return invalid(`provider must be one of anthropic, openai, fake, not ${JSON.stringify(provider)}`);
+        const kind = String(answer["kind"] ?? provider);
+        const baseUrl = ((answer["base_url"] as string | null) ?? "").trim() || null;
+        if ((kind === "gateway" || kind === "litellm") && !baseUrl) return invalid(`a ${kind} needs its base URL, ending in /v1`);
+        advance({ provider, kind, base_url: baseUrl, auth: (answer["auth"] as string) ?? "api_key" }, "key");
+        break;
+      }
+      case "key": {
+        const provider = flow.answers["provider"]!;
+        let key: string | null;
+        let source: Record<string, unknown>;
+        if (typeof answer["api_key"] === "string") {
+          key = answer["api_key"].trim();
+          if (!key) return invalid("api_key is empty; paste the key, or name the variable it is in");
+          source = { source: "typed" };
+        } else if (typeof answer["env"] === "string") {
+          const value = this.env[answer["env"]];
+          if (!value) return invalid(`${answer["env"]} is not set where the daemon runs; paste the key, or set it and start the daemon again`);
+          key = value;
+          source = { source: "env", var: answer["env"] };
+        } else if (provider["base_url"]) {
+          key = null;
+          source = { source: "none" };
+        } else {
+          return invalid(`${provider["provider"]} needs a key; paste one, or keep it in ${provider["provider"] === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"}`);
+        }
+        // The real daemon lists the provider's models with the key; here a key is right
+        // when it looks like one, and a gateway given none cannot be asked.
+        if (key && !key.startsWith("sk-")) {
+          flow.check = { state: "refused", reason: "401 unauthorized: the key was refused" };
+          break;
+        }
+        flow.key = typeof answer["env"] === "string" ? `{env:${answer["env"]}}` : key;
+        flow.offered = key ? OFFERS[String(provider["provider"])]! : [];
+        const ids = flow.offered.map((m) => String(m["id"]));
+        flow.suggested = { default: ids[0] ?? null, cheap: ids[1] ?? ids[0] ?? null };
+        flow.check = key ? { state: "ok", reason: null } : { state: "unknown", reason: "no key was given, so nothing was asked" };
+        advance(source, "models");
+        break;
+      }
+      case "models": {
+        const def = String(answer["default"] ?? "").trim();
+        if (!def) return invalid("default must be a model id");
+        const cheap = ((answer["cheap"] as string | null) ?? "").trim() || null;
+        const provider = flow.answers["provider"]!;
+        this.settings = {
+          exists: true,
+          provider: String(provider["provider"]),
+          base_url: (provider["base_url"] as string | null) ?? null,
+          auth: (provider["auth"] as "api_key" | "bearer") ?? "api_key",
+          api_key: flow.key,
+          models: { default: def, cheap, expensive: null },
+        };
+        advance({ default: def, cheap }, "workspace");
+        break;
+      }
+      case "workspace": {
+        const workspace = String(answer["workspace"] ?? "").trim();
+        if (!workspace) return invalid("workspace must be a directory");
+        if (!this.directories.includes(workspace)) return invalid(`${workspace} is not a directory`);
+        const approvals = answer["approvals"] ?? "ask";
+        if (approvals !== "ask" && approvals !== "auto") return invalid(`approvals must be ask or auto, not ${JSON.stringify(approvals)}`);
+        advance({ workspace, approvals }, "finish");
+        break;
+      }
+      case "finish": {
+        const choice = String(flow.answers["where"]?.["choice"] ?? "local");
+        this.setupCompleted = { completed_at: new Date().toISOString(), choice, subject: this.principal.subject };
+        const workspace = flow.answers["workspace"]?.["workspace"] as string | undefined;
+        let session: Record<string, unknown> | null = null;
+        if (choice === "local" && workspace && answer["start"] !== false) {
+          const prompt = String(answer["prompt"] ?? "").trim() || this.suggestedPrompt(workspace);
+          const created = this.seed(workspace);
+          // As a session created with a prompt starts: the prompt is its first input.
+          created.log.append("user_input", { text: prompt, source: "user", author: this.principal.subject }, { kind: "user", subject: this.principal.subject });
+          session = { workspace, prompt, session_id: created.id, worktree: null, branch: null };
+        }
+        advance({ start: session !== null }, "done");
+        const finished = { ...this.setupJson(), step: "done", session };
+        this.setup = freshSetup();
+        return reply(ws, id, finished);
+      }
+    }
+    return reply(ws, id, this.setupJson());
+  }
+
+  private suggestedPrompt(workspace: string | null | undefined): string | null {
+    if (!workspace) return null;
+    return workspace.endsWith("repo")
+      ? "Tell me what this project does, how it is built and tested, and where you would start reading."
+      : "Look around this directory and tell me what you find.";
+  }
+
+  private setupJson(): Record<string, unknown> {
+    const flow = this.setup;
+    const path =
+      flow.answers["where"]?.["choice"] === "plane"
+        ? ["where", "finish"]
+        : typeof flow.answers["provider"]?.["reuse"] === "string"
+          ? ["where", "provider", "workspace", "finish"]
+          : [...SETUP_STEPS];
+    const config = this.configJson();
+    return {
+      needed: this.setupCompleted === null && !this.settings.exists,
+      completed: this.setupCompleted,
+      step: flow.step,
+      steps: path.map((name) => ({ name, done: name in flow.answers })),
+      answers: flow.answers,
+      detected: {
+        env: Object.keys(this.env).filter((v) => v === "ANTHROPIC_API_KEY" || v === "OPENAI_API_KEY"),
+        opencode: { path: `/home/${this.osUser}/.config/opencode/opencode.jsonc`, ...this.opencode },
+        config: { ...config, usable: this.settings.exists && this.settings.api_key !== null },
+        plane: { url: this.linked?.plane_url ?? null, linked: this.linked !== null },
+      },
+      key_storage: { kind: "file", path: config["path"], keychain: false },
+      offered: flow.offered,
+      suggested: flow.suggested,
+      check: flow.check,
+      suggested_prompt: this.suggestedPrompt(flow.answers["workspace"]?.["workspace"] as string | undefined),
+      session: null,
+    };
   }
 
   /**

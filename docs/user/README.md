@@ -21,10 +21,21 @@ machine and you see the same transcript; two people can open the same session at
    [configuration.md](configuration.md) has every key.
 
 With no model set up, plain `troupe` asks the same questions first, and whatever needs a
-model says to run `troupe config` rather than failing without a reason.
+model says to run `troupe config` rather than failing without a reason. `troupe doctor`
+checks the setup — the config files, the provider and its key (with a real request), the
+daemon, the two programs on the PATH and any plane you are signed in to — one line each,
+and exits 1 when one fails.
 
-Without the TUI, the desktop app sets up the same file on **This computer**, under
-**Models**, or you write it yourself. The simplest `config.yaml` takes the key from the
+**The desktop app** asks the same questions on its first run, as screens: where the work
+runs, the provider (with what is already on the machine offered: a key in the environment,
+an opencode setup, a `config.yaml`), the key, the models with their context and price, a
+first directory and the approval model, then a first session there with a suggested
+prompt. It writes the same `config.yaml`, and once it is done the terminal client does not
+ask again. **Setup** in the app's rail runs it again at any time, and a session whose key
+the provider refuses offers it too.
+
+Without either, the desktop app's **This computer** screen, under **Models**, sets up the
+same file, or you write it yourself. The simplest `config.yaml` takes the key from the
 environment:
 
 ```yaml

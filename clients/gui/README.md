@@ -339,6 +339,9 @@ apps/desktop/src
   mark.ts         the mask's geometry, generated from the same files — do not edit
   views/          SignIn · Launcher · Sessions · StartSession · Session · Approval · Question
                   Approvals · Files · Review · CommandPalette · Local (Models · Servers) · Appearance
+                  Onboarding/     the first run's questions, one screen per step, over `setup.get`
+                                  and `setup.answer`; FirstRun leads with the theme, SetupScreen
+                                  is the rail's Setup entry
 ```
 
 `SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so
