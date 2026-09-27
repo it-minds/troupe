@@ -57,6 +57,35 @@ defmodule Troupe.Events do
   @spec watched?(String.t()) :: boolean()
   def watched?(session_id), do: Registry.match(@registry, session_id, :viewer) != []
 
+  @doc """
+  Note that the calling process is a client reading this session: subscribed to it, by
+  name, through the gateway. Narrower than following it, which a `fleet` subscriber and a
+  worker's uplink do for every session at once without reading any of them.
+
+  What it decides: a session somebody is reading is not put to sleep under them
+  (`Troupe.Sessions.Index`), and nothing that happens in it while they are there is news
+  to tell them afterwards (`Troupe.Sessions.Unseen`). Idempotent per process, like
+  `subscribe/2`, and the registration goes with the process.
+  """
+  @spec attach(String.t()) :: :ok
+  def attach(session_id) do
+    key = {:attached, session_id}
+
+    unless key in Registry.keys(@registry, self()) do
+      {:ok, _registered} = Registry.register(@registry, key, nil)
+    end
+
+    :ok
+  end
+
+  @doc "The calling process has stopped reading this session."
+  @spec detach(String.t()) :: :ok
+  def detach(session_id), do: Registry.unregister(@registry, {:attached, session_id})
+
+  @doc "Whether any client is reading this session."
+  @spec attached?(String.t()) :: boolean()
+  def attached?(session_id), do: Registry.lookup(@registry, {:attached, session_id}) != []
+
   @doc "Whether the calling process already follows this session."
   @spec following?(String.t()) :: boolean()
   def following?(session_id) do

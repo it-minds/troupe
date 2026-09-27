@@ -25,6 +25,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Session.MCP, as: LocalMCP
+  alias Troupe.Sessions.Unseen
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -1253,6 +1254,9 @@ defmodule Troupe.Gateway.Dispatch do
       # The counts a plane's row carries too, so an inbox is a listing and not a replay.
       "pending_approvals" => Map.get(session, :pending_approvals, 0),
       "pending_questions" => Map.get(session, :pending_questions, 0),
+      # What happened while nobody was reading it (`Troupe.Sessions.Unseen`): the row a
+      # client that comes back tells the person from, cleared by subscribing to the session.
+      "unseen" => unseen_json(Map.get(session, :unseen)),
       "tokens" => Map.get(session, :tokens, 0),
       "cost" => Map.get(session, :cost, 0.0),
       "created_at" => Map.get(session, :created_at),
@@ -1260,6 +1264,9 @@ defmodule Troupe.Gateway.Dispatch do
       "pinned" => Map.get(session, :pinned, false)
     }
   end
+
+  defp unseen_json(nil), do: unseen_json(Unseen.none())
+  defp unseen_json(unseen), do: Map.new(unseen, fn {key, value} -> {Atom.to_string(key), value} end)
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

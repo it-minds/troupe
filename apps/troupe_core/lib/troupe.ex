@@ -17,7 +17,7 @@ defmodule Troupe do
   alias Troupe.{Events, Mounts, Registry, Session, Sessions}
   alias Troupe.Protocol.Origin
   alias Troupe.Session.{Approvals, Blobs, Log, Questions, Watcher}
-  alias Troupe.Sessions.Index
+  alias Troupe.Sessions.{Index, Unseen}
 
   @type session :: %{id: String.t(), pid: pid(), workspace: Troupe.Workspace.t()}
 
@@ -320,6 +320,24 @@ defmodule Troupe do
 
   @spec unsubscribe(String.t()) :: :ok
   def unsubscribe(session_id), do: Events.unsubscribe(session_id)
+
+  @doc """
+  The calling process is a client reading this session, from its head on: it is not put to
+  sleep while they are there, and what they have read is not news (`Troupe.Sessions.Unseen`).
+  The gateway says so for a subscription that names the session, and takes it back with
+  `detach/1` when the last one goes.
+  """
+  @spec attach(String.t()) :: :ok
+  def attach(session_id) do
+    Events.attach(session_id)
+    Unseen.seen(session_id)
+  end
+
+  @spec detach(String.t()) :: :ok
+  def detach(session_id) do
+    Unseen.seen(session_id)
+    Events.detach(session_id)
+  end
 
   @doc """
   A read-only snapshot of one agent. Never used inside the loop.

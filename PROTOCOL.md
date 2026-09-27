@@ -413,6 +413,11 @@ order, forever.
 `from_seq: 0` replays everything. Omitting `from_seq` starts live from `head_seq`
 with no replay.
 
+A subscription that names a session — `session:<id>`, or its `presence:<id>` — is also how
+a client says it is reading the session: the daemon does not put one to sleep under a
+subscriber, and the session's `unseen` row (`session.list`) is cleared by it and counted
+again from when the last subscriber leaves. `fleet` names no session and reads none.
+
 - **`detail`** delivers every event for the session, durable and ephemeral.
 - **`summary`** delivers only `summary_diff` ephemerals plus session lifecycle
   events. A summary carries: per-agent state and profile, current todo item, active
@@ -525,8 +530,8 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"pending_approvals", "pending_questions", "tokens", "cost", "created_at", "last_active_at",
-"pinned"}]}`
+"pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
+"last_active_at", "pinned"}]}`
 
 `filter.parent` selects the branches of one session.
 
@@ -536,6 +541,25 @@ budget's and the failure guard's), and `status` is `waiting` while either is not
 whatever else it would say: the columns a plane's `sessions.list` row carries, so an inbox
 is a listing and not a replay. A dormant session counts the root agent's, which are what it
 asks again when it wakes.
+
+`unseen` is what happened while nobody was reading the session — "while you were away",
+for a client that comes back to tell the person, and the marker it shows:
+
+```json
+{"turns": 1, "approvals": 0, "questions": 1, "since": "2026-09-26T22:49:38.593Z"}
+```
+
+`turns` counts the root agent's turns that ended (`turn_ended`), `approvals` and
+`questions` the requests it raised (`approval_requested`, `question_asked`; each once, since
+a wake asks a request again under its id), and `since` is when the first of them happened,
+`null` with nothing to say. All of it is counted from the moment the last client
+subscribed to the session (§5) left, and it is empty while one is subscribed: what they read
+as it happened is not news. Subscribing to the session is what clears it; a listing, a
+`session.get` or reading a blob does not, so an inbox can be refreshed without losing its
+markers. `pending_*` say what is still open, `unseen` what was raised with nobody there:
+a question asked and timed out while away is in the second and not the first. A session no
+client has ever read has nothing unseen, and a session asleep answers from its log exactly
+as it answered awake.
 
 #### `session.get` → one session object plus `head_seq`.
 
@@ -1062,12 +1086,18 @@ again. A refusal happens only where a person set a ceiling, and then it quotes t
 they set.
 
 A session goes `dormant` on its own idle timeout, or on `session.archive`: the daemon's for
-a local session, the plane's for a pod session (§7). Waiting on a person counts as idle,
-and a local daemon's timeout is shorter for a session no client is subscribed to
+a local session, the plane's for a pod session (§7). Waiting on a person counts as idle. A
+local daemon never sleeps a session while a client is subscribed to it (§5) — the
+person reading it is not handed a state change they did not ask for — and its timeout is
+minutes once nobody is
 ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log stays, and so
 does everything a client can learn from it: `session.list`, `session.get`, `blob.get` and
 `subscribe` all work on a dormant session and start nothing. That is deliberate — a session
-that woke up because somebody looked at it would never stay dormant.
+that woke up because somebody looked at it would never stay dormant. A client reading one
+need not know it slept: an activating command brings it back on its own, the stream carries
+on from the same `seq`, and what the client sees of it is the log's own lifecycle events
+(`session_dormant`, then `agent_restarted`, `session_resumed`, `session_activated` on the
+way back), which it may show or ignore.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
@@ -1276,6 +1306,16 @@ confirmed. A client cannot set a boolean on somebody's behalf.
 no other. A second client attached to the same session cannot invoke a tool it did not
 register, and a registrant that disconnects takes its tools with it.
 
+**A call outlives its client, for a while.** A registrant that leaves mid-call — a lid
+closed, an app restarted — is usually back in a moment, on a fresh connection. The call
+it was serving is parked for a grace (`TROUPE_CLIENT_TOOL_GRACE_SECONDS`, 60 s,
+[troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)) and, when a client
+registers the tool again inside it — through a fresh consent, as always — is sent to that
+client as the same `tool.invoke`: same `call_id`, same `arguments`. Nobody inside the
+grace, and the call fails once, with a result naming the tool and saying its client left;
+the tool is off the model's list by then (`tools_unregistered`, reason `disconnected`).
+The grace comes out of the call's own timeout, so a dropped laptop is never a hung turn.
+
 **The session is tainted, visibly.** `session_tainted` is durable and appears in every
 participant's summary, because a tool running on somebody's laptop is something the others
 are entitled to know about.
@@ -1321,7 +1361,9 @@ Also happens on its own when the connection drops.
 
 The client answers with a result or an error, on the same connection. A client that does
 not answer within the tool's timeout gets the call abandoned and the agent gets an error
-result — the same contract as any other tool that fails.
+result — the same contract as any other tool that fails. A client that registers a tool
+after another connection of the person's dropped mid-call may be sent that call first,
+under the `call_id` the earlier connection was asked with.
 
 ### Presence
 
