@@ -150,18 +150,18 @@
         }
       },
       "queued": {
-        "description": "Accepted but not yet started, and the list's idle fallback. Quiet grey, like the comp's STOPPED: the comp's amber QUEUED pill on a held message has no token of its own yet.",
+        "description": "Accepted but not yet started: a message held while the troupe works. The comp's amber, as its QUEUED pill on a held message; the pill itself is unfilled. Where a session runs is the same amber (`local`); a session doing nothing is not this but `idle`, which has no colour of its own.",
         "fg": {
-          "dark": "#8A8AA0",
-          "light": "#5A5A76"
+          "dark": "#FFBC56",
+          "light": "#7A4E00"
         },
         "bg": {
-          "dark": "rgba(138,138,160,0.08)",
-          "light": "rgba(90,90,118,0.08)"
+          "dark": "transparent",
+          "light": "transparent"
         },
         "border": {
-          "dark": "rgba(232,223,208,0.42)",
-          "light": "rgba(11,11,18,0.42)"
+          "dark": "#A37734",
+          "light": "#C48F3F"
         }
       },
       "local": {
@@ -425,6 +425,14 @@
         "letterSpacing": "-0.02em",
         "use": "Session subject, approval headline."
       },
+      "tile": {
+        "family": "sans",
+        "size": "26px",
+        "weight": 900,
+        "lineHeight": 1.15,
+        "letterSpacing": "-0.02em",
+        "use": "The title on a tile: the launcher's three, and the tiles a new session is cast from."
+      },
       "subheading": {
         "family": "sans",
         "size": "16px",
@@ -440,6 +448,14 @@
         "lineHeight": 1.65,
         "letterSpacing": "0",
         "use": "Conversation and all long-form reading."
+      },
+      "name": {
+        "family": "sans",
+        "size": "14px",
+        "weight": 800,
+        "lineHeight": 1.3,
+        "letterSpacing": "0",
+        "use": "The name over a turn in the transcript, in the person's colour."
       },
       "bodyStrong": {
         "family": "sans",
@@ -464,6 +480,14 @@
         "lineHeight": 1.5,
         "letterSpacing": "0",
         "use": "The sentence under a title, secondary copy, notes."
+      },
+      "note": {
+        "family": "sans",
+        "size": "14px",
+        "weight": 400,
+        "lineHeight": 1.5,
+        "letterSpacing": "0",
+        "use": "The sentence beside a section label, a backstage item, the copy on a tile, the scoped answer."
       },
       "micro": {
         "family": "mono",
@@ -546,10 +570,11 @@
   "border": {
     "hairline": "1px",
     "strong": "1px",
+    "edge": "2px",
     "focus": "2px",
     "marker": "3px",
     "heavy": "4px",
-    "$note": "marker is the left edge that flags a row or panel as needing attention; heavy is the approval panel's top edge. Strong borders differ from hairlines by opacity, not by width."
+    "$note": "marker is the left edge that flags a row or panel as needing attention; edge is the left edge of a message in the transcript (solid in the person's colour, dashed while it is held); heavy is the approval panel's top edge. Strong borders differ from hairlines by opacity, not by width."
   },
   "motion": {
     "duration": {
@@ -615,6 +640,7 @@
       "md": "26px",
       "lg": "34px"
     },
+    "markDisplay": "108px",
     "railWidth": "230px",
     "backstageWidth": "380px",
     "composerMinHeight": "52px",

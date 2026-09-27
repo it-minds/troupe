@@ -106,8 +106,12 @@ export function Review({
 
   return (
     <>
-      <header className="toolbar">
-        <h2>Review</h2>
+      <header className="screen-head">
+        <span className="count">{loading && total === 0 ? "Loading" : `${total} to review`}</span>
+        <h1>Review</h1>
+      </header>
+
+      <div className="toolbar">
         <select value={origin} onChange={(e) => setOrigin(e.target.value as Origin)} aria-label="What started it">
           <option value="trigger">Started by a trigger</option>
           <option value="a2a">Started by another agent</option>
@@ -117,9 +121,8 @@ export function Review({
           Include what has been reviewed
         </label>
         <span className="spacer" />
-        <span className="count">{loading && total === 0 ? "loading" : `${total}`}</span>
         <button onClick={reload}>Reload</button>
-      </header>
+      </div>
 
       {(listError ?? error) && (
         <div className="banner error">

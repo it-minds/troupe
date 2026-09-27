@@ -19,6 +19,9 @@ const base = raw === "" || raw === "/" ? "/" : `/${raw.replace(/^\/+|\/+$/g, "")
 export default defineConfig({
   base,
   plugins: [react()],
+  // The package's version, for the launcher's footer. pnpm sets it for every script it
+  // runs; anything else building this is a development build.
+  define: { __TROUPE_VERSION__: JSON.stringify(process.env["npm_package_version"] ?? "dev") },
   resolve: {
     alias: {
       // The client is resolved to its source, not its `dist`. Without this a change to
