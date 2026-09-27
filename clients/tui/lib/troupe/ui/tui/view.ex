@@ -915,7 +915,7 @@ defmodule Troupe.UI.TUI.View do
   defp note(choice, room),
     do: Enum.find(choice.notes, "", &(Model.cell_width(&1) <= room))
 
-  defp help_paragraph(%{settings: s}) do
+  defp help_paragraph(%{settings: s} = state) do
     field = Enum.at(Settings.fields(), s.cursor)
 
     head =
@@ -927,7 +927,7 @@ defmodule Troupe.UI.TUI.View do
       ] ++ String.split(String.trim_trailing(field.help), "\n") ++ [""]
 
     %Paragraph{
-      text: Enum.join(head ++ Settings.help_lines(), "\n"),
+      text: Enum.join(head ++ Settings.help_lines(state.commands), "\n"),
       wrap: true,
       scroll: {s.scroll, 0},
       block: %Block{title: " help — PgUp/PgDn or the wheel scrolls ", borders: [:all]}

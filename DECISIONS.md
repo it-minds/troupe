@@ -2212,6 +2212,68 @@ citation keeps meaning what it meant.
        the app against a fake daemon in a headless browser, light and dark, at 1280px and
        380px, on the pull request.
 
+710. **The desktop app keeps its sign-in under its own bundle identifier.** Issue #224,
+     defects D33. `secrets.rs` named every credential-store entry with a fixed service,
+     `com.objective-mj.troupe`, so a build made with another identifier, as a test build
+     installed beside the real app is, read and wrote the real app's refresh token: in
+     plane mode it would restore that sign-in and could rotate it, signing the real app
+     out. The service is now the running build's `identifier`, from its Tauri config,
+     which `tauri build --config` sets.
+     - **No migration.** The shipped identifier is the string the fixed name was, so an
+       upgrade finds its sign-in where it left it, and a renamed build starts with none. A
+       test in `secrets.rs` reads `tauri.conf.json` and fails if the identifier changes,
+       because then the old entry has to be moved first.
+     - **Proof:** the two tests in `secrets.rs`; a renamed build (identifier
+       `com.objective-mj.troupe.fix224`) installed from the chunk's tip wrote a dummy key
+       under `com.objective-mj.troupe`, and the same build with this change wrote,
+       read and cleared it under its own identifier and did not see or touch the entry
+       under the real app's name, by Credential Manager's target names and write times.
+
+711. **A setting saved from a client changes its own line of `config.yaml` and nothing
+     else; the file is edited, not rewritten.** Issue #223 (defects D28), amending 675,
+     686 and 699, which each wrote a file by rendering its map again, so the first model
+     picked in the desktop app, the first value changed on the terminal UI's settings
+     page or the first budget raised for a workspace turned a hand-written, commented
+     file into a machine-written one.
+     - **One edit, in `Troupe.Config.Yaml`.** `edit/2` makes a file's text read as a new
+       map key by key: a changed scalar takes the old value's place on its key's line,
+       which keeps the key as it is spelled and the comment after it; a key that is not
+       there is added after the last key of its map, a missing parent with it; a key
+       that is gone goes with the lines beneath it; a map written one key a line is
+       edited key by key, and any other map or list that changes is written out again
+       under its key. `put/3` sets one key, nested or not, through it. A string goes bare
+       when YAML reads it back as the same string, and would under YAML 1.1 too, and in
+       double quotes when it needs them or was quoted before. The answer is read back
+       and must be exactly the map asked for, as with `edit_list/4` (686), which stays
+       what `troupe config trust` uses.
+     - **Every writer gets it through `Migrate.write/2`.** The terminal UI's settings
+       page, `config.set` (the desktop app's model settings, and a first run's), a
+       budget answer for the workspace (`Config.write_key/3`), `config.import` and a first
+       run's approvals all write through it, so none of them changed. A file that is
+       there is edited; a new file, or one the edit cannot follow — a value an alias
+       shares, a key written twice, a document in braces — is written whole as before,
+       with `version: 1` and the header, whose words no longer say comments are lost. The
+       file before the save is kept as `.previous` either way.
+     - **The keys a writer sets are written in the new spellings; the others are the
+       file's.** 686 had every writer write the new spellings only, which a whole-file
+       write did for every key in it. An edit writes what the writer brings by its new
+       name and removes that setting's old spellings, and leaves an old spelling of a
+       setting it did not touch as it is, with its load warning, for `troupe config
+       migrate --write`, the one rewrite, which is asked for and shows its diff first.
+       An edited file gets no `version` line it did not have: a missing one reads as 1.
+     - **Not done:** `troupe config migrate --write` still renders the file, since a
+       migration moves keys between blocks; and a string with a space or a letter
+       outside ASCII is quoted, though YAML would take some of them bare.
+     - **Proof:** `Troupe.Config.YamlTest` (one key written is one line changed, nested,
+       added under its parent and with a missing parent, quoting, a key with only a
+       comment, a map in braces, line endings and a byte order mark, a key of the same
+       name elsewhere, removal with the lines beneath, `{}` and new maps and lists);
+       `Troupe.Config.WriteKeyTest`, `Troupe.Config.ModelSettingsTest` and the terminal
+       UI's `Troupe.SettingsTest`, each keeping a comment and changing one line;
+       `Troupe.Agent.BudgetQuestionTest`'s workspace answer; `Troupe.Config.ExplainTest`
+       for a new file and an edited one; and `config.set` over the installed daemon's
+       socket on a commented file, the diff that one line.
+
 716. **The design tokens are one set of files, the GUI's; the plane's front page and the
      TUI are generated from them, and the front page stays in Signal.** Issue #228,
      defect D30. `docs/design/themes/` was a copy of `clients/gui/docs/design/themes/`
@@ -2238,3 +2300,22 @@ citation keeps meaning what it meant.
      - **Proof:** the three checks and `mix troupe.admin.tokens --check`;
        `front_page_assets_test.exs` and `console_assets_test.exs`; `/` and `/docs`
        before and after, at 1280px and 380px, on the pull request.
+
+717. **The desktop app's Tauri plugins move when tauri does, their Rust and JavaScript
+     halves together.** Folding Dependabot's updates into the 0.6.1 chunk; the rule 708
+     followed for the notification plugin, made the rule for all of them.
+     - **The CLI checks the pairs.** `tauri build` refuses a build whose `tauri-plugin-*`
+       crate and `@tauri-apps/plugin-*` package differ in their minor ("Found version
+       mismatched Tauri packages"), and so does `tauri-action` in `native.yml`. Dependabot
+       updates the crates and the npm packages in separate groups, so one of its pull
+       requests can move one half alone: #120 took `tauri-plugin-http` to 2.7.0 with
+       `@tauri-apps/plugin-http` on 2.6, and the build stopped there.
+     - **A plugin's next minor waits for tauri's.** `@tauri-apps/plugin-http` 2.7 depends
+       on `@tauri-apps/api` 2.12, and `tauri-plugin-notification` 2.5 on tauri 2.12; beside
+       tauri 2.11 the first would put a second, newer copy of the API into the bundle. So
+       both stay on the minor that goes with tauri 2.11, pinned with `~` on both sides
+       (`tauri-plugin-http ~2.6` and `~2.6.1`, `tauri-plugin-notification ~2.4` and
+       `~2.4.0`), and the pins come off in the change that moves tauri, `@tauri-apps/api`
+       and the CLI to 2.12 together.
+     - **Proof:** the renamed desktop build (`pnpm tauri build --bundles nsis`) with the
+       pins; with #120's lock as Dependabot wrote it, the same build stops at the check.

@@ -7,9 +7,10 @@ defmodule Troupe.Config.Migrate do
   the rewrite that would stop the warnings, and `--write` makes it, keeping the file as
   it was beside it as `<name>.previous`.
 
-  Every writer — the daemon's model settings, the terminal UI's settings page, this —
-  goes through `write/2`, which writes only the new spellings, `version`, and a header
-  pointing an editor at the schema.
+  Every writer — the daemon's model settings, the terminal UI's settings page, a budget
+  answer for the workspace — goes through `write/2`, which changes only the lines of
+  the keys it sets and writes a new file with `version` and a header pointing an editor
+  at the schema. `troupe config migrate --write` is the one rewrite: it is asked for.
   """
 
   alias Troupe.Config.{Issue, Layers, Schema, Yaml}
@@ -22,11 +23,14 @@ defmodule Troupe.Config.Migrate do
   refuses and a writer will not write.
   """
   @spec rename(map()) :: {map(), [move()], [{[String.t()], [String.t()], String.t()}]}
-  def rename(map) when is_map(map) do
+  def rename(map) when is_map(map), do: rename(map, fn _old -> false end)
+
+  # `leave?` names the old spellings to leave where they are.
+  defp rename(map, leave?) do
     map
     |> groups()
     |> Enum.reduce({map, [], []}, fn {new, olds}, {map, moves, conflicts} ->
-      case Enum.filter(olds ++ [new], &has_path?(map, &1)) do
+      case Enum.filter(Enum.reject(olds, leave?) ++ [new], &has_path?(map, &1)) do
         [] ->
           {map, moves, conflicts}
 
@@ -206,16 +210,36 @@ defmodule Troupe.Config.Migrate do
   # -- writing --------------------------------------------------------------------
 
   @doc """
-  Write a config file: the new spellings only, `version`, and a header, beside a
-  `.previous` copy of what was there. Written to a temporary file and renamed over the
-  target, so a crash mid-write leaves the old file rather than half a new one. The file
-  may hold a key, so on Unix only its owner may read it, and the copy likewise.
+  Write `map` to a config file, beside a `.previous` copy of what was there.
+
+  A file that is there is edited, not rewritten (`Troupe.Config.Yaml.edit/2`): only the
+  lines of the keys whose values differ from `map` change, written in the new
+  spellings, so the file's comments, its order and the keys the writer left alone stay
+  as they were, old spellings included. A new file, or one written in a shape the edit
+  does not follow, is written whole: the new spellings only, `version`, and a header. A
+  map that spells one setting two ways is written neither way.
+
+  Written to a temporary file and renamed over the target, so a crash mid-write leaves
+  the old file rather than half a new one. The file may hold a key, so on Unix only its
+  owner may read it, and the copy likewise.
   """
   @spec write(Path.t(), map()) :: :ok | {:error, String.t()}
   def write(path, map) do
     case canonical(map) do
-      {:ok, migrated, _moves} -> write_text(path, render(migrated, path))
+      {:ok, migrated, _moves} -> write_text(path, edited(path, map) || render(migrated, path))
       {:error, conflicts} -> {:error, "#{shown(path)}: " <> Enum.join(conflicts, "; ")}
+    end
+  end
+
+  # An old spelling the file already has, with the value the writer left it, is the
+  # file's business; one the writer brings is written by its new name.
+  defp edited(path, map) do
+    with {:ok, before, text} <- Layers.parse(path),
+         {respelled, _moves, []} <- rename(map, &(fetch_path(before, &1) == fetch_path(map, &1))),
+         {:ok, edited} <- Yaml.edit(text, respelled) do
+      edited
+    else
+      _ -> nil
     end
   end
 
@@ -254,8 +278,7 @@ defmodule Troupe.Config.Migrate do
 
   defp header(path) do
     "# yaml-language-server: $schema=#{Schema.id()}\n" <>
-      "# Written by troupe. Comments are not kept; the file before the last save is " <>
-      "#{Path.basename(path)}.previous.\n"
+      "# Written by troupe; the file before the last save is #{Path.basename(path)}.previous.\n"
   end
 
   defp restrict(path) do

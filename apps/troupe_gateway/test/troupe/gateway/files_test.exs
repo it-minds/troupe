@@ -13,8 +13,30 @@ defmodule Troupe.Gateway.FilesTest do
 
   alias Troupe.Gateway.Dispatch
   alias Troupe.Protocol.Event
+  alias Troupe.Watch.FileSystemBackend
 
   @moduletag timeout: 60_000
+
+  # Two of these claims are the native watcher's: an event inside a second, and a
+  # deletion reported at all. A machine without `inotifywait` gets the polling backend,
+  # which scans once a second and reports no deletions, so there those two are skipped
+  # and say why. CI installs inotify-tools, so they run there, and a runner that lost it
+  # fails them rather than skipping.
+  @on_ci System.get_env("CI") == "true"
+  @native_watcher FileSystemBackend.available?(System.tmp_dir!()) or @on_ci
+  @native_only if(@native_watcher, do: [], else: [skip: "needs the native watcher (inotifywait)"])
+
+  setup_all do
+    unless @native_watcher do
+      IO.puts(:stderr, """
+
+      SKIPPED: 2 tests of #{inspect(__MODULE__)}: no inotifywait, so fs_changed comes from the
+      polling backend. Install inotify-tools to run them.
+      """)
+    end
+
+    :ok
+  end
 
   setup do
     unique = System.unique_integer([:positive])
@@ -46,6 +68,7 @@ defmodule Troupe.Gateway.FilesTest do
     %{session: session, workspace: workspace, state_dir: state_dir}
   end
 
+  @tag @native_only
   test "a file written by shell reaches subscribers as fs_changed within a second", context do
     Troupe.subscribe(context.session.id)
     started = System.monotonic_time(:millisecond)
@@ -133,6 +156,7 @@ defmodule Troupe.Gateway.FilesTest do
     assert event.actor.subject == "someone@example.test"
   end
 
+  @tag @native_only
   test "a file removed reaches subscribers with a null hash", context do
     File.write!(Path.join(context.workspace, "doomed.txt"), "here for now")
     Troupe.subscribe(context.session.id)

@@ -188,18 +188,6 @@ defmodule Troupe.UI.TUI.Model do
       :remote_status ->
         %{m | remote: Map.merge(m.remote || %{}, e.data)}
 
-      # MCP server status is transient: the latest state per server is folded
-      # here so the status line and the /mcp page read from the model, and the
-      # page's live query (Client.mcp_status/1) repopulates it when it opens.
-      :mcp_status ->
-        entry = %{
-          state: e.data.state,
-          tools: length(e.data.tools),
-          error: e.data.error
-        }
-
-        %{m | mcp: Map.put(m.mcp, e.data.server, entry)}
-
       # The files panel is a fold too: a bumped version is what tells it its
       # listing is stale, without the panel subscribing to anything itself.
       :fs_changed ->
@@ -820,10 +808,8 @@ defmodule Troupe.UI.TUI.Model do
   defp said(_text), do: ""
 
   @doc """
-  MCP servers as the `/mcp` page and the status line read them: the latest
-  folded status per server, sorted by name. The fold is transient (driven by
-  `:mcp_status` events) so it may be empty after a crash until the page's live
-  query repopulates it.
+  MCP servers as the status line reads them: the state per server the `/mcp`
+  page's live query last found, sorted by name. Empty until the page first opens.
   """
   @spec mcp_servers(t()) :: [
           %{name: String.t(), state: atom(), tools: non_neg_integer(), error: String.t() | nil}
@@ -1284,32 +1270,49 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # `read_file` returns numbered lines: show them as source, with the numbers in
-  # their own gutter and the code highlighted for the file's language.
+  # their own gutter and the code highlighted for the file's language. A read of part
+  # of a file opens with the range it shows, and one cut at the size cap ends with a
+  # note that says so; both stay plain lines around the source.
   defp body_lines(%{name: "read_file", input: path, lines: lines}) do
-    numbered = Enum.map(lines, &split_number/1)
+    {head, rest} =
+      case lines do
+        ["(lines " <> _ = range | rest] -> {[range], rest}
+        _ -> {[], lines}
+      end
 
-    if numbered != [] and Enum.all?(numbered, &(&1 != nil)),
-      do: numbered_source(numbered, language_of(path)),
-      else: Enum.map(lines, &{:body, &1})
+    numbered = rest |> Enum.map(&split_number/1) |> Enum.take_while(&(&1 != nil))
+
+    cut =
+      case Enum.drop(rest, length(numbered)) do
+        [] -> []
+        ["", "[truncated:" <> _ = note] -> [note]
+        _other -> nil
+      end
+
+    if numbered != [] and cut != nil,
+      do: plain(head) ++ numbered_source(numbered, language_of(path)) ++ plain(cut),
+      else: plain(lines)
   end
 
-  defp body_lines(%{lines: lines}), do: Enum.map(lines, &{:body, &1})
+  defp body_lines(%{lines: lines}), do: plain(lines)
 
-  # `read_file` right-aligns the number in five columns and follows it with a tab,
-  # which `sanitize/1` expands to the next stop: an eight-column gutter. Splitting
-  # on that fixed width keeps the code's own indentation out of the separator.
-  @gutter_width 8
+  defp plain(lines), do: Enum.map(lines, &{:body, &1})
 
-  defp split_number(line) when byte_size(line) >= @gutter_width do
-    {prefix, code} = String.split_at(line, @gutter_width)
+  # `read_file` writes the number, a tab and the line, and `sanitize/1` has expanded
+  # the tab to the next `@tab` stop by now: `7   code`, `1000    code`. Splitting at
+  # the stop the number's own width implies keeps the code's indentation out of the
+  # separator. A file that ends in a newline ends in an empty numbered line, which
+  # the result's trimming leaves as the number alone.
+  defp split_number(line) do
+    case Regex.run(~r/^\d+/, line) do
+      [number] ->
+        {gutter, code} = String.split_at(line, (div(byte_size(number), @tab) + 1) * @tab)
+        if String.trim_trailing(gutter) == number, do: {number, code}
 
-    case Regex.run(~r/^\s*(\d+)\s+$/, prefix) do
-      [_, number] -> {number, code}
-      _ -> nil
+      nil ->
+        nil
     end
   end
-
-  defp split_number(_line), do: nil
 
   defp numbered_source(numbered, language) do
     code = Enum.map_join(numbered, "\n", &elem(&1, 1))

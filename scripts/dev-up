@@ -10,16 +10,13 @@ cd "$(dirname "$0")/.."
 compose() { docker compose --project-directory dev --file dev/docker-compose.yml "$@"; }
 
 # Only the three that stay up are waited on. `--wait` fails the moment any container
-# it is watching exits, and the two setup services are one-shots that exit 0 on
-# purpose - so they are run afterwards, once their service is healthy, and their exit
-# codes are what `set -e` reads.
+# it is watching exits, and the setup service is a one-shot that exits 0 on purpose -
+# so it is run afterwards, once MinIO is healthy, and its exit code is what `set -e`
+# reads. OpenBao seeds its own transit engine and key, and is not healthy until it has.
 compose up --detach --wait --wait-timeout 180 postgres minio openbao
 
-# A bucket with versioning on, and the transit engine and signing key the plane mints
-# session tokens through. Neither is optional: erasure has to destroy prior versions,
-# and a plane with no key cannot sign.
+# A bucket with versioning on: erasure has to destroy prior versions.
 compose run --rm --no-deps minio-setup
-compose run --rm --no-deps openbao-setup
 
 echo
 echo "postgres  postgres://troupe:troupe@localhost:25432/troupe_plane_dev"
