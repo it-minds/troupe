@@ -28,7 +28,7 @@ defmodule Troupe.CLI.ConfigSetup do
   the desktop app or by hand, in which case nothing is asked.
   """
 
-  alias Troupe.CLI.ModelConfig
+  alias Troupe.CLI.{ModelConfig, Prompt}
   alias Troupe.CLI.Remote, as: RemoteCLI
   alias Troupe.Client.Daemon.Link
   alias Troupe.Protocol.Client, as: Protocol
@@ -468,8 +468,12 @@ defmodule Troupe.CLI.ConfigSetup do
     Keyword.get(opts, :stdin) == true and Keyword.get(opts, :stdout) == true
   end
 
+  # On Windows the binary's VM reads no line the way the console edits one, so a question
+  # there reads it key by key (`Troupe.CLI.Prompt` says why).
   defp ask(prompt) do
-    case IO.gets(prompt) do
+    line = if windows?(), do: Prompt.read(prompt), else: IO.gets(prompt)
+
+    case line do
       line when is_binary(line) -> String.trim(line)
       _eof -> nil
     end
@@ -478,6 +482,15 @@ defmodule Troupe.CLI.ConfigSetup do
   # Unechoed where the terminal allows it: `-noshell` reads lines cooked, and only raw
   # mode lets `get_password` turn the echo off. Where it will not, the prompt says so.
   defp secret(prompt) do
+    if windows?(), do: prompt |> Prompt.read(echo: false) |> trim(), else: echo_off(prompt)
+  end
+
+  defp trim(line) when is_binary(line), do: String.trim(line)
+  defp trim(nil), do: nil
+
+  defp windows?, do: match?({:win32, _}, :os.type())
+
+  defp echo_off(prompt) do
     IO.write(prompt)
 
     password =

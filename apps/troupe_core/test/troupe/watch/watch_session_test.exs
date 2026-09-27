@@ -3,7 +3,8 @@ defmodule Troupe.Watch.WatchSessionTest do
 
   use Troupe.SessionCase, async: true
 
-  alias Troupe.Session.Watcher
+  alias Troupe.Gitignore
+  alias Troupe.Session.{Files, Watcher}
 
   test "an AI? turn answers under the plan permission set and cannot write", context do
     write_file(
@@ -89,6 +90,23 @@ defmodule Troupe.Watch.WatchSessionTest do
     contents = read_file(context, "lib/calc.ex")
     assert contents =~ "def answer, do: 42"
     refute contents =~ "AI!"
+  end
+
+  # Reading the ignore rules walks the whole workspace; in a home directory that took
+  # minutes, inside `session.create`, for rules only watching uses (#231).
+  test "a session that is not watching starts without reading the ignore rules", context do
+    write_file(context, ".gitignore", "secret/\n")
+    %{session: session} = start_session(context, steps: [{:text, "hi"}])
+
+    watcher = Registry.watcher_pid(session.id)
+    assert %Watcher{ignore: nil} = :sys.get_state(watcher)
+    assert %Files{ignore: nil} = :sys.get_state(GenServer.whereis(Registry.files(session.id)))
+
+    # Watching reads them, and applies them.
+    assert {:ok, _backend} = Troupe.watch(session.id, true)
+    assert %Watcher{ignore: %Gitignore{} = ignore} = :sys.get_state(watcher)
+    assert Gitignore.ignored?(ignore, "secret/key.txt")
+    assert {:ok, :off} = Troupe.watch(session.id, false)
   end
 
   test "watch reports which backend it selected and can be toggled", context do
