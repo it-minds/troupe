@@ -308,7 +308,10 @@ defmodule Troupe.Config.Schema do
           default: true,
           field: :memory
         ),
-        spec("memory_auto_refresh", :boolean, "A new session in a git repository refreshes a missing or stale brief; never a headless run.",
+        spec(
+          "memory_auto_refresh",
+          :boolean,
+          "A new session in a git repository refreshes a missing or stale brief, but not within `memory_max_age_days` of a refresh that built nothing; never a headless run.",
           default: true,
           field: :memory_auto_refresh
         ),

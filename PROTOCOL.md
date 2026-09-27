@@ -795,9 +795,10 @@ the order a palette shows them: `session`, `navigate`, `workspace`, `setup`, `ag
 (`usage`: `/upload <path>`), its `args` (`{"name", "required", "kind"}`, where `kind`
 is `window`, `file` or `text`, for completion), a longer `detail`, an `example` or
 null, and where it came from: `source` is `builtin` or `agent`. The agents are the
-primary ones `agents.list` answers with for the session's workspace, described by their
-definition; they take a `prompt` and start a branch on it, which a client without
-branches shows as such.
+primary ones the session was started with, described by their definition: on a pod its
+bundle's, as the team's grant narrows them, and for a session that is asleep the ones
+`agents.list` answers with for its workspace. They take a `prompt` and start a branch on
+it, which a client without branches shows as such.
 
 `availability` is what the command needs, for a client to judge and say rather than
 hide the row: `always`; `window` (acts on a window — the activated one, or one named
@@ -811,7 +812,7 @@ it can and shows the rest greyed with the reason. Reading the table wakes nothin
 ```
 → `{"status": "fresh", "path": "/home/me/project/.troupe/memory.md",
 "built_at": "2026-09-20T10:00:00Z", "sections": ["Overview", "Layout", "Commands",
-"Conventions", "Notes"], "text": "..."}`
+"Conventions", "Notes"], "text": "...", "refresh_due": false}`
 
 The **project brief**: what earlier agents learned about the repository, read into
 every agent's system prompt and written by the `remember` tool and the `librarian`
@@ -819,9 +820,12 @@ agent. `status` is `absent`, `stale` (never built, older than `memory_max_age_da
 the tracked file count drifted), `fresh` or `disabled` (`memory: false` in the workspace
 config). A `librarian`'s run that ends as it meant to builds it, whether or not it
 rewrote any of it.
-One brief per repository: a worktree's is the main checkout's. A client that finds it
-`absent` or `stale` may start a `librarian` session on the workspace, which is what
-`memory_auto_refresh` asks of it.
+One brief per repository: a worktree's is the main checkout's. `refresh_due` is whether
+a client should start a `librarian` session on the workspace now, which is what
+`memory_auto_refresh` asks of it: the brief is `absent` or `stale`, and no librarian has
+started on it in the last `memory_max_age_days` without its being built since. A
+librarian's run that failed, was cancelled or wrote nothing is tried again that much
+later, not in every new session. `memory.forget` forgets that try with the brief.
 
 #### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
 
@@ -896,7 +900,8 @@ since that is what saving changes. The key is never in the answer: `api_key_set`
 whether one is in force and `api_key_source` where from (`file`, `env`, `opencode` or
 null). `overrides` names what beats the file anyway: a project's `.troupe/config.yaml`
 (only when `workspace` is given), a `TROUPE_*` variable, or the opencode fallback that
-applies while no key is saved.
+applies while no key is saved. `config_dir` and `path` are written as a person on the
+daemon's platform writes them, for a screen to print.
 
 ```json
 {"provider": "openai", "base_url": "https://llm-gw.example/v1", "api_key": "sk-...", "auth": "bearer"}
@@ -990,7 +995,9 @@ session: the user's (`mcp.json` and `skills/` beside `config.yaml`) and the work
 (`.troupe/mcp.json` and `.troupe/skills/`), over `config.yaml`'s `mcp:`. **The daemon's
 only**, like `config.*`: a worker answers `method_not_found`, since a pod's servers are
 its bundle's. `scope` is `user` (the default) or `workspace`, the latter needing a
-`workspace`. Both clients manage the one set through these.
+`workspace`. Both clients manage the one set through these. The paths in the answers
+(`path`, `source`, `dir`) are written as a person on the daemon's platform writes them,
+for a panel to print.
 
 ```json
 {"workspace": "/home/me/project", "session_id": "s-9f"}

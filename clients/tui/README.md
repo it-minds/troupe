@@ -240,7 +240,8 @@ the model called `finish`. Nobody is there to answer an approval, so it is refus
 the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A
 headless run starts no librarian: the project brief is refreshed automatically only for
 a session a person opens, in a git repository, with a model to ask
-(`memory_auto_refresh`). The exit code says how the run ended, for scripts and CI:
+(`memory_auto_refresh`), and not again within `memory_max_age_days` of a librarian that
+built nothing. The exit code says how the run ended, for scripts and CI:
 
 | code | the run |
 |---|---|

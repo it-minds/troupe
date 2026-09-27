@@ -46,7 +46,7 @@ defmodule Troupe.Gateway.CommandsListTest do
     %{workspace: workspace, state_dir: state_dir, client: client}
   end
 
-  defp start_session(context) do
+  defp start_session(context, opts \\ []) do
     fake =
       start_supervised!(
         {Troupe.LLM.Fake, [steps: [{:text, "hi"}]]},
@@ -55,14 +55,16 @@ defmodule Troupe.Gateway.CommandsListTest do
 
     {:ok, session} =
       Troupe.start_session(
-        workspace: context.workspace,
-        fake: fake,
-        config_overrides: [
-          provider: "fake",
-          auto_approve: true,
-          model: "fake",
-          state_dir: context.state_dir
-        ]
+        [
+          workspace: context.workspace,
+          fake: fake,
+          config_overrides: [
+            provider: "fake",
+            auto_approve: true,
+            model: "fake",
+            state_dir: context.state_dir
+          ]
+        ] ++ opts
       )
 
     on_exit(fn -> Troupe.stop_session(session.id) end)
@@ -126,6 +128,41 @@ defmodule Troupe.Gateway.CommandsListTest do
       commands |> Enum.filter(&(&1["source"] == "agent")) |> Enum.map(& &1["name"]) |> Enum.sort()
 
     assert from_commands == from_agents
+  end
+
+  # A pod's session runs its bundle's agents, narrowed by the team's grant, and its
+  # palette offers those rather than the ones this build ships (defects D29): the table
+  # lists the agents the session was started with.
+  test "a session on a bundle lists the bundle's agents, as its grant narrows them", context do
+    bundle = Path.join(Path.dirname(context.workspace), "bundle")
+    File.mkdir_p!(Path.join(bundle, "agents"))
+
+    File.write!(Path.join(bundle, "agents/triage.md"), """
+    ---
+    description: Sorts the team's incoming issues.
+    mode: primary
+    ---
+    You triage.
+    """)
+
+    session =
+      start_session(context,
+        agent: "triage",
+        bundle: %{
+          version: "1",
+          hash: "sha256:bundle",
+          channel: "stable",
+          dir: bundle,
+          entitlements: %{"agents" => ["triage"]}
+        }
+      )
+
+    {:ok, %{"commands" => commands}} =
+      Client.call(context.client, "commands.list", %{"session_id" => session.id})
+
+    agents = for %{"source" => "agent"} = command <- commands, do: command
+
+    assert [%{"name" => "triage", "summary" => "Sorts the team's incoming issues."}] = agents
   end
 
   test "reading the table needs a session id and an existing session", context do
