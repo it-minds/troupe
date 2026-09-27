@@ -132,6 +132,13 @@ defmodule Troupe.Agent.Server do
   def goal(pid), do: :gen_statem.call(pid, :goal, 5_000)
 
   @doc """
+  Every agent definition this agent's session was started with: on a pod its bundle's,
+  narrowed by the team's grant, which nothing outside the session can work out again.
+  """
+  @spec definitions(pid()) :: Definitions.t()
+  def definitions(pid), do: :gen_statem.call(pid, :definitions, 5_000)
+
+  @doc """
   Which loop's iterations this agent takes (Decision 681): `Troupe.Session.Loop` names
   its loop when it starts or resumes one, and says when it ends. Process-local rather
   than folded, because the loop process says it again whenever either of them restarts.
@@ -866,6 +873,10 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, [{:reply, from, state.goal}]}
   end
 
+  defp common({:call, from}, :definitions, _state_name, state) do
+    {:keep_state_and_data, [{:reply, from, state.definitions}]}
+  end
+
   defp common(:info, message, state_name, state) do
     Logger.debug(
       "troupe agent #{State.label(state)} dropped #{inspect(message)} in #{state_name}"
@@ -968,6 +979,7 @@ defmodule Troupe.Agent.Server do
       )
 
       state = %{state | queued: MapSet.delete(state.queued, meta.command_id)}
+      brief_attempted(state)
       apply_input(state, source, content, actor, meta.command_id)
     else
       Logger.debug("troupe: ignoring #{inspect(source)} input of #{inspect(content)}")
@@ -1574,6 +1586,15 @@ defmodule Troupe.Agent.Server do
     do: Memory.checked(state.workspace.root_real)
 
   defp brief_checked(_state), do: :ok
+
+  # And a librarian given something to do is trying the brief, recorded before it asks a
+  # model anything: a run that then fails, is cancelled, or ends with nothing to stamp
+  # holds off the next automatic refresh instead of being tried in every new session
+  # (Decision 713).
+  defp brief_attempted(%State{definition: %Definition{name: "librarian"}} = state),
+    do: Memory.attempted(state.workspace.root_real, state.config.state_dir)
+
+  defp brief_attempted(_state), do: :ok
 
   # Resting is free: the budget is a question about the *next* model call, asked when that
   # call is about to be made (Decision 660), so an agent whose turn ended with the budget

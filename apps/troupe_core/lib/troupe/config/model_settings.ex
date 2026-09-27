@@ -58,7 +58,9 @@ defmodule Troupe.Config.ModelSettings do
   The user's file as a settings screen shows it, and what overrides it.
 
   With a workspace, a project `.troupe/config.yaml` there is reported as an override;
-  without one only the machine-wide sources are.
+  without one only the machine-wide sources are. The paths are as a person on this
+  platform writes them: a screen prints them, and on Windows a `TROUPE_CONFIG_HOME` in
+  backslashes joined to a file name is neither spelling.
   """
   @spec describe(Path.t() | nil) :: description()
   def describe(workspace \\ nil) do
@@ -67,8 +69,8 @@ defmodule Troupe.Config.ModelSettings do
     models = file_models(file)
 
     %{
-      "config_dir" => Path.dirname(path),
-      "path" => path,
+      "config_dir" => path |> Path.dirname() |> Troupe.Paths.display(),
+      "path" => Troupe.Paths.display(path),
       "exists" => File.regular?(path),
       "provider" => string(file["provider"]) || "anthropic",
       "base_url" => string(file["base_url"]),

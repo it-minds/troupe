@@ -75,6 +75,33 @@ defmodule Troupe.MemoryClientTest do
     refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
   end
 
+  # A librarian that got nowhere is a try all the same: the next session on the workspace
+  # starts none, where it used to start another in every session until one got through
+  # (Decision 127).
+  test "a session after a librarian that failed starts none" do
+    {sid, _, ws} =
+      start_session!(
+        workspace: git_init!(tmp_workspace()),
+        script: [{:error, "the gateway is down"}],
+        config: %{memory_auto_refresh: true}
+      )
+
+    eventually(
+      fn ->
+        Enum.any?(Client.events(sid), &(&1.type == :llm_error and &1.agent_path == "librarian-1"))
+      end,
+      10_000
+    )
+
+    assert {:ok, "no project brief yet; " <> _} = Client.memory(sid, "")
+
+    {sid2, _, _} = start_session!(workspace: ws, config: %{memory_auto_refresh: true})
+
+    spawned = for %{type: :branch_spawned} = event <- Client.events(sid2), do: event.data.name
+    refute "librarian" in spawned
+    refute Enum.any?(Client.events(sid2), &(&1.agent_path == "librarian-1"))
+  end
+
   # What a brief describes is a repository: `troupe` opened in a home directory, or any
   # directory git does not know, surveys nothing. Nor does a session whose client says
   # not to, as a headless run does. `/memory refresh` still writes one anywhere.
