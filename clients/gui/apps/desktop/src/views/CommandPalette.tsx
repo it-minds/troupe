@@ -13,6 +13,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { CommandEntry } from "@troupe/client";
 import type { SessionHandle } from "../hooks";
+import { loopError } from "./Goal";
 
 /** The screens a command can leave the session for; `setup` is also where a refused key sends people. */
 export type PaletteScreen = "sessions" | "local" | "appearance" | "setup";
@@ -62,8 +63,12 @@ const RUNNERS: Record<string, (ctx: RunContext, args: string) => Promise<string 
     }
     const n = args === "" ? undefined : Number(args);
     if (n !== undefined && !(Number.isInteger(n) && n > 0)) return "usage: /loop [n | stop]";
-    const started = await v.startLoop(n);
-    return `loop ${started.loop_id} started, up to ${started.max_iterations} turns`;
+    try {
+      const started = await v.startLoop(n);
+      return `loop ${started.loop_id} started, up to ${started.max_iterations} turns`;
+    } catch (e) {
+      return loopError(e);
+    }
   },
   sessions: ({ go }) => void go("sessions"),
   hq: ({ go }) => void go("sessions"),

@@ -101,7 +101,7 @@ tools included.
 
 ## The GUI (pnpm)
 
-131 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
+132 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
 depends on the machine.
@@ -150,6 +150,7 @@ depends on the machine.
 | `@tauri-apps/cli` | Apache-2.0 OR MIT |
 | `@tauri-apps/plugin-dialog` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-http` | MIT OR Apache-2.0 |
+| `@tauri-apps/plugin-notification` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | MIT OR Apache-2.0 |
 | `@types/babel__core` | MIT |
 | `@types/babel__generator` | MIT |
@@ -243,7 +244,7 @@ depends on the machine.
 
 ## The desktop app (Cargo)
 
-478 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
+486 crates, from `clients/gui/apps/desktop/src-tauri/Cargo.lock`, for every
 platform, build dependencies included.
 
 | package | licence |
@@ -452,6 +453,7 @@ platform, build dependencies included.
 | `lock_api` | MIT OR Apache-2.0 |
 | `log` | MIT OR Apache-2.0 |
 | `lru-slab` | MIT OR Apache-2.0 OR Zlib |
+| `mac-notification-sys` | MIT/Apache-2.0 |
 | `markup5ever` | MIT OR Apache-2.0 |
 | `memchr` | Unlicense OR MIT |
 | `memoffset` | MIT |
@@ -465,6 +467,7 @@ platform, build dependencies included.
 | `ndk` | MIT OR Apache-2.0 |
 | `ndk-sys` | MIT OR Apache-2.0 |
 | `new_debug_unreachable` | MIT |
+| `notify-rust` | MIT OR Apache-2.0 |
 | `num-conv` | MIT OR Apache-2.0 |
 | `num-traits` | MIT OR Apache-2.0 |
 | `num_enum` | BSD-3-Clause OR MIT OR Apache-2.0 |
@@ -511,6 +514,7 @@ platform, build dependencies included.
 | `portable-atomic-util` | Apache-2.0 OR MIT |
 | `potential_utf` | Unicode-3.0 |
 | `powerfmt` | MIT OR Apache-2.0 |
+| `ppv-lite86` | MIT OR Apache-2.0 |
 | `precomputed-hash` | MIT |
 | `proc-macro-crate` | MIT OR Apache-2.0 |
 | `proc-macro-error` | MIT OR Apache-2.0 |
@@ -525,6 +529,7 @@ platform, build dependencies included.
 | `quote` | MIT OR Apache-2.0 |
 | `r-efi` | MIT OR Apache-2.0 OR LGPL-2.1-or-later |
 | `rand` | MIT OR Apache-2.0 |
+| `rand_chacha` | MIT OR Apache-2.0 |
 | `rand_core` | MIT OR Apache-2.0 |
 | `rand_pcg` | MIT OR Apache-2.0 |
 | `raw-window-handle` | MIT OR Apache-2.0 OR Zlib |
@@ -603,11 +608,13 @@ platform, build dependencies included.
 | `tauri-plugin-dialog` | Apache-2.0 OR MIT |
 | `tauri-plugin-fs` | Apache-2.0 OR MIT |
 | `tauri-plugin-http` | Apache-2.0 OR MIT |
+| `tauri-plugin-notification` | Apache-2.0 OR MIT |
 | `tauri-plugin-opener` | Apache-2.0 OR MIT |
 | `tauri-runtime` | Apache-2.0 OR MIT |
 | `tauri-runtime-wry` | Apache-2.0 OR MIT |
 | `tauri-utils` | Apache-2.0 OR MIT |
 | `tauri-winres` | MIT |
+| `tauri-winrt-notification` | MIT OR Apache-2.0 |
 | `tempfile` | MIT OR Apache-2.0 |
 | `tendril` | MIT OR Apache-2.0 |
 | `thiserror` | MIT OR Apache-2.0 |
@@ -715,6 +722,8 @@ platform, build dependencies included.
 | `zbus_macros` | MIT |
 | `zbus_names` | MIT |
 | `zcheapstr` | MIT |
+| `zerocopy` | BSD-2-Clause OR Apache-2.0 OR MIT |
+| `zerocopy-derive` | BSD-2-Clause OR Apache-2.0 OR MIT |
 | `zerofrom` | Unicode-3.0 |
 | `zerofrom-derive` | Unicode-3.0 |
 | `zeroize` | Apache-2.0 OR MIT |

@@ -5,7 +5,7 @@
 import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
-import { addPending, dropPending, emptyTranscript, fold, isBusy, needsYou, openApprovals, openQuestions, rootState } from "../src/index.js";
+import { addPending, dropPending, emptyTranscript, fold, isBusy, loopEnding, needsYou, openApprovals, openQuestions, rootState, settleLoop } from "../src/index.js";
 import type { DurableEvent, Entry, TranscriptState, TroupeEvent } from "../src/index.js";
 
 let seq = 0;
@@ -389,5 +389,60 @@ describe("questions, and what the daemon says about limits (troupe-remote Decisi
     assert.equal(state.thinking, "let me think");
     assert.equal(needsYou(fold(state, ephemeral("agent_state", { state: "waiting" }))), true);
     assert.equal(isBusy(fold(state, ephemeral("agent_state", { state: "waiting" }))), false);
+  });
+});
+
+describe("the goal and its loop (issue #59)", () => {
+  it("keeps the goal until it is cleared, and says each change once in the transcript", () => {
+    seq = 0;
+    const set = foldAll([durable("goal_set", { text: "the notes build", command_id: "c-1" })]);
+    assert.equal(set.goal, "the notes build");
+    const replaced = fold(set, durable("goal_set", { text: "only the changelog", command_id: "c-2" }));
+    assert.equal(replaced.goal, "only the changelog");
+    const cleared = fold(replaced, durable("goal_cleared", { command_id: "c-3" }));
+    assert.equal(cleared.goal, undefined);
+    assert.deepEqual(
+      cleared.entries.map((e) => (e as Extract<Entry, { kind: "system" }>).text),
+      ["goal: the notes build", "goal: only the changelog", "goal cleared"],
+    );
+  });
+
+  it("follows a loop from its start through its iterations to how it ended, in place of the loop's own input", () => {
+    seq = 0;
+    const running = foldAll([
+      durable("goal_set", { text: "g" }),
+      durable("loop_started", { loop_id: "loop-1", max_iterations: 5, max_failures: 3, goal: "g" }),
+      durable("loop_iteration_started", { loop_id: "loop-1", iteration: 1, command_id: "l-1" }),
+      durable("input_accepted", { command_id: "l-1" }),
+      durable("user_input", { source: "loop", text: "Work towards the goal.", command_id: "l-1" }),
+      durable("loop_iteration_finished", { loop_id: "loop-1", iteration: 1, outcome: "failed", detail: "model request failed" }),
+      durable("loop_iteration_started", { loop_id: "loop-1", iteration: 2, command_id: "l-2" }),
+    ]);
+    assert.deepEqual(
+      { id: running.loop?.id, state: running.loop?.state, iteration: running.loop?.iteration, max: running.loop?.max },
+      { id: "loop-1", state: "running", iteration: 2, max: 5 },
+    );
+    assert.deepEqual(
+      running.entries.map((e) => (e.kind === "system" ? e.text : e.kind)),
+      ["goal: g", "loop: up to 5 iterations towards the goal", "loop iteration 1/5", "loop iteration 1 failed — model request failed", "loop iteration 2/5"],
+    );
+
+    const done = fold(running, durable("loop_stopped", { loop_id: "loop-1", reason: "goal_complete", iterations: 2, summary: "the build is green" }));
+    assert.equal(done.loop?.state, "stopped");
+    assert.equal(loopEnding(done.loop!), "loop done after 2 iterations: the goal is met — the build is green");
+    const asked = fold(running, durable("loop_stopped", { loop_id: "loop-1", reason: "requested", iterations: 2 }));
+    assert.equal((asked.entries.at(-1) as Extract<Entry, { kind: "system" }>).text, "loop stopped after 2 iterations: stopped on request");
+  });
+
+  it("takes the session's word that a loop the log still has running is over, and only for that loop", () => {
+    seq = 0;
+    const state = foldAll([durable("loop_started", { loop_id: "loop-2", max_iterations: 3 }), durable("loop_iteration_started", { loop_id: "loop-2", iteration: 1 })]);
+    const answer = { loop_id: "loop-2", state: "stopped", iteration: 1, max_iterations: 3, reason: "interrupted" };
+    const settled = settleLoop(state.loop, answer);
+    assert.equal(settled?.state, "stopped");
+    assert.equal(loopEnding(settled!), "loop stopped after 1 iteration: the session stopped while it ran");
+    assert.equal(settleLoop(state.loop, { ...answer, loop_id: "loop-1" }), state.loop);
+    assert.equal(settleLoop(state.loop, { ...answer, state: "running" }), state.loop);
+    assert.equal(settleLoop(state.loop, null), state.loop);
   });
 });

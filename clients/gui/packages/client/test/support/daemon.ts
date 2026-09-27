@@ -42,6 +42,13 @@ interface Session {
   pendingQuestions: number;
   /** The session's goal (`session.goal.*`), once one was set. */
   goal?: string | null;
+  /**
+   * The head `seq` as of the last moment a client was reading the session, the daemon's
+   * `seen` mark: `unseen` counts what came after it. Null for a session nobody ever read.
+   */
+  seen?: number | null;
+  /** How many subscriptions name the session now; `unseen` is empty while any does. */
+  readers?: number;
 }
 
 interface Client {
@@ -267,6 +274,60 @@ export class FakeDaemon {
     return session.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text }] } });
   }
 
+  /** As if a client had read the session up to now and left: what follows is `unseen`. */
+  markSeen(sessionId: string): void {
+    const session = this.sessions.get(sessionId)!;
+    session.seen = session.log.headSeq;
+  }
+
+  /**
+   * What happened since the last reader left (PROTOCOL.md §6, `session.list`): the root
+   * agent's `turn_ended`s and its distinct approvals and questions, with the first one's
+   * time. Empty while somebody reads it, and for a session nobody ever read.
+   */
+  unseenOf(s: Session): { turns: number; approvals: number; questions: number; since: string | null } {
+    const empty = { turns: 0, approvals: 0, questions: 0, since: null };
+    if ((s.readers ?? 0) > 0 || s.seen === null || s.seen === undefined) return empty;
+    const root = s.log.from(s.seen).filter((e) => e.agent.length === 1);
+    const turns = root.filter((e) => e.type === "turn_ended");
+    const calls = (type: string) => root.filter((e, i, all) => e.type === type && all.findIndex((o) => o.type === type && o.data["call_id"] === e.data["call_id"]) === i);
+    const approvals = calls("approval_requested");
+    const questions = calls("question_asked");
+    const counted = [...turns, ...approvals, ...questions].sort((a, b) => a.seq - b.seq);
+    return { turns: turns.length, approvals: approvals.length, questions: questions.length, since: counted[0]?.ts ?? null };
+  }
+
+  /** The latest loop as the log has it, the way `session.loop.get` reads it. */
+  loopOf(s: Session): Record<string, unknown> | null {
+    const started = s.log.events.filter((e) => e.type === "loop_started").at(-1);
+    if (!started) return null;
+    const id = started.data["loop_id"];
+    const mine = s.log.from(started.seq).filter((e) => e.data["loop_id"] === id);
+    const stopped = mine.find((e) => e.type === "loop_stopped");
+    const iteration = mine.filter((e) => e.type === "loop_iteration_started").length;
+    return {
+      loop_id: id,
+      state: stopped ? "stopped" : "running",
+      iteration,
+      max_iterations: started.data["max_iterations"],
+      failures: 0,
+      reason: stopped?.data["reason"] ?? null,
+      detail: stopped?.data["detail"] ?? null,
+      summary: stopped?.data["summary"] ?? null,
+      goal: started.data["goal"],
+      started_by: started.actor.subject ?? null,
+      started_at: started.ts,
+    };
+  }
+
+  /** A subscription that names a session is a reader of it: it clears `unseen` on arrival and marks where it left. */
+  private reading(topic: string, delta: 1 | -1): void {
+    const session = this.sessions.get(topic.replace(/^(session|presence):/, ""));
+    if (!session || !/^(session|presence):/.test(topic)) return;
+    session.readers = Math.max(0, (session.readers ?? 0) + delta);
+    if (delta === 1 || session.readers === 0) session.seen = session.log.headSeq;
+  }
+
   private onConnection(ws: WebSocket): void {
     let client: Client | null = null;
 
@@ -306,7 +367,10 @@ export class FakeDaemon {
 
     ws.on("close", () => {
       if (!client) return;
-      for (const s of client.subs.values()) s.off();
+      for (const s of client.subs.values()) {
+        s.off();
+        this.reading(s.topic, -1);
+      }
       this.clients.delete(client);
     });
   }
@@ -365,6 +429,7 @@ export class FakeDaemon {
         const backlog = target.log.from(from);
         const off = target.log.listen((e) => notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: target.id, event: e }));
         client.subs.set(subscriptionId, { id: subscriptionId, topic, off });
+        this.reading(topic, 1);
         reply(ws, id, { subscription_id: subscriptionId, head_seq: target.log.headSeq, replayed: backlog.length });
         for (const e of backlog) {
           notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: target.id, event: e });
@@ -375,7 +440,10 @@ export class FakeDaemon {
       case "unsubscribe": {
         const sub = client.subs.get(String(params["subscription_id"] ?? ""));
         sub?.off();
-        if (sub) client.subs.delete(sub.id);
+        if (sub) {
+          client.subs.delete(sub.id);
+          this.reading(sub.topic, -1);
+        }
         return reply(ws, id, { unsubscribed: true });
       }
 
@@ -417,21 +485,38 @@ export class FakeDaemon {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
         return reply(ws, id, session.goal ? { goal: session.goal, set_by: this.principal.subject, set_at: new Date().toISOString() } : { goal: null, set_by: null, set_at: null });
 
+      // A loop is read from the log, as the daemon reads it: its iterations are whatever a
+      // test appends (`loop_iteration_started`, …), and stopping writes `loop_stopped`.
       case "session.loop.start": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
-        if (!session.goal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { needs: "goal", reason: "the session has no goal to loop towards" } });
-        const max = Number(params["max_iterations"] ?? 10);
-        session.log.append("loop_started", { loop_id: "loop-1", max_iterations: max, max_failures: 3, goal: session.goal, command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
-        return reply(ws, id, { accepted: true, loop_id: "loop-1", max_iterations: max });
+        if (!session.goal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { needs: "goal", reason: "the session has no goal to loop towards: set one with session.goal.set" } });
+        const running = this.loopOf(session);
+        if (running?.["state"] === "running") {
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { loop_id: running["loop_id"], reason: "a loop is already running: session.loop.stop stops it" } });
+        }
+        const max = params["max_iterations"] === undefined ? 10 : Number(params["max_iterations"]);
+        if (!(Number.isInteger(max) && max > 0)) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "max_iterations" } });
+        const loopId = `loop-${session.log.events.filter((e) => e.type === "loop_started").length + 1}`;
+        session.log.append("loop_started", { loop_id: loopId, max_iterations: max, max_failures: 3, goal: session.goal, command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true, loop_id: loopId, max_iterations: max });
       }
 
-      case "session.loop.stop":
+      case "session.loop.stop": {
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const loop = this.loopOf(session);
+        if (loop?.["state"] === "running") {
+          session.log.append(
+            "loop_stopped",
+            { loop_id: loop["loop_id"], reason: "requested", iterations: loop["iteration"], detail: null, summary: null, command_id: params["command_id"] },
+            { kind: "user", subject: this.principal.subject },
+          );
+        }
         return reply(ws, id, { accepted: true });
+      }
 
       case "session.loop.get":
         if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
-        return reply(ws, id, { loop: null });
+        return reply(ws, id, { loop: this.loopOf(session) });
 
       case "presence.set":
         return reply(ws, id, { ok: true });
@@ -897,6 +982,7 @@ export class FakeDaemon {
       ...(this.linked ? { owner: this.linked.subject } : {}),
       pending_approvals: s.pendingApprovals,
       pending_questions: s.pendingQuestions,
+      unseen: this.unseenOf(s),
       config: { watch: s.watch },
     };
   }

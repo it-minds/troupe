@@ -17,6 +17,7 @@ import type { AuthSession } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
+import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
@@ -59,11 +60,19 @@ export function App(): JSX.Element {
   const mode: AppMode = localOnly || offline ? "local" : "plane";
   const [where, setWhere] = useState<Where>({ screen: "sessions" });
   const daemon = useDaemon();
-  const { snapshot, refresh } = useFleet(auth, daemon.client);
+  const { snapshot, store, refresh } = useFleet(auth, daemon.client);
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.
   const adminApi = useAdmin(auth);
   const appearance = useAppearance();
+  // Opening a session reads it, which clears its row's `unseen` at the daemon: the row
+  // says so now rather than at the next poll. What rows count while nobody reads their
+  // session is what a notification says (notify.ts).
+  const onScreen = where.screen === "session" ? where.id : null;
+  useEffect(() => {
+    if (onScreen) store?.patch(onScreen, { unseen: null });
+  }, [onScreen, store]);
+  useNotifications(snapshot.rows, onScreen);
   // Asked once, on this person's first sign-in, and never again. Tracked per subject:
   // two people on one computer are two first sign-ins, and the second should not
   // inherit an answer the first one gave.

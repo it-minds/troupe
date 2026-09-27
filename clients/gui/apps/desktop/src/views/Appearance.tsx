@@ -18,6 +18,8 @@
 // there is nothing to confirm.
 
 import type { JSX } from "react";
+import { useNotificationSetting } from "../notify";
+import type { Permission } from "../notify";
 import { DEFAULT_MODE, DEFAULT_THEME, MODES, THEMES } from "../theme";
 import type { Mode, ThemeId } from "../theme";
 import { Mask } from "./brand";
@@ -170,9 +172,43 @@ export function AppearanceSettings(props: Appearance): JSX.Element {
         <div className="appearance">
           <p>Yours alone. Other people in your sessions see them in their own theme, and nothing about a theme changes what anything means.</p>
           <Chooser {...props} />
+          <Notifications />
         </div>
       </div>
     </>
+  );
+}
+
+const PERMISSION_WORDS: Record<Permission, string | null> = {
+  granted: null,
+  default: "Troupe has not been allowed to show notifications yet. Choosing On asks.",
+  denied: "Notifications are turned off for Troupe in this computer's or this browser's settings, and Troupe will not ask again. Turn them on there to have them here.",
+  unsupported: "This browser cannot show notifications. The marker in the list and the line when you come back still say what happened.",
+};
+
+/**
+ * Whether a session that finishes or asks while you are not looking says so with a
+ * notification. Beside the appearance because it is the same kind of thing: yours, kept
+ * on this computer, changing nothing about what anybody else sees.
+ */
+function Notifications(): JSX.Element {
+  const { on, permission, setOn } = useNotificationSetting();
+  const note = on ? PERMISSION_WORDS[permission] : null;
+  return (
+    <section className="notify">
+      <h2 className="screen">Notifications</h2>
+      <div className="options">
+        <button type="button" className="option" aria-pressed={on} onClick={() => setOn(true)}>
+          <span className="label">On</span>
+          <span className="consequence">A notification when a session finishes a turn or asks you something while you are not looking at it.</span>
+        </button>
+        <button type="button" className="option" aria-pressed={!on} onClick={() => setOn(false)}>
+          <span className="label">Off</span>
+          <span className="consequence">Only the marker in the list, and the line at the top of a session when you come back to it.</span>
+        </button>
+      </div>
+      {note && <p className="note">{note}</p>}
+    </section>
   );
 }
 

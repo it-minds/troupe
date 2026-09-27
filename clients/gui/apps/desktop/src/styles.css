@@ -346,6 +346,12 @@ label code {
   background: var(--private-bg);
   border-color: var(--private-bd);
 }
+/* News rather than a state — what happened while nobody was reading — so no glyph and
+   no fill: the machine's cyan in outline, the way the comp marks a file NEW. */
+.pill.new {
+  color: var(--running-fg);
+  border-color: var(--running-bd);
+}
 
 /* Only live states animate, and only as a pulse that restarts cleanly. */
 .pill.running .eye,
@@ -417,6 +423,11 @@ label code {
 .banner.error {
   color: var(--error-fg);
   background: var(--error-bg);
+}
+/* What the machine did while nobody was reading: its own cyan. */
+.banner.away {
+  color: var(--running-fg);
+  background: var(--running-bg);
 }
 
 .empty {
@@ -1009,6 +1020,97 @@ main {
   min-height: 32px;
   padding: 4px 12px;
   font: var(--t-code);
+}
+
+/* The goal, under the title: a mono caption in the machine's cyan, then the goal in the
+   reading face on one line, clipped, the whole of it on hover and a click away. What
+   can be done about it sits at the end in mono, quieter than the goal itself, and how
+   the last loop ended is a literal line under it. */
+.session-head .goal-block {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+  margin-top: 3px;
+}
+.session-head .goal {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: var(--space-1) var(--space-3);
+  min-width: 0;
+}
+.session-head .goal .label {
+  flex: none;
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--running-fg);
+}
+.session-head .goal .text {
+  flex: 0 1 auto;
+  min-width: 0;
+  max-width: 100%;
+  min-height: 0;
+  padding: 0;
+  background: none;
+  border: none;
+  font: var(--t-note);
+  color: var(--text-body);
+  text-align: left;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.session-head .goal.shown {
+  flex-wrap: nowrap;
+}
+.session-head .goal.open .text {
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+.session-head .goal .text:hover:not(:disabled) {
+  filter: none;
+  color: var(--text-primary);
+}
+.session-head .goal .actions {
+  flex: none;
+  display: flex;
+  gap: var(--space-3);
+}
+.session-head .goal button.link {
+  font: var(--t-micro);
+  letter-spacing: var(--tracking-micro);
+  text-transform: uppercase;
+  color: var(--text-label);
+}
+.session-head .goal button.link:hover:not(:disabled) {
+  color: var(--text-primary);
+  text-decoration: none;
+}
+.session-head .goal input {
+  flex: 1 1 240px;
+  min-width: 0;
+  min-height: 32px;
+  padding: 4px 10px;
+  font: var(--t-note);
+}
+.session-head .goal label.inline {
+  flex: none;
+  font: var(--t-note);
+  color: var(--text-secondary);
+}
+.session-head .goal label.inline input {
+  flex: none;
+  width: 6em;
+}
+.session-head .goal-note {
+  margin: 0;
+  font: var(--t-code-small);
+  color: var(--text-muted);
+}
+.session-head .goal-block .note.error {
+  margin: 0;
 }
 
 /* The conversation and the backstage are wrapping flex tracks, not breakpoints. */
@@ -1768,6 +1870,21 @@ details.advanced > summary {
 }
 .chooser .mode .options {
   max-width: var(--measure-narrow);
+}
+
+/* On or off, as the mode is chosen, and a line when the OS or the browser says otherwise. */
+.appearance > .notify {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+.appearance > .notify .options {
+  max-width: var(--measure-narrow);
+}
+/* The note is set in mono, whose `ch` is narrower: the reading measure lines it up. */
+.appearance > .notify .note {
+  margin: 0;
+  max-width: var(--measure-reading);
 }
 
 /* The cards: tiles, like every other choice in the product, the one in use edged in

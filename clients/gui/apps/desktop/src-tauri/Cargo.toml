@@ -30,6 +30,11 @@ tauri-plugin-opener = "2"
 # A workspace is a directory on this computer, and the browser build can only ask for a
 # path typed in. The native picker is the difference between the two builds here.
 tauri-plugin-dialog = "2"
+# A notification when a session finishes or asks something while nobody is looking. The
+# page's own `Notification` is refused in WebView2, which denies the permission unless
+# the host answers for it, and wry answers only the clipboard's. `~2.4` because 2.5 wants
+# tauri 2.12, and tauri moves with the rest of its group, not behind a plugin.
+tauri-plugin-notification = "~2.4"
 # Windows Credential Manager / macOS Keychain / Secret Service. The refresh token lives
 # here and nowhere else; see src/secrets.rs.
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }

@@ -52,6 +52,8 @@ export interface DaemonSessionRow {
   owner?: string;
   pending_approvals?: number;
   pending_questions?: number;
+  /** What happened while nobody was reading it (`Unseen`); absent from a daemon before #119. */
+  unseen?: FleetRow["unseen"];
   [k: string]: unknown;
 }
 
@@ -538,6 +540,7 @@ export function rowFromDaemon(row: DaemonSessionRow, source = "daemon"): FleetRo
     origin: null,
     reviewedBy: null,
     sync: kind === "private" ? ((row["sync"] as FleetRow["sync"]) ?? "this-device-only") : null,
+    unseen: row.unseen ?? null,
     raw: row,
   };
 }
