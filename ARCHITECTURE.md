@@ -203,11 +203,14 @@ administers — are checked once per method.
 | `read_only` | stopped | as dormant; activating commands are refused |
 | `erased` | gone | `not_found` |
 
-A session goes dormant after its idle timeout — waiting on a person counts as idle, and the
-timeout is minutes rather than half an hour once no client is watching it
+A session goes dormant after its idle timeout — waiting on a person counts as idle, the
+timeout is minutes rather than half an hour once no client is watching it, and a session
+a client is subscribed to by name is not put to sleep at all
 ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)); the next
 *activating* command restores the tree by folding the log, and asks again whatever it was
-waiting on. A daemon restart brings sessions back dormant — restarting every
+waiting on. What ended or was asked while nobody was reading a session is kept beside its
+log as a mark and reported in its listing (`Sessions.Unseen`), so a client that comes back
+can say so. A daemon restart brings sessions back dormant — restarting every
 session a person ever had is a stampede, not a restoration — and stops itself after a quiet
 period with no clients. `Sessions.Index` holds metadata only and monitors each live tree,
 so a crashed session leaves the live view at once. The TUI's HQ page is a `fleet`

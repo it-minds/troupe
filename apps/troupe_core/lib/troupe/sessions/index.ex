@@ -14,7 +14,11 @@ defmodule Troupe.Sessions.Index do
 
   It is also what puts a session to sleep. One with nothing running — idle, or waiting on
   a person — gives its actor tree back after `session_idle_ms` while somebody is watching
-  it, and after the much shorter `detached_idle_ms` once nobody is.
+  it, and after the much shorter `detached_idle_ms` once nobody is. Never while a client
+  is reading it (`Troupe.Events.attached?/1`): a session stopped under the person looking
+  at it is a state change nobody asked for, and the clocks start when they leave. The
+  whole ladder, from a running turn to the daemon's exit, with every clock's setting:
+  [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
   """
 
   use GenServer
@@ -22,6 +26,7 @@ defmodule Troupe.Sessions.Index do
   alias Troupe.{Events, Paths, Registry, Session}
   alias Troupe.Protocol.Event
   alias Troupe.Session.{Approvals, Log, Questions, Summary, Watcher}
+  alias Troupe.Sessions.Unseen
 
   @type meta :: %{
           id: String.t(),
@@ -33,6 +38,7 @@ defmodule Troupe.Sessions.Index do
           status: atom(),
           pending_approvals: non_neg_integer(),
           pending_questions: non_neg_integer(),
+          unseen: Unseen.t(),
           tokens: non_neg_integer(),
           cost: float(),
           created_at: String.t() | nil,
@@ -230,13 +236,19 @@ defmodule Troupe.Sessions.Index do
   # A session with nothing to do for long enough gives its actor tree back. Idleness
   # is asked of the agent rather than inferred from events, because "nothing has been
   # logged lately" is also true of an agent waiting on a twenty-minute test run.
+  #
+  # Not while a client is reading it, whatever the clocks say. Both start again from the
+  # sweep after it leaves, so a session read for an hour and left is on the same footing
+  # as one that went quiet the moment its reader went.
   defp sweep_session(session_id, state) do
     case Map.fetch(state.live, session_id) do
       :error ->
         state
 
       {:ok, entry} ->
-        sweep_live(state, session_id, watch(entry, session_id), agent_state(session_id))
+        if Events.attached?(session_id),
+          do: put_in(state.live[session_id], Map.merge(entry, %{idle_since: nil, unwatched_since: nil})),
+          else: sweep_live(state, session_id, watch(entry, session_id), agent_state(session_id))
     end
   end
 
@@ -339,7 +351,7 @@ defmodule Troupe.Sessions.Index do
   end
 
   def handle_call({:list, filter}, _from, state) do
-    listed = state |> all() |> apply_filter(filter) |> Enum.map(&(live(state, &1.id) || &1))
+    listed = state |> all() |> apply_filter(filter) |> Enum.map(&(live(state, &1.id, &1) || &1))
     {:reply, listed, state}
   end
 
@@ -370,12 +382,27 @@ defmodule Troupe.Sessions.Index do
   # is asked for: from the session's own summary projection, which already follows every
   # way an approval (#142) or a question (#162) ends and is what a worker reports to the
   # plane from. Nothing here hears the session's events, so a count kept here would be one
-  # more reader to get it wrong.
-  defp live(state, session_id) do
+  # more reader to get it wrong. What nobody has seen of it is read from its log the same
+  # way: `listed` is the listing's own scan of that log, already done, and `get` reads it
+  # now, only when nobody is attached (`Unseen`).
+  defp live(state, session_id, listed \\ nil) do
     case Map.fetch(state.live, session_id) do
-      {:ok, entry} -> entry |> put_asked(Summary.snapshot(session_id)) |> waiting()
-      :error -> nil
+      {:ok, entry} ->
+        entry
+        |> put_asked(Summary.snapshot(session_id))
+        |> waiting()
+        |> Map.put(:unseen, (listed && Map.get(listed, :unseen)) || unseen(session_id))
+
+      :error ->
+        nil
     end
+  end
+
+  defp unseen(session_id) do
+    path = Log.path(session_id)
+    Unseen.of(session_id, Path.dirname(path), fn -> Log.read_file(path) end)
+  catch
+    :exit, _ -> Unseen.none()
   end
 
   defp put_asked(meta, summary) do
@@ -395,12 +422,12 @@ defmodule Troupe.Sessions.Index do
   defp waiting(meta), do: meta
 
   # Live entries win: a session with a running tree knows more about itself than its
-  # log's first event does.
+  # log's first event does. What nobody has seen of it is the log's to say either way.
   defp all(state) do
     disk = Map.new(scan_disk(state), &{&1.id, &1})
 
     disk
-    |> Map.merge(state.live)
+    |> Map.merge(state.live, fn _id, from_disk, live -> Map.put(live, :unseen, from_disk.unseen) end)
     |> Map.values()
     |> Enum.sort_by(& &1.last_active_at, :desc)
   end
@@ -458,14 +485,17 @@ defmodule Troupe.Sessions.Index do
         last = List.last(events)
         created = Enum.find(events, &(&1.type == "session_created"))
 
+        id = Path.basename(Path.dirname(path))
+
         meta = %{
-          id: Path.basename(Path.dirname(path)),
+          id: id,
           workspace: get_data(created, "workspace", "(unknown)"),
           branch: get_data(created, "branch", nil),
           parent: get_data(created, "parent", nil),
           profile: get_data(created, "profile", "build"),
           state: :dormant,
           status: status_from_log(events),
+          unseen: Unseen.of(id, Path.dirname(path), fn -> events end),
           tokens: total_tokens(events),
           cost: total_cost(events),
           created_at: first.ts,

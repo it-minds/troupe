@@ -63,7 +63,7 @@ defmodule Troupe.Gateway.SleepTest do
       File.rm_rf!(base)
     end)
 
-    %{workspace: workspace, state_dir: state_dir, endpoint: endpoint}
+    %{workspace: workspace, state_dir: state_dir, endpoint: endpoint, script: script}
   end
 
   test "a turn whose client has gone runs to completion, and its result is in the log", context do
@@ -82,18 +82,94 @@ defmodule Troupe.Gateway.SleepTest do
     assert inspect(response.data) =~ "finished with nobody there"
   end
 
-  test "a session somebody is watching is not put to sleep on the short clock", context do
+  test "a session a client is subscribed to is not put to sleep on either clock", context do
     %{session: session} = start_session(context, [{:text, "hi"}])
     client = connect(context)
     {:ok, _} = Client.subscribe(client, "session:#{session.id}")
 
-    sweep(session, detached_idle_ms: 100)
+    # Both clocks well inside the wait: a session somebody is reading is not stopped under
+    # them, so the state change they would otherwise have to handle never happens.
+    sweep(session, session_idle_ms: 200, detached_idle_ms: 100)
 
-    Process.sleep(600)
+    Process.sleep(700)
     assert session.id in Troupe.session_ids(), "slept while a client was subscribed to it"
 
     Client.close(client)
     eventually(fn -> session.id not in Troupe.session_ids() end, 5_000)
+  end
+
+  test "a client tool call whose client left fails once the grace is up, the session sleeps, and the tool is served again once a client is back and it wakes",
+       context do
+    grace(300)
+
+    %{session: session} =
+      start_session(context, [
+        {:tools, [{"client.notes.search", %{"q" => "before the nap"}}]},
+        {:text, "did without it"}
+      ])
+
+    sid = session.id
+    client = connect(context)
+    {:ok, _} = register(client, sid)
+    {:ok, _} = Client.call(client, "input.send", input(sid, "search my notes"))
+    assert_receive {:troupe_request, _id, "tool.invoke", _params}, 15_000
+
+    # The client goes mid-call and nobody comes back within the grace: the call fails once,
+    # naming the tool, and the turn carries on to its end without it.
+    Client.close(client)
+
+    eventually(fn -> logged?(sid, "turn_ended") end, 15_000)
+    [failed] = Enum.filter(Troupe.events(sid), &(&1.type == "tool_call_completed"))
+    assert failed.data["ok"] == false
+    assert failed.data["content"] =~ "notes.search"
+    assert failed.data["content"] =~ "left"
+
+    # Idle and unwatched, so it sleeps; the registration did not outlive the connection
+    # and the tree does not outlive the clock.
+    sweep(session, detached_idle_ms: 300)
+    eventually(fn -> sid not in Troupe.session_ids() end, 5_000)
+
+    # The person is back. Offering the tool again is an activating command, so it is what
+    # wakes the session, and the woken model asks for the tool once more.
+    File.write!(
+      context.script,
+      Jason.encode!(%{
+        "steps" => [
+          %{"tools" => [%{"name" => "client.notes.search", "input" => %{"q" => "after the nap"}}]},
+          %{"text" => "served after the nap"}
+        ]
+      })
+    )
+
+    client = connect(context)
+    {:ok, _} = Client.subscribe(client, "session:#{sid}")
+    {:ok, _} = register(client, sid)
+    assert {:ok, %{"state" => "active"}} = Client.call(client, "session.get", %{"session_id" => sid})
+
+    {:ok, _} = Client.call(client, "input.send", input(sid, "search again"))
+
+    # The woken session runs with the machine's own settings rather than this test's, so
+    # the tool asks first, as a client's tool does by default (the consent was to offering
+    # it, not to every call); then the call reaches the client that offered it.
+    %Event{data: %{"call_id" => call_id}} =
+      List.last(collect_until(&(&1.type == "approval_requested")))
+
+    {:ok, _} =
+      Client.call(client, "approval.respond", %{
+        "command_id" => Client.command_id(),
+        "session_id" => sid,
+        "call_id" => call_id,
+        "decision" => "allow"
+      })
+
+    assert_receive {:troupe_request, id, "tool.invoke", %{"arguments" => %{"q" => "after the nap"}}}, 15_000
+    :ok = Client.respond(client, id, %{"content" => "one note, after the nap"})
+
+    events = collect_until(&(&1.type == "llm_response"))
+    served = Enum.find(events, &(&1.type == "tool_call_completed"))
+    assert served.data["ok"] == true
+    assert served.data["content"] =~ "after the nap"
+    assert inspect(List.last(events).data) =~ "served after the nap"
   end
 
   test "a session left waiting on an approval sleeps, the daemon then exits, and the next command brings the approval back",
@@ -203,8 +279,39 @@ defmodule Troupe.Gateway.SleepTest do
     %{session: session, fake: fake}
   end
 
+  # The grace a parked client tool call waits for its client, short enough to test.
+  defp grace(ms) do
+    previous = Application.get_env(:troupe_core, :client_tool_grace_ms)
+    Application.put_env(:troupe_core, :client_tool_grace_ms, ms)
+
+    on_exit(fn ->
+      if previous,
+        do: Application.put_env(:troupe_core, :client_tool_grace_ms, previous),
+        else: Application.delete_env(:troupe_core, :client_tool_grace_ms)
+    end)
+  end
+
+  # Offer `notes.search` from this client, consenting the way a harness does: the first
+  # registration is refused with the challenge to show, and the second carries it back.
+  defp register(client, session_id) do
+    tool = %{"name" => "notes.search", "description" => "Search my notes.", "schema" => %{"type" => "object"}}
+    params = %{"session_id" => session_id, "tools" => [tool]}
+
+    {:error, %{data: %{"challenge" => challenge}}} =
+      Client.call(client, "tools.register", Map.put(params, "command_id", Client.command_id()))
+
+    Client.call(
+      client,
+      "tools.register",
+      params
+      |> Map.put("command_id", Client.command_id())
+      |> Map.put("consent", %{"challenge" => challenge, "confirmed_by" => "the person"})
+    )
+  end
+
+  # The clocks given win over the defaults here: an hour watched, a sweep every 25 ms.
   defp sweep(session, clocks) do
-    opts = [session_idle_ms: :timer.hours(1), sweep_ms: 25] ++ clocks
+    opts = clocks ++ [session_idle_ms: :timer.hours(1), sweep_ms: 25]
 
     index =
       start_supervised!(%{
