@@ -4,6 +4,10 @@ defmodule Troupe.UI.TUI.View do
   status and command line. Transcript text is wrapped in Elixir (`Model.rows/4`)
   and handed to the renderer as pre-wrapped lines, so only the rows in view are
   built and nothing is ever clipped at the bottom.
+
+  Every colour is a role from `Troupe.UI.TUI.Theme` (Afterglow, generated from the
+  design tokens), resolved for the terminal's depth once the frame is built. The
+  reserved pink — `:needs_you` — is spent only where a person is needed.
   """
 
   alias ExRatatui.Layout
@@ -14,7 +18,7 @@ defmodule Troupe.UI.TUI.View do
   alias ExRatatui.Widgets.Block.Title
   alias Troupe.Client
   alias Troupe.Settings
-  alias Troupe.UI.TUI.{Input, Model}
+  alias Troupe.UI.TUI.{Input, Model, Theme}
 
   # Command-box geometry. The focused box — the command line and an active
   # window's input — is a fixed `@input_rows` console rows: `@input_content`
@@ -26,26 +30,39 @@ defmodule Troupe.UI.TUI.View do
   @input_content 5
   @input_rows @input_content + 2
 
+  @doc """
+  The frame's widgets, coloured for the terminal: `state.theme` when the state carries
+  one (a test drawing at a given depth), otherwise what the environment says.
+  """
   @spec render(map(), ExRatatui.Frame.t()) :: [{term(), Rect.t()}]
-  def render(%{focus: :settings} = state, frame) do
+  def render(state, frame) do
+    theme = Map.get(state, :theme) || Theme.current()
+
+    state
+    |> Map.put(:theme, theme)
+    |> draw(frame)
+    |> Theme.paint(theme)
+  end
+
+  defp draw(%{focus: :settings} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     settings_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
-  def render(%{focus: :observer} = state, frame) do
+  defp draw(%{focus: :observer} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     observer_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
-  def render(%{focus: :sessions} = state, frame) do
+  defp draw(%{focus: :sessions} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     sessions_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
-  def render(%{focus: :hq} = state, frame) do
+  defp draw(%{focus: :hq} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
 
@@ -53,13 +70,13 @@ defmodule Troupe.UI.TUI.View do
       [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
-  def render(%{focus: :files} = state, frame) do
+  defp draw(%{focus: :files} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     files_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
   end
 
-  def render(%{focus: :mcp} = state, frame) do
+  defp draw(%{focus: :mcp} = state, frame) do
     area = %Rect{x: 0, y: 0, width: frame.width, height: frame.height}
     [page_rect, status_rect, cmd_rect] = Layout.split(area, :vertical, page_constraints())
     mcp_page(state, page_rect) ++ [status(state, status_rect), command_line(state, cmd_rect)]
@@ -68,15 +85,15 @@ defmodule Troupe.UI.TUI.View do
   # The palette is a popup over the session (Decision 119): the screen is drawn as it was
   # where the palette was opened from, the command box shows the filter being typed, and
   # the popup sits over the rest.
-  def render(%{focus: :palette} = state, frame) do
-    behind = render(%{state | focus: state.palette.return_to}, frame)
+  defp draw(%{focus: :palette} = state, frame) do
+    behind = draw(%{state | focus: state.palette.return_to}, frame)
     {_line, cmd_rect} = List.last(behind)
 
     Enum.drop(behind, -1) ++
       [command_line(state, cmd_rect, cmd_rect.height)] ++ palette_popup(state, frame, cmd_rect)
   end
 
-  def render(state, frame) do
+  defp draw(state, frame) do
     windows = Model.windows(state.model)
     geometry = pane_geometry(state, {frame.width, frame.height})
     cmd_rows = box_height(frame.height)
@@ -271,7 +288,7 @@ defmodule Troupe.UI.TUI.View do
       items: Enum.map(rows, &tree_line(&1, state)),
       selected: if(rows == [], do: nil, else: cursor),
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: " agents — #{observer_totals(rows)} ",
         borders: [:all],
@@ -319,16 +336,17 @@ defmodule Troupe.UI.TUI.View do
     [
       String.pad_trailing(indent <> label, 22),
       String.pad_trailing("(#{name})", 10),
-      String.pad_trailing(state_text(st, state.tick), 12),
+      String.pad_trailing(state_text(st, state), 12),
       String.pad_trailing(Model.agent_elapsed(row, state.now), 6),
       String.pad_leading(Model.tokens(row.agent), 15),
       detail
     ]
     |> Enum.join(" ")
     |> String.trim_trailing()
+    |> needs_you_line(st == :needs_input)
   end
 
-  defp state_text(:needs_input, tick), do: if(rem(tick, 2) == 0, do: "▶ you", else: "needs you")
+  defp state_text(:needs_input, state), do: if(blink?(state), do: "▶ you", else: "needs you")
   defp state_text(:done_unread, _), do: "done ●"
   defp state_text(:failed_unread, _), do: "failed ●"
   defp state_text(state, _), do: to_string(state)
@@ -461,7 +479,7 @@ defmodule Troupe.UI.TUI.View do
         end),
       selected: if(entries == [], do: nil, else: cursor),
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: sessions_title(entries, state, list_rect.width - 2),
         borders: [:all],
@@ -504,8 +522,21 @@ defmodule Troupe.UI.TUI.View do
       |> Enum.join(" ")
 
     room = max(width - Model.cell_width(head) - 1, 8)
-    String.trim_trailing(head <> " " <> clip(Model.one_line(entry.title), room))
+
+    (head <> " " <> clip(Model.one_line(entry.title), room))
+    |> String.trim_trailing()
+    |> needs_you_line(needs_you?(entry))
   end
+
+  # A row in a list that says a person is needed is drawn in the reserved colour, whole,
+  # so it is the row that is found from across the room; any other row is left as text.
+  defp needs_you_line(text, true), do: Line.new([Span.new(text, style: Theme.style(:needs_you))])
+  defp needs_you_line(text, false), do: text
+
+  @doc false
+  @spec needs_you?(Client.summary()) :: boolean()
+  def needs_you?(%{status: "waiting"}), do: true
+  def needs_you?(entry), do: Enum.any?(live_branches(entry), &(&1.state == :needs_input))
 
   defp session_marker(%{id: sid}, %{session_id: sid}), do: "●"
   defp session_marker(%{state: :active}, _state), do: "○"
@@ -649,7 +680,7 @@ defmodule Troupe.UI.TUI.View do
       items: Enum.map(entries, &file_line(&1, max(list_rect.width - 4, 12))),
       selected: if(entries == [], do: nil, else: cursor),
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: fit([" #{state.files.path} ", " files "], list_rect.width - 2),
         borders: [:all],
@@ -744,7 +775,7 @@ defmodule Troupe.UI.TUI.View do
       items: items,
       selected: if(entries == [], do: nil, else: min(state.mcp_cursor, length(entries) - 1)),
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: " MCP servers and skills ",
         borders: [:all],
@@ -843,7 +874,7 @@ defmodule Troupe.UI.TUI.View do
       items: items,
       selected: s.cursor,
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: " settings — #{Settings.target_path(state.model.workspace)} ",
         borders: [:all],
@@ -873,7 +904,7 @@ defmodule Troupe.UI.TUI.View do
       items: items,
       selected: min(p.cursor, length(items) - 1),
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: " #{length(p.choices)} models detected — Enter picks · Esc back ",
         borders: [:all]
@@ -1005,7 +1036,7 @@ defmodule Troupe.UI.TUI.View do
       items: items,
       selected: selected,
       highlight_symbol: "▸ ",
-      highlight_style: %Style{fg: :cyan, modifiers: [:bold]},
+      highlight_style: selected(),
       block: %Block{
         title: " commands — #{length(rows)} of #{length(state.commands)} ",
         borders: [:all],
@@ -1019,14 +1050,14 @@ defmodule Troupe.UI.TUI.View do
 
     Line.new([
       Span.new(label <> String.duplicate("─", max(width - String.length(label), 0)),
-        style: %Style{fg: :dark_gray}
+        style: Theme.style(:rail)
       )
     ])
   end
 
   # A command this client cannot run now is greyed rather than hidden; the detail says why.
   defp palette_line(%{entry: entry, status: status}, name_w, width) do
-    style = if status == :ok, do: %Style{}, else: %Style{fg: :dark_gray}
+    style = Theme.style(if(status == :ok, do: nil, else: :muted))
     name = String.pad_trailing("/" <> entry["name"], name_w)
     summary = Model.wrap(entry["summary"], max(width - name_w, 8), :char) |> List.first() || ""
 
@@ -1040,7 +1071,7 @@ defmodule Troupe.UI.TUI.View do
     do:
       Line.new([
         Span.new("the session's harness did not answer commands.list",
-          style: %Style{fg: :dark_gray}
+          style: Theme.style(:muted)
         )
       ])
 
@@ -1048,7 +1079,7 @@ defmodule Troupe.UI.TUI.View do
     do:
       Line.new([
         Span.new("nothing matches /#{query} — Enter runs it as typed",
-          style: %Style{fg: :dark_gray}
+          style: Theme.style(:muted)
         )
       ])
 
@@ -1130,12 +1161,41 @@ defmodule Troupe.UI.TUI.View do
 
   ## Window strip
 
+  # Nothing dispatched yet: the mask and the word over what to type, when the screen has
+  # room for them, and the words alone when it has not.
   defp strip([], rect, state) do
-    text =
+    hint =
       "No branches. Type a command: " <>
         Enum.map_join(state.agents, "  ", &("/" <> &1)) <> "  /help"
 
-    [{%Paragraph{text: text, style: %Style{fg: :dark_gray}, wrap: true}, rect}]
+    {mask_w, mask_h} = Theme.mask_size(:large)
+    hint_h = div(Model.cell_width(hint) + rect.width - 1, max(rect.width, 1))
+
+    if rect.width >= mask_w + 2 and rect.height >= mask_h + 4 + hint_h do
+      top = rect.y + div(rect.height - (mask_h + 4 + hint_h), 2)
+      mark_rect = %Rect{x: rect.x, y: top, width: rect.width, height: mask_h + 2}
+
+      hint_rect = %Rect{
+        x: rect.x,
+        y: top + mask_h + 3,
+        width: rect.width,
+        height: rect.y + rect.height - (top + mask_h + 3)
+      }
+
+      # The mask is not wrapped: wrapping trims a line's leading blanks, and those are
+      # the picture.
+      mark =
+        Theme.mask(:large, state.theme) ++
+          [Line.new([]), Line.new([Span.new("troupe", style: Theme.style(nil, [:bold]))])]
+
+      [
+        {%Paragraph{text: mark, alignment: :center}, mark_rect},
+        {%Paragraph{text: hint, style: Theme.style(:muted), alignment: :center, wrap: true},
+         hint_rect}
+      ]
+    else
+      [{%Paragraph{text: hint, style: Theme.style(:muted), wrap: true}, rect}]
+    end
   end
 
   defp strip(windows, rect, state) do
@@ -1145,7 +1205,38 @@ defmodule Troupe.UI.TUI.View do
     shown
     |> Enum.with_index(1)
     |> Enum.zip(rects)
-    |> Enum.map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+    |> Enum.flat_map(fn {{w, n}, r} -> window_tile(w, n, r, state) end)
+  end
+
+  # A session nobody has said anything to yet is the TUI's empty state: its one window
+  # says it started and little else, so the mask and the word stand in the middle of it
+  # until the first line is typed. Not wrapped: wrapping trims a line's leading blanks,
+  # and those are the picture.
+  defp lockup(w, rect, used, state) do
+    {mask_w, mask_h} = Theme.mask_size(:large)
+    {inner_w, inner_h} = {rect.width - 2, rect.height - 2}
+    height = mask_h + 2
+    top = max(div(inner_h - height, 2), used + 1)
+
+    if fresh?(w) and inner_w >= mask_w + 2 and top + height <= inner_h do
+      area = %Rect{x: rect.x + 1, y: rect.y + 1 + top, width: inner_w, height: height}
+
+      mark =
+        Theme.mask(:large, state.theme) ++
+          [Line.new([]), Line.new([Span.new("troupe", style: Theme.style(nil, [:bold]))])]
+
+      [{%Paragraph{text: mark, alignment: :center}, area}]
+    else
+      []
+    end
+  end
+
+  defp fresh?(w) do
+    w.pending == [] and
+      w.agents
+      |> Map.get(w.path, %{transcript: []})
+      |> Map.get(:transcript, [])
+      |> Enum.all?(&match?({:system, _}, &1))
   end
 
   defp window_tile(w, n, rect, state) do
@@ -1160,23 +1251,34 @@ defmodule Troupe.UI.TUI.View do
       |> Model.tile_lines(state.tick, state.now, inner_h > 3)
       |> Model.tail_rows(inner_w, inner_h)
 
-    %Paragraph{
+    shown = shown_state(w)
+
+    tile = %Paragraph{
       text: styled(rows),
       wrap: false,
       style: text_style(w),
       block: %Block{
-        title: tile_title(w, n, state, inner_w),
+        title: tile_title(shown, n, state, inner_w),
+        title_style: title_style(shown),
         borders: [:all],
         border_type: if(focused?, do: :double, else: :rounded),
-        border_style: border_style(w, state)
+        border_style: border_style(shown, state)
       }
     }
-    |> then(&{&1, rect})
+
+    [{tile, rect} | lockup(w, rect, length(rows), state)]
   end
+
+  # Whether a window waits on you: something is pending in it. The window's own state
+  # says `needs_input` only when a `branch_state` said so, which no daemon sends, so the
+  # strip, the status line and the colour read the pending list the pane draws from.
+  defp waits_on_you?(w), do: w.state == :needs_input or w.pending != []
+
+  defp shown_state(w), do: if(waits_on_you?(w), do: %{w | state: :needs_input}, else: w)
 
   defp tile_title(w, n, state, inner_w) do
     badge = if w.badge, do: " ●", else: ""
-    blink = if w.state == :needs_input and rem(state.tick, 2) == 0, do: " ▶ needs input", else: ""
+    blink = if w.state == :needs_input and blink?(state), do: " ▶ needs input", else: ""
     stats = " · #{Model.elapsed(w, state.now)} · #{Model.tokens(w)}"
 
     [
@@ -1200,29 +1302,31 @@ defmodule Troupe.UI.TUI.View do
     Enum.find(candidates, List.last(candidates), &(Model.cell_width(&1) <= width))
   end
 
+  # A window that needs you is the one thing on screen that blinks, and the only border
+  # in the reserved colour; everything else is quieter than it.
   defp border_style(%{state: :needs_input}, state) do
-    if rem(state.tick, 2) == 0,
-      do: %Style{fg: :yellow, modifiers: [:bold]},
-      else: %Style{fg: :dark_gray}
+    if blink?(state),
+      do: Theme.style(:needs_you_edge, [:bold]),
+      else: Theme.style(:rail)
   end
 
-  defp border_style(%{state: :running}, _), do: %Style{fg: :cyan}
+  defp border_style(%{state: :running}, _), do: Theme.style(:working_edge)
+  defp border_style(%{state: :done_unread, badge: true}, _), do: Theme.style(:ok, [:bold])
+  defp border_style(%{state: :done_unread}, _), do: Theme.style(:rail, [:dim])
+  defp border_style(%{state: :failed_unread, badge: true}, _), do: Theme.style(:error, [:bold])
+  defp border_style(%{state: :failed_unread}, _), do: Theme.style(:rail, [:dim])
+  defp border_style(_, _), do: Theme.style(nil)
 
-  defp border_style(%{state: :done_unread, badge: true}, _),
-    do: %Style{fg: :green, modifiers: [:bold]}
+  defp title_style(%{state: :needs_input}), do: Theme.style(:needs_you, [:bold])
+  defp title_style(_w), do: nil
 
-  defp border_style(%{state: :done_unread}, _), do: %Style{fg: :dark_gray, modifiers: [:dim]}
-
-  defp border_style(%{state: :failed_unread, badge: true}, _),
-    do: %Style{fg: :red, modifiers: [:bold]}
-
-  defp border_style(%{state: :failed_unread}, _), do: %Style{fg: :dark_gray, modifiers: [:dim]}
-  defp border_style(_, _), do: %Style{}
+  # On for half a second and off for half: about once a second, whatever the tick's pace.
+  defp blink?(%{now: now}), do: rem(div(now, 500), 2) == 0
 
   defp text_style(%{state: s}) when s in [:done_unread, :failed_unread],
-    do: %Style{modifiers: [:dim]}
+    do: Theme.style(nil, [:dim])
 
-  defp text_style(_), do: %Style{}
+  defp text_style(_), do: Theme.style(nil)
 
   ## Activated pane
 
@@ -1255,8 +1359,8 @@ defmodule Troupe.UI.TUI.View do
              content_length: g.total,
              position: g.offset,
              viewport_content_length: g.inner_h,
-             thumb_style: %Style{fg: :dark_gray},
-             track_style: %Style{fg: :dark_gray}
+             thumb_style: Theme.style(:muted),
+             track_style: Theme.style(:rail)
            }, %Rect{x: g.left.x + g.left.width - 1, y: g.left.y + 1, width: 1, height: g.inner_h}}
         ]
       else
@@ -1380,7 +1484,8 @@ defmodule Troupe.UI.TUI.View do
 
   ## Styling
 
-  @muted %Style{fg: :dark_gray}
+  # A list's selected row: the light that is not a status, bold.
+  defp selected, do: Theme.style(:accent, [:bold])
 
   defp styled([]), do: ""
   defp styled(rows), do: Enum.map(rows, &styled_row/1)
@@ -1397,41 +1502,59 @@ defmodule Troupe.UI.TUI.View do
     )
   end
 
-  defp segment_style(%Style{} = style, _kind, _text), do: style
-  defp segment_style(:muted, _kind, _text), do: @muted
-  defp segment_style(:code_rail, _kind, _text), do: @muted
-  defp segment_style(:quote_rail, _kind, _text), do: @muted
-  defp segment_style(:linenum, _kind, _text), do: @muted
-  defp segment_style(:code_lang, _kind, _text), do: %Style{fg: :magenta}
-  defp segment_style(:code_inline, _kind, _text), do: %Style{fg: :magenta}
-  defp segment_style(:strong, _kind, _text), do: %Style{modifiers: [:bold]}
-  defp segment_style(:heading, _kind, _text), do: %Style{fg: :cyan, modifiers: [:bold]}
-  defp segment_style(:bullet_marker, _kind, _text), do: %Style{fg: :cyan}
-  defp segment_style(:quote, _kind, _text), do: %Style{modifiers: [:dim]}
-  defp segment_style(:system, _kind, _text), do: %Style{modifiers: [:dim]}
-  defp segment_style(:reasoning_marker, _kind, _text), do: %Style{fg: :magenta}
-  defp segment_style(:reasoning_title, _kind, _text), do: %Style{fg: :magenta, modifiers: [:dim]}
-  defp segment_style(:reasoning_body, _kind, _text), do: %Style{fg: :magenta, modifiers: [:dim]}
-  defp segment_style(:pending, _kind, _text), do: %Style{fg: :yellow, modifiers: [:bold]}
-  defp segment_style(:diff_add, _kind, _text), do: %Style{fg: :green}
-  defp segment_style(:diff_del, _kind, _text), do: %Style{fg: :red}
-  defp segment_style(:diff_meta, _kind, _text), do: %Style{fg: :cyan, modifiers: [:dim]}
-  defp segment_style(:user_marker, _kind, _text), do: %Style{fg: :cyan, modifiers: [:bold]}
-  defp segment_style(:activity_glyph, _kind, _text), do: %Style{fg: :yellow}
-  defp segment_style(:activity, _kind, _text), do: %Style{fg: :yellow, modifiers: [:dim]}
-  defp segment_style(:tool_glyph, _kind, text), do: glyph_style(text)
-  defp segment_style(:tool_name, _kind, _text), do: %Style{modifiers: [:bold]}
-  defp segment_style(:tool_note, _kind, _text), do: @muted
+  # A segment's tag, as the model draws it, in a role (issue #228). The pink is for the
+  # three things that wait on a person — the pending line with the keys that answer it,
+  # an option ticked in a question, and "waiting for you" where the activity line would
+  # be — and a test holds every other tag the model emits to something else. The neon
+  # that is left is the accent, for what structures a reply; reasoning stays muted.
+  @doc false
+  @spec segment_style(atom() | Style.t(), atom(), String.t()) :: Style.t()
+  def segment_style(%Style{} = style, _kind, _text), do: style
+  def segment_style(:muted, _kind, _text), do: Theme.style(:muted)
+
+  def segment_style(tag, _kind, _text) when tag in [:code_rail, :quote_rail, :linenum, :fill],
+    do: Theme.style(:rail)
+
+  def segment_style(:code_lang, _kind, _text), do: Theme.style(:accent)
+  def segment_style(:code_inline, _kind, _text), do: Theme.style(:accent)
+  def segment_style(:strong, _kind, _text), do: Theme.style(nil, [:bold])
+
+  def segment_style(tag, :heading, _text) when tag in [:heading, :text],
+    do: Theme.style(:accent, [:bold])
+
+  def segment_style(:heading, _kind, _text), do: Theme.style(:accent, [:bold])
+  def segment_style(:bullet_marker, _kind, _text), do: Theme.style(:accent)
+  def segment_style(:quote, _kind, _text), do: Theme.style(nil, [:dim])
+  def segment_style(:system, _kind, _text), do: Theme.style(nil, [:dim])
+  def segment_style(:reasoning_marker, _kind, _text), do: Theme.style(:muted)
+  def segment_style(:reasoning_title, _kind, _text), do: Theme.style(:muted, [:dim])
+  def segment_style(:reasoning_body, _kind, _text), do: Theme.style(:muted, [:dim])
+  def segment_style(:pending, _kind, _text), do: Theme.style(:needs_you, [:bold])
+  def segment_style(:diff_add, _kind, _text), do: Theme.style(:added)
+  def segment_style(:diff_del, _kind, _text), do: Theme.style(:removed)
+  def segment_style(:diff_meta, _kind, _text), do: Theme.style(:hunk)
+  def segment_style(:user_marker, _kind, _text), do: Theme.style(:accent, [:bold])
+  def segment_style(:activity_glyph, _kind, _text), do: Theme.style(:working)
+
+  # `Model.activity_line/4` says this where a spinner would be when the agent is waiting
+  # on a person; it is the one activity line that is not the machine working.
+  def segment_style(:activity, _kind, "waiting for you" <> _),
+    do: Theme.style(:needs_you, [:bold])
+
+  def segment_style(:activity, _kind, _text), do: Theme.style(:working, [:dim])
+  def segment_style(:tool_glyph, _kind, text), do: glyph_style(text)
+  def segment_style(:tool_name, _kind, _text), do: Theme.style(nil, [:bold])
+  def segment_style(:tool_note, _kind, _text), do: Theme.style(:muted)
 
   # A wrapped tool head's later rows have no glyph to key off: draw them dim.
-  defp segment_style(kind, kind, _text) when kind in [:tool_ok, :tool_err, :tool_running],
-    do: %Style{modifiers: [:dim]}
+  def segment_style(kind, kind, _text) when kind in [:tool_ok, :tool_err, :tool_running],
+    do: Theme.style(nil, [:dim])
 
-  defp segment_style(_tag, _kind, _text), do: %Style{}
+  def segment_style(_tag, _kind, _text), do: Theme.style(nil)
 
-  defp glyph_style("✓"), do: %Style{fg: :green}
-  defp glyph_style("✗"), do: %Style{fg: :red, modifiers: [:bold]}
-  defp glyph_style(_), do: %Style{fg: :yellow}
+  defp glyph_style("✓"), do: Theme.style(:ok)
+  defp glyph_style("✗"), do: Theme.style(:error, [:bold])
+  defp glyph_style(_), do: Theme.style(:working)
 
   ## Side panel
 
@@ -1514,7 +1637,7 @@ defmodule Troupe.UI.TUI.View do
     notice = List.first(state.model.notices)
 
     hint =
-      case Enum.find_index(Model.windows(state.model), &(&1.state == :needs_input)) do
+      case Enum.find_index(Model.windows(state.model), &waits_on_you?/1) do
         nil -> ""
         i -> " · press #{i + 1} (or Enter, or click the window) to answer"
       end
@@ -1532,7 +1655,7 @@ defmodule Troupe.UI.TUI.View do
       end
 
     text =
-      "#{Model.attention_summary(state.model)}#{hint}#{goal_note(state.model)}#{loop_note(state.model)}" <>
+      "#{goal_note(state.model)}#{loop_note(state.model)}" <>
         " · #{watch}#{mcp}" <>
         " · #{state.session_id}" <>
         remote_note(state) <>
@@ -1541,9 +1664,36 @@ defmodule Troupe.UI.TUI.View do
     text =
       if state.quit_armed,
         do: text <> " · PRESS CTRL-C AGAIN TO QUIT",
-        else: text <> " · /help for settings and help · /quit or Ctrl-C twice exits"
+        else: text <> " · /help lists the commands · /settings · /quit or Ctrl-C twice exits"
 
-    {%Paragraph{text: text, style: %Style{fg: :dark_gray}}, rect}
+    # The count of windows that need you, and how to answer, are the needs-you status:
+    # in the reserved colour, on a line that is otherwise muted. Counted here from what
+    # is pending, as the strip counts it; the model's summary gives the rest.
+    waiting = Enum.count(Model.windows(state.model), &waits_on_you?/1)
+
+    parts =
+      state.model
+      |> Model.attention_summary()
+      |> String.split(", ")
+      |> Enum.reject(&(String.ends_with?(&1, "need input") or &1 == "idle"))
+
+    {needs, others} =
+      case {waiting, parts} do
+        {0, []} -> {"", "idle"}
+        {0, parts} -> {"", Enum.join(parts, ", ")}
+        {n, parts} -> {"#{n} need input", Enum.map_join(parts, &(", " <> &1))}
+      end
+
+    line =
+      [{needs, :needs_you}, {others, nil}, {hint, :needs_you}, {text, nil}]
+      |> Enum.reject(fn {part, _role} -> part == "" end)
+      |> Enum.map(fn
+        {part, nil} -> Span.new(part)
+        {part, role} -> Span.new(part, style: Theme.style(role, [:bold]))
+      end)
+      |> Line.new()
+
+    {%Paragraph{text: [line], style: Theme.style(:muted)}, rect}
   end
 
   # The session's goal, for as long as it has one, near the front of the line where a
@@ -1676,7 +1826,7 @@ defmodule Troupe.UI.TUI.View do
        block: %Block{
          title: title,
          borders: [:all],
-         border_style: %Style{fg: if(focused_cmd?, do: :white, else: :dark_gray)}
+         border_style: Theme.style(if(focused_cmd?, do: nil, else: :rail))
        },
        wrap: false
      }, rect}

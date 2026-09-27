@@ -115,7 +115,9 @@ jobs:
             troupe_core: [apps/troupe_core/**]
             troupe_gateway: [apps/troupe_gateway/**]
             troupe_daemon: [apps/troupe_daemon/**]
-            troupe_plane: [apps/troupe_plane/**]
+            # The front page's stylesheet and the TUI's palette are generated from the
+            # GUI's theme files (Decision 716), so a token changed there checks both.
+            troupe_plane: [apps/troupe_plane/**, clients/gui/docs/design/themes/**]
             troupe_operator: [apps/troupe_operator/**]
             troupe_worker: [apps/troupe_worker/**]
             troupe_a2a: [apps/troupe_a2a/**]
@@ -128,6 +130,7 @@ jobs:
               - scripts/build-images
             tui:
               - clients/tui/**
+              - clients/gui/docs/design/themes/**
               - scripts/locks-agree.exs
             gui:
               - clients/gui/**

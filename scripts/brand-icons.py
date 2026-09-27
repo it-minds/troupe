@@ -7,7 +7,7 @@ Writes `apps/troupe_plane/priv/static/brand/favicon.ico` (16/32/48) and
 `apple-touch-icon.png` (180). Everything else about the brand is SVG and is
 authored by hand next to them; only these two formats force a bitmap.
 
-The geometry is the mask as `docs/design/themes/*.tokens.json` defines it, at the
+The geometry is the mask as `clients/gui/docs/design/themes/*.tokens.json` defines it, at the
 three stroke weights the kits use: 3.4 at 16px with the eyes flattened to bars,
 3.0 above it. Colours are the Signal theme's dark values, because a favicon is
 pasted onto a browser chrome we do not control and the dark mark reads on both.

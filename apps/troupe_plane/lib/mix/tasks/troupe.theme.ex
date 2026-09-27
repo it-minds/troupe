@@ -2,7 +2,7 @@ defmodule Mix.Tasks.Troupe.Theme do
   @shortdoc "Generate the brand stylesheet from a theme kit's tokens"
 
   @moduledoc """
-  Turn one of `docs/design/themes/*.tokens.json` into
+  Turn one of `clients/gui/docs/design/themes/*.tokens.json` into
   `apps/troupe_plane/priv/static/theme.css`.
 
       mix troupe.theme
@@ -11,11 +11,17 @@ defmodule Mix.Tasks.Troupe.Theme do
 
   ## What this is, and what it is not
 
-  `docs/design/themes/THEMES.md` describes three themes over one token contract —
-  Footlight, Limelight and Signal — of which **Signal** is the one the platform wears in
-  public: neutral graphite with no blue cast, cyan for the machine working and magenta,
-  the reserved colour, for a person being asked to decide. This task writes that theme
+  `clients/gui/docs/design/themes/THEMES.md` describes four themes over one token
+  contract — Afterglow, the design, and Footlight, Limelight and Signal on its structure
+  — of which **Signal** is the one the front page wears: neutral graphite with no blue
+  cast, cyan for the machine working and magenta, the reserved colour, for a person
+  being asked to decide and nothing else. Afterglow spends its pink on links and the
+  accent too (root Decision 702), which the front page's rule — the reserved colour on
+  the mask and the approval figure alone — does not allow. This task writes the theme
   out as the stylesheet the plane's front page loads.
+
+  The themes are one set of files, the GUI's, which `pnpm tokens` and the TUI's
+  `mix troupe.palette` read as well (Decision 716); a copy here once drifted from them.
 
   It is a *sibling* of `mix troupe.admin.tokens`, not a replacement. The console reads
   `docs/design/admin/tokens.json`, whose status vocabulary is the fleet's — healthy,
@@ -41,10 +47,10 @@ defmodule Mix.Tasks.Troupe.Theme do
   alias Mix.Tasks.Troupe.Admin.Tokens
 
   @output_path Path.join(~w(apps troupe_plane priv static theme.css))
-  @themes_dir Path.join(~w(docs design themes))
+  @themes_dir Path.join(~w(clients gui docs design themes))
 
-  # The main theme. Changing this line changes what the front page wears; the other two
-  # kits stay in `docs/` and stay renderable through `--theme`.
+  # The main theme. Changing this line changes what the front page wears; the other
+  # three stay renderable through `--theme`.
   @default_theme "signal"
 
   @impl Mix.Task

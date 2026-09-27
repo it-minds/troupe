@@ -315,8 +315,19 @@ bullets, quotes and rules read as such, `inline code` and **bold** keep their
 emphasis without their markers, and a fenced code block gets a rule with its
 language on it, a rail down its left and full syntax highlighting. A file an
 agent read is shown as numbered source, its line numbers in their own column
-and its indentation intact. The same colours run through diffs (green and red)
-and tool calls (green, red or amber by outcome).
+and its indentation intact. The same colours run through diffs and tool calls,
+by outcome.
+
+Colours are Afterglow's, the GUI's design, generated from the same design tokens: cyan
+is the machine working, and pink is for one thing only, a window that needs you — its
+border and title (blinking, about once a second), the approval or question waiting in
+it, and the status line's count. Troupe uses as many colours as the terminal says it
+has: exact colours where `COLORTERM` is `truecolor` or `24bit` and in Windows Terminal,
+the nearest of 256 where `TERM` names `256color`, the terminal's own sixteen otherwise,
+and none under `NO_COLOR`. It never paints the background, so it sits on whatever theme
+the terminal already has; a light background reported in `COLORFGBG` gets the light
+values. `TROUPE_COLORS` overrides what the terminal says: `truecolor`, `256`, `16` or
+`none`, and `light` or `dark` (`TROUPE_COLORS=256,light`).
 
 The activated pane follows the tail until you scroll —
 PgUp/PgDn, Home/End, ↑/↓ (while nothing is typed) or the mouse wheel; the
