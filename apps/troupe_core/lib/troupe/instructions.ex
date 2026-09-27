@@ -260,13 +260,15 @@ defmodule Troupe.Instructions do
   end
 
   # The brief as `Troupe.Session.Memory` puts it in the prompt, with its own budget and
-  # status: listed here so one table says everything a prompt was read from.
+  # status: listed here so one table says everything a prompt was read from. Its path is
+  # asked for once, since that is a `git` call and this runs before every model call.
   defp brief(workspace, config) do
     path = Brief.path(workspace)
     max = memory_max_chars(config)
     {size, hash} = stat(path)
-    text = Brief.prompt_section(workspace, config)
-    overflow = Memory.overflow(Brief.brief(workspace), max_chars: max)
+    brief = Brief.read(path)
+    text = Brief.to_prompt(brief, config)
+    overflow = Memory.overflow(brief, max_chars: max)
 
     status =
       cond do

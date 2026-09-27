@@ -327,7 +327,8 @@ defmodule Troupe.Gateway.Dispatch do
   # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
   # resolve them, so a picker offers exactly what a `profile` may name.
   # The project brief, as a client shows it: status, where it is, when it was built and
-  # what it covers, and the text itself for a client that renders it.
+  # what it covers, and the text itself for a client that renders it. `refresh_due` is
+  # whether a client that refreshes it by itself should start a librarian now.
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
@@ -340,14 +341,25 @@ defmodule Troupe.Gateway.Dispatch do
          "path" => Troupe.Session.Memory.path(workspace),
          "built_at" => brief && brief.built_at && DateTime.to_iso8601(brief.built_at),
          "sections" => if(brief, do: Troupe.Memory.titles(brief), else: []),
-         "text" => brief && Troupe.Memory.render(brief)
+         "text" => brief && Troupe.Memory.render(brief),
+         "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config)
        }}
     end
   end
 
+  # With the record of a librarian's try at it, which is kept where the workspace's
+  # config keeps state; a config that cannot be read leaves that under the default.
   defp handle("memory.forget", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
-      :ok = workspace |> Path.expand() |> Troupe.Session.Memory.forget()
+      workspace = Path.expand(workspace)
+
+      state_dir =
+        case workspace_config(workspace) do
+          {:ok, config} -> config.state_dir
+          {:error, _error} -> nil
+        end
+
+      :ok = Troupe.Session.Memory.forget(workspace, state_dir)
       {:ok, %{"forgotten" => true}}
     end
   end
@@ -380,7 +392,7 @@ defmodule Troupe.Gateway.Dispatch do
             "tools" => server.tools,
             "error" => server.error,
             "layer" => to_string(server[:layer] || :config),
-            "source" => server[:source]
+            "source" => server[:source] && Troupe.Paths.display(server[:source])
           }
         end)
 
@@ -416,11 +428,13 @@ defmodule Troupe.Gateway.Dispatch do
 
   # The slash commands a client may offer for this session (Decision 698): the harness's
   # table, then one entry per primary agent, described by its definition. The agents are
-  # the ones `agents.list` answers for the session's workspace, so the two never disagree.
+  # the ones the running session was started with, which on a pod are its bundle's as the
+  # team's grant narrows them; a session that is asleep has them loaded for its workspace,
+  # as `agents.list` answers, rather than woken to be asked.
   defp handle("commands.list", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, session} <- lookup(session_id) do
-      agents = session.workspace |> Path.expand() |> Definitions.load() |> Definitions.primaries()
+      agents = session_id |> session_definitions(session) |> Definitions.primaries()
       {:ok, %{"commands" => Troupe.Commands.list(agents: agents)}}
     end
   end
@@ -1203,6 +1217,13 @@ defmodule Troupe.Gateway.Dispatch do
     case Troupe.get_session(session_id) do
       nil -> {:error, Error.new(:not_found, %{kind: "session", id: session_id})}
       session -> {:ok, session}
+    end
+  end
+
+  defp session_definitions(session_id, session) do
+    case Troupe.definitions(session_id) do
+      {:ok, definitions} -> definitions
+      {:error, :no_agent} -> session.workspace |> Path.expand() |> Definitions.load()
     end
   end
 

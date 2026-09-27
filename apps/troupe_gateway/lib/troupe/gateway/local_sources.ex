@@ -11,10 +11,13 @@ defmodule Troupe.Gateway.LocalSources do
   round; the TUI and the GUI hold a form each and never a path of their own.
 
   What goes back is what a panel shows and nothing a file keeps secret: a server's
-  environment travels as the names of its variables, never their values.
+  environment travels as the names of its variables, never their values. A path goes
+  back as a person on this platform writes it (`Troupe.Paths.display/1`), since a panel
+  prints it; the files themselves are read and written by the paths they had.
   """
 
   alias Troupe.MCP.{Import, Local, Trust}
+  alias Troupe.Paths
   alias Troupe.Protocol.Error
   alias Troupe.Session.MCP, as: LocalMCP
   alias Troupe.Skills
@@ -81,7 +84,7 @@ defmodule Troupe.Gateway.LocalSources do
     {:ok,
      %{
        "name" => result.name,
-       "path" => result.path,
+       "path" => Paths.display(result.path),
        "entry" => entry_json(result.entry),
        "warnings" => result.warnings
      }}
@@ -94,8 +97,11 @@ defmodule Troupe.Gateway.LocalSources do
          {:ok, workspace} <- workspace_of(params),
          {:ok, what} <- what_to_remove(params) do
       case Local.remove(scope, workspace, what) do
-        {:ok, result} -> {:ok, %{"path" => result.path, "removed" => result.removed}}
-        {:error, reason} -> invalid(reason)
+        {:ok, result} ->
+          {:ok, %{"path" => Paths.display(result.path), "removed" => result.removed}}
+
+        {:error, reason} ->
+          invalid(reason)
       end
     end
   end
@@ -162,7 +168,7 @@ defmodule Troupe.Gateway.LocalSources do
   defp imported({:ok, result}) do
     {:ok,
      %{
-       "path" => result.path,
+       "path" => Paths.display(result.path),
        "from" => result.from,
        "added" => result.added,
        "skipped" => Enum.map(result.skipped, &%{"name" => &1.name, "reason" => &1.reason}),
@@ -193,7 +199,7 @@ defmodule Troupe.Gateway.LocalSources do
     %{
       "name" => server.name,
       "layer" => to_string(server.layer),
-      "source" => server.source,
+      "source" => Paths.display(server.source),
       "transport" => if(is_binary(config[:url]), do: "http", else: "stdio"),
       "command" => config[:command],
       "args" => config[:args] || [],
@@ -214,7 +220,7 @@ defmodule Troupe.Gateway.LocalSources do
     %{
       "name" => name,
       "layer" => to_string(status[:layer] || :session),
-      "source" => status[:source]
+      "source" => status[:source] && Paths.display(status[:source])
     }
     |> Map.merge(status_json(status))
   end
@@ -249,8 +255,8 @@ defmodule Troupe.Gateway.LocalSources do
             "name" => &1.name,
             "description" => &1.description,
             "layer" => to_string(&1.layer),
-            "source" => &1.source,
-            "dir" => &1.dir,
+            "source" => Paths.display(&1.source),
+            "dir" => Paths.display(&1.dir),
             "linked" => &1.linked?
           }
         )
@@ -267,7 +273,7 @@ defmodule Troupe.Gateway.LocalSources do
         {:ok, result} ->
           {:ok,
            %{
-             "path" => result.path,
+             "path" => Paths.display(result.path),
              "from" => result.from,
              "added" => result.added,
              "skipped" => Enum.map(result.skipped, &%{"name" => &1.name, "reason" => &1.reason}),
@@ -285,8 +291,11 @@ defmodule Troupe.Gateway.LocalSources do
          {:ok, workspace} <- workspace_of(params),
          {:ok, what} <- what_to_remove(params) do
       case Skills.Local.remove(scope, workspace, what) do
-        {:ok, result} -> {:ok, %{"path" => result.path, "removed" => result.removed}}
-        {:error, reason} -> invalid(reason)
+        {:ok, result} ->
+          {:ok, %{"path" => Paths.display(result.path), "removed" => result.removed}}
+
+        {:error, reason} ->
+          invalid(reason)
       end
     end
   end

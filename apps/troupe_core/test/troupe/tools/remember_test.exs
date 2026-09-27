@@ -102,6 +102,62 @@ defmodule Troupe.Tools.RememberTest do
     assert Memory.status(context.workspace, config) == :stale
   end
 
+  # A run that built nothing is still a try. With nothing to show for it, a client with
+  # `memory_auto_refresh` started another librarian in every new session until one got
+  # through, and where the librarian writes nothing, in every session for good
+  # (Decision 713).
+  test "a librarian's run that failed holds off the next automatic refresh", context do
+    config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
+    write_file(context, ".troupe/memory.md", "## Overview\nWritten by hand.\n")
+    assert Memory.refresh_due?(context.workspace, config)
+
+    librarian!(context, [{:error, "the gateway is down"}])
+    assert Memory.status(context.workspace, config) == :stale
+    refute Memory.refresh_due?(context.workspace, config)
+  end
+
+  test "and so does one that wrote nothing where there was no brief", context do
+    config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
+    assert Memory.refresh_due?(context.workspace, config)
+
+    librarian!(context, [{:text, "Nothing here worth writing down."}])
+    assert Memory.status(context.workspace, config) == :absent
+    refute Memory.refresh_due?(context.workspace, config)
+  end
+
+  test "a try holds for memory_max_age_days, not past a build, and not past forget", context do
+    config = Troupe.Config.load(context.workspace, state_dir: context.state_dir)
+    days_ago = &DateTime.add(DateTime.utc_now(), -&1 * 86_400, :second)
+
+    # No brief, and a try eight days ago with the default of seven: due again.
+    :ok = Memory.attempted(context.workspace, context.state_dir, days_ago.(8))
+    assert Memory.refresh_due?(context.workspace, config)
+
+    :ok = Memory.attempted(context.workspace, context.state_dir, days_ago.(1))
+    refute Memory.refresh_due?(context.workspace, config)
+
+    # Built after that try and stale since, because the repository is not the one it
+    # counted: the try did not leave it stale, so it holds nothing off.
+    git_init!(context.workspace)
+    built = DateTime.to_iso8601(DateTime.utc_now())
+
+    write_file(
+      context,
+      ".troupe/memory.md",
+      "---\nbuilt_at: #{built}\nfiles: 100\n---\n\n## Overview\nOld.\n"
+    )
+
+    assert Memory.status(context.workspace, config) == :stale
+    assert Memory.refresh_due?(context.workspace, config)
+
+    # A try since the build holds; forgetting the brief forgets the try.
+    :ok = Memory.attempted(context.workspace, context.state_dir)
+    refute Memory.refresh_due?(context.workspace, config)
+    :ok = Memory.forget(context.workspace, context.state_dir)
+    assert Memory.status(context.workspace, config) == :absent
+    assert Memory.refresh_due?(context.workspace, config)
+  end
+
   test "stamping a brief as checked changes no word of it, and makes none", context do
     assert :ok = Memory.checked(context.workspace)
     refute File.exists?(Memory.path(context.workspace))
@@ -158,6 +214,11 @@ defmodule Troupe.Tools.RememberTest do
     after
       10_000 -> flunk("the librarian did not come to rest")
     end
+  end
+
+  defp git_init!(dir) do
+    {_, 0} = System.cmd("git", ["init", "-q", "--initial-branch", "main"], cd: dir)
+    File.write!(Path.join(dir, "README.md"), "# r\n")
   end
 
   defp ctx(session, context) do
