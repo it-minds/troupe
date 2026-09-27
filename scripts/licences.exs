@@ -74,7 +74,10 @@ defmodule Licences do
   #
   # The pull request that adds an entry is where a maintainer approves it. An entry names
   # the licence exactly as the package declares it, so a package that changes licence
-  # fails again; an entry that matches nothing any more fails too, and is deleted.
+  # fails again; an entry that matches nothing any more fails too, and is deleted. An
+  # entry for a package covers its builds for one platform (`lightningcss-win32-x64-msvc`
+  # under `lightningcss`), which no entry could name: which is installed depends on the
+  # machine, and one named for Windows would match nothing on CI.
   @exceptions [
     {:cargo, "cssparser", "MPL-2.0",
      "Tauri's HTML handling, through `tauri-utils`, in the desktop app. MPL-2.0 is copyleft " <>
@@ -89,8 +92,10 @@ defmodule Licences do
        "bundling a font with software; the font stays under it, unchanged and never sold on its own."},
     {:pnpm, "@fontsource/dm-mono", "OFL-1.1", "As `@fontsource/figtree`."},
     {:pnpm, "@fontsource/vt323", "OFL-1.1", "As `@fontsource/figtree`."},
-    {:pnpm, "caniuse-lite", "CC-BY-4.0",
-     "Browser-support data the GUI's build tools read. It does not ship."}
+    {:pnpm, "lightningcss", "MPL-2.0",
+     "Vite's CSS minifier from Vite 8, one of the GUI's build tools. It does not ship: the " <>
+       "bundle holds the stylesheet it wrote, not its code. MPL-2.0 is copyleft per file, " <>
+       "and we use it unmodified, as npm publishes it with its source."}
   ]
 
   # Licences that ask whoever ships a binary to say where its source is: MPL-2.0's section
@@ -212,7 +217,9 @@ defmodule Licences do
   defp excepted?(p), do: Enum.any?(@exceptions, &covers?(&1, p))
 
   defp covers?({ecosystem, name, licence, _why}, p),
-    do: ecosystem == p.ecosystem and name == p.name and licence == p.licence
+    do:
+      ecosystem == p.ecosystem and licence == p.licence and
+        (name == p.name or (not p.listed and String.starts_with?(p.name, name <> "-")))
 
   # -- Hex ------------------------------------------------------------------------------
 
@@ -290,7 +297,7 @@ defmodule Licences do
 
   defp own?(name), do: name == "troupe-gui" or String.starts_with?(name, "@troupe/")
 
-  # esbuild's, Rollup's and the Tauri CLI's binaries for one operating system and processor.
+  # esbuild's, Rolldown's and the Tauri CLI's binaries for one operating system and processor.
   # Which ones are installed depends on the machine, so they are checked and not listed.
   defp platform_build?(path) do
     manifest = path |> Path.join("package.json") |> File.read!() |> JSON.decode!()

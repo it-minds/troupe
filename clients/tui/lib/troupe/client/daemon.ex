@@ -196,9 +196,6 @@ defmodule Troupe.Client.Daemon do
   @impl true
   def cancel_branch(sid, path), do: route(sid, path, &Worker.cancel/1)
 
-  @impl true
-  def compact(_sid, _path), do: {:error, "the daemon compacts a session on its own"}
-
   # Dismissing this session's own window lets go of the session; dismissing a branch's
   # closes the window for good and leaves the session to the daemon, where the picker
   # still lists it.

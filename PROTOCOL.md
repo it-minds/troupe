@@ -921,8 +921,9 @@ because it sends a key to a URL of the caller's choosing.
 `anthropic` or `openai` (anything speaking Chat Completions), or `fake`, the scripted
 model a packaged build is tried with. An absent `api_key` keeps
 the saved one and `""` removes it; a `base_url` of null or `""` removes it; a model role
-set to null is removed. Keys it does not own are kept, but the file is rewritten, so
-comments are not: the file before the save is kept as `config.yaml.previous`. A file
+set to null is removed. Only the lines of the keys it sets change: every other line of
+the file, comments included, stays as it was, and the file before the save is kept as
+`config.yaml.previous`. A file
 that does not parse is never overwritten — the call fails with `invalid_params`. The
 next session reads the new file; nothing restarts.
 

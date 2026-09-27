@@ -30,9 +30,9 @@ and four gateway tests that spawn or `kill -9` a daemon. They pass on a Linux ru
 
 | Service | Image | Host port | Credentials | Notes |
 |---|---|---|---|---|
-| `postgres` | `postgres:16-alpine` | 25432 (5432 in the container); 25433 is mapped to 5433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; WAL archive volume chowned to 70:70 by a `busybox` init service (`docker-compose.yml:17-56`) |
-| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 29000 (S3), 29001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:77-88`) |
-| `openbao` | `openbao/openbao:2.4.1`, dev mode | 28200 | root token `troupe-dev-root` | `openbao-setup` enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) (`:109-122`); KV v2 is at `secret/` in dev mode |
+| `postgres` | `postgres:16-alpine` | 25432 (5432 in the container); 25433 is mapped to 5433 for the restored cluster `scripts/pitr-drill` starts | `troupe` / `troupe`, database `troupe_plane_dev` | `wal_level=replica`, `archive_mode=on`, `archive_timeout=60`, data checksums; WAL archive volume chowned to 70:70 by a `busybox` init service (`docker-compose.yml:21-61`) |
+| `minio` | `pgsty/minio:RELEASE.2026-08-04T00-00-00Z`, pinned by digest (Pigsty's community build; MinIO's own images are no longer public) | 29000 (S3), 29001 (console) | `troupe` / `troupe-secret` | `minio-setup` creates bucket `troupe-sessions` and enables versioning (`:87-98`) |
+| `openbao` | `openbao/openbao:2.4.1`, dev mode | 28200 | root token `troupe-dev-root` | dev mode keeps everything in memory, so the container enables `transit` and creates key `troupe-session-tokens` (`ecdsa-p256`) each time it starts, and is healthy once the key exists (`:105-136`); KV v2 is at `secret/` in dev mode |
 
 `config/config.exs:61-70` points the dev and test repos at `localhost:25432`
 (`troupe_plane_dev` / `troupe_plane_test`), `:86-96` points the object store at
@@ -55,7 +55,9 @@ mix check          # compile with warnings as errors, format, credo --strict, bo
 `scripts/dev-up` starts compose project `troupe-dev` on ports chosen not to collide with a
 Postgres or MinIO already on the machine, and below 32768 so no outgoing connection is
 handed one first; `scripts/dev-down` stops it (`--purge` drops the
-volumes).
+volumes). In between, the three services restart with Docker (`restart: unless-stopped`):
+after the WSL VM or the machine restarts they are back as soon as Docker is, OpenBao with
+its transit key written again, without running `scripts/dev-up`.
 
 | Service | Port | Credentials | Notes |
 |---|---|---|---|

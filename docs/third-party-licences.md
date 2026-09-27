@@ -35,7 +35,7 @@ the NIF's crates from its own Cargo.lock, the rest from a list kept in the scrip
 | pnpm | `@fontsource/figtree` | OFL-1.1 | The fonts the GUI ships (Decision 702: Figtree, DM Mono and VT323). OFL-1.1 allows bundling a font with software; the font stays under it, unchanged and never sold on its own. |
 | pnpm | `@fontsource/dm-mono` | OFL-1.1 | As `@fontsource/figtree`. |
 | pnpm | `@fontsource/vt323` | OFL-1.1 | As `@fontsource/figtree`. |
-| pnpm | `caniuse-lite` | CC-BY-4.0 | Browser-support data the GUI's build tools read. It does not ship. |
+| pnpm | `lightningcss` | MPL-2.0 | Vite's CSS minifier from Vite 8, one of the GUI's build tools. It does not ship: the bundle holds the stylesheet it wrote, not its code. MPL-2.0 is copyleft per file, and we use it unmodified, as npm publishes it with its source. |
 
 ## Elixir: the umbrella and the TUI (Hex)
 
@@ -101,7 +101,7 @@ tools included.
 
 ## The GUI (pnpm)
 
-132 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
+93 packages, from `clients/gui/pnpm-lock.yaml`, build and test tools included. A
 package's builds for one operating system and processor, such as esbuild's, are checked
 and not listed: each is under its parent's licence, and which of them are installed
 depends on the machine.
@@ -110,25 +110,6 @@ depends on the machine.
 |---|---|
 | `@asamuzakjp/css-color` | MIT |
 | `@asamuzakjp/dom-selector` | MIT |
-| `@babel/code-frame` | MIT |
-| `@babel/compat-data` | MIT |
-| `@babel/core` | MIT |
-| `@babel/generator` | MIT |
-| `@babel/helper-compilation-targets` | MIT |
-| `@babel/helper-globals` | MIT |
-| `@babel/helper-module-imports` | MIT |
-| `@babel/helper-module-transforms` | MIT |
-| `@babel/helper-plugin-utils` | MIT |
-| `@babel/helper-string-parser` | MIT |
-| `@babel/helper-validator-identifier` | MIT |
-| `@babel/helper-validator-option` | MIT |
-| `@babel/helpers` | MIT |
-| `@babel/parser` | MIT |
-| `@babel/plugin-transform-react-jsx-self` | MIT |
-| `@babel/plugin-transform-react-jsx-source` | MIT |
-| `@babel/template` | MIT |
-| `@babel/traverse` | MIT |
-| `@babel/types` | MIT |
 | `@bramus/specificity` | MIT |
 | `@csstools/color-helpers` | MIT-0 |
 | `@csstools/css-calc` | MIT |
@@ -140,11 +121,10 @@ depends on the machine.
 | `@fontsource/dm-mono` | OFL-1.1 |
 | `@fontsource/figtree` | OFL-1.1 |
 | `@fontsource/vt323` | OFL-1.1 |
-| `@jridgewell/gen-mapping` | MIT |
-| `@jridgewell/remapping` | MIT |
 | `@jridgewell/resolve-uri` | MIT |
 | `@jridgewell/sourcemap-codec` | MIT |
 | `@jridgewell/trace-mapping` | MIT |
+| `@oxc-project/types` | MIT |
 | `@rolldown/pluginutils` | MIT |
 | `@tauri-apps/api` | Apache-2.0 OR MIT |
 | `@tauri-apps/cli` | Apache-2.0 OR MIT |
@@ -152,10 +132,6 @@ depends on the machine.
 | `@tauri-apps/plugin-http` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-notification` | MIT OR Apache-2.0 |
 | `@tauri-apps/plugin-opener` | MIT OR Apache-2.0 |
-| `@types/babel__core` | MIT |
-| `@types/babel__generator` | MIT |
-| `@types/babel__template` | MIT |
-| `@types/babel__traverse` | MIT |
 | `@types/chai` | MIT |
 | `@types/deep-eql` | MIT |
 | `@types/estree` | MIT |
@@ -167,39 +143,27 @@ depends on the machine.
 | `@vitest/mocker` | MIT |
 | `@vitest/spy` | MIT |
 | `assertion-error` | MIT |
-| `baseline-browser-mapping` | Apache-2.0 |
 | `bidi-js` | MIT |
-| `browserslist` | MIT |
-| `caniuse-lite` | CC-BY-4.0 |
 | `chai` | MIT |
-| `convert-source-map` | MIT |
 | `css-tree` | MIT |
 | `csstype` | MIT |
 | `data-urls` | MIT |
-| `debug` | MIT |
 | `decimal.js` | MIT |
-| `electron-to-chromium` | ISC |
+| `detect-libc` | Apache-2.0 |
 | `entities` | BSD-2-Clause |
 | `es-module-lexer` | MIT |
 | `esbuild` | MIT |
-| `escalade` | MIT |
 | `estree-walker` | MIT |
 | `expect-type` | Apache-2.0 |
 | `fdir` | MIT |
-| `gensync` | MIT |
 | `html-encoding-sniffer` | MIT |
 | `is-potential-custom-element-name` | MIT |
-| `js-tokens` | MIT |
 | `jsdom` | MIT |
-| `jsesc` | MIT |
-| `json5` | MIT |
+| `lightningcss` | MPL-2.0 |
 | `lru-cache` | BlueOak-1.0.0 |
-| `lru-cache` | ISC |
 | `magic-string` | MIT |
 | `mdn-data` | CC0-1.0 |
-| `ms` | MIT |
 | `nanoid` | MIT |
-| `node-releases` | MIT |
 | `obug` | MIT |
 | `parse5` | MIT |
 | `picocolors` | ISC |
@@ -208,12 +172,10 @@ depends on the machine.
 | `punycode` | MIT |
 | `react` | MIT |
 | `react-dom` | MIT |
-| `react-refresh` | MIT |
 | `require-from-string` | MIT |
-| `rollup` | MIT |
+| `rolldown` | MIT |
 | `saxes` | ISC |
 | `scheduler` | MIT |
-| `semver` | ISC |
 | `siginfo` | ISC |
 | `source-map-js` | BSD-3-Clause |
 | `stackback` | MIT |
@@ -229,7 +191,6 @@ depends on the machine.
 | `typescript` | Apache-2.0 |
 | `undici` | MIT |
 | `undici-types` | MIT |
-| `update-browserslist-db` | MIT |
 | `vite` | MIT |
 | `vitest` | MIT |
 | `w3c-xmlserializer` | MIT |
@@ -240,7 +201,6 @@ depends on the machine.
 | `ws` | MIT |
 | `xml-name-validator` | Apache-2.0 |
 | `xmlchars` | MIT |
-| `yallist` | ISC |
 
 ## The desktop app (Cargo)
 
