@@ -1,0 +1,13 @@
+## Flags for the daemon's VM: `bin/troupe_daemon start`, and the `eval` behind every other
+## `troupe-daemon` command. A release is built on the platform it runs on.
+<%= if match?({:win32, _}, :os.type()) do %>
+## Windows (#231, root Decision 719). The VM shares a console, the one `troupe-daemon run`
+## was typed in or the one `troupe daemon run` runs in, and reads none of it.
+##
+## -noinput: no reader on the console. Nothing here reads standard input.
+## +Bc: Ctrl-C is not the break handler's. The wrapper gives this VM the null device for
+## standard input (`bin/troupe-daemon.cmd`), so +Bc leaves the console's mode alone, Ctrl-C
+## stays the signal it is at a prompt, and it ends this VM at once, with no menu to answer.
+-noinput
++Bc
+<% end %>

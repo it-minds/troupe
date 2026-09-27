@@ -28,7 +28,7 @@ defmodule Troupe.CLI.ConfigSetup do
   the desktop app or by hand, in which case nothing is asked.
   """
 
-  alias Troupe.CLI.{ModelConfig, Prompt}
+  alias Troupe.CLI.{ModelConfig, Prompt, Terminal}
   alias Troupe.CLI.Remote, as: RemoteCLI
   alias Troupe.Client.Daemon.Link
   alias Troupe.Protocol.Client, as: Protocol
@@ -463,10 +463,9 @@ defmodule Troupe.CLI.ConfigSetup do
     }
   end
 
-  defp terminal? do
-    opts = :io.getopts(:standard_io)
-    Keyword.get(opts, :stdin) == true and Keyword.get(opts, :stdout) == true
-  end
+  # Standard output as the person sees it, which in the binary on Linux and macOS is the
+  # launcher's, not the VM's (`Troupe.CLI.Terminal`).
+  defp terminal?, do: Terminal.stdin?() and Terminal.stdout?()
 
   # On Windows the binary's VM reads no line the way the console edits one, so a question
   # there reads it key by key (`Troupe.CLI.Prompt` says why).
