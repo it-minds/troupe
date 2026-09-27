@@ -34,7 +34,7 @@ dependency up, never silence.
 | a second BEAM node | the plane's cluster test | skipped, flunks |
 | `bubblewrap` | the sandbox tests | skipped, flunks |
 | `python3` | the conformance test | skipped, passes |
-| `inotifywait` / `mac_listener` | the native half of the watcher tests | passes without asserting; polling is always tested |
+| `inotifywait` / `mac_listener` | the native half of the watcher tests; two gateway `FilesTest` tests (an event inside a second, a deletion) | watcher: passes without asserting, polling is always tested; `FilesTest`: skipped, saying so, except under `CI=true`, where they fail |
 | `zig` | anything that runs `shell` | `:reaper_missing` |
 
 `scripts/dev-up` provides the first four; [local-setup.md](local-setup.md). Suites isolate
