@@ -50,8 +50,15 @@ the #85 fixer (PR #88), 2026-09-22.
 - The TUI's `FakeRemote` answers `input.send` with the dotted `input.queued` and
   `input.accepted` and never a `user_input`, so the remote session tests don't exercise
   the real sequence.
+- Under full load, core `WatcherTest` "poll backend a gitignored file's marker is ignored"
+  and `ReadBranchTest` (an `Index` call timeout) fail now and then; both pass alone.
+- The gateway suite prints `erl_child_setup: failed with error 32 on line 284` a few
+  times, with or without failures (probably a port child writing to a closed pipe).
+- `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
+  sessions it creates. They live in a second daemon OS process, so they probably don't
+  leak into the test VM the way the two fixed in chunk 6 did (unconfirmed).
 
-Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 5.
+Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 6.
 
 ### D9 - The admin docs describe a `subject_claim` setting the plane does not have (unconfirmed, medium)
 
@@ -114,6 +121,82 @@ agent whose subprocess exits once; count its task starts. Found by the fixer of 
 
 Found by the chunk 5 fixers, 2026-09-26.
 
+### D27 - The TUI never draws `read_file`'s numbered body (medium)
+
+`apps/troupe_core/lib/troupe/tools/read_file.ex` writes each line as `N<tab>line`, while
+`split_number/1` in `clients/tui/lib/troupe/ui/tui/model.ex` expects a number
+right-aligned in five columns. The parse fails, so every file renders raw with its number
+inline, and the numbered, highlighted body (Decision 52) never appears. A fix: split at
+the tab stop the number's width implies. The comment on `@gutter_width` there also says
+the tab expands to an 8-column stop; `@tab` is 4. Found by the #182 fixer (PR #209),
+2026-09-26.
+
+### D28 - Writing a setting drops the config file's comments (medium)
+
+`Troupe.Config.Yaml` has no comment-preserving edit for a scalar (`edit_list/4` handles
+lists only), so the TUI settings screen, `ModelSettings.write` and the budget question's
+"this workspace" answer re-render the whole `config.yaml`. The file before the write is
+kept as `config.yaml.previous`. A follow-up to #122's scope-aware writes. Found by the
+#183 fixer (PR #213), 2026-09-26.
+
+### D29 - A pod's command palette lists the built-in agents, not the bundle's (low)
+
+On a worker, `commands.list` (`handle("commands.list")` in
+`apps/troupe_gateway/lib/troupe/gateway/dispatch.ex`) loads agent definitions with
+`Definitions.load(workspace)` alone, without the `bundle_dir`, `entitled` and
+`acp_agents` options `Troupe.Session` passes. So a pod's palette shows `priv/agents`
+and leaves out the bundle's agents, against Decision 698. Small in practice: agent rows
+are `availability: local` and show greyed on a remote session. Found by the fixer of
+PR #217, 2026-09-27.
+
+### D30 - Two sources for the brand's assets (low)
+
+- `docs/design/themes/` (read by `mix troupe.theme` for the plane's front page; default
+  Footlight) and `clients/gui/docs/design/themes/` (read by `pnpm tokens`; default
+  Afterglow since Decision 702) are near-copies that drift.
+- `scripts/brand-icons.py` (Pillow) draws the plane's `favicon.ico` and
+  `apple-touch-icon.png` with a second rasteriser; `pnpm icons` (PR #210) could draw them
+  from the same mask so the plane and the desktop app match.
+- `clients/gui/docs/design/*.dc.html` reference `./support.js`, which is only in
+  `docs/design/themes/` and `docs/design/admin/`.
+
+Found by the #159 and #52 fixers (PRs #210, #211), 2026-09-26.
+
+### D31 - The dev stack doesn't come back after a WSL restart (low)
+
+`dev/docker-compose.yml` sets no restart policy, so after the WSL VM restarts (an idle
+shutdown, `wsl --shutdown`, a reboot) the three containers stay `Exited`. Suites then fail
+in ways that look like a bug: gateway `PrivateTest` with `econnrefused`, plane and worker
+tests unable to reach Postgres. OpenBao runs in memory, so its transit key and the bucket
+are gone too. `scripts/dev-up` brings everything back and re-seeds; `restart:
+unless-stopped` on the three services would save the step. Found by the coordinator,
+2026-09-27.
+
+### D32 - Small leftovers from the 0.6.0 work (low)
+
+- `/compact` does nothing in the TUI: `Client.Daemon.compact/2` and
+  `Client.Remote.compact/2` only return a sentence saying the other side compacts on its
+  own. The command table describes it truthfully; it could go.
+- `Settings.help_sections/0` (`clients/tui/lib/troupe/settings.ex`) is prose that points
+  at `/help` and `/settings` and can drift from the command table.
+- The TUI's `Model` folds `:mcp_status` events that nothing emits.
+- On Windows, `config.get`'s `path`, `Troupe.Config.user_path/0` and
+  `Troupe.MCP.Local.user_path/1` return mixed separators (`...\troupe/config.yaml`) when
+  `TROUPE_CONFIG_HOME` has backslashes, and the GUI's Models panel prints it raw;
+  `Troupe.Paths.display` exists for this.
+- The headless printer answers the budget question with
+  `Client.approve(sid, budget_id, :deny)`, an approval call on a question id.
+- `Troupe.Instructions.brief/2` finds the repository root with git three times per model
+  call.
+- The librarian's prompt (`apps/troupe_core/priv/agents/librarian.md`, step 1) still
+  copies `AGENTS.md`, `CLAUDE.md` and `copilot-instructions.md` into the brief, which now
+  renders after those files themselves (#123, PR #216).
+- On a pod the plane always sends terms, so `contract/1` sets `budget_asks: false` for
+  every placed session and the budget question never fires there. If pods should ask,
+  the terms need their own switch.
+
+Found by the chunk 6 fixers, 2026-09-26/27.
+
 ## Taken
 
 | Defect | Taken by |
@@ -147,6 +230,8 @@ Found by the chunk 5 fixers, 2026-09-26.
 | The TUI shows every typed line twice | #181, PR #194 |
 | A brief with only notes stays stale, so every session starts the librarian (found by the D8 fixer) | PR #201 |
 | `install-local.ps1` fails while a TUI is running, and `verify-local.ps1` accepts any daemon (found in chunk 5) | PR #200 |
+| A session's own token is refused `commands.list` on a worker (found by the #123 fixer) | PR #217 |
+| Two gateway tests left a session running, so later tests saw it (found by the #119 fixer and the coordinator) | PR #220, PR #218 |
 
 ## Checked and not a defect
 
