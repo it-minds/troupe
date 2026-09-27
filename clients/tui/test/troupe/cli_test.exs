@@ -407,6 +407,22 @@ defmodule Troupe.CLITest do
     assert contents(io) =~ "root> exit 1: the agent ended refused"
   end
 
+  # The budget question is a question (Decision 120), and headless mode answers it
+  # through the question path with its `stop` option: an approval sent on its id was
+  # answered by nothing (defects D32).
+  test "headless printer stops at the budget question and exits 1" do
+    script = [{:tools, [{"todo_read", %{}}]}, {:tools, [{"todo_read", %{}}]}, {:text, "done"}]
+    {sid, _, _} = start_session!(script: script, config: %{"max_turns" => 1})
+    {io, _} = printer!(sid)
+
+    say!(sid, "go")
+    assert_receive {:rest, 1}, 15_000
+    assert %{data: %{decision: "deny"}} = await_event("root", :budget_ask_answered, 5_000)
+    out = contents(io)
+    assert [_once] = Regex.scan(~r/budget exhausted.*; headless mode stops here/, out)
+    assert out =~ "root> exit 1: the agent ended budget_exhausted"
+  end
+
   # A librarian on a repository with no brief is a branch of its own, window `librarian-1`,
   # and its events reach a printer beside root's: `troupe run` without `--headless` starts
   # one, and so does `/memory refresh` from anyone attached. It coming to rest is not the
