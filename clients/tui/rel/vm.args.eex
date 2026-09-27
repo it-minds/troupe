@@ -1,0 +1,15 @@
+## Flags for the VM inside the troupe binary, rendered once per Burrito target.
+<%= if String.starts_with?(System.get_env("BURRITO_TARGET", ""), "windows") do %>
+## Windows (#231, TUI Decision 128). The console belongs to troupe, not to the VM, and
+## Burrito's launcher in front of the VM dies of any Ctrl-C the console signals, whatever
+## the VM does: the VM must never be what is left behind in the shell's console.
+##
+## -noinput: no reader on the console. The terminal UI reads its own keys, and a reader
+## beside it takes some of them; a question `troupe config` asks starts one
+## (`Troupe.CLI.Prompt`).
+## +Bc: while troupe runs, the console makes a key of Ctrl-C, not a signal, so nothing
+## dies of it and nothing opens the break handler's menu; the terminal UI reads it. A
+## Ctrl-C another program signals ends the VM, as it ends the launcher.
+-noinput
++Bc
+<% end %>
