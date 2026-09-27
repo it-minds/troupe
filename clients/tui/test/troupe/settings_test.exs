@@ -59,6 +59,21 @@ defmodule Troupe.SettingsTest do
       refute Settings.mouse?(off)
     end
 
+    # The help beside the settings named commands in prose that could drift from the
+    # table the palette is drawn from (defects D32); its commands are the table's now.
+    test "the help's commands are the setup section of the command table" do
+      table = Troupe.Commands.list()
+      lines = Settings.help_lines(table)
+
+      for %{"section" => "setup", "name" => name, "summary" => summary} <- table do
+        assert Enum.any?(lines, &(&1 =~ "/#{name} " and String.ends_with?(&1, summary))), name
+      end
+
+      assert "Setup commands" in lines
+      refute "Setup commands" in Settings.help_lines([])
+      assert "Keys" in Settings.help_lines([])
+    end
+
     test "unknown keys are reported, not raised" do
       assert :error = Settings.fetch("nope")
       assert {:error, msg} = Settings.persist(tmp_workspace(), "nope", 1)

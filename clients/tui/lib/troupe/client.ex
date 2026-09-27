@@ -95,7 +95,6 @@ defmodule Troupe.Client do
   @callback start_loop(session_id(), pos_integer() | nil) :: :ok | {:error, term()}
   @callback stop_loop(session_id()) :: :ok | {:error, term()}
   @callback cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
-  @callback compact(session_id(), String.t()) :: :ok | {:error, term()}
   @callback dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   @callback merge(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback discard(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
@@ -236,9 +235,6 @@ defmodule Troupe.Client do
 
   @spec cancel_branch(session_id(), String.t()) :: :ok | {:error, term()}
   def cancel_branch(sid, path), do: impl(sid).cancel_branch(sid, path)
-
-  @spec compact(session_id(), String.t()) :: :ok | {:error, term()}
-  def compact(sid, path), do: impl(sid).compact(sid, path)
 
   @spec dismiss(session_id(), String.t()) :: :ok | {:error, term()}
   def dismiss(sid, path), do: impl(sid).dismiss(sid, path)
