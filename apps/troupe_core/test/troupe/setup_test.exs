@@ -231,8 +231,8 @@ defmodule Troupe.SetupTest do
 
       {:ok, _gateway} = Setup.answer(gateway, "models", %{"default" => "qwen3"})
       written = File.read!(ctx.config_file)
-      assert written =~ ~s(provider: "openai")
-      assert written =~ ~s(base_url: "http://127.0.0.1:1/v1")
+      assert written =~ "provider: openai\n"
+      assert written =~ "base_url: http://127.0.0.1:1/v1\n"
       refute written =~ "sk-ant-old"
     end
 

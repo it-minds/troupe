@@ -340,13 +340,13 @@ defmodule Troupe.Config do
   defdelegate drop_spellings(map, path), to: Migrate
 
   @doc """
-  Set one top-level key in a config file and answer the path written: the file's other
-  keys are kept, the key's old spellings dropped, and the file as it was kept beside it
-  as `.previous`, all through `write_file/2`, the writer every settings screen uses. A
-  file that is not YAML is left alone and the reason answered; a missing one is made.
+  Set one top-level key in a config file and answer the path written: the key's old
+  spellings dropped, and the file as it was kept beside it as `.previous`, all through
+  `write_file/2`, the writer every settings screen uses. A file that is not YAML is left
+  alone and the reason answered; a missing one is made.
 
-  The map is rendered again, so comments in a hand-written file do not survive; the
-  `.previous` copy is where they went.
+  The file is edited, not rewritten: the key's own line changes, or is added after the
+  last key, and every other line, comments included, stays as it was.
   """
   @spec write_key(Path.t(), [String.t()], term()) :: {:ok, Path.t()} | {:error, String.t()}
   def write_key(path, [key] = key_path, value) do

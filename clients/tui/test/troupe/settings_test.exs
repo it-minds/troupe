@@ -94,7 +94,7 @@ defmodule Troupe.SettingsTest do
       refute Settings.mouse?(Config.load(ws))
     end
 
-    test "writes the new spelling only, replacing the old one, with version and the schema header" do
+    test "writes the new spelling only, replacing the old one, and leaves the other keys as they were" do
       ws =
         workspace_with_config(
           "# hand-written\nmodel: old-default\nsmall_model: old-cheap\nmax_turns: 5\n"
@@ -102,18 +102,51 @@ defmodule Troupe.SettingsTest do
 
       {:ok, path} = Settings.persist(ws, "models.default", "gateway/opus")
 
-      {:ok, written} = YamlElixir.read_from_file(path)
-      assert written["models"] == %{"default" => "gateway/opus", "cheap" => "old-cheap"}
-      refute Map.has_key?(written, "model")
-      refute Map.has_key?(written, "small_model")
-      assert written["version"] == 1
-      assert File.read!(path) =~ "# yaml-language-server: $schema="
+      # The setting's old spelling goes and its new one comes; `small_model` is another
+      # setting's, so it stays as written, and loads with its warning until a migrate.
+      assert File.read!(path) ==
+               "# hand-written\nsmall_model: old-cheap\nmax_turns: 5\nmodels:\n  default: gateway/opus\n"
+
       assert File.read!(path <> ".previous") =~ "# hand-written"
 
       config = Config.load(ws)
 
-      assert {config.model, config.small_model, config.max_turns, config.warnings} ==
-               {"gateway/opus", "old-cheap", 5, []}
+      assert {config.model, config.small_model, config.max_turns} ==
+               {"gateway/opus", "old-cheap", 5}
+
+      assert [warning] = config.warnings
+      assert warning =~ "small_model"
+    end
+
+    test "a save changes the setting's own line, and the file's comments stay" do
+      text = """
+      # the team's settings
+
+      models:
+        default: gateway/glm-5.2   # the one we use
+        cheap: gateway/qwen        # for summaries
+
+      max_turns: 40   # raised in the spring
+      """
+
+      ws = workspace_with_config(text)
+
+      {:ok, path} = Settings.persist(ws, "max_turns", 60)
+      assert File.read!(path) == String.replace(text, "max_turns: 40 ", "max_turns: 60 ")
+
+      {:ok, _} = Settings.persist(ws, "models.default", "gateway/opus")
+
+      assert File.read!(path) ==
+               text
+               |> String.replace("max_turns: 40 ", "max_turns: 60 ")
+               |> String.replace("default: gateway/glm-5.2 ", "default: gateway/opus ")
+
+      # "default" takes the cheap model's override off: its line goes, and only that one.
+      {:ok, _} = Settings.persist(ws, "models.cheap", nil)
+      refute File.read!(path) =~ "cheap"
+
+      assert File.read!(path) =~
+               "# the team's settings\n\nmodels:\n  default: gateway/opus   # the one we use\n\n"
     end
 
     test "writes auto_approve to the user's file while the workspace is not trusted" do
