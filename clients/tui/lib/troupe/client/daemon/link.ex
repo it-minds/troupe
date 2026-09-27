@@ -102,7 +102,7 @@ defmodule Troupe.Client.Daemon.Link do
   def handle_call({:call, method, params}, _from, state) do
     case ensure_client(state) do
       {:ok, state} ->
-        case Client.call(state.client, method, params, @call_timeout) do
+        case request(state.client, method, params) do
           {:ok, result} -> {:reply, {:ok, result}, state}
           {:error, %{} = error} -> {:reply, {:error, error_message(error)}, state}
           {:error, reason} -> {:reply, {:error, reason}, state}
@@ -126,6 +126,16 @@ defmodule Troupe.Client.Daemon.Link do
   end
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  # A daemon that has not answered in time has answered too: the caller gets an error it
+  # can print, and this process, the one link to the daemon, lives on for the next call
+  # rather than dying of the caller's (#231).
+  defp request(client, method, params) do
+    Client.call(client, method, params, @call_timeout)
+  catch
+    :exit, {:timeout, _} ->
+      {:error, "the daemon did not answer #{method} within #{div(@call_timeout, 1_000)} s"}
+  end
 
   ## Finding or starting the daemon
 
@@ -170,10 +180,10 @@ defmodule Troupe.Client.Daemon.Link do
   end
 
   defp ensure_client(state) do
-    with {:ok, state} <- ensure_daemon(state),
-         {address, port} = Endpoint.connect_args(state.endpoint),
-         {:ok, client} <-
-           Client.connect(
+    with {:ok, state} <- ensure_daemon(state) do
+      {address, port} = Endpoint.connect_args(state.endpoint)
+
+      case Client.connect(
              address: address,
              port: port,
              token: state.endpoint.token,
@@ -181,10 +191,15 @@ defmodule Troupe.Client.Daemon.Link do
              client_info: %{"name" => "troupe", "version" => version()},
              capabilities: %{"blobs" => true}
            ) do
-      {:ok, %{state | client: client, error: nil}}
-    else
-      {:error, reason, state} -> {:error, reason, state}
-      {:error, reason} -> {:error, reason, %{state | error: reason}}
+        {:ok, client} ->
+          {:ok, %{state | client: client, error: nil}}
+
+        # A daemon whose socket answers and whose protocol does not, a wedged one above
+        # all: which daemon, in words, is what a person can act on (#231).
+        {:error, reason} ->
+          message = "no connection to the daemon at #{Endpoint.describe(state.endpoint)}"
+          {:error, "#{message}: #{inspect(reason)}", %{state | error: reason}}
+      end
     end
   end
 

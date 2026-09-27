@@ -240,7 +240,8 @@ the model called `finish`. Nobody is there to answer an approval, so it is refus
 the config, which `--auto-approve`, `--watch` and `--full-send` beat only when given. A
 headless run starts no librarian: the project brief is refreshed automatically only for
 a session a person opens, in a git repository, with a model to ask
-(`memory_auto_refresh`). The exit code says how the run ended, for scripts and CI:
+(`memory_auto_refresh`), and not again within `memory_max_age_days` of a librarian that
+built nothing. The exit code says how the run ended, for scripts and CI:
 
 | code | the run |
 |---|---|
@@ -248,6 +249,7 @@ a session a person opens, in a git repository, with a model to ask
 | `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; the session could not start; or the connection to the daemon went and did not come back within a minute. The last line says which |
 | `2` | never started: the command line did not parse |
 | `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
+| `130` | was interrupted with Ctrl-C |
 
 The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` without
 `--headless`, with standard output sent to a file or a pipe, say so in one line and exit
@@ -314,8 +316,19 @@ bullets, quotes and rules read as such, `inline code` and **bold** keep their
 emphasis without their markers, and a fenced code block gets a rule with its
 language on it, a rail down its left and full syntax highlighting. A file an
 agent read is shown as numbered source, its line numbers in their own column
-and its indentation intact. The same colours run through diffs (green and red)
-and tool calls (green, red or amber by outcome).
+and its indentation intact. The same colours run through diffs and tool calls,
+by outcome.
+
+Colours are Afterglow's, the GUI's design, generated from the same design tokens: cyan
+is the machine working, and pink is for one thing only, a window that needs you — its
+border and title (blinking, about once a second), the approval or question waiting in
+it, and the status line's count. Troupe uses as many colours as the terminal says it
+has: exact colours where `COLORTERM` is `truecolor` or `24bit` and in Windows Terminal,
+the nearest of 256 where `TERM` names `256color`, the terminal's own sixteen otherwise,
+and none under `NO_COLOR`. It never paints the background, so it sits on whatever theme
+the terminal already has; a light background reported in `COLORFGBG` gets the light
+values. `TROUPE_COLORS` overrides what the terminal says: `truecolor`, `256`, `16` or
+`none`, and `light` or `dark` (`TROUPE_COLORS=256,light`).
 
 The activated pane follows the tail until you scroll —
 PgUp/PgDn, Home/End, ↑/↓ (while nothing is typed) or the mouse wheel; the

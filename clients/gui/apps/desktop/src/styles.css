@@ -2259,6 +2259,12 @@ details.advanced > summary {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+/* The marker and where it runs keep their line; the title gives way first. */
+.launcher .recent .pill,
+.launcher .recent .kind {
+  flex: none;
+  white-space: nowrap;
+}
 .launcher .recent .kind {
   font: var(--t-micro);
   letter-spacing: var(--tracking-micro);

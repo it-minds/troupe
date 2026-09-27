@@ -17,7 +17,7 @@ import type { ConnectOptions, ConnectionHooks } from "./connection.js";
 import type { ConfigSetParams, ModelConfig, ModelDiscovery, ModelsParams } from "./config.js";
 import type { FleetRow, FleetSource } from "./fleet.js";
 import type { SetupAnswer, SetupFlow, SetupStepName } from "./setup.js";
-import type { EventEnvelope, Principal, SessionCreateResult, ToolInvoke } from "./types.js";
+import type { EventEnvelope, Principal, SessionCreateResult, ToolInvoke, TroupeEvent } from "./types.js";
 
 /** What `daemon.json` says about the WebSocket the daemon serves for graphical clients. */
 export interface DaemonEndpoint {
@@ -144,6 +144,9 @@ export interface DaemonHooks {
   onToolInvoke?: (invoke: ToolInvoke) => Promise<unknown>;
 }
 
+/** Somebody watching one session's events alongside its view's owner. */
+type Listener = (e: TroupeEvent) => void;
+
 /** `ws://127.0.0.1:<port>/v1/socket` — loopback, never a name that could resolve away. */
 export function daemonUrl(endpoint: Pick<DaemonEndpoint, "port">): string {
   return `ws://127.0.0.1:${endpoint.port}/v1/socket`;
@@ -171,6 +174,9 @@ export class DaemonClient {
   // `close` unsubscribed a view somebody else was still reading, and what they read
   // from then on was nothing.
   private readonly holders = new Map<string, number>();
+  // The listeners handed to `open`, per session, each with how to stop it: null while its
+  // view is still being made, and the listener waits to be attached before `subscribe`.
+  private readonly listening = new Map<string, Map<Listener, (() => void) | null>>();
   private readonly hooks: DaemonHooks;
   private opening: Promise<TroupeConnection> | null = null;
 
@@ -269,12 +275,18 @@ export class DaemonClient {
    * The view is registered before `subscribe` is sent, so an event that arrives while
    * the subscription is being acknowledged is folded rather than dropped. A second
    * caller joins the same view — its `hooks` are not installed, since the view already
-   * has an owner; use `SessionView.listen` to watch alongside — and each caller owes one
-   * `close`.
+   * has an owner — and each caller owes one `close`.
+   *
+   * `listener` watches alongside whoever owns the view, and is attached before anything
+   * is sent: the replay can arrive in the same read as `subscribe`'s answer, before this
+   * resolves, and a caller that listened only once it had the view would miss the whole
+   * history. It is given back to `close`. A caller that joins a view already open hears
+   * from then on.
    */
-  async open(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2] = {}): Promise<SessionView> {
+  async open(sessionId: string, hooks: ConstructorParameters<typeof SessionView>[2] = {}, listener?: Listener): Promise<SessionView> {
     this.holders.set(sessionId, (this.holders.get(sessionId) ?? 0) + 1);
     const existing = this.views.get(sessionId);
+    if (listener) this.listenersOf(sessionId).set(listener, existing ? existing.listen(listener) : null);
     if (existing) return existing;
     const pending = this.openingViews.get(sessionId);
     if (pending) return pending;
@@ -282,6 +294,9 @@ export class DaemonClient {
     const opening = (async () => {
       const conn = await this.connection();
       const view = new SessionView(conn, sessionId, hooks);
+      // Everybody who asked while the socket was being dialled, before the first event.
+      const listeners = this.listenersOf(sessionId);
+      for (const [l, stop] of listeners) if (!stop) listeners.set(l, view.listen(l));
       this.views.set(sessionId, view);
       await view.subscribe(0);
       return view;
@@ -291,17 +306,31 @@ export class DaemonClient {
     return opening;
   }
 
+  private listenersOf(sessionId: string): Map<Listener, (() => void) | null> {
+    const found = this.listening.get(sessionId);
+    if (found) return found;
+    const made = new Map<Listener, (() => void) | null>();
+    this.listening.set(sessionId, made);
+    return made;
+  }
+
   /**
-   * Let go of a session. The view is unsubscribed when the last holder does; the socket
-   * stays, because other sessions are on it.
+   * Let go of a session, and stop `listener` if `open` was given one. The view is
+   * unsubscribed when the last holder does; the socket stays, because other sessions
+   * are on it.
    */
-  async close(sessionId: string): Promise<void> {
+  async close(sessionId: string, listener?: Listener): Promise<void> {
+    if (listener) {
+      this.listening.get(sessionId)?.get(listener)?.();
+      this.listening.get(sessionId)?.delete(listener);
+    }
     const left = (this.holders.get(sessionId) ?? 1) - 1;
     if (left > 0) {
       this.holders.set(sessionId, left);
       return;
     }
     this.holders.delete(sessionId);
+    this.listening.delete(sessionId);
     const view = this.views.get(sessionId);
     if (!view) return;
     this.views.delete(sessionId);
@@ -317,6 +346,7 @@ export class DaemonClient {
   disconnect(): void {
     this.views.clear();
     this.holders.clear();
+    this.listening.clear();
     this.conn?.close();
     this.conn = null;
   }

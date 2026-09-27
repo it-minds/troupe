@@ -265,9 +265,12 @@ defmodule Troupe.UI.TUI.Server do
 
   # Test seam: render synchronously regardless of dirtiness.
   # A fleet `summary` updates the HQ list in place; with HQ closed there is
-  # nothing to update and the message is dropped.
-  def handle_info({:troupe_fleet, _plane, session_id, diff}, %{hq: hq} = state) when hq != nil,
-    do: {:noreply, %{state | hq: HQ.summary(hq, session_id, diff), dirty: true}, render?: false}
+  # nothing to update and the message is dropped. It asks for a frame itself: with
+  # every window at rest nothing else is ticking.
+  def handle_info({:troupe_fleet, _plane, session_id, diff}, %{hq: hq} = state) when hq != nil do
+    state = %{state | hq: HQ.summary(hq, session_id, diff), dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
 
   def handle_info({:troupe_fleet, _plane, _session_id, _diff}, state),
     do: {:noreply, state, render?: false}
@@ -667,7 +670,7 @@ defmodule Troupe.UI.TUI.Server do
   # 698); this is only which of them the TUI implements, and the suite holds the two
   # equal, so a command added to the table without a clause here fails a test rather
   # than being dispatched as an agent.
-  @builtins ~w(cancel dismiss compact merge discard goal loop sessions hq observer files
+  @builtins ~w(cancel dismiss merge discard goal loop sessions hq observer files
                upload copy memory context watch settings models mcp skills help agents worktree quit)
 
   @doc false
@@ -762,15 +765,6 @@ defmodule Troupe.UI.TUI.Server do
 
   defp builtin("dismiss", _args, state, target),
     do: with_target(target.(), &Client.dismiss(state.session_id, &1))
-
-  defp builtin("compact", _args, state, target) do
-    with_target(target.(), fn path ->
-      case Client.compact(state.session_id, path) do
-        :ok -> {:notice, "compacting #{path}"}
-        other -> other
-      end
-    end)
-  end
 
   defp builtin("merge", _args, state, target),
     do: with_target(target.(), &Client.merge(state.session_id, &1))
@@ -2021,7 +2015,7 @@ defmodule Troupe.UI.TUI.Server do
   ## Helpers
 
   defp activate(state, path, agent \\ nil) do
-    model = %{state.model | windows: Map.update!(state.model.windows, path, &%{&1 | badge: false})}
+    model = Model.seen(state.model, path)
     agent = if agent == path, do: nil, else: agent
 
     %{
@@ -2240,6 +2234,14 @@ defmodule Troupe.UI.TUI.Server do
         _ -> model
       end
 
+    # A window that ends while it is open has been seen ending: only one you were not
+    # looking at is unread.
+    model =
+      case state.focus do
+        {:window, path} -> Model.seen(model, path)
+        _ -> model
+      end
+
     state = %{state | model: model}
     if event.type == :remote_status, do: recheck_loop(state), else: state
   end
@@ -2332,9 +2334,9 @@ defmodule Troupe.UI.TUI.Server do
   @doc """
   Tab completion on the command line: command names (`wor` → `worktree `), window paths
   for the commands whose first argument is a window — `/merge`, `/discard`, `/cancel`,
-  `/dismiss`, `/compact`, `/copy` as the table has them (repeated Tab cycles through the
-  matches) — and `@file` paths anywhere. `/merge` and `/discard` only offer worktree
-  branches that have finished and are neither merged nor discarded.
+  `/dismiss`, `/copy` as the table has them (repeated Tab cycles through the matches) —
+  and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches that
+  have finished and are neither merged nor discarded.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -2429,7 +2431,6 @@ defmodule Troupe.UI.TUI.Server do
   end
 
   defp eligible?("cancel", w), do: w.state != :dismissed
-  defp eligible?("compact", w), do: w.state != :dismissed
   defp eligible?("dismiss", w), do: w.state in [:done_unread, :failed_unread]
   # Any window has a transcript worth copying, dismissed ones included.
   defp eligible?("copy", _w), do: true

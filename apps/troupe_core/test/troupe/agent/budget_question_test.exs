@@ -343,6 +343,8 @@ defmodule Troupe.Agent.BudgetQuestionTest do
     assert await_done(sid)["reason"] == "finished"
 
     assert {:ok, %{"max_turns" => 27, "default_agent" => "build"}} = YamlElixir.read_from_file(path)
+    # Edited, not rewritten: the comment stays, and the new key is the one line added.
+    assert File.read!(path) == "# kept for the team\ndefault_agent: build\nmax_turns: 27\n"
     assert File.read!(path <> ".previous") =~ "kept for the team"
 
     # The next session in this workspace starts with the raised limit.

@@ -84,6 +84,61 @@ defmodule Troupe.CLIDaemonTest do
     assert Troupe.CLI.Daemon.invocation(path, ["run"], {:unix, :linux}) == {:exec, path, ["run"]}
   end
 
+  # On Windows the daemon runs under the reaper, in a job that ends with this VM (#231, TUI
+  # Decision 130). The reaper here is the same program for this host, and what goes
+  # through it is proven here: the Windows path itself, a batch file through cmd.exe, was
+  # tried on the pull request.
+  describe "under the reaper" do
+    setup do
+      case {:os.type(), Troupe.Reaper.path(), System.find_executable("sh")} do
+        {{:unix, _}, {:ok, _} = reaper, sh} when is_binary(sh) -> %{reaper: reaper}
+        _ -> %{reaper: nil}
+      end
+    end
+
+    test "the arguments, the output and the exit status pass through", %{reaper: reaper} do
+      if reaper do
+        fake =
+          fake_daemon("troupe-daemon-reaped", "fake-daemon", """
+          #!/bin/sh
+          echo "fake-daemon got: $*"
+          exit 7
+          """)
+
+        System.put_env("TROUPE_DAEMON_COMMAND", fake)
+
+        output =
+          capture_io(fn ->
+            assert Troupe.CLI.Daemon.run(["status", "--verbose"], reaper: reaper) == 7
+          end)
+
+        assert output =~ "fake-daemon got: status --verbose"
+      end
+    end
+
+    test "the daemon goes when the process that ran it goes", %{reaper: reaper} do
+      if reaper do
+        fake =
+          fake_daemon("troupe-daemon-reaped", "fake-daemon", """
+          #!/bin/sh
+          echo $$ > "$0.pid"
+          exec sleep 60
+          """)
+
+        System.put_env("TROUPE_DAEMON_COMMAND", fake)
+        runner = spawn(fn -> Troupe.CLI.Daemon.run(["run"], reaper: reaper) end)
+
+        assert pid = eventually(fn -> written(fake <> ".pid") end)
+        on_exit(fn -> System.cmd("kill", ["-9", pid], stderr_to_stdout: true) end)
+        assert alive?(pid)
+
+        # What Ctrl-C does to troupe, as far as the daemon can tell.
+        Process.exit(runner, :kill)
+        assert eventually(fn -> not alive?(pid) end)
+      end
+    end
+  end
+
   test "with no binary anywhere the answer is how to install one, and exit 1" do
     System.put_env("TROUPE_DAEMON_COMMAND", "")
     previous_path = System.get_env("PATH")
@@ -93,6 +148,25 @@ defmodule Troupe.CLIDaemonTest do
     assert Troupe.CLI.Daemon.command() == :error
     output = capture_io(:stderr, fn -> assert Troupe.CLI.Daemon.run(["run"]) == 1 end)
     assert output =~ "install.sh"
+  end
+
+  defp alive?(pid), do: match?({_, 0}, System.cmd("kill", ["-0", pid], stderr_to_stdout: true))
+
+  # A file's first line, once there is one.
+  defp written(path) do
+    case File.read(path) do
+      {:ok, text} -> if String.ends_with?(text, "\n"), do: String.trim(text)
+      {:error, _} -> nil
+    end
+  end
+
+  # The check's value once it has one, within five seconds, or nil.
+  defp eventually(check, tries \\ 100) do
+    case check.() do
+      value when value not in [nil, false] -> value
+      _ when tries == 0 -> nil
+      _ -> Process.sleep(50) && eventually(check, tries - 1)
+    end
   end
 
   defp fake_daemon(dir_prefix, name, script) do

@@ -127,12 +127,13 @@ defmodule Troupe.Config.ModelSettingsTest do
       {:ok, written} = YamlElixir.read_from_file(path)
       assert written["max_branches"] == 3
       assert written["read_roots"] == ["~/src/dep"]
-      # The old flat spelling is gone, so the two cannot disagree, and the file says which
-      # version it is and where an editor finds the schema.
+      # The old flat spelling is gone, so the two cannot disagree.
       refute Map.has_key?(written, "model")
-      assert written["version"] == 1
-      assert File.read!(path) =~ "# yaml-language-server: $schema=https://troupe.dev/schema/config/v1.json"
       assert written["models"] == %{"default" => "glm-5.2", "cheap" => "qwen3.6-35b"}
+
+      # The file is edited, not rewritten: its comment and the lines it did not change
+      # are as they were, and what is new comes after them.
+      assert File.read!(path) =~ ~r/\A# my notes\nmax_branches: 3\nread_roots: \[~\/src\/dep\]\n/
 
       config = Config.load(nil)
       assert config.provider == "openai"
@@ -144,6 +145,38 @@ defmodule Troupe.Config.ModelSettingsTest do
 
       # The hand-written file is kept, comments and all.
       assert File.read!(path <> ".previous") =~ "# my notes"
+    end
+
+    test "a model changed changes its own line, and the comments stay", %{path: path} do
+      text = """
+      # the gateway at work
+      provider: openai
+      base_url: https://gw.example/v1   # through the VPN
+      api_key: "{env:GW_KEY}"
+
+      models:
+        # what I use most days
+        default: glm-5.2   # fast enough
+        cheap: qwen3.6-35b
+      """
+
+      File.write!(path, text)
+
+      assert {:ok, %{"models" => %{"default" => "glm-5.3"}}} =
+               ModelSettings.write(%{"provider" => "openai", "models" => %{"default" => "glm-5.3"}})
+
+      assert File.read!(path) == String.replace(text, "default: glm-5.2 ", "default: glm-5.3 ")
+      assert File.read!(path <> ".previous") == text
+
+      # A role that is not there is added under the others, and only that line.
+      {:ok, _} = ModelSettings.write(%{"provider" => "openai", "models" => %{"expensive" => "claude-opus-5"}})
+
+      assert File.read!(path) ==
+               String.replace(
+                 text,
+                 "default: glm-5.2   # fast enough\n  cheap: qwen3.6-35b\n",
+                 "default: glm-5.3   # fast enough\n  cheap: qwen3.6-35b\n  expensive: claude-opus-5\n"
+               )
     end
 
     test "an absent key keeps the saved one, an empty one removes it", %{path: path} do

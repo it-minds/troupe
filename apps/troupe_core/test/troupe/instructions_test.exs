@@ -173,6 +173,49 @@ defmodule Troupe.InstructionsTest do
     assert Instructions.to_prompt(loaded) == ""
   end
 
+  # The brief lives in the repository's main checkout, which is a question for `git`, and
+  # this read comes before every model call: the path is asked for once, not once for the
+  # path, once for the text and once for what the budget cut.
+  test "reading the brief asks git where the repository is once", %{repo: repo} do
+    write!(repo, ".troupe/memory.md", "## Overview\nA brief.\n")
+
+    {loaded, gits} = gits(fn -> Instructions.load(repo, config()) end)
+    assert %{files: [%{scope: :brief, status: :whole}]} = loaded
+    assert gits == 1
+  end
+
+  # How many times `fun` ran `git` in this process: every one goes through the reaper, and a
+  # tracer beside the test counts the calls (a process is not its own tracer).
+  defp gits(fun) do
+    Code.ensure_loaded!(Troupe.Reaper)
+    assert :erlang.trace_pattern({Troupe.Reaper, :run, 3}, true, [:local]) == 1
+    on_exit(fn -> :erlang.trace_pattern({Troupe.Reaper, :run, 3}, false, [:local]) end)
+    tracer = spawn_link(fn -> count_gits(0) end)
+
+    :erlang.trace(self(), true, [:call, {:tracer, tracer}])
+    result = fun.()
+    :erlang.trace(self(), false, [:call])
+
+    ref = :erlang.trace_delivered(self())
+    assert_receive {:trace_delivered, _pid, ^ref}
+    send(tracer, {:count, self()})
+    assert_receive {:gits, count}
+    {result, count}
+  end
+
+  defp count_gits(count) do
+    receive do
+      {:trace, _pid, :call, {Troupe.Reaper, :run, [_cwd, ["git" | _args], _opts]}} ->
+        count_gits(count + 1)
+
+      {:trace, _pid, :call, _other} ->
+        count_gits(count)
+
+      {:count, from} ->
+        send(from, {:gits, count})
+    end
+  end
+
   defp write!(dir, relative, text) do
     path = Path.join(dir, relative)
     File.mkdir_p!(Path.dirname(path))

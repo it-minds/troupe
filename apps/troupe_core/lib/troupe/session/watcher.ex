@@ -83,7 +83,6 @@ defmodule Troupe.Session.Watcher do
       agent_path: Keyword.get(opts, :agent_path, ["root"]),
       debounce_ms: Keyword.get(opts, :debounce_ms, 300),
       poll_interval_ms: Keyword.get(opts, :poll_interval_ms, 1_000),
-      ignore: Gitignore.load(workspace.root_real),
       forced_backend: Keyword.get(opts, :backend)
     }
 
@@ -115,7 +114,7 @@ defmodule Troupe.Session.Watcher do
   end
 
   def handle_call({:scan_now, paths}, _from, state) do
-    {:reply, :ok, scan_and_trigger(%{state | pending: MapSet.new(paths)})}
+    {:reply, :ok, scan_and_trigger(%{with_ignore(state) | pending: MapSet.new(paths)})}
   end
 
   @impl GenServer
@@ -169,6 +168,7 @@ defmodule Troupe.Session.Watcher do
 
   defp start_backend(state, module) do
     Process.flag(:trap_exit, true)
+    state = with_ignore(state)
 
     opts = [interval_ms: state.poll_interval_ms]
 
@@ -294,6 +294,13 @@ defmodule Troupe.Session.Watcher do
   defp reload_ignore(state) do
     %{state | ignore: Gitignore.load(state.workspace.root_real)}
   end
+
+  # The ignore rules are read the first time something needs them, a backend starting or
+  # a scan asked for, and not when the session starts: reading them walks the workspace,
+  # and in a home directory that is minutes, which a session that is not watching (most
+  # of them) spent inside `session.create` until its client gave up (#231).
+  defp with_ignore(%{ignore: nil} = state), do: reload_ignore(state)
+  defp with_ignore(state), do: state
 
   defp interesting?(state, path) do
     relative = Workspace.relative(state.workspace, path)

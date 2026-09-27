@@ -19,10 +19,10 @@ defmodule Troupe.UI.HQ do
 
   alias ExRatatui.Layout
   alias ExRatatui.Layout.Rect
-  alias ExRatatui.Style
+  alias ExRatatui.Text.{Line, Span}
   alias ExRatatui.Widgets.{Block, List, Paragraph}
   alias Troupe.Client
-  alias Troupe.UI.TUI.Model
+  alias Troupe.UI.TUI.{Model, Theme, View}
 
   @type column :: :teams | :profiles | :sessions
 
@@ -154,11 +154,12 @@ defmodule Troupe.UI.HQ do
   @doc "Renders the page into `rect`."
   @spec render(t(), Rect.t(), map()) :: [{term(), Rect.t()}]
   def render(hq, rect, state) do
+    {header, rect} = header(hq, rect, state)
     {banner, rect} = banner(hq, rect)
 
     case hq.create do
-      nil -> banner ++ columns(hq, rect, state)
-      create -> banner ++ create_page(hq, create, rect)
+      nil -> header ++ banner ++ columns(hq, rect, state)
+      create -> header ++ banner ++ create_page(hq, create, rect)
     end
   end
 
@@ -168,6 +169,52 @@ defmodule Troupe.UI.HQ do
 
   def footer(_hq),
     do: " HQ — ↑↓ move · ←/→/Tab column · Enter opens · n new session · r refresh · Esc back "
+
+  # The lockup over the page — the mask, the word, where this HQ looks and what waits on
+  # you — when the page is tall enough to give it the rows; on a short terminal the
+  # lists need them more.
+  defp header(hq, rect, state) do
+    {mask_w, mask_h} = Theme.mask_size(:small)
+
+    if rect.height >= 3 * (mask_h + 1) and rect.width >= mask_w + 30 do
+      [top, rest] = Layout.split(rect, :vertical, [{:length, mask_h + 1}, {:fill, 1}])
+
+      [mark, words] =
+        Layout.split(top, :horizontal, [{:length, mask_w + 2}, {:fill, 1}])
+
+      mask = Theme.mask(:small, Map.get(state, :theme) || Theme.current())
+
+      {[{%Paragraph{text: mask, alignment: :center}, mark}, {%Paragraph{text: lockup(hq)}, words}],
+       rest}
+    else
+      {[], rect}
+    end
+  end
+
+  defp lockup(hq) do
+    waiting = Enum.count(hq.sessions, &View.needs_you?/1)
+
+    where =
+      case hq.origin do
+        {:remote, plane} -> "HQ · " <> plane
+        _ -> "HQ · this computer"
+      end
+
+    count = "#{length(hq.sessions)} session(s)"
+
+    [
+      Line.new([Span.new("troupe", style: Theme.style(nil, [:bold]))]),
+      Line.new([Span.new(where, style: Theme.style(:muted))]),
+      Line.new([]),
+      Line.new(
+        [Span.new(count, style: Theme.style(:muted))] ++
+          if(waiting > 0,
+            do: [Span.new(" · #{waiting} need you", style: Theme.style(:needs_you, [:bold]))],
+            else: []
+          )
+      )
+    ]
+  end
 
   defp banner(hq, rect) do
     if up?(hq) do
@@ -179,7 +226,7 @@ defmodule Troupe.UI.HQ do
         "⚠ the plane is unreachable — attached sessions keep streaming; " <>
           "creating and activating sessions are unavailable" <> reason(hq)
 
-      {[{%Paragraph{text: text, style: %Style{fg: :yellow, modifiers: [:bold]}}, line}], rest}
+      {[{%Paragraph{text: text, style: Theme.style(:offline, [:bold])}, line}], rest}
     end
   end
 
@@ -271,6 +318,12 @@ defmodule Troupe.UI.HQ do
     ]
     |> Enum.join(" ")
     |> String.trim_trailing()
+    |> then(fn text ->
+      # A session waiting on a person is found from across the room.
+      if View.needs_you?(session),
+        do: Line.new([Span.new(text, style: Theme.style(:needs_you))]),
+        else: text
+    end)
   end
 
   defp label({:remote, _plane}), do: "remote"
@@ -278,12 +331,12 @@ defmodule Troupe.UI.HQ do
 
   defp highlight(hq, column) do
     if hq.column == column,
-      do: %Style{fg: :cyan, modifiers: [:bold]},
-      else: %Style{modifiers: [:bold]}
+      do: Theme.style(:accent, [:bold]),
+      else: Theme.style(nil, [:bold])
   end
 
   defp border(hq, column) do
-    if hq.column == column, do: %Style{fg: :cyan}, else: %Style{fg: :dark_gray}
+    if hq.column == column, do: Theme.style(:accent), else: Theme.style(:rail)
   end
 
   ## The new-session wizard

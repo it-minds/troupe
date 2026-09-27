@@ -2177,6 +2177,7 @@ citation keeps meaning what it meant.
      - **Not in this slice.** A plane's rows carry no `unseen`, so a team session tells
        only while it is open; clicking a notification does not open its session, which
        the plugin cannot report on a desktop; and the launcher's rows carry no marker.
+       (Both are 714.)
      - **Proof:** the desktop app's `goal-loop`, `away` and `notify` tests against the
        fake daemon, which now keeps the loop in its log and `unseen` beside it; the
        client's fold and row tests; the probe and the renamed installed build on the pull
@@ -2211,3 +2212,230 @@ citation keeps meaning what it meant.
        typecheck and test suites, the desktop build, `tokens:check`, `icons:check`, and
        the app against a fake daemon in a headless browser, light and dark, at 1280px and
        380px, on the pull request.
+
+710. **The desktop app keeps its sign-in under its own bundle identifier.** Issue #224,
+     defects D33. `secrets.rs` named every credential-store entry with a fixed service,
+     `com.objective-mj.troupe`, so a build made with another identifier, as a test build
+     installed beside the real app is, read and wrote the real app's refresh token: in
+     plane mode it would restore that sign-in and could rotate it, signing the real app
+     out. The service is now the running build's `identifier`, from its Tauri config,
+     which `tauri build --config` sets.
+     - **No migration.** The shipped identifier is the string the fixed name was, so an
+       upgrade finds its sign-in where it left it, and a renamed build starts with none. A
+       test in `secrets.rs` reads `tauri.conf.json` and fails if the identifier changes,
+       because then the old entry has to be moved first.
+     - **Proof:** the two tests in `secrets.rs`; a renamed build (identifier
+       `com.objective-mj.troupe.fix224`) installed from the chunk's tip wrote a dummy key
+       under `com.objective-mj.troupe`, and the same build with this change wrote,
+       read and cleared it under its own identifier and did not see or touch the entry
+       under the real app's name, by Credential Manager's target names and write times.
+
+711. **A setting saved from a client changes its own line of `config.yaml` and nothing
+     else; the file is edited, not rewritten.** Issue #223 (defects D28), amending 675,
+     686 and 699, which each wrote a file by rendering its map again, so the first model
+     picked in the desktop app, the first value changed on the terminal UI's settings
+     page or the first budget raised for a workspace turned a hand-written, commented
+     file into a machine-written one.
+     - **One edit, in `Troupe.Config.Yaml`.** `edit/2` makes a file's text read as a new
+       map key by key: a changed scalar takes the old value's place on its key's line,
+       which keeps the key as it is spelled and the comment after it; a key that is not
+       there is added after the last key of its map, a missing parent with it; a key
+       that is gone goes with the lines beneath it; a map written one key a line is
+       edited key by key, and any other map or list that changes is written out again
+       under its key. `put/3` sets one key, nested or not, through it. A string goes bare
+       when YAML reads it back as the same string, and would under YAML 1.1 too, and in
+       double quotes when it needs them or was quoted before. The answer is read back
+       and must be exactly the map asked for, as with `edit_list/4` (686), which stays
+       what `troupe config trust` uses.
+     - **Every writer gets it through `Migrate.write/2`.** The terminal UI's settings
+       page, `config.set` (the desktop app's model settings, and a first run's), a
+       budget answer for the workspace (`Config.write_key/3`), `config.import` and a first
+       run's approvals all write through it, so none of them changed. A file that is
+       there is edited; a new file, or one the edit cannot follow — a value an alias
+       shares, a key written twice, a document in braces — is written whole as before,
+       with `version: 1` and the header, whose words no longer say comments are lost. The
+       file before the save is kept as `.previous` either way.
+     - **The keys a writer sets are written in the new spellings; the others are the
+       file's.** 686 had every writer write the new spellings only, which a whole-file
+       write did for every key in it. An edit writes what the writer brings by its new
+       name and removes that setting's old spellings, and leaves an old spelling of a
+       setting it did not touch as it is, with its load warning, for `troupe config
+       migrate --write`, the one rewrite, which is asked for and shows its diff first.
+       An edited file gets no `version` line it did not have: a missing one reads as 1.
+     - **Not done:** `troupe config migrate --write` still renders the file, since a
+       migration moves keys between blocks; and a string with a space or a letter
+       outside ASCII is quoted, though YAML would take some of them bare.
+     - **Proof:** `Troupe.Config.YamlTest` (one key written is one line changed, nested,
+       added under its parent and with a missing parent, quoting, a key with only a
+       comment, a map in braces, line endings and a byte order mark, a key of the same
+       name elsewhere, removal with the lines beneath, `{}` and new maps and lists);
+       `Troupe.Config.WriteKeyTest`, `Troupe.Config.ModelSettingsTest` and the terminal
+       UI's `Troupe.SettingsTest`, each keeping a comment and changing one line;
+       `Troupe.Agent.BudgetQuestionTest`'s workspace answer; `Troupe.Config.ExplainTest`
+       for a new file and an edited one; and `config.set` over the installed daemon's
+       socket on a commented file, the diff that one line.
+
+713. **A librarian's try at the brief is recorded when it starts, and one that built
+     nothing holds off the next automatic refresh for `memory_max_age_days`.** Amends
+     696, which left a run that failed, was cancelled or ran out of budget to be tried
+     again by the next session: with `memory_auto_refresh` that was every new session
+     until one got through, and in a repository whose librarian writes nothing and has
+     no brief to stamp, every session for good, each paying for it (defects D24).
+     - **The try is the start.** A `librarian` agent given something to do records the
+       time before it asks a model anything (`Troupe.Session.Memory.attempted/3`), so a
+       run that crashes, is closed with its session or is still going when the next
+       session opens counts as well as one that failed. It is kept in the state
+       directory, `librarian.json`, filed under the brief's path, never in the
+       repository.
+     - **The daemon says whether a refresh is due.** `memory.get` answers `refresh_due`:
+       the brief is `absent` or `stale`, and no librarian has started on it in the last
+       `memory_max_age_days` without its being built since. A try the brief was built
+       after holds nothing off, so a brief a librarian stamped that went stale because
+       the repository grew is refreshed at once, as before. `status` is unchanged, so
+       `/memory` still says what the brief is. `memory.forget` forgets the try with the
+       brief, so a person who clears it gets a new one at the next session. The TUI
+       starts its librarian only when the refresh is due (TUI Decision 127);
+       `/memory refresh` is a person asking and is never held off.
+     - **The librarian stops copying the instruction files.** Decision 706 put
+       `AGENTS.md` and its aliases into every prompt ahead of the brief and left the
+       librarian's prompt folding them into the brief. It now reads them to leave out
+       what they say, and describes the brief as Troupe's own notes on the repository.
+     - **Proof:** `Troupe.Tools.RememberTest` (a librarian whose request failed, and one
+       that wrote nothing where there was no brief, each leave the refresh not due; the
+       hold's length, a build after the try, and `forget`), `Troupe.Gateway.MemoryTest`
+       (`refresh_due` over the wire), and the TUI's `Troupe.MemoryClientTest` (a session
+       after a failed librarian starts none), which failed on the chunk's tip; and the
+       installed build, where three sessions on a repository whose librarian fails start
+       it once, on the pull request.
+
+714. **A desktop notification leads back to its session, the launcher marks what was
+     missed, and a first run's plane is signed in to without being asked for again.**
+     Issues #119 and #76, following 708, 705 and 709, with D26's GUI half.
+     - **The click where it is reported, the window coming back where it is not.** A
+       browser's `Notification` reports a click: it brings the window forward and opens
+       the session. `tauri-plugin-notification` does not on a desktop, in 2.4 or 2.5: it
+       shows the toast through notify-rust in a task of its own and drops the handle
+       whose `wait_for_response` would hear the click, and its `onAction` listens on a
+       channel only the phone plugins feed. So in the shell, the window coming to the
+       front within 15 seconds of a notification said while it was not is taken as the
+       answer to it, however it came forward, and opens the session the last one was
+       about. Windows itself can report the click, through the toast's own `Activated`
+       event, but only for a toast the shell shows itself rather than the plugin; that
+       waits for a machine where a toast can be clicked and the result seen.
+     - **The launcher's recent rows carry the list's marker**, "2 new" with the sentence
+       behind it, from one component the two screens share.
+     - **The plane's address is asked once.** A first run that chose a plane and was
+       given its address ends on the sign-in screen signing in to it: the field is
+       filled, and the provider's page or its code comes next, unless the store already
+       holds a sign-in for it. An address kept from an earlier sign-in only fills the
+       field, since signing out is not a request to be signed in again.
+     - **Signing back in is a start.** After signing out, the next sign-in in the same
+       run lands on the launcher, or on the list for a person who chose it (709).
+     - **A session is finished when its root agent is.** A subagent's `agent_done`, and
+       one a restore ended `interrupted`, is its own agent's state and a note in the
+       transcript, not "Finished" in the session's head (D26).
+     - **A dropped socket reopens a team session in `read` mode.** `SessionAttachment`
+       opens in the mode it is asked for, reconnects in `read` as PROTOCOL.md §6 says,
+       and follows a pod's `not_found` for an activating command in `activate`. Since
+       707 a subscribed session is never put to sleep, and the reconnection's backoff
+       (about 19 seconds) ends well inside the two-minute unwatched clock, so a session
+       no longer falls asleep on its own while a view is attached; what reconnecting in
+       `activate` still did was place again, at once, a session that a drain or a
+       replaced pod had left asleep. A session on this computer never went through the
+       plane and wakes for nothing a subscription does.
+     - **A local view is listened to before it subscribes.** `DaemonClient.open` takes
+       the caller's listener and attaches it before `subscribe` is sent, and `close`
+       takes it off again. A replay can arrive in the same read as the subscription's
+       answer, before `open` resolves; a screen that listened once it had the view saw
+       no history in Node, and in a browser only because each message is a task of its
+       own.
+     - **Proof:** the desktop app's `notify` (a click, the window back soon after, and
+       too late), `launcher` (the marker, and gone once read), `signin` (a first run's
+       plane signed in to with nothing pressed, a kept address that waits, and sign-out
+       and back to the launcher or the list) and `history` (a seeded session's replay)
+       tests; the client's fold, `move` and `stage2` tests; the command palette's with
+       `/loop` in the fakes' table; and the renamed desktop build installed from its
+       setup, on the pull request.
+
+716. **The design tokens are one set of files, the GUI's; the plane's front page and the
+     TUI are generated from them, and the front page stays in Signal.** Issue #228,
+     defect D30. `docs/design/themes/` was a copy of `clients/gui/docs/design/themes/`
+     from before Afterglow: three themes on the old structure, with the kits and
+     `support.js` byte for byte the same. It is gone, and `mix troupe.theme` reads the
+     GUI's directory.
+     - **One copy rather than a checked one.** The GUI's image builds with `clients/gui`
+       as its only context, so the files stay where `pnpm tokens` finds them; nothing
+       else needs them anywhere else, since the plane's image copies no `docs/` and
+       `theme.css` is committed. A generated copy with a check that fails on drift would
+       have worked too; a file that exists once cannot drift at all.
+     - **The front page keeps Signal's colours and takes the shared structure.**
+       Graphite, cyan for the machine, magenta on the mask and the approval figure and
+       nowhere else. Afterglow spends its pink on links and the accent (702), which is
+       exactly what the front page's rule and `front_page_assets_test.exs` forbid, so
+       moving it to Afterglow is a change to that rule and not to this file; the one
+       line is `@default_theme`. What changes is what every theme has carried since 702:
+       Figtree and DM Mono (the page's webfont link follows), black-weight headings,
+       square corners, Afterglow's spacing.
+     - **Three generators, three checks.** `pnpm tokens:check` (the GUI), `mix
+       troupe.theme --check` (the front page) and `mix troupe.palette --check` in
+       `clients/tui` (TUI Decision 126), and CI's path filters send a change to the
+       themes directory to all three.
+     - **Proof:** the three checks and `mix troupe.admin.tokens --check`;
+       `front_page_assets_test.exs` and `console_assets_test.exs`; `/` and `/docs`
+       before and after, at 1280px and 380px, on the pull request.
+
+717. **The desktop app's Tauri plugins move when tauri does, their Rust and JavaScript
+     halves together.** Folding Dependabot's updates into the 0.6.1 chunk; the rule 708
+     followed for the notification plugin, made the rule for all of them.
+     - **The CLI checks the pairs.** `tauri build` refuses a build whose `tauri-plugin-*`
+       crate and `@tauri-apps/plugin-*` package differ in their minor ("Found version
+       mismatched Tauri packages"), and so does `tauri-action` in `native.yml`. Dependabot
+       updates the crates and the npm packages in separate groups, so one of its pull
+       requests can move one half alone: #120 took `tauri-plugin-http` to 2.7.0 with
+       `@tauri-apps/plugin-http` on 2.6, and the build stopped there.
+     - **A plugin's next minor waits for tauri's.** `@tauri-apps/plugin-http` 2.7 depends
+       on `@tauri-apps/api` 2.12, and `tauri-plugin-notification` 2.5 on tauri 2.12; beside
+       tauri 2.11 the first would put a second, newer copy of the API into the bundle. So
+       both stay on the minor that goes with tauri 2.11, pinned with `~` on both sides
+       (`tauri-plugin-http ~2.6` and `~2.6.1`, `tauri-plugin-notification ~2.4` and
+       `~2.4.0`), and the pins come off in the change that moves tauri, `@tauri-apps/api`
+       and the CLI to 2.12 together.
+     - **Proof:** the renamed desktop build (`pnpm tauri build --bundles nsis`) with the
+       pins; with #120's lock as Dependabot wrote it, the same build stops at the check.
+
+718. **A session starts without reading the workspace's ignore rules; watching reads them
+     when it starts.** Issue #231's cause (TUI Decision 128 has the rest). The watcher and
+     `Session.Files` each walked the workspace for its `.gitignore`s in `init`, whether or
+     not they would ever watch: two walks per `session.create`, inside `Troupe.Sessions`'
+     `start_child`, which does not time out, for rules only a watch or `fs_events` backend
+     uses, and both are off by default. A directory with no `.gitignore` to prune the walk
+     is walked whole, and a home directory, where a new terminal opens, is the worst of
+     them: one walk of it took over 150 s on the machine of the issue (this repository,
+     8 s). So the TUI's embedded daemon answered `session.create` long after the client's
+     30 s, and plain `troupe` died in its boot. The rules are now read by the backend's
+     start, in both, and by a scan asked for (`Watcher.scan_now/2`). A session that
+     watches from its start still walks there, as before; that is a watch in a home
+     directory, which polling would not survive either. Proof: `watch_session_test.exs`
+     ("a session that is not watching starts without reading the ignore rules"), and
+     plain `troupe` in a directory of 360,000 files, which died in its boot after 30 s
+     before and opens now, on the pull request.
+
+719. **On Windows the daemon's VM reads nothing of the console and has no break menu for
+     Ctrl-C: `-noinput` and `+Bc`, and the null device for standard input.** Issue #231's
+     follow-up for the daemon (TUI Decision 130 has the TUI's side). The daemon release
+     had the stock `vm.args`, so a daemon in a console, `troupe-daemon run` typed there
+     or the one `troupe daemon run` starts, had a reader on it and the break handler's
+     menu for Ctrl-C and Ctrl-Break, which then read the console beside the shell.
+     `apps/troupe_daemon/rel/vm.args.eex` now gives the Windows build `-noinput` and
+     `+Bc`, and `bin/troupe-daemon.cmd` starts every VM with the null device as standard
+     input. The two go together: `+Bc` turns off the console's processed input through
+     the VM's standard input, so given the console it would make Ctrl-C a key nobody
+     reads here, and the daemon could not be stopped with it. Given the null device it
+     leaves the console alone, Ctrl-C stays a signal, and under `+Bc` that signal is
+     passed to Windows' own handler, which ends the VM at once with no menu to answer.
+     `+Bi` would ignore Ctrl-C and leave the daemon running, and `+Bd` is not read on
+     Windows. Ctrl-Break still opens the menu, which then reads the null device, finds
+     nothing and ends the VM. The Unix build is unchanged: there Ctrl-C is SIGINT to the
+     terminal's process group. Proof: the Windows release, `troupe-daemon run` in a
+     console window and under `troupe daemon run`, with Ctrl-C, before and after, on the
+     pull request.

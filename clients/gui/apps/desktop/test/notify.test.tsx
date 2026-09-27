@@ -4,11 +4,11 @@
 // first thing the person does, a refusal is kept, and the preference turns it all off.
 // The page's `Notification` stands in for the OS's here, as it does in a browser.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import type { DurableEvent, FleetRow } from "@troupe/client";
 import { App } from "../src/App";
-import { askPermission, noticeEvent, noticeRows, resetNotifications } from "../src/notify";
+import { ANSWER_MS, askPermission, noticeEvent, noticeRows, resetNotifications } from "../src/notify";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { button, render, sleep, startOnTheList, waitFor } from "./support";
 
@@ -20,6 +20,7 @@ class FakeNotification {
   static answer: NotificationPermission = "granted";
   static asked = 0;
   static sent: Array<{ title: string; body: string | undefined }> = [];
+  static shown: FakeNotification[] = [];
   static async requestPermission(): Promise<NotificationPermission> {
     FakeNotification.asked += 1;
     FakeNotification.permission = FakeNotification.answer;
@@ -28,6 +29,7 @@ class FakeNotification {
   onclick: (() => void) | null = null;
   constructor(title: string, opts: NotificationOptions = {}) {
     FakeNotification.sent.push({ title, body: opts.body });
+    FakeNotification.shown.push(this);
   }
   close(): void {}
 }
@@ -48,6 +50,7 @@ beforeEach(async () => {
   FakeNotification.answer = "granted";
   FakeNotification.asked = 0;
   FakeNotification.sent = [];
+  FakeNotification.shown = [];
   (globalThis as { Notification?: unknown }).Notification = FakeNotification;
   focused = true;
   Object.defineProperty(document, "hasFocus", { configurable: true, value: () => focused });
@@ -61,6 +64,8 @@ afterEach(async () => {
   unmount = null;
   location.hash = "";
   delete (globalThis as { Notification?: unknown }).Notification;
+  delete window.troupe;
+  vi.restoreAllMocks();
   await daemon.stop();
 });
 
@@ -197,5 +202,82 @@ describe("notifications", () => {
     await sleep(300);
     expect(FakeNotification.sent).toEqual([]);
     expect(FakeNotification.asked).toBe(1);
+  });
+});
+
+/** The screen, as far as these tests need to know it: a session open, or the list. */
+const sessionOnScreen = (): boolean => Boolean(document.querySelector('textarea[aria-label="Message"]'));
+
+/** A session nobody here reads, read once, and the list showing it with nothing new. */
+async function awayFromTheList(workspace: string): Promise<ReturnType<FakeDaemon["seed"]>> {
+  const other = daemon.seed(workspace);
+  daemon.markSeen(other.id);
+  unmount = render(<App />).unmount;
+  await waitFor(() => row(workspace), "the list");
+  await sleep(4_500); // one poll after the first, so the row's first sight is recorded
+  return other;
+}
+
+describe("answering a notification", () => {
+  it("opens its session when it is clicked, and brings the window forward", async () => {
+    const focus = vi.spyOn(window, "focus").mockImplementation(() => undefined);
+    const other = await awayFromTheList("/home/ada/kunder");
+
+    focused = false;
+    other.log.append("turn_ended", {});
+    await waitFor(() => FakeNotification.shown.length === 1, "the notification");
+    expect(sessionOnScreen()).toBe(false);
+
+    FakeNotification.shown[0]!.onclick!();
+    await waitFor(sessionOnScreen, "the session the notification was about");
+    expect(document.body.textContent).toContain("/home/ada/kunder");
+    expect(focus).toHaveBeenCalled();
+  });
+
+  it("where the notification says nothing of a click, the window coming back shortly after opens its session", async () => {
+    // The desktop shell's notifications: shown by the OS, and no click reported.
+    const shown: Array<{ title: string; body: string }> = [];
+    window.troupe = {
+      name: "Test shell",
+      version: "0",
+      notifications: {
+        permission: async () => "granted",
+        request: async () => "granted",
+        send: async (title, body) => void shown.push({ title, body }),
+      },
+    };
+    const other = await awayFromTheList("/home/ada/kunder");
+
+    // Said while the window is in front: nothing is waiting for an answer.
+    other.log.append("turn_ended", {});
+    await waitFor(() => shown.length === 1, "the first notification");
+    window.dispatchEvent(new Event("focus"));
+    await sleep(200);
+    expect(sessionOnScreen()).toBe(false);
+
+    // Said while it is not, and the person comes back to it: the session opens.
+    focused = false;
+    other.log.append("turn_ended", {});
+    await waitFor(() => shown.length === 2, "the second notification");
+    focused = true;
+    window.dispatchEvent(new Event("focus"));
+    await waitFor(sessionOnScreen, "the session the notification was about");
+    expect(document.body.textContent).toContain("/home/ada/kunder");
+
+    // Too long after, coming back is only coming back.
+    document.querySelector<HTMLButtonElement>(".rail nav button")!.click();
+    await waitFor(() => !sessionOnScreen() && row("/home/ada/kunder"), "the list again");
+    const third = daemon.seed("/home/ada/notes");
+    daemon.markSeen(third.id);
+    await sleep(4_500);
+    focused = false;
+    third.log.append("turn_ended", {});
+    await waitFor(() => shown.length === 3, "the third notification");
+    const now = Date.now();
+    vi.spyOn(Date, "now").mockReturnValue(now + ANSWER_MS + 1_000);
+    focused = true;
+    window.dispatchEvent(new Event("focus"));
+    await sleep(300);
+    expect(sessionOnScreen()).toBe(false);
   });
 });

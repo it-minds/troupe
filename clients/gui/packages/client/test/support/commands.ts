@@ -1,6 +1,7 @@
 // The command table the fakes answer `commands.list` with: a slice of the harness's
 // (`Troupe.Commands`), enough for a palette to have sections, aliases, a command that
-// needs an argument, one a pod cannot run, and an agent.
+// needs an argument, one a pod cannot run, an agent, and `/goal` with the `/loop` whose
+// summary names the goal too.
 
 import type { CommandEntry } from "../../src/types.js";
 
@@ -42,6 +43,18 @@ export const COMMANDS: CommandEntry[] = [
     source: "builtin",
     detail: "Every later turn works towards the goal. /goal alone shows it, /goal clear clears it.",
     example: "/goal make the suite green",
+  },
+  {
+    name: "loop",
+    aliases: [],
+    section: "session",
+    summary: "Work towards the goal on its own",
+    usage: "/loop [n | stop]",
+    args: [arg("iterations", false, "text")],
+    availability: "always",
+    source: "builtin",
+    detail: "Runs turn after turn, up to n, until the agent says the goal is met or something stops it; /loop stop stops it. Needs a goal.",
+    example: "/loop 10",
   },
   {
     name: "sessions",

@@ -14,6 +14,7 @@ defmodule Troupe.CLI.Runner do
   use Task
 
   alias Troupe.{CLI, Client}
+  alias Troupe.CLI.{Interrupt, Terminal}
   alias Troupe.UI.Headless.Printer
   alias Troupe.UI.TUI
 
@@ -22,10 +23,29 @@ defmodule Troupe.CLI.Runner do
     :persistent_term.put({__MODULE__, :waiter}, self())
 
     argv = argv()
-
-    code = main(argv)
-    halt(code)
+    halt(guard(fn -> main(argv) end), draws?(argv))
     :ignore
+  end
+
+  @doc """
+  Runs `fun`, the command line, to an exit status, whatever happens on the way.
+
+  The runner is the application's start (see the moduledoc), so an exception or an exit
+  that escaped it failed the VM's boot: the person saw the boot's own wreckage,
+  `{exit,terminating,[{application_controller,call,2,…`, never the reason, while the VM
+  hung stopping everything else (#231). Here it is one line on standard error, `troupe:
+  could not start: <reason>`, printed after every window has closed and given the
+  terminal back, and the status is 1.
+  """
+  @spec guard((-> non_neg_integer())) :: non_neg_integer()
+  def guard(fun) do
+    fun.()
+  catch
+    kind, reason ->
+      message = failure(kind, reason, __STACKTRACE__)
+      close_windows()
+      IO.puts(:stderr, "troupe: could not start: " <> message)
+      1
   end
 
   # Burrito passes the wrapper's argv as plain Erlang arguments; `burrito` itself is a
@@ -53,7 +73,10 @@ defmodule Troupe.CLI.Runner do
 
   @spec main([String.t()]) :: non_neg_integer()
   def main(argv) do
-    case argv |> CLI.parse() |> needs_terminal(terminal?()) do
+    parsed = argv |> CLI.parse() |> needs_terminal(Terminal.stdout?())
+    if interruptible?(parsed), do: Interrupt.watch(fn -> halt(130, false) end)
+
+    case parsed do
       {:no_terminal, message} ->
         fail(message)
 
@@ -137,7 +160,7 @@ defmodule Troupe.CLI.Runner do
                config: CLI.session_config(args)
              }) do
           {:ok, sid} -> tui(sid, page ++ mouse_opts(args))
-          {:error, reason} -> fail("could not start session: #{inspect(reason)}")
+          {:error, reason} -> fail("troupe: could not start: " <> reason(reason))
         end
 
       {:error, msg} ->
@@ -166,13 +189,19 @@ defmodule Troupe.CLI.Runner do
 
   def needs_terminal(parsed, _terminal?), do: parsed
 
-  # Whether standard output is a terminal, as the VM found it at start.
-  defp terminal? do
-    case :io.getopts(:standard_io) do
-      opts when is_list(opts) -> Keyword.get(opts, :stdout, true)
-      _ -> true
-    end
-  end
+  @doc """
+  Whether Ctrl-C is watched for while the command runs (`Troupe.CLI.Interrupt`): the
+  commands that print, read nothing and may wait, on something outside this machine or on
+  a daemon until it is stopped. The rest draw the terminal UI or ask questions, and read
+  the key themselves, or are over before it could matter.
+  """
+  @spec interruptible?({:ok, CLI.args()} | term()) :: boolean()
+  def interruptible?({:ok, %{mode: :run} = args}), do: args.headless
+
+  def interruptible?({:ok, %{mode: mode}}),
+    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :config_pull]
+
+  def interruptible?(_parsed), do: false
 
   # `troupe --remote https://plane…` beats the plane last logged in to.
   defp plane(%{plane_url: url}) when is_binary(url), do: url
@@ -197,7 +226,7 @@ defmodule Troupe.CLI.Runner do
         tui(sid, mouse_opts(args))
 
       {:error, reason} ->
-        fail("could not start: #{inspect(reason)}")
+        fail("troupe: could not start: " <> reason(reason))
     end
   end
 
@@ -277,7 +306,7 @@ defmodule Troupe.CLI.Runner do
         wait()
 
       {:error, reason} ->
-        fail("could not start the terminal UI (is this a TTY?): #{inspect(reason)}")
+        fail("troupe: could not start the terminal UI (is this a TTY?): #{inspect(reason)}")
     end
   end
 
@@ -326,8 +355,82 @@ defmodule Troupe.CLI.Runner do
     1
   end
 
-  defp halt(code) do
-    # Let stdout flush and the terminal restore before the VM goes away.
+  # A reason given in words is printed as it was given; any other, as the term it is.
+  defp reason(reason) when is_binary(reason), do: reason
+  defp reason(reason), do: inspect(reason)
+
+  # One line a person can act on. An exit that came up through calls is told by its
+  # reason and the innermost call it stopped: `exited in: GenServer.call(…)`, twice over,
+  # says where it was and not why.
+  defp failure(:error, error, stacktrace),
+    do: :error |> Exception.normalize(error, stacktrace) |> Exception.message() |> one_line()
+
+  defp failure(:exit, reason, _stacktrace) do
+    case innermost(reason, nil) do
+      {reason, nil} ->
+        one_line(Exception.format_exit(reason))
+
+      {reason, {mod, fun, args}} ->
+        call = Enum.map_join(args, ", ", &inspect(&1, limit: 5, printable_limit: 80))
+        one_line("#{Exception.format_exit(reason)}, in #{inspect(mod)}.#{fun}(#{call})")
+    end
+  end
+
+  defp failure(:throw, value, _stacktrace), do: one_line("uncaught throw " <> inspect(value))
+
+  defp innermost({reason, {mod, fun, args} = call}, _call)
+       when is_atom(mod) and is_atom(fun) and is_list(args),
+       do: innermost(reason, call)
+
+  defp innermost(reason, call), do: {reason, call}
+
+  defp one_line(text), do: text |> String.split(~r/\s*\R\s*/, trim: true) |> Enum.join(" ")
+
+  # Each window gives the terminal back as it stops: the terminal UI leaves raw mode and
+  # the alternate screen and shows the cursor. They are stopped, and waited for, before
+  # anything is printed or the VM goes, so the shell never gets a console the UI still
+  # holds.
+  defp close_windows do
+    for {_, pid, _, _} <- DynamicSupervisor.which_children(Troupe.UI.Windows), is_pid(pid) do
+      DynamicSupervisor.terminate_child(Troupe.UI.Windows, pid)
+    end
+
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  # Keys typed while the terminal UI was starting were meant for it, and when it never
+  # came nothing read them: left in the console's input, the shell would read them as a
+  # command line once troupe exits. Windows only, where the console holds them and the VM
+  # reads none of them itself (`rel/vm.args.eex`).
+  defp forget_typeahead do
+    if match?({:win32, _}, :os.type()) and Terminal.stdout?(), do: drain(2_000, 0)
+    :ok
+  end
+
+  # A poll takes one record off the console's input and answers nothing for a record that
+  # is no event of its own, a Ctrl key going down before its C for one, so the input is
+  # empty only after a run of empty answers, not the first.
+  defp drain(0, _empty), do: :ok
+  defp drain(_left, 10), do: :ok
+
+  defp drain(left, empty) do
+    case ExRatatui.poll_event(0) do
+      nil -> drain(left - 1, empty + 1)
+      _event -> drain(left - 1, 0)
+    end
+  rescue
+    _ -> :ok
+  end
+
+  # Whether the command line is one that draws the terminal UI.
+  defp draws?(argv), do: match?({:no_terminal, _}, needs_terminal(CLI.parse(argv), false))
+
+  defp halt(code, draws?) do
+    close_windows()
+    if code != 0 and draws?, do: forget_typeahead()
+    # Let stdout flush before the VM goes away.
     Process.sleep(50)
     System.halt(code)
   end

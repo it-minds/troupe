@@ -86,11 +86,18 @@ defmodule Troupe.UI.TUI.Model do
           root?: boolean()
         }
 
+  @typedoc """
+  A window: one agent's branch and the subagents it delegated to. `state` is derived by
+  the fold (`:running`, `:needs_input`, `:done_unread`, `:failed_unread`), from what is
+  `pending` and from `outcome`, how the window's own agent's last turn ended (`nil`
+  while it works); `badge` says the window has ended since it was last opened.
+  """
   @type window :: %{
           path: String.t(),
           name: String.t(),
           profile: String.t(),
           state: atom(),
+          outcome: :done | :failed | nil,
           isolation: atom(),
           started_at: integer(),
           ended_at: integer() | nil,
@@ -145,6 +152,7 @@ defmodule Troupe.UI.TUI.Model do
           name: e.data.name,
           profile: e.data.name,
           state: :running,
+          outcome: nil,
           isolation: e.data.isolation,
           started_at: e.ts,
           ended_at: nil,
@@ -188,18 +196,6 @@ defmodule Troupe.UI.TUI.Model do
       :remote_status ->
         %{m | remote: Map.merge(m.remote || %{}, e.data)}
 
-      # MCP server status is transient: the latest state per server is folded
-      # here so the status line and the /mcp page read from the model, and the
-      # page's live query (Client.mcp_status/1) repopulates it when it opens.
-      :mcp_status ->
-        entry = %{
-          state: e.data.state,
-          tools: length(e.data.tools),
-          error: e.data.error
-        }
-
-        %{m | mcp: Map.put(m.mcp, e.data.server, entry)}
-
       # The files panel is a fold too: a bumped version is what tells it its
       # listing is stale, without the panel subscribing to anything itself.
       :fs_changed ->
@@ -213,16 +209,74 @@ defmodule Troupe.UI.TUI.Model do
     end
   end
 
-  # `needs_input` only means anything while something is outstanding, and the
-  # agent that would log `branch_state :running` may never get to: a killed
-  # subagent cannot answer its own request, and a `y` on a budget question
-  # resumes the turn. Deriving the clear from `pending` keeps the strip, the
-  # status line and Enter's "go to the branch that needs you" honest whichever
-  # way the last request went away.
-  defp settle(%{state: :needs_input, pending: []} = w, %Event{ts: ts}),
-    do: set_state(w, :running, ts)
+  # A window's state is derived here, once, from what its events said: the daemon sends
+  # none (the old harness's `branch_state` went with it). It needs you while anything in
+  # it is pending, a subagent's request as much as its own agent's, and otherwise says
+  # where that agent is: working, or at rest after a turn that finished or failed.
+  # Deriving it from `pending` keeps the strip, the status line and Enter's "go to the
+  # branch that needs you" honest whichever way the last request went away: a killed
+  # subagent never answers its own, and a `y` on a budget question resumes the turn.
+  defp settle(w, %Event{} = e) do
+    w = turn(w, e)
+    %{w | state: window_state(w)}
+  end
 
-  defp settle(w, _e), do: w
+  defp window_state(%{pending: [_ | _]}), do: :needs_input
+  defp window_state(%{outcome: :done}), do: :done_unread
+  defp window_state(%{outcome: :failed}), do: :failed_unread
+  defp window_state(_w), do: :running
+
+  # Where the window's own agent is. At rest as the log says it: `turn_ended`, `cancelled`
+  # and `agent_done` arrive as a durable `agent_state`, while the live one says `idle`
+  # once before the agent has even taken its task, so it is no rest. Working again on any
+  # word that it works, live or not. The end is unread (`badge`) until the window is
+  # opened; a subagent's own end is its parent's business, not its window's.
+  defp turn(%{path: path} = w, %Event{type: :agent_state, agent_path: path, data: d} = e) do
+    case {activity(d.to), e.transient?} do
+      {to, false} when to in [:idle, :done] ->
+        failure = failure(w, to, reason(d))
+        outcome = if failure, do: :failed, else: :done
+        %{w | outcome: outcome, message: failure, badge: true, ended_at: e.ts}
+
+      {to, _transient?} when to in [nil, :idle, :done] ->
+        w
+
+      _working ->
+        working(w)
+    end
+  end
+
+  defp turn(w, _e), do: w
+
+  defp working(w), do: %{w | outcome: nil, message: nil, ended_at: nil}
+
+  # Why a rest is a failure, in words, or nil when it is none: the line the headless
+  # printer draws between a run that finished and one that ended short, save that a cancel
+  # is the person's own doing and leaves the window done (Decision 7).
+  defp failure(_w, :done, reason) when reason not in [nil, "finished"],
+    do: "the agent ended #{reason}"
+
+  defp failure(_w, _to, "tool_failures"),
+    do: "a tool kept failing, and the harness stopped the turn"
+
+  defp failure(_w, _to, "cancelled"), do: nil
+
+  defp failure(%{path: path} = w, _to, _reason) do
+    case Map.get(w, :model_errors, %{}) do
+      %{^path => message} -> "the model request failed: #{message}"
+      _ -> nil
+    end
+  end
+
+  # A journal read back gives the state as the string it wrote and the reason as an atom
+  # (`Codec` restores only its enum keys, and `reason` is one of them, `to` not).
+  defp activity(to) when is_binary(to), do: String.to_atom(to)
+  defp activity(to), do: to
+
+  defp reason(%{reason: reason}) when is_atom(reason) and not is_nil(reason),
+    do: Atom.to_string(reason)
+
+  defp reason(d), do: d[:reason]
 
   defp apply_to_window(w, %Event{type: type, agent_path: path, data: d, ts: ts}) do
     case type do
@@ -233,17 +287,15 @@ defmodule Troupe.UI.TUI.Model do
         w
         |> ensure_agent(path)
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
-        |> Map.put(:ended_at, nil)
-        |> set_state(:running, ts)
+        |> working()
 
       :input when d.source in [:user, :watch] ->
         w
         |> ensure_agent(path)
         |> draw_input(path, d)
         |> update_agent(path, fn a -> %{a | ended_at: nil} end)
-        |> Map.put(:ended_at, nil)
         |> unconfirmed(d)
-        |> set_state(:running, ts)
+        |> working()
 
       # A remote session renders your own input before the server has seen it;
       # `input.accepted` carrying the same command id is what confirms it.
@@ -274,11 +326,12 @@ defmodule Troupe.UI.TUI.Model do
         end)
 
       :agent_state ->
+        to = activity(d.to)
         errors = Map.get(w, :model_errors, %{})
-        errors = if d.to in [nil, :idle], do: errors, else: Map.delete(errors, path)
+        errors = if to in [nil, :idle], do: errors, else: Map.delete(errors, path)
 
         Map.merge(w, %{
-          activity: Map.put(w.activity, path, d.to),
+          activity: Map.put(w.activity, path, to),
           activity_since: ts,
           model_errors: errors
         })
@@ -376,30 +429,6 @@ defmodule Troupe.UI.TUI.Model do
 
       t when t in [:approval_answered, :question_answered] ->
         %{w | pending: Enum.reject(w.pending, &(&1.call_id == d.call_id))}
-
-      :branch_state ->
-        case d.state do
-          :done_unread ->
-            %{w | state: :done_unread, badge: true, ended_at: ts, summary: d[:summary] || w.summary}
-
-          # `branch_state` is window-scoped but each agent emits it from its own
-          # outstanding calls, so the root answering would clear the window while a
-          # delegated subagent still waits — leaving it stuck with no signal in the
-          # strip, the status line or Enter's "go to the branch that needs you".
-          :running when w.pending != [] ->
-            w
-
-          :running ->
-            set_state(w, :running, ts)
-
-          :needs_input ->
-            %{w | state: :needs_input}
-        end
-
-      :branch_failed ->
-        w
-        |> push(path, {:system, "branch failed: #{d.message}"})
-        |> Map.merge(%{state: :failed_unread, badge: true, ended_at: ts, message: d.message})
 
       :finished ->
         w = ensure_agent(w, path)
@@ -552,8 +581,6 @@ defmodule Troupe.UI.TUI.Model do
 
   defp truncation_line(_d), do: "the reply hit the output token cap — asking again in smaller steps"
 
-  defp set_state(w, state, _ts), do: %{w | state: state}
-
   # Only the optimistic copy of an input carries a command id worth waiting on:
   # one that came off the wire is already confirmed by definition.
   defp unconfirmed(w, %{optimistic: true, command_id: id, content: text}) when is_binary(id),
@@ -580,8 +607,8 @@ defmodule Troupe.UI.TUI.Model do
 
   # An agent that is gone never logs `approval_answered`/`question_answered`, so
   # its request would sit in `pending` forever: unanswerable (Approvals dropped
-  # its entry when the pid died) and, because of the guard above, blocking every
-  # later `:running`. Delegation ending and cancellation are the two points where
+  # its entry when the pid died) and holding its window in `:needs_input` for
+  # good. Delegation ending and cancellation are the two points where
   # the whole subtree is known to be dead.
   defp drop_pending(w, path) do
     prefix = path <> "/"
@@ -820,10 +847,8 @@ defmodule Troupe.UI.TUI.Model do
   defp said(_text), do: ""
 
   @doc """
-  MCP servers as the `/mcp` page and the status line read them: the latest
-  folded status per server, sorted by name. The fold is transient (driven by
-  `:mcp_status` events) so it may be empty after a crash until the page's live
-  query repopulates it.
+  MCP servers as the status line reads them: the state per server the `/mcp`
+  page's live query last found, sorted by name. Empty until the page first opens.
   """
   @spec mcp_servers(t()) :: [
           %{name: String.t(), state: atom(), tools: non_neg_integer(), error: String.t() | nil}
@@ -850,6 +875,22 @@ defmodule Troupe.UI.TUI.Model do
     [w.path | children]
   end
 
+  @doc """
+  Marks a window read: it is open, so how it ended has been seen. The screen does this
+  when a window is activated, and for the open one whenever it ends.
+  """
+  @spec seen(t(), String.t()) :: t()
+  def seen(%__MODULE__{windows: windows} = m, path) do
+    case windows do
+      %{^path => %{badge: true} = w} -> %{m | windows: Map.put(windows, path, %{w | badge: false})}
+      _ -> m
+    end
+  end
+
+  @doc """
+  What the status line says about the windows: how many need you, and how many ended,
+  done or failed, since they were last opened.
+  """
   @spec attention_summary(t()) :: String.t()
   def attention_summary(%__MODULE__{} = m) do
     ws = windows(m)
@@ -893,9 +934,15 @@ defmodule Troupe.UI.TUI.Model do
   running tools and pending items.
   """
   @spec activity_line(window(), String.t(), non_neg_integer(), integer()) :: String.t() | nil
-  def activity_line(%{state: s}, _path, _tick, _now)
-      when s in [:done_unread, :failed_unread, :dismissed],
-      do: nil
+  def activity_line(%{state: s} = w, path, _tick, _now)
+      when s in [:done_unread, :failed_unread, :dismissed] do
+    # A window at rest has nothing going on, but a model that failed still says why,
+    # where the person is looking.
+    case Map.get(w, :model_errors, %{}) do
+      %{^path => message} -> "model error: #{message}"
+      _ -> nil
+    end
+  end
 
   def activity_line(w, path, tick, now) do
     agent = Map.get(w.agents, path, new_agent())
@@ -1284,32 +1331,49 @@ defmodule Troupe.UI.TUI.Model do
   end
 
   # `read_file` returns numbered lines: show them as source, with the numbers in
-  # their own gutter and the code highlighted for the file's language.
+  # their own gutter and the code highlighted for the file's language. A read of part
+  # of a file opens with the range it shows, and one cut at the size cap ends with a
+  # note that says so; both stay plain lines around the source.
   defp body_lines(%{name: "read_file", input: path, lines: lines}) do
-    numbered = Enum.map(lines, &split_number/1)
+    {head, rest} =
+      case lines do
+        ["(lines " <> _ = range | rest] -> {[range], rest}
+        _ -> {[], lines}
+      end
 
-    if numbered != [] and Enum.all?(numbered, &(&1 != nil)),
-      do: numbered_source(numbered, language_of(path)),
-      else: Enum.map(lines, &{:body, &1})
+    numbered = rest |> Enum.map(&split_number/1) |> Enum.take_while(&(&1 != nil))
+
+    cut =
+      case Enum.drop(rest, length(numbered)) do
+        [] -> []
+        ["", "[truncated:" <> _ = note] -> [note]
+        _other -> nil
+      end
+
+    if numbered != [] and cut != nil,
+      do: plain(head) ++ numbered_source(numbered, language_of(path)) ++ plain(cut),
+      else: plain(lines)
   end
 
-  defp body_lines(%{lines: lines}), do: Enum.map(lines, &{:body, &1})
+  defp body_lines(%{lines: lines}), do: plain(lines)
 
-  # `read_file` right-aligns the number in five columns and follows it with a tab,
-  # which `sanitize/1` expands to the next stop: an eight-column gutter. Splitting
-  # on that fixed width keeps the code's own indentation out of the separator.
-  @gutter_width 8
+  defp plain(lines), do: Enum.map(lines, &{:body, &1})
 
-  defp split_number(line) when byte_size(line) >= @gutter_width do
-    {prefix, code} = String.split_at(line, @gutter_width)
+  # `read_file` writes the number, a tab and the line, and `sanitize/1` has expanded
+  # the tab to the next `@tab` stop by now: `7   code`, `1000    code`. Splitting at
+  # the stop the number's own width implies keeps the code's indentation out of the
+  # separator. A file that ends in a newline ends in an empty numbered line, which
+  # the result's trimming leaves as the number alone.
+  defp split_number(line) do
+    case Regex.run(~r/^\d+/, line) do
+      [number] ->
+        {gutter, code} = String.split_at(line, (div(byte_size(number), @tab) + 1) * @tab)
+        if String.trim_trailing(gutter) == number, do: {number, code}
 
-    case Regex.run(~r/^\s*(\d+)\s+$/, prefix) do
-      [_, number] -> {number, code}
-      _ -> nil
+      nil ->
+        nil
     end
   end
-
-  defp split_number(_line), do: nil
 
   defp numbered_source(numbered, language) do
     code = Enum.map_join(numbered, "\n", &elem(&1, 1))

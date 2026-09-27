@@ -13,12 +13,19 @@ defmodule Troupe.CLI.Daemon do
   @install_sh "curl -fsSL https://raw.githubusercontent.com/it-minds/troupe/main/install.sh | sh"
   @install_ps1 "irm https://raw.githubusercontent.com/it-minds/troupe/main/install.ps1 | iex"
 
-  @doc "Run the daemon binary with `args` and return its exit status."
-  @spec run([String.t()]) :: non_neg_integer()
-  def run(args) do
+  @port [:binary, :exit_status, :hide, :stderr_to_stdout]
+
+  @doc """
+  Run the daemon binary with `args` and return its exit status.
+
+  `opts[:reaper]` is the reaper to run it under (`{:ok, path}`), or `:none`: by default the
+  reaper on Windows and none elsewhere.
+  """
+  @spec run([String.t()], keyword()) :: non_neg_integer()
+  def run(args, opts \\ []) do
     case command() do
       {:ok, path} ->
-        exec(path, args)
+        exec(path, args, Keyword.get_lazy(opts, :reaper, &reaper/0))
 
       :error ->
         IO.puts(:stderr, missing())
@@ -61,7 +68,34 @@ defmodule Troupe.CLI.Daemon do
     end
   end
 
-  defp exec(path, args) do
+  # On Windows the daemon, and whatever else is asked of it, runs under the reaper
+  # (`Troupe.Reaper`), in a job that ends when this VM does, however it does (#231, TUI
+  # Decision 130). There Ctrl-C is a key while troupe runs, which `Troupe.CLI.Interrupt`
+  # reads and ends troupe with, and a daemon started through a batch file gets no signal
+  # of its own: without the job it went on in the console after troupe had gone.
+  # Elsewhere Ctrl-C is the terminal's signal, and it reaches the daemon as well.
+  defp exec(path, args, {:ok, reaper}) do
+    port =
+      case invocation(path, args) do
+        {:exec, path, args} ->
+          Port.open({:spawn_executable, String.to_charlist(reaper)}, [
+            {:args, [path | args]} | @port
+          ])
+
+        # The line goes on as it is written, as `System.shell/2` hands it to cmd.exe: the
+        # reaper passes its own command line on unchanged, less its own name.
+        {:shell, line} ->
+          reaper = String.replace(reaper, "/", "\\")
+          shell = System.get_env("COMSPEC", "cmd")
+          Port.open({:spawn, ~c"\"#{reaper}\" #{shell} /s /c #{line}"}, @port)
+      end
+
+    relay(port)
+  rescue
+    error in ErlangError -> cannot_run(path, error)
+  end
+
+  defp exec(path, args, :none) do
     opts = [into: IO.stream(:stdio, :line), stderr_to_stdout: true]
 
     {_output, status} =
@@ -72,9 +106,33 @@ defmodule Troupe.CLI.Daemon do
 
     status
   rescue
-    error in ErlangError ->
-      IO.puts(:stderr, "could not run #{Troupe.Paths.display(path)}: #{Exception.message(error)}")
-      1
+    error in ErlangError -> cannot_run(path, error)
+  end
+
+  defp reaper do
+    with {:win32, _} <- :os.type(),
+         {:ok, path} <- Troupe.Reaper.path() do
+      {:ok, path}
+    else
+      _ -> :none
+    end
+  end
+
+  # What the daemon prints, as it prints it, and then its status.
+  defp relay(port) do
+    receive do
+      {^port, {:data, data}} ->
+        IO.write(data)
+        relay(port)
+
+      {^port, {:exit_status, status}} ->
+        status
+    end
+  end
+
+  defp cannot_run(path, error) do
+    IO.puts(:stderr, "could not run #{Troupe.Paths.display(path)}: #{Exception.message(error)}")
+    1
   end
 
   # A word cmd.exe reads as one word as it stands, like every argument the daemon takes,

@@ -74,8 +74,7 @@ defmodule Troupe.Session.Files do
       session_id: session_id,
       workspace: workspace,
       agent_path: Keyword.get(opts, :agent_path, ["root"]),
-      debounce_ms: Keyword.get(opts, :debounce_ms, @debounce_ms),
-      ignore: Gitignore.load(workspace.root_real)
+      debounce_ms: Keyword.get(opts, :debounce_ms, @debounce_ms)
     }
 
     if Keyword.get(opts, :enabled, false) do
@@ -85,7 +84,12 @@ defmodule Troupe.Session.Files do
     end
   end
 
+  # The ignore rules are read with the backend, whose events are all they filter, and not
+  # for a session that has none: reading them walks the workspace, which in a home
+  # directory is minutes spent inside `session.create` (#231).
   defp start_backend(state, opts) do
+    state = %{state | ignore: Gitignore.load(state.workspace.root_real)}
+
     module =
       Keyword.get(opts, :backend) ||
         if FileSystemBackend.available?(state.workspace.root_real), do: FileSystemBackend, else: PollBackend

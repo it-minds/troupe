@@ -433,3 +433,194 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      (the line for a workspace with an alias hidden, the notice from `/context` typed,
      and the line's shape for a cut, a left-out file and the brief), and `/context` in
      the installed TUI on a scratch repository, on the pull request.
+
+125. **`/compact` is gone, the settings page names the commands the table has, and
+     headless mode answers the budget question as the question it is.** Paper cuts
+     after 0.6.0 (defects D32), part of #124. `/compact` asked a session to shrink its
+     context, and since the TUI became a client of the daemon no request carries that:
+     both clients answered with a sentence saying the other side compacts by itself,
+     at `compact_at` on this machine and on its plane remotely. The entry leaves the
+     harness's table (root Decision 698), and the TUI's clause, the `Troupe.Client`
+     callback and its two implementations go with it. This supersedes the sentence of
+     Decision 86 that made `/compact` the hand escape hatch: the wedge it was for, a
+     prompt too big to send, is the context overflow the harness compacts and retries
+     by itself. The help beside the settings lists the table's setup commands, `/help`
+     among them, in place of prose that could drift from the table, and `/help`'s
+     summary no longer says "this list", since it is read outside the palette now.
+     Headless mode answered the budget question with `approval.respond` on the
+     question's id, which no approval has, so a run that reached a limit waited for
+     ever rather than stopping as Decision 120 says it did; it now answers `stop`
+     through `question.answer`, and the run ends `1`. Proof:
+     `test/troupe/command_palette_test.exs` (the built-ins still the table's),
+     `test/troupe/settings_test.exs` ("the help's commands are the setup section of
+     the command table") and `test/troupe/cli_test.exs` ("headless printer stops at
+     the budget question and exits 1"), which waited out its 15 seconds before.
+
+126. **The TUI draws in Afterglow's palette, generated from the design tokens, at the
+     depth the terminal can show, and its pink means a person is needed.** Issue #228,
+     root Decisions 702 and 716. Every colour was a literal in `view.ex` and `hq.ex`,
+     magenta on code and reasoning, yellow on what waited for you.
+     - **Roles, generated.** `mix troupe.palette` writes `Troupe.UI.TUI.Palette` from
+       `afterglow.tokens.json`: fourteen roles, each a token with its dark and light
+       values, the nearest of xterm's fixed 240 to each (CIELAB, never 0 to 15, which
+       are the person's theme) and a stand-in among the sixteen. An alpha token is laid
+       over `bg.canvas`. `--check` is in `mix check`. The view names roles, never
+       colours, and `Theme.paint/2` resolves them once per frame.
+     - **Depth from the terminal.** Truecolor under `COLORTERM=truecolor|24bit` or in
+       Windows Terminal (`WT_SESSION`, which sets no `COLORTERM`), 256 from a `TERM`
+       that says so, otherwise the sixteen; none under `NO_COLOR` or `TERM=dumb`. The
+       light values when `COLORFGBG` reports a light background. `TROUPE_COLORS`
+       (`truecolor`, `256`, `16`, `none`, and `light` or `dark`) overrides all of it; an
+       environment variable rather than a setting, since the setting belongs with the
+       theme choice (#57) and this is about the terminal, not the person's taste.
+     - **The canvas is not painted.** Text outside a role keeps the terminal's ink, and a
+       background never comes from anything but a role: the code highlighter's
+       backgrounds are dropped, and its colours become their nearest of 256 at 256 and
+       the terminal's ink with the sixteen.
+     - **Pink is for being needed.** `:needs_you` goes on the pending line and a ticked
+       option, "waiting for you", the border and title of a window that waits on you,
+       the status line's count and how to answer, and the rows in the observer, the
+       session picker and HQ that wait on you; `:brand` on the mask's lit half. Magenta
+       in the sixteen goes to those three roles and nothing else, and a test reads every
+       tag `model.ex` draws and holds all but those to other roles. Code and headings
+       take the accent (the focus cyan), reasoning goes muted.
+     - **A window waits on you when something in it is pending.** No daemon sends the
+       `branch_state` that used to set `needs_input`, so the strip, the status line's
+       count and hint read `pending` instead; the needs-you border blinks once a second,
+       off the clock rather than the tick.
+     - **The mask, in half-blocks.** Rasterised by the task from `mark.path` and the
+       eyes at two cuts, light from the right, the eye on the lit half cut out; drawn
+       in the middle of a session's window until its first line, over the empty strip,
+       and beside HQ's lists. With no colour the lit half is solid ink against the
+       hollow one.
+     - **Not in this slice:** the theme picker and the other three themes (#57, #122),
+       the ◐ glyph family in each window's corner and as the spinner, a `blink` setting,
+       and painting the canvas on request.
+     - **Proof:** `test/troupe/tui_theme_test.exs` (the palette against the tokens,
+       detection and each depth, the pink's tags, an approval drawn at truecolor, 256,
+       16 and none, the light values, the mask's rules, the fresh window, HQ), `mix
+       check`, and the installed build's screens at each depth, headless and in Windows
+       Terminal, on the pull request.
+
+127. **A new session starts the librarian only when the daemon says the refresh is
+     due.** Amends 105, which started it whenever `memory.get` said the brief was
+     `absent` or `stale`: a librarian that failed, or wrote nothing where there was no
+     brief, left it so, and the next session started another (root Decision 713). The
+     daemon records each librarian's try and answers `refresh_due`, false while a try
+     that built nothing is younger than `memory_max_age_days`; `create_session` starts
+     no branch then, and the prompt still follows the status. A daemon from before the
+     field leaves it to the status, as 105 did. `/memory refresh` is not held off, and
+     `/memory` shows the status as before. Proof: `test/troupe/memory_client_test.exs`
+     ("a session after a librarian that failed starts none"), which failed on the
+     chunk's tip, and the installed TUI on a scratch repository, on the pull request.
+
+128. **A start that fails says why in one line and gives the terminal back, and on
+     Windows the VM neither reads the console nor outlives the launcher's Ctrl-C.**
+     Issue #231; root Decision 718 has the cause. In a Burrito binary the runner is the
+     application's start, so an exit that escaped it (the daemon link's call timing out)
+     failed the VM's boot. The person saw `{exit,terminating,[{application_controller,…`
+     and never the reason, the VM hung stopping the rest, and a Ctrl-C then killed
+     Burrito's launcher alone and left the VM's break menu reading the console beside the
+     shell, which is where the stray keystrokes went.
+     - **One line, then halt.** `Runner.guard/1` catches exits, exceptions and throws
+       around the command line and prints `troupe: could not start: <reason>`, status 1;
+       an exit is told by its reason and the innermost call it stopped. The daemon link
+       says in words what went wrong with the daemon, a call past its timeout (`the
+       daemon did not answer session.create within 30 s`) or a daemon that took the
+       connection and never answered (`no connection to the daemon at tcp:…`), and a
+       call past its timeout no longer kills the link with its caller.
+     - **The terminal back on every way out.** The runner stops the windows, and waits,
+       before it prints or halts: the terminal UI's own stop leaves raw mode and the
+       alternate screen and shows the cursor. It used to halt 50 ms after telling the UI
+       to quit. On Windows, a terminal UI that never came also drops the keys typed while
+       it started, which the shell would otherwise read as a command line.
+     - **`rel/vm.args.eex`, Windows only: `-noinput` and `+Bc`, not the `+Bi` the issue
+       proposed.** The launcher dies of any Ctrl-C the console signals, whatever the VM
+       does. Under `+Bi` the VM ignored it and stayed on in the console, still starting
+       the terminal UI or waiting on a question, beside the shell: reproduced here. Under
+       `+Bc` the console makes a key of Ctrl-C while troupe runs, so nothing dies and no
+       menu opens; the terminal UI reads it, and a Ctrl-C another program signals ends
+       the VM with the launcher. The shell has the signal back at its prompt.
+     - **Questions read key by key on Windows.** A cooked read there never ends while
+       troupe runs, since the console only makes a line end of Enter when it also makes a
+       signal of Ctrl-C. `Troupe.CLI.Prompt` turns the VM's reader on raw and does the
+       console's line editing (echo, or none for a key; Backspace; arrow keys dropped;
+       Enter), and a Ctrl-C at a question ends the command with status 130.
+     - **What is left, on Windows.** Ctrl-C does not interrupt a command that stays in
+       the console's cooked mode, `troupe run --headless` or `troupe daemon run` (close
+       the window, or `troupe daemon stop`), and the key it leaves is the shell's to read
+       at its next line, where cmd takes it as part of the command. Ctrl-Break still
+       reaches the break handler. After a first run that asked questions, the VM's reader
+       stays on beside that session's terminal UI, as it was on every run before.
+     - **Unix unchanged.** Its launcher dies of SIGINT the same way, and `+Bd`, no break
+       handler so the VM dies with it, would be the equivalent; nothing here can show it.
+     - **Proof:** `test/troupe/runner_guard_test.exs` (an exit, an exception and a throw
+       are one line and status 1, and the windows close before it is printed),
+       `test/troupe/prompt_test.exs`, and the built binary in real console windows on
+       the machine of the issue, before and after, on the pull request.
+
+129. **A window's state is derived by the model from what the daemon sends, since the
+     daemon sends none.** Supersedes the `branch_state` of Decision 4, which only the
+     old in-process harness logged: since Decision 100 every window said `running` for
+     ever, so the status line never counted what needs you, done or failed, no window
+     was unread, and Enter on the command line opened the first window rather than the
+     one asking. The fold now says `needs_input` while anything in a window is pending,
+     a subagent's request as much as its own agent's, and otherwise where the window's
+     own agent is: `running`, or at rest once the log says its turn is over (the
+     durable `agent_state` that `turn_ended`, `cancelled` and `agent_done` become; the
+     live one says `idle` once before the task is taken). A rest is `failed_unread`
+     when the headless printer would exit `1` for it (a model request that failed, a
+     tool that kept failing, an agent that ended other than `finished`), except that a
+     cancel stays `done_unread` as Decision 7 has it; otherwise `done_unread`. Either is
+     unread until the window is opened, and a window that ends while it is open is
+     read. The view's own count of what is pending (Decision 126) agrees with the
+     model's now. Proof: `test/troupe/window_attention_test.exs`, which failed on the
+     chunk's tip, and the installed TUI on a delegation whose subagent asks, on the
+     pull request.
+
+130. **Whether troupe has a terminal is asked of Burrito's launcher on Linux and macOS,
+     and on Windows Ctrl-C ends the commands that only print.** Issue #231's follow-ups
+     (Decision 128 left them; root Decision 719 has the daemon's side).
+     - **The launcher's standard output is the one the person sees.** On Linux and macOS
+       Burrito's launcher gives the VM a pipe for standard output and copies it to its
+       own (`erlang_launcher.zig`, so that `troupe … | head` going away ends the VM too).
+       So the VM's own standard output was never a terminal there, and the guard of 0.5.1
+       (`Runner.needs_terminal/2`) refused plain `troupe` in a real terminal for everyone,
+       as if it had been drawn into a file; `troupe config` asked nothing either. Shown
+       with the v0.6.0-beta Linux asset and with a build of the chunk's tip, under a pty
+       and under `script`: `troupe: stdout is not a terminal`, the VM's descriptor 1 a
+       pipe and the launcher's `/dev/pts/4`. `Troupe.CLI.Terminal` asks the launcher, the
+       VM's parent: `/proc/<pid>/fd/1` on Linux, `lsof` elsewhere, and a standard output
+       it cannot read counts as a terminal, since refusing on a guess is what went wrong.
+       A file, a pipe or no terminal at all is still refused. Standard input the launcher
+       passes on as it is, and on Windows it hands the VM its console: there the VM's own
+       answers stand.
+     - **Ctrl-C at a command that only prints, on Windows.** Under `+Bc` Ctrl-C is a key,
+       and `troupe run --headless`, `troupe daemon run`, `troupe login` and the others
+       that wait on a daemon or a network read none, so the key waited for the shell,
+       which read it into its next line. `Troupe.CLI.Interrupt` reads the console while
+       they run (`Runner.interruptible?/1` lists them), through the same reader the
+       terminal UI uses (`ExRatatui.poll_event/1`): every key typed is taken off, and
+       Ctrl-C prints `^C` and ends the command with 130. The terminal UI and a question
+       read Ctrl-C themselves and are not watched.
+     - **`troupe daemon` runs the daemon under the reaper on Windows**, in a job that ends
+       with troupe however troupe ends. Started through a batch file, the daemon got no
+       signal of its own, and without the job it went on in the console after troupe had
+       gone. Elsewhere Ctrl-C is the terminal's signal, reaches the daemon too, and
+       nothing changes.
+     - **What is left: Ctrl-Break opens the VM's break menu.** It is a signal whatever
+       the console's mode, and ERTS gives no flag that makes it end the VM
+       (`sys_interrupt.c`, `erl_init.c`): under `+Bc` it is still the break handler's,
+       `+Bi` ignores it and leaves the VM behind the launcher that died of it, and `+Bd`
+       is not read on Windows at all. A second Ctrl-Break ends the VM. Ending it on the
+       first takes a console control handler inside the VM, a NIF of our own.
+     - **Unix Ctrl-C, checked.** At `troupe login` under a pty the launcher dies of SIGINT
+       and the VM with it, and nothing of troupe is left three seconds later; nothing
+       changes there.
+     - **Proof:** `test/troupe/terminal_test.exs` (the launcher is asked only behind the
+       pipe; a file, a pipe and `/dev/null` are refused and a terminal is not; another
+       process's standard output read from `/proc`, and with `lsof` and `ps` as on
+       macOS), `test/troupe/interrupt_test.exs`, `test/troupe/cli_daemon_test.exs` ("the
+       daemon goes when the process that ran it goes", which the old spawn fails), the
+       Linux binary under a pty, and the Windows binary in console windows, before and
+       after, on the pull request.
