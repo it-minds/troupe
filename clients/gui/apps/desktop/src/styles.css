@@ -1872,13 +1872,16 @@ details.advanced > summary {
   max-width: var(--measure-narrow);
 }
 
-/* On or off, as the mode is chosen, and a line when the OS or the browser says otherwise. */
-.appearance > .notify {
+/* On or off, as the mode is chosen, and a line when the OS or the browser says otherwise.
+   What the app opens on is chosen the same way. */
+.appearance > .notify,
+.appearance > .opening {
   display: flex;
   flex-direction: column;
   gap: var(--space-3);
 }
-.appearance > .notify .options {
+.appearance > .notify .options,
+.appearance > .opening .options {
   max-width: var(--measure-narrow);
 }
 /* The note is set in mono, whose `ch` is narrower: the reading measure lines it up. */
@@ -2280,6 +2283,21 @@ details.advanced > summary {
   display: flex;
   flex-wrap: wrap;
   gap: var(--space-4);
+}
+/* Where the comp keeps its shortcuts: whether the app opens here, in the footer's own
+   mono caption. */
+.launcher footer label {
+  flex-direction: row;
+  align-items: center;
+  margin-left: auto;
+  cursor: pointer;
+}
+.launcher footer input[type="checkbox"] {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: var(--running-solid);
+  cursor: pointer;
 }
 
 /* -- a new session ----------------------------------------------------------- */

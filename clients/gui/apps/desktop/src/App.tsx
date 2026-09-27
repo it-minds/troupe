@@ -1,5 +1,5 @@
-// The shell. Sign in, or use this computer only, then one list and the things you reach
-// from it.
+// The shell. Sign in, or use this computer only, then the launcher — or the one list, for
+// a person who chose to start there — and the things you reach from them.
 //
 // There is no router and no session state: which screen is showing is a local
 // variable, and every screen rebuilds itself from the platform and the machine running
@@ -21,7 +21,7 @@ import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
-import { Launcher } from "./views/Launcher";
+import { Launcher, opensOnLauncher } from "./views/Launcher";
 import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
 import { FirstRun, SetupScreen, useSetupNeeded } from "./views/Onboarding";
@@ -58,7 +58,10 @@ export function App(): JSX.Element {
   const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const mode: AppMode = localOnly || offline ? "local" : "plane";
-  const [where, setWhere] = useState<Where>({ screen: "sessions" });
+  // The launcher, unless the person has said the list (Decision 709). A first run ends
+  // where it ends — on the session it started, or on the list — and the next start is
+  // the first that opens here.
+  const [where, setWhere] = useState<Where>(() => (opensOnLauncher() ? { screen: "launcher" } : { screen: "sessions" }));
   const daemon = useDaemon();
   const { snapshot, store, refresh } = useFleet(auth, daemon.client);
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
@@ -176,8 +179,8 @@ export function App(): JSX.Element {
   const caps = capabilities();
   const local = snapshot.rows.filter((r) => r.kind !== "team").length;
 
-  // The front of house: no rail, three tiles, and the same rows the list shows. The
-  // lockup in the rail opens it; every tile on it leads back into the shell.
+  // The front of house: no rail, three tiles, and the same rows the list shows. The app
+  // opens on it and the lockup in the rail opens it again; every tile leads into the shell.
   if (where.screen === "launcher") {
     return (
       <Launcher

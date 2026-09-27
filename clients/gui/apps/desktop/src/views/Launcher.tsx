@@ -1,21 +1,43 @@
-// The launcher: the front of house, behind the lockup in the rail.
+// The launcher: the front of house, and the first screen.
 //
-// The comp opens on it; the app still opens on the one list, because the list is the
-// whole idea, and this is the screen for the moment before you know which room you want:
-// three tiles for the three things there are to do, what was open last, and what this
-// machine is. Nothing here is a second copy of any state — every number is read off the
-// same rows the list shows.
+// The app opens on it, as the comp does, and the lockup in the rail opens it from
+// anywhere: the screen for the moment before you know which room you want — three tiles
+// for the three things there are to do, what was open last, and what this machine is.
+// Nothing here is a second copy of any state — every number is read off the same rows the
+// list shows. A person who would rather start on the list says so at its foot, or beside
+// the appearance, and from the next start the app opens there (Decision 709).
 
+import { useState } from "react";
 import type { JSX } from "react";
 import { awaitingYou } from "@troupe/client";
 import type { AuthSession, FleetRow } from "@troupe/client";
-import { capabilities } from "../shell";
+import { capabilities, prefs } from "../shell";
 import { Mask } from "./brand";
 import { relative, statusOf } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
 const KIND: Record<FleetRow["kind"], string> = { team: "Team", local: "This computer", private: "Private" };
+
+/** Whether the app opens here, which it does until the person says the list. */
+export function opensOnLauncher(): boolean {
+  return prefs.get("start", "launcher") !== "sessions";
+}
+
+/**
+ * The preference, for the checkbox at the launcher's foot and the one beside the
+ * appearance. It is read at start and nowhere else, so changing it moves nothing now.
+ */
+export function useOpensOnLauncher(): { on: boolean; setOn: (on: boolean) => void } {
+  const [on, setOnState] = useState(opensOnLauncher);
+  return {
+    on,
+    setOn: (next) => {
+      prefs.set("start", next ? "launcher" : "sessions");
+      setOnState(next);
+    },
+  };
+}
 
 export function Launcher({
   rows,
@@ -43,6 +65,7 @@ export function Launcher({
   onOpen: (id: string) => void;
 }): JSX.Element {
   const caps = capabilities();
+  const start = useOpensOnLauncher();
   const waiting = awaitingYou(rows);
   const team = rows.filter((r) => r.kind === "team").length;
   const here = rows.length - team;
@@ -162,6 +185,10 @@ export function Launcher({
         <span>
           troupe {__TROUPE_VERSION__} · {caps.shellName ?? "browser"}
         </span>
+        <label title="Appearance, in the rail, brings it back.">
+          <input type="checkbox" checked={!start.on} onChange={(e) => start.setOn(!e.target.checked)} />
+          Skip this screen when Troupe starts
+        </label>
       </footer>
     </div>
   );

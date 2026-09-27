@@ -10,7 +10,7 @@ import type { DurableEvent, FleetRow } from "@troupe/client";
 import { App } from "../src/App";
 import { askPermission, noticeEvent, noticeRows, resetNotifications } from "../src/notify";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, render, sleep, waitFor } from "./support";
+import { button, render, sleep, startOnTheList, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -42,6 +42,7 @@ const row = (workspace: string): HTMLButtonElement | undefined =>
 beforeEach(async () => {
   localStorage.clear();
   localStorage.setItem("troupe.pref.localOnly", "yes");
+  startOnTheList();
   resetNotifications();
   FakeNotification.permission = "granted";
   FakeNotification.answer = "granted";

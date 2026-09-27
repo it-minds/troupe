@@ -9,7 +9,7 @@ import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { COMMANDS } from "../../../packages/client/test/support/commands.js";
-import { button, render, says, type, waitFor } from "./support";
+import { button, render, says, startOnTheList, type, waitFor } from "./support";
 
 Element.prototype.scrollIntoView = function scrollIntoView() {};
 globalThis.WebSocket = NodeWebSocket as unknown as typeof WebSocket;
@@ -32,6 +32,7 @@ function rowNames(): string[] {
 beforeEach(async () => {
   localStorage.clear();
   localStorage.setItem("troupe.pref.localOnly", "yes");
+  startOnTheList();
   daemon = new FakeDaemon({ osUser: "ada" });
   await daemon.start();
   daemon.seed("/home/ada/notes");
