@@ -47,6 +47,11 @@ type Where =
 /** How often an app working offline asks whether the plane is back. */
 const OFFLINE_RETRY_MS = 15_000;
 
+/** Where a start lands: the launcher, or the list for a person who chose it. */
+function startScreen(): Where {
+  return opensOnLauncher() ? { screen: "launcher" } : { screen: "sessions" };
+}
+
 export function App(): JSX.Element {
   const [localOnly, setLocalOnlyState] = useState(storedLocalOnly);
   // Plane mode with the plane not answering, and the person carrying on here meanwhile.
@@ -57,11 +62,18 @@ export function App(): JSX.Element {
   const [asking, setAsking] = useState(0);
   const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState<AuthSession | null>(null);
+  // A first run that has just named a plane: the sign-in screen signs in to it at once
+  // rather than ask for it again. Spent by the sign-in, or by leaving plane mode.
+  const [signInNow, setSignInNow] = useState(false);
+  const signedIn = useCallback((a: AuthSession) => {
+    setSignInNow(false);
+    setAuth(a);
+  }, []);
   const mode: AppMode = localOnly || offline ? "local" : "plane";
   // The launcher, unless the person has said the list (Decision 709). A first run ends
   // where it ends — on the session it started, or on the list — and the next start is
   // the first that opens here.
-  const [where, setWhere] = useState<Where>(() => (opensOnLauncher() ? { screen: "launcher" } : { screen: "sessions" }));
+  const [where, setWhere] = useState<Where>(startScreen);
   const daemon = useDaemon();
   const { snapshot, store, refresh } = useFleet(auth, daemon.client);
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
@@ -75,7 +87,9 @@ export function App(): JSX.Element {
   useEffect(() => {
     if (onScreen) store?.patch(onScreen, { unseen: null });
   }, [onScreen, store]);
-  useNotifications(snapshot.rows, onScreen);
+  // A notification the person answered leads to its session (notify.ts).
+  const openSession = useCallback((id: string) => setWhere({ screen: "session", id }), []);
+  useNotifications(snapshot.rows, onScreen, openSession);
   // Asked once, on this person's first sign-in, and never again. Tracked per subject:
   // two people on one computer are two first sign-ins, and the second should not
   // inherit an answer the first one gave.
@@ -88,7 +102,8 @@ export function App(): JSX.Element {
   const signOut = useCallback(async () => {
     await auth?.signOut();
     setAuth(null);
-    setWhere({ screen: "sessions" });
+    // Signing back in is a start like any other, so it lands where a start does.
+    setWhere(startScreen());
     // Whoever signs in next is a different person until proved otherwise, and whether
     // *they* have picked a theme is a question about them.
     setChosen(false);
@@ -99,6 +114,7 @@ export function App(): JSX.Element {
     setLocalOnlyState(on);
     setOffline(false);
     setExpired(false);
+    setSignInNow(false);
     // Let go of, not signed out of: the refresh token stays in its store, so turning
     // this off again signs straight back in. Signing out is a different button.
     if (on) setAuth(null);
@@ -140,17 +156,31 @@ export function App(): JSX.Element {
   }, [offline, expired, planeUrl, asking]);
 
   if (mode === "plane" && !auth) {
-    return <SignIn onSignedIn={setAuth} onLocalOnly={() => setLocalOnly(true)} onOffline={() => setOffline(true)} />;
+    return (
+      <SignIn
+        signInNow={signInNow}
+        onSignedIn={signedIn}
+        onLocalOnly={() => setLocalOnly(true)}
+        onOffline={() => {
+          setSignInNow(false);
+          setOffline(true);
+        }}
+      />
+    );
   }
 
   // Where a run ends: on the session it started, on the list, or at the sign-in screen
-  // for a plane — which is local-only turned off again.
+  // for a plane — which is local-only turned off again, signing in to the plane's address
+  // straight away when the run was given one.
   const setupDone = (outcome: SetupOutcome): void => {
     setup.done();
     refresh();
     if (outcome.plane !== null) {
-      if (outcome.plane) prefs.set("planeUrl", outcome.plane);
       setLocalOnly(false);
+      if (outcome.plane) {
+        prefs.set("planeUrl", outcome.plane);
+        setSignInNow(true);
+      }
     } else {
       setWhere(outcome.sessionId ? { screen: "session", id: outcome.sessionId } : { screen: "sessions" });
     }

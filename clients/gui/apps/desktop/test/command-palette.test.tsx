@@ -29,6 +29,10 @@ function rowNames(): string[] {
   return [...document.querySelectorAll(".palette .row .name")].map((el) => el.textContent ?? "");
 }
 
+function selected(): string | null {
+  return document.querySelector('.palette .row[aria-selected="true"] .name')?.textContent ?? null;
+}
+
 beforeEach(async () => {
   localStorage.clear();
   localStorage.setItem("troupe.pref.localOnly", "yes");
@@ -130,7 +134,11 @@ describe("the command palette", () => {
     const input = dialog.querySelector<HTMLInputElement>("input")!;
 
     type(input, "goal make the suite green");
-    await waitFor(() => rowNames().join() === "/goal", "the goal row, the rest being its argument");
+    // The first word filters and the rest is the argument. `/loop` works towards the goal,
+    // and says so, so it stays in the list; the cursor is on the command named exactly.
+    await waitFor(() => selected() === "/goal", "the cursor on the goal row, the rest being its argument");
+    expect(rowNames()).toContain("/goal");
+    expect(rowNames()).not.toContain("/merge");
     key(input, "Enter");
     await waitFor(() => daemon.calls.some((c) => c.method === "session.goal.set" && c.params["text"] === "make the suite green"), "the goal to reach the daemon");
     await waitFor(() => says("goal set: make the suite green"), "the palette's notice");

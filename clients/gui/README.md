@@ -333,7 +333,8 @@ packages/client/src
 apps/desktop/src
   shell.ts        the whole contract between the web bundle and a desktop shell
   hooks.ts        React bindings over the stores above; no protocol knowledge
-  notify.ts       a notification when a session finishes or asks while nobody is looking
+  notify.ts       a notification when a session finishes or asks while nobody is looking,
+                  and its answer: a click, or the window back soon after, opens the session
   theme.ts        which theme and mode this person reads in; the only place that knows
   tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
   mark.ts         the mask's geometry, generated from the same files — do not edit

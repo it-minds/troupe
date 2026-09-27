@@ -4,8 +4,9 @@
 // anywhere: the screen for the moment before you know which room you want — three tiles
 // for the three things there are to do, what was open last, and what this machine is.
 // Nothing here is a second copy of any state — every number is read off the same rows the
-// list shows. A person who would rather start on the list says so at its foot, or beside
-// the appearance, and from the next start the app opens there (Decision 709).
+// list shows, and a recent row carries the list's marker for what happened while nobody
+// was reading it. A person who would rather start on the list says so at its foot, or
+// beside the appearance, and from the next start the app opens there (Decision 709).
 
 import { useState } from "react";
 import type { JSX } from "react";
@@ -13,7 +14,7 @@ import { awaitingYou } from "@troupe/client";
 import type { AuthSession, FleetRow } from "@troupe/client";
 import { capabilities, prefs } from "../shell";
 import { Mask } from "./brand";
-import { relative, statusOf } from "./bits";
+import { relative, statusOf, Unread } from "./bits";
 import type { DaemonState } from "./Local";
 
 /** The one word for where a row runs, as the list's pill says it. */
@@ -153,6 +154,7 @@ export function Launcher({
                     <button type="button" className={`is-${statusOf(r)}`} onClick={() => onOpen(r.id)}>
                       <span className="bar" aria-hidden="true" />
                       <span className="title">{r.title ?? r.id}</span>
+                      <Unread row={r} />
                       <span className={`kind ${r.kind === "team" ? "" : "local"}`}>{KIND[r.kind]}</span>
                     </button>
                   </li>

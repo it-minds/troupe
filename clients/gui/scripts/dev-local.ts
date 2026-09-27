@@ -165,6 +165,6 @@ console.log(`\n  dev:local    ${home}`);
 const endpoint = await startDaemon();
 console.log(`  daemon       ws://127.0.0.1:${endpoint.port}/v1/socket`);
 console.log(`  model        the daemon's fake provider, scripted by ${script}`);
-console.log(`  workspace    ${dirs.demo}  (type it into "Start a session")`);
+console.log(`  workspace    ${dirs.demo}  (New session, then type it into "Which directory")`);
 console.log("  plane        none. Local only: the app starts with no sign-in and contacts no plane.\n");
 startVite(endpoint);

@@ -156,6 +156,30 @@ describe("the transcript fold", () => {
     // it must not do is move the cursor backwards.
     assert.equal(fold(state, durable("user_input", { source: "user", text: "later" })).lastSeq, e.seq + 1);
   });
+
+  it("finishes the session on the root agent's agent_done alone, not a subagent's", () => {
+    seq = 0;
+    // A subagent that reports, and one a restore ended `interrupted`: each is a note in
+    // the transcript and its own agent's state, and the session carries on.
+    const working = foldAll([
+      durable("agent_started", { mode: "build" }),
+      durable("agent_started", { mode: "explore" }, ["root", "explore-1"]),
+      durable("agent_done", { reason: "finished" }, ["root", "explore-1"]),
+      durable("agent_done", { reason: "interrupted" }, ["root", "explore-2"]),
+    ]);
+    assert.equal(working.doneReason, undefined);
+    assert.equal(working.agentState["explore-1"], "done");
+    assert.deepEqual(
+      working.entries.slice(-2).map((e) => (e.kind === "system" ? e.text : e.kind)),
+      ["done: finished", "done: interrupted"],
+    );
+
+    const finished = fold(working, durable("agent_done", { reason: "finished" }));
+    assert.equal(finished.doneReason, "finished");
+    // A subagent starting afterwards does not take it back; the root starting again does.
+    assert.equal(fold(finished, durable("agent_started", { mode: "explore" }, ["root", "explore-3"])).doneReason, "finished");
+    assert.equal(fold(finished, durable("agent_started", { mode: "build" })).doneReason, undefined);
+  });
 });
 
 // Logs real sessions wrote against the scripted model (test/fixtures/approvals at the
