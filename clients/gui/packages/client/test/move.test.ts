@@ -89,6 +89,48 @@ describe("a session that moves to another pod", () => {
     }
   });
 
+  it("follows a dropped socket in read mode, which wakes nothing, and activates only for a command", async () => {
+    first.createSession(SESSION);
+    first.calls.length = 0;
+    second.calls.length = 0;
+    let holder = first;
+    const opens: string[] = [];
+
+    const a = await SessionAttachment.open({
+      sessionId: SESSION,
+      mode: "activate",
+      open: async (mode) => {
+        opens.push(mode);
+        return attachmentFor(holder, mode);
+      },
+      mint: async () => attachmentFor(holder, "activate"),
+      backoffMs: [10, 20, 40],
+    });
+
+    try {
+      // The socket goes, and nothing the person did asked for the session to run: the
+      // plane is asked where it is, in read mode (PROTOCOL.md §6), so a session that had
+      // gone to sleep stays asleep.
+      const doomed = a.conn!;
+      (doomed as unknown as { ws: { close(code: number, reason: string): void } }).ws.close(4000, "dropped");
+      const deadline = Date.now() + 5_000;
+      while (!(a.conn && a.conn !== doomed && a.status === "live") && Date.now() < deadline) await new Promise((r) => setTimeout(r, 10));
+      assert.equal(a.status, "live");
+      assert.deepEqual(opens, ["activate", "read"]);
+
+      // A command is what activates: the pod that only serves its history refuses it, and
+      // it is followed in activate mode and sent once more.
+      first.sessions.delete(SESSION);
+      holder = second;
+      await a.retrying(() => a.view.send("wake up", "c-moved-3"));
+      assert.deepEqual(opens, ["activate", "read", "activate"]);
+      assert.deepEqual(sends(second), ["c-moved-3"]);
+    } finally {
+      await a.close();
+      second.sessions.delete(SESSION);
+    }
+  });
+
   it("a session that cannot be reached again fails the command with the pod's answer, sent once", async () => {
     first.createSession(SESSION);
     first.calls.length = 0;

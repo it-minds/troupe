@@ -29,6 +29,7 @@ import type {
   SessionKind,
   SessionView,
   TranscriptState,
+  TroupeEvent,
 } from "@troupe/client";
 
 /**
@@ -300,7 +301,14 @@ export function useSessionView(
     // knows whether it owes the daemon a `close` — the one it would otherwise pay twice
     // when the open resolves after the unmount and that path closes too.
     let held = false;
-    let stopListening: (() => void) | null = null;
+    // The local view's stream, from its first event. The replay may arrive before `open`
+    // has resolved, and until it has, nothing that arrives is news.
+    const listener = (e: TroupeEvent): void => {
+      if (!live) return;
+      setState((s) => fold(s, e));
+      const v = ref.current;
+      noticeEvent(sessionId, e, held && Boolean(v) && isDurable(e) && e.seq > v!.headSeq);
+    };
     setState(emptyTranscript);
     setError(null);
     setStatus("connecting");
@@ -313,18 +321,14 @@ export function useSessionView(
     // The local view is *listened to* rather than given this mount's hook: a view may
     // already be open for somebody else — another pane, or this same component mounted
     // twice by React in development — and a hook installed by the first opener would
-    // keep folding into a state nobody renders.
+    // keep folding into a state nobody renders. The listener goes in with the `open`, so
+    // it is there before the replay is.
     const opened = local
       ? daemon!
-          .open(sessionId)
+          .open(sessionId, {}, listener)
           .then((v) => {
-            if (!live) return void daemon!.close(sessionId);
+            if (!live) return void daemon!.close(sessionId, listener);
             held = true;
-            stopListening = v.listen((e) => {
-              if (!live) return;
-              setState((s) => fold(s, e));
-              noticeEvent(sessionId, e, isDurable(e) && e.seq > v.headSeq);
-            });
             ref.current = v;
             setView(v);
             setStatus("live");
@@ -363,13 +367,12 @@ export function useSessionView(
 
     return () => {
       live = false;
-      stopListening?.();
       const a = attachment.current;
       attachment.current = null;
       ref.current = null;
       setView(null);
       if (a) void a.close();
-      else if (local && daemon && held) void daemon.close(sessionId);
+      else if (local && daemon && held) void daemon.close(sessionId, listener);
     };
   }, [auth, daemon, sessionId, mode, local]);
 

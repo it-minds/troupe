@@ -8,6 +8,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX, ReactNode } from "react";
+import { hasUnseen, unseenSummary } from "@troupe/client";
 import type { FleetRow, SessionKind, SyncState } from "@troupe/client";
 import { Eye } from "./brand";
 
@@ -81,6 +82,23 @@ export function Where({ kind }: { kind: SessionKind }): JSX.Element {
   return (
     <span className={`pill ${kind}`} title={kind === "team" ? "Runs on the platform" : "Runs on this computer"}>
       {kind === "team" ? "Team" : "This computer"}
+    </span>
+  );
+}
+
+/**
+ * What happened while nobody was reading the session (issue #119), as a marker: how many
+ * things, and the sentence behind them. The list's rows and the launcher's carry it. It
+ * goes when the session is opened, which is what clears it at the daemon; a listing never
+ * does.
+ */
+export function Unread({ row }: { row: FleetRow }): JSX.Element | null {
+  const summary = unseenSummary(row);
+  if (!summary || !hasUnseen(row.unseen)) return null;
+  const n = row.unseen.turns + row.unseen.approvals + row.unseen.questions;
+  return (
+    <span className="pill new" title={`While you were away: ${summary}`} aria-label={`While you were away: ${summary}`}>
+      {n} new
     </span>
   );
 }

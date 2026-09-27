@@ -151,3 +151,33 @@ describe("the first screen", () => {
     expect(says("Welcome.")).toBe(false);
   });
 });
+
+describe("the launcher's recent rows", () => {
+  const recent = (workspace: string): HTMLButtonElement | undefined =>
+    [...document.querySelectorAll<HTMLButtonElement>(".launcher .recent button")].find((b) => b.textContent?.includes(workspace));
+
+  it("carry the list's marker for what happened while nobody was reading, and lose it once the session is opened", async () => {
+    await start();
+    const away = daemon.seed("/home/ada/tilbud", { status: "waiting", pendingQuestions: 1 });
+    daemon.markSeen(away.id);
+    away.log.append("turn_ended", {});
+    daemon.ask(away.id, { call_id: "q-1", question: "Formal or casual?" });
+    const quiet = daemon.seed("/home/ada/notes");
+    daemon.markSeen(quiet.id);
+    restart();
+
+    const mark = await waitFor(() => recent("/home/ada/tilbud")?.querySelector<HTMLElement>(".pill.new"), "the marker on the recent row");
+    expect(mark.textContent).toBe("2 new");
+    expect(mark.title).toMatch(/^While you were away: 1 turn finished, 1 question waiting since \d\d:\d\d$/);
+    expect(recent("/home/ada/notes")?.querySelector(".pill.new")).toBeNull();
+
+    // Opened from the launcher and read, which is what clears it: at the next start the
+    // marker is gone.
+    recent("/home/ada/tilbud")!.click();
+    await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the session");
+    await waitFor(() => daemon.unseenOf(away).since === null, "the daemon to count it read");
+    restart();
+    await waitFor(() => recent("/home/ada/tilbud"), "the launcher again");
+    expect(recent("/home/ada/tilbud")!.querySelector(".pill.new")).toBeNull();
+  });
+});

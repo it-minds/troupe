@@ -2259,6 +2259,9 @@ details.advanced > summary {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.launcher .recent .pill {
+  flex: none;
+}
 .launcher .recent .kind {
   font: var(--t-micro);
   letter-spacing: var(--tracking-micro);
