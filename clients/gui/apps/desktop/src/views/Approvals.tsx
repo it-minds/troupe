@@ -33,10 +33,9 @@ export function Approvals({
 
   return (
     <>
-      <header className="toolbar">
-        <h2>Waiting for you</h2>
-        <span className="spacer" />
-        <span className="count">{waiting.length === 0 ? "nothing waiting" : `${waiting.length}`}</span>
+      <header className="screen-head">
+        <span className="count">{waiting.length === 0 ? "Nothing waiting" : `${waiting.length} waiting`}</span>
+        <h1>Waiting for you</h1>
       </header>
 
       {waiting.length === 0 ? (

@@ -9,6 +9,9 @@
 // The local half asks different questions, because a local session has different ones: a
 // directory rather than a profile's capacity, whether to branch, whether to act on notes
 // left in the files, and whether it should be sealed and follow you to another device.
+//
+// It is a screen of its own, as the comp draws it — "Cast a troupe" — not a dialog over
+// the list: the list's button and the launcher's tile both come here.
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
@@ -33,26 +36,31 @@ export function StartSession({
   const [where, setWhere] = useState<"team" | "local">(auth ? "team" : "local");
 
   return (
-    <div className="scrim" onClick={onClose}>
-      <div className="dialog" role="dialog" aria-modal="true" aria-label="Start a session" onClick={(e) => e.stopPropagation()}>
-        <h1>Start a session</h1>
+    <section className="start" aria-label="Start a session">
+      <header className="screen-head">
+        <span className="count">New session</span>
+        <h1>Cast a troupe</h1>
+      </header>
 
+      <div className="body">
         {auth && daemon && (
-          <div className="stack" style={{ gap: "var(--space-2)" }}>
-            <h3>Where it runs</h3>
-            <div className="options">
+          <section>
+            <span className="screen">Where it runs</span>
+            <div className="tiles">
               <button className="option" aria-pressed={where === "team"} onClick={() => setWhere("team")}>
+                <span className="kicker">Remote</span>
                 <span className="label">On the platform</span>
                 <span className="consequence">
                   A machine in the cluster, openable by your team, and still running when this window is closed.
                 </span>
               </button>
-              <button className="option" aria-pressed={where === "local"} onClick={() => setWhere("local")}>
+              <button className="option local" aria-pressed={where === "local"} onClick={() => setWhere("local")}>
+                <span className="kicker">Local</span>
                 <span className="label">On this computer</span>
                 <span className="consequence">Your own checkout and your own files. It stops when the daemon does.</span>
               </button>
             </div>
-          </div>
+          </section>
         )}
 
         {auth && (where === "team" || !daemon) ? (
@@ -71,7 +79,7 @@ export function StartSession({
           </>
         )}
       </div>
-    </div>
+    </section>
   );
 }
 
@@ -123,8 +131,8 @@ function TeamSession({
         </div>
       )}
 
-      <div className="stack" style={{ gap: "var(--space-2)" }}>
-        <h3>What it can reach</h3>
+      <section>
+        <span className="screen">What it can reach</span>
         <div className="options">
           {profiles.map((p) => {
             const spare = p.capacity - p.active_sessions;
@@ -138,7 +146,7 @@ function TeamSession({
                   setAgent("");
                 }}
               >
-                <span className="label">{p.name}</span>
+                <span className="label mono">{p.name}</span>
                 <span className="consequence">
                   {p.skills.length > 0 ? `Can ${p.skills.map((s) => s.name).join(", ")}. ` : ""}
                   {p.mcp_servers.length > 0 ? `Reaches ${p.mcp_servers.join(", ")}. ` : "Reaches nothing outside its own workspace. "}
@@ -147,45 +155,43 @@ function TeamSession({
               </button>
             );
           })}
-          {profiles.length === 0 && !profilesError && (
-            <p className="note" style={{ padding: "var(--space-3)" }}>
-              Loading what you can use…
-            </p>
-          )}
+          {profiles.length === 0 && !profilesError && <p className="note">Loading what you can use…</p>}
         </div>
-      </div>
+      </section>
 
       {chosen && (
         <>
-          <div className="stack" style={{ gap: "var(--space-2)" }}>
-            <h3>Who can open it</h3>
+          <section>
+            <span className="screen">Who can open it</span>
             <p className="note">
               {teams.length > 0
                 ? `Everyone on ${teams.join(" and ")} can open this session and answer its approvals.`
                 : "You can open this session. It is billed to your team."}
             </p>
+          </section>
+
+          <div className="fields">
+            <label>
+              How it should start
+              <select value={agent} onChange={(e) => setAgent(e.target.value)}>
+                <option value="">However this profile normally starts</option>
+                {chosen.agents.map((a) => (
+                  <option key={a} value={a}>
+                    {a}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label>
+              What to call it <small>optional</small>
+              <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Rewrite the placement loop" />
+            </label>
           </div>
 
           <label>
-            How it should start
-            <select value={agent} onChange={(e) => setAgent(e.target.value)}>
-              <option value="">However this profile normally starts</option>
-              {chosen.agents.map((a) => (
-                <option key={a} value={a}>
-                  {a}
-                </option>
-              ))}
-            </select>
-          </label>
-
-          <label>
-            What to call it <small>optional</small>
-            <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Rewrite the placement loop" />
-          </label>
-
-          <label>
-            What you want done <small>optional — you can also say it afterwards</small>
-            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} />
+            First instruction <small>optional — you can also say it afterwards</small>
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} />
           </label>
         </>
       )}
@@ -197,12 +203,12 @@ function TeamSession({
       )}
 
       <div className="actions">
-        <button onClick={onClose}>Cancel</button>
         <button className="primary" onClick={() => void start()} disabled={busy || !chosen || free <= 0}>
           {busy ? "Starting…" : "Start"}
         </button>
+        <button onClick={onClose}>Cancel</button>
+        {chosen && free <= 0 && <span className="note">Every machine on {chosen.name} is busy. Try another, or wait for one to finish.</span>}
       </div>
-      {chosen && free <= 0 && <p className="note">Every machine on {chosen.name} is busy. Try another, or wait for one to finish.</p>}
     </>
   );
 }
@@ -266,13 +272,14 @@ function LocalSession({
 
   return (
     <>
-      <label>
-        Which directory
+      <section>
+        <span className="screen local">Which directory</span>
         <div className="inline-form" style={{ marginBottom: 0 }}>
           <input
             value={workspace}
             onChange={(e) => setWorkspace(e.target.value)}
             placeholder={picker ? "Choose one, or type a path" : "/home/you/project"}
+            aria-label="Which directory"
             spellCheck={false}
             style={{ flex: 1 }}
           />
@@ -282,11 +289,7 @@ function LocalSession({
             </button>
           )}
         </div>
-      </label>
-
-      {recent.length > 0 && (
-        <div className="stack" style={{ gap: "var(--space-2)" }}>
-          <h3>Recently</h3>
+        {recent.length > 0 && (
           <div className="chips">
             {recent.map((w) => (
               <button key={w.path} className="chip as-button" onClick={() => setWorkspace(w.path)}>
@@ -294,8 +297,8 @@ function LocalSession({
               </button>
             ))}
           </div>
-        </div>
-      )}
+        )}
+      </section>
 
       <label>
         If something is already running there
@@ -306,19 +309,21 @@ function LocalSession({
         </select>
       </label>
 
-      <label className="inline">
-        <input type="checkbox" checked={watch} onChange={(e) => setWatch(e.target.checked)} />
-        Act on notes I leave in the files
-      </label>
-      <p className="note">
-        Watch mode reads comments you save in the workspace and treats them as input. One session per workspace may do it; a second is
-        refused rather than fighting the first.
-      </p>
+      <section>
+        <label className="inline">
+          <input type="checkbox" checked={watch} onChange={(e) => setWatch(e.target.checked)} />
+          Act on notes I leave in the files
+        </label>
+        <p className="note">
+          Watch mode reads comments you save in the workspace and treats them as input. One session per workspace may do it; a second is
+          refused rather than fighting the first.
+        </p>
+      </section>
 
       {/* Only where the daemon says it can seal one. A checkbox for something the
           server has never heard of reads as a setting that did not take. */}
       {daemon.supportsPrivateSessions && (
-        <>
+        <section>
           <label className="inline">
             <input type="checkbox" checked={privately} onChange={(e) => setPrivately(e.target.checked)} disabled={!linked} />
             Keep it private, and let it follow me to other devices
@@ -328,12 +333,12 @@ function LocalSession({
               ? "A private session runs here and is sealed under your own key before anything is stored. The platform lists it and can never read it."
               : "This needs your account linked to this computer first — the control is on “This computer”."}
           </p>
-        </>
+        </section>
       )}
 
       <label>
-        What you want done <small>optional — you can also say it afterwards</small>
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} />
+        First instruction <small>optional — you can also say it afterwards</small>
+        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={4} />
       </label>
 
       {error && (
@@ -343,10 +348,10 @@ function LocalSession({
       )}
 
       <div className="actions">
-        <button onClick={onClose}>Cancel</button>
         <button className="primary" onClick={() => void start()} disabled={busy || !workspace.trim()}>
           {busy ? "Starting…" : "Start"}
         </button>
+        <button onClick={onClose}>Cancel</button>
       </div>
     </>
   );

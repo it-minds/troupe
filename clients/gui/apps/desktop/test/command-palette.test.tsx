@@ -49,9 +49,9 @@ async function openSession(): Promise<HTMLTextAreaElement> {
   unmount = render(<App />).unmount;
   await waitFor(() => says("/home/ada/notes"), "the daemon's session in the list");
   button("Start a session")!.click();
-  const dialog = await waitFor(() => document.querySelector<HTMLElement>(".dialog"), "the start dialog");
-  type(dialog.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
-  button("Start", dialog)!.click();
+  const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
+  type(start.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
+  button("Start", start)!.click();
   return waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
 }
 

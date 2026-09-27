@@ -14,6 +14,7 @@ import type { JSX } from "react";
 import type { Entry } from "@troupe/client";
 import { LEGACY_BUDGET_OPTIONS } from "@troupe/client";
 import { Pill } from "./bits";
+import { Mask } from "./brand";
 
 type Question = Extract<Entry, { kind: "question" }>;
 
@@ -66,9 +67,10 @@ export function QuestionPanel({
   return (
     <section className="approval question">
       <header>
+        <Mask size={26} />
         <Pill status="waiting" />
+        <h2>{budget ? "A limit is reached. How much more, and for how long?" : "The session has a question"}</h2>
       </header>
-      <h2>{budget ? "A limit is reached. How much more, and for how long?" : "The session has a question"}</h2>
       <p className="consequence">{entry.question}</p>
       {error && <p className="also error">{error}</p>}
 

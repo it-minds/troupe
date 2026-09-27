@@ -170,6 +170,7 @@ function structure(tokens: Record<string, any>): string[] {
   s.put("backstage-width", tokens["size"].backstageWidth);
   s.put("composer-min-height", tokens["size"].composerMinHeight);
   for (const [k, v] of Object.entries<string>(tokens["size"].avatar)) s.put(`avatar-${k}`, v);
+  s.put("mark-display", tokens["size"].markDisplay);
   s.blank();
   for (const [k, v] of Object.entries<any>(tokens["breakpoint"])) s.put(`bp-${k}`, v.value);
 
