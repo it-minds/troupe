@@ -265,9 +265,12 @@ defmodule Troupe.UI.TUI.Server do
 
   # Test seam: render synchronously regardless of dirtiness.
   # A fleet `summary` updates the HQ list in place; with HQ closed there is
-  # nothing to update and the message is dropped.
-  def handle_info({:troupe_fleet, _plane, session_id, diff}, %{hq: hq} = state) when hq != nil,
-    do: {:noreply, %{state | hq: HQ.summary(hq, session_id, diff), dirty: true}, render?: false}
+  # nothing to update and the message is dropped. It asks for a frame itself: with
+  # every window at rest nothing else is ticking.
+  def handle_info({:troupe_fleet, _plane, session_id, diff}, %{hq: hq} = state) when hq != nil do
+    state = %{state | hq: HQ.summary(hq, session_id, diff), dirty: true}
+    {:noreply, schedule_tick(state), render?: false}
+  end
 
   def handle_info({:troupe_fleet, _plane, _session_id, _diff}, state),
     do: {:noreply, state, render?: false}
@@ -2012,7 +2015,7 @@ defmodule Troupe.UI.TUI.Server do
   ## Helpers
 
   defp activate(state, path, agent \\ nil) do
-    model = %{state.model | windows: Map.update!(state.model.windows, path, &%{&1 | badge: false})}
+    model = Model.seen(state.model, path)
     agent = if agent == path, do: nil, else: agent
 
     %{
@@ -2228,6 +2231,14 @@ defmodule Troupe.UI.TUI.Server do
     model =
       case event do
         %{type: :notice, data: %{text: "watch mode" <> _}} -> model
+        _ -> model
+      end
+
+    # A window that ends while it is open has been seen ending: only one you were not
+    # looking at is unread.
+    model =
+      case state.focus do
+        {:window, path} -> Model.seen(model, path)
         _ -> model
       end
 
