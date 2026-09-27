@@ -249,6 +249,7 @@ built nothing. The exit code says how the run ended, for scripts and CI:
 | `1` | stopped short: the agent ran out of budget, refused, or gave a cut or empty reply; its last model request failed; the turn was cancelled; the session could not start; or the connection to the daemon went and did not come back within a minute. The last line says which |
 | `2` | never started: the command line did not parse |
 | `3` | was refused an approval, with nobody to ask. Run it again with `--auto-approve`, or `troupe resume` the session to carry on by hand |
+| `130` | was interrupted with Ctrl-C |
 
 The terminal UI needs a terminal: `troupe`, `troupe resume` and `troupe run` without
 `--headless`, with standard output sent to a file or a pipe, say so in one line and exit

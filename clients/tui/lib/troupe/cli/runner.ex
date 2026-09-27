@@ -14,6 +14,7 @@ defmodule Troupe.CLI.Runner do
   use Task
 
   alias Troupe.{CLI, Client}
+  alias Troupe.CLI.{Interrupt, Terminal}
   alias Troupe.UI.Headless.Printer
   alias Troupe.UI.TUI
 
@@ -72,7 +73,10 @@ defmodule Troupe.CLI.Runner do
 
   @spec main([String.t()]) :: non_neg_integer()
   def main(argv) do
-    case argv |> CLI.parse() |> needs_terminal(terminal?()) do
+    parsed = argv |> CLI.parse() |> needs_terminal(Terminal.stdout?())
+    if interruptible?(parsed), do: Interrupt.watch(fn -> halt(130, false) end)
+
+    case parsed do
       {:no_terminal, message} ->
         fail(message)
 
@@ -185,13 +189,19 @@ defmodule Troupe.CLI.Runner do
 
   def needs_terminal(parsed, _terminal?), do: parsed
 
-  # Whether standard output is a terminal, as the VM found it at start.
-  defp terminal? do
-    case :io.getopts(:standard_io) do
-      opts when is_list(opts) -> Keyword.get(opts, :stdout, true)
-      _ -> true
-    end
-  end
+  @doc """
+  Whether Ctrl-C is watched for while the command runs (`Troupe.CLI.Interrupt`): the
+  commands that print, read nothing and may wait, on something outside this machine or on
+  a daemon until it is stopped. The rest draw the terminal UI or ask questions, and read
+  the key themselves, or are over before it could matter.
+  """
+  @spec interruptible?({:ok, CLI.args()} | term()) :: boolean()
+  def interruptible?({:ok, %{mode: :run} = args}), do: args.headless
+
+  def interruptible?({:ok, %{mode: mode}}),
+    do: mode in [:daemon, :login, :logout, :whoami, :models, :doctor, :config_pull]
+
+  def interruptible?(_parsed), do: false
 
   # `troupe --remote https://plane…` beats the plane last logged in to.
   defp plane(%{plane_url: url}) when is_binary(url), do: url
@@ -395,7 +405,7 @@ defmodule Troupe.CLI.Runner do
   # command line once troupe exits. Windows only, where the console holds them and the VM
   # reads none of them itself (`rel/vm.args.eex`).
   defp forget_typeahead do
-    if match?({:win32, _}, :os.type()) and terminal?(), do: drain(2_000, 0)
+    if match?({:win32, _}, :os.type()) and Terminal.stdout?(), do: drain(2_000, 0)
     :ok
   end
 

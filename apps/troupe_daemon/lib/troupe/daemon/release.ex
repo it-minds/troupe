@@ -119,6 +119,11 @@ defmodule Troupe.Daemon.Release do
 
   # Untested here: this repository is built and checked on Linux runners and a WSL
   # laptop. The Windows release job runs it.
+  #
+  # Every VM it starts reads the null device, not the console: with `+Bc` in `vm.args`
+  # (`rel/vm.args.eex`) a VM given the console turns Ctrl-C into a key for the whole
+  # console, which nothing here reads, and the daemon could no longer be stopped with it
+  # (root Decision 719).
   defp wrapper_cmd do
     ~S"""
     @echo off
@@ -129,15 +134,15 @@ defmodule Troupe.Daemon.Release do
     set "cmd=%~1"
     if "%cmd%"=="" set "cmd=run"
     if "%cmd%"=="run" (
-      call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status >nul 2>&1
+      call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status <nul >nul 2>&1
       if not errorlevel 1 (
-        call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status
+        call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- status <nul
         exit /b 0
       )
-      call "%rel%" start
+      call "%rel%" start <nul
       exit /b %errorlevel%
     )
-    call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- %*
+    call "%rel%" eval "Troupe.Daemon.CLI.eval(System.argv())" -- %* <nul
     exit /b %errorlevel%
     """
   end
