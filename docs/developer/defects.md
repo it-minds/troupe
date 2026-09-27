@@ -35,9 +35,8 @@ the #85 fixer (PR #88), 2026-09-22.
 
 - The root `.formatter.exs` has no `subdirectories`, so `mix format --check-formatted`
   never checks `apps/`. Running `mix format` on an app file reflows unrelated lines.
-- Under WSL, 2 tests in `apps/troupe_gateway/test/troupe/gateway/files_test.exs` fail
-  (`fs_changed` timing, no `inotifywait`), and `Troupe.Gateway.RestartTest` sometimes
-  fails under load ("the daemon never came up", a second VM with a 30 s limit).
+- `Troupe.Gateway.RestartTest` sometimes fails under load ("the daemon never came up",
+  a second VM with a 30 s limit).
 - Load-dependent: core `Troupe.Watch.WatcherTest` "poll backend five writes inside the
   debounce window produce one trigger", and the plane's `UsageTest` `enrolled/1`
   (`{:error, :closed}`, probably a shared-database deadlock inside the control connection).
@@ -57,8 +56,13 @@ the #85 fixer (PR #88), 2026-09-22.
 - `apps/troupe_gateway/test/troupe/gateway/restart_test.exs` `create/2` never stops the
   sessions it creates. They live in a second daemon OS process, so they probably don't
   leak into the test VM the way the two fixed in chunk 6 did (unconfirmed).
+- Gateway `PrivateTest` (`@moduletag :object_store`) has no reachability check: without
+  MinIO it fails with `econnrefused` rather than a SKIPPED block naming `scripts/dev-up`.
+- The desktop app's tests time out now and then when the machine is busy (goal-loop,
+  local-mode, onboarding, command-palette); local-mode sends before its session is
+  attached ("not attached").
 
-Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 6.
+Found by the #59, #87, #97, #98 and #99 fixers (2026-09-22/23) and in chunks 3 to 7.
 
 ### D9 - The admin docs describe a `subject_claim` setting the plane does not have (unconfirmed, medium)
 
@@ -78,39 +82,18 @@ fixer (PR #101), 2026-09-23.
 - `queue_input` logs a task edit's `input_queued` text as `inspect(%Todo.Edit{})`.
 - A worker command that is `waiting` can still be sent after its caller got
   `{:error, :timeout}` at 35 s.
-- `scripts/verify-local.ps1` prints "To go back: install-local.ps1 -Rollback" even when
-  its only failure is another daemon answering, which could lead to rolling back a good
-  install.
+- Under Windows PowerShell 5.1, `scripts/verify-local.ps1`'s `$ErrorActionPreference =
+  "Stop"` turns a native command's stderr (with `2>&1`) into a terminating
+  `NativeCommandError`, so on a broken install it stops before its summary.
+- `verify-local.ps1` stopping the installed daemon leaves a stale
+  `%LOCALAPPDATA%\troupe\daemon.json` whose port no longer listens.
 - The GUI's `BlobResponse` doc comment (`clients/gui/packages/client/src/types.ts`,
   `session.ts`) still says a server may answer a shorter `range`.
 
-Found by the chunk 4 and 5 fixers, 2026-09-26.
-
-### D24 - The librarian can run in every session of a repository (medium)
-
-Since #201 a librarian run that ends normally stamps the brief. A run that fails (model
-error, budget, cancel) stamps nothing, so with `memory_auto_refresh` it runs again in every
-new session, and a repository with no brief whose librarian writes nothing gets one in
-every session too. Each spends tokens. A fix: record an attempt time and cap automatic
-refreshes (for example once per `memory_max_age_days`). Found by the fixer of PR #201,
-2026-09-26.
-
-### D25 - An ACP agent whose subprocess exits may run its task again (unconfirmed, medium)
-
-`Troupe.Agent.ACPAgent` starts under its parent's DynamicSupervisor with the default
-`use GenServer` child spec (`restart: :permanent`), so one whose subprocess exits stops
-`:normal` and is restarted, re-running its task. #198 (stopping a subagent once it has
-reported) narrows this but doesn't remove it. It should be `:temporary`. To confirm: an ACP
-agent whose subprocess exits once; count its task starts. Found by the fixer of PR #198,
-2026-09-26.
+Found by the chunk 4, 5 and 7 fixers, 2026-09-26/27.
 
 ### D26 - Small state leftovers in the GUI, A2A and headless runs (low)
 
-- The GUI transcript (`clients/gui/packages/client/src/transcript.ts`, `agent_done`) sets
-  the session's `doneReason` on any agent's `agent_done`, so a subagent finishing (or one
-  ended `interrupted` by a restore) makes the session view say "Finished".
-- The desktop app reconnects with `session.open` in activate mode, so any dropped socket
-  wakes a session that had gone to sleep on its own.
 - The desktop app starts the daemon with the app's install directory as its working
   directory (`spawn_any` in `src-tauri/src/daemon.rs`), so the uninstaller probably can't
   remove that directory while the daemon runs (unconfirmed).
@@ -121,91 +104,94 @@ agent whose subprocess exits once; count its task starts. Found by the fixer of 
 
 Found by the chunk 5 fixers, 2026-09-26.
 
-### D27 - The TUI never draws `read_file`'s numbered body (medium)
-
-`apps/troupe_core/lib/troupe/tools/read_file.ex` writes each line as `N<tab>line`, while
-`split_number/1` in `clients/tui/lib/troupe/ui/tui/model.ex` expects a number
-right-aligned in five columns. The parse fails, so every file renders raw with its number
-inline, and the numbered, highlighted body (Decision 52) never appears. A fix: split at
-the tab stop the number's width implies. The comment on `@gutter_width` there also says
-the tab expands to an 8-column stop; `@tab` is 4. Found by the #182 fixer (PR #209),
-2026-09-26.
-
-### D28 - Writing a setting drops the config file's comments (medium)
-
-`Troupe.Config.Yaml` has no comment-preserving edit for a scalar (`edit_list/4` handles
-lists only), so the TUI settings screen, `ModelSettings.write` and the budget question's
-"this workspace" answer re-render the whole `config.yaml`. The file before the write is
-kept as `config.yaml.previous`. A follow-up to #122's scope-aware writes. Found by the
-#183 fixer (PR #213), 2026-09-26.
-
-### D29 - A pod's command palette lists the built-in agents, not the bundle's (low)
-
-On a worker, `commands.list` (`handle("commands.list")` in
-`apps/troupe_gateway/lib/troupe/gateway/dispatch.ex`) loads agent definitions with
-`Definitions.load(workspace)` alone, without the `bundle_dir`, `entitled` and
-`acp_agents` options `Troupe.Session` passes. So a pod's palette shows `priv/agents`
-and leaves out the bundle's agents, against Decision 698. Small in practice: agent rows
-are `availability: local` and show greyed on a remote session. Found by the fixer of
-PR #217, 2026-09-27.
-
 ### D30 - Two sources for the brand's assets (low)
 
-- `docs/design/themes/` (read by `mix troupe.theme` for the plane's front page; default
-  Footlight) and `clients/gui/docs/design/themes/` (read by `pnpm tokens`; default
-  Afterglow since Decision 702) are near-copies that drift.
 - `scripts/brand-icons.py` (Pillow) draws the plane's `favicon.ico` and
   `apple-touch-icon.png` with a second rasteriser; `pnpm icons` (PR #210) could draw them
   from the same mask so the plane and the desktop app match.
-- `clients/gui/docs/design/*.dc.html` reference `./support.js`, which is only in
-  `docs/design/themes/` and `docs/design/admin/`.
+- `clients/gui/docs/design/*.dc.html` reference `./support.js`, which is not in that
+  directory.
 
-Found by the #159 and #52 fixers (PRs #210, #211), 2026-09-26.
-
-### D31 - The dev stack doesn't come back after a WSL restart (low)
-
-`dev/docker-compose.yml` sets no restart policy, so after the WSL VM restarts (an idle
-shutdown, `wsl --shutdown`, a reboot) the three containers stay `Exited`. Suites then fail
-in ways that look like a bug: gateway `PrivateTest` with `econnrefused`, plane and worker
-tests unable to reach Postgres. OpenBao runs in memory, so its transit key and the bucket
-are gone too. `scripts/dev-up` brings everything back and re-seeds; `restart:
-unless-stopped` on the three services would save the step. Found by the coordinator,
-2026-09-27.
-
-### D33 - A renamed desktop build shares the real app's stored sign-in (medium)
-
-`clients/gui/apps/desktop/src-tauri/src/secrets.rs` names its keyring entry with a fixed
-`SERVICE` ("com.objective-mj.troupe"), not the build's identifier. A test build installed
-under another product name and identifier, as fixers do, still reads and writes the real
-app's stored refresh token: started in plane mode with a remembered plane URL, it would
-restore that sign-in and could rotate the real token. Deriving the service from the
-bundle identifier would separate them. Until then, a renamed build is run in local mode
-only. Found by the wave 3 fixer (PR #222), 2026-09-27.
+The two copies of the design tokens are one since PR #239. Found by the #159 and #52
+fixers (PRs #210, #211), 2026-09-26.
 
 ### D32 - Small leftovers from the 0.6.0 work (low)
 
-- `/compact` does nothing in the TUI: `Client.Daemon.compact/2` and
-  `Client.Remote.compact/2` only return a sentence saying the other side compacts on its
-  own. The command table describes it truthfully; it could go.
-- `Settings.help_sections/0` (`clients/tui/lib/troupe/settings.ex`) is prose that points
-  at `/help` and `/settings` and can drift from the command table.
-- The TUI's `Model` folds `:mcp_status` events that nothing emits.
-- On Windows, `config.get`'s `path`, `Troupe.Config.user_path/0` and
-  `Troupe.MCP.Local.user_path/1` return mixed separators (`...\troupe/config.yaml`) when
-  `TROUPE_CONFIG_HOME` has backslashes, and the GUI's Models panel prints it raw;
-  `Troupe.Paths.display` exists for this.
-- The headless printer answers the budget question with
-  `Client.approve(sid, budget_id, :deny)`, an approval call on a question id.
-- `Troupe.Instructions.brief/2` finds the repository root with git three times per model
-  call.
-- The librarian's prompt (`apps/troupe_core/priv/agents/librarian.md`, step 1) still
-  copies `AGENTS.md`, `CLAUDE.md` and `copilot-instructions.md` into the brief, which now
-  renders after those files themselves (#123, PR #216).
 - On a pod the plane always sends terms, so `contract/1` sets `budget_asks: false` for
   every placed session and the budget question never fires there. If pods should ask,
   the terms need their own switch.
 
-Found by the chunk 6 fixers, 2026-09-26/27.
+The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixers,
+2026-09-26/27.
+
+### D34 - On a pod, a deleted file is never reported to clients (medium)
+
+The worker image (`docker/Dockerfile`) installs `git` and `bubblewrap` but not
+`inotify-tools`, so `Troupe.Session.Files` on a pod uses the poll backend, which never
+reports a deletion (`changed_paths` lists additions and changes only) and takes a second
+or more for a change. A remote session's clients never learn a file was deleted. Found by
+the fixer of PR #233, 2026-09-27 (read in code).
+
+### D35 - Clicking a desktop notification on Windows doesn't open its session (medium)
+
+`tauri-plugin-notification` can't report a click on desktop (its `show()` drops the
+handle; `onAction` is fed only by the phone plugins). Since PR #238 the app opens the
+session when its window comes to the front within 15 s of a notification, which a click
+usually causes. A real click handler needs the shell to show its own toast through
+`tauri-winrt-notification`'s `on_activated` (already in `Cargo.lock`), and single-instance
+handling beside it, because a click may start a second copy from the Start-menu shortcut
+(unconfirmed). Found by the fixer of PR #238, 2026-09-27.
+
+### D36 - TUI leftovers after the attention fix (low)
+
+- `clients/tui/lib/troupe/ui/headless/printer.ex` still reads the dead
+  `:branch_state`/`:branch_failed`.
+- `view.ex`'s `waits_on_you?/1` and its status-line recount (from PR #239) are redundant
+  since PR #241 derives the window state in the model; so is its comment that no daemon
+  sends `branch_state`.
+- `model.ex`'s `:finished`, `:delegation_started` and `:delegation_completed` clauses are
+  dead (`Translate` never emits them), so a finished subagent's `ended_at` is never set,
+  and after a cancel a killed subagent's last activity stays on its window.
+- The session picker's `branch_states` column reads `Client.summary` branches, and
+  `Troupe.Client.Daemon` always returns `branches: []`, so it is always empty.
+- An idle screen stops ticking, so the sessions page's and HQ's ages are only as fresh
+  as the last tick.
+- A question for the design rather than a defect: chatting from the command line, the
+  session's own window shows `done ●`, dimmed, and "1 done" after every reply until you
+  open it (PR #241).
+- `Troupe.Codec.decode_event` restores only its `@enum_keys` as atoms, so on a rebuild
+  from the journal `agent_state` comes back with `to: "idle"` (a string) but
+  `reason: :cancelled` (an atom); readers comparing `to` with atoms break on a reopened
+  screen.
+- `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
+  dark-theme colours on a light terminal.
+
+Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
+
+### D37 - Small leftovers from the 0.6.1 work (low)
+
+- `Troupe.Tools.Output.cap/2` computes "N more bytes" before cutting back to the last
+  newline, so it under-reports what was dropped.
+- The settings help's "Where things live" says `~/.config/troupe/config.yaml`; on
+  Windows the file is under `%APPDATA%\troupe`.
+- An agent that crashes in `init` restarts in a tight loop with no backoff (dozens of
+  `agent_restarted` a second when the reaper can't spawn).
+- `troupe --watch` still walks the whole workspace for `.gitignore` rules at start (PR
+  #240 moved that walk out of every other session start).
+- The desktop client: after the daemon socket drops, `DaemonClient.connection()` rebinds
+  open views but never resubscribes them, so a session screen open across a daemon
+  restart may stop receiving events (unconfirmed); `DaemonClient.open` leaves a view
+  registered when `subscribe` fails, and later opens reuse it.
+- The desktop first run's Where step pre-fills the plane address from the daemon's link
+  only, not from the app's own `planeUrl` preference.
+- `clients/gui/dev/plane-stack.yml` has its own in-memory OpenBao and one-shot setup, so
+  a restart there loses the key as D31 did.
+- Dependabot puts Tauri's crates (cargo `tauri` group) and its npm packages (npm
+  `tooling` group) in different groups, so one pull request can move one half alone and
+  fail Tauri's version check, as #120 did. `@types/node` is 26 while the runtime is 24.
+- The comment above `handle("memory.get")` in `dispatch.ex` belongs to `agents.list`.
+
+Found by the chunk 7 fixers, 2026-09-27.
 
 ## Taken
 
@@ -242,6 +228,16 @@ Found by the chunk 6 fixers, 2026-09-26/27.
 | `install-local.ps1` fails while a TUI is running, and `verify-local.ps1` accepts any daemon (found in chunk 5) | PR #200 |
 | A session's own token is refused `commands.list` on a worker (found by the #123 fixer) | PR #217 |
 | Two gateway tests left a session running, so later tests saw it (found by the #119 fixer and the coordinator) | PR #220, PR #218 |
+| D24 - The librarian can run in every session of a repository | PR #237 |
+| D25 - An ACP agent whose subprocess exits may run its task again (confirmed) | PR #237 |
+| D27 - The TUI never draws `read_file`'s numbered body | PR #234 |
+| D28 - Writing a setting drops the config file's comments | #223, PR #235 |
+| D29 - A pod's command palette lists the built-in agents, not the bundle's | PR #237 |
+| D31 - The dev stack doesn't come back after a WSL restart | #225, PR #233 |
+| D33 - A renamed desktop build shares the real app's stored sign-in | #224, PR #232 |
+| Headless runs waited forever on a spent budget: the printer answered its question as an approval (found by the D32 fixer) | PR #234 |
+| The TUI's needs-input, done and failed window states were dead since the daemon move (found by the #228 fixer) | PR #241 |
+| `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
 
 ## Checked and not a defect
 
