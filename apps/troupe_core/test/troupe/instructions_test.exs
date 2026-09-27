@@ -1,0 +1,187 @@
+defmodule Troupe.InstructionsTest do
+  @moduledoc """
+  The instruction files a repository carries (Decision 706): which are read and in what
+  order, which alias wins in a directory and which are named as skipped, how the budget
+  is shared with the nearest kept whole, where the repository root is, and how the
+  digest follows the content. The loader alone; a real session's prompt is
+  `instructions_prompt_test.exs`.
+  """
+
+  use ExUnit.Case, async: true
+
+  alias Troupe.Instructions
+
+  setup do
+    base = Path.join(System.tmp_dir!(), "troupe-instr-#{System.unique_integer([:positive])}")
+    repo = Path.join(base, "repo")
+    File.mkdir_p!(Path.join(repo, ".git"))
+    on_exit(fn -> File.rm_rf!(base) end)
+    %{base: base, repo: Path.expand(repo)}
+  end
+
+  test "the root's file, then one per directory down to the workspace, nearest last", %{
+    repo: repo
+  } do
+    write!(repo, "AGENTS.md", "root rule")
+    write!(repo, "frontend/AGENTS.md", "frontend rule")
+    write!(repo, "frontend/app/AGENTS.md", "app rule")
+    write!(repo, "backend/AGENTS.md", "not on the path")
+
+    loaded = Instructions.load(Path.join(repo, "frontend/app"), config())
+
+    assert files(loaded, repo) == [
+             {:root, "AGENTS.md"},
+             {:nested, "frontend/AGENTS.md"},
+             {:nested, "frontend/app/AGENTS.md"}
+           ]
+
+    assert List.last(loaded.files).scope == :brief
+
+    assert loaded.used ==
+             String.length("root rule") + String.length("frontend rule") +
+               String.length("app rule")
+
+    prompt = Instructions.to_prompt(loaded)
+    assert prompt =~ "# Instruction files"
+    assert [_head, root, frontend, app] = String.split(prompt, "Contents of ")
+    assert root =~ "(repository root):\nroot rule"
+    assert frontend =~ "(nearer: frontend/):\nfrontend rule"
+    assert app =~ "(nearer: frontend/app/):\napp rule"
+    refute prompt =~ "not on the path"
+  end
+
+  test "in one directory the first alias is read and the rest are named as skipped", %{repo: repo} do
+    write!(repo, "CLAUDE.md", "claude's")
+    write!(repo, "AGENTS.md", "agents'")
+    write!(repo, ".github/copilot-instructions.md", "copilot's")
+    write!(repo, "lib/GEMINI.md", "gemini's")
+    write!(repo, "lib/.github/copilot-instructions.md", "copilot's again")
+    write!(repo, "lib/x/.github/copilot-instructions.md", "copilot's alone")
+
+    loaded = Instructions.load(Path.join(repo, "lib/x"), config())
+
+    assert [
+             %{
+               scope: :root,
+               text: "agents'",
+               skipped: ["CLAUDE.md", ".github/copilot-instructions.md"]
+             },
+             %{scope: :nested, text: "gemini's", skipped: [".github/copilot-instructions.md"]},
+             %{scope: :nested, text: "copilot's alone", skipped: []},
+             %{scope: :brief}
+           ] = loaded.files
+
+    assert Instructions.aliases() == [
+             "AGENTS.md",
+             "CLAUDE.md",
+             "GEMINI.md",
+             ".github/copilot-instructions.md"
+           ]
+
+    prompt = Instructions.to_prompt(loaded)
+    refute prompt =~ "claude's"
+    assert prompt =~ "gemini's"
+  end
+
+  test "the budget keeps the nearest whole first and says what it cut", %{repo: repo} do
+    write!(repo, "AGENTS.md", String.duplicate("r", 100))
+    write!(repo, "a/AGENTS.md", String.duplicate("m", 100))
+    write!(repo, "a/b/AGENTS.md", String.duplicate("n", 100))
+
+    loaded = Instructions.load(Path.join(repo, "a/b"), config(instructions_max_chars: 150))
+
+    assert [
+             %{scope: :root, status: :dropped, chars: 0, trimmed: 100, text: ""},
+             %{scope: :nested, status: :trimmed, chars: 50, trimmed: 50, text: text},
+             %{scope: :nested, status: :whole, chars: 100, trimmed: 0},
+             %{scope: :brief}
+           ] = loaded.files
+
+    assert text == String.duplicate("m", 50)
+    assert loaded.budget == 150
+    assert loaded.used == 150
+
+    prompt = Instructions.to_prompt(loaded)
+
+    assert prompt =~
+             "(repository root): left out, the instructions budget of 150 characters was spent on nearer files."
+
+    assert prompt =~ String.duplicate("m", 50) <> "\n\n(cut here: 50 more characters"
+    assert prompt =~ String.duplicate("n", 100)
+
+    provenance = Instructions.provenance(loaded)
+    assert provenance["budget"] == 150
+    assert provenance["used"] == 150
+
+    assert Enum.map(provenance["files"], &{&1["status"], &1["chars"], &1["trimmed"], &1["share"]}) ==
+             [
+               {"dropped", 0, 100, 0.0},
+               {"trimmed", 50, 50, 0.333},
+               {"whole", 100, 0, 0.667},
+               {"absent", 0, 0, 0.0}
+             ]
+  end
+
+  test "without a .git the workspace is the root; a .git file, a worktree's, is one too", %{
+    base: base
+  } do
+    plain = Path.join(base, "plain")
+    write!(plain, "AGENTS.md", "plain")
+    write!(plain, "sub/AGENTS.md", "sub")
+    loaded = Instructions.load(Path.join(plain, "sub"), config())
+    assert files(loaded, Path.expand(plain)) == [{:root, "sub/AGENTS.md"}]
+    assert Path.expand(Path.join(plain, "sub")) in loaded.searched
+
+    worktree = Path.join(base, "worktree")
+    File.mkdir_p!(worktree)
+    File.write!(Path.join(worktree, ".git"), "gitdir: elsewhere\n")
+    write!(worktree, "AGENTS.md", "the branch's own")
+    loaded = Instructions.load(Path.join(worktree, "deep"), config())
+    assert files(loaded, Path.expand(worktree)) == [{:root, "AGENTS.md"}]
+  end
+
+  test "the digest follows the content, and the brief is listed with its own budget", %{
+    repo: repo
+  } do
+    write!(repo, "AGENTS.md", "one")
+    first = Instructions.load(repo, config())
+    assert Instructions.load(repo, config()).digest == first.digest
+
+    write!(repo, "AGENTS.md", "two")
+    assert Instructions.load(repo, config()).digest != first.digest
+
+    write!(repo, ".troupe/memory.md", "## Overview\nA brief.\n")
+    with_brief = Instructions.load(repo, config(memory_max_chars: 3))
+    assert with_brief.digest != first.digest
+
+    assert %{scope: :brief, status: :trimmed, budget: 3, size: size, hash: "sha256:" <> _} =
+             List.last(with_brief.files)
+
+    assert size == byte_size("## Overview\nA brief.\n")
+    assert Instructions.to_prompt(with_brief) =~ "# Project brief"
+    assert Instructions.to_prompt(with_brief) =~ "(brief truncated)"
+
+    off = Instructions.load(repo, config(memory: false))
+    assert %{scope: :brief, status: :disabled, chars: 0, text: ""} = List.last(off.files)
+    refute Instructions.to_prompt(off) =~ "# Project brief"
+  end
+
+  test "an empty workspace has nothing but the brief's line, and no prompt block", %{repo: repo} do
+    loaded = Instructions.load(repo, config())
+    assert [%{scope: :brief, status: :absent, chars: 0}] = loaded.files
+    assert loaded.used == 0
+    assert Instructions.to_prompt(loaded) == ""
+  end
+
+  defp write!(dir, relative, text) do
+    path = Path.join(dir, relative)
+    File.mkdir_p!(Path.dirname(path))
+    File.write!(path, text)
+  end
+
+  defp config(overrides \\ []), do: struct!(Troupe.Config, overrides)
+
+  defp files(loaded, root) do
+    for f <- loaded.files, f.scope != :brief, do: {f.scope, Path.relative_to(f.path, root)}
+  end
+end

@@ -68,6 +68,11 @@ defmodule Troupe.Agent.State do
     # The `/loop` whose iterations this agent takes (Decision 681), as the loop process
     # last said. Not folded: that process says it again whenever either of them restarts.
     loop: nil,
+    # The instruction files and the brief the last prompt was read from (Decision 706),
+    # as `Troupe.Instructions.load/2` gave them: read again at every turn, and the digest
+    # in here is what says whether that read is news worth an `instructions_loaded`
+    # event. Not replayed: a restart reads afresh and says so once.
+    instructions: nil,
     llm_text: "",
     llm_tool_names: %{},
     pending: %{},

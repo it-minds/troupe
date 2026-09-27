@@ -31,7 +31,7 @@ defmodule Troupe.Agent.Server do
   @behaviour :gen_statem
 
   alias Troupe.Agent.{BudgetQuestion, Call, Definition, Definitions, Headroom, State}
-  alias Troupe.{Budget, Config, Events, Registry, Skills, Todo, Tools}
+  alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tools}
 
   alias Troupe.LLM.{
     Catalog,
@@ -1054,6 +1054,7 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
+        state = load_instructions(state)
         definition = effective_definition(state)
         request = build_request(state, definition)
 
@@ -1158,10 +1159,11 @@ defmodule Troupe.Agent.Server do
   defp request_extra(%State{fake: nil} = state), do: %{agent_path: state.agent_path}
   defp request_extra(%State{fake: fake} = state), do: %{fake: fake, agent_path: state.agent_path}
 
-  # The project brief comes right after the profile's own words and before the
-  # environment: what earlier agents learned about this repository is the first thing
-  # a new one should read, and it is read fresh at every prompt so a `remember` made in
-  # this session reaches the next agent to start.
+  # The repository's instruction files and the project brief come right after the
+  # profile's own words and before the environment: what the people who work here wrote
+  # for agents, and what earlier agents learned, are the first things a new one should
+  # read. Both are read fresh at every prompt, so an edit to `AGENTS.md` and a
+  # `remember` made in this session reach the next turn (Decision 706).
   #
   # The goal comes after everything that describes the agent and its surroundings and
   # before the task list: it is what the list is for, and it changes less often than the
@@ -1169,7 +1171,7 @@ defmodule Troupe.Agent.Server do
   defp system_prompt(state, definition) do
     [
       definition.prompt,
-      Memory.prompt_section(state.workspace.root_real, state.config),
+      Instructions.to_prompt(state.instructions),
       environment_section(state),
       Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
       goal_section(state),
@@ -1177,6 +1179,20 @@ defmodule Troupe.Agent.Server do
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
+  end
+
+  # Read from disk at every turn, so an edit takes effect on the next one; the digest is
+  # the cache. An `instructions_loaded` event is written when what reached the prompt
+  # changed since this agent's last turn, and never when it did not, so the log says
+  # which files each turn was read from without saying so every turn.
+  defp load_instructions(%State{} = state) do
+    loaded = Instructions.load(state.workspace.root_real, state.config)
+
+    if state.instructions == nil or loaded.digest != state.instructions.digest do
+      log(state, :instructions_loaded, Instructions.provenance(loaded))
+    end
+
+    %{state | instructions: loaded}
   end
 
   defp environment_section(state) do

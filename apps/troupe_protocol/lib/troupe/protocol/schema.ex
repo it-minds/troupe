@@ -145,6 +145,16 @@ defmodule Troupe.Protocol.Schema do
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
       "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
+      # What the agent's system prompt was read from at this turn (Decision 706): the
+      # instruction files and the brief, as `context.get` lists them, each with `scope`,
+      # `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped` and
+      # `hash`. Written when the set or a file changed since the agent's last turn.
+      "instructions_loaded" => %{
+        "budget" => required(:integer),
+        "used" => required(:integer),
+        "files" => required(:array),
+        "searched" => optional({:array, :string})
+      },
       # The session's goal, written by the root agent under whoever set or cleared it, and
       # carrying the `command_id` of the `session.goal.*` call that asked.
       "goal_set" => %{"text" => required(:string), "command_id" => optional(:string)},
@@ -541,6 +551,9 @@ defmodule Troupe.Protocol.Schema do
       # the table wakes nothing.
       "commands.list" => %{"session_id" => required(:string)},
       "memory.get" => %{"workspace" => required(:string)},
+      # Every file the session's next prompt is read from, with its scope and its share
+      # of the budget (Decision 706); reading it wakes nothing.
+      "context.get" => %{"session_id" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
       "worktree.list" => %{"workspace" => optional(:string)},

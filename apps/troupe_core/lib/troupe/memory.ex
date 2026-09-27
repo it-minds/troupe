@@ -88,6 +88,19 @@ defmodule Troupe.Memory do
     "# Project brief\n#{@preamble}\n\n" <> text
   end
 
+  @doc """
+  How many characters of the body `to_prompt/2` cuts under the same `:max_chars`: 0 when
+  it fits, or when there is no brief. What the provenance of a prompt reports as trimmed.
+  """
+  @spec overflow(t() | nil, keyword()) :: non_neg_integer()
+  def overflow(nil, _opts), do: 0
+
+  def overflow(%__MODULE__{sections: sections}, opts) do
+    text = body(sections)
+    max = Keyword.get(opts, :max_chars, @max_chars)
+    if byte_size(text) <= max, do: 0, else: String.length(text) - max
+  end
+
   ## Mutation
 
   @doc "Replaces the named section, or appends it when it is not there yet."

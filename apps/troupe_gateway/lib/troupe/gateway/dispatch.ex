@@ -63,6 +63,7 @@ defmodule Troupe.Gateway.Dispatch do
     "commands.list" => :observe,
     "workflows.list" => :observe,
     "memory.get" => :observe,
+    "context.get" => :observe,
     "mcp.status" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
@@ -347,6 +348,19 @@ defmodule Troupe.Gateway.Dispatch do
     with {:ok, workspace} <- fetch(params, "workspace") do
       :ok = workspace |> Path.expand() |> Troupe.Session.Memory.forget()
       {:ok, %{"forgotten" => true}}
+    end
+  end
+
+  # The provenance of the session's prompt (Decision 706): every instruction file and
+  # the brief, with its scope, size and share of the budget, as a client's `/context`
+  # shows it. Read from disk now, as the next turn will read it, so it says what an edit
+  # will do; what a past turn read is its `instructions_loaded` event.
+  defp handle("context.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, session} <- lookup(session_id),
+         workspace = Path.expand(session.workspace),
+         {:ok, config} <- workspace_config(workspace) do
+      {:ok, Troupe.Instructions.provenance(workspace, config)}
     end
   end
 
