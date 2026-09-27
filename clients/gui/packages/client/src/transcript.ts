@@ -134,7 +134,7 @@ export interface TranscriptState {
   lastSeq: number;
   /** The last `llm_error`, cleared by the next successful response. */
   error: string | undefined;
-  /** Set once the agent reports it has finished; `agent_done.reason`. */
+  /** Set once the root agent reports it has finished; its `agent_done.reason`. */
   doneReason: string | undefined;
   /** Summed from every `llm_response.gateway.cost_micros`; undefined if none said. */
   costMicros: number | undefined;
@@ -627,7 +627,7 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
       return {
         ...next,
         bundleVersion: str(d.data["bundle_version"]) || next.bundleVersion,
-        doneReason: undefined,
+        doneReason: isRoot(d.agent) ? undefined : next.doneReason,
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
 
@@ -638,10 +638,12 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };
 
+    // The session is finished when its root agent is: a subagent reporting, or one a
+    // restore ended `interrupted`, is its own agent's state and a note, and nothing more.
     case "agent_done":
       return {
         ...next,
-        doneReason: str(d.data["reason"], "finished"),
+        doneReason: isRoot(d.agent) ? str(d.data["reason"], "finished") : next.doneReason,
         agentState: { ...next.agentState, [pathKey(d.agent)]: "done" },
         entries: [...state.entries, { kind: "system", ...base, type: d.type, text: systemText(d) }],
       };

@@ -14,6 +14,11 @@
 // leaves it somewhere else (PROTOCOL.md §6, "A session that moves"). Every reconnection
 // asks the plane again, so a socket that goes follows the session by itself; a pod that is
 // still up and answers `not_found` for the session is followed with `retrying`.
+//
+// The first open asks in the mode it was given. A reconnection asks in `read` mode,
+// because a socket that went is not the person asking for anything: a session that a
+// drain left asleep stays asleep until a command wakes it, and the command that the pod
+// refuses for it is what `retrying` follows in `activate` mode.
 
 import { TroupeConnection, TroupeRpcError } from "./connection.js";
 import { normalizeEndpoint } from "./plane.js";
@@ -73,7 +78,7 @@ export class SessionAttachment {
 
   static async open(opts: AttachOptions): Promise<SessionAttachment> {
     const a = new SessionAttachment(opts);
-    await a.connect();
+    await a.connect(a.opts.mode);
     return a;
   }
 
@@ -88,7 +93,8 @@ export class SessionAttachment {
 
   /**
    * Run a command, and when the pod says it does not hold the session, reopen through the
-   * plane and run it once more. The pod ran nothing, so a command that reuses its
+   * plane in `activate` mode and run it once more: the commands that come through here
+   * are the activating ones. The pod ran nothing, so a command that reuses its
    * `command_id` is not run twice; a second refusal is the answer.
    */
   async retrying<T>(command: () => Promise<T>): Promise<T> {
@@ -102,10 +108,10 @@ export class SessionAttachment {
     }
   }
 
-  /** Leave the socket that is up and reopen through the plane, as a drop would. */
+  /** Leave the socket that is up and reopen through the plane, activating the session. */
   private async follow(reason: string): Promise<void> {
     const old = this.conn;
-    const reopened = this.reconnecting ?? this.reconnect(reason);
+    const reopened = this.reconnecting ?? this.reconnect(reason, "activate");
     old?.close();
     await reopened;
   }
@@ -126,9 +132,9 @@ export class SessionAttachment {
     this.opts.onStatus?.(status, detail);
   }
 
-  private async connect(): Promise<void> {
+  private async connect(mode: "read" | "activate"): Promise<void> {
     this.set("connecting");
-    const attachment = await this.opts.open(this.opts.mode);
+    const attachment = await this.opts.open(mode);
     if (!attachment.token) throw new Error(`the plane minted no token for ${this.sessionId}`);
     this.attachment = attachment;
 
@@ -175,7 +181,7 @@ export class SessionAttachment {
     }
   }
 
-  private async reconnect(reason: string): Promise<void> {
+  private async reconnect(reason: string, mode: "read" | "activate" = "read"): Promise<void> {
     if (this.stopped || this.reconnecting) return;
     this.reconnecting = (async () => {
       this.conn = null;
@@ -185,7 +191,7 @@ export class SessionAttachment {
         this.set("reconnecting", `${reason}; attempt ${i + 1}`);
         await new Promise((r) => setTimeout(r, wait));
         try {
-          await this.connect();
+          await this.connect(mode);
           return;
         } catch (e) {
           reason = e instanceof Error ? e.message : String(e);

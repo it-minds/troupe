@@ -10,7 +10,7 @@
 import assert from "node:assert/strict";
 import { after, before, describe, it } from "node:test";
 import { awaitingApproval, awaitingYou, DaemonClient, DaemonSource, FleetStore, filterRows, rowFromDaemon } from "../src/index.js";
-import type { DaemonEndpoint, FleetRow, FleetSource } from "../src/index.js";
+import type { DaemonEndpoint, FleetRow, FleetSource, TroupeEvent } from "../src/index.js";
 import { FakeDaemon } from "./support/daemon.js";
 
 describe("stage 2, done item 2: one list, two kinds, each labelled", () => {
@@ -207,6 +207,30 @@ describe("stage 2: several sessions on one socket", () => {
     daemon.say(fourth.id, "once");
     await settle();
     assert.deepEqual(heard, ["session_created", "llm_response"]);
+  });
+
+  it("a listener handed to open hears the replay, which arrives before open resolves, and close stops it", async () => {
+    const session = daemon.seed("/home/ada/history");
+    daemon.say(session.id, "said before anybody looked");
+
+    // Two callers at once, as a screen mounted twice does: both listen from the start.
+    const first: string[] = [];
+    const second: string[] = [];
+    const firstListener = (e: TroupeEvent) => void first.push(e.type);
+    const secondListener = (e: TroupeEvent) => void second.push(e.type);
+    const [a, b] = await Promise.all([client.open(session.id, {}, firstListener), client.open(session.id, {}, secondListener)]);
+    assert.equal(a, b);
+    assert.deepEqual(first, ["session_created", "llm_response"]);
+    assert.deepEqual(second, ["session_created", "llm_response"]);
+
+    // The first leaves; its listener goes with it, and the second still hears.
+    await client.close(session.id, firstListener);
+    const said = daemon.say(session.id, "and after");
+    await b.waitFor((e) => "seq" in e && e.seq === said.seq, 5_000, "the new event");
+    assert.deepEqual(first, ["session_created", "llm_response"]);
+    assert.deepEqual(second, ["session_created", "llm_response", "llm_response"]);
+    await client.close(session.id, secondListener);
+    assert.equal(client.holdersOf(session.id), 0);
   });
 
   it("a session two callers hold is let go by the last of them, and a joiner hears the replay", async () => {
