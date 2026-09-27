@@ -1,0 +1,29 @@
+{
+  "$id": "https://troupe.dev/schema/v1/events/instructions_loaded.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "budget": {
+      "type": "integer"
+    },
+    "files": {
+      "type": "array"
+    },
+    "searched": {
+      "items": {
+        "type": "string"
+      },
+      "type": "array"
+    },
+    "used": {
+      "type": "integer"
+    }
+  },
+  "required": [
+    "budget",
+    "files",
+    "used"
+  ],
+  "title": "instructions_loaded",
+  "type": "object"
+}

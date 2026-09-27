@@ -657,6 +657,15 @@
       ],
       "minimum": 1
     },
+    "instructions_max_chars": {
+      "description": "How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first.",
+      "default": 16000,
+      "type": [
+        "integer",
+        "null"
+      ],
+      "minimum": 1
+    },
     "trusted_workspaces": {
       "description": "Workspaces whose own files may set the keys marked trusted. A path trusts everything under it. Read only from the user's config.yaml.",
       "type": [

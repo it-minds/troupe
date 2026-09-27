@@ -173,6 +173,14 @@ defmodule Troupe.Commands do
             "deletes it.",
         example: "/memory refresh"
       ),
+      entry("context", "workspace", "Every instruction file in the prompt, and its share of the budget",
+        usage: "/context",
+        detail:
+          "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
+            "repository's, one in each directory down to the workspace, and the project " <>
+            "brief, each with its scope, size and share of the budget, and the aliases " <>
+            "(CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid."
+      ),
       entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
         usage: "/watch",
         availability: "local",

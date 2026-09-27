@@ -45,7 +45,7 @@ defmodule Troupe.Worker.Auth do
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     session.goal.set session.goal.get session.goal.clear
     session.loop.start session.loop.stop session.loop.get
-    fs.list fs.read fs.upload blob.get mcp.status presence.set
+    fs.list fs.read fs.upload blob.get mcp.status context.get presence.set
     tools.register tools.unregister
   )
 
