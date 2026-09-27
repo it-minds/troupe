@@ -178,6 +178,8 @@ defmodule Troupe.Gateway.LocalSourcesTest do
                  "worktree" => "never"
                })
 
+      on_exit(fn -> Troupe.stop_session(session_id) end)
+
       # The stub takes a moment to answer `initialize`; the listing shows it arriving.
       assert %{"name" => "stub", "state" => "ready", "tools" => ["greet"], "layer" => "user"} =
                wait_for_ready(context.client, session_id)

@@ -12,37 +12,28 @@
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
 import { filterRows } from "@troupe/client";
-import type { AuthSession, DaemonClient, FleetRow, SessionKind } from "@troupe/client";
-import { StartSession } from "./StartSession";
+import type { FleetRow, SessionKind } from "@troupe/client";
 import { Cost, RowStatus, statusOf, Sync, When, Where } from "./bits";
 
 export function Sessions({
-  auth,
-  daemon,
-  linked,
   rows,
   loading,
   error,
   onOpen,
-  onCreated,
+  onStart,
 }: {
-  /** The plane, for team sessions. Null in local mode, which lists this computer's alone. */
-  auth: AuthSession | null;
-  daemon: DaemonClient | null;
-  /** Whether the daemon records this person by name, which a private session needs. */
-  linked: boolean;
   rows: FleetRow[];
   loading: boolean;
   error: string | null;
   onOpen: (id: string) => void;
-  onCreated: (id: string) => void;
+  /** Go and cast a troupe: the start screen is the shell's, not the list's. */
+  onStart: () => void;
 }): JSX.Element {
   const [query, setQuery] = useState("");
   const [state, setState] = useState("");
   const [status, setStatus] = useState("");
   const [profile, setProfile] = useState("");
   const [kind, setKind] = useState<SessionKind | "">("");
-  const [starting, setStarting] = useState(false);
 
   const shown = useMemo(
     () =>
@@ -112,7 +103,7 @@ export function Sessions({
         )}
         <span className="spacer" />
         <span className="count">{loading && rows.length === 0 ? "loading" : `${shown.length} of ${rows.length}`}</span>
-        <button className="primary" onClick={() => setStarting(true)}>
+        <button className="primary" onClick={onStart}>
           Start a session
         </button>
       </div>
@@ -132,7 +123,7 @@ export function Sessions({
               A session is one piece of work handed to the troupe: you describe it, it works on it, and it asks you before doing anything
               that changes something.
             </p>
-            <button className="primary" onClick={() => setStarting(true)}>
+            <button className="primary" onClick={onStart}>
               Start a session
             </button>
           </div>
@@ -158,19 +149,6 @@ export function Sessions({
           </>
         )}
       </div>
-
-      {starting && (
-        <StartSession
-          auth={auth}
-          daemon={daemon}
-          linked={linked}
-          onClose={() => setStarting(false)}
-          onCreated={(id) => {
-            setStarting(false);
-            onCreated(id);
-          }}
-        />
-      )}
     </>
   );
 }
