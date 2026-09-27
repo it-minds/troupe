@@ -84,10 +84,10 @@ describe("local-only mode", () => {
 
     // Start a session here, say something, and read the answer.
     button("Start a session")!.click();
-    const dialog = await waitFor(() => document.querySelector<HTMLElement>(".dialog"), "the start dialog");
+    const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
     expect(says("On the platform")).toBe(false);
-    type(dialog.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
-    button("Start", dialog)!.click();
+    type(start.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
+    button("Start", start)!.click();
     const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
     const created = [...daemon.sessions.values()].find((s) => s.workspace === "/home/ada/project")!;
     type(composer, "hello");

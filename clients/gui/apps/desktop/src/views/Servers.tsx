@@ -32,8 +32,8 @@ function ServerState({ server }: { server: LocalServer }): JSX.Element {
             : server.state === "connecting"
               ? ["queued", "Connecting"]
               : server.state === "stopped"
-                ? ["dormant", "Stopped"]
-                : ["dormant", "Not checked"];
+                ? ["idle", "Stopped"]
+                : ["idle", "Not checked"];
   return <Pill status={status}>{word}</Pill>;
 }
 

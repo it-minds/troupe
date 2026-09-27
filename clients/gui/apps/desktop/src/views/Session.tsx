@@ -68,6 +68,9 @@ export function Session({
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);
+  // Everyone else here, by name: who could answer an approval first, and who reads
+  // what is sent.
+  const others = view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject);
 
   // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
   useEffect(() => {
@@ -119,13 +122,7 @@ export function Session({
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
-            <ApprovalPanel
-              key={entry.callId}
-              entry={entry}
-              canAnswer={!readOnly}
-              others={view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject)}
-              onAnswer={(d) => view.respond(entry.callId, d)}
-            />
+            <ApprovalPanel key={entry.callId} entry={entry} canAnswer={!readOnly} others={others} onAnswer={(d) => view.respond(entry.callId, d)} />
           ))}
 
           {/* The agent's questions and the harness's budget question, in the same place. */}
@@ -136,7 +133,7 @@ export function Session({
           {readOnly ? (
             <ReadOnly />
           ) : (
-            <Composer view={view} dormant={dormant} busy={isBusy(view.state)} live={view.status === "live"} onCommands={() => setPalette(true)} />
+            <Composer view={view} dormant={dormant} busy={isBusy(view.state)} live={view.status === "live"} others={others} onCommands={() => setPalette(true)} />
           )}
         </div>
 
@@ -153,6 +150,11 @@ function transcriptText(state: TranscriptState): string {
     .join("\n\n");
 }
 
+/**
+ * The head: where the session is, as a breadcrumb in mono, over its title; who is
+ * here; and the controls. The subject column is where a goal line goes once the
+ * session has one to show.
+ */
 function Header({
   row,
   sessionId,
@@ -180,54 +182,86 @@ function Header({
 
   return (
     <header className="session-head">
-      <button onClick={onBack} aria-label="Back to all sessions">
-        ←
-      </button>
-
       <div className="subject">
-        <strong>{row?.title ?? sessionId}</strong>
-        <span className="sub">
-          {row && <Where kind={row.kind} />}
-          <span>{state.profile ?? row?.profile ?? "—"}</span>
-          {role && <span>you are {role === "owner" ? "the owner" : role === "collaborator" ? "a collaborator" : "a reader"}</span>}
-          {here.length > 0 && <Here members={here} self={self} />}
-        </span>
+        <div className="crumbs">
+          <button className="link" onClick={onBack} aria-label="Back to all sessions">
+            ← Sessions
+          </button>
+          <span className="sep" aria-hidden="true">
+            /
+          </span>
+          {row && (
+            <>
+              <Where kind={row.kind} />
+              <span className="sep" aria-hidden="true">
+                /
+              </span>
+            </>
+          )}
+          <span className="profile">{state.profile ?? row?.profile ?? "—"}</span>
+          <span className="sep" aria-hidden="true">
+            /
+          </span>
+          <span className="id">{sessionId}</span>
+          {role && (
+            <>
+              <span className="sep" aria-hidden="true">
+                ·
+              </span>
+              <span>you are {role === "owner" ? "the owner" : role === "collaborator" ? "a collaborator" : "a reader"}</span>
+            </>
+          )}
+        </div>
+        <h1 className="title">{row?.title ?? sessionId}</h1>
       </div>
 
-      {state.doneReason ? (
-        <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
-      ) : needsYou(state) ? (
-        <Pill status="waiting">Needs you</Pill>
-      ) : isBusy(state) ? (
-        <Pill status="running">{working === "compacting" ? "Tidying up" : "Working"}</Pill>
-      ) : (
-        <Pill status="queued">Idle</Pill>
-      )}
+      {here.length > 0 && <Here members={here} self={self} />}
 
-      {/* The profiles are the plane's. With no plane there are none to switch to, and an
-          empty control is a broken one. */}
-      {profiles.length > 0 && (
-        <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
-          {profiles.map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      )}
+      <div className="controls">
+        {state.doneReason ? (
+          <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
+        ) : needsYou(state) ? (
+          <Pill status="waiting">Needs you</Pill>
+        ) : isBusy(state) ? (
+          <Pill status="running">{working === "compacting" ? "Tidying up" : "Working"}</Pill>
+        ) : (
+          <Pill status="idle">Idle</Pill>
+        )}
 
-      <button onClick={onToggleBackstage} aria-pressed={backstage}>
-        {backstage ? "Hide backstage" : "Show backstage"}
-      </button>
+        {/* The profiles are the plane's. With no plane there are none to switch to, and an
+            empty control is a broken one. */}
+        {profiles.length > 0 && (
+          <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
+            {profiles.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <button className="tab" onClick={onToggleBackstage} aria-pressed={backstage}>
+          {backstage ? "Hide backstage" : "Show backstage"}
+        </button>
+      </div>
     </header>
   );
 }
 
-/** Up to three rings, then a plain sentence. Your own ring is the neutral one. */
+/** Up to three rings and a count, with the plain sentence behind them. Your own ring is the dashed one. */
 function Here({ members, self }: { members: TranscriptState["presence"]; self: string | undefined }): JSX.Element {
   const names = members.map((m) => (m.subject === self ? "you" : (m.display_name ?? m.subject)));
   const sentence = names.length === 1 ? `${names[0]} is here` : `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are here`;
-  return <span title={sentence}>{sentence}</span>;
+  return (
+    <div className="here" title={sentence} aria-label={sentence}>
+      {members.slice(0, 3).map((m) => (
+        <span key={m.subject} className={`ring md ${m.subject === self ? "self" : ""}`} style={{ color: personColour(m.subject, self) }} aria-hidden="true">
+          {initials(m.display_name ?? m.subject)}
+        </span>
+      ))}
+      <span className="count">{members.length} here</span>
+    </div>
+  );
 }
 
 function Banners({
@@ -360,7 +394,9 @@ function StreamEntry({
       return (
         <article className={`turn person ${mine ? "self" : ""}`} style={{ ["--author" as string]: personColour(entry.author, self) }}>
           <div className="byline">
-            <span className="mono micro">{initials(name)}</span>
+            <span className="ring" aria-hidden="true">
+              {initials(name)}
+            </span>
             <span className="name">{name}</span>
             {entry.source !== "user" && <span className="micro muted">via {entry.source}</span>}
           </div>
@@ -593,10 +629,10 @@ function Backstage({
     <aside className="backstage">
       <section>
         <div className="tabs">
-          <button aria-selected={pane === "tasks"} onClick={() => onPane("tasks")}>
+          <button className="tab" aria-selected={pane === "tasks"} onClick={() => onPane("tasks")}>
             Tasks
           </button>
-          <button aria-selected={pane === "files"} onClick={() => onPane("files")}>
+          <button className="tab" aria-selected={pane === "files"} onClick={() => onPane("files")}>
             Files
           </button>
         </div>
@@ -604,7 +640,7 @@ function Backstage({
 
       {pane === "tasks" ? (
         <section>
-          <h3>What it is doing</h3>
+          <h3>Running order</h3>
           {view.state.todo.length === 0 ? (
             <p className="note">No task list yet.</p>
           ) : (
@@ -618,18 +654,20 @@ function Backstage({
           )}
         </section>
       ) : (
-        <section style={{ padding: 0 }}>
+        <section>
+          <h3>Files</h3>
           <Files view={view.view} />
         </section>
       )}
 
       {agents.length > 0 && (
         <section>
-          <h3>Who is working</h3>
-          <ul className="tasks">
+          <h3>The company</h3>
+          <ul className="cast">
             {agents.map(([path, state]) => (
               <li key={path}>
-                <span className="mono micro">{path}</span> {state}
+                <span className="mono">{path}</span>
+                <span className="state">{state}</span>
               </li>
             ))}
           </ul>
@@ -666,12 +704,15 @@ function Composer({
   dormant,
   busy,
   live,
+  others,
   onCommands,
 }: {
   view: SessionHandle;
   dormant: boolean;
   busy: boolean;
   live: boolean;
+  /** Everyone else here, who reads what is sent. */
+  others: string[];
   /** Open the command palette: `/` on an empty draft, or the button. */
   onCommands: () => void;
 }): JSX.Element {
@@ -699,11 +740,20 @@ function Composer({
         void submit();
       }}
     >
+      <p className="hint">
+        {dormant
+          ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
+          : busy
+            ? "The session is working. What you send is queued and goes next."
+            : !live
+              ? "Not connected. What you send is held and goes when the connection comes back."
+              : "Enter sends, Shift+Enter starts a new line."}
+      </p>
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         aria-label="Message"
-        placeholder="Write to the session…"
+        placeholder="Write to the troupe"
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
@@ -717,27 +767,23 @@ function Composer({
         }}
       />
       <div className="row">
-        <button type="submit" className="primary" disabled={!draft.trim()}>
-          {dormant ? "Wake and send" : "Send"}
+        {others.length > 0 && (
+          <span className="hint">
+            {others.length === 1 ? `${others[0]} sees what you send` : `${others.slice(0, -1).join(", ")} and ${others.at(-1)} see what you send`}
+          </span>
+        )}
+        <span className="spacer" />
+        <button type="button" onClick={onCommands} title="Every command, filtered as you type (Ctrl-K, or / on an empty line)">
+          / Commands
         </button>
         {busy && (
           <button type="button" onClick={() => void view.cancel()}>
             Stop
           </button>
         )}
-        <button type="button" onClick={onCommands} title="Every command, filtered as you type (Ctrl-K, or / on an empty line)">
-          / Commands
+        <button type="submit" className="send" disabled={!draft.trim()}>
+          {dormant ? "Wake and send" : busy ? "Queue" : "Send"}
         </button>
-        <span className="spacer" />
-        <p className="hint">
-          {dormant
-            ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
-            : busy
-              ? "The session is working. What you send is queued and goes next."
-              : !live
-                ? "Not connected. What you send is held and goes when the connection comes back."
-                : "Enter sends, Shift+Enter starts a new line."}
-        </p>
       </div>
       {error && <p className="hint error">{error}</p>}
     </form>

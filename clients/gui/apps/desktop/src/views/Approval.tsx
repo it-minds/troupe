@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
 import type { Entry } from "@troupe/client";
 import { Pill } from "./bits";
+import { Mask } from "./brand";
 
 export type Decision = "allow" | "deny" | "allow_session";
 type Approval = Extract<Entry, { kind: "approval" }>;
@@ -123,10 +124,10 @@ export function ApprovalPanel({
     const mine = entry.resolvedBy === undefined;
     return (
       <section className="approval answered" aria-live="assertive">
-        <header className="row">
+        <header>
           <Pill status={entry.decision === "deny" ? "denied" : "allowed"} />
+          <h2>{headline(entry.tool)}</h2>
         </header>
-        <h2>{headline(entry.tool)}</h2>
         <p className="consequence">
           {entry.decision === "deny"
             ? `Denied${mine ? " by you" : ` by ${entry.resolvedBy}`} — nothing was changed.`
@@ -138,10 +139,12 @@ export function ApprovalPanel({
 
   return (
     <section className="approval">
+      {/* The mask, lit and pulsing, then the word, then the question: the comp's header row. */}
       <header>
+        <Mask size={26} />
         <Pill status="waiting" />
+        <h2>{headline(entry.tool)}</h2>
       </header>
-      <h2>{headline(entry.tool)}</h2>
       <p className="consequence">{consequence(entry.tool)}</p>
       <Evidence entry={entry} />
       {others.length > 0 && (

@@ -20,6 +20,7 @@ import type { AppMode } from "./mode";
 import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
+import { Launcher } from "./views/Launcher";
 import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
 import { FirstRun, SetupScreen, useSetupNeeded } from "./views/Onboarding";
@@ -28,10 +29,13 @@ import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { newSession, SignIn } from "./views/SignIn";
+import { StartSession } from "./views/StartSession";
 import { Eye, Wordmark } from "./views/brand";
 
 type Where =
+  | { screen: "launcher" }
   | { screen: "sessions" }
+  | { screen: "new" }
   | { screen: "approvals" }
   | { screen: "review" }
   | { screen: "local" }
@@ -163,10 +167,30 @@ export function App(): JSX.Element {
   const caps = capabilities();
   const local = snapshot.rows.filter((r) => r.kind !== "team").length;
 
+  // The front of house: no rail, three tiles, and the same rows the list shows. The
+  // lockup in the rail opens it; every tile on it leads back into the shell.
+  if (where.screen === "launcher") {
+    return (
+      <Launcher
+        rows={snapshot.rows}
+        auth={auth}
+        daemon={daemon}
+        planeUrl={planeUrl}
+        offline={offline}
+        localOnly={localOnly}
+        onNew={() => setWhere({ screen: "new" })}
+        onSessions={() => setWhere({ screen: "sessions" })}
+        onApprovals={() => setWhere({ screen: "approvals" })}
+        onSettings={() => setWhere({ screen: "local" })}
+        onOpen={(id) => setWhere({ screen: "session", id })}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <div className="rail">
-        <Wordmark size={24} />
+        <Wordmark size={24} onClick={() => setWhere({ screen: "launcher" })} />
         <nav>
           <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
             Sessions <span className="count muted">{snapshot.rows.length}</span>
@@ -252,14 +276,15 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "sessions" && (
-          <Sessions
+          <Sessions rows={snapshot.rows} loading={snapshot.loading} error={planeError} onOpen={(id) => setWhere({ screen: "session", id })} onStart={() => setWhere({ screen: "new" })} />
+        )}
+
+        {where.screen === "new" && (
+          <StartSession
             auth={auth}
             daemon={daemon.client}
             linked={Boolean(daemon.identity?.linked)}
-            rows={snapshot.rows}
-            loading={snapshot.loading}
-            error={planeError}
-            onOpen={(id) => setWhere({ screen: "session", id })}
+            onClose={() => setWhere({ screen: "sessions" })}
             onCreated={(id) => {
               refresh();
               setWhere({ screen: "session", id });

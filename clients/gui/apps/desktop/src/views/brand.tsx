@@ -74,17 +74,26 @@ export function Mask({ size = 24, label }: { size?: number; label?: string }): J
  *
  * The word is set in the interface face at its blackest weight, and lowercase, always:
  * `troupe`, not `Troupe`. The face and the weight are `.wordmark .word`'s, from the
- * design file's `wordmark` role.
+ * design file's `wordmark` role. Given `onClick` it is a button — in the rail, where
+ * the comp's lockup opens the launcher.
  */
-export function Wordmark({ size = 20 }: { size?: number }): JSX.Element {
-  return (
-    <span className="wordmark">
+export function Wordmark({ size = 20, onClick }: { size?: number; onClick?: () => void }): JSX.Element {
+  const inner = (
+    <>
       <Mask size={size} label="Troupe" />
       <span className="word" style={{ fontSize: `${Math.round(size * 0.8)}px` }}>
         troupe
       </span>
-    </span>
+    </>
   );
+  if (onClick) {
+    return (
+      <button type="button" className="wordmark" onClick={onClick} title="Home">
+        {inner}
+      </button>
+    );
+  }
+  return <span className="wordmark">{inner}</span>;
 }
 
 /**
@@ -115,6 +124,9 @@ const EYES: Record<Status, JSX.Element> = {
   ),
   // Dashed: accepted, not started. The outline is provisional.
   queued: <path d="M1.6 8 Q8 2.4 14.4 8 Q8 13.6 1.6 8 Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeDasharray="2.4 2" />,
+  // Open, and empty: the agent is there and looking at nothing. Idle is not asleep
+  // (that lid is closed) and not provisional (that outline is dashed).
+  idle: <path d="M1.6 8 Q8 2.4 14.4 8 Q8 13.6 1.6 8 Z" fill="none" stroke="currentColor" strokeWidth="1.5" />,
   // Closed: asleep is a healthy state, so the lid is a calm single curve, not a cross.
   dormant: <path d="M1.6 8 Q8 13.6 14.4 8" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" />,
   // Crossed out: you may look, you may not act.
