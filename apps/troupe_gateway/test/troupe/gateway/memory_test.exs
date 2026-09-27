@@ -64,6 +64,32 @@ defmodule Troupe.Gateway.MemoryTest do
     assert {:ok, %{"status" => "absent"}} = Client.call(client, "memory.get", %{"workspace" => ws})
   end
 
+  # A client that refreshes the brief by itself asks whether to, and a librarian's try that
+  # built nothing holds that off (Decision 713) until the brief is forgotten.
+  test "refresh_due says whether a librarian should start", %{workspace: ws, client: client} do
+    assert {:ok, %{"status" => "absent", "refresh_due" => true}} =
+             Client.call(client, "memory.get", %{"workspace" => ws})
+
+    :ok = Memory.attempted(ws, nil)
+
+    assert {:ok, %{"status" => "absent", "refresh_due" => false}} =
+             Client.call(client, "memory.get", %{"workspace" => ws})
+
+    assert {:ok, %{"forgotten" => true}} =
+             Client.call(client, "memory.forget", %{
+               "command_id" => Client.command_id(),
+               "workspace" => ws
+             })
+
+    assert {:ok, %{"refresh_due" => true}} =
+             Client.call(client, "memory.get", %{"workspace" => ws})
+
+    :ok = Memory.put_section(ws, "overview", "A project.")
+
+    assert {:ok, %{"status" => "fresh", "refresh_due" => false}} =
+             Client.call(client, "memory.get", %{"workspace" => ws})
+  end
+
   test "memory: false in the workspace config reads as disabled", %{workspace: ws, client: client} do
     File.mkdir_p!(Path.join(ws, ".troupe"))
     File.write!(Path.join(ws, ".troupe/config.yaml"), "memory: false\n")

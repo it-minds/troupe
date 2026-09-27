@@ -943,13 +943,19 @@ defmodule Troupe.Client.Daemon do
   # default). Off in tests and for anyone who would rather run `/memory refresh`. Only in
   # a git repository, which is what a brief describes — `troupe` opened in a home
   # directory surveys nothing — and only with a model to ask, or the first thing a new
-  # user saw would be the librarian failing beside their own first turn.
+  # user saw would be the librarian failing beside their own first turn. And only when
+  # the daemon says the refresh is due: a librarian that tried lately and built nothing
+  # is not tried again in every session (Decision 127); a daemon too old to say leaves
+  # it to the status.
   defp refresh_brief_if_asked(sid, workspace) do
     config = config(workspace)
 
     if config.memory != false and config.memory_auto_refresh != false and repository?(workspace) and
          Config.key_problem(config) == nil do
       case Link.call("memory.get", %{workspace: workspace}) do
+        {:ok, %{"refresh_due" => false}} ->
+          :ok
+
         {:ok, %{"status" => status}} when status in ["absent", "stale"] ->
           prompt = if status == "absent", do: @first_prompt, else: @refresh_prompt
           _ = dispatch(sid, "librarian", prompt)

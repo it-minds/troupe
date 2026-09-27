@@ -455,3 +455,15 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      `test/troupe/settings_test.exs` ("the help's commands are the setup section of
      the command table") and `test/troupe/cli_test.exs` ("headless printer stops at
      the budget question and exits 1"), which waited out its 15 seconds before.
+
+127. **A new session starts the librarian only when the daemon says the refresh is
+     due.** Amends 105, which started it whenever `memory.get` said the brief was
+     `absent` or `stale`: a librarian that failed, or wrote nothing where there was no
+     brief, left it so, and the next session started another (root Decision 713). The
+     daemon records each librarian's try and answers `refresh_due`, false while a try
+     that built nothing is younger than `memory_max_age_days`; `create_session` starts
+     no branch then, and the prompt still follows the status. A daemon from before the
+     field leaves it to the status, as 105 did. `/memory refresh` is not held off, and
+     `/memory` shows the status as before. Proof: `test/troupe/memory_client_test.exs`
+     ("a session after a librarian that failed starts none"), which failed on the
+     chunk's tip, and the installed TUI on a scratch repository, on the pull request.

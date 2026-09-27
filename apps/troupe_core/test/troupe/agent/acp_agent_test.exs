@@ -305,6 +305,93 @@ defmodule Troupe.Agent.ACPAgentTest do
     end
   end
 
+  # An agent that takes its task, writes down that it did, and exits before it answers:
+  # the program somebody else wrote falling over mid-task.
+  defp quitting_agent(base, starts) do
+    path = Path.join(base, "quitting-acp-agent.exs")
+
+    File.write!(path, """
+    defmodule QuittingACPAgent do
+      def loop do
+        case IO.read(:stdio, :line) do
+          :eof ->
+            :ok
+
+          line ->
+            line |> String.trim() |> handle()
+            loop()
+        end
+      end
+
+      defp handle(line) do
+        case Jason.decode(line) do
+          {:ok, %{"method" => "initialize", "id" => id}} ->
+            reply(id, %{"protocolVersion" => 1})
+
+          {:ok, %{"method" => "session/new", "id" => id}} ->
+            reply(id, %{"sessionId" => "acp-1"})
+
+          {:ok, %{"method" => "session/prompt"}} ->
+            File.write!(#{inspect(starts)}, "started\\n", [:append])
+            System.halt(3)
+
+          _other ->
+            :ok
+        end
+      end
+
+      defp reply(id, result) do
+        IO.puts(Jason.encode!(%{"jsonrpc" => "2.0", "id" => id, "result" => result}))
+      end
+    end
+
+    QuittingACPAgent.loop()
+    """)
+
+    path
+  end
+
+  describe "a subprocess that exits" do
+    # A delegate runs its task once. Under the DynamicSupervisor a parent starts it in, one
+    # whose program exits mid-task must not be started again and run its task a second
+    # time, with nobody left waiting for its answer (defects D25).
+    test "is reported as partial and not started again", context do
+      starts = Path.join(context.base, "starts.log")
+      sup = start_supervised!({DynamicSupervisor, strategy: :one_for_one})
+      parent_ref = make_ref()
+
+      entry = %{
+        name: "quitter",
+        command: System.find_executable("elixir"),
+        args: code_paths() ++ [quitting_agent(context.base, starts)],
+        hash: nil
+      }
+
+      {:ok, pid} =
+        DynamicSupervisor.start_child(
+          sup,
+          {ACPAgent,
+           session_id: "s-acp",
+           agent_path: ["root", "quitter#1"],
+           workspace: context.workspace,
+           entry: entry,
+           task: "have a look",
+           parent: self(),
+           parent_ref: parent_ref}
+        )
+
+      monitor = Process.monitor(pid)
+      assert_receive {:child_result, ^parent_ref, {:partial, _said, _usage}}, 30_000
+      assert_receive {:DOWN, ^monitor, :process, ^pid, :normal}, 5_000
+
+      # Nothing started in its place, and nothing reports twice: a restarted delegate would
+      # be under the supervisor at once, starting its program to be handed the task again.
+      refute_receive {:child_result, ^parent_ref, _result}, 3_000
+      assert DynamicSupervisor.which_children(sup) == []
+      assert File.read!(starts) == "started\n"
+    end
+  end
+
   describe "a method nobody implements" do
     test "is method_not_found, not silence", context do
       assert {:error, %{"code" => -32_601}} =
