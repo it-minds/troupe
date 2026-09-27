@@ -414,10 +414,17 @@ defmodule Troupe.Settings do
   end
 
   @doc """
-  The curated help shown beside the settings, as `{heading, lines}` sections.
+  The help shown beside the settings, as `{heading, lines}` sections. The commands are
+  the setup section of the session's command table (`commands.list`, Decision 698), `/help`
+  among them for the rest, so they say what the palette says; a table not yet received
+  leaves the section out.
   """
-  @spec help_sections() :: [{String.t(), [String.t()]}]
-  def help_sections do
+  @spec help_sections([map()]) :: [{String.t(), [String.t()]}]
+  def help_sections(commands) do
+    setup =
+      for %{"section" => "setup", "name" => name, "summary" => summary} <- commands,
+          do: String.pad_trailing("/" <> name, 16) <> " " <> summary
+
     [
       {"Keys",
        [
@@ -426,12 +433,7 @@ defmodule Troupe.Settings do
          "Esc              back to the command line",
          "Ctrl-C twice     quit"
        ]},
-      {"Commands",
-       [
-         "/help            every command, what it does and how to type it",
-         "/ (empty line)   the same list, filtered as you type",
-         "/settings        this page"
-       ]},
+      {"Setup commands", setup},
       {"Where things live",
        [
          "settings         the project's .troupe/config.yaml, else ~/.config/troupe/config.yaml",
@@ -439,12 +441,13 @@ defmodule Troupe.Settings do
          "models           `troupe models` lists what this machine can address"
        ]}
     ]
+    |> Enum.reject(&match?({_heading, []}, &1))
   end
 
   @doc "The help as flat lines, for a narrow screen."
-  @spec help_lines() :: [String.t()]
-  def help_lines do
-    Enum.flat_map(help_sections(), fn {heading, lines} ->
+  @spec help_lines([map()]) :: [String.t()]
+  def help_lines(commands) do
+    Enum.flat_map(help_sections(commands), fn {heading, lines} ->
       [heading | Enum.map(lines, &("  " <> &1))] ++ [""]
     end)
   end
