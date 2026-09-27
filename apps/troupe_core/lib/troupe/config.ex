@@ -167,6 +167,10 @@ defmodule Troupe.Config do
             memory_auto_refresh: true,
             memory_max_chars: 6_000,
             memory_max_age_days: 7,
+            # The instruction files a repository carries for agents (`AGENTS.md` and its
+            # aliases, Decision 706): the characters every scope may take together in a
+            # prompt, the nearest kept whole first.
+            instructions_max_chars: 16_000,
             # The workspace's own MCP servers (Decision 654): `mcp:` in a config file,
             # `%{name => %{command, args, env, cd}}` for one on its standard streams or
             # `%{name => %{url}}` for one over HTTP, plus `permission` and `timeout_ms`.

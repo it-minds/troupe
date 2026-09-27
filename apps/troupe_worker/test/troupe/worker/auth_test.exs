@@ -83,6 +83,7 @@ defmodule Troupe.Worker.AuthTest do
     "fs.read",
     "fs.upload",
     "blob.get",
+    "context.get",
     "presence.set"
   ]
 

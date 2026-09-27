@@ -107,6 +107,7 @@ defmodule Troupe.Client do
   @callback sources(session_id()) :: {:ok, sources()} | {:error, term()}
   @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
@@ -270,6 +271,13 @@ defmodule Troupe.Client do
 
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)
+
+  @doc """
+  `/context`: every file the session's next prompt is read from, as `context.get` lists
+  them (Decision 124), on one line.
+  """
+  @spec instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
+  def instructions(sid), do: impl(sid).instructions(sid)
 
   @spec fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   def fs_list(sid, path), do: impl(sid).fs_list(sid, path)
