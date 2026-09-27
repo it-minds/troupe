@@ -47,6 +47,13 @@ defmodule Troupe.Client do
           workspace: String.t() | nil
         }
 
+  @typedoc """
+  The person's own MCP servers and skills as the `/mcp` page lists them (troupe-remote
+  Decision 700): every server the layers give the session's workspace, with its live
+  state when the session runs it, and every skill with its layer.
+  """
+  @type sources :: %{servers: [map()], skills: [map()], warnings: [String.t()]}
+
   @typedoc "What a session allows right now, and why not when it does not."
   @type capability :: %{
           state: atom(),
@@ -58,12 +65,20 @@ defmodule Troupe.Client do
           remote?: boolean()
         }
 
+  @typedoc """
+  One slash command as `commands.list` lists it (PROTOCOL.md §6): `name`, `aliases`,
+  `section`, `summary`, `usage`, `args`, `availability`, `source`, `detail`, `example`.
+  Kept as the wire map, because the palette is a view over it and nothing else.
+  """
+  @type command :: %{String.t() => term()}
+
   ## Session-scoped
 
   @callback subscribe(session_id()) :: :ok
   @callback unsubscribe(session_id()) :: :ok
   @callback events(session_id()) :: [Event.t()]
   @callback commands(session_id()) :: [String.t()]
+  @callback command_table(session_id()) :: [command()]
   @callback context(session_id()) :: {String.t(), Config.t()}
   @callback capability(session_id()) :: capability()
   @callback dispatch(session_id(), String.t(), String.t() | map()) ::
@@ -89,7 +104,10 @@ defmodule Troupe.Client do
   @callback watch(session_id(), boolean()) :: {:ok, atom()} | :ok | {:error, term()}
   @callback watch_status(session_id()) :: map()
   @callback mcp_status(session_id()) :: [map()]
+  @callback sources(session_id()) :: {:ok, sources()} | {:error, term()}
+  @callback manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
   @callback memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
+  @callback instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   @callback fs_read(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   @callback fs_upload(session_id(), String.t(), binary()) :: :ok | {:error, term()}
@@ -151,8 +169,17 @@ defmodule Troupe.Client do
   @spec events(session_id()) :: [Event.t()]
   def events(sid), do: impl(sid).events(sid)
 
+  @doc "The agents a slash command may start a branch on."
   @spec commands(session_id()) :: [String.t()]
   def commands(sid), do: impl(sid).commands(sid)
+
+  @doc """
+  Every command the session offers, built-ins and agents, as the harness lists them
+  (`commands.list`, Decision 698): what the palette shows, what Tab completes, and what
+  resolves an alias. Empty when the session's harness did not answer.
+  """
+  @spec command_table(session_id()) :: [command()]
+  def command_table(sid), do: impl(sid).command_table(sid)
 
   @spec context(session_id()) :: {String.t(), Config.t()}
   def context(sid), do: impl(sid).context(sid)
@@ -235,8 +262,22 @@ defmodule Troupe.Client do
   @spec mcp_status(session_id()) :: [map()]
   def mcp_status(sid), do: impl(sid).mcp_status(sid)
 
+  @spec sources(session_id()) :: {:ok, sources()} | {:error, term()}
+  def sources(sid), do: impl(sid).sources(sid)
+
+  @doc "`mcp.add`, `mcp.remove`, `mcp.check`, `skills.add` or `skills.remove` on the session's workspace."
+  @spec manage_sources(session_id(), String.t(), map()) :: {:ok, map()} | {:error, term()}
+  def manage_sources(sid, method, params), do: impl(sid).manage_sources(sid, method, params)
+
   @spec memory(session_id(), String.t()) :: {:ok, String.t()} | {:error, term()}
   def memory(sid, command), do: impl(sid).memory(sid, command)
+
+  @doc """
+  `/context`: every file the session's next prompt is read from, as `context.get` lists
+  them (Decision 124), on one line.
+  """
+  @spec instructions(session_id()) :: {:ok, String.t()} | {:error, term()}
+  def instructions(sid), do: impl(sid).instructions(sid)
 
   @spec fs_list(session_id(), String.t()) :: {:ok, [map()]} | {:error, term()}
   def fs_list(sid, path), do: impl(sid).fs_list(sid, path)

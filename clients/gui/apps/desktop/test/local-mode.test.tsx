@@ -14,7 +14,7 @@ import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
 import { startHarness } from "../../../packages/client/test/support/harness.js";
 import type { Harness } from "../../../packages/client/test/support/harness.js";
-import { button, externalResources, nav, recordNetwork, render, says, sleep, type, waitFor } from "./support";
+import { button, externalResources, nav, recordNetwork, render, says, sleep, startOnTheList, type, waitFor } from "./support";
 import type { Recorder } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
@@ -74,9 +74,12 @@ describe("local-only mode", () => {
     net = recordNetwork();
     unmount = render(<App />).unmount;
 
-    // Straight to the list: no sign-in, no restore, and the machine's user named.
-    await waitFor(() => says("/home/ada/notes"), "the daemon's session in the list");
+    // Straight in: no sign-in, no restore, the launcher first, and the machine's user named.
+    await waitFor(() => says("/home/ada/notes"), "the daemon's session on the launcher");
     expect(says("Use this computer only")).toBe(false);
+    expect(document.querySelector(".launcher")).not.toBeNull();
+    button("02")!.click();
+    await waitFor(() => document.querySelector(".me"), "the shell");
     expect(document.querySelector(".me .name")?.textContent).toBe("This computer");
     await waitFor(() => document.querySelector(".me")?.textContent?.includes("ada"), "the operating system's user in the rail");
     // The plane's screens are not offered.
@@ -84,10 +87,10 @@ describe("local-only mode", () => {
 
     // Start a session here, say something, and read the answer.
     button("Start a session")!.click();
-    const dialog = await waitFor(() => document.querySelector<HTMLElement>(".dialog"), "the start dialog");
+    const start = await waitFor(() => document.querySelector<HTMLElement>(".start"), "the start screen");
     expect(says("On the platform")).toBe(false);
-    type(dialog.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
-    button("Start", dialog)!.click();
+    type(start.querySelector<HTMLInputElement>("input")!, "/home/ada/project");
+    button("Start", start)!.click();
     const composer = await waitFor(() => document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Message"]'), "the session");
     const created = [...daemon.sessions.values()].find((s) => s.workspace === "/home/ada/project")!;
     type(composer, "hello");
@@ -121,7 +124,7 @@ describe("local-only mode", () => {
 
     const door = await waitFor(() => button("Use this computer only"), "the third door");
     door.click();
-    await waitFor(() => says("/home/ada/notes"), "the session list, with no sign-in");
+    await waitFor(() => says("/home/ada/notes"), "the daemon's session, with no sign-in");
     expect(localStorage.getItem("troupe.pref.localOnly")).toBe("yes");
 
     // A relaunch: no sign-in screen at all, not even for a moment.
@@ -129,7 +132,7 @@ describe("local-only mode", () => {
     app = render(<App />);
     unmount = app.unmount;
     expect(button("Use this computer only")).toBeNull();
-    await waitFor(() => says("/home/ada/notes"), "the session list again");
+    await waitFor(() => says("/home/ada/notes"), "the daemon's session again");
 
     expect(notTheDaemon()).toEqual([]);
   });
@@ -146,6 +149,7 @@ describe("switching local-only off and on", () => {
     await harness.signIn({ store: webTokenStore() });
     localStorage.setItem("troupe.pref.planeUrl", plane);
     localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
     const first = refreshTokenFor(plane);
     expect(first).toBeTruthy();
 
@@ -203,6 +207,7 @@ describe("a plane that does not answer", () => {
     await harness.signIn({ store: webTokenStore() });
     localStorage.setItem("troupe.pref.planeUrl", plane);
     localStorage.setItem("troupe.pref.appearance.chosen.alice@example.com", "yes");
+    startOnTheList();
 
     let down = true;
     net = recordNetwork({ refuse: (url) => down && url.startsWith(plane) });

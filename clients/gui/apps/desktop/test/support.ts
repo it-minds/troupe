@@ -150,6 +150,15 @@ export function button(label: string, within: ParentNode = document): HTMLButton
   return [...within.querySelectorAll("button")].find((b) => (b.textContent ?? "").trim().startsWith(label)) ?? null;
 }
 
+/**
+ * Start where a person who chose the list starts, rather than on the launcher (Decision
+ * 709). For the suites about the list and what opens from it; `launcher.test.tsx` is the
+ * one about the first screen. Call it after `localStorage.clear()`.
+ */
+export function startOnTheList(): void {
+  localStorage.setItem("troupe.pref.start", "sessions");
+}
+
 /** A navigation entry in the rail, which carries counts after its name. */
 export function nav(label: string): HTMLButtonElement | null {
   return button(label, document.querySelector(".rail nav") ?? document);

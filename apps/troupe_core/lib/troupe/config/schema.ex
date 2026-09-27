@@ -319,6 +319,13 @@ defmodule Troupe.Config.Schema do
         spec("memory_max_age_days", {:integer, 1}, "How old the brief may be before it counts as stale.",
           default: 7,
           field: :memory_max_age_days
+        ),
+        spec(
+          "instructions_max_chars",
+          {:integer, 1},
+          "How many characters of instruction files (`AGENTS.md` and its aliases, every scope together) go into a prompt; the nearest are kept whole first.",
+          default: 16_000,
+          field: :instructions_max_chars
         )
       ]),
       group("This machine", [

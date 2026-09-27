@@ -17,6 +17,14 @@ defmodule Troupe.Session.ClientTools do
   takes its tools with it: this process monitors every registrant, and a `:DOWN` removes
   the registration and logs `tools_unregistered` before the agent's next lookup.
 
+  **A call outlives its client, for a while.** A registrant that leaves mid-call — a lid
+  closed, an app restarted — is usually back in a moment, on a fresh connection, and the
+  call it was serving is parked here (`await/4`) until a client offers the tool again or
+  the grace is up (`grace_ms/0`). Answered from the new registration, it is the same call;
+  not answered, it fails once, naming the tool, and the tool is off the model's list by
+  then. The grace is one rung of the ladder from a running turn to the daemon's exit:
+  [troupe-daemon](../../../../troupe_daemon/README.md#how-long-it-stays-up).
+
   **The taint is durable and visible.** `session_tainted` goes in the log and into the
   summary projection, because a tool executing outside the pod is something the other
   participants are entitled to know about — and to decide about — rather than something
@@ -39,13 +47,29 @@ defmodule Troupe.Session.ClientTools do
   alias Troupe.Registry
   alias Troupe.Session.Log
 
+  require Logger
+
   @prefix "client."
 
   # Long enough for a person to read a prompt and click; short enough that a challenge
   # left lying around is not a standing permission.
   @challenge_ttl_ms 5 * 60 * 1000
 
-  defstruct [:session_id, managed_servers_only: false, tools: %{}, challenges: %{}, monitors: %{}]
+  # How long a call whose client left waits for one to offer the tool again. An app that
+  # restarts is back in seconds and a laptop woken from its nap in a minute; longer than
+  # this and the call would time out anyway, since the wait comes out of its own timeout.
+  @default_grace_ms 60 * 1000
+
+  defstruct [
+    :session_id,
+    managed_servers_only: false,
+    tools: %{},
+    challenges: %{},
+    monitors: %{},
+    # Calls parked on a tool nobody hosts right now, by a reference of their own:
+    # `%{name, from, timer}`, answered by the next registration of `name` or by the timer.
+    waiting: %{}
+  ]
 
   @typedoc """
   One registered tool, in the shape `Troupe.Tool` accepts as a value.
@@ -104,6 +128,33 @@ defmodule Troupe.Session.ClientTools do
   @doc "Every registered tool, as `Troupe.Tool` handles."
   @spec list(String.t()) :: [tool()]
   def list(session_id), do: call(session_id, :list, [])
+
+  @doc """
+  How long a call whose client left mid-call waits for one to offer the tool again:
+  `:troupe_core, :client_tool_grace_ms` — `TROUPE_CLIENT_TOOL_GRACE_SECONDS` on the
+  daemon — a minute by default, `0` for no wait at all.
+  """
+  @spec grace_ms() :: non_neg_integer()
+  def grace_ms, do: Application.get_env(:troupe_core, :client_tool_grace_ms, @default_grace_ms)
+
+  @doc """
+  The tool `name` as registered, at once if a live connection hosts it and otherwise as
+  soon as one does, or `:gone` once `grace_ms` is up with nobody offering it.
+
+  This is where a call whose client left mid-call waits (`Troupe.Gateway.ClientTool`).
+  `except:` is the connection that left, whose registration may still be on the books for
+  a moment: a tool it hosts is nobody's.
+  """
+  @spec await(String.t(), String.t(), non_neg_integer(), keyword()) :: {:ok, tool()} | {:error, :gone}
+  def await(session_id, name, grace_ms, opts \\ []) do
+    GenServer.call(
+      Registry.client_tools(session_id),
+      {:await, name, grace_ms, Keyword.get(opts, :except)},
+      grace_ms + 5_000
+    )
+  catch
+    :exit, _reason -> {:error, :gone}
+  end
 
   @doc "Which connection owns a tool, if any."
   @spec owner(String.t(), String.t()) :: {:ok, pid()} | :error
@@ -188,6 +239,18 @@ defmodule Troupe.Session.ClientTools do
 
   def handle_call(:list, _from, state), do: {:reply, Map.values(state.tools), state}
 
+  def handle_call({:await, name, grace_ms, except}, from, state) do
+    case Map.fetch(state.tools, name) do
+      {:ok, %{connection: connection} = tool} when connection != except ->
+        if Process.alive?(connection),
+          do: {:reply, {:ok, tool}, state},
+          else: park(state, name, grace_ms, from)
+
+      _nobody ->
+        park(state, name, grace_ms, from)
+    end
+  end
+
   def handle_call({:owner, name}, _from, state) do
     case Map.fetch(state.tools, name) do
       {:ok, tool} -> {:reply, {:ok, tool.connection}, state}
@@ -215,7 +278,42 @@ defmodule Troupe.Session.ClientTools do
     {:noreply, expire(state)}
   end
 
+  def handle_info({:waited_out, ref}, state) do
+    case Map.pop(state.waiting, ref) do
+      {nil, _waiting} ->
+        {:noreply, state}
+
+      {%{from: from}, waiting} ->
+        GenServer.reply(from, {:error, :gone})
+        {:noreply, %{state | waiting: waiting}}
+    end
+  end
+
   def handle_info(_message, state), do: {:noreply, state}
+
+  # -- parked calls -----------------------------------------------------------
+
+  defp park(state, _name, 0, _from), do: {:reply, {:error, :gone}, state}
+
+  defp park(state, name, grace_ms, from) do
+    Logger.info("troupe: #{name} lost its client mid-call; waiting #{grace_ms}ms for one to offer it again")
+    ref = make_ref()
+    timer = Process.send_after(self(), {:waited_out, ref}, grace_ms)
+    {:noreply, %{state | waiting: Map.put(state.waiting, ref, %{name: name, from: from, timer: timer})}}
+  end
+
+  # Every call parked on a tool this registration brings back gets it, as the same call.
+  defp answer_waiting(state, registered) do
+    {answered, waiting} =
+      Enum.split_with(state.waiting, fn {_ref, %{name: name}} -> Map.has_key?(registered, name) end)
+
+    Enum.each(answered, fn {_ref, %{name: name, from: from, timer: timer}} ->
+      Process.cancel_timer(timer)
+      GenServer.reply(from, {:ok, Map.fetch!(registered, name)})
+    end)
+
+    %{state | waiting: Map.new(waiting)}
+  end
 
   # -- consent ----------------------------------------------------------------
 
@@ -289,11 +387,13 @@ defmodule Troupe.Session.ClientTools do
 
     names = tools |> Map.keys() |> Enum.sort()
 
-    state = %{
-      state
-      | tools: Map.merge(state.tools, tools),
-        monitors: watch(state.monitors, connection)
-    }
+    state =
+      %{
+        state
+        | tools: Map.merge(state.tools, tools),
+          monitors: watch(state.monitors, connection)
+      }
+      |> answer_waiting(tools)
 
     Log.append(
       state.session_id,

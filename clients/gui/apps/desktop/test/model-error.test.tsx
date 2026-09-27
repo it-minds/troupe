@@ -7,7 +7,7 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { WebSocket as NodeWebSocket } from "ws";
 import { App } from "../src/App";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { render, says, waitFor } from "./support";
+import { render, says, startOnTheList, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -20,6 +20,7 @@ let unmount: (() => void) | null = null;
 beforeEach(async () => {
   localStorage.clear();
   localStorage.setItem("troupe.pref.localOnly", "yes");
+  startOnTheList();
   daemon = new FakeDaemon({ osUser: "ada" });
   await daemon.start();
   location.hash = `#daemon=${daemon.port}:${daemon.token}`;

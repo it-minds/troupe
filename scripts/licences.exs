@@ -84,10 +84,11 @@ defmodule Licences do
     {:cargo, "dtoa-short", "MPL-2.0", "Used by `cssparser`. As `cssparser`."},
     {:cargo, "selectors", "MPL-2.0", "Tauri's HTML handling, with `cssparser`. As `cssparser`."},
     {:cargo, "option-ext", "MPL-2.0", "Tauri's `dirs`, through `dirs-sys`. As `cssparser`."},
-    {:pnpm, "@fontsource/ibm-plex-mono", "OFL-1.1",
-     "The IBM Plex fonts the GUI ships. OFL-1.1 allows bundling a font with software; " <>
-       "the font stays under it, unchanged and never sold on its own."},
-    {:pnpm, "@fontsource/ibm-plex-sans", "OFL-1.1", "As `@fontsource/ibm-plex-mono`."},
+    {:pnpm, "@fontsource/figtree", "OFL-1.1",
+     "The fonts the GUI ships (Decision 702: Figtree, DM Mono and VT323). OFL-1.1 allows " <>
+       "bundling a font with software; the font stays under it, unchanged and never sold on its own."},
+    {:pnpm, "@fontsource/dm-mono", "OFL-1.1", "As `@fontsource/figtree`."},
+    {:pnpm, "@fontsource/vt323", "OFL-1.1", "As `@fontsource/figtree`."},
     {:pnpm, "caniuse-lite", "CC-BY-4.0",
      "Browser-support data the GUI's build tools read. It does not ship."}
   ]

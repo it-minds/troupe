@@ -1734,3 +1734,480 @@ citation keeps meaning what it meant.
        pod's report leaves the row read-only. `Troupe.Worker.HarnessWebSocketTest`:
        activating commands for a session the pod has only on disk answer `not_found` and
        start nothing. All ten fail on the chunk's tip.
+
+698. **The slash commands a client offers are one table in the harness,
+     `Troupe.Commands`, published as `commands.list`; a client keeps only the code that
+     runs each one, and the TUI's suite holds its set equal to the table.** Issue #124.
+     The TUI had three lists that had to agree (the dispatch table, Tab completion and
+     the window-path commands), `/help` opened the settings, and the desktop app had no
+     commands at all, so nothing told a person what they could type. Now every built-in
+     has one entry — name, aliases, section, a one-line summary, usage, arguments, what
+     it needs (`availability`) and where it came from (`source`) — and the agents are
+     entries in a section of their own, described by their definition rather than
+     pretending to be built-ins: the same primaries `agents.list` answers with, so a
+     palette and a session picker never disagree. `availability` is a requirement the
+     client judges, not a verdict the harness passes (`always`, `window`, `local`,
+     `plane`), so a client shows a command it cannot run greyed with the reason rather
+     than hiding it, which is how somebody learns the tool. `/goal` and `/loop` (#59)
+     are entries like any other. A worker answers the same method through the same
+     handler, so a pod's palette lists its bundle's agents. Still owed to #124, and out
+     of this: commands defined as markdown files, and generating `troupe --help` and the
+     docs' command reference from the table. Proof: `Troupe.CommandsTest`,
+     `Troupe.Gateway.CommandsListTest` (over a socket) and the TUI's
+     `Troupe.CommandPaletteTest`, which fails the moment the two sets differ.
+
+699. **The budget question is answered with how much more and for how long: a typed
+     amount raises the limit that asked, for this run, this session or this workspace;
+     an answer that cannot be read is asked back; a pod's terms are a ceiling.** Issue
+     #183. Answering `50` to the budget question stopped the session: `budget_decision/1`
+     knew `allow`, `always` and `deny` and read everything else as a refusal, the only
+     sizes were "the same slice again" and "no limit at all", and nothing could make a
+     limit stick for a repository.
+     - **Every amount is an increment on the limit that asked**, whatever the spelling —
+       `50`, `+50`, `50 turns`, `+50k tokens`, `+15 min` — because "raise it to 50" reads
+       two ways when 40 is used and "50 more" reads one. The steps offered are increments
+       too: three round numbers from a quarter of what the session has used (10, 25 and
+       50 turns after 40), so a session that burned 40 turns is never offered 5.
+     - **Three scopes, one list.** *This run* raises the limit for the turn in flight and
+       gives back what the turn did not use at `turn_ended` or `agent_done`, folded from
+       those events as well as applied live, so the next turn — a loop's next iteration
+       — meets the checkpoint again; that is what makes it differ from *this session*,
+       which keeps the raise and asks again when it is spent. *No limit this session* is
+       the old `always`, kept as its own clearly worded choice. *This workspace* keeps
+       the raise for the session and writes `max_<x>: <new limit>` to the workspace's
+       `.troupe/config.yaml` through `Config.write_key/3` — `Migrate.write/2`, the writer
+       every settings screen has used since #122 — and names the file in the answer
+       (`path`); the file is rendered again, so its comments go to the `.previous` copy
+       beside it, and a file that is not YAML is left alone and the answer says so. A
+       bare amount is for the session: a person who types `50` means fifty more, not
+       fifty more for this turn and the question again. A fourth scope, this machine, is
+       not offered; the list is eight options long already, and the user file is the
+       settings screen's.
+     - **An answer that cannot be read is asked back**, under the next id, with the
+       reason first (`decision: unclear`, `note`): a typo must not stop a session, and a
+       silent stop was the bug. The old words keep their meaning — `allow` buys the first
+       slice again, `always` lifts, `deny` stops — so a client from before this still
+       answers.
+     - **The words.** The question names the limit, says it is a safety net against
+       runaway loops and runaway spend, what the session has used and spent in money
+       (the index's running cost, where every priced response lands) and what the middle
+       step would cost at the session's own rate — spend so far over units used, the one
+       rate that needs no price list — and each option carries its own estimate. Calm: a
+       checkpoint, not an error.
+     - **On a pod** the worker hands the limits the terms set to the config as `terms`,
+       and the gate offers a raise only inside them, refuses one past them with the
+       reason, and offers no workspace scope: a pod's limits are the terms and the
+       profile, in the plane. `budget_asks: false` still asks nothing at all, and every
+       session the plane places has it, so this holds for the day the terms let one ask.
+     - **`/loop`.** "This run" means this iteration, and the question says so; a loop
+       still stops at the question (Decision 681). A cap of the loop's own that the same
+       question could raise is not designed here.
+     - **Not done:** a comment-preserving scalar edit (`Yaml.edit_list/4` covers lists
+       only), and a "this machine" scope.
+     - **Proof:** `Troupe.Agent.BudgetAnswerTest` — the parser in every spelling and
+       unit, the steps, the options and their round trip, the pod's ceiling, the words;
+       `Troupe.Agent.BudgetQuestionTest` — `50`, `+50`, `50 turns`, `+50k tokens` and
+       `+15 min` continue a session, nonsense is asked back, a run's raise is given back
+       and a session's kept, the raise survives a restart, the workspace file is written
+       and the next session there starts with it, a pod's terms cap and refuse;
+       `Troupe.BudgetTest` — extend and reclaim; `Troupe.Config.WriteKeyTest`. The
+       clients: TUI Decision 120, and the GUI's transcript test.
+
+700. **A person's own MCP servers and skills live in two layers beside `config.yaml`,
+     import from the files other tools keep, and a workspace's servers run only once
+     somebody attached has said so.** Issue #60, the local half. What was there: `mcp:`
+     in `config.yaml` (654), read from a project's file only in a trusted workspace
+     (686), and skills read from the pinned bundle alone. What a person has is a
+     `.mcp.json` from Claude Code, Cursor, Claude Desktop or VS Code and a
+     `~/.claude/skills`, and bringing them in meant retyping them into YAML.
+     - **Layers.** `<config>/mcp.json` and `<config>/skills/` for the user,
+       `.troupe/mcp.json` and `.troupe/skills/` for the workspace: the `mcpServers`
+       shape every other tool reads and writes, plus an `include` list that reads
+       another file in place — a *link*; `skills.json` does the same for directories of
+       skills. They stack over `config.yaml`'s `mcp:` as the config files stack (686):
+       merged by name, key by key, the workspace's over the user's, `null` removing and a
+       list replacing, so `{"disabled": true}` alone turns a lower layer's server off.
+       Each server and skill carries its layer and its file, since that is what a person
+       needs to know to change it (`Troupe.MCP.Local`, `Troupe.Skills.Local`).
+     - **Import.** `Troupe.MCP.Import` reads the four shapes: `${VAR}` and `${env:VAR}`
+       become `{env:VAR}`, which the loader refuses when unset instead of sending an
+       empty string; a VS Code `${input:…}` skips that server and says so, since only VS
+       Code could fill it in; `headers` are dropped with a warning, a credential this
+       slice does not carry. `mcp.add` with `from` copies, or links; `skills.add` copies
+       a directory of `SKILL.md`s or one skill's directory, or links it.
+     - **Trust.** A `.troupe/mcp.json` arrives with a clone. Its servers start only after
+       the session's question, through `Troupe.Session.Questions` under
+       `mcp-trust-<hash>`, so any client that answers an `ask_user` answers this; `deny`
+       is the first option, so a runner with nobody to ask runs nothing. `allow` is
+       remembered in `<state>/mcp-trust.json` per checkout (`Troupe.MCP.Trust`), beside a
+       fingerprint of the command, its arguments, environment, directory or URL, so a
+       changed command is a new question and a re-ordered file is not; `once` runs them
+       for the session; `deny` leaves them stopped until the next session or a reload.
+       A workspace on `trusted_workspaces` is not asked, since trusting it already lets
+       its `config.yaml` name what runs; the user's layer asks nothing, since the person
+       wrote it. A pod session reads no layer at all, and `managed_mcp_servers_only`
+       starts nothing local and says so in each server's status.
+     - **Skills.** A bundle's skills stay gated by the profile's `skills:` list and the
+       team's entitlements; a person's own are offered to every agent of the session,
+       because the person put them there and a skill nobody can call is not one. They
+       are read beside the workspace wherever the session runs, as `.troupe/agents/` is.
+       A local skill's files are listed by their path, and the user's directory and every
+       linked root are read roots of the session.
+     - **Protocol.** `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check` and `skills.list`,
+       `skills.add`, `skills.remove`, the daemon's only like `config.*`; `mcp.status`
+       gains `layer` and `source`. `mcp.check` on a session's server reads its files
+       again and starts what they say now — reconnect, enable and disable in one verb —
+       and on a server not in a session runs it once and stops it. `mcp.list` with a
+       `session_id` joins the live state onto the listing, so one call fills a page. Env
+       values never go over the wire: `mcp.list` and `mcp.add` answer with the names.
+     - **Out of this slice**, and said in the pull request: streamable HTTP and SSE with
+       OAuth for remote servers, and keychain storage for their tokens. A `url` server
+       stays the one-shot HTTP client 654 gave it.
+     - **Proof:** `Troupe.MCP.ImportTest` (the four shapes, placeholders, skips),
+       `Troupe.MCP.LocalTest` (layering, links, merging, writes, the trust store),
+       `Troupe.Skills.LocalTest` (both layers, copy and link, the tool and the prompt),
+       `Troupe.MCPLocalTest` (the question and each answer, a trusted workspace,
+       `managed_mcp_servers_only`, reload), `Troupe.MCPLayersTest` (the user's layer and
+       the read roots), `Troupe.Gateway.LocalSourcesTest` (the seven methods over the
+       daemon's socket, and none without the daemon), the TUI's `Troupe.MCPPageTest` and
+       the GUI's `local-sources.test.ts` and `servers-panel.test.tsx`.
+
+702. **The GUI's design is Afterglow: its type, spacing and square corners in every
+     theme, its palette as the default, and the three earlier palettes kept on the same
+     contract.** Issue #52, part 1 of 2: the tokens, the shell, the session list and
+     sign-in. The comp (`clients/gui/docs/design/afterglow.dc.html`) is a redesign, not a
+     palette: Figtree at black weights, DM Mono labels in capitals, the VT323 screen face
+     for a `// SECTION` label, radii of zero, a spacing scale of its own, a hard offset
+     shadow under tiles. The token pipeline already emitted structure once, from the
+     default theme's file, so the structure is now Afterglow's for every theme, and
+     `pnpm tokens` refuses a theme file whose copy of it differs.
+     - **Kept, not dropped.** Signal, Footlight and Limelight stay selectable. Whether
+       they survive is a product question the issue does not settle, and the appearance
+       screen, which is part 2, is where it would be answered; keeping them costs six
+       colour names in three files and nothing in a component, and dropping one later
+       is a file delete and a list entry.
+     - **The contract grew, once.** `text.body`, `text.label`, `bg.shadow`, `accent`,
+       `status.running.solid` and `status.local` are what the comp needed and the
+       contract lacked. Every theme answers them; the older three answer with values
+       they already had (the link blue for `accent`, the stage for the shadow, the
+       neutral of `queued` for `local`). Nothing was renamed, so every variable a
+       component reads today still resolves, in every theme.
+     - **The reserved colour is also the brand, in Afterglow only.** Pink marks
+       `waiting` and, through `--accent` and `--link`, the mask's lit half, links and
+       the current nav item; the comp does this, and the rule that a component reaches
+       for `--waiting-*` only for a waiting state holds. The other three keep their
+       reserved colour for waiting alone.
+     - **Two values moved from the comp.** `text.muted`, the comp's grey-deep at 3.7:1
+       on the void, is lifted to clear the 4.5:1 floor every theme is held to; and
+       `queued` is grey rather than the comp's amber, because the list's idle sessions
+       read as queued and three amber rows would fight the pink. The light mode is
+       derived — the comp is dark only — by inverting the ground to cream and darkening
+       every accent until it clears the same floor.
+     - **Generated, not typed.** `afterglow.tokens.json` carries both modes; the type
+       roles are emitted as `--t-<role>` shorthands and the tracking as
+       `--tracking-<role>`, so no size or weight is typed into the stylesheet.
+     - **Proof:** `pnpm tokens:check`, the GUI's typecheck, its test suites unchanged
+       and passing, the desktop build, and the app against `pnpm fake` in a browser:
+       the shell, the list and sign-in, light and dark, at 1280px and at 380px, on the
+       pull request.
+
+703. **The desktop app's icons are generated from the mask, in one fixed cut, and CI
+     fails when the committed set is not what the design file says.** Issue #159. Every
+     file in `clients/gui/apps/desktop/src-tauri/icons/` was an older three-dot mark, so
+     the app wore the brand inside its window and something else on the dock, the
+     taskbar, the Start menu, in Alt-Tab and in the installer. `pnpm icons`
+     (`clients/gui/scripts/icons.ts`) now draws the whole set from `mark.ts`, the
+     constant `views/brand.tsx` draws the mask from, which `pnpm tokens` generates out of
+     the design file, and from the design file's colours; `pnpm icons:check` runs in CI
+     after `tokens:check`.
+     - **One cut, dark.** In the app the mask follows the theme; an icon is one image.
+       It bakes Signal in dark, as `public/favicon.svg` does: the tile is `bg.sunken`
+       `#0B0D10`, the edge and the open eye `text.primary` `#ECEFF3`, the lit half
+       `status.waiting.solid` `#FF5CB8` (the reserved colour, meaning here what it means
+       everywhere), the eye cut out of it `text.inverse` `#0A0B0D`. A dark tile reads on
+       a light dock and on a dark one; a light tile vanishes into a light one.
+     - **Per size.** `brand.tsx`'s rules, on the size the mark's 48-unit frame is drawn
+       at: stroke `lg` from 40px, `md` from 24px, `sm` below; the seam line dropped below
+       32px so the colour change is the seam; bars for eyes below 24px. Inside the tile
+       the mark sits at 0.86 of its frame, the favicon's cut, with the stroke at full
+       weight. The tile is the favicon's, 44 of 48 with corners of 7, on Windows, Linux
+       and the Store tiles; macOS draws no shape around an icon and expects Apple's, so
+       `icon.icns` is 824 of 1024 with corners of 22.37%, at every size and scale the
+       dock reads.
+     - **Around the app.** The NSIS installer and uninstaller carry the app icon, a
+       150 x 57 header with the tile and a 164 x 314 sidebar with the mark on the dark
+       stage; the disk image has a 660 x 400 background with an arrow from the app to
+       Applications, on Signal's light canvas, because Finder draws a window that has a
+       background picture as light with dark labels whatever the appearance; `icon.png`
+       (512) heads `bundle.icon` because Tauri takes the first PNG there as the Linux
+       window icon, and it was the 32px one. `publisher` is "The Troupe contributors",
+       as NOTICE says; `copyright` already was.
+     - **Pure Node, pixels compared.** No image library and no network: the mark is a
+       few quadratic curves, rasterised by a scanline pass with sixteen sub-rows per
+       pixel and exact horizontal coverage, and PNG, ICO, ICNS and BMP are written by
+       hand. Curves are flattened with polynomials only, so the pixels are the same on
+       every machine; the check decodes what is committed and compares pixels rather
+       than bytes, because two zlibs compress one image differently and the icon is the
+       pixels.
+     - **Not done.** `troupe.exe`, the TUI Burrito wraps, has no resource section at all:
+       Windows shows the generic executable icon. Burrito's `build.zig` builds the
+       wrapper with `addExecutable` and takes no Win32 resource file, so an icon needs
+       Burrito to accept one (`addWin32ResourceFile`, upstream or in a fork) or a
+       post-build edit of the executable's resources before it is signed. A follow-up.
+
+704. **Every screen of the GUI is drawn in Afterglow, the launcher and the full-screen
+     "new session" with them; a session doing nothing is `idle`, its own status with no
+     colour, so `queued` can be the comp's amber.** Issue #52, part 2 of 2, on the tokens
+     702 laid down. The session view (transcript, tool calls, the agent's and the
+     harness's questions, approvals), the inbox, review, This computer with its models
+     and servers panels, appearance and the command palette are restyled to the comp;
+     the two screens the comp has that neither part listed are built. Nothing behaves
+     differently: the same protocol calls, the same words on the buttons.
+     - **The launcher is behind the lockup, not the first screen.** The comp opens on
+       it; the app still opens on the one list, because the list is the whole idea
+       (Sessions.tsx says so) and the app's tests and habits are built on it. The lockup
+       in the rail opens the launcher — three tiles (new, open, what needs you), the
+       three most recent rows, what this machine is — and every tile leads back in.
+       Opening on it instead is one line in `App.tsx`, if the product wants it. (709
+       reverses this: the app opens on the launcher, and a person may choose the list.)
+     - **Casting a troupe is a screen, not a dialog.** `StartSession` moved out of the
+       list into the shell (`where.screen === "new"`), as the comp draws it: where it
+       runs as two tiles, then the questions that follow from the answer. The list's
+       button and the launcher's tile both come here; the fields and the calls are the
+       ones the dialog made.
+     - **Idle is not a colour.** `statusOf` mapped an idle session to `queued`, which
+       forced 702 to make the queued pill grey. Idle is now a status of its own — an
+       open, empty eye, the chrome's label grey on a strong rule, the comp's STOPPED —
+       with no token, because doing nothing is the absence of a state; and `queued`
+       takes the comp's amber for a message held while the troupe works. A session
+       whose only open question is the workspace's trust question, asked at its start,
+       reads as waiting like any other, and a test says so.
+     - **The structure grew, once more, and every theme carries the copy.** Three type
+       roles the comp needed and 702 left without a token — `tile` (26px/900), `name`
+       (14px/800, the byline) and `note` (14px/400) — a `border.edge` of 2px for a
+       message's left edge, and `size.markDisplay` for the launcher's mask, in all four
+       files, so `pnpm tokens` still finds them identical. No colour token was added.
+     - **Two comp values were not taken.** The in-progress task is lit in the
+       machine's cyan, not the comp's pink: pink marks a person's decision and nothing
+       else, which 702 held to and this holds to. The `ag-scan` keyframe is defined in
+       the comp and used by nothing in it.
+     - **Room left.** The session head's subject column stacks the breadcrumb and the
+       title and is where the next wave's goal line, loop controls and "while you were
+       away" marker go.
+     - **Proof:** `pnpm tokens:check`, `icons:check`, the GUI's typecheck, its test
+       suites (the app's grew from 13 to 18: `statusOf`, the trust question, the
+       launcher), the desktop build, and every screen against `pnpm fake` and the
+       client's fake daemon in a browser, light and dark, at 1280px and 380px, on the
+       pull request.
+
+705. **A first run's questions are one state machine in the harness, asked over the
+     protocol, so both clients ask the same things and a run done in one is done in
+     the other.** Issue #76's second slice: a person with a fresh machine and one API
+     key reaches a first working session in the desktop app without opening the docs,
+     and the terminal client does not ask again. `Troupe.Setup` is the flow — `where`
+     (this machine or a plane), `provider` (Anthropic, OpenAI, a gateway or a LiteLLM
+     proxy by URL; or opencode's providers and a `config.yaml` that works, detected and
+     offered), `key` (pasted, or kept as `{env:VAR}`), `models`, `workspace` with the
+     approval model in two sentences, `finish` — and `Troupe.Gateway.Setup` holds one
+     in progress behind `setup.get` and `setup.answer`, the daemon's only, like
+     `config.*`. The choices that could have gone another way:
+     - **The key is checked with a real request before anything is written**: the
+       provider's model listing, which every provider authenticates and which also
+       fills the models step. A refused key keeps the step; a provider that answers
+       but will not list (a gateway with no listing) is `unknown` and the person goes
+       on and types a model id, since a working gateway is not a wrong key. Everything
+       is written as late as the answer is complete — the settings at `models`,
+       `auto_approve` at `workspace` — through `Troupe.Config.ModelSettings` and
+       `Troupe.Config.write_key/3`, into the user's `config.yaml` and never a
+       repository's `.troupe/`. The fake provider takes part (`ModelSettings` now
+       accepts it), so a packaged build's first run is driven to a written file with
+       no model behind it.
+     - **No keychain.** The daemon has no keychain module — the plane's refresh tokens
+       are the plane's — so the key goes into `config.yaml`, readable by the user alone
+       on Unix, and the flow says so (`key_storage`) rather than pretending. A keychain
+       is a later slice.
+     - **Completion is a record in the state directory** (`<state>/setup.json`, beside
+       `identity.json`), not a config key: the settings file is what was set up, and
+       the record is that somebody finished, including a person who chose a plane and
+       wrote no settings. `needed` is the absence of all three (the record, a
+       `config.yaml`, a model that can be asked), which is what the desktop app asks
+       before showing the questions and the terminal client asks before its own
+       (`setup.get`; a daemon without the method still gets the old questions).
+     - **`finish` starts the first session on the daemon**, as `session.create` would
+       under the caller, with a prompt suited to the directory — a repository is asked
+       to explain itself — so the flow ends on a session and not on a settings screen.
+     - **`troupe doctor` is `Troupe.Doctor` in the harness**, printed by both programs:
+       config, provider, key (the same live check), key storage, daemon, both binaries
+       on the PATH, and every plane the caller knows of, one line each, `FAIL` making
+       the exit status 1. It is not a session command, so it is not in
+       `Troupe.Commands`.
+     - **Out of this slice:** the daemon at login (launchd, systemd, Task Scheduler),
+       the full-screen terminal flow (`troupe setup`; `troupe config`'s questions
+       stay), a plane pushing a recommended setup, and the keychain.
+     Proof: `apps/troupe_core/test/troupe/setup_test.exs` (every path, a refused and
+     an accepted key against a socket, the reference written for an environment key,
+     the suggestion), `doctor_test.exs`, `apps/troupe_gateway/test/troupe/gateway/setup_test.exs`
+     (over the socket to a session, the key never in an answer, a worker without the
+     methods), the desktop app's `test/onboarding.test.tsx`, and the terminal client's
+     `config_setup_test.exs` ("a first run done in the desktop app means no questions
+     here").
+
+706. **A repository's own instruction files are read into every prompt, from disk at
+     every turn, in the order the other tools read them, and one table says what got
+     in.** Issue #123, its first slice. `AGENTS.md` is the file the tools settled on,
+     and a repository that has one has told agents how to work in it; Troupe read none
+     of it. The only mention was the librarian's prompt, which told that one agent to
+     fold `AGENTS.md` into the brief, so a repository's rules reached a session only as
+     a cheap model's paraphrase, only if somebody ran the librarian, and an edit changed
+     nothing until the brief was rebuilt. `Troupe.Instructions` now reads them: the
+     person's own `<config>/AGENTS.md`, the repository root's (the nearest directory
+     with a `.git`, so a worktree reads its own checkout's), one in each directory
+     between the root and the workspace, and the brief last. Every file applies and the
+     nearer comes later in the prompt, which is how "the nearest wins" is put to a
+     model. In one directory `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
+     `.github/copilot-instructions.md` are the same file under other tools' names: the
+     first that exists is read, the rest are named as skipped.
+     - **Read every turn, cached by digest.** The agent reads the files before every
+       model call and keeps a digest of what it read; an `instructions_loaded` event is
+       written when the digest changed since its last turn and never otherwise. So an
+       edit reaches the next turn, the log says which files each turn was read from,
+       and a quiet log means the same files again. Not distilled once by the librarian,
+       whose prompt still folds the same files into the brief — a follow-up stops it.
+     - **One budget, the nearest whole first.** `instructions_max_chars` (16,000) is
+       shared by the instruction files; the nearest takes what it needs first, and a
+       file the remainder cannot hold is cut where the prompt says so, or left out with
+       a line saying so. The brief keeps `memory_max_chars`. Never a silent drop.
+     - **Provenance is a method.** `context.get` (`observe`, a session method a worker
+       answers too) lists every file the next prompt is read from — scope, path, size,
+       characters that got in, budget, share, status, what was cut, what was skipped,
+       hash — read from disk when asked, as the next turn will read it, so it says what
+       an edit will do; a past turn's read is its event. `/context` in the TUI prints
+       it (TUI Decision 124). Nothing reaches the prompt from a file without appearing
+       there: the loader that answers the method is the loader that builds the prompt.
+     - **Not in this slice.** `.cursor/rules` globs, `@path` imports, a nested
+       `AGENTS.md` below the workspace (attached per file, the same mechanism as the
+       globs), the wider opencode and Claude Code imports, the linter, proposed edits
+       to `AGENTS.md`, the organisation layer, `troupe init`, command verification, and
+       a GUI view of the provenance.
+     - **Proof:** `Troupe.InstructionsTest` (order, aliases and what is skipped, the
+       budget with the nearest whole first, the root without and with a `.git` file,
+       the digest), `Troupe.InstructionsPromptTest` (a repository with only an
+       `AGENTS.md` and no Troupe setup reaches the prompt, an edit reaches the next
+       turn, one event per change and none for a turn that read the same, the person's
+       own file first and the brief last, the prompt names exactly what the provenance
+       lists), `Troupe.Gateway.ContextTest`, and the installed build on a scratch
+       repository, on the pull request.
+
+707. **A session somebody is reading is never put to sleep, a call to a client's own tool
+     outlives the connection that was serving it for a grace, and a session's row says
+     what happened while nobody was reading it.** Issue #119, the daemon's last three
+     parts after 140's sleeping. What was there: a subscribed client kept its session on
+     a thirty-minute clock and then had it stopped underneath them; a client that dropped
+     mid-call had the call failed at once with a bare `disconnected`, its tool gone; and
+     a person who came back had no way to tell, short of a replay, that a turn had ended
+     or a question been asked while they were gone.
+     - **Read means subscribed by name.** `Troupe.Events.attach/1` is registered by the
+       gateway for a subscription that names the session, `session:<id>` or
+       `presence:<id>`, and taken back when the last one on that connection goes, so
+       "somebody is reading this" is narrower than "somebody follows
+       it" (`watched?/1`): a `fleet` subscriber and a worker's uplink follow every session
+       and read none. The index skips an attached session on both clocks and restarts
+       them from the sweep after the reader leaves; the watched clock (30 min) still
+       covers the followers, and nothing changed for a pod, whose uplink is a follower
+       and whose manager keeps its own dormancy.
+     - **The call is parked in the registry, not the connection.** The connection still
+       answers its in-flight `tool.invoke`s with `disconnected` on the way out — it is the
+       only process that can unblock the task — and the task then asks `ClientTools` to
+       wait for the tool by name (`await/4`), for the grace or for what is left of the
+       call's own timeout, whichever is shorter, so the whole thing stays inside that
+       timeout and a dropped laptop is never a hung turn. A client that registers the
+       tool again, through a fresh consent as it always must, is asked the same call: same
+       id, same arguments, over its own connection. Nobody inside the grace, and the call
+       fails once, naming the tool and saying its client left. `TROUPE_CLIENT_TOOL_GRACE_SECONDS`
+       (60; `0` fails at once) sits on the ladder in the daemon's README with the other
+       clocks, which the three modules that keep them now point to instead of restating.
+     - **`unseen` is a mark beside the log, not an event in it.** `seen` holds the head
+       `seq` as of the last moment a client was attached, written on attach and on
+       detach; the row counts the root agent's `turn_ended`s and its distinct
+       `approval_requested`s and `question_asked`s after it, with `since`, and is empty
+       while a client is attached or when no mark exists — which is also what keeps every
+       session from before this from lighting up at once. A reader's progress is not
+       something the session did, reading a dormant session must not write to a log it
+       has not opened, and a mark in the log would reach every other subscriber as an
+       event about somebody else's screen. Cleared by a subscription, never by a listing,
+       so an inbox refreshes without losing its markers. The row is the contract for the
+       desktop app's notification and marker; the events keep their shape.
+
+708. **The desktop app shows a session's goal and its loop in the session's head, marks
+     what happened while nobody was reading, and says it with the operating system's
+     notification.** Issues #59 (the GUI's part) and #119 (its "tell the person" box).
+     The harness had `/goal`, `/loop` and `unseen`, and the terminal client showed the
+     first two; the desktop app dropped `goal_*` and `loop_*` on the floor, printed a
+     loop's own input as the person's words, and read no `unseen`.
+     - **What the events say, in the head.** The fold keeps the goal from `goal_set`
+       until `goal_cleared` and the latest loop from `loop_started` to `loop_stopped`,
+       so the head follows any client's change as it happens. The goal sits under the
+       title on one line, whole on hover and on a click; the loop sits beside the status,
+       "iteration 2/5", with a stop that works mid-iteration. A loop's turn is a note,
+       "loop iteration 2/5", not the words the loop gave the model, as in the terminal
+       client. `session.loop.get` is asked once per attachment for the one case the log
+       cannot say yet: a session that stopped mid-loop writes `interrupted` only when it
+       wakes. A refusal is said in words, not as `conflict (-32006)`.
+     - **`unseen` is read at the door.** Opening a session subscribes to it, which is
+       what clears it, so the line at the top ("while you were away: 2 turns finished,
+       1 question waiting since 14:02") is the row as the list last showed it, kept for
+       the visit until it is seen or answered. A request is `waiting` while the row still
+       has one of its kind open and `asked` once it ended. The list marks a row with how
+       many things, and the row the person opens loses its mark at once.
+     - **Notifications are the OS's, through the notification plugin.** A Tauri build of
+       this app on Windows, at its own origin, answers `Notification.requestPermission()`
+       with `denied` and never prompts, and `new Notification()` fires `error`: WebView2
+       refuses the permission unless the host answers its `PermissionRequested`, and wry
+       answers only the clipboard's. So `tauri-plugin-notification`, pinned to 2.4
+       because 2.5 wants tauri 2.12, is reached through the shell contract, and a browser
+       uses its own. The capability grants three verbs: whether it is allowed, ask, show.
+     - **When, and once.** News comes two ways and each is the only one for its case: a
+       session nobody reads is told by its row's counts going up, whether or not the
+       window is in front, since nothing on screen shows it; a session this window reads
+       has an empty `unseen`, so its own events speak, after the replay and only while
+       the window is not in front, and a loop's turns stay quiet until the loop ends.
+       Counts are remembered per session and a request by its call id, which a waking
+       session asks again under. Permission is asked once, on the person's first
+       gesture, a refusal is kept, and a preference beside the appearance turns it off.
+     - **Not in this slice.** A plane's rows carry no `unseen`, so a team session tells
+       only while it is open; clicking a notification does not open its session, which
+       the plugin cannot report on a desktop; and the launcher's rows carry no marker.
+     - **Proof:** the desktop app's `goal-loop`, `away` and `notify` tests against the
+       fake daemon, which now keeps the loop in its log and `unseen` beside it; the
+       client's fold and row tests; the probe and the renamed installed build on the pull
+       request.
+
+709. **The desktop app opens on the launcher, and a person who would rather start on the
+     list says so once.** Issue #52, amending 704, which built the launcher and kept the
+     list as the first screen; the comp opens on the launcher, and so does the app now.
+     - **The choice is at the foot of the screen it is about.** "Skip this screen when
+       Troupe starts" is a checkbox in the launcher's footer, where the comp keeps its
+       shortcuts, and from the next start the app opens on the list. It moves nothing
+       now: the preference is read once, when the app starts. The lockup in the rail
+       still opens the launcher from anywhere, with the box ticked.
+     - **Turned back beside the appearance.** A person who skipped the launcher no longer
+       meets its checkbox, so the same preference is on the Appearance screen under the
+       notifications, as two cards — Home, the lockup's own name for the launcher, or
+       Sessions. It is kept where the theme and the notifications are, as `start` in the
+       app's preferences on this computer.
+     - **A first run is not a start.** On a fresh machine the first run's questions (705)
+       end where they did, on the session they started or on the list, and the launcher
+       comes on the starts after. Sign-in, and the theme a first sign-in asks for, still
+       come before it.
+     - **The app's tests say which screen they start on.** The suites that open a session
+       from the list start where a person who chose the list starts (`startOnTheList` in
+       the desktop app's `test/support.ts`); `launcher.test.tsx` is the one about the
+       first screen, and the local-only test passes through the launcher on its way to
+       every other screen.
+     - **Proof:** `launcher.test.tsx` (the launcher first; the box ticked and a restart on
+       the list, the lockup still reaching the launcher, the box unticked and the launcher
+       back; Appearance both ways; a first run ending on the list and the launcher at the
+       next start), the first-run test's relaunch now on the launcher, the GUI's
+       typecheck and test suites, the desktop build, `tokens:check`, `icons:check`, and
+       the app against a fake daemon in a headless browser, light and dark, at 1280px and
+       380px, on the pull request.

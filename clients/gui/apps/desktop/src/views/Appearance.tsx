@@ -1,15 +1,15 @@
 // Choosing a theme: once on first sign-in, and afterwards whenever you like.
 //
-// One screen, three cards, a light/dark control, and a sentence saying it can be
+// One screen, four cards, a light/dark control, and a sentence saying it can be
 // changed later. Four rules from docs/design/themes/THEMES.md are what make it a
 // ten-second screen rather than a puzzle, and each one is visible in the markup:
 //
 //   1. The default is preselected. Someone who presses Continue without reading gets
-//      Signal and loses nothing. Skipping is allowed and means the same thing.
+//      Afterglow and loses nothing. Skipping is allowed and means the same thing.
 //   2. The previews are real. Each card shows the session row that needs you, an
 //      approval and the cast — the three things a person looks at all day. Swatches
 //      tell you nothing about whether you can work in a theme.
-//   3. Light and dark is a separate control, not six cards. Theme and mode are
+//   3. Light and dark is a separate control, not eight cards. Theme and mode are
 //      different questions, and the mode control defaults to "follow my system".
 //   4. The copy says it is changeable, which removes all the weight from the decision.
 //
@@ -18,10 +18,13 @@
 // there is nothing to confirm.
 
 import type { JSX } from "react";
+import { useNotificationSetting } from "../notify";
+import type { Permission } from "../notify";
 import { DEFAULT_MODE, DEFAULT_THEME, MODES, THEMES } from "../theme";
 import type { Mode, ThemeId } from "../theme";
 import { Mask } from "./brand";
 import { Pill } from "./bits";
+import { useOpensOnLauncher } from "./Launcher";
 
 export interface Appearance {
   theme: ThemeId;
@@ -127,8 +130,8 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
       <header>
         <h1>{name ? `Welcome, ${name}.` : "Welcome."}</h1>
         <p>
-          Pick how Troupe looks. Every theme says the same things in the same places — one colour is reserved, in all three, for work that has
-          stopped and needs you. You can change this any time in Settings.
+          Pick how Troupe looks. Every theme says the same things in the same places — one colour is reserved, in each of them, for work that
+          has stopped and needs you. You can change this any time in Settings.
         </p>
       </header>
 
@@ -148,7 +151,7 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
             onDone();
           }}
         >
-          Skip — Signal, following my system
+          Skip — {THEMES[0]!.name}, following my system
         </button>
       </footer>
     </main>
@@ -161,15 +164,77 @@ export function Onboarding({ name, appearance, onDone }: { name: string | null; 
  */
 export function AppearanceSettings(props: Appearance): JSX.Element {
   return (
-    <div className="listing">
-      <div className="appearance">
-        <header>
-          <h1>Appearance</h1>
+    <>
+      <header className="screen-head">
+        <span className="count">Settings</span>
+        <h1>Appearance</h1>
+      </header>
+      <div className="listing">
+        <div className="appearance">
           <p>Yours alone. Other people in your sessions see them in their own theme, and nothing about a theme changes what anything means.</p>
-        </header>
-        <Chooser {...props} />
+          <Chooser {...props} />
+          <Notifications />
+          <Start />
+        </div>
       </div>
-    </div>
+    </>
+  );
+}
+
+const PERMISSION_WORDS: Record<Permission, string | null> = {
+  granted: null,
+  default: "Troupe has not been allowed to show notifications yet. Choosing On asks.",
+  denied: "Notifications are turned off for Troupe in this computer's or this browser's settings, and Troupe will not ask again. Turn them on there to have them here.",
+  unsupported: "This browser cannot show notifications. The marker in the list and the line when you come back still say what happened.",
+};
+
+/**
+ * Whether a session that finishes or asks while you are not looking says so with a
+ * notification. Beside the appearance because it is the same kind of thing: yours, kept
+ * on this computer, changing nothing about what anybody else sees.
+ */
+function Notifications(): JSX.Element {
+  const { on, permission, setOn } = useNotificationSetting();
+  const note = on ? PERMISSION_WORDS[permission] : null;
+  return (
+    <section className="notify">
+      <h2 className="screen">Notifications</h2>
+      <div className="options">
+        <button type="button" className="option" aria-pressed={on} onClick={() => setOn(true)}>
+          <span className="label">On</span>
+          <span className="consequence">A notification when a session finishes a turn or asks you something while you are not looking at it.</span>
+        </button>
+        <button type="button" className="option" aria-pressed={!on} onClick={() => setOn(false)}>
+          <span className="label">Off</span>
+          <span className="consequence">Only the marker in the list, and the line at the top of a session when you come back to it.</span>
+        </button>
+      </div>
+      {note && <p className="note">{note}</p>}
+    </section>
+  );
+}
+
+/**
+ * What the app opens on: the launcher, or the list. The launcher's own checkbox sets the
+ * same thing; this is where it is turned back, since a person who skipped the launcher
+ * no longer starts on it.
+ */
+function Start(): JSX.Element {
+  const { on, setOn } = useOpensOnLauncher();
+  return (
+    <section className="opening">
+      <h2 className="screen">When Troupe starts</h2>
+      <div className="options">
+        <button type="button" className="option" aria-pressed={on} onClick={() => setOn(true)}>
+          <span className="label">Home</span>
+          <span className="consequence">Start something, go back to what was open last, or see what is waiting for you, from one screen. The troupe mark in the rail opens it any time.</span>
+        </button>
+        <button type="button" className="option" aria-pressed={!on} onClick={() => setOn(false)}>
+          <span className="label">Sessions</span>
+          <span className="consequence">Straight to the list of every session. Home is still one press away, on the troupe mark.</span>
+        </button>
+      </div>
+    </section>
   );
 }
 
@@ -177,11 +242,11 @@ function Chooser(props: Appearance): JSX.Element {
   return (
     <div className="chooser">
       <section>
-        <h2>Theme</h2>
+        <h2 className="screen">Theme</h2>
         <ThemeCards theme={props.theme} resolved={props.resolved} setTheme={props.setTheme} />
       </section>
       <section className="mode">
-        <h2>Light or dark</h2>
+        <h2 className="screen">Light or dark</h2>
         <ModeChoice mode={props.mode} setMode={props.setMode} />
       </section>
     </div>

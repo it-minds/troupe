@@ -276,6 +276,19 @@ defmodule Troupe.Worker.HarnessAuthTest do
       assert {:ok, %{"servers" => _}} = Client.call(client, "mcp.status", %{"session_id" => mine})
     end
 
+    # The palette a client opens on a remote session is this table, so reading it is the
+    # session's own: a viewer's token has it, and it holds the harness's built-ins.
+    test "a session's token reads the slash commands its palette offers", context do
+      {:ok, client} =
+        connect(context, token(context, role: "viewer", session_id: context.session_id))
+
+      assert {:ok, %{"commands" => commands}} =
+               Client.call(client, "commands.list", %{"session_id" => context.session_id})
+
+      names = Enum.map(commands, & &1["name"])
+      assert Enum.map(Troupe.Commands.builtins(), & &1["name"]) -- names == []
+    end
+
     # The plane holds a pod session's row, key and retention, so these are asked of the
     # plane; its erasure reaches the pod over the control channel (`erasure_test.exs`).
     test "a session's token is refused archiving, pinning and erasing it, and none runs",

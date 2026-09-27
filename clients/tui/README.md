@@ -169,6 +169,19 @@ and its tools. A server that fails to start is marked, not fatal — the rest
 still work; so is one whose `{env:VAR}` is not set, which is never started. A
 project's own `mcp:` starts nothing until the workspace is trusted.
 
+Servers you already have for Claude Code, Claude Desktop, Cursor or VS Code come
+over as they are: `/mcp import <path>` copies a `.mcp.json` into your own
+`mcp.json` beside `config.yaml`, `/mcp link <path>` reads it in place, and
+`/skills import <dir>` or `link` does the same for a directory of skills such as
+`~/.claude/skills`. `--workspace` on any of them writes the workspace's
+`.troupe/mcp.json` or `.troupe/skills/` instead, for whoever opens the
+repository. The page lists every server and skill with the layer it came from
+(`[user]`, `[workspace]`, `[config]`); `c` checks a server (and starts one written
+after the session began), `d` disables or enables it, `x` removes it. A
+workspace's own servers are commands a cloned repository would run, so the
+session asks before starting them — `deny`, `once` or `allow`, the last
+remembered for that workspace — and asks again when a command changes.
+
 If Troupe has no API key of its own, it reads the providers from opencode's
 `~/.config/opencode/opencode.jsonc` (keys also from its `auth.json`) and uses
 opencode's `model` as the default, so an existing opencode setup works with no
@@ -192,7 +205,15 @@ report and then the same choices, and plain `troupe` asks them before it opens a
 on a machine with no settings and no key. The installers end with the same check.
 
 Whatever finds no key says so with one next step, `troupe config`: the report's last
-line, a headless run's model error, and the first turn in the TUI.
+line, a headless run's model error, and the first turn in the TUI. A first run finished
+in the desktop app is recorded by the daemon, and plain `troupe` asks nothing then.
+
+`troupe doctor` checks the setup and prints one line per check: the config files load,
+the default model's provider has a key, the key is accepted (a real request, the
+provider's model listing), where the key is kept, whether a daemon is running,
+`troupe-daemon` and `troupe` on the PATH, and every plane you are logged in to. A line
+that says `FAIL` makes the exit status 1; `warn` does not. `troupe-daemon doctor` prints
+the same lines.
 
 ## Use
 
@@ -204,6 +225,7 @@ troupe run code "make the tests pass" --headless --auto-approve
 troupe run plan "how should we split billing" --worktree
 troupe resume [SESSION_ID]              # no id: reopen the last session here, picker open
 troupe models [--refresh]               # every model, its window and its price
+troupe doctor                           # check the setup, one line per check; exits 1 on a failure
 troupe login PLANE_URL                  # sign in to a Troupe Remote plane (device flow)
 troupe logout [PLANE_URL] [--all]       # forget a plane's credentials
 troupe whoami [PLANE_URL]               # who the plane says you are, and your teams
@@ -248,10 +270,11 @@ Inside the TUI, everything starts with `/`:
 | `/dismiss`, `/merge`, `/discard` `[n]` | act on the activated window or the one on tile `n` (a path works too) |
 | `/agents` | list the agents you can dispatch |
 | `/resume`, `/sessions` | this directory's sessions, newest first: Enter switches the window to one (`/resume <n\|ID>` goes straight there) |
-| `/settings`, `/help` | settings page: tweak settings and read the curated help |
+| `/help`, `/` on an empty line, Ctrl-K | the command palette: every command with a one-line description, filtered as you type |
+| `/settings` | settings page: tweak settings and read the curated help |
 | `/hq`, `/remote` | HQ: a plane's teams, profiles and sessions, with this machine's own listed alongside |
 | `/files` | the session's files, live: Enter opens, ← goes up, `r` reloads |
-| `/mcp` | MCP servers: each one's state, tools and errors |
+| `/mcp`, `/skills` | your MCP servers and skills: each one's layer, state, tools and errors; `/mcp import <path>` copies a `.mcp.json`, `link` reads it in place, `remove <name>`, `check <name>`; the same verbs on `/skills` for a directory of skills; `--workspace` writes the workspace's files |
 | `/goal <text>` | set the session's goal: every later turn works towards it and the status line shows it; `/goal` shows it, `/goal clear` clears it |
 | `/loop [n]` | work towards the goal on its own, up to `n` turns (the config's `loop_max_iterations` without one), until the agent says the goal is met; the status line shows `loop 2/10`, and `/loop stop` stops it |
 | `/upload <path>` | send a local file into the session's own mount |
@@ -356,9 +379,23 @@ explicit: starting a session reads the cache and never the network.
 setting, Esc goes back. The last entry types a model by hand for anything the
 config does not mention. The cheap model has the same menu on the settings page.
 
+### Command palette
+
+`/` on an empty command line, Ctrl-K with nothing typed, or `/help` opens a popup
+over the session listing every command in sections — Session, Navigate, Workspace,
+Setup, Agents (one entry per agent, with its description), Quit — each with a
+one-line description, and the selected one explained beside it with an example.
+Typing filters by name, alias or description (`mer` narrows to `/merge`); `↑`/`↓`
+and PgUp/PgDn move; Enter runs the command, or leaves it on the line when it needs an
+argument; Tab or Space leave it on the line too, so `/merge 2` types exactly as it
+always did; Esc goes back. A command that cannot run right now — one that acts on a
+window when none is activated, or a local one in a plane session — is shown greyed
+with the reason rather than hidden. The list is the daemon's (`commands.list`), so the
+desktop app shows the same one.
+
 ### Settings page
 
-`/settings` (or `/help`) opens a page listing every tweakable setting with its
+`/settings` opens a page listing every tweakable setting with its
 current value, and a curated help text next to it: what the selected setting
 does, plus the commands, keys and concepts worth knowing. `↑`/`↓` moves, Enter
 toggles a boolean, opens a menu (the models) or edits a value, PgUp/PgDn or the

@@ -101,6 +101,9 @@ defmodule Troupe.CLI.Runner do
             fail(message)
         end
 
+      {:ok, %{mode: :doctor} = args} ->
+        Troupe.CLI.Doctor.run(args.workspace)
+
       {:ok, %{mode: :run} = args} ->
         run(args)
 

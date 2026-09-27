@@ -81,6 +81,16 @@ defmodule Troupe.Client.Daemon do
     end
   end
 
+  # The command table is the daemon's (Decision 698), read over the session's socket
+  # like anything else about it; a session that is not open has no socket to ask.
+  @impl true
+  def command_table(sid) do
+    case Worker.whereis(sid) && Worker.rpc(sid, "commands.list", %{}) do
+      {:ok, %{"commands" => commands}} when is_list(commands) -> commands
+      _ -> []
+    end
+  end
+
   @impl true
   def context(sid) do
     workspace = workspace(sid)
@@ -330,7 +340,87 @@ defmodule Troupe.Client.Daemon do
   defp mcp_state("connecting"), do: :connecting
   defp mcp_state("error"), do: :error
   defp mcp_state("stopped"), do: :stopped
+  defp mcp_state("pending"), do: :pending
+  defp mcp_state("disabled"), do: :disabled
   defp mcp_state(_other), do: :unknown
+
+  # The person's own servers and skills (troupe-remote Decision 700), as the `/mcp`
+  # page lists them: every server the layers give this session's workspace, with its
+  # live state where the session runs it, and every skill with its layer.
+  @impl true
+  def sources(sid) do
+    workspace = workspace(sid)
+
+    with {:ok, %{"servers" => servers} = listed} <-
+           Link.call("mcp.list", %{workspace: workspace, session_id: sid}),
+         {:ok, %{"skills" => skills}} <- Link.call("skills.list", %{workspace: workspace}) do
+      {:ok,
+       %{
+         servers: Enum.map(servers, &server_entry/1),
+         skills: Enum.map(skills, &skill_entry/1),
+         warnings: List.wrap(listed["warnings"])
+       }}
+    else
+      {:ok, other} -> {:error, "unexpected answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  # `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add` and `skills.remove` on this
+  # session's workspace; a command gets its id here, as every other does.
+  @impl true
+  def manage_sources(sid, method, params)
+      when method in ~w(mcp.add mcp.remove skills.add skills.remove) do
+    params =
+      Map.merge(%{workspace: workspace(sid), command_id: Troupe.Remote.RPC.command_id()}, params)
+
+    manage(method, params)
+  end
+
+  def manage_sources(sid, "mcp.check", params),
+    do: manage("mcp.check", Map.merge(%{workspace: workspace(sid)}, params))
+
+  def manage_sources(_sid, method, _params), do: {:error, "unknown method #{method}"}
+
+  defp manage(method, params) do
+    case Link.call(method, params) do
+      {:ok, answer} when is_map(answer) -> {:ok, answer}
+      {:ok, other} -> {:error, "unexpected #{method} answer: #{inspect(other)}"}
+      {:error, reason} -> {:error, message(reason)}
+    end
+  end
+
+  defp server_entry(server) do
+    %{
+      name: server["name"],
+      layer: layer(server["layer"]),
+      source: server["source"],
+      transport: server["transport"],
+      command: server["command"],
+      args: List.wrap(server["args"]),
+      url: server["url"],
+      state: if(server["state"], do: mcp_state(server["state"])),
+      tools: List.wrap(server["tools"]),
+      error: server["error"] || server["refused"],
+      disabled?: server["disabled"] == true,
+      trust: server["trust"]
+    }
+  end
+
+  defp skill_entry(skill) do
+    %{
+      name: skill["name"],
+      description: skill["description"] || "",
+      layer: layer(skill["layer"]),
+      source: skill["source"],
+      linked?: skill["linked"] == true
+    }
+  end
+
+  defp layer("user"), do: :user
+  defp layer("workspace"), do: :workspace
+  defp layer("config"), do: :config
+  defp layer(_other), do: :session
 
   # `/memory` shows the brief, `/memory refresh` has the librarian rewrite it as a branch
   # of this session, `/memory forget` deletes it.
@@ -374,6 +464,21 @@ defmodule Troupe.Client.Daemon do
 
   def memory(_sid, other),
     do: {:error, "unknown /memory #{other}; use /memory, /memory refresh or /memory forget"}
+
+  # `/context`: the provenance of the prompt, as the daemon reads it now (Decision 124).
+  @impl true
+  def instructions(sid) do
+    case Worker.rpc(sid, "context.get", %{}) do
+      {:ok, %{"files" => _} = answer} ->
+        {:ok, Troupe.Client.Instructions.line(answer, workspace(sid))}
+
+      {:ok, other} ->
+        {:error, "unexpected context.get answer: #{inspect(other)}"}
+
+      {:error, reason} ->
+        {:error, message(reason)}
+    end
+  end
 
   @impl true
   def fs_list(sid, path) do

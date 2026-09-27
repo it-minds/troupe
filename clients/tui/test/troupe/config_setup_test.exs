@@ -258,6 +258,28 @@ defmodule Troupe.ConfigSetupTest do
       assert text =~ "When you are ready, either:"
     end
 
+    # The desktop app's first run is recorded once, for every client (TUI Decision 123).
+    test "a first run done in the desktop app means no questions here" do
+      daemon = fn "setup.get", _ ->
+        {:ok, %{"needed" => false, "completed" => %{"choice" => "plane"}}}
+      end
+
+      assert ConfigSetup.before_session("/w", io(daemon: daemon)) == :ok
+      assert said() == []
+      refute_received {:ask, _}
+      refute_received {:call, "config.get", _}
+    end
+
+    test "a daemon from before setup.get still gets the questions" do
+      daemon = fn
+        "setup.get", _ -> {:error, %{"message" => "method_not_found"}}
+        "config.get", _ -> {:ok, @nothing}
+      end
+
+      assert ConfigSetup.before_session("/w", io(daemon: daemon, answers: ["3"])) == :ok
+      assert_received {:ask, "choice [1]: "}
+    end
+
     test "without a terminal, one line says what to run" do
       assert ConfigSetup.before_session("/w", io(interactive?: false)) == :ok
       assert said() == ["No provider is set up yet: run `troupe config` to set one up."]
@@ -273,7 +295,13 @@ defmodule Troupe.ConfigSetupTest do
 
   # -- a person and a daemon, played ------------------------------------------------
 
-  defp settings(answer), do: fn "config.get", _ -> {:ok, answer} end
+  # A daemon with the file's settings, on a machine whose first run is not done.
+  defp settings(answer) do
+    fn
+      "config.get", _ -> {:ok, answer}
+      "setup.get", _ -> {:ok, %{"needed" => true, "completed" => nil}}
+    end
+  end
 
   defp io(opts) do
     test = self()

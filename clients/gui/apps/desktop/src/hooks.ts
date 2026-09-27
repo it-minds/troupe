@@ -12,9 +12,11 @@ import {
   DaemonClient,
   DaemonSource,
   FleetStore,
+  isDurable,
   PlaneSource,
   SessionAttachment,
 } from "@troupe/client";
+import { noticeEvent } from "./notify";
 import { daemonHint, shell } from "./shell";
 import type {
   AttachStatus,
@@ -254,6 +256,12 @@ export interface SessionHandle {
   answer(callId: string, text: string): Promise<void>;
   cancel(): Promise<void>;
   switchProfile(profile: string): Promise<void>;
+  /** The goal every later turn works towards (`session.goal.*`); the effect is its event. */
+  setGoal(text: string): Promise<void>;
+  clearGoal(): Promise<void>;
+  /** A loop towards the goal, up to `max` iterations or the session's own cap. */
+  startLoop(max?: number): Promise<void>;
+  stopLoop(): Promise<void>;
   /** Fetch a blob's text. Called on expand and never on load. */
   readBlob(blob: string): Promise<string>;
   error: string | null;
@@ -312,7 +320,11 @@ export function useSessionView(
           .then((v) => {
             if (!live) return void daemon!.close(sessionId);
             held = true;
-            stopListening = v.listen((e) => live && setState((s) => fold(s, e)));
+            stopListening = v.listen((e) => {
+              if (!live) return;
+              setState((s) => fold(s, e));
+              noticeEvent(sessionId, e, isDurable(e) && e.seq > v.headSeq);
+            });
             ref.current = v;
             setView(v);
             setStatus("live");
@@ -324,7 +336,15 @@ export function useSessionView(
           mode,
           open: (m) => auth!.rpc("session.open", { session_id: sessionId, mode: m }),
           mint: () => auth!.rpc("token.mint", { session_id: sessionId }),
-          hooks: { onEvent: (e) => live && setState((s) => fold(s, e)) },
+          hooks: {
+            onEvent: (e) => {
+              if (!live) return;
+              setState((s) => fold(s, e));
+              // Until the attachment is here, what arrives is the replay.
+              const v = ref.current;
+              noticeEvent(sessionId, e, Boolean(v) && isDurable(e) && e.seq > v!.headSeq);
+            },
+          },
           onStatus: (s, d) => {
             if (!live) return;
             setStatus(s);
@@ -394,13 +414,35 @@ export function useSessionView(
     if (v) await following(() => v.switchProfile(profile));
   }, [following]);
 
+  const setGoal = useCallback(async (text: string) => {
+    const v = ref.current;
+    if (!v) throw new Error("not attached");
+    await following(() => v.setGoal(text));
+  }, [following]);
+
+  const clearGoal = useCallback(async () => {
+    const v = ref.current;
+    if (v) await following(() => v.clearGoal());
+  }, [following]);
+
+  const startLoop = useCallback(async (max?: number) => {
+    const v = ref.current;
+    if (!v) throw new Error("not attached");
+    await following(() => v.startLoop(max));
+  }, [following]);
+
+  const stopLoop = useCallback(async () => {
+    const v = ref.current;
+    if (v) await following(() => v.stopLoop());
+  }, [following]);
+
   const readBlob = useCallback(async (blob: string) => {
     const v = ref.current;
     if (!v) throw new Error("not attached");
     return v.blobText(blob);
   }, []);
 
-  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, readBlob, error };
+  return { state, status, detail, view, send, respond, answer, cancel, switchProfile, setGoal, clearGoal, startLoop, stopLoop, readBlob, error };
 }
 
 /**

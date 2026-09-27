@@ -16,7 +16,7 @@ defmodule Troupe.Gateway.Dispatch do
 
   alias Troupe.Agent.Definitions
   alias Troupe.Config.ModelSettings
-  alias Troupe.Gateway.{ClientTool, Commands, Plane, Presence, Private, Session, Worktrees}
+  alias Troupe.Gateway.{ClientTool, Commands, LocalSources, Plane, Presence, Private, Session, Setup, Worktrees}
   alias Troupe.Gateway.Session.Subscription
   alias Troupe.Identity
   alias Troupe.LLM.Provider
@@ -25,6 +25,7 @@ defmodule Troupe.Gateway.Dispatch do
   alias Troupe.Protocol.Event
   alias Troupe.Session.{ClientTools, Log}
   alias Troupe.Session.MCP, as: LocalMCP
+  alias Troupe.Sessions.Unseen
   alias Troupe.Todo.Edit
   alias Troupe.Tool.Result
   alias Troupe.Workflow
@@ -60,8 +61,10 @@ defmodule Troupe.Gateway.Dispatch do
     "fs.upload" => :control,
     "workspace.recent" => :observe,
     "agents.list" => :observe,
+    "commands.list" => :observe,
     "workflows.list" => :observe,
     "memory.get" => :observe,
+    "context.get" => :observe,
     "mcp.status" => :observe,
     "workspace.search" => :observe,
     "worktree.list" => :observe,
@@ -113,7 +116,21 @@ defmodule Troupe.Gateway.Dispatch do
     "config.get" => :observe,
     "config.models" => :admin,
     "config.set" => :admin,
-    "config.import" => :admin
+    "config.import" => :admin,
+    # A first run's questions (Decision 705): reading where it stands says nothing
+    # secret; answering sends a key to a provider, writes the settings and starts a
+    # session, so it takes what `config.set` takes.
+    "setup.get" => :observe,
+    "setup.answer" => :admin,
+    # The person's own MCP servers and skills (Decision 700): the daemon's only. Adding,
+    # removing and checking are `admin`, since each names a command this machine runs.
+    "mcp.list" => :observe,
+    "mcp.add" => :admin,
+    "mcp.remove" => :admin,
+    "mcp.check" => :admin,
+    "skills.list" => :observe,
+    "skills.add" => :admin,
+    "skills.remove" => :admin
   }
 
   # Every way a registration can fail for want of consent. All three answer with a fresh
@@ -335,7 +352,21 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # The workspace's own MCP servers for a session: what a client's `/mcp` page shows.
+  # The provenance of the session's prompt (Decision 706): every instruction file and
+  # the brief, with its scope, size and share of the budget, as a client's `/context`
+  # shows it. Read from disk now, as the next turn will read it, so it says what an edit
+  # will do; what a past turn read is its `instructions_loaded` event.
+  defp handle("context.get", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, session} <- lookup(session_id),
+         workspace = Path.expand(session.workspace),
+         {:ok, config} <- workspace_config(workspace) do
+      {:ok, Troupe.Instructions.provenance(workspace, config)}
+    end
+  end
+
+  # The session's own MCP servers: what a client's `/mcp` page shows. `layer` and
+  # `source` say which file each came from (Decision 700).
   defp handle("mcp.status", params, _context) do
     with {:ok, session_id} <- fetch(params, "session_id"),
          {:ok, _session} <- lookup(session_id) do
@@ -347,7 +378,9 @@ defmodule Troupe.Gateway.Dispatch do
             "name" => server.name,
             "state" => to_string(server.state),
             "tools" => server.tools,
-            "error" => server.error
+            "error" => server.error,
+            "layer" => to_string(server[:layer] || :config),
+            "source" => server[:source]
           }
         end)
 
@@ -378,6 +411,17 @@ defmodule Troupe.Gateway.Dispatch do
         |> Enum.sort_by(& &1["name"])
 
       {:ok, %{"agents" => agents}}
+    end
+  end
+
+  # The slash commands a client may offer for this session (Decision 698): the harness's
+  # table, then one entry per primary agent, described by its definition. The agents are
+  # the ones `agents.list` answers for the session's workspace, so the two never disagree.
+  defp handle("commands.list", params, _context) do
+    with {:ok, session_id} <- fetch(params, "session_id"),
+         {:ok, session} <- lookup(session_id) do
+      agents = session.workspace |> Path.expand() |> Definitions.load() |> Definitions.primaries()
+      {:ok, %{"commands" => Troupe.Commands.list(agents: agents)}}
     end
   end
 
@@ -824,8 +868,27 @@ defmodule Troupe.Gateway.Dispatch do
       else: {:error, Error.new(:method_not_found, %{method: method})}
   end
 
+  # The person's own MCP servers and skills (Decision 700): the daemon's alone, for the
+  # same reason as the settings. `mcp.status`, which a pod answers too, is above.
+  defp handle("mcp." <> _ = method, params, _context), do: local_sources(method, params)
+  defp handle("skills." <> _ = method, params, _context), do: local_sources(method, params)
+
+  # A first run's questions (Decision 705): the daemon's alone, since they write the
+  # settings file and start a session on this machine.
+  defp handle("setup." <> _ = method, params, context) do
+    if Process.whereis(Troupe.Gateway.Daemon),
+      do: setup(method, params, context),
+      else: {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
   defp handle(method, _params, _context) do
     {:error, Error.new(:method_not_found, %{method: method})}
+  end
+
+  defp local_sources(method, params) do
+    if Process.whereis(Troupe.Gateway.Daemon),
+      do: LocalSources.call(method, params),
+      else: {:error, Error.new(:method_not_found, %{method: method})}
   end
 
   defp model_settings("config.get", params) do
@@ -852,6 +915,45 @@ defmodule Troupe.Gateway.Dispatch do
 
   defp settings_result({:error, reason}),
     do: {:error, Error.new(:invalid_params, %{reason: reason})}
+
+  defp setup("setup.get", _params, _context), do: {:ok, Setup.get()}
+
+  # The last step starts the first session as `session.create` would, under the caller,
+  # and reports it beside the finished flow; a session that could not start is said so
+  # rather than undoing a first run that is otherwise done.
+  defp setup("setup.answer", params, context) do
+    with {:ok, step} <- fetch(params, "step"),
+         {:ok, answer} <- answer_object(Map.get(params, "answer")) do
+      case Setup.answer(step, answer, subject: context.principal["subject"]) do
+        {:ok, %{step: "done", session: %{} = wanted} = flow} ->
+          {:ok, flow |> Troupe.Setup.report() |> Map.put("session", first_session(wanted, params, context))}
+
+        {:ok, flow} ->
+          {:ok, Troupe.Setup.report(flow)}
+
+        {:error, reason} ->
+          {:error, Error.new(:invalid_params, %{reason: reason})}
+      end
+    end
+  end
+
+  defp answer_object(nil), do: {:ok, %{}}
+  defp answer_object(answer) when is_map(answer), do: {:ok, answer}
+  defp answer_object(_other), do: {:error, Error.new(:invalid_params, %{reason: "answer must be an object"})}
+
+  defp first_session(wanted, params, context) do
+    create = %{
+      "command_id" => params["command_id"] <> ":session",
+      "workspace" => wanted["workspace"],
+      "prompt" => wanted["prompt"],
+      "worktree" => "never"
+    }
+
+    case handle("session.create", create, context) do
+      {:ok, created} -> Map.merge(wanted, created)
+      {:error, %Error{data: data}} -> Map.put(wanted, "error", to_string(data[:reason] || data["reason"] || "refused"))
+    end
+  end
 
   defp workspace_param(%{"workspace" => workspace}) when is_binary(workspace) and workspace != "",
     do: Path.expand(workspace)
@@ -1204,6 +1306,9 @@ defmodule Troupe.Gateway.Dispatch do
       # The counts a plane's row carries too, so an inbox is a listing and not a replay.
       "pending_approvals" => Map.get(session, :pending_approvals, 0),
       "pending_questions" => Map.get(session, :pending_questions, 0),
+      # What happened while nobody was reading it (`Troupe.Sessions.Unseen`): the row a
+      # client that comes back tells the person from, cleared by subscribing to the session.
+      "unseen" => unseen_json(Map.get(session, :unseen)),
       "tokens" => Map.get(session, :tokens, 0),
       "cost" => Map.get(session, :cost, 0.0),
       "created_at" => Map.get(session, :created_at),
@@ -1211,6 +1316,9 @@ defmodule Troupe.Gateway.Dispatch do
       "pinned" => Map.get(session, :pinned, false)
     }
   end
+
+  defp unseen_json(nil), do: unseen_json(Unseen.none())
+  defp unseen_json(unseen), do: Map.new(unseen, fn {key, value} -> {Atom.to_string(key), value} end)
 
   defp maybe_put(opts, _key, nil), do: opts
   defp maybe_put(opts, key, value), do: Keyword.put(opts, key, value)

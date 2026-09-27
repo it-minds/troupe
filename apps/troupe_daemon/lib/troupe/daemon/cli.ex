@@ -12,6 +12,7 @@ defmodule Troupe.Daemon.CLI do
       troupe-daemon config untrust [PATH]   take that back
       troupe-daemon config import-opencode   copy opencode's providers into config.yaml
       troupe-daemon models [--refresh]  every model this machine can address
+      troupe-daemon doctor              check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
       troupe-daemon version
       troupe-daemon help
 
@@ -48,6 +49,7 @@ defmodule Troupe.Daemon.CLI do
           | :config_trust_list
           | :config_import_opencode
           | {:models, refresh: boolean()}
+          | :doctor
           | :version
           | :help
           | {:error, String.t()}
@@ -111,6 +113,7 @@ defmodule Troupe.Daemon.CLI do
   end
   def parse(["models"]), do: {:models, refresh: false}
   def parse(["models", "--refresh"]), do: {:models, refresh: true}
+  def parse(["doctor"]), do: :doctor
   def parse(["version"]), do: :version
   def parse(["--version"]), do: :version
   def parse(["help"]), do: :help
@@ -185,6 +188,14 @@ defmodule Troupe.Daemon.CLI do
         IO.puts(:stderr, Config.as_run_by(Exception.message(error), @command))
         1
     end
+  end
+
+  # One line per check, the same lines `troupe doctor` prints; the plane is the one the
+  # daemon is linked to, since the daemon holds no login of its own.
+  def main(:doctor) do
+    checks = Troupe.Doctor.run(workspace: File.cwd!(), command: @command)
+    IO.write(Troupe.Doctor.format(checks))
+    Troupe.Doctor.exit_status(checks)
   end
 
   def main(:version) do
@@ -310,6 +321,7 @@ defmodule Troupe.Daemon.CLI do
     troupe-daemon config untrust [PATH]   take that back
     troupe-daemon config import-opencode   copy opencode's providers into config.yaml
     troupe-daemon models [--refresh]  every model this machine can address
+    troupe-daemon doctor              check the setup: provider, key, daemon, PATH, plane; exits 1 on a failure
     troupe-daemon version
 
     Environment: TROUPE_DAEMON_IDLE_MINUTES (10; 0 = never), TROUPE_DAEMON_LOG (file|stderr),

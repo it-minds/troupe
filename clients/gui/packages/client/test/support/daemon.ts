@@ -12,6 +12,8 @@
 //   it can be told who you are   `identity.link` changes the actor on everything after
 //   it keeps the model settings  `config.set` writes them, `config.get` reads them back
 //                                without the key, and `config.models` asks a provider
+//   it asks the first run's      `setup.get` says where it stands and `setup.answer`
+//   questions                    moves it a step, checking a key and writing the settings
 //
 // It implements the protocol rather than imitating a screen, for the same reason the
 // fake worker does: a test that passes against a fake that agrees with the client by
@@ -20,6 +22,7 @@
 import { createServer, type Server } from "node:http";
 import type { AddressInfo } from "node:net";
 import { WebSocketServer, type WebSocket } from "ws";
+import { COMMANDS } from "./commands.js";
 import { SessionLog, type LoggedEvent } from "./log.js";
 
 interface Session {
@@ -37,6 +40,15 @@ interface Session {
   pendingApprovals: number;
   /** The same for questions. */
   pendingQuestions: number;
+  /** The session's goal (`session.goal.*`), once one was set. */
+  goal?: string | null;
+  /**
+   * The head `seq` as of the last moment a client was reading the session, the daemon's
+   * `seen` mark: `unseen` counts what came after it. Null for a session nobody ever read.
+   */
+  seen?: number | null;
+  /** How many subscriptions name the session now; `unseen` is empty while any does. */
+  readers?: number;
 }
 
 interface Client {
@@ -56,6 +68,59 @@ export interface FakeDaemonOptions {
   modelSettings?: boolean;
   /** Things with a stronger claim than the file, as `config.get` reports them. */
   overrides?: Array<{ source: "project" | "env" | "opencode"; detail: string }>;
+  /**
+   * True is a machine nobody has set up: no settings, no record of a first run, so
+   * `setup.get` says the questions are needed. The default is a machine whose first
+   * run is done, which is what every other test wants in front of it.
+   */
+  firstRun?: boolean;
+  /** Variables set where the daemon runs, which the key step may keep a key in. */
+  env?: Record<string, string>;
+  /** What the machine's opencode config holds, as the daemon detects it. */
+  opencode?: { providers: string[]; default: string | null };
+}
+
+/** The first run in progress, as the fake daemon holds it. The key is here and in no answer. */
+interface FakeSetupFlow {
+  step: string;
+  answers: Record<string, Record<string, unknown>>;
+  key: string | null;
+  offered: Array<Record<string, unknown>>;
+  suggested: { default: string | null; cheap: string | null };
+  check: { state: string; reason: string | null } | null;
+}
+
+const SETUP_STEPS = ["where", "provider", "key", "models", "workspace", "finish"] as const;
+
+function freshSetup(): FakeSetupFlow {
+  return { step: "where", answers: {}, key: null, offered: [], suggested: { default: null, cheap: null }, check: null };
+}
+
+/** One MCP server in a fake layer file (troupe-remote Decision 700). `env` values stay here, as the real daemon keeps them. */
+export interface FakeServer {
+  name: string;
+  layer: "user" | "workspace";
+  source: string;
+  command?: string;
+  args?: string[];
+  url?: string;
+  env?: Record<string, string>;
+  disabled?: boolean;
+}
+
+export interface FakeSkill {
+  name: string;
+  description: string;
+  layer: "user" | "workspace";
+  source: string;
+  dir: string;
+  linked: boolean;
+}
+
+/** What the fake finds at a path a test names: the stand-in for the daemon reading a file or a directory. */
+export interface Importable {
+  servers?: Record<string, Record<string, unknown>>;
+  skills?: Array<{ name: string; description: string }>;
 }
 
 /** What the fake daemon's settings file holds. The key is here and nowhere in an answer. */
@@ -107,6 +172,17 @@ export class FakeDaemon {
     api_key: null,
     models: { default: null, cheap: null, expensive: null },
   };
+  /** The two layers of `mcp.json` and `skills/`, as the seven `mcp.*`/`skills.*` methods keep them. */
+  servers: FakeServer[] = [];
+  skills: FakeSkill[] = [];
+  /** What lies at a path a test names, for `mcp.add` and `skills.add` with `from`. */
+  importable: Record<string, Importable> = {};
+  /** The record of a finished first run, as `setup.get` reports it; null until `finish`. */
+  setupCompleted: { completed_at: string; choice: string; subject: string | null } | null;
+  /** The first run in progress. */
+  setup: FakeSetupFlow = freshSetup();
+  /** Directories the workspace step accepts; anything else "is not a directory". */
+  directories: string[] = ["/home/ada/project", "/home/ada/notes", "/home/ada/repo"];
 
   private server: Server | null = null;
   private wss: WebSocketServer | null = null;
@@ -115,6 +191,8 @@ export class FakeDaemon {
   private readonly osUser: string;
   private readonly modelSettings: boolean;
   private readonly overrides: NonNullable<FakeDaemonOptions["overrides"]>;
+  private readonly env: Record<string, string>;
+  private readonly opencode: { providers: string[]; default: string | null };
   private nextId = 1;
 
   constructor(opts: FakeDaemonOptions = {}) {
@@ -123,6 +201,9 @@ export class FakeDaemon {
     this.osUser = opts.osUser ?? "ada";
     this.modelSettings = opts.modelSettings ?? true;
     this.overrides = opts.overrides ?? [];
+    this.env = opts.env ?? {};
+    this.opencode = opts.opencode ?? { providers: [], default: null };
+    this.setupCompleted = opts.firstRun ? null : { completed_at: "2026-09-01T08:00:00Z", choice: "local", subject: null };
   }
 
   get principal(): { subject: string; display_name: string; kind: string } {
@@ -193,6 +274,60 @@ export class FakeDaemon {
     return session.log.append("llm_response", { message: { role: "assistant", content: [{ type: "text", text }] } });
   }
 
+  /** As if a client had read the session up to now and left: what follows is `unseen`. */
+  markSeen(sessionId: string): void {
+    const session = this.sessions.get(sessionId)!;
+    session.seen = session.log.headSeq;
+  }
+
+  /**
+   * What happened since the last reader left (PROTOCOL.md §6, `session.list`): the root
+   * agent's `turn_ended`s and its distinct approvals and questions, with the first one's
+   * time. Empty while somebody reads it, and for a session nobody ever read.
+   */
+  unseenOf(s: Session): { turns: number; approvals: number; questions: number; since: string | null } {
+    const empty = { turns: 0, approvals: 0, questions: 0, since: null };
+    if ((s.readers ?? 0) > 0 || s.seen === null || s.seen === undefined) return empty;
+    const root = s.log.from(s.seen).filter((e) => e.agent.length === 1);
+    const turns = root.filter((e) => e.type === "turn_ended");
+    const calls = (type: string) => root.filter((e, i, all) => e.type === type && all.findIndex((o) => o.type === type && o.data["call_id"] === e.data["call_id"]) === i);
+    const approvals = calls("approval_requested");
+    const questions = calls("question_asked");
+    const counted = [...turns, ...approvals, ...questions].sort((a, b) => a.seq - b.seq);
+    return { turns: turns.length, approvals: approvals.length, questions: questions.length, since: counted[0]?.ts ?? null };
+  }
+
+  /** The latest loop as the log has it, the way `session.loop.get` reads it. */
+  loopOf(s: Session): Record<string, unknown> | null {
+    const started = s.log.events.filter((e) => e.type === "loop_started").at(-1);
+    if (!started) return null;
+    const id = started.data["loop_id"];
+    const mine = s.log.from(started.seq).filter((e) => e.data["loop_id"] === id);
+    const stopped = mine.find((e) => e.type === "loop_stopped");
+    const iteration = mine.filter((e) => e.type === "loop_iteration_started").length;
+    return {
+      loop_id: id,
+      state: stopped ? "stopped" : "running",
+      iteration,
+      max_iterations: started.data["max_iterations"],
+      failures: 0,
+      reason: stopped?.data["reason"] ?? null,
+      detail: stopped?.data["detail"] ?? null,
+      summary: stopped?.data["summary"] ?? null,
+      goal: started.data["goal"],
+      started_by: started.actor.subject ?? null,
+      started_at: started.ts,
+    };
+  }
+
+  /** A subscription that names a session is a reader of it: it clears `unseen` on arrival and marks where it left. */
+  private reading(topic: string, delta: 1 | -1): void {
+    const session = this.sessions.get(topic.replace(/^(session|presence):/, ""));
+    if (!session || !/^(session|presence):/.test(topic)) return;
+    session.readers = Math.max(0, (session.readers ?? 0) + delta);
+    if (delta === 1 || session.readers === 0) session.seen = session.log.headSeq;
+  }
+
   private onConnection(ws: WebSocket): void {
     let client: Client | null = null;
 
@@ -232,7 +367,10 @@ export class FakeDaemon {
 
     ws.on("close", () => {
       if (!client) return;
-      for (const s of client.subs.values()) s.off();
+      for (const s of client.subs.values()) {
+        s.off();
+        this.reading(s.topic, -1);
+      }
       this.clients.delete(client);
     });
   }
@@ -291,6 +429,7 @@ export class FakeDaemon {
         const backlog = target.log.from(from);
         const off = target.log.listen((e) => notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: target.id, event: e }));
         client.subs.set(subscriptionId, { id: subscriptionId, topic, off });
+        this.reading(topic, 1);
         reply(ws, id, { subscription_id: subscriptionId, head_seq: target.log.headSeq, replayed: backlog.length });
         for (const e of backlog) {
           notify(ws, "event", { topic, subscription_id: subscriptionId, session_id: target.id, event: e });
@@ -301,7 +440,10 @@ export class FakeDaemon {
       case "unsubscribe": {
         const sub = client.subs.get(String(params["subscription_id"] ?? ""));
         sub?.off();
-        if (sub) client.subs.delete(sub.id);
+        if (sub) {
+          client.subs.delete(sub.id);
+          this.reading(sub.topic, -1);
+        }
         return reply(ws, id, { unsubscribed: true });
       }
 
@@ -321,8 +463,67 @@ export class FakeDaemon {
         return reply(ws, id, { accepted: true });
       }
 
+      // The goal and the loop, as the daemon keeps them (PROTOCOL.md §6): the answer is
+      // the acknowledgement and the event is the effect.
+      case "session.goal.set": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const text = String(params["text"] ?? "").trim();
+        if (!text) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "text" } });
+        session.goal = text;
+        session.log.append("goal_set", { text, command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true });
+      }
+
+      case "session.goal.clear": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        session.goal = null;
+        session.log.append("goal_cleared", { command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true });
+      }
+
+      case "session.goal.get":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, session.goal ? { goal: session.goal, set_by: this.principal.subject, set_at: new Date().toISOString() } : { goal: null, set_by: null, set_at: null });
+
+      // A loop is read from the log, as the daemon reads it: its iterations are whatever a
+      // test appends (`loop_iteration_started`, …), and stopping writes `loop_stopped`.
+      case "session.loop.start": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        if (!session.goal) return reply(ws, id, null, { code: -32006, message: "conflict", data: { needs: "goal", reason: "the session has no goal to loop towards: set one with session.goal.set" } });
+        const running = this.loopOf(session);
+        if (running?.["state"] === "running") {
+          return reply(ws, id, null, { code: -32006, message: "conflict", data: { loop_id: running["loop_id"], reason: "a loop is already running: session.loop.stop stops it" } });
+        }
+        const max = params["max_iterations"] === undefined ? 10 : Number(params["max_iterations"]);
+        if (!(Number.isInteger(max) && max > 0)) return reply(ws, id, null, { code: -32602, message: "invalid_params", data: { field: "max_iterations" } });
+        const loopId = `loop-${session.log.events.filter((e) => e.type === "loop_started").length + 1}`;
+        session.log.append("loop_started", { loop_id: loopId, max_iterations: max, max_failures: 3, goal: session.goal, command_id: params["command_id"] }, { kind: "user", subject: this.principal.subject });
+        return reply(ws, id, { accepted: true, loop_id: loopId, max_iterations: max });
+      }
+
+      case "session.loop.stop": {
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        const loop = this.loopOf(session);
+        if (loop?.["state"] === "running") {
+          session.log.append(
+            "loop_stopped",
+            { loop_id: loop["loop_id"], reason: "requested", iterations: loop["iteration"], detail: null, summary: null, command_id: params["command_id"] },
+            { kind: "user", subject: this.principal.subject },
+          );
+        }
+        return reply(ws, id, { accepted: true });
+      }
+
+      case "session.loop.get":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found" });
+        return reply(ws, id, { loop: this.loopOf(session) });
+
       case "presence.set":
         return reply(ws, id, { ok: true });
+
+      case "commands.list":
+        if (!session) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "session", id: sessionId } });
+        return reply(ws, id, { commands: COMMANDS });
 
       case "workspace.recent":
         return reply(ws, id, {
@@ -357,6 +558,20 @@ export class FakeDaemon {
       case "config.set":
         if (!this.modelSettings) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
         return this.config(ws, id, method, params);
+
+      case "setup.get":
+      case "setup.answer":
+        if (!this.modelSettings) return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+        return this.setupCall(ws, id, method, params);
+
+      case "mcp.list":
+      case "mcp.add":
+      case "mcp.remove":
+      case "mcp.check":
+      case "skills.list":
+      case "skills.add":
+      case "skills.remove":
+        return this.sources(ws, id, method, params);
 
       default:
         return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
@@ -408,6 +623,320 @@ export class FakeDaemon {
     return reply(ws, id, this.configJson());
   }
 
+  /**
+   * The first run's questions (troupe Decision 705), with the daemon's semantics: a step
+   * is the current one or one already answered (which forgets what came after), a key
+   * is checked before anything is written — right when it looks like one, refused
+   * otherwise — the settings are written at the models step, `auto_approve` at the
+   * workspace step, and `finish` records the run and starts the session.
+   */
+  private setupCall(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    if (method === "setup.get") return reply(ws, id, this.setupJson());
+    if (!params["command_id"]) return invalid("command_id is required");
+
+    const step = String(params["step"] ?? "");
+    const answer = (params["answer"] ?? {}) as Record<string, unknown>;
+    const flow = this.setup;
+    const index = SETUP_STEPS.indexOf(step as (typeof SETUP_STEPS)[number]);
+    if (index < 0) return invalid(`${JSON.stringify(step)} is not a step; the steps are ${SETUP_STEPS.join(", ")}`);
+    if (step !== flow.step && !(step in flow.answers)) return invalid(`the current step is ${flow.step}; answer it, or a step already answered`);
+
+    // Going back forgets what came after, the key included.
+    for (const later of SETUP_STEPS.slice(index)) delete flow.answers[later];
+    if (index <= SETUP_STEPS.indexOf("key")) {
+      flow.key = null;
+      flow.offered = [];
+      flow.suggested = { default: null, cheap: null };
+      flow.check = null;
+    }
+    flow.step = step;
+    if (answer["back"] === true) return reply(ws, id, this.setupJson());
+
+    const advance = (accepted: Record<string, unknown>, next: string) => {
+      flow.answers[step] = accepted;
+      flow.step = next;
+    };
+
+    switch (step) {
+      case "where": {
+        if (answer["choice"] === "local") advance({ choice: "local" }, "provider");
+        else if (answer["choice"] === "plane") advance({ choice: "plane", plane_url: (answer["plane_url"] as string) || null }, "finish");
+        else return invalid("choice must be local or plane");
+        break;
+      }
+      case "provider": {
+        if (answer["reuse"] === "opencode") {
+          if (this.opencode.providers.length === 0) return invalid("there are no providers in opencode's config to copy");
+          this.settings.exists = true;
+          advance({ reuse: "opencode", providers: this.opencode.providers }, "workspace");
+          break;
+        }
+        if (answer["reuse"] === "config") {
+          if (!this.settings.exists || !this.settings.api_key) return invalid("there is no config.yaml through which a model can be asked; set a provider up instead");
+          advance({ reuse: "config", path: this.configJson()["path"] }, "workspace");
+          break;
+        }
+        const provider = String(answer["provider"] ?? "");
+        if (!OFFERS[provider]) return invalid(`provider must be one of anthropic, openai, fake, not ${JSON.stringify(provider)}`);
+        const kind = String(answer["kind"] ?? provider);
+        const baseUrl = ((answer["base_url"] as string | null) ?? "").trim() || null;
+        if ((kind === "gateway" || kind === "litellm") && !baseUrl) return invalid(`a ${kind} needs its base URL, ending in /v1`);
+        advance({ provider, kind, base_url: baseUrl, auth: (answer["auth"] as string) ?? "api_key" }, "key");
+        break;
+      }
+      case "key": {
+        const provider = flow.answers["provider"]!;
+        let key: string | null;
+        let source: Record<string, unknown>;
+        if (typeof answer["api_key"] === "string") {
+          key = answer["api_key"].trim();
+          if (!key) return invalid("api_key is empty; paste the key, or name the variable it is in");
+          source = { source: "typed" };
+        } else if (typeof answer["env"] === "string") {
+          const value = this.env[answer["env"]];
+          if (!value) return invalid(`${answer["env"]} is not set where the daemon runs; paste the key, or set it and start the daemon again`);
+          key = value;
+          source = { source: "env", var: answer["env"] };
+        } else if (provider["base_url"]) {
+          key = null;
+          source = { source: "none" };
+        } else {
+          return invalid(`${provider["provider"]} needs a key; paste one, or keep it in ${provider["provider"] === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY"}`);
+        }
+        // The real daemon lists the provider's models with the key; here a key is right
+        // when it looks like one, and a gateway given none cannot be asked.
+        if (key && !key.startsWith("sk-")) {
+          flow.check = { state: "refused", reason: "401 unauthorized: the key was refused" };
+          break;
+        }
+        flow.key = typeof answer["env"] === "string" ? `{env:${answer["env"]}}` : key;
+        flow.offered = key ? OFFERS[String(provider["provider"])]! : [];
+        const ids = flow.offered.map((m) => String(m["id"]));
+        flow.suggested = { default: ids[0] ?? null, cheap: ids[1] ?? ids[0] ?? null };
+        flow.check = key ? { state: "ok", reason: null } : { state: "unknown", reason: "no key was given, so nothing was asked" };
+        advance(source, "models");
+        break;
+      }
+      case "models": {
+        const def = String(answer["default"] ?? "").trim();
+        if (!def) return invalid("default must be a model id");
+        const cheap = ((answer["cheap"] as string | null) ?? "").trim() || null;
+        const provider = flow.answers["provider"]!;
+        this.settings = {
+          exists: true,
+          provider: String(provider["provider"]),
+          base_url: (provider["base_url"] as string | null) ?? null,
+          auth: (provider["auth"] as "api_key" | "bearer") ?? "api_key",
+          api_key: flow.key,
+          models: { default: def, cheap, expensive: null },
+        };
+        advance({ default: def, cheap }, "workspace");
+        break;
+      }
+      case "workspace": {
+        const workspace = String(answer["workspace"] ?? "").trim();
+        if (!workspace) return invalid("workspace must be a directory");
+        if (!this.directories.includes(workspace)) return invalid(`${workspace} is not a directory`);
+        const approvals = answer["approvals"] ?? "ask";
+        if (approvals !== "ask" && approvals !== "auto") return invalid(`approvals must be ask or auto, not ${JSON.stringify(approvals)}`);
+        advance({ workspace, approvals }, "finish");
+        break;
+      }
+      case "finish": {
+        const choice = String(flow.answers["where"]?.["choice"] ?? "local");
+        this.setupCompleted = { completed_at: new Date().toISOString(), choice, subject: this.principal.subject };
+        const workspace = flow.answers["workspace"]?.["workspace"] as string | undefined;
+        let session: Record<string, unknown> | null = null;
+        if (choice === "local" && workspace && answer["start"] !== false) {
+          const prompt = String(answer["prompt"] ?? "").trim() || this.suggestedPrompt(workspace);
+          const created = this.seed(workspace);
+          // As a session created with a prompt starts: the prompt is its first input.
+          created.log.append("user_input", { text: prompt, source: "user", author: this.principal.subject }, { kind: "user", subject: this.principal.subject });
+          session = { workspace, prompt, session_id: created.id, worktree: null, branch: null };
+        }
+        advance({ start: session !== null }, "done");
+        const finished = { ...this.setupJson(), step: "done", session };
+        this.setup = freshSetup();
+        return reply(ws, id, finished);
+      }
+    }
+    return reply(ws, id, this.setupJson());
+  }
+
+  private suggestedPrompt(workspace: string | null | undefined): string | null {
+    if (!workspace) return null;
+    return workspace.endsWith("repo")
+      ? "Tell me what this project does, how it is built and tested, and where you would start reading."
+      : "Look around this directory and tell me what you find.";
+  }
+
+  private setupJson(): Record<string, unknown> {
+    const flow = this.setup;
+    const path =
+      flow.answers["where"]?.["choice"] === "plane"
+        ? ["where", "finish"]
+        : typeof flow.answers["provider"]?.["reuse"] === "string"
+          ? ["where", "provider", "workspace", "finish"]
+          : [...SETUP_STEPS];
+    const config = this.configJson();
+    return {
+      needed: this.setupCompleted === null && !this.settings.exists,
+      completed: this.setupCompleted,
+      step: flow.step,
+      steps: path.map((name) => ({ name, done: name in flow.answers })),
+      answers: flow.answers,
+      detected: {
+        env: Object.keys(this.env).filter((v) => v === "ANTHROPIC_API_KEY" || v === "OPENAI_API_KEY"),
+        opencode: { path: `/home/${this.osUser}/.config/opencode/opencode.jsonc`, ...this.opencode },
+        config: { ...config, usable: this.settings.exists && this.settings.api_key !== null },
+        plane: { url: this.linked?.plane_url ?? null, linked: this.linked !== null },
+      },
+      key_storage: { kind: "file", path: config["path"], keychain: false },
+      offered: flow.offered,
+      suggested: flow.suggested,
+      check: flow.check,
+      suggested_prompt: this.suggestedPrompt(flow.answers["workspace"]?.["workspace"] as string | undefined),
+      session: null,
+    };
+  }
+
+  /**
+   * The person's own servers and skills (troupe-remote Decision 700), with the daemon's
+   * shapes: a layer's file written by scope, an import reading what `importable` says
+   * is at the path, `env` answered as names, a check answering `ready` with one tool
+   * for anything but a command that does not exist.
+   */
+  private sources(ws: WebSocket, id: unknown, method: string, params: Record<string, unknown>): void {
+    const invalid = (reason: string) => reply(ws, id, null, { code: -32602, message: "invalid_params", data: { reason } });
+    const scope = (params["scope"] as "user" | "workspace" | undefined) ?? "user";
+    const workspace = typeof params["workspace"] === "string" ? params["workspace"] : null;
+    const dir = `/home/${this.osUser}/.config/troupe`;
+    const layerPath = (what: "mcp.json" | "skills") => (scope === "workspace" ? `${workspace}/.troupe/${what}` : `${dir}/${what}`);
+    if (scope === "workspace" && !workspace) return invalid("the workspace scope needs a workspace");
+
+    const visible = <T extends { layer: string }>(rows: T[]): T[] => rows.filter((r) => r.layer === "user" || Boolean(workspace));
+    const liveOf = (s: FakeServer) => (s.disabled ? { state: "disabled", tools: [], error: null } : { state: "ready", tools: ["greet"], error: null });
+    const serverJson = (s: FakeServer, live: boolean) => ({
+      name: s.name,
+      layer: s.layer,
+      source: s.source,
+      transport: s.url ? "http" : "stdio",
+      command: s.command ?? null,
+      args: s.args ?? [],
+      url: s.url ?? null,
+      cd: null,
+      env: Object.keys(s.env ?? {}).sort(),
+      permission: "ask",
+      disabled: Boolean(s.disabled),
+      refused: null,
+      trust: s.layer === "workspace" ? "trusted" : null,
+      ...(live ? liveOf(s) : { state: null, tools: [], error: null }),
+    });
+
+    switch (method) {
+      case "mcp.list":
+        return reply(ws, id, { servers: visible(this.servers).map((s) => serverJson(s, typeof params["session_id"] === "string")), warnings: [] });
+
+      case "mcp.add": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const from = params["from"];
+        if (typeof from === "string") {
+          const found = this.importable[from];
+          if (!found?.servers) return invalid(`could not read ${from}: no such file or directory`);
+          const path = layerPath("mcp.json");
+          const added: string[] = [];
+          const skipped: Array<{ name: string; reason: string }> = [];
+          for (const [name, raw] of Object.entries(found.servers)) {
+            if (!raw["command"] && !raw["url"]) {
+              skipped.push({ name, reason: "has neither a command nor a url" });
+              continue;
+            }
+            this.servers = this.servers.filter((s) => !(s.name === name && s.layer === scope));
+            this.servers.push({ name, layer: scope, source: params["link"] ? from : path, ...(raw as Omit<FakeServer, "name" | "layer" | "source">) });
+            added.push(name);
+          }
+          return reply(ws, id, { path, from, added: added.sort(), skipped, warnings: [], linked: Boolean(params["link"]) });
+        }
+        const name = params["name"];
+        const raw = params["server"];
+        if (typeof name !== "string" || typeof raw !== "object" || raw === null) return invalid("mcp.add takes a file to import (from) or a server to write (name and server)");
+        if (!/^[a-z0-9][a-z0-9_-]*$/.test(name)) return invalid(`${JSON.stringify(name)} is not a server name: lower-case letters, digits, - and _, and no dot`);
+        const existing = this.servers.find((s) => s.name === name && s.layer === scope);
+        const merged: FakeServer = { ...(existing ?? { name, layer: scope, source: layerPath("mcp.json") }), ...(raw as Partial<FakeServer>), name, layer: scope };
+        this.servers = [...this.servers.filter((s) => s !== existing), merged];
+        const { name: _n, layer: _l, source: _s, env, ...entry } = merged;
+        return reply(ws, id, { name, path: merged.source, entry: { ...entry, ...(env ? { env: Object.keys(env).sort() } : {}) }, warnings: [] });
+      }
+
+      case "mcp.remove": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const path = layerPath("mcp.json");
+        if (typeof params["include"] === "string") {
+          const gone = this.servers.filter((s) => s.layer === scope && s.source === params["include"]);
+          if (gone.length === 0) return invalid(`${path} does not include ${params["include"]}`);
+          this.servers = this.servers.filter((s) => !gone.includes(s));
+          return reply(ws, id, { path, removed: gone.map((s) => s.name).sort() });
+        }
+        const name = String(params["name"] ?? "");
+        const own = this.servers.find((s) => s.name === name && s.layer === scope);
+        if (!own) return invalid(`${path} has no server named ${name}`);
+        if (own.source !== path) return invalid(`${name} comes from ${own.source}, which ${path} links; edit that file, or unlink it with include: ${JSON.stringify(own.source)}`);
+        this.servers = this.servers.filter((s) => s !== own);
+        return reply(ws, id, { path, removed: [name] });
+      }
+
+      case "mcp.check": {
+        const name = String(params["name"] ?? "");
+        const given = params["server"] as Record<string, unknown> | undefined;
+        const known = this.servers.find((s) => s.name === name);
+        if (!given && !known) return reply(ws, id, null, { code: -32005, message: "not_found", data: { kind: "mcp_server", name } });
+        const command = given ? String(given["command"] ?? "") : (known?.command ?? "");
+        const base = known ? serverJson(known, false) : { name, layer: "request", source: "request" };
+        if (command.startsWith("no-such")) return reply(ws, id, { server: { ...base, state: "error", tools: [], error: `could not start: {:not_found, "${command}"}` } });
+        if (known?.disabled) return reply(ws, id, { server: { ...base, state: "disabled", tools: [], error: null } });
+        return reply(ws, id, { server: { ...base, state: "ready", tools: ["greet"], error: null } });
+      }
+
+      case "skills.list":
+        return reply(ws, id, { skills: visible(this.skills) });
+
+      case "skills.add": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        const from = String(params["from"] ?? "");
+        const found = this.importable[from];
+        if (!found?.skills) return invalid(`${from} is not a directory`);
+        const link = Boolean(params["link"]);
+        const path = link ? `${scope === "workspace" ? `${workspace}/.troupe` : dir}/skills.json` : layerPath("skills");
+        const added: string[] = [];
+        for (const skill of found.skills) {
+          this.skills = this.skills.filter((s) => !(s.name === skill.name && s.layer === scope));
+          this.skills.push({ ...skill, layer: scope, source: link ? from : layerPath("skills"), dir: `${link ? from : layerPath("skills")}/${skill.name}`, linked: link });
+          added.push(skill.name);
+        }
+        return reply(ws, id, { path, from, added: added.sort(), skipped: [], linked: link });
+      }
+
+      case "skills.remove": {
+        if (!params["command_id"]) return invalid("command_id is required");
+        if (typeof params["include"] === "string") {
+          const gone = this.skills.filter((s) => s.layer === scope && s.linked && s.source === params["include"]);
+          this.skills = this.skills.filter((s) => !gone.includes(s));
+          return reply(ws, id, { path: `${dir}/skills.json`, removed: gone.map((s) => s.name).sort() });
+        }
+        const name = String(params["name"] ?? "");
+        const own = this.skills.find((s) => s.name === name && s.layer === scope);
+        if (!own) return invalid(`${layerPath("skills")} has no skill named ${name}`);
+        if (own.linked) return invalid(`${name} comes from ${own.source}, which links it; unlink it with include: ${JSON.stringify(own.source)}`);
+        this.skills = this.skills.filter((s) => s !== own);
+        return reply(ws, id, { path: layerPath("skills"), removed: [name] });
+      }
+
+      default:
+        return reply(ws, id, null, { code: -32601, message: "method_not_found", data: { method } });
+    }
+  }
+
   private configJson(): Record<string, unknown> {
     const s = this.settings;
     const dir = `/home/${this.osUser}/.config/troupe`;
@@ -453,6 +982,7 @@ export class FakeDaemon {
       ...(this.linked ? { owner: this.linked.subject } : {}),
       pending_approvals: s.pendingApprovals,
       pending_questions: s.pendingQuestions,
+      unseen: this.unseenOf(s),
       config: { watch: s.watch },
     };
   }

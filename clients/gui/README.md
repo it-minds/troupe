@@ -62,11 +62,11 @@ pnpm dev:local --port 5185       # anything after the name goes to Vite
 ```
 
 `pnpm dev:local` starts a daemon and the GUI in *local-only* mode against it: no plane,
-no identity provider, no key, and nothing sent anywhere. The app opens on the session
-list; start a session in the `demo` directory it prints, and the answers come from the
-daemon's scripted `fake` provider reading `script.json` in the same place — one step per
-model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each new
-session.
+no identity provider, no key, and nothing sent anywhere. The app opens on the launcher,
+with no sign-in; start a session in the `demo` directory it prints, and the answers come
+from the daemon's scripted `fake` provider reading `script.json` in the same place — one
+step per model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each
+new session.
 
 It needs `troupe-daemon` installed (`install.ps1`/`install.sh` at the repository root,
 or `scripts/install-local.ps1` from a checkout); `TROUPE_DAEMON_BIN` names another. The
@@ -159,9 +159,10 @@ know it.
 ## Testing
 
 ```sh
-pnpm test                        # the client's 77 and the app's 4, below
+pnpm test                        # the client's 100 and the app's 18, below
 pnpm first-token                 # sign-in to first streamed token, against the fakes
 pnpm tokens:check                # fails if the generated design tokens are stale
+pnpm icons:check                 # fails if the desktop app's icons are not the mask
 ```
 
 The client's tests cover stage 1 and 2's done items, PKCE, the fold, the fleet store and
@@ -244,20 +245,29 @@ pod's running digest for that reason, and CI never publishes a floating tag.
 ## Design
 
 [`docs/design/DESIGN.md`](docs/design/DESIGN.md) is the system,
-[`docs/design/themes/`](docs/design/themes/THEMES.md) is it as data — three themes from
-one token contract — and `example.dc.html` is every surface in one file.
+[`docs/design/themes/`](docs/design/themes/THEMES.md) is it as data — four themes from
+one token contract — `afterglow.dc.html` is the design the app is drawn to (Afterglow,
+#52), and `example.dc.html` is every surface of the design before it.
 `apps/desktop/src/tokens.css` and `apps/desktop/src/mark.ts` are **generated** from
 `docs/design/themes/*.tokens.json` by `pnpm tokens` and committed; do not edit them.
+So is everything in `apps/desktop/src-tauri/icons/` — the app's icon on every platform,
+the installer's images and the disk image's background — by `pnpm icons`, from `mark.ts`
+and Signal's dark values; `scripts/icons.ts` says which and why.
 
 Three rules carry most of the weight, and a change that breaks one of them is a bug:
 
 * **The reserved colour is a job, not a mood.** `--waiting-*` marks work that has stopped
-  and needs a person. Nothing else in the product may use it — not branding, not links,
-  not warnings. Which hue it is depends on the theme; what it means never does.
-* **Structure comes from hairlines and alignment**, not from cards, shadows or gradients.
+  and needs a person, and no component reaches for it for anything else. Which hue it is
+  depends on the theme; what it means never does. Afterglow lends the same hue to the
+  brand — the mask's lit half, links, the current nav item — but only through `--accent`
+  and `--link`, which is the theme's choice and not a component's.
+* **Structure comes from hairlines and alignment**, not from cards or gradients. Radii
+  are zero; the one depth is a flat block of `--bg-shadow` under a tile or a primary
+  button, and the one glow is the footlight under the approval.
 * **A status is a glyph *and* a word.** Colour is never the only carrier of meaning.
 
-**Themes.** Signal (the default), Footlight and Limelight, each in light and dark. A
+**Themes.** Afterglow (the default, and the design: its type, spacing and square corners
+are every theme's), Signal, Footlight and Limelight, each in light and dark. A
 person picks one on first sign-in and can change it in Appearance; it is `data-theme`
 and `data-mode` on the document root and nothing else. Every theme exposes exactly the
 same token names — a component reads `--waiting-solid` and never a hex, and never
@@ -323,11 +333,15 @@ packages/client/src
 apps/desktop/src
   shell.ts        the whole contract between the web bundle and a desktop shell
   hooks.ts        React bindings over the stores above; no protocol knowledge
+  notify.ts       a notification when a session finishes or asks while nobody is looking
   theme.ts        which theme and mode this person reads in; the only place that knows
   tokens.css      generated from docs/design/themes/*.tokens.json — do not edit
   mark.ts         the mask's geometry, generated from the same files — do not edit
-  views/          SignIn · Sessions · Session · Approval · Approvals · Files · Review
-                  Local (Models) · Admin (Fleet · Bundles · Teams · Automation · Audit · Settings)
+  views/          SignIn · Launcher · Sessions · StartSession · Session · Approval · Question
+                  Approvals · Files · Review · CommandPalette · Local (Models · Servers) · Appearance
+                  Onboarding/     the first run's questions, one screen per step, over `setup.get`
+                                  and `setup.answer`; FirstRun leads with the theme, SetupScreen
+                                  is the rail's Setup entry
 ```
 
 `SessionView` owns the cursor and `SessionAttachment` swaps the socket underneath it, so

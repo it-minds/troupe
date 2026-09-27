@@ -1,5 +1,5 @@
-// The shell. Sign in, or use this computer only, then one list and the things you reach
-// from it.
+// The shell. Sign in, or use this computer only, then the launcher — or the one list, for
+// a person who chose to start there — and the things you reach from them.
 //
 // There is no router and no session state: which screen is showing is a local
 // variable, and every screen rebuilds itself from the platform and the machine running
@@ -17,23 +17,31 @@ import type { AuthSession } from "@troupe/client";
 import { useAdmin, useDaemon, useFleet } from "./hooks";
 import { chooseLocalOnly, storedLocalOnly } from "./mode";
 import type { AppMode } from "./mode";
+import { useNotifications } from "./notify";
 import { capabilities, likelyPlaneUrl, prefs } from "./shell";
 import { hasChosen, markChosen, useAppearance } from "./theme";
 import { Approvals } from "./views/Approvals";
+import { Launcher, opensOnLauncher } from "./views/Launcher";
 import { Local } from "./views/Local";
 import { AppearanceSettings, Onboarding } from "./views/Appearance";
+import { FirstRun, SetupScreen, useSetupNeeded } from "./views/Onboarding";
+import type { SetupOutcome } from "./views/Onboarding";
 import { Review } from "./views/Review";
 import { Sessions } from "./views/Sessions";
 import { Session } from "./views/Session";
 import { newSession, SignIn } from "./views/SignIn";
+import { StartSession } from "./views/StartSession";
 import { Eye, Wordmark } from "./views/brand";
 
 type Where =
+  | { screen: "launcher" }
   | { screen: "sessions" }
+  | { screen: "new" }
   | { screen: "approvals" }
   | { screen: "review" }
   | { screen: "local" }
   | { screen: "appearance" }
+  | { screen: "setup" }
   | { screen: "session"; id: string };
 
 /** How often an app working offline asks whether the plane is back. */
@@ -50,18 +58,32 @@ export function App(): JSX.Element {
   const [checking, setChecking] = useState(false);
   const [auth, setAuth] = useState<AuthSession | null>(null);
   const mode: AppMode = localOnly || offline ? "local" : "plane";
-  const [where, setWhere] = useState<Where>({ screen: "sessions" });
+  // The launcher, unless the person has said the list (Decision 709). A first run ends
+  // where it ends — on the session it started, or on the list — and the next start is
+  // the first that opens here.
+  const [where, setWhere] = useState<Where>(() => (opensOnLauncher() ? { screen: "launcher" } : { screen: "sessions" }));
   const daemon = useDaemon();
-  const { snapshot, refresh } = useFleet(auth, daemon.client);
+  const { snapshot, store, refresh } = useFleet(auth, daemon.client);
   // Only the Review screen still needs it: `admin.runs.list` is how a reviewer finds
   // the runs nobody has looked at. Administration itself is the console's, at /admin.
   const adminApi = useAdmin(auth);
   const appearance = useAppearance();
+  // Opening a session reads it, which clears its row's `unseen` at the daemon: the row
+  // says so now rather than at the next poll. What rows count while nobody reads their
+  // session is what a notification says (notify.ts).
+  const onScreen = where.screen === "session" ? where.id : null;
+  useEffect(() => {
+    if (onScreen) store?.patch(onScreen, { unseen: null });
+  }, [onScreen, store]);
+  useNotifications(snapshot.rows, onScreen);
   // Asked once, on this person's first sign-in, and never again. Tracked per subject:
   // two people on one computer are two first sign-ins, and the second should not
   // inherit an answer the first one gave.
   const [chosen, setChosen] = useState(false);
   const planeUrl = prefs.get("planeUrl", likelyPlaneUrl());
+  // A fresh machine in local mode meets the first run's questions (Decision 705); the
+  // daemon says whether they are needed, once per connection.
+  const setup = useSetupNeeded(mode === "local" ? daemon.client : null);
 
   const signOut = useCallback(async () => {
     await auth?.signOut();
@@ -121,6 +143,23 @@ export function App(): JSX.Element {
     return <SignIn onSignedIn={setAuth} onLocalOnly={() => setLocalOnly(true)} onOffline={() => setOffline(true)} />;
   }
 
+  // Where a run ends: on the session it started, on the list, or at the sign-in screen
+  // for a plane — which is local-only turned off again.
+  const setupDone = (outcome: SetupOutcome): void => {
+    setup.done();
+    refresh();
+    if (outcome.plane !== null) {
+      if (outcome.plane) prefs.set("planeUrl", outcome.plane);
+      setLocalOnly(false);
+    } else {
+      setWhere(outcome.sessionId ? { screen: "session", id: outcome.sessionId } : { screen: "sessions" });
+    }
+  };
+
+  if (mode === "local" && daemon.client && setup.needed === true) {
+    return <FirstRun client={daemon.client} appearance={appearance} onDone={setupDone} />;
+  }
+
   if (auth && !chosen && !hasChosen(auth.me?.subject)) {
     return (
       <Onboarding
@@ -140,10 +179,30 @@ export function App(): JSX.Element {
   const caps = capabilities();
   const local = snapshot.rows.filter((r) => r.kind !== "team").length;
 
+  // The front of house: no rail, three tiles, and the same rows the list shows. The app
+  // opens on it and the lockup in the rail opens it again; every tile leads into the shell.
+  if (where.screen === "launcher") {
+    return (
+      <Launcher
+        rows={snapshot.rows}
+        auth={auth}
+        daemon={daemon}
+        planeUrl={planeUrl}
+        offline={offline}
+        localOnly={localOnly}
+        onNew={() => setWhere({ screen: "new" })}
+        onSessions={() => setWhere({ screen: "sessions" })}
+        onApprovals={() => setWhere({ screen: "approvals" })}
+        onSettings={() => setWhere({ screen: "local" })}
+        onOpen={(id) => setWhere({ screen: "session", id })}
+      />
+    );
+  }
+
   return (
     <div className="app">
       <div className="rail">
-        <Wordmark size={20} />
+        <Wordmark size={24} onClick={() => setWhere({ screen: "launcher" })} />
         <nav>
           <button aria-current={where.screen === "sessions" ? "page" : undefined} onClick={() => setWhere({ screen: "sessions" })}>
             Sessions <span className="count muted">{snapshot.rows.length}</span>
@@ -170,6 +229,9 @@ export function App(): JSX.Element {
           </button>
           <button aria-current={where.screen === "appearance" ? "page" : undefined} onClick={() => setWhere({ screen: "appearance" })}>
             Appearance
+          </button>
+          <button aria-current={where.screen === "setup" ? "page" : undefined} onClick={() => setWhere({ screen: "setup" })}>
+            Setup
           </button>
         </nav>
         <span className="spacer" />
@@ -226,14 +288,15 @@ export function App(): JSX.Element {
         )}
 
         {where.screen === "sessions" && (
-          <Sessions
+          <Sessions rows={snapshot.rows} loading={snapshot.loading} error={planeError} onOpen={(id) => setWhere({ screen: "session", id })} onStart={() => setWhere({ screen: "new" })} />
+        )}
+
+        {where.screen === "new" && (
+          <StartSession
             auth={auth}
             daemon={daemon.client}
             linked={Boolean(daemon.identity?.linked)}
-            rows={snapshot.rows}
-            loading={snapshot.loading}
-            error={planeError}
-            onOpen={(id) => setWhere({ screen: "session", id })}
+            onClose={() => setWhere({ screen: "sessions" })}
             onCreated={(id) => {
               refresh();
               setWhere({ screen: "session", id });
@@ -258,6 +321,8 @@ export function App(): JSX.Element {
 
         {where.screen === "appearance" && <AppearanceSettings {...appearance} />}
 
+        {where.screen === "setup" && <SetupScreen client={daemon.client} onDone={setupDone} />}
+
         {where.screen === "approvals" && (
           <Approvals
             auth={auth}
@@ -276,6 +341,7 @@ export function App(): JSX.Element {
             row={row}
             sessionId={where.id}
             onBack={() => setWhere({ screen: "sessions" })}
+            onGo={(screen) => setWhere({ screen })}
           />
         )}
       </main>

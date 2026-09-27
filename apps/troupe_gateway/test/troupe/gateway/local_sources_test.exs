@@ -1,0 +1,308 @@
+defmodule Troupe.Gateway.LocalSourcesTest do
+  @moduledoc """
+  `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check` and `skills.list`, `skills.add`,
+  `skills.remove` through the daemon's own socket (Decision 700): a Claude Code
+  `.mcp.json` and a `~/.claude/skills` directory imported in one step each, listed with
+  their layer, a server tried before it is kept, a session's servers joined onto the
+  listing, and — without the daemon — no such methods at all.
+  """
+
+  use ExUnit.Case, async: false
+
+  alias Troupe.Gateway.{Daemon, Dispatch}
+  alias Troupe.Protocol.{Client, Endpoint, Error}
+
+  @vars ~w(TROUPE_CONFIG_HOME TROUPE_STATE_HOME TROUPE_OPENCODE_CONFIG TROUPE_OPENCODE_AUTH TROUPE_API_KEY
+           TROUPE_AUTH_TOKEN TROUPE_PROVIDER TROUPE_MODEL)
+
+  @stub Path.expand("../../../../troupe_core/test/support/mcp_stub.exs", __DIR__)
+  @elixir System.find_executable("elixir") || "elixir"
+
+  setup do
+    base = Path.join(System.tmp_dir!(), "troupe-gw-sources-#{System.unique_integer([:positive])}")
+    workspace = Path.join(base, "workspace")
+    File.mkdir_p!(Path.join(base, "config"))
+    File.mkdir_p!(Path.join(base, "state"))
+    File.mkdir_p!(workspace)
+
+    previous = Map.new(@vars, &{&1, System.get_env(&1)})
+    Enum.each(@vars, &System.delete_env/1)
+    System.put_env("TROUPE_CONFIG_HOME", Path.join(base, "config"))
+    System.put_env("TROUPE_STATE_HOME", Path.join(base, "state"))
+    System.put_env("TROUPE_OPENCODE_CONFIG", Path.join(base, "none.jsonc"))
+    System.put_env("TROUPE_OPENCODE_AUTH", Path.join(base, "none.json"))
+
+    # A session needs a model; the fake answers nothing here and nobody asks it.
+    File.write!(
+      Path.join([base, "config", "config.yaml"]),
+      "version: 1\nprovider: fake\nmodels:\n  default: fake-model\n"
+    )
+
+    on_exit(fn ->
+      Enum.each(previous, fn {k, v} ->
+        if v, do: System.put_env(k, v), else: System.delete_env(k)
+      end)
+
+      File.rm_rf!(base)
+    end)
+
+    %{base: base, workspace: workspace, user_file: Path.join([base, "config", "mcp.json"])}
+  end
+
+  describe "on the daemon" do
+    setup %{base: base} do
+      endpoint = %Endpoint{kind: :unix, path: Path.join(base, "daemon.sock")}
+      start_supervised!({Daemon, endpoint: endpoint, idle_shutdown_ms: :timer.hours(1)})
+      {:ok, client} = Troupe.Protocol.Daemon.connect(endpoint: endpoint, spawn: false)
+      on_exit(fn -> if Process.alive?(client), do: Client.close(client) end)
+      %{client: client}
+    end
+
+    test "a Claude Code .mcp.json imports in one step, is listed with its layer, and can be tried",
+         context do
+      from = Path.join(context.base, "claude/.mcp.json")
+      File.mkdir_p!(Path.dirname(from))
+
+      File.write!(
+        from,
+        Jason.encode!(%{
+          "mcpServers" => %{
+            "stub" => %{"command" => @elixir, "args" => [@stub]},
+            "secret" => %{"command" => "x", "env" => %{"K" => "${input:token}"}}
+          }
+        })
+      )
+
+      assert {:ok, imported} =
+               Client.call(context.client, "mcp.add", %{
+                 "command_id" => "c-1",
+                 "scope" => "user",
+                 "from" => from
+               })
+
+      assert imported["added"] == ["stub"]
+      assert [%{"name" => "secret"}] = imported["skipped"]
+      assert imported["path"] == context.user_file
+      refute imported["linked"]
+
+      assert {:ok, %{"servers" => [stub], "warnings" => []}} =
+               Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+
+      assert %{
+               "name" => "stub",
+               "layer" => "user",
+               "transport" => "stdio",
+               "state" => nil,
+               "disabled" => false
+             } = stub
+
+      assert stub["source"] == context.user_file
+      assert stub["command"] == @elixir
+
+      assert {:ok, %{"server" => tried}} =
+               Client.call(context.client, "mcp.check", %{
+                 "workspace" => context.workspace,
+                 "name" => "stub"
+               })
+
+      assert %{"name" => "stub", "state" => "ready", "tools" => ["greet"], "error" => nil} = tried
+
+      # One given in the request, never written: the same probe.
+      assert {:ok, %{"server" => %{"state" => "error", "error" => "could not start" <> _}}} =
+               Client.call(context.client, "mcp.check", %{
+                 "name" => "nope",
+                 "server" => %{"command" => "no-such-mcp-server-anywhere"}
+               })
+
+      assert {:ok, %{"removed" => ["stub"]}} =
+               Client.call(context.client, "mcp.remove", %{
+                 "command_id" => "c-2",
+                 "scope" => "user",
+                 "name" => "stub"
+               })
+
+      assert {:ok, %{"servers" => []}} =
+               Client.call(context.client, "mcp.list", %{"workspace" => context.workspace})
+    end
+
+    test "a server written by name, disabled by a partial add, and the env never read back",
+         context do
+      assert {:ok, %{"entry" => entry}} =
+               Client.call(context.client, "mcp.add", %{
+                 "command_id" => "c-3",
+                 "name" => "fs",
+                 "server" => %{
+                   "command" => "npx",
+                   "args" => ["-y", "fs"],
+                   "env" => %{"TOKEN" => "secret-value"}
+                 }
+               })
+
+      assert entry == %{"command" => "npx", "args" => ["-y", "fs"], "env" => ["TOKEN"]}
+      refute inspect(entry) =~ "secret-value"
+
+      assert {:ok, _} =
+               Client.call(context.client, "mcp.add", %{
+                 "command_id" => "c-4",
+                 "name" => "fs",
+                 "server" => %{"disabled" => true}
+               })
+
+      assert {:ok,
+              %{"servers" => [%{"name" => "fs", "disabled" => true, "env" => ["TOKEN"]} = listed]}} =
+               Client.call(context.client, "mcp.list", %{})
+
+      refute inspect(listed) =~ "secret-value"
+
+      assert {:error, %Error{message: "invalid_params", data: data}} =
+               Client.call(context.client, "mcp.add", %{
+                 "command_id" => "c-5",
+                 "name" => "bad.name",
+                 "server" => %{"command" => "x"}
+               })
+
+      assert data["reason"] =~ "not a server name"
+    end
+
+    test "a session's servers are joined onto the listing, and mcp.check brings one back",
+         context do
+      File.write!(
+        context.user_file,
+        Jason.encode!(%{"mcpServers" => %{"stub" => %{"command" => @elixir, "args" => [@stub]}}})
+      )
+
+      assert {:ok, %{"session_id" => session_id}} =
+               Client.call(context.client, "session.create", %{
+                 "command_id" => "c-6",
+                 "workspace" => context.workspace,
+                 "worktree" => "never"
+               })
+
+      on_exit(fn -> Troupe.stop_session(session_id) end)
+
+      # The stub takes a moment to answer `initialize`; the listing shows it arriving.
+      assert %{"name" => "stub", "state" => "ready", "tools" => ["greet"], "layer" => "user"} =
+               wait_for_ready(context.client, session_id)
+
+      assert {:ok, %{"server" => %{"state" => "ready", "tools" => ["greet"], "layer" => "user"}}} =
+               Client.call(context.client, "mcp.check", %{
+                 "session_id" => session_id,
+                 "name" => "stub"
+               })
+
+      assert {:ok,
+              %{
+                "servers" => [
+                  %{"name" => "stub", "state" => "ready", "layer" => "user", "source" => source}
+                ]
+              }} =
+               Client.call(context.client, "mcp.status", %{"session_id" => session_id})
+
+      assert source == context.user_file
+
+      assert {:error, %Error{message: "not_found"}} =
+               Client.call(context.client, "mcp.check", %{
+                 "session_id" => session_id,
+                 "name" => "nope"
+               })
+    end
+
+    test "a ~/.claude/skills directory imports in one step, linked or copied, and is listed with its layer",
+         context do
+      claude = Path.join(context.base, ".claude/skills")
+      File.mkdir_p!(Path.join(claude, "review"))
+
+      File.write!(
+        Path.join(claude, "review/SKILL.md"),
+        "---\ndescription: How I review\n---\nCheck the tests."
+      )
+
+      assert {:ok, %{"added" => ["review"], "linked" => true}} =
+               Client.call(context.client, "skills.add", %{
+                 "command_id" => "c-7",
+                 "scope" => "workspace",
+                 "workspace" => context.workspace,
+                 "from" => claude,
+                 "link" => true
+               })
+
+      assert {:ok, %{"skills" => [linked]}} =
+               Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
+
+      assert %{
+               "name" => "review",
+               "description" => "How I review",
+               "layer" => "workspace",
+               "linked" => true
+             } = linked
+
+      assert linked["source"] == claude
+
+      assert {:ok, %{"added" => ["review"], "linked" => false}} =
+               Client.call(context.client, "skills.add", %{
+                 "command_id" => "c-8",
+                 "from" => claude
+               })
+
+      assert {:ok, %{"skills" => [%{"layer" => "workspace"}]}} =
+               Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
+
+      assert {:ok, %{"skills" => [%{"layer" => "user", "linked" => false}]}} =
+               Client.call(context.client, "skills.list", %{})
+
+      assert {:ok, %{"removed" => ["review"]}} =
+               Client.call(context.client, "skills.remove", %{
+                 "command_id" => "c-9",
+                 "scope" => "workspace",
+                 "workspace" => context.workspace,
+                 "include" => claude
+               })
+
+      assert {:ok, %{"removed" => ["review"]}} =
+               Client.call(context.client, "skills.remove", %{
+                 "command_id" => "c-10",
+                 "name" => "review"
+               })
+
+      assert {:ok, %{"skills" => []}} =
+               Client.call(context.client, "skills.list", %{"workspace" => context.workspace})
+
+      assert {:error, %Error{message: "invalid_params", data: data}} =
+               Client.call(context.client, "skills.add", %{
+                 "command_id" => "c-11",
+                 "from" => Path.join(context.base, "nowhere")
+               })
+
+      assert data["reason"] =~ "not a directory"
+    end
+  end
+
+  defp wait_for_ready(client, session_id, waited \\ 0) do
+    {:ok, %{"servers" => servers}} =
+      Client.call(client, "mcp.list", %{"session_id" => session_id})
+
+    case Enum.find(servers, &(&1["name"] == "stub")) do
+      %{"state" => "connecting"} when waited < 20_000 ->
+        Process.sleep(200)
+        wait_for_ready(client, session_id, waited + 200)
+
+      server ->
+        server
+    end
+  end
+
+  # A pod runs the same dispatcher without the daemon: its servers are its bundle's.
+  test "without the daemon, the methods do not exist" do
+    context = %Dispatch.Context{
+      principal: %{"subject" => "someone"},
+      scopes: [:observe, :control, :admin],
+      connection: self()
+    }
+
+    refute Process.whereis(Daemon)
+
+    for method <- ~w(mcp.list mcp.add mcp.remove mcp.check skills.list skills.add skills.remove) do
+      assert {:error, %Error{message: "method_not_found"}} = Dispatch.call(method, %{}, context)
+    end
+  end
+end

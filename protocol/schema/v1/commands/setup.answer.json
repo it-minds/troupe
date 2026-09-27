@@ -1,0 +1,22 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/setup.answer.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "answer": {
+      "type": "object"
+    },
+    "command_id": {
+      "type": "string"
+    },
+    "step": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "step"
+  ],
+  "title": "setup.answer",
+  "type": "object"
+}

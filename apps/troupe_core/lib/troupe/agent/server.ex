@@ -30,8 +30,8 @@ defmodule Troupe.Agent.Server do
 
   @behaviour :gen_statem
 
-  alias Troupe.Agent.{Call, Definition, Definitions, Headroom, State}
-  alias Troupe.{Budget, Config, Events, Registry, Skills, Todo, Tools}
+  alias Troupe.Agent.{BudgetQuestion, Call, Definition, Definitions, Headroom, State}
+  alias Troupe.{Budget, Config, Events, Instructions, Registry, Skills, Todo, Tools}
 
   alias Troupe.LLM.{
     Catalog,
@@ -311,6 +311,7 @@ defmodule Troupe.Agent.Server do
              "compacted",
              "budget_ask_started",
              "budget_ask_answered",
+             "turn_ended",
              "tool_failures_ask_started",
              "tool_failures_ask_answered"
            ] ->
@@ -348,12 +349,16 @@ defmodule Troupe.Agent.Server do
 
   # An `always` written before Decision 687 does not say what it lifted. It lifts the limit
   # its question named, which is all that question was about; a limit it used to lift as
-  # well asks again when it is reached, which costs a question and never any work.
+  # well asks again when it is reached, which costs a question and never any work. A
+  # `raise` names its limit, scope and amount (Decision 699); an `unclear` applied nothing.
   defp fold_limits(state, "budget_ask_answered", data) do
-    %{state | budget_ask_limit: limit_named(data["lifted"]) || state.budget_ask_limit}
-    |> apply_budget_decision(budget_decision_atom(data["decision"]))
+    %{state | budget_ask_limit: limit_named(data["limit"] || data["lifted"]) || state.budget_ask_limit}
+    |> apply_budget_decision(folded_decision(data))
     |> Map.merge(%{budget_ask_pending: nil, budget_ask_limit: nil})
   end
+
+  # A raise for one run is given back where the run ended (Decision 699).
+  defp fold_limits(state, "turn_ended", _data), do: reclaim_run_grant(state)
 
   defp fold_limits(state, "tool_failures_ask_started", data) do
     %{
@@ -368,7 +373,9 @@ defmodule Troupe.Agent.Server do
     %{state | budget_ask_pending: nil, failure_ask: nil}
   end
 
-  defp fold_done(state, "agent_done", data), do: %{state | done_reason: safe_reason(data["reason"])}
+  defp fold_done(state, "agent_done", data),
+    do: %{reclaim_run_grant(state) | done_reason: safe_reason(data["reason"])}
+
   defp fold_done(state, "agent_woken", _data), do: %{state | done_reason: nil}
 
   # Reasons are a closed set this module writes, so an unknown one from a log written
@@ -731,7 +738,7 @@ defmodule Troupe.Agent.Server do
   def waiting({:call, from}, :snapshot, state), do: reply_snapshot(from, :waiting, state)
 
   def waiting(:info, {:budget_answer, call_id, answer}, %State{budget_ask_pending: call_id} = state) do
-    budget_answered(%{state | budget_ask_task: nil}, budget_decision(answer))
+    budget_answered(%{state | budget_ask_task: nil}, budget_decision(state, answer))
   end
 
   def waiting(:info, {:failure_answer, call_id, answer}, %State{budget_ask_pending: call_id} = state) do
@@ -1047,6 +1054,7 @@ defmodule Troupe.Agent.Server do
         gate_halt(halt)
 
       :ok ->
+        state = load_instructions(state)
         definition = effective_definition(state)
         request = build_request(state, definition)
 
@@ -1151,10 +1159,11 @@ defmodule Troupe.Agent.Server do
   defp request_extra(%State{fake: nil} = state), do: %{agent_path: state.agent_path}
   defp request_extra(%State{fake: fake} = state), do: %{fake: fake, agent_path: state.agent_path}
 
-  # The project brief comes right after the profile's own words and before the
-  # environment: what earlier agents learned about this repository is the first thing
-  # a new one should read, and it is read fresh at every prompt so a `remember` made in
-  # this session reaches the next agent to start.
+  # The repository's instruction files and the project brief come right after the
+  # profile's own words and before the environment: what the people who work here wrote
+  # for agents, and what earlier agents learned, are the first things a new one should
+  # read. Both are read fresh at every prompt, so an edit to `AGENTS.md` and a
+  # `remember` made in this session reach the next turn (Decision 706).
   #
   # The goal comes after everything that describes the agent and its surroundings and
   # before the task list: it is what the list is for, and it changes less often than the
@@ -1162,14 +1171,28 @@ defmodule Troupe.Agent.Server do
   defp system_prompt(state, definition) do
     [
       definition.prompt,
-      Memory.prompt_section(state.workspace.root_real, state.config),
+      Instructions.to_prompt(state.instructions),
       environment_section(state),
-      Skills.prompt_section(state.bundle, definition),
+      Skills.prompt_section(state.bundle, definition, state.workspace.root_real),
       goal_section(state),
       todo_section(state)
     ]
     |> Enum.reject(&(&1 in [nil, ""]))
     |> Enum.join("\n\n")
+  end
+
+  # Read from disk at every turn, so an edit takes effect on the next one; the digest is
+  # the cache. An `instructions_loaded` event is written when what reached the prompt
+  # changed since this agent's last turn, and never when it did not, so the log says
+  # which files each turn was read from without saying so every turn.
+  defp load_instructions(%State{} = state) do
+    loaded = Instructions.load(state.workspace.root_real, state.config)
+
+    if state.instructions == nil or loaded.digest != state.instructions.digest do
+      log(state, :instructions_loaded, Instructions.provenance(loaded))
+    end
+
+    %{state | instructions: loaded}
   end
 
   defp environment_section(state) do
@@ -1571,7 +1594,7 @@ defmodule Troupe.Agent.Server do
   # to be able to tell that the agent is waiting for input (issue #127). A `reason` says the
   # harness ended the turn rather than the model (Decision 687).
   defp rest(state, reason \\ nil) do
-    state = %{state | turn_mode: nil}
+    state = reclaim_run_grant(%{state | turn_mode: nil})
     log(state, :turn_ended, if(reason, do: %{"reason" => reason}, else: %{}))
     publish_state(state, :idle)
     {:next_state, :idle, state}
@@ -1969,11 +1992,12 @@ defmodule Troupe.Agent.Server do
   defp failure_halt(state, tool, failures), do: {:ask, ask_failures(state, tool, failures)}
 
   # Whether another model call may start (Decision 660). A spent budget is a question,
-  # not a stop: the person attached is asked, once per slice, and `allow` buys the same
-  # slice again. `full_send` passes without asking, and a limit `always` lifted is never
-  # the one that stops (Decision 687); a session whose budget is a contract
-  # (`budget_asks: false` — the plane's terms) stops as it always did; an unattended
-  # session answers no itself, through the questions' deny mode.
+  # not a stop: the person attached is asked, and says how much more and for how long
+  # (Decision 699) — `allow` still buys the same slice again. `full_send` passes without
+  # asking, and a limit `always` lifted is never the one that stops (Decision 687); a
+  # session whose budget is a contract (`budget_asks: false` — the plane's terms) stops
+  # as it always did; an unattended session answers no itself, through the questions'
+  # deny mode.
   defp budget_gate(%State{config: %{full_send: true}}), do: :ok
 
   defp budget_gate(%State{config: %{budget_asks: false}} = state), do: check_or_stop(state)
@@ -2010,22 +2034,6 @@ defmodule Troupe.Agent.Server do
     {:next_state, :waiting, state}
   end
 
-  # `always` names the limit it lifts, and only that one (Decision 687): the question was
-  # about one limit, and an answer that switched off the other three is how a loop of
-  # failing calls ran on for half an hour past a time limit that had already warned.
-  defp budget_options(dim) do
-    [
-      %{label: "allow", description: "one more slice: the same budget again, then ask again"},
-      %{label: "always", description: "lift the #{limit_words(dim)} limit for the rest of the session"},
-      %{label: "deny", description: "stop here"}
-    ]
-  end
-
-  defp limit_words(:turns), do: "turn"
-  defp limit_words(:input), do: "input-token"
-  defp limit_words(:output), do: "output-token"
-  defp limit_words(:wall), do: "time"
-
   @limits [:max_turns, :max_input_tokens, :max_output_tokens, :wall_clock]
 
   # The limit a `budget_ask_started` names by its dimension, and one a `budget_ask_answered`
@@ -2039,10 +2047,12 @@ defmodule Troupe.Agent.Server do
   # A task waits on the answer, because the agent itself must not block. The id is the
   # count of asks, so a replay that finds a `budget_ask_started` without its answer asks
   # again under the same id — and the questions server, which remembers answers by id,
-  # hands back one given while the agent was away rather than asking twice.
-  defp ask_budget(state, limit) do
+  # hands back one given while the agent was away rather than asking twice. An answer
+  # that could not be read is asked back under the next id, with the reason first.
+  defp ask_budget(state, limit, note \\ nil) do
     dim = Headroom.dimension(limit)
-    entry = headroom(state)[dim]
+    ctx = budget_context(state, limit)
+    entry = ctx.entry
     detail = Headroom.describe(dim, entry)
 
     {call_id, state} =
@@ -2068,10 +2078,35 @@ defmodule Troupe.Agent.Server do
     |> ask_person(:budget_answer, %{
       call_id: call_id,
       agent_path: state.agent_path,
-      question: detail <> " — continue?",
-      options: budget_options(dim),
+      question: BudgetQuestion.question(ctx, note),
+      options: BudgetQuestion.options(ctx),
       multiple: false
     })
+  end
+
+  # What the question is about (Decision 699): the session's spend so far, from the index
+  # where every priced response lands; the scopes and the ceiling the terms leave a session
+  # on a pod; the file a workspace answer writes; and `iteration` for a loop's turn.
+  defp budget_context(state, limit) do
+    entry = headroom(state)[Headroom.dimension(limit)]
+    terms = state.config.terms
+
+    BudgetQuestion.context(limit, entry,
+      spent_micros: spent_micros(state),
+      scopes: if(is_map(terms), do: [:run, :session], else: [:run, :session, :workspace]),
+      cap: if(is_map(terms), do: Map.get(terms, limit)),
+      path: Config.project_path(state.workspace.root_real),
+      run_word: if(state.turn_mode == :loop, do: "iteration", else: "run")
+    )
+  end
+
+  defp spent_micros(state) do
+    case Index.get(state.session_id) do
+      %{cost: cost} when is_number(cost) -> round(cost * 1_000_000)
+      _none -> nil
+    end
+  catch
+    :exit, _reason -> nil
   end
 
   # A task waits on the answer and sends it back tagged, so the agent never blocks.
@@ -2087,19 +2122,31 @@ defmodule Troupe.Agent.Server do
     %{state | budget_ask_pending: question.call_id, budget_ask_task: pid}
   end
 
-  defp budget_decision({:ok, text}) when is_binary(text) do
-    case text |> String.trim() |> String.downcase() do
-      always when always in ["always", "a"] -> :always
-      allow when allow in ["allow", "yes", "y", "continue", "more"] -> :allow
-      _other -> :deny
+  # What the person said, read against the question that was asked (Decision 699). Nobody
+  # to ask, or a question with no limit on record, is a no.
+  defp budget_decision(%State{budget_ask_limit: limit} = state, {:ok, text})
+       when is_binary(text) and limit != nil do
+    case BudgetQuestion.parse(text, budget_context(state, limit)) do
+      {:ok, decision} -> decision
+      {:error, note} -> {:unclear, note}
     end
   end
 
-  defp budget_decision(_unattended_or_odd), do: :deny
+  defp budget_decision(_state, _unattended_or_odd), do: :deny
 
-  defp budget_decision_atom("allow"), do: :allow
-  defp budget_decision_atom("always"), do: :always
-  defp budget_decision_atom(_other), do: :deny
+  # A logged answer, as `apply_budget_decision/2` takes it. `deny` and `unclear` applied
+  # nothing, and so does an odd value.
+  defp folded_decision(%{"decision" => "raise", "scope" => scope, "amount" => amount})
+       when is_integer(amount) and amount > 0,
+       do: {:extend, scope_named(scope), amount}
+
+  defp folded_decision(%{"decision" => "allow"}), do: :allow
+  defp folded_decision(%{"decision" => "always"}), do: :always
+  defp folded_decision(_other), do: :deny
+
+  defp scope_named("run"), do: :run
+  defp scope_named("workspace"), do: :workspace
+  defp scope_named(_session_or_odd), do: :session
 
   # `allow` also forgets which limits were warned about: a fresh slice is a fresh warning.
   defp apply_budget_decision(state, :allow) do
@@ -2111,19 +2158,55 @@ defmodule Troupe.Agent.Server do
   defp apply_budget_decision(state, :always),
     do: %{state | budget: Budget.lift(state.budget, state.budget_ask_limit)}
 
+  defp apply_budget_decision(%State{budget_ask_limit: nil} = state, {:extend, _scope, _amount}), do: state
+
+  # A raise re-arms the warning for its own dimension: a fresh stretch of that limit. One
+  # for this run alone is remembered, to be given back where the run ends.
+  defp apply_budget_decision(%State{budget_ask_limit: limit} = state, {:extend, scope, amount}) do
+    grants =
+      if scope == :run,
+        do: Map.update(state.budget_run_grant, limit, amount, &(&1 + amount)),
+        else: state.budget_run_grant
+
+    %{
+      state
+      | budget: Budget.extend(state.budget, limit, amount),
+        budget_run_grant: grants,
+        headroom_warned: MapSet.delete(state.headroom_warned, Headroom.dimension(limit))
+    }
+  end
+
   defp apply_budget_decision(state, :deny), do: state
 
+  # What a run's raise left unused goes back when the turn ends (Decision 699), live and
+  # on replay alike, so the next run meets the checkpoint again.
+  defp reclaim_run_grant(%State{budget_run_grant: grants} = state) when map_size(grants) == 0, do: state
+
+  defp reclaim_run_grant(%State{} = state) do
+    budget =
+      Enum.reduce(state.budget_run_grant, state.budget, fn {limit, amount}, budget ->
+        Budget.reclaim(budget, limit, amount)
+      end)
+
+    %{state | budget: budget, budget_run_grant: %{}}
+  end
+
+  # An answer that could not be read is written down as such and the question asked again,
+  # under the next id, with the reason first: a typo must not stop a session.
+  defp budget_answered(state, {:unclear, note}) do
+    log(state, :budget_ask_answered, %{
+      "call_id" => state.budget_ask_pending,
+      "decision" => "unclear",
+      "note" => note
+    })
+
+    limit = state.budget_ask_limit
+    state = %{state | budget_ask_pending: nil, budget_ask_limit: nil}
+    gate_halt({:ask, ask_budget(state, limit, note)})
+  end
+
   defp budget_answered(state, decision) do
-    data = %{"call_id" => state.budget_ask_pending, "decision" => Atom.to_string(decision)}
-
-    data =
-      case decision do
-        :allow -> Map.put(data, "grant", grant_json(Budget.original(state.budget)))
-        :always when state.budget_ask_limit != nil -> Map.put(data, "lifted", Atom.to_string(state.budget_ask_limit))
-        _other -> data
-      end
-
-    log(state, :budget_ask_answered, data)
+    log(state, :budget_ask_answered, answered_data(state, decision))
 
     state =
       state
@@ -2142,6 +2225,55 @@ defmodule Troupe.Agent.Server do
       start_turn(state)
     end
   end
+
+  # What the answer meant, for the log: the slice `allow` bought, the limit `always`
+  # lifted, or a raise's scope, limit and amount — and, for the workspace, the file it
+  # went to or why it did not.
+  defp answered_data(state, decision) do
+    data = %{"call_id" => state.budget_ask_pending, "decision" => decision_word(decision)}
+
+    case decision do
+      :allow ->
+        Map.put(data, "grant", grant_json(Budget.original(state.budget)))
+
+      :always when state.budget_ask_limit != nil ->
+        Map.put(data, "lifted", Atom.to_string(state.budget_ask_limit))
+
+      {:extend, scope, amount} ->
+        data
+        |> Map.merge(%{
+          "scope" => Atom.to_string(scope),
+          "limit" => Atom.to_string(state.budget_ask_limit),
+          "amount" => amount
+        })
+        |> Map.merge(written(state, scope, amount))
+
+      _other ->
+        data
+    end
+  end
+
+  defp decision_word({:extend, _scope, _amount}), do: "raise"
+  defp decision_word(decision), do: Atom.to_string(decision)
+
+  # A workspace answer writes the raised limit to the project's file, so the next session
+  # there starts with it (Decision 699), and names the file; the session is raised either
+  # way, and a file that could not be written is said in the answer rather than lost.
+  defp written(%State{budget_ask_limit: limit} = state, :workspace, amount) do
+    path = Config.project_path(state.workspace.root_real)
+    value = Map.fetch!(state.budget, Budget.field(limit)) + amount
+
+    case Config.write_key(path, [BudgetQuestion.key(limit)], value) do
+      {:ok, path} ->
+        %{"path" => path}
+
+      {:error, reason} ->
+        Logger.warning("troupe: the budget answer was not written to #{path}: #{reason}")
+        %{"note" => "not written to #{path}: #{reason}"}
+    end
+  end
+
+  defp written(_state, _scope, _amount), do: %{}
 
   defp grant_json(slice) do
     %{
@@ -2555,7 +2687,7 @@ defmodule Troupe.Agent.Server do
   # A subagent reports last, once everything it has to say is written and its state
   # announced: its parent stops it as soon as it has the result (#171).
   defp enter_done(state, reason, data, result \\ nil) do
-    state = clear_llm(state)
+    state = state |> clear_llm() |> reclaim_run_grant()
 
     log(state, :agent_done, Map.put(data, "reason", Atom.to_string(reason)))
 

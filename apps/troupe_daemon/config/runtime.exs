@@ -73,6 +73,16 @@ session_minutes = fn name, default ->
   end
 end
 
+# Seconds a call to a client-hosted tool waits for its client, gone mid-call, to come back
+# and offer the tool again before it is failed. `0` fails it at once. A session somebody is
+# reading is never put to sleep; the clocks above start when they leave.
+grace =
+  case Integer.parse(System.get_env("TROUPE_CLIENT_TOOL_GRACE_SECONDS", "60")) do
+    {seconds, ""} when seconds >= 0 -> :timer.seconds(seconds)
+    _ -> raise "TROUPE_CLIENT_TOOL_GRACE_SECONDS is not a whole number of seconds"
+  end
+
 config :troupe_core,
   session_idle_ms: session_minutes.("TROUPE_SESSION_IDLE_MINUTES", "30"),
-  detached_idle_ms: session_minutes.("TROUPE_SESSION_DETACHED_MINUTES", "2")
+  detached_idle_ms: session_minutes.("TROUPE_SESSION_DETACHED_MINUTES", "2"),
+  client_tool_grace_ms: grace

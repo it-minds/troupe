@@ -1,0 +1,285 @@
+defmodule Troupe.Commands do
+  @moduledoc """
+  The one table of slash commands a client offers, as `commands.list` answers it
+  (Decision 698).
+
+  A client used to carry its own list — the TUI had three that had to agree, the desktop
+  app none — so nothing told a person what they could type. The harness owns the table
+  now: every built-in with a name, its aliases, the section it belongs to, a one-line
+  summary, how it is typed, its arguments, what it needs to be available and where it
+  came from. A client renders a palette from it and keeps only the code that runs each
+  command; the TUI's suite holds its set of built-ins equal to this one.
+
+  Agents are in the table too, in a section of their own, described by their
+  definition's `description` rather than pretending to be built-ins. The maps are keyed
+  by strings because they go on the wire as they are.
+
+  `availability` is a requirement the client judges, not a verdict: `always`; `window`
+  (acts on a window: the activated one, or one named as an argument); `local` (a session
+  on this machine: a pod has no checkout, watcher or brief of the person's); `plane`
+  (needs a plane). A client shows a command it cannot run greyed, with the reason, rather
+  than hiding it — that is how somebody learns the tool.
+  """
+
+  alias Troupe.Agent.Definition
+
+  @typedoc "One command as `commands.list` lists it."
+  @type entry :: %{String.t() => term()}
+
+  @typedoc "One argument, for completion and for the usage line."
+  @type arg :: %{String.t() => term()}
+
+  @sections ~w(session navigate workspace setup agents quit)
+
+  @doc "The sections, in the order a palette shows them."
+  @spec sections() :: [String.t()]
+  def sections, do: @sections
+
+  @doc """
+  Every command available in a session: the built-ins, then one entry per primary agent
+  in `agents:` (the definitions `agents.list` answers with), grouped by section in the
+  order `sections/0` gives.
+  """
+  @spec list(keyword()) :: [entry()]
+  def list(opts \\ []) do
+    agents = opts |> Keyword.get(:agents, []) |> Enum.map(&agent/1)
+
+    Enum.flat_map(@sections, fn section ->
+      Enum.filter(builtins() ++ agents, &(&1["section"] == section))
+    end)
+  end
+
+  @doc "The built-in commands alone, in section order."
+  @spec builtins() :: [entry()]
+  def builtins do
+    [
+      entry("cancel", "session", "Stop a branch mid-turn and remove its window",
+        usage: "/cancel [window]",
+        args: [window()],
+        availability: "window",
+        detail:
+          "Stops the agent in the activated window, or in the one named by its tile " <>
+            "number or path, and removes the window; a worktree Troupe made for it goes too.",
+        example: "/cancel 2"
+      ),
+      entry("dismiss", "session", "Let go of a window",
+        usage: "/dismiss [window]",
+        args: [window()],
+        availability: "window",
+        detail:
+          "Closes the activated window, or the one named. This session's own window lets " <>
+            "go of the session; a branch's window closes for good and its session stays in " <>
+            "the daemon, where /sessions still lists it.",
+        example: "/dismiss 3"
+      ),
+      entry("compact", "session", "Compact a window's context",
+        usage: "/compact [window]",
+        args: [window()],
+        availability: "window",
+        detail:
+          "Asks the window's session to shrink its context. A session on this machine " <>
+            "compacts by itself when its context nears compact_at, and a remote one compacts " <>
+            "on its plane, so this answers with which."
+      ),
+      entry("merge", "session", "Land a worktree branch on the checkout",
+        usage: "/merge [window]",
+        args: [window()],
+        availability: "local",
+        detail:
+          "Commits whatever the branch left uncommitted, merges its branch into the " <>
+            "checkout with a merge commit, and removes the worktree and the window. A merge " <>
+            "git cannot complete is left for you to resolve. Tab completes the branches that " <>
+            "have finished.",
+        example: "/merge 2"
+      ),
+      entry("discard", "session", "Throw a worktree branch away",
+        usage: "/discard [window]",
+        args: [window()],
+        availability: "local",
+        detail:
+          "Removes the branch's worktree and deletes its branch, uncommitted work " <>
+            "included, and closes the window.",
+        example: "/discard 2"
+      ),
+      entry("goal", "session", "Set, show or clear the session's goal",
+        usage: "/goal [text | clear]",
+        args: [arg("text", false, "text")],
+        detail:
+          "Every later turn works towards the goal and the status line shows it. /goal " <>
+            "alone shows it, /goal clear clears it.",
+        example: "/goal make the suite green"
+      ),
+      entry("loop", "session", "Work towards the goal on its own",
+        usage: "/loop [n | stop]",
+        args: [arg("iterations", false, "text")],
+        detail:
+          "Runs turn after turn, up to n (the config's loop_max_iterations without one), " <>
+            "until the agent says the goal is met or something stops it; the status line " <>
+            "shows loop 2/10 and /loop stop stops it. Needs a goal.",
+        example: "/loop 10"
+      ),
+      entry("sessions", "navigate", "This directory's sessions, newest first",
+        aliases: ["resume"],
+        usage: "/sessions [n | id]",
+        args: [arg("session", false, "text")],
+        detail:
+          "Enter switches the window to one; /resume 2 or /resume <id> goes straight there.",
+        example: "/resume 2"
+      ),
+      entry("hq", "navigate", "HQ: a plane's teams, profiles and sessions",
+        aliases: ["remote"],
+        usage: "/hq [plane]",
+        args: [arg("plane", false, "text")],
+        detail:
+          "This machine's own sessions are listed alongside. Names a plane by URL; " <>
+            "without one, the plane this machine is logged in to.",
+        example: "/hq https://troupe.example"
+      ),
+      entry("observer", "navigate", "The agent tree: every branch and subagent",
+        aliases: ["agents-tree", "tree"],
+        usage: "/observer",
+        detail: "Each with its state, worktree and tokens; Enter opens the agent's transcript."
+      ),
+      entry("files", "navigate", "The session's files, live",
+        usage: "/files",
+        detail:
+          "Enter opens a file, ← goes up, r reloads; a change the session makes reloads " <>
+            "the listing by itself."
+      ),
+      entry("upload", "workspace", "Send a local file into the session's own mount",
+        usage: "/upload <path>",
+        args: [arg("path", true, "file")],
+        detail:
+          "The file is read on this machine and written to session:/<name>; a worker " <>
+            "never sees this machine's disk.",
+        example: "/upload notes.md"
+      ),
+      entry("copy", "workspace", "Copy a transcript to the clipboard",
+        usage: "/copy [window]",
+        args: [window()],
+        availability: "window",
+        detail:
+          "The activated window's transcript, or tile n's; a mouse selection in the pane " <>
+            "copies on release.",
+        example: "/copy 2"
+      ),
+      entry("memory", "workspace", "The project brief: show, refresh or forget it",
+        usage: "/memory [refresh | forget]",
+        args: [arg("action", false, "text")],
+        availability: "local",
+        detail:
+          "The brief in .troupe/memory.md is read into every agent's prompt. /memory says " <>
+            "what it holds, /memory refresh asks the librarian to rewrite it, /memory forget " <>
+            "deletes it.",
+        example: "/memory refresh"
+      ),
+      entry("context", "workspace", "Every instruction file in the prompt, and its share of the budget",
+        usage: "/context",
+        detail:
+          "The files the next turn's system prompt is read from: your own AGENTS.md, the " <>
+            "repository's, one in each directory down to the workspace, and the project " <>
+            "brief, each with its scope, size and share of the budget, and the aliases " <>
+            "(CLAUDE.md, GEMINI.md, copilot-instructions.md) it hid."
+      ),
+      entry("watch", "workspace", "Toggle watch mode: act on AI! and AI? comments",
+        usage: "/watch",
+        availability: "local",
+        detail:
+          "A comment ending in AI! starts a change and AI? starts an answer. One session " <>
+            "per workspace watches at a time."
+      ),
+      entry("settings", "setup", "Settings, and the keys and concepts worth knowing",
+        usage: "/settings",
+        detail:
+          "Every tweakable setting with its value and what it does; a change is written " <>
+            "to the config file that owns it."
+      ),
+      entry("models", "setup", "Pick the default model from every model Troupe detected",
+        aliases: ["model"],
+        usage: "/models",
+        detail: "The settings page opened on the default model, with its menu up."
+      ),
+      entry("mcp", "setup", "Your MCP servers: each one's layer, state, tools and errors",
+        usage: "/mcp [import|link|remove|check <target>] [--workspace]",
+        args: [arg("verb", false, "text"), arg("target", false, "path")],
+        detail:
+          "Servers from your mcp.json, the workspace's .troupe/mcp.json and the bundle. " <>
+            "import copies a .mcp.json, link reads it in place, remove and check take a " <>
+            "server name; --workspace writes the workspace's file.",
+        example: "/mcp import .mcp.json"
+      ),
+      entry("skills", "setup", "Your skills: each one's layer, description and source",
+        usage: "/skills [import|link|remove <target>] [--workspace]",
+        args: [arg("verb", false, "text"), arg("target", false, "path")],
+        detail:
+          "Skills from your skills/ directory, the workspace's .troupe/skills/ and the " <>
+            "bundle; import copies a directory of skills, link reads it in place.",
+        example: "/skills link ~/.claude/skills"
+      ),
+      entry("help", "setup", "This list: every command, what it does and how to type it",
+        aliases: ["?"],
+        usage: "/help",
+        detail:
+          "Type to filter by name, alias or description; ↑↓ move, Enter runs, Tab puts " <>
+            "the command on the line, Esc closes. / on an empty line opens it too."
+      ),
+      entry("agents", "agents", "List the agents this session can start a branch on",
+        usage: "/agents",
+        detail:
+          "The primary agents: the built-ins, this machine's agents/ and the project's " <>
+            ".troupe/agents/. Each is a command of its own, below."
+      ),
+      entry("worktree", "agents", "Run the default agent on a branch in a worktree of its own",
+        usage: "/worktree [name:] <prompt>",
+        args: [prompt()],
+        availability: "local",
+        detail:
+          "/worktree <prompt> works in a fresh worktree, to /merge or /discard later; " <>
+            "/worktree <name>: <prompt> in a Troupe worktree of that name, created the first " <>
+            "time and reused after; /worktree <existing> <prompt> in one you checked out " <>
+            "(Tab completes them).",
+        example: "/worktree fix the flaky test"
+      ),
+      entry("quit", "quit", "Leave the terminal client; the session carries on",
+        aliases: ["exit", "q"],
+        usage: "/quit",
+        detail:
+          "Sessions live in the daemon, so nothing stops; troupe resume comes back to " <>
+            "this one. Ctrl-C twice does the same."
+      )
+    ]
+  end
+
+  # An agent is a command that starts a branch on it. Its summary is the first line of
+  # the definition's description, so a long one still reads as one row.
+  defp agent(%Definition{name: name, description: description}) do
+    description = description || ""
+
+    entry(name, "agents", description |> String.split("\n", parts: 2) |> hd() |> String.trim(),
+      usage: "/#{name} <prompt>",
+      args: [prompt()],
+      availability: "local",
+      source: "agent",
+      detail: String.trim(description)
+    )
+  end
+
+  defp entry(name, section, summary, opts) do
+    %{
+      "name" => name,
+      "aliases" => Keyword.get(opts, :aliases, []),
+      "section" => section,
+      "summary" => summary,
+      "usage" => Keyword.get(opts, :usage, "/" <> name),
+      "args" => Keyword.get(opts, :args, []),
+      "availability" => Keyword.get(opts, :availability, "always"),
+      "source" => Keyword.get(opts, :source, "builtin"),
+      "detail" => Keyword.get(opts, :detail, summary),
+      "example" => Keyword.get(opts, :example)
+    }
+  end
+
+  defp arg(name, required?, kind), do: %{"name" => name, "required" => required?, "kind" => kind}
+  defp window, do: arg("window", false, "window")
+  defp prompt, do: arg("prompt", true, "text")
+end

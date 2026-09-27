@@ -6,7 +6,7 @@
 // the message being produced, the agent's state, who else is here — and may be dropped
 // under load without changing what the transcript says.
 
-import type { DurableEvent, LlmDeltaData, TroupeEvent } from "./types.js";
+import type { DurableEvent, LlmDeltaData, LoopInfo, TroupeEvent } from "./types.js";
 import { isDurable } from "./types.js";
 
 /** A `data` field the server replaced with a reference because it ran past 16 KiB. */
@@ -91,6 +91,24 @@ export type Entry =
   /** Lifecycle: started, switched, compacted, done, cancelled, dormant, resumed, errors. */
   | { kind: "system"; seq: number; agent: string[]; type: string; text: string };
 
+/**
+ * The session's latest loop towards its goal (`session.loop.start`), as its events say:
+ * running from `loop_started` until `loop_stopped`, which says why.
+ */
+export interface LoopState {
+  id: string;
+  state: "running" | "stopped";
+  /** The iteration running, or the last one run; 0 until the first starts. */
+  iteration: number;
+  max: number | null;
+  /** From `loop_stopped`: `goal_complete`, `max_iterations`, `requested`, … */
+  reason: string | undefined;
+  detail: string | undefined;
+  /** The evidence `goal_complete` gave. */
+  summary: string | undefined;
+  iterations: number | undefined;
+}
+
 /** An input this client sent that the server has not yet echoed back. */
 export interface PendingInput {
   commandId: string;
@@ -120,6 +138,10 @@ export interface TranscriptState {
   doneReason: string | undefined;
   /** Summed from every `llm_response.gateway.cost_micros`; undefined if none said. */
   costMicros: number | undefined;
+  /** The session's goal from `goal_set`, until `goal_cleared`: what every turn works towards. */
+  goal: string | undefined;
+  /** The latest loop towards the goal, running or how it ended; undefined before the first. */
+  loop: LoopState | undefined;
 }
 
 export interface PresenceMember {
@@ -142,6 +164,8 @@ export const emptyTranscript: TranscriptState = {
   error: undefined,
   doneReason: undefined,
   costMicros: undefined,
+  goal: undefined,
+  loop: undefined,
 };
 
 /** The root agent is the one-element path; everything deeper is a subagent. */
@@ -160,6 +184,60 @@ function textOf(message: unknown): string {
 
 function str(v: unknown, fallback = ""): string {
   return typeof v === "string" ? v : v === undefined || v === null ? fallback : String(v);
+}
+
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+/** What somebody said beside an event, after a dash, when they said anything. */
+function said(v: unknown): string {
+  return typeof v === "string" && v !== "" ? ` — ${v}` : "";
+}
+
+function freshLoop(id: string, max: number | null): LoopState {
+  return { id, state: "running", iteration: 0, max, reason: undefined, detail: undefined, summary: undefined, iterations: undefined };
+}
+
+const LOOP_REASONS: Record<string, string> = {
+  max_iterations: "it reached its limit",
+  failures: "too many iterations failed in a row",
+  budget: "the budget is spent and asks you first",
+  requested: "stopped on request",
+  cancelled: "the turn was cancelled",
+  goal_cleared: "the goal was cleared",
+  interrupted: "the session stopped while it ran",
+  agent_done: "the agent takes no more input",
+};
+
+/**
+ * The loop as `session.loop.get` answers for it, where the log has not caught up: a
+ * session that stopped mid-loop wrote no `loop_stopped`, and writes `interrupted` only
+ * once it is activated again, while the answer already says it is not running. Only the
+ * loop the answer names: one that started since the question was asked is its own
+ * events' to report.
+ */
+export function settleLoop(loop: LoopState | undefined, answer: LoopInfo | null | undefined): LoopState | undefined {
+  if (!loop || loop.state !== "running" || !answer || answer.loop_id !== loop.id || answer.state !== "stopped") return loop;
+  return {
+    ...loop,
+    state: "stopped",
+    reason: answer.reason ?? undefined,
+    detail: answer.detail ?? undefined,
+    summary: answer.summary ?? undefined,
+    iterations: answer.iteration,
+  };
+}
+
+/**
+ * How a loop ended, in the terminal client's words: the evidence when the goal is met,
+ * the reason otherwise. The transcript's note and the header's line both say this.
+ */
+export function loopEnding(loop: LoopState): string {
+  const n = loop.iterations ?? loop.iteration;
+  const iterations = n === 1 ? "1 iteration" : `${n} iterations`;
+  if (loop.reason === "goal_complete") return `loop done after ${iterations}: the goal is met${said(loop.summary)}`;
+  return `loop stopped after ${iterations}: ${LOOP_REASONS[loop.reason ?? ""] ?? loop.reason ?? "it stopped"}${said(loop.detail)}`;
 }
 
 /** `content` is a string, or a blob reference when the result ran past 16 KiB. */
@@ -275,6 +353,10 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
     }
 
     case "user_input":
+      // A loop's iteration starts the agent's turn like any input, but nobody typed it:
+      // the note `loop_iteration_started` left says which iteration it is, rather than
+      // the words the loop gave the model, the way the terminal client says it.
+      if (str(d.data["source"]) === "loop") return next;
       // The note the harness gives a model whose reply was cut or empty (troupe-remote
       // Decision 659) is not something a person typed, and is shown as what it is.
       if (str(d.data["source"]) === "harness") {
@@ -377,22 +459,27 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
 
     // A question for a person. The harness's budget question rides on the same path under
     // a `budget-<n>` id with an event of its own beside it, so the entry is made from
-    // whichever arrives first and the other only fills it in. A question the harness asks
-    // at the gate before a model call (the budget's, the failure guard's) is still owed
-    // after a cancel ended it, and is asked again under the same id at the next turn: the
-    // entry it had is open again.
+    // whichever arrives first and the other fills it in: the harness's own event says
+    // which limit, the question says the words and the options — sizes and scopes to
+    // pick, and an amount can be typed (troupe-remote Decision 699). A question the
+    // harness asks at the gate before a model call (the budget's, the failure guard's) is
+    // still owed after a cancel ended it, and is asked again under the same id at the
+    // next turn: the entry it had is open again.
     case "budget_ask_started": {
       const callId = str(d.data["call_id"]);
       if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
-      return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"))] };
+      return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["detail"], "budget exhausted"), [])] };
     }
 
     case "question_asked": {
       const callId = str(d.data["call_id"]);
-      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
       if (callId.startsWith("budget-")) {
-        return { ...next, entries: [...state.entries, budgetQuestion(base, callId, str(d.data["question"], "budget exhausted"))] };
+        const question = str(d.data["question"], "budget exhausted");
+        const options = optionsOf(d.data["options"]);
+        if (hasQuestion(state, callId)) return { ...next, entries: fillBudget(reopen(state.entries, callId), callId, question, options) };
+        return { ...next, entries: [...state.entries, budgetQuestion(base, callId, question, options)] };
       }
+      if (hasQuestion(state, callId)) return { ...next, entries: reopen(state.entries, callId) };
       return {
         ...next,
         entries: [
@@ -476,6 +563,56 @@ export function fold(state: TranscriptState, e: TroupeEvent): TranscriptState {
         todo: items,
         entries: [...state.entries, { kind: "todo", ...base, items, source: str(d.data["source"], "agent") }],
       };
+    }
+
+    // The goal (issue #59): said once in the transcript, where it happened, and kept for
+    // the session's header, which shows it for as long as it is set.
+    case "goal_set":
+      return { ...next, goal: str(d.data["text"]), entries: [...state.entries, { kind: "system", ...base, type: d.type, text: `goal: ${str(d.data["text"])}` }] };
+
+    case "goal_cleared":
+      return { ...next, goal: undefined, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: "goal cleared" }] };
+
+    // A loop towards the goal: said in the transcript as it goes, as the terminal client
+    // says it, and kept for the header — where it is while it runs, how it ended after.
+    case "loop_started": {
+      const max = num(d.data["max_iterations"]);
+      return {
+        ...next,
+        loop: freshLoop(str(d.data["loop_id"]), max),
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: max ? `loop: up to ${max} iterations towards the goal` : "loop: towards the goal" }],
+      };
+    }
+
+    case "loop_iteration_started": {
+      const id = str(d.data["loop_id"]);
+      const iteration = num(d.data["iteration"]) ?? 0;
+      const loop: LoopState = { ...(state.loop?.id === id ? state.loop : freshLoop(id, null)), state: "running", iteration };
+      return {
+        ...next,
+        loop,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: `loop iteration ${iteration}${loop.max ? `/${loop.max}` : ""}` }],
+      };
+    }
+
+    case "loop_iteration_finished":
+      if (d.data["outcome"] !== "failed") return next;
+      return {
+        ...next,
+        entries: [...state.entries, { kind: "system", ...base, type: d.type, text: `loop iteration ${str(d.data["iteration"], "?")} failed${said(d.data["detail"])}` }],
+      };
+
+    case "loop_stopped": {
+      const id = str(d.data["loop_id"]);
+      const loop: LoopState = {
+        ...(state.loop?.id === id ? state.loop : freshLoop(id, null)),
+        state: "stopped",
+        reason: str(d.data["reason"]) || undefined,
+        detail: str(d.data["detail"]) || undefined,
+        summary: str(d.data["summary"]) || undefined,
+        iterations: num(d.data["iterations"]) ?? undefined,
+      };
+      return { ...next, loop, entries: [...state.entries, { kind: "system", ...base, type: d.type, text: loopEnding(loop) }] };
     }
 
     case "session_created":
@@ -571,9 +708,12 @@ export function needsYou(state: TranscriptState): boolean {
   return rootState(state) === "waiting" || openApprovals(state).length > 0 || openQuestions(state).length > 0;
 }
 
-const BUDGET_OPTIONS: QuestionOption[] = [
+/**
+ * The answers a daemon from before the question carried its options listened for, in
+ * case a budget question arrives with none (troupe-remote Decisions 660 and 687).
+ */
+export const LEGACY_BUDGET_OPTIONS: QuestionOption[] = [
   { label: "allow", description: "one more slice: the same budget again, then ask again" },
-  // The limit the question names, and no other (troupe-remote Decision 687).
   { label: "always", description: "lift this limit for the rest of the session; the others still ask" },
   { label: "deny", description: "stop here" },
 ];
@@ -593,8 +733,13 @@ function reopen(entries: Entry[], callId: string): Entry[] {
   return entries.map((en) => (en.kind === "question" && en.callId === callId && en.closed && en.answer === undefined ? { ...en, closed: false } : en));
 }
 
-function budgetQuestion(base: { seq: number; agent: string[] }, callId: string, detail: string): Entry {
-  return { kind: "question", ...base, callId, question: detail, options: BUDGET_OPTIONS, multiple: false, asked: "budget", answer: undefined, closed: false };
+function budgetQuestion(base: { seq: number; agent: string[] }, callId: string, question: string, options: QuestionOption[]): Entry {
+  return { kind: "question", ...base, callId, question, options, multiple: false, asked: "budget", answer: undefined, closed: false };
+}
+
+/** The budget question's own words and options, once the question it rides on arrives. */
+function fillBudget(entries: Entry[], callId: string, question: string, options: QuestionOption[]): Entry[] {
+  return entries.map((en) => (en.kind === "question" && en.callId === callId && en.asked === "budget" ? { ...en, question, options } : en));
 }
 
 function optionsOf(v: unknown): QuestionOption[] {

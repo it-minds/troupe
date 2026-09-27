@@ -1,0 +1,676 @@
+{
+  "$meta": {
+    "name": "Troupe — Afterglow",
+    "id": "afterglow",
+    "version": "1.0.0",
+    "default": true,
+    "description": "Void and pit under cream, and two lights on it: pink is you being asked, cyan is the machine working. The stage after the house lights go down.",
+    "reservedColour": "status.waiting — pink #FF0080 / #C4005F. Afterglow also spends it as the brand's accent: the mask's lit half, links and the current nav item. Denied and error are clay so they never read as the reserved colour.",
+    "defaultMode": "dark",
+    "source": "../afterglow.dc.html is the comp, and it is dark only. The dark values are its custom properties (the oklch cyan and amber converted to sRGB); the light values are derived from them: the ground inverts to cream and every accent darkens until it clears the same contrast floor as the other themes."
+  },
+  "$themeContract": "Every colour token carries a dark and a light value under one semantic name. Components read the name, never a hex. All four Troupe themes expose exactly this token set — swapping a theme swaps values only. A theme that needs a new token name is a redesign, not a theme.",
+  "color": {
+    "bg": {
+      "stage": {
+        "dark": "#0B0B12",
+        "light": "#E9E0CB"
+      },
+      "canvas": {
+        "dark": "#0B0B12",
+        "light": "#F4ECDB"
+      },
+      "panel": {
+        "dark": "#12121C",
+        "light": "#FAF5EA"
+      },
+      "raised": {
+        "dark": "#1C1C2B",
+        "light": "#FFFCF4"
+      },
+      "sunken": {
+        "dark": "#0B0B12",
+        "light": "#ECE3CF"
+      },
+      "hover": {
+        "dark": "#1C1C2B",
+        "light": "#ECE3CF"
+      },
+      "selected": {
+        "dark": "#242436",
+        "light": "#E3D9C1"
+      },
+      "scrim": {
+        "dark": "rgba(11,11,18,0.72)",
+        "light": "rgba(11,11,18,0.44)"
+      },
+      "shadow": {
+        "dark": "#000353",
+        "light": "#000353",
+        "description": "The one hard shadow: a flat block offset down and right under a tile or a primary button, never blurred. The offset is the component's; this is its colour."
+      }
+    },
+    "text": {
+      "primary": {
+        "dark": "#F4ECDB",
+        "light": "#0B0B12"
+      },
+      "body": {
+        "dark": "#E8DFD0",
+        "light": "#1C1C2B",
+        "description": "Long-form reading, a step below primary so the headings lead."
+      },
+      "secondary": {
+        "dark": "#A3A3B8",
+        "light": "#4A4A66"
+      },
+      "label": {
+        "dark": "#8A8AA0",
+        "light": "#5A5A76",
+        "description": "Form labels, breadcrumbs and the mono labels that name a region."
+      },
+      "muted": {
+        "dark": "#7B7B94",
+        "light": "#5F5F78",
+        "description": "The comp's grey-deep (#6A6A82) lifted a step: at 3.7:1 on the void it was under the floor every theme is held to."
+      },
+      "inverse": {
+        "dark": "#0B0B12",
+        "light": "#FBF7EE"
+      },
+      "link": {
+        "dark": "#FF0080",
+        "light": "#C4005F"
+      },
+      "linkHover": {
+        "dark": "#FF4DA6",
+        "light": "#A3004F"
+      }
+    },
+    "accent": {
+      "dark": "#FF0080",
+      "light": "#C4005F",
+      "description": "The brand where it is not a status: the current nav item's edge. Afterglow spends its reserved pink here; the other themes keep their reserved colour for waiting alone and use their link blue."
+    },
+    "border": {
+      "hairline": {
+        "dark": "rgba(232,223,208,0.18)",
+        "light": "rgba(11,11,18,0.18)"
+      },
+      "strong": {
+        "dark": "rgba(232,223,208,0.42)",
+        "light": "rgba(11,11,18,0.42)"
+      },
+      "focus": {
+        "dark": "#00C6C9",
+        "light": "#007A7C"
+      },
+      "divider": {
+        "dark": "rgba(232,223,208,0.18)",
+        "light": "rgba(11,11,18,0.18)"
+      }
+    },
+    "status": {
+      "running": {
+        "description": "An agent is working right now. Cyan: the machine's colour.",
+        "fg": {
+          "dark": "#00DBD3",
+          "light": "#006466"
+        },
+        "solid": {
+          "dark": "#00C6C9",
+          "light": "#007779"
+        },
+        "bg": {
+          "dark": "rgba(0,220,220,0.10)",
+          "light": "rgba(0,134,135,0.10)"
+        },
+        "border": {
+          "dark": "#008687",
+          "light": "#4FB0B1"
+        }
+      },
+      "waiting": {
+        "description": "Stopped, waiting for a human decision. The reserved colour.",
+        "fg": {
+          "dark": "#FF0080",
+          "light": "#C4005F"
+        },
+        "solid": {
+          "dark": "#FF0080",
+          "light": "#C4005F"
+        },
+        "bg": {
+          "dark": "rgba(255,0,128,0.07)",
+          "light": "rgba(196,0,95,0.07)"
+        },
+        "border": {
+          "dark": "#FF0080",
+          "light": "#C4005F"
+        }
+      },
+      "queued": {
+        "description": "Accepted but not yet started: a message held while the troupe works. The comp's amber, as its QUEUED pill on a held message; the pill itself is unfilled. Where a session runs is the same amber (`local`); a session doing nothing is not this but `idle`, which has no colour of its own.",
+        "fg": {
+          "dark": "#FFBC56",
+          "light": "#7A4E00"
+        },
+        "bg": {
+          "dark": "transparent",
+          "light": "transparent"
+        },
+        "border": {
+          "dark": "#A37734",
+          "light": "#C48F3F"
+        }
+      },
+      "local": {
+        "description": "Runs on this machine and never leaves it. The comp's amber.",
+        "fg": {
+          "dark": "#FFBC56",
+          "light": "#7A4E00"
+        },
+        "bg": {
+          "dark": "rgba(242,166,24,0.08)",
+          "light": "rgba(163,119,52,0.10)"
+        },
+        "border": {
+          "dark": "#A37734",
+          "light": "#C48F3F"
+        }
+      },
+      "allowed": {
+        "description": "Decision record: the action was permitted. The machine may go on, so it is the machine's cyan.",
+        "fg": {
+          "dark": "#00DBD3",
+          "light": "#006466"
+        },
+        "bg": {
+          "dark": "rgba(0,220,220,0.10)",
+          "light": "rgba(0,134,135,0.10)"
+        },
+        "border": {
+          "dark": "#008687",
+          "light": "#4FB0B1"
+        }
+      },
+      "denied": {
+        "description": "Decision record: the action was refused. Clay, not the reserved pink and not the error red.",
+        "fg": {
+          "dark": "#FF7E6E",
+          "light": "#8E2F1F"
+        },
+        "bg": {
+          "dark": "rgba(255,126,110,0.12)",
+          "light": "rgba(126,54,40,0.10)"
+        },
+        "border": {
+          "dark": "#7E3628",
+          "light": "#C97A6A"
+        }
+      },
+      "dormant": {
+        "description": "Session asleep. Costs nothing, wakes on the next message. Violet.",
+        "fg": {
+          "dark": "#9C8BFF",
+          "light": "#4A3F86"
+        },
+        "bg": {
+          "dark": "rgba(156,139,255,0.10)",
+          "light": "rgba(74,63,134,0.10)"
+        },
+        "border": {
+          "dark": "#4A3F86",
+          "light": "#8C80C9"
+        }
+      },
+      "readonly": {
+        "description": "Access withdrawn or archived. Readable, not writable.",
+        "fg": {
+          "dark": "#8A8AA0",
+          "light": "#5A5A76"
+        },
+        "bg": {
+          "dark": "rgba(138,138,160,0.08)",
+          "light": "rgba(90,90,118,0.08)"
+        },
+        "border": {
+          "dark": "rgba(232,223,208,0.42)",
+          "light": "rgba(11,11,18,0.42)"
+        }
+      },
+      "private": {
+        "description": "Session belongs to one person, or to the people invited to it. Violet, like asleep: a quiet state, not an alarming one.",
+        "fg": {
+          "dark": "#9C8BFF",
+          "light": "#4A3F86"
+        },
+        "bg": {
+          "dark": "rgba(156,139,255,0.10)",
+          "light": "rgba(74,63,134,0.10)"
+        },
+        "border": {
+          "dark": "#4A3F86",
+          "light": "#8C80C9"
+        }
+      },
+      "error": {
+        "description": "Something failed. Reserved for failure, never for denial: hotter than clay.",
+        "fg": {
+          "dark": "#FF6A55",
+          "light": "#A5261A"
+        },
+        "bg": {
+          "dark": "rgba(255,106,85,0.12)",
+          "light": "rgba(165,38,26,0.10)"
+        },
+        "border": {
+          "dark": "#8A3A2E",
+          "light": "#D4877B"
+        }
+      },
+      "offline": {
+        "description": "Connection lost or platform unreachable. A dimmer tan than the amber of queued.",
+        "fg": {
+          "dark": "#C9B27A",
+          "light": "#5D4A1E"
+        },
+        "bg": {
+          "dark": "rgba(201,178,122,0.10)",
+          "light": "rgba(93,74,30,0.08)"
+        },
+        "border": {
+          "dark": "#7A6A40",
+          "light": "#B9A578"
+        }
+      }
+    },
+    "diff": {
+      "addedBg": {
+        "dark": "rgba(0,220,220,0.10)",
+        "light": "rgba(0,134,135,0.10)"
+      },
+      "addedText": {
+        "dark": "#00DBD3",
+        "light": "#006466"
+      },
+      "addedMarker": {
+        "dark": "#008687",
+        "light": "#4FB0B1"
+      },
+      "removedBg": {
+        "dark": "rgba(255,126,110,0.12)",
+        "light": "rgba(126,54,40,0.10)"
+      },
+      "removedText": {
+        "dark": "#FF7E6E",
+        "light": "#8E2F1F"
+      },
+      "removedMarker": {
+        "dark": "#7E3628",
+        "light": "#C97A6A"
+      },
+      "contextText": {
+        "dark": "#A3A3B8",
+        "light": "#4A4A66"
+      },
+      "gutterBg": {
+        "dark": "#0B0B12",
+        "light": "#ECE3CF"
+      },
+      "gutterText": {
+        "dark": "#6A6A82",
+        "light": "#5F5F78"
+      },
+      "hunkHeader": {
+        "dark": "#8A8AA0",
+        "light": "#5A5A76"
+      }
+    },
+    "person": {
+      "1": {
+        "dark": "#00DBD3",
+        "light": "#006466"
+      },
+      "2": {
+        "dark": "#9C8BFF",
+        "light": "#4A3F86"
+      },
+      "3": {
+        "dark": "#FFBC56",
+        "light": "#7A4E00"
+      },
+      "4": {
+        "dark": "#FF7E6E",
+        "light": "#8E2F1F"
+      },
+      "5": {
+        "dark": "#E29BFF",
+        "light": "#7A2E96"
+      },
+      "6": {
+        "dark": "#B6C36E",
+        "light": "#4E5B10"
+      },
+      "self": {
+        "dark": "#8A8AA0",
+        "light": "#5A5A76"
+      },
+      "agent": {
+        "dark": "#F4ECDB",
+        "light": "#0B0B12"
+      }
+    }
+  },
+  "shadow": {
+    "none": "none",
+    "raise": {
+      "dark": "0 1px 2px rgba(0,0,0,0.55)",
+      "light": "0 1px 2px rgba(11,11,18,0.12)",
+      "use": "Menus and chips only."
+    },
+    "sheet": {
+      "dark": "0 -8px 28px rgba(0,0,0,0.6)",
+      "light": "0 -8px 28px rgba(11,11,18,0.16)",
+      "use": "Bottom sheet and mobile backstage."
+    },
+    "overlay": {
+      "dark": "0 16px 48px rgba(0,0,0,0.68)",
+      "light": "0 16px 48px rgba(11,11,18,0.22)",
+      "use": "Dialogs."
+    },
+    "footlight": {
+      "dark": "0 -14px 40px rgba(255,0,128,0.14)",
+      "light": "0 -14px 40px rgba(196,0,95,0.14)",
+      "use": "The approval panel only. The panel's own pink edges are borders; this is the glow under them."
+    }
+  },
+  "typography": {
+    "family": {
+      "sans": {
+        "value": "'Figtree','Segoe UI',system-ui,sans-serif",
+        "description": "Interface and reading. Geometric, with the black weights the headlines are set in, and Danish diacritics at every weight."
+      },
+      "mono": {
+        "value": "'DM Mono',ui-monospace,Menlo,monospace",
+        "description": "Anything literal — paths, commands, diffs, identifiers — and every label and pill."
+      },
+      "screen": {
+        "value": "'VT323',monospace",
+        "description": "The screen face. Section labels only, `// LIKE THIS`, and a device code. Never body text."
+      }
+    },
+    "role": {
+      "display": {
+        "family": "sans",
+        "size": "clamp(52px, 9vw, 96px)",
+        "weight": 900,
+        "lineHeight": 0.9,
+        "letterSpacing": "-0.035em",
+        "use": "The wordmark on the launcher, and nothing else."
+      },
+      "title": {
+        "family": "sans",
+        "size": "30px",
+        "weight": 900,
+        "lineHeight": 1.15,
+        "letterSpacing": "-0.025em",
+        "use": "Screen title."
+      },
+      "heading": {
+        "family": "sans",
+        "size": "22px",
+        "weight": 900,
+        "lineHeight": 1.2,
+        "letterSpacing": "-0.02em",
+        "use": "Session subject, approval headline."
+      },
+      "tile": {
+        "family": "sans",
+        "size": "26px",
+        "weight": 900,
+        "lineHeight": 1.15,
+        "letterSpacing": "-0.02em",
+        "use": "The title on a tile: the launcher's three, and the tiles a new session is cast from."
+      },
+      "subheading": {
+        "family": "sans",
+        "size": "16px",
+        "weight": 800,
+        "lineHeight": 1.3,
+        "letterSpacing": "0",
+        "use": "Row titles, tile titles, group headings."
+      },
+      "body": {
+        "family": "sans",
+        "size": "15px",
+        "weight": 400,
+        "lineHeight": 1.65,
+        "letterSpacing": "0",
+        "use": "Conversation and all long-form reading."
+      },
+      "name": {
+        "family": "sans",
+        "size": "14px",
+        "weight": 800,
+        "lineHeight": 1.3,
+        "letterSpacing": "0",
+        "use": "The name over a turn in the transcript, in the person's colour."
+      },
+      "bodyStrong": {
+        "family": "sans",
+        "size": "15px",
+        "weight": 600,
+        "lineHeight": 1.65,
+        "letterSpacing": "0",
+        "use": "Emphasis inside body copy."
+      },
+      "ui": {
+        "family": "sans",
+        "size": "15px",
+        "weight": 600,
+        "lineHeight": 1.4,
+        "letterSpacing": "0",
+        "use": "Buttons, nav items, inputs."
+      },
+      "uiSmall": {
+        "family": "sans",
+        "size": "13px",
+        "weight": 400,
+        "lineHeight": 1.5,
+        "letterSpacing": "0",
+        "use": "The sentence under a title, secondary copy, notes."
+      },
+      "note": {
+        "family": "sans",
+        "size": "14px",
+        "weight": 400,
+        "lineHeight": 1.5,
+        "letterSpacing": "0",
+        "use": "The sentence beside a section label, a backstage item, the copy on a tile, the scoped answer."
+      },
+      "micro": {
+        "family": "mono",
+        "size": "12px",
+        "weight": 500,
+        "lineHeight": 1.3,
+        "letterSpacing": "0.08em",
+        "use": "Labels, pills, counts, relative times. Upper case and tracked: the comp's mono label."
+      },
+      "screen": {
+        "family": "screen",
+        "size": "19px",
+        "weight": 400,
+        "lineHeight": 1.1,
+        "letterSpacing": "0.14em",
+        "use": "`// SECTION` labels that name a region of a screen."
+      },
+      "code": {
+        "family": "mono",
+        "size": "13px",
+        "weight": 400,
+        "lineHeight": 1.55,
+        "letterSpacing": "0",
+        "use": "Commands, file paths, inline code, profile names."
+      },
+      "codeSmall": {
+        "family": "mono",
+        "size": "12px",
+        "weight": 400,
+        "lineHeight": 1.7,
+        "letterSpacing": "0",
+        "use": "Tool payloads and diff bodies."
+      },
+      "wordmark": {
+        "family": "sans",
+        "size": "19px",
+        "weight": 900,
+        "lineHeight": 1,
+        "letterSpacing": "-0.02em",
+        "use": "The word 'troupe' beside the mask. Always lowercase in the rail; the launcher alone sets it in capitals with the last two letters in pink."
+      }
+    },
+    "measure": {
+      "reading": {
+        "value": "78ch",
+        "description": "Max line length for the conversation and long copy."
+      },
+      "narrow": {
+        "value": "46ch",
+        "description": "Empty states, sign-in, error copy."
+      }
+    }
+  },
+  "space": {
+    "0": "0px",
+    "1": "4px",
+    "2": "8px",
+    "3": "12px",
+    "4": "16px",
+    "5": "22px",
+    "6": "28px",
+    "7": "38px",
+    "8": "52px",
+    "9": "72px",
+    "10": "96px",
+    "11": "128px",
+    "px": "1px",
+    "half": "2px",
+    "$note": "The comp's scale runs 4, 8, 12, 16, 22, 28, 38, 52. Steps 9 to 11 continue it for the few screens that breathe more than a session does."
+  },
+  "radius": {
+    "none": "0px",
+    "xs": "0px",
+    "sm": "0px",
+    "md": "0px",
+    "lg": "0px",
+    "pill": "0px",
+    "$note": "Afterglow is square. Every radius is zero; the names stay so a component that asks for one gets an answer in every theme."
+  },
+  "border": {
+    "hairline": "1px",
+    "strong": "1px",
+    "edge": "2px",
+    "focus": "2px",
+    "marker": "3px",
+    "heavy": "4px",
+    "$note": "marker is the left edge that flags a row or panel as needing attention; edge is the left edge of a message in the transcript (solid in the person's colour, dashed while it is held); heavy is the approval panel's top edge. Strong borders differ from hairlines by opacity, not by width."
+  },
+  "motion": {
+    "duration": {
+      "instant": "0ms",
+      "fast": "120ms",
+      "base": "180ms",
+      "slow": "300ms",
+      "wake": "700ms",
+      "caret": "1000ms",
+      "pulse": "2200ms"
+    },
+    "easing": {
+      "standard": "cubic-bezier(0.2, 0, 0, 1)",
+      "enter": "cubic-bezier(0.05, 0.7, 0.1, 1)",
+      "exit": "cubic-bezier(0.3, 0, 0.8, 0.15)",
+      "linear": "linear"
+    },
+    "rules": [
+      "Every animation is idempotent: a server-driven DOM replacement may restart it at any time, and restarting must look acceptable.",
+      "Nothing animates except a state genuinely in motion: running, waiting, reconnecting, waking, and the caret while the troupe writes.",
+      "A tile lifts two pixels on hover and its hard shadow grows to match. Nothing else moves.",
+      "prefers-reduced-motion: reduce collapses all durations to instant and replaces pulses with static marks."
+    ]
+  },
+  "breakpoint": {
+    "min": {
+      "value": "380px",
+      "description": "Hard floor. Everything must work here."
+    },
+    "sm": {
+      "value": "480px"
+    },
+    "md": {
+      "value": "720px",
+      "description": "Backstage becomes a side panel instead of a sheet."
+    },
+    "lg": {
+      "value": "1040px",
+      "description": "Session list rail appears beside the conversation."
+    },
+    "xl": {
+      "value": "1320px",
+      "description": "Reading column caps; backstage widens."
+    }
+  },
+  "zIndex": {
+    "base": 0,
+    "raised": 10,
+    "sticky": 100,
+    "rail": 200,
+    "approval": 300,
+    "sheet": 400,
+    "overlay": 500,
+    "toast": 600
+  },
+  "size": {
+    "touchTarget": {
+      "value": "44px",
+      "description": "Minimum hit area for anything tappable, approvals included."
+    },
+    "avatar": {
+      "sm": "20px",
+      "md": "26px",
+      "lg": "34px"
+    },
+    "markDisplay": "108px",
+    "railWidth": "230px",
+    "backstageWidth": "380px",
+    "composerMinHeight": "52px",
+    "switchTrack": {
+      "value": "44px",
+      "description": "Tool on/off switch track. Knob 18px, travel 18px."
+    }
+  },
+  "mark": {
+    "$note": "The mask. One silhouette, split down the middle: the filled half is what the agent did alone, the hollow half is what still needs a person.",
+    "path": "M9 15 Q9 7 24 7 Q39 7 39 15 L39 25 Q39 35 24 43 Q9 35 9 25 Z",
+    "viewBox": "0 0 48 48",
+    "strokeWidth": {
+      "lg": "2.6",
+      "md": "3",
+      "sm": "3.4"
+    },
+    "eyeLeft": "M15.5 21 Q19 18.4 22.5 21 Q19 23.6 15.5 21 Z",
+    "eyeRight": "M25.5 21 Q29 18.4 32.5 21 Q29 23.6 25.5 21 Z",
+    "seam": {
+      "path": "M24 8 L24 42",
+      "minSize": "32px",
+      "description": "Drop the seam line below 32px and let the colour change be the seam."
+    },
+    "lightDirection": "right",
+    "rules": [
+      "Fill the mask with the surface behind it, never a colour outside the token set.",
+      "No mouth, ever.",
+      "An eye on a filled half is cut out of it; an eye on a hollow half is solid.",
+      "People never get a mask. A human is initials in a ring."
+    ]
+  }
+}

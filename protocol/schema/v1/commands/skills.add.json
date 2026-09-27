@@ -1,0 +1,28 @@
+{
+  "$id": "https://troupe.dev/schema/v1/commands/skills.add.json",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "additionalProperties": true,
+  "properties": {
+    "command_id": {
+      "type": "string"
+    },
+    "from": {
+      "type": "string"
+    },
+    "link": {
+      "type": "boolean"
+    },
+    "scope": {
+      "type": "string"
+    },
+    "workspace": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "command_id",
+    "from"
+  ],
+  "title": "skills.add",
+  "type": "object"
+}

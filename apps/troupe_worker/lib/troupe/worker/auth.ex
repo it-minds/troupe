@@ -41,11 +41,11 @@ defmodule Troupe.Worker.Auth do
   # own and never get here.
   @session_methods ~w(
     subscribe unsubscribe session.list fleet.get
-    session.get
+    session.get commands.list
     input.send turn.cancel profile.switch approval.respond question.answer todo.edit
     session.goal.set session.goal.get session.goal.clear
     session.loop.start session.loop.stop session.loop.get
-    fs.list fs.read fs.upload blob.get mcp.status presence.set
+    fs.list fs.read fs.upload blob.get mcp.status context.get presence.set
     tools.register tools.unregister
   )
 

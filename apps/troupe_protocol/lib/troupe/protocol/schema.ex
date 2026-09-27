@@ -145,6 +145,16 @@ defmodule Troupe.Protocol.Schema do
       "tool_results" => %{"results" => required(:array)},
       "todo_updated" => %{"items" => required(:array), "source" => optional(:string)},
       "profile_switched" => %{"from" => optional(:string), "to" => required(:string)},
+      # What the agent's system prompt was read from at this turn (Decision 706): the
+      # instruction files and the brief, as `context.get` lists them, each with `scope`,
+      # `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped` and
+      # `hash`. Written when the set or a file changed since the agent's last turn.
+      "instructions_loaded" => %{
+        "budget" => required(:integer),
+        "used" => required(:integer),
+        "files" => required(:array),
+        "searched" => optional({:array, :string})
+      },
       # The session's goal, written by the root agent under whoever set or cleared it, and
       # carrying the `command_id` of the `session.goal.*` call that asked.
       "goal_set" => %{"text" => required(:string), "command_id" => optional(:string)},
@@ -206,12 +216,20 @@ defmodule Troupe.Protocol.Schema do
       },
       # `allow` (one more slice, `grant` says how much), `always` (the limit asked about,
       # named in `lifted`, is lifted for this agent and its subagents; the others still
-      # ask — Decision 687) or `deny` (`budget_exhausted` follows).
+      # ask — Decision 687), `raise` (`limit` goes up by `amount` for `scope` — `run`,
+      # `session` or `workspace`, the last also written to the file `path` names —
+      # Decision 699), `unclear` (the answer could not be read, `note` says why, and the
+      # question is asked again under the next id) or `deny` (`budget_exhausted` follows).
       "budget_ask_answered" => %{
         "call_id" => required(:string),
         "decision" => required(:string),
         "grant" => optional(:object),
-        "lifted" => optional(:string)
+        "lifted" => optional(:string),
+        "scope" => optional(:string),
+        "limit" => optional(:string),
+        "amount" => optional(:integer),
+        "path" => optional(:string),
+        "note" => optional(:string)
       },
       # One tool has failed `failures` times in a row and the agent asks before its next
       # model call whether the turn goes on (Decision 687). The question itself is a
@@ -529,7 +547,13 @@ defmodule Troupe.Protocol.Schema do
       "workspace.search" => %{"query" => required(:string), "limit" => optional(:integer)},
       "workflows.list" => %{"workspace" => required(:string)},
       "agents.list" => %{"workspace" => required(:string)},
+      # The slash commands a client may offer for a session, agents included; reading
+      # the table wakes nothing.
+      "commands.list" => %{"session_id" => required(:string)},
       "memory.get" => %{"workspace" => required(:string)},
+      # Every file the session's next prompt is read from, with its scope and its share
+      # of the budget (Decision 706); reading it wakes nothing.
+      "context.get" => %{"session_id" => required(:string)},
       "mcp.status" => %{"session_id" => required(:string)},
       "memory.forget" => %{"command_id" => required(:string), "workspace" => required(:string)},
       "worktree.list" => %{"workspace" => optional(:string)},
@@ -606,6 +630,59 @@ defmodule Troupe.Protocol.Schema do
         "command_id" => required(:string),
         "from" => required(:string),
         "workspace" => optional(:string)
+      },
+      # A first run's questions (Decision 705) — the daemon's only, like the settings
+      # they write; a worker answers `method_not_found`. `answer` is the named step's
+      # answer, whose shape the step decides; the key goes in through it and never
+      # comes back out.
+      "setup.get" => %{},
+      "setup.answer" => %{
+        "command_id" => required(:string),
+        "step" => required(:string),
+        "answer" => optional(:object)
+      },
+      # The person's own MCP servers and skills (Decision 700) — the daemon's only, like
+      # the settings; a worker answers `method_not_found`. A file is named to import
+      # (`from`, copied, or read in place with `link`), or one server is written
+      # (`name` and `server`); `scope` is `user` or `workspace`. `mcp.status` above is
+      # what a session runs, and `mcp.list` with a `session_id` joins the two.
+      "mcp.list" => %{"workspace" => optional(:string), "session_id" => optional(:string)},
+      "mcp.add" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => optional(:string),
+        "server" => optional(:object),
+        "from" => optional(:string),
+        "link" => optional(:boolean)
+      },
+      "mcp.remove" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => optional(:string),
+        "include" => optional(:string)
+      },
+      "mcp.check" => %{
+        "workspace" => optional(:string),
+        "session_id" => optional(:string),
+        "name" => optional(:string),
+        "server" => optional(:object)
+      },
+      "skills.list" => %{"workspace" => optional(:string)},
+      "skills.add" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "from" => required(:string),
+        "link" => optional(:boolean)
+      },
+      "skills.remove" => %{
+        "command_id" => required(:string),
+        "scope" => optional(:string),
+        "workspace" => optional(:string),
+        "name" => optional(:string),
+        "include" => optional(:string)
       }
     }
   end

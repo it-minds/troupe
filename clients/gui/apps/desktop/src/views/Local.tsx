@@ -19,6 +19,7 @@ import { useAdminQuery } from "../hooks";
 import type { MachineUser } from "../hooks";
 import { Confirm, Failed, Loading, Pill, Table, When } from "./bits";
 import { Models } from "./Models";
+import { Servers } from "./Servers";
 
 export interface DaemonState {
   client: DaemonClient | null;
@@ -54,9 +55,9 @@ export function Local({
 }): JSX.Element {
   return (
     <>
-      <header className="toolbar">
-        <h2>This computer</h2>
-        <span className="spacer" />
+      <header className="screen-head">
+        <span className="count">Settings</span>
+        <h1>This computer</h1>
         <DaemonStatus daemon={daemon} />
       </header>
 
@@ -65,6 +66,7 @@ export function Local({
         <Connect daemon={daemon} />
         {daemon.client && <WhoAmI daemon={daemon} me={me} planeUrl={planeUrl} />}
         {daemon.client && <Models client={daemon.client} auth={auth} />}
+        {daemon.client && <Servers client={daemon.client} />}
         {daemon.client && <Workspaces client={daemon.client} />}
         {daemon.client && <Worktrees client={daemon.client} />}
       </div>
@@ -76,7 +78,7 @@ function DaemonStatus({ daemon }: { daemon: DaemonState }): JSX.Element {
   if (daemon.status === "connected") return <Pill status="running">Connected</Pill>;
   if (daemon.status === "searching") return <Pill status="queued">Looking</Pill>;
   if (daemon.status === "error") return <Pill status="error">Not answering</Pill>;
-  if (daemon.status === "absent") return <Pill status="dormant">Not running</Pill>;
+  if (daemon.status === "absent") return <Pill status="idle">Not running</Pill>;
   return <Pill status="offline">No way to find it</Pill>;
 }
 

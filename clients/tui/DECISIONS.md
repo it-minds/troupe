@@ -335,3 +335,101 @@ One line of rationale per deviation or ambiguity resolution. Newest at the botto
      history, and PROTOCOL.md §6 says how a move looks ("A session that moves"). Proof:
      `test/troupe/remote_move_test.exs`, six cases that all failed before this, over a
      `FakeRemote` that can move a session between workers and take a worker away.
+
+119. **The command palette is a popup over the session, opened by `/` on an empty line,
+     Ctrl-K with nothing typed, or `/help`, and it is a view over the harness's
+     `commands.list`: the TUI keeps no list of its own beyond the clauses that run each
+     built-in.** Issue #124, root Decision 698. The three lists in `server.ex` collapse
+     into `@builtins`, which a test holds equal to the harness's table; aliases, Tab
+     completion and which commands take a window path all come from the table
+     (`canonical/2`, `command_names/1`, `takes_window?/2`), so adding a command is one
+     entry there and one clause here. What is typed while the palette is open filters by
+     name, alias and summary; ↑↓ and PgUp/PgDn move over the rows, which keep their
+     sections; Enter runs the row, or puts it on the line when it wants an argument or
+     a window the person has to name; Tab and Space put it on the line too, so
+     `/merge 2⏎` types exactly as it did before there was a palette; Esc closes it with
+     the line clear. A row the client cannot run now is greyed with the reason — no
+     window activated, a session on a plane — and the detail box says why. `/settings`
+     keeps its own entry and `/help` (and `?`) now means help. The session stays on
+     screen behind the popup, and a command picked from a window acts on that window.
+     The box's slash is a prompt: a line that carries its own (one the palette put
+     there) is not shown with two. Proof: `test/troupe/command_palette_test.exs`.
+
+120. **The budget question is drawn as the question it rides on — the harness's words,
+     its options numbered and picked with a digit, or an amount typed — and y, n and a
+     no longer answer it.** Issue #183, troupe-remote Decision 699. The window drew its
+     own line for a `:budget` item, the limit and "continue anyway? (y one more slice / n
+     stop / a lift this limit)", and dropped the `question_asked` the harness writes
+     beside it. So the sizes and scopes the daemon now offers, and its account of what
+     the limit is for and what the session has spent, never reached the screen, and a
+     typed amount — the answer the issue is about — could not be given at all.
+     `Troupe.Remote.Translate` now folds the question's words and options into the
+     `:budget_ask_started` event, whichever of the two events comes first, and the
+     window keeps one item per id; `pending_blocks` draws it as `BUDGET: <the harness's
+     words>`, the numbered options and a hint naming the typed forms, and the digit and
+     Enter keys treat a `:budget` item as a `:question`. The y/n/a shortcuts answer
+     approvals alone: with typing on, an answer in a person's own words — `no limit this
+     session` — would have stopped the session on its first key. A daemon from before
+     this sends the question without an account and the old three options, which draw
+     as they are; headless mode still stops at the budget, and once, though the item is
+     now drawn twice. Proof: `Troupe.RemoteTranslateTest` (the item filled in by its
+     question), `Troupe.BudgetAnswerTest` (the words and options on screen, a digit
+     answers, a typed answer beginning with `n` stays a letter and is sent with Enter),
+     and the recorded questions, which draw as before.
+
+121. **The `/mcp` page is the person's own servers and skills, from the daemon's
+     layers, with the verbs to bring them in; it never holds a path of its own.**
+     Issue #60's local slice (root Decision 700). The page listed what `mcp.status`
+     said about a running session and nothing else, and the only way in was YAML by
+     hand. It now opens on `mcp.list` with the session's id and `skills.list`
+     (`Troupe.Client.sources/1`), so every server the user's `mcp.json` and the
+     workspace's `.troupe/mcp.json` give this workspace is listed with its layer, its
+     file and — where the session runs it — its state, and every skill beside them.
+     `/mcp import <path>` and `link <path>` are `mcp.add`, `/skills import` and `link`
+     are `skills.add`, `remove` and `unlink` the two `remove` methods and `check` is
+     `mcp.check` on this session (`Troupe.Client.manage_sources/3`); `--workspace`
+     names the scope. On the page `c` checks the selected server, which is also how one
+     written after the session began is started, `d` writes `disabled` through
+     `mcp.add` and checks, and `x` removes, a removed server being checked afterwards so
+     the session stops it. All of it goes through the daemon: the TUI reads and writes
+     no `mcp.json` itself, so the desktop app sees the same set, and a remote session's
+     page says its servers are its profile's. The status line's `mcp:` count is fed from
+     the same listing. Proof: `test/troupe/mcp_page_test.exs`, an import and a link
+     typed into the TUI over the embedded daemon, the stub started with `c`, and the
+     remove key.
+
+123. **Plain `troupe` asks the daemon whether the first run is done before it asks its
+     own questions, and `troupe doctor` prints the harness's checks.** Issue #76's
+     second slice (root Decision 705). A first run finished in the desktop app is
+     recorded by the daemon, and `before_session/2` now reads `setup.get` first: a
+     daemon that says `needed: false` gets no questions, and one from before the
+     method — which answers `method_not_found` — gets the questions of Decision 113 as
+     before. `troupe config`'s own questions are unchanged: an explicit command asks.
+     The full-screen flow (`troupe setup`) is a later slice. `troupe doctor` is
+     `Troupe.Doctor`, the same lines `troupe-daemon doctor` prints, plus what only
+     this client knows — the planes it is logged in to, each asked for its discovery
+     document; it needs no daemon, and exits 1 on a failure. `Troupe.Doctor` joins the
+     harness modules the TUI may call (`mix troupe.xref`), since the checks read the
+     files a daemon may not be running to answer about. Proof:
+     `test/troupe/config_setup_test.exs` ("a first run done in the desktop app means no
+     questions here", "a daemon from before setup.get still gets the questions") and
+     `test/troupe/doctor_test.exs`.
+
+124. **`/context` prints the provenance of the session's prompt on the notice line, as
+     the daemon's `context.get` answers it, and holds no reading of its own.** Issue
+     #123's first slice (root Decision 706). A repository's `AGENTS.md` now reaches
+     every prompt, with the person's own file before it, one per directory down to the
+     workspace after it and the brief last; the question that follows is "which files,
+     and did mine get in", and the TUI answers it the way `/memory` answers for the
+     brief: one line, `context: 1,234 of 16,000 chars · AGENTS.md (root) 800, CLAUDE.md
+     skipped · app/AGENTS.md (nested) 434 · .troupe/memory.md (brief) absent`, with
+     what the budget cut or left out said where it happened. Paths under the workspace
+     are shown from it, the person's own whole. `Troupe.Client.instructions/1` is the
+     call, `Worker.rpc` with `context.get` behind it, on a remote session too — the
+     pod's checkout has instruction files of its own and the method is a session's. The
+     TUI reads no file itself, so what it prints is what the daemon will read at the
+     next turn, and the command is one entry in the harness's table, held equal to the
+     TUI's built-ins by the palette test. Proof: `test/troupe/context_command_test.exs`
+     (the line for a workspace with an alias hidden, the notice from `/context` typed,
+     and the line's shape for a cut, a left-out file and the brief), and `/context` in
+     the installed TUI on a scratch repository, on the pull request.

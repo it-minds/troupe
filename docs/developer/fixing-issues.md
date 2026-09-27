@@ -63,7 +63,13 @@ scratch directory, reading `free` or `held by #N`. A fixer that needs the instal
 its code and tests first, then waits for `free`. Writing the file is not atomic, and two
 fixers that both read `free` both write, so a fixer writes `held by #N`, waits a second,
 reads it again, and goes ahead only if it still says `#N`; otherwise it waits for `free`
-again. It writes `free` back when it has verified or rolled back.
+again. It writes `free` back when it has verified or rolled back, after stopping anything it
+started with scratch homes (a daemon, a dev server): the next fixer's install stops the
+installed daemon, not those.
+
+The dev services (`scripts/dev-up`: Postgres, MinIO, OpenBao) do not survive a restart of
+the machine or the WSL VM. A suite failing with `econnrefused` or a closed connection is
+checked against `docker ps` before anything is blamed on a change.
 
 Besides the install, the plane's tests share one database, `troupe_plane_test`, so one
 plane suite runs at a time: two at once deadlock (Postgrex `40P01`). The suite does not
@@ -183,6 +189,9 @@ does not reproduce it, stop with `cannot-reproduce` and what was tried.
 - The smallest change that makes the reproduction pass and reads like the code around
   it: same comment density, same naming, same prose style in docs.
 - Stay inside the issue or the slice. Anything else goes in the report under `noticed`.
+- A test that starts a session, directly or through a flow that ends in one, stops it in
+  `on_exit`. A session left running is still there for every later test in the VM, and
+  the failure lands in someone else's test at random.
 - A design choice the issue does not settle and neither the code nor `DECISIONS.md`
   answers: stop with `needs-decision`, the options and a recommendation.
 
@@ -195,7 +204,7 @@ Every row that applies must pass.
 | `apps/troupe_daemon`, `troupe_core`, `troupe_gateway`, `troupe_protocol` (anything the daemon ships) | targeted `mixw test <files>`, `mixw credo --strict` on touched files, then **install and verify** |
 | `clients/tui` | `mixw test` in `clients/tui`, then **install and verify** |
 | `apps/troupe_plane`, `troupe_worker`, `troupe_operator`, `troupe_a2a` (server only) | targeted `mixw test <files>`; `bash scripts/ci --gates` when it runs here. A test that prints `SKIPPED` for Postgres, OpenBao or MinIO is not a pass - name what could not run |
-| `clients/gui` | `pnpm -C clients/gui install`, `typecheck`, `test`; for UI behaviour, `pnpm -C clients/gui fake` and the desktop app's web dev server in a browser, checking the behaviour the issue describes. For a Tauri build, `pnpm tauri build --bundles nsis` works offline here; test-install a renamed build (`--config` productName and mainBinaryName) so the installed app is untouched |
+| `clients/gui` | `pnpm -C clients/gui install`, `typecheck`, `test`; for UI behaviour, `pnpm -C clients/gui fake` and the desktop app's web dev server in a browser, checking the behaviour the issue describes. For a Tauri build, `pnpm tauri build --bundles nsis` works offline here; test-install a renamed build (`--config` productName and mainBinaryName) so the installed app is untouched, into a scratch directory (`/S /D=<dir>`), and run it in local mode only: it shares the real app's stored sign-in (defects D33) |
 | docs only | links resolve, Mermaid renders if touched; no install |
 
 **Install and verify**, in PowerShell from the worktree root:

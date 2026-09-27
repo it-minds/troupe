@@ -11,38 +11,29 @@
 
 import { useMemo, useState } from "react";
 import type { JSX } from "react";
-import { filterRows } from "@troupe/client";
-import type { AuthSession, DaemonClient, FleetRow, SessionKind } from "@troupe/client";
-import { StartSession } from "./StartSession";
+import { filterRows, hasUnseen, unseenSummary } from "@troupe/client";
+import type { FleetRow, SessionKind } from "@troupe/client";
 import { Cost, RowStatus, statusOf, Sync, When, Where } from "./bits";
 
 export function Sessions({
-  auth,
-  daemon,
-  linked,
   rows,
   loading,
   error,
   onOpen,
-  onCreated,
+  onStart,
 }: {
-  /** The plane, for team sessions. Null in local mode, which lists this computer's alone. */
-  auth: AuthSession | null;
-  daemon: DaemonClient | null;
-  /** Whether the daemon records this person by name, which a private session needs. */
-  linked: boolean;
   rows: FleetRow[];
   loading: boolean;
   error: string | null;
   onOpen: (id: string) => void;
-  onCreated: (id: string) => void;
+  /** Go and cast a troupe: the start screen is the shell's, not the list's. */
+  onStart: () => void;
 }): JSX.Element {
   const [query, setQuery] = useState("");
   const [state, setState] = useState("");
   const [status, setStatus] = useState("");
   const [profile, setProfile] = useState("");
   const [kind, setKind] = useState<SessionKind | "">("");
-  const [starting, setStarting] = useState(false);
 
   const shown = useMemo(
     () =>
@@ -64,7 +55,12 @@ export function Sessions({
 
   return (
     <>
-      <header className="toolbar">
+      <header className="screen-head">
+        <span className="count">Sessions · {rows.length} total</span>
+        <h1>Everything your troupe is holding</h1>
+      </header>
+
+      <div className="toolbar">
         <input
           className="search"
           type="search"
@@ -107,10 +103,10 @@ export function Sessions({
         )}
         <span className="spacer" />
         <span className="count">{loading && rows.length === 0 ? "loading" : `${shown.length} of ${rows.length}`}</span>
-        <button className="primary" onClick={() => setStarting(true)}>
+        <button className="primary" onClick={onStart}>
           Start a session
         </button>
-      </header>
+      </div>
 
       {error && (
         <div className="banner error">
@@ -127,7 +123,7 @@ export function Sessions({
               A session is one piece of work handed to the troupe: you describe it, it works on it, and it asks you before doing anything
               that changes something.
             </p>
-            <button className="primary" onClick={() => setStarting(true)}>
+            <button className="primary" onClick={onStart}>
               Start a session
             </button>
           </div>
@@ -153,23 +149,15 @@ export function Sessions({
           </>
         )}
       </div>
-
-      {starting && (
-        <StartSession
-          auth={auth}
-          daemon={daemon}
-          linked={linked}
-          onClose={() => setStarting(false)}
-          onCreated={(id) => {
-            setStarting(false);
-            onCreated(id);
-          }}
-        />
-      )}
     </>
   );
 }
 
+/**
+ * A row is the title over its facts, then the pills, then when: what the comp's row
+ * says, in its order — the profile and the cost are what a session *is*, the pills are
+ * where it runs and what it is doing, and the time sits at the edge to be scanned.
+ */
 function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void }): JSX.Element {
   return (
     <ul className="rows">
@@ -178,13 +166,18 @@ function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void
         return (
           <li key={r.id}>
             <button className={`row is-${status}`} onClick={() => onOpen(r.id)}>
-              <span className="subject">{r.title ?? r.id}</span>
+              <span className="subject">
+                <span className="title">{r.title ?? r.id}</span>
+                <span className="sub">
+                  {r.profile && <span>{r.profile}</span>}
+                  <Cost micros={r.costMicros} />
+                </span>
+              </span>
               <span className="meta">
-                <RowStatus row={r} />
+                <Unread row={r} />
                 <Where kind={r.kind} />
                 <Sync state={r.sync} />
-                <span className="when">{r.profile}</span>
-                <Cost micros={r.costMicros} />
+                <RowStatus row={r} />
                 <When iso={r.lastActiveAt} />
               </span>
             </button>
@@ -192,6 +185,22 @@ function Rows({ rows, onOpen }: { rows: FleetRow[]; onOpen: (id: string) => void
         );
       })}
     </ul>
+  );
+}
+
+/**
+ * What happened while nobody was reading the session (issue #119), as a marker: how many
+ * things, and the sentence behind them. It goes when the session is opened, which is
+ * what clears it at the daemon; a listing never does.
+ */
+function Unread({ row }: { row: FleetRow }): JSX.Element | null {
+  const summary = unseenSummary(row);
+  if (!summary || !hasUnseen(row.unseen)) return null;
+  const n = row.unseen.turns + row.unseen.approvals + row.unseen.questions;
+  return (
+    <span className="pill new" title={`While you were away: ${summary}`} aria-label={`While you were away: ${summary}`}>
+      {n} new
+    </span>
   );
 }
 

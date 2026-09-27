@@ -206,6 +206,39 @@ defmodule Troupe.Session.ClientToolsTest do
     end
   end
 
+  describe "a call parked on a registrant that went away" do
+    test "is answered by the next registration of the same tool", %{session: session} do
+      registrant =
+        spawn(fn ->
+          receive do
+            :stop -> :ok
+          end
+        end)
+
+      consent = consent!(session.id, registrant, "bob", ["mail.send"])
+      {:ok, _} = ClientTools.register(session.id, registrant, consent, specs: [spec("mail.send")], subject: "bob")
+      send(registrant, :stop)
+      assert eventually(fn -> ClientTools.owner(session.id, "client.mail.send") == :error end)
+
+      parked = Task.async(fn -> ClientTools.await(session.id, "client.mail.send", 2_000) end)
+
+      # Nothing answers until somebody offers the tool again: this test, on a connection of
+      # its own, through the same consent as the first time.
+      assert Task.yield(parked, 100) == nil
+      consent = consent!(session.id, self(), "bob", ["mail.send"])
+      {:ok, _} = ClientTools.register(session.id, self(), consent, specs: [spec("mail.send")], subject: "bob")
+
+      me = self()
+      assert {:ok, %{name: "client.mail.send", connection: ^me}} = Task.await(parked)
+    end
+
+    test "is told the client is gone once the grace is up", %{session: session} do
+      started = System.monotonic_time(:millisecond)
+      assert {:error, :gone} = ClientTools.await(session.id, "client.mail.send", 150)
+      assert System.monotonic_time(:millisecond) - started >= 150
+    end
+  end
+
   # -- helpers ----------------------------------------------------------------
 
   defp ctx(session_id) do

@@ -258,6 +258,7 @@ Durable:
 | `tool_results` | `results` |
 | `todo_updated` | `items`, `source` |
 | `profile_switched` | `from`, `to` |
+| `instructions_loaded` | `budget`, `used`, `searched`, `files` — what the agent's system prompt was read from at this turn: the instruction files (`AGENTS.md` and its aliases) and the project brief, as `context.get` lists them, each with `scope`, `path`, `size`, `chars`, `budget`, `share`, `status`, `trimmed`, `skipped` and `hash`. Written when the set of files, or what one of them holds, changed since the agent's last turn, so a quiet log means the same files were read again |
 | `goal_set` | `text`, `command_id` — the session's goal, written by the root agent under the actor who set it (`session.goal.set`) |
 | `goal_cleared` | `command_id` |
 | `loop_started` | `loop_id` (`loop-<n>`), `max_iterations`, `max_failures`, `goal`, `command_id` — a loop towards the goal, written by the session under the actor who started it (`session.loop.start`) |
@@ -267,22 +268,24 @@ Durable:
 | `delegation_started` | `call_id`, `agent`, `child_path` (the parent's path and `<agent>#<n>`; `n` goes on counting across restarts, so a path names one child), `task`. The child writes its `agent_done` before the parent's `tool_call_completed` for the call, and is stopped once the parent has its result: from then on it is only its log. A delegation a restart closes as interrupted or takes up again leaves a child nothing starts again, so the restart closes that child's part of the log, and the part of each agent under it: a `tool_call_completed` for each call still open, then `agent_done` with `reason: interrupted` |
 | `compacted` | `summary`, `reason` (`threshold`, or `context_overflow` when the provider refused the prompt and the turn is sent again after compacting) |
 | `budget_exhausted` | `limit` |
-| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, with options `allow` / `always` / `deny`, answered with `question.answer` |
-| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
+| `budget_ask_started` | `call_id` (`budget-<n>`), `dimension`, `used`, `limit`, `detail` — the budget is spent and the agent asks before its next model call; the question itself is a `question_asked` under the same `call_id`, answered with `question.answer`. Its `question` says what the limit protects against, what the session has used and spent, and what the raise on offer would cost; its `options` are sizes and scopes — `+25 turns this run`, `+50 turns this session`, `no limit this session`, `+50 turns this workspace`, `stop` — and a typed amount (`50`, `+50 turns`, `+50k tokens`, `+15 min`, with `run`, `session` or `workspace` after it) is an answer too (Decision 699) |
+| `budget_ask_answered` | `call_id`, `decision` (`allow`: one more slice of the original size, `grant` says how much; `always`: the limit the question was about, named in `lifted` — `max_turns`, `max_input_tokens`, `max_output_tokens` or `wall_clock` — is lifted for this agent and its subagents, and the others still ask; `raise`: `limit` goes up by `amount` — turns, tokens or milliseconds — for `scope` `run` (given back at the turn's end), `session` or `workspace`, the last also written to the project's file named in `path`, or `note` says why it was not; `unclear`: the answer could not be read, `note` says why, and the question is asked again under the next id; `deny`: `budget_exhausted` follows). An `always` without `lifted`, from a log written before Decision 687, lifted the limit its `budget_ask_started` named |
 | `budget_warning` | `dimension`, `used`, `limit`, `fraction`, `detail` — once per dimension per agent, at `budget_warn_at` |
 | `tool_failures_ask_started` | `call_id` (`failures-<n>`), `tool`, `failures`, `detail` — one tool has failed `failures` times in a row and the agent asks before its next model call whether the turn goes on; the question itself is a `question_asked` under the same `call_id`, with options `stop` / `continue`, answered with `question.answer` |
 | `tool_failures_ask_answered` | `call_id`, `decision` (`continue`: the tool's count starts again; `stop`: a `user_input` from `harness` saying why, then `turn_ended` with `reason: tool_failures`) |
 | `agent_done` | `reason` (`finished`, `budget_exhausted`, `output_truncated`, `empty_reply`, `refused`, `tool_failures`, `llm_error` — a subagent whose model request failed, after the `llm_error` that says why; a root rests instead; `interrupted` — a subagent a restart took down, written by the restart, see `delegation_started`), `summary`, `limit` |
 
 A spent budget is a question, not a stop (Decision 660): the agent's `agent_state` is
-`waiting` until the answer, input queues meanwhile, and `allow` buys the budget it was
-first given again — a checkpoint every slice. It is a stop where the budget is a contract
-(`budget_asks: false`, which the plane's terms set) and never asked under `full_send`; a
-session with `approvals: deny` answers no itself, as it does an `ask_user`. A subagent
-never asks: it hands its parent what it found, labelled partial, and the parent may
-delegate again. It ends `budget_exhausted` with no further model call and nothing left
+`waiting` until the answer, input queues meanwhile, and the answer says how much more and
+for how long (Decision 699) — a checkpoint every time. It is a stop where the budget is a
+contract (`budget_asks: false`, which the plane's terms set) and never asked under
+`full_send`; a session with `approvals: deny` answers no itself, as it does an `ask_user`.
+A subagent never asks: it hands its parent what it found, labelled partial, and the parent
+may delegate again. It ends `budget_exhausted` with no further model call and nothing left
 running, and a `done` subagent keeps no session awake: its parent stops it on taking its
-result. `always` lifts only the limit it was asked about (Decision 687).
+result. `always` lifts only the limit it was asked about (Decision 687). On a pod the
+terms are a ceiling: a raise past a limit they set is refused with the reason, and the
+workspace is not a scope there.
 
 A tool that keeps failing is stopped whatever the budget says (Decision 687). The agent
 counts each tool's failures in a row; a success of that tool clears its count. At
@@ -410,6 +413,11 @@ order, forever.
 `from_seq: 0` replays everything. Omitting `from_seq` starts live from `head_seq`
 with no replay.
 
+A subscription that names a session — `session:<id>`, or its `presence:<id>` — is also how
+a client says it is reading the session: the daemon does not put one to sleep under a
+subscriber, and the session's `unseen` row (`session.list`) is cleared by it and counted
+again from when the last subscriber leaves. `fleet` names no session and reads none.
+
 - **`detail`** delivers every event for the session, durable and ephemeral.
 - **`summary`** delivers only `summary_diff` ephemerals plus session lifecycle
   events. A summary carries: per-agent state and profile, current todo item, active
@@ -522,8 +530,8 @@ runs on, and a client cannot move it.
             "parent": "s-3a"}}
 ```
 → `{"sessions": [{"id", "workspace", "branch", "parent", "profile", "state", "status",
-"pending_approvals", "pending_questions", "tokens", "cost", "created_at", "last_active_at",
-"pinned"}]}`
+"pending_approvals", "pending_questions", "unseen", "tokens", "cost", "created_at",
+"last_active_at", "pinned"}]}`
 
 `filter.parent` selects the branches of one session.
 
@@ -533,6 +541,25 @@ budget's and the failure guard's), and `status` is `waiting` while either is not
 whatever else it would say: the columns a plane's `sessions.list` row carries, so an inbox
 is a listing and not a replay. A dormant session counts the root agent's, which are what it
 asks again when it wakes.
+
+`unseen` is what happened while nobody was reading the session — "while you were away",
+for a client that comes back to tell the person, and the marker it shows:
+
+```json
+{"turns": 1, "approvals": 0, "questions": 1, "since": "2026-09-26T22:49:38.593Z"}
+```
+
+`turns` counts the root agent's turns that ended (`turn_ended`), `approvals` and
+`questions` the requests it raised (`approval_requested`, `question_asked`; each once, since
+a wake asks a request again under its id), and `since` is when the first of them happened,
+`null` with nothing to say. All of it is counted from the moment the last client
+subscribed to the session (§5) left, and it is empty while one is subscribed: what they read
+as it happened is not news. Subscribing to the session is what clears it; a listing, a
+`session.get` or reading a blob does not, so an inbox can be refreshed without losing its
+markers. `pending_*` say what is still open, `unseen` what was raised with nobody there:
+a question asked and timed out while away is in the second and not the first. A session no
+client has ever read has nothing unseen, and a session asleep answers from its log exactly
+as it answered awake.
 
 #### `session.get` → one session object plus `head_seq`.
 
@@ -753,6 +780,31 @@ machine's `agents/`, the project's `.troupe/agents/`). `source` is `builtin`, `g
 or `project`. A worker answers from its bundle instead, so a client offers exactly what
 `profile` may name wherever the session will run.
 
+#### `commands.list`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"commands": [{"name", "aliases", "section", "summary", "usage", "args", "availability",
+"source", "detail", "example"}]}`
+
+The slash commands a client may offer for the session — the one table behind every
+client's palette, so `/help` in the terminal and the desktop app show the same list and
+adding a command is one change in the harness. Entries come grouped by `section`, in
+the order a palette shows them: `session`, `navigate`, `workspace`, `setup`, `agents`,
+`quit`. Each has a `name`, its `aliases`, a one-line `summary`, how it is typed
+(`usage`: `/upload <path>`), its `args` (`{"name", "required", "kind"}`, where `kind`
+is `window`, `file` or `text`, for completion), a longer `detail`, an `example` or
+null, and where it came from: `source` is `builtin` or `agent`. The agents are the
+primary ones `agents.list` answers with for the session's workspace, described by their
+definition; they take a `prompt` and start a branch on it, which a client without
+branches shows as such.
+
+`availability` is what the command needs, for a client to judge and say rather than
+hide the row: `always`; `window` (acts on a window — the activated one, or one named
+as an argument); `local` (a session on this machine: a pod has no checkout, watcher or
+project brief of the person's to act on); `plane` (needs a plane). A client runs what
+it can and shows the rest greyed with the reason. Reading the table wakes nothing.
+
 #### `memory.get`
 ```json
 {"workspace": "/home/me/project"}
@@ -773,16 +825,47 @@ One brief per repository: a worktree's is the main checkout's. A client that fin
 
 #### `memory.forget` → `{"command_id", "workspace"}` deletes the brief. `admin`.
 
+#### `context.get`
+```json
+{"session_id": "s-9f"}
+```
+→ `{"budget": 16000, "used": 1234, "searched": ["/home/me/.config/troupe", "/home/me/project"],
+"files": [{"scope": "root", "path": "/home/me/project/AGENTS.md", "size": 812, "chars": 800,
+"budget": 16000, "share": 0.05, "status": "whole", "trimmed": 0, "skipped": ["CLAUDE.md"],
+"hash": "sha256:…"}, {"scope": "brief", "path": "/home/me/project/.troupe/memory.md",
+"size": 0, "chars": 0, "budget": 6000, "share": 0.0, "status": "absent", "trimmed": 0,
+"skipped": [], "hash": null}]}`
+
+The **provenance of the prompt**: every file the session's next system prompt is read
+from, in the order it is read — the person's own `<config>/AGENTS.md` (`user`), the
+repository root's (`root`), one in each directory between the root and the workspace
+(`nested`, the nearest last) and the project brief (`brief`) — with its `size` on disk,
+the `chars` that reach the prompt, the `budget` those count against
+(`instructions_max_chars` for the files together, `memory_max_chars` for the brief) and
+its `share` of it. Every file applies and the nearest wins where two disagree. `status`
+is `whole`; `trimmed`, with `trimmed` saying how many characters were cut, the nearest
+files being kept whole first; `dropped`, the budget was spent before it; or, for the
+brief, `absent` or `disabled` as `memory.get` has it. `skipped` names the aliases the
+file hid in its directory: `AGENTS.md`, `CLAUDE.md`, `GEMINI.md` and
+`.github/copilot-instructions.md` are the same file under other tools' names, the first
+that exists is read and the rest are skipped, so nobody debugs a file that was never
+loaded. `searched` is every directory looked in. Read from disk when asked, as the next
+turn reads it, so it says what an edit will do; what a past turn read is its
+`instructions_loaded` event. Nothing reaches the prompt from a file without appearing
+here. Reading it wakes nothing.
+
 #### `mcp.status`
 ```json
 {"session_id": "s-9f"}
 ```
 → `{"servers": [{"name": "filesystem", "state": "ready", "tools": ["read_file", "list_directory"],
-"error": null}]}`
+"error": null, "layer": "workspace", "source": "/home/me/project/.troupe/mcp.json"}]}`
 
-The MCP servers the session's own workspace configuration names (`mcp:` in
-`.troupe/config.yaml`), as distinct from a pod's bundle servers: `state` is
-`connecting`, `ready`, `error` or `stopped`. Their tools are `mcp.<server>.<tool>` like
+The MCP servers the session runs of its own — `mcp:` in `config.yaml` (`layer`
+`config`), the user's `mcp.json` (`user`) and the workspace's `.troupe/mcp.json`
+(`workspace`), `source` naming the file — as distinct from a pod's bundle servers:
+`state` is `connecting`, `ready`, `error`, `stopped`, `pending` (the workspace's trust
+question below is unanswered) or `disabled`. Their tools are `mcp.<server>.<tool>` like
 every other MCP tool.
 
 #### `workflows.list`
@@ -830,7 +913,8 @@ because it sends a key to a URL of the caller's choosing.
  "auth": "bearer", "api_key": "sk-...", "models": {"default": "glm-5.2", "cheap": "qwen3.6-35b"}}
 ```
 `config.set` (`admin`) → the `config.get` answer after the write. `provider` is
-`anthropic` or `openai` (anything speaking Chat Completions). An absent `api_key` keeps
+`anthropic` or `openai` (anything speaking Chat Completions), or `fake`, the scripted
+model a packaged build is tried with. An absent `api_key` keeps
 the saved one and `""` removes it; a `base_url` of null or `""` removes it; a model role
 set to null is removed. Keys it does not own are kept, but the file is rewritten, so
 comments are not: the file before the save is kept as `config.yaml.previous`. A file
@@ -848,6 +932,146 @@ depending on opencode's config. A provider the file already names is kept as it 
 listed under `kept`; opencode's default model becomes `models.default` only when the file
 has none. `from` is `opencode`, the only source; with no opencode providers the call fails
 with `invalid_params`. Nothing is written when nothing would change.
+
+#### `setup.get`, `setup.answer`
+
+A first run's questions (Decision 705), asked one step at a time so that the terminal
+client and the desktop app ask the same things in the same order, and a person who
+answered in one is not asked again in the other. **The daemon's only**, like `config.*`:
+a worker answers `method_not_found`. The daemon holds one flow in progress; every
+answer moves it one step on, and the key a person gives at one step is the key written
+at a later one, without ever travelling back to a client.
+
+```json
+{}
+```
+`setup.get` (`observe`) → `{"needed", "completed", "step", "steps": [{"name",
+"done"}], "answers", "detected", "key_storage", "offered", "suggested", "check",
+"suggested_prompt", "session"}`. `needed` says whether a client should offer the
+questions: nothing recorded, no `config.yaml`, and no model that can be asked.
+`completed` is `null` or `{"completed_at", "choice", "subject"}`, recorded once for every
+client in the daemon's state directory. `step` is the step to answer next — `where`,
+`provider`, `key`, `models`, `workspace`, `finish` — and `steps` the ones this path
+takes, since a plane finishes at once and reused settings skip the key and the models.
+`detected` is what is already here: `env` (which of `ANTHROPIC_API_KEY` and
+`OPENAI_API_KEY` are set, names only), `opencode` (`path`, `providers`, `default`),
+`config` (the file, as `config.get` reports it, plus `usable`) and `plane` (`url`,
+`linked`). `key_storage` says where a key goes: `{"kind": "file", "path", "keychain":
+false}`, there being no keychain in the daemon. `answers` holds every answered step as
+it was accepted; the key step is `{"source": "typed" | "env" | "none", "var"}`, never
+the key.
+
+```json
+{"command_id": "c-20", "step": "key", "answer": {"api_key": "sk-..."}}
+```
+`setup.answer` (`admin`) → the `setup.get` answer after the move. `step` is the current
+step, or one already answered, which goes back to it and forgets what came after; an
+`answer` of `{"back": true}` goes back to a step and takes no answer, for a screen
+whose person wants the question again. Each step's `answer`:
+
+| step | answer | what it does |
+| --- | --- | --- |
+| `where` | `{"choice": "local"}` or `{"choice": "plane", "plane_url"?}` | a plane records the choice and goes to `finish`; signing in is the client's |
+| `provider` | `{"provider": "anthropic" \| "openai", "kind"?: "anthropic" \| "openai" \| "gateway" \| "litellm", "base_url"?, "auth"?}`, or `{"reuse": "opencode" \| "config"}` | a gateway and a LiteLLM proxy are `openai` with their URL; `reuse` copies opencode's providers in as `config.import` does, or keeps a `config.yaml` that works, and goes to `workspace` |
+| `key` | `{"api_key"}`, `{"env": "VAR"}` (kept as `{env:VAR}`) or `{}` for a gateway that wants none | checked with a real request, the provider's model listing: `check` is `{"state": "ok" \| "refused" \| "unknown", "reason"}`. Refused stays on `key`; `ok` fills `offered` (`{"id", "context", "max_output", "input", "output"}`, prices per million tokens) and `suggested` (`{"default", "cheap"}`, a safe answer); `unknown` goes on with nothing listed |
+| `models` | `{"default", "cheap"?}` | writes the provider, the key and the models into the user's `config.yaml` |
+| `workspace` | `{"workspace", "approvals": "ask" \| "auto"}` | the first project directory, which must exist; writes `auto_approve`. `ask` is the default |
+| `finish` | `{"start"?: true, "prompt"?}` | records the run as done; for a local setup starts a session in the workspace with `prompt`, or `suggested_prompt`, and answers it as `session` (`session.create`'s answer, or `{"error"}`) |
+
+A bad answer is `invalid_params` with `data.reason` in one sentence, and the flow stays
+where it was. After `finish` the next `setup.get` is a fresh flow with `needed` false,
+which is what a client's "Setup" entry re-runs.
+
+#### `mcp.list`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.list`, `skills.add`, `skills.remove`
+
+The person's own MCP servers and skills, in two layers the daemon reads for every local
+session: the user's (`mcp.json` and `skills/` beside `config.yaml`) and the workspace's
+(`.troupe/mcp.json` and `.troupe/skills/`), over `config.yaml`'s `mcp:`. **The daemon's
+only**, like `config.*`: a worker answers `method_not_found`, since a pod's servers are
+its bundle's. `scope` is `user` (the default) or `workspace`, the latter needing a
+`workspace`. Both clients manage the one set through these.
+
+```json
+{"workspace": "/home/me/project", "session_id": "s-9f"}
+```
+`mcp.list` (`observe`; both optional) → `{"servers": [{"name", "layer", "source",
+"transport", "command", "args", "url", "cd", "env", "permission", "disabled",
+"refused", "trust", "state", "tools", "error"}], "warnings": [...]}` — every server the
+layers give the workspace, merged by name, the workspace's file over the user's over
+`config.yaml`. `layer` is `config`, `user` or `workspace` and `source` the file; `env` is
+the names of its variables, never their values; `refused` says why one will not start
+(an unset `{env:VAR}`); `trust` is `trusted` or `pending` for a workspace-level server
+and null otherwise. With `session_id`, each server also carries the `state`, `tools` and
+`error` that `mcp.status` reports for the session, and a server the session runs that no
+file names any more is listed too.
+
+```json
+{"command_id": "c-14", "scope": "user", "from": "/home/me/.claude/.mcp.json", "link": false}
+```
+`mcp.add` (`admin`) → `{"path", "from", "added": ["fs"], "skipped": [{"name",
+"reason"}], "warnings", "linked"}`. Imports another tool's file — Claude Code's and
+Claude Desktop's `mcpServers`, Cursor's, VS Code's `servers` — copying its servers into
+the layer's `mcp.json`, or with `link: true` reading it in place from then on. `${VAR}`
+and `${env:VAR}` become `{env:VAR}`; a server with a `${input:…}` is skipped and said
+so; `headers` are dropped with a warning. Importing again updates.
+
+```json
+{"command_id": "c-15", "scope": "workspace", "workspace": "/home/me/project",
+ "name": "fs", "server": {"command": "npx", "args": ["-y", "@modelcontextprotocol/server-filesystem", "."]}}
+```
+The same call with `name` and `server` writes one entry, merged onto what the layer has
+under that name — `{"disabled": true}` alone turns one off without restating its
+command — and answers `{"name", "path", "entry", "warnings"}`, the entry's `env` as
+names. A name has lower-case letters, digits, `-` and `_`, and no dot.
+
+```json
+{"command_id": "c-16", "scope": "user", "name": "fs"}
+```
+`mcp.remove` (`admin`) → `{"path", "removed": ["fs"]}`. `include` in place of `name`
+unlinks a linked file, and `removed` names every server it gave. A server that comes
+only from a linked file is refused with `invalid_params` naming the file.
+
+```json
+{"session_id": "s-9f", "name": "fs"}
+```
+`mcp.check` (`admin`) → `{"server": {"name", "layer", "source", "state", "tools",
+"error"}}`. With a `session_id`, the session reads its files again for that server and
+starts what they say now — which is how one that died is brought back, one just written
+is started, and one now `disabled` is stopped — and answers once it is ready or has
+failed; a workspace-level server whose command changed is asked about again first, and
+answers `pending`. With `workspace` and `name`, or with `name` and a `server` that was
+never written, the server is run once on its own, asked for its tools, and stopped. A
+stdio server that does not answer `initialize` within twenty seconds is `error`.
+
+```json
+{"workspace": "/home/me/project"}
+```
+`skills.list` (`observe`; `workspace` optional) → `{"skills": [{"name", "description",
+"layer", "source", "dir", "linked"}]}`, the workspace's over the user's by name.
+
+```json
+{"command_id": "c-17", "scope": "user", "from": "/home/me/.claude/skills", "link": true}
+```
+`skills.add` (`admin`) → `{"path", "from", "added", "skipped", "linked"}`. `from` is a
+directory of skills, such as `~/.claude/skills`, or one skill's directory (one holding a
+`SKILL.md`): copied into the layer's `skills/`, or with `link` read in place through the
+layer's `skills.json`. A directory whose name is not one a skill may have is skipped.
+
+```json
+{"command_id": "c-18", "scope": "user", "name": "review"}
+```
+`skills.remove` (`admin`) → `{"path", "removed"}`; `include` unlinks a linked directory,
+as for servers.
+
+**Trust.** A workspace-level server is a command a cloned repository would run, so a
+local session starts the workspace's servers only once somebody attached has answered
+the question the session asks — a `question_asked` with `call_id` `mcp-trust-<hash>` and
+the options `deny`, `once` and `allow`, answered through `question.answer` like an
+`ask_user`, so any client can. `allow` is remembered per checkout in the daemon's state
+directory, never in the repository, beside a fingerprint of what would run, so a changed
+command asks again; `once` runs them for the session; `deny` leaves them `stopped` until
+the next session. A workspace on `trusted_workspaces` is not asked. Under
+`managed_mcp_servers_only` no local server starts, and `mcp.status` says so for each.
 
 #### `workspace.recent` → `{"workspaces": [{"path", "last_used_at", "sessions"}]}`
 #### `workspace.search`
@@ -912,12 +1136,18 @@ again. A refusal happens only where a person set a ceiling, and then it quotes t
 they set.
 
 A session goes `dormant` on its own idle timeout, or on `session.archive`: the daemon's for
-a local session, the plane's for a pod session (§7). Waiting on a person counts as idle,
-and a local daemon's timeout is shorter for a session no client is subscribed to
+a local session, the plane's for a pod session (§7). Waiting on a person counts as idle. A
+local daemon never sleeps a session while a client is subscribed to it (§5) — the
+person reading it is not handed a state change they did not ask for — and its timeout is
+minutes once nobody is
 ([troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)). Its log stays, and so
 does everything a client can learn from it: `session.list`, `session.get`, `blob.get` and
 `subscribe` all work on a dormant session and start nothing. That is deliberate — a session
-that woke up because somebody looked at it would never stay dormant.
+that woke up because somebody looked at it would never stay dormant. A client reading one
+need not know it slept: an activating command brings it back on its own, the stream carries
+on from the same `seq`, and what the client sees of it is the log's own lifecycle events
+(`session_dormant`, then `agent_restarted`, `session_resumed`, `session_activated` on the
+way back), which it may show or ignore.
 
 The **activating** commands are `input.send`, `turn.cancel`, `profile.switch`,
 `session.goal.set`, `session.goal.clear`, `session.loop.start`, `approval.respond`,
@@ -1001,9 +1231,9 @@ is asked again, under the same id, and an answer that arrived in the meantime �
 
 | scope | grants |
 | --- | --- |
-| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `workflows.list`, `memory.get`, `mcp.status`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get` |
+| `observe` | `initialize`, `subscribe`, `unsubscribe`, `session.list`, `session.get`, `session.goal.get`, `session.loop.get`, `blob.get`, `fleet.get`, `fs.list`, `fs.read`, `agents.list`, `commands.list`, `workflows.list`, `memory.get`, `context.get`, `mcp.status`, `mcp.list`, `skills.list`, `workspace.recent`, `workspace.search`, `worktree.list`, `presence.set`, `identity.get`, `config.get`, `setup.get` |
 | `control` | everything in `observe`, plus `input.send`, `turn.cancel`, `profile.switch`, `session.goal.set`, `session.goal.clear`, `session.loop.start`, `session.loop.stop`, `approval.respond`, `question.answer`, `todo.edit`, `fs.upload`, `tools.register`, `tools.unregister` |
-| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import` |
+| `admin` | everything in `control`, plus `session.create`, `session.archive`, `session.pin`, `session.unpin`, `session.erase`, `worktree.remove`, `worktree.merge`, `worktree.discard`, `memory.forget`, `watch.set`, `identity.link`, `identity.unlink`, `config.models`, `config.set`, `config.import`, `setup.answer`, `mcp.add`, `mcp.remove`, `mcp.check`, `skills.add`, `skills.remove` |
 
 Locally, the socket's permissions authenticate the user and the connection gets all
 three. `troupe ctl token --scope observe` mints a read-only token for a status bar or
@@ -1058,10 +1288,11 @@ ACL of each session a request names.
 require `session_id` (§6) but the four below: `session.get`, `input.send`, `turn.cancel`,
 `profile.switch`, `session.goal.*`, `session.loop.*`, `approval.respond`,
 `question.answer`, `todo.edit`, `fs.list`, `fs.read`, `fs.upload`, `blob.get`,
-`mcp.status`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
+`mcp.status`, `context.get`, `commands.list`, `presence.set`, `tools.register` and `tools.unregister`. Everything else a
 worker serves is about the pod or a path on it — `session.create`, `agents.list`,
 `workflows.list`, `memory.get`, `memory.forget`, `workspace.recent`, `workspace.search`,
-`worktree.*`, `watch.set`, `identity.*` and `config.*` — and a token for one session is
+`worktree.*`, `watch.set`, `identity.*`, `config.*`, `skills.*` and the `mcp.*` methods
+but `mcp.status` — and a token for one session is
 refused it with `forbidden` and `data.method` naming it. A method a worker does not have
 is `method_not_found`, whatever the token, and `initialize` and `auth.refresh` belong to
 the connection. The plane mints every token for a pod with a `session_id`; one without is
@@ -1125,6 +1356,16 @@ confirmed. A client cannot set a boolean on somebody's behalf.
 no other. A second client attached to the same session cannot invoke a tool it did not
 register, and a registrant that disconnects takes its tools with it.
 
+**A call outlives its client, for a while.** A registrant that leaves mid-call — a lid
+closed, an app restarted — is usually back in a moment, on a fresh connection. The call
+it was serving is parked for a grace (`TROUPE_CLIENT_TOOL_GRACE_SECONDS`, 60 s,
+[troupe-daemon](apps/troupe_daemon/README.md#how-long-it-stays-up)) and, when a client
+registers the tool again inside it — through a fresh consent, as always — is sent to that
+client as the same `tool.invoke`: same `call_id`, same `arguments`. Nobody inside the
+grace, and the call fails once, with a result naming the tool and saying its client left;
+the tool is off the model's list by then (`tools_unregistered`, reason `disconnected`).
+The grace comes out of the call's own timeout, so a dropped laptop is never a hung turn.
+
 **The session is tainted, visibly.** `session_tainted` is durable and appears in every
 participant's summary, because a tool running on somebody's laptop is something the others
 are entitled to know about.
@@ -1170,7 +1411,9 @@ Also happens on its own when the connection drops.
 
 The client answers with a result or an error, on the same connection. A client that does
 not answer within the tool's timeout gets the call abandoned and the agent gets an error
-result — the same contract as any other tool that fails.
+result — the same contract as any other tool that fails. A client that registers a tool
+after another connection of the person's dropped mid-call may be sent that call first,
+under the `call_id` the earlier connection was asked with.
 
 ### Presence
 

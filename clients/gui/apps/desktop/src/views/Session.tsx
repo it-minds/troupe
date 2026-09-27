@@ -12,7 +12,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { JSX } from "react";
-import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState } from "@troupe/client";
+import { isBlobRef, isBusy, needsYou, openApprovals, openQuestions, rootState, settleLoop, unseenSummary } from "@troupe/client";
 import type {
   AttachStatus,
   AuthSession,
@@ -20,6 +20,8 @@ import type {
   DaemonClient,
   Entry,
   FleetRow,
+  LoopInfo,
+  LoopState,
   ProfileOffering,
   TranscriptState,
 } from "@troupe/client";
@@ -27,7 +29,10 @@ import { useProfiles, useSessionView } from "../hooks";
 import type { SessionHandle } from "../hooks";
 import { ApprovalPanel, DecisionRecord } from "./Approval";
 import { AnswerRecord, QuestionPanel } from "./Question";
+import { CommandPalette } from "./CommandPalette";
+import type { PaletteScreen } from "./CommandPalette";
 import { Files } from "./Files";
+import { GoalLine, LoopStatus } from "./Goal";
 import { LocalControls } from "./LocalControls";
 import { Cost, initials, Loading, personColour, Pill, When, Where } from "./bits";
 
@@ -38,6 +43,7 @@ export function Session({
   row,
   sessionId,
   onBack,
+  onGo,
 }: {
   /** The plane, for a team session and its profiles. Null in local mode. */
   auth: AuthSession | null;
@@ -47,6 +53,8 @@ export function Session({
   row: FleetRow | undefined;
   sessionId: string;
   onBack: () => void;
+  /** Leave for another screen, for the palette's Navigate and Setup commands. */
+  onGo?: (screen: PaletteScreen) => void;
 }): JSX.Element {
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
@@ -56,14 +64,51 @@ export function Session({
   const view = useSessionView(auth, sessionId, { daemon, kind });
   const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);
+  const [pane, setPane] = useState<"tasks" | "files">("tasks");
+  const [palette, setPalette] = useState(false);
   const self = (kind === "team" ? auth?.me?.subject : (machineUser ?? auth?.me?.subject)) ?? undefined;
 
   const readOnly = row?.state === "read_only" || row?.yourRole === "viewer";
   const dormant = row?.state === "dormant";
   const open = openApprovals(view.state);
+  // Everyone else here, by name: who could answer an approval first, and who reads
+  // what is sent.
+  const others = view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject);
+  // The loop as its events say, and as the session answers for the one case they cannot:
+  // a session that stopped mid-loop records the interruption only when it wakes.
+  const loop = settleLoop(view.state.loop, useLoopAnswer(view.view));
+  const [away, seenAway] = useAway(sessionId, row);
+
+  // Ctrl-K (⌘K on a Mac) opens the command palette from anywhere on the screen.
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent): void => {
+      if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setPalette(true);
+      }
+    };
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
 
   return (
     <section className="session">
+      {palette && (
+        <CommandPalette
+          view={view}
+          local={kind !== "team"}
+          onClose={() => setPalette(false)}
+          actions={{
+            go: (screen) => (screen === "sessions" ? onBack() : onGo?.(screen)),
+            showFiles: () => {
+              setBackstage(true);
+              setPane("files");
+            },
+            transcript: () => transcriptText(view.state),
+          }}
+        />
+      )}
+
       <Header
         row={row}
         sessionId={sessionId}
@@ -74,23 +119,21 @@ export function Session({
         onBack={onBack}
         onToggleBackstage={() => setBackstage((b) => !b)}
         onSwitch={(p) => void view.switchProfile(p)}
+        loop={loop}
+        canChange={!readOnly}
+        view={view}
       />
 
       <Banners status={view.status} detail={view.detail} dormant={dormant} readOnly={readOnly} error={view.error} />
+      {away && <Away summary={away} onSeen={seenAway} />}
 
       <div className="stagearea">
         <div className="conversation">
-          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} />
+          <Stream state={view.state} self={self} local={kind === "local"} readBlob={view.readBlob} onSetup={onGo ? () => onGo("setup") : undefined} />
 
           {/* Sticky, so scrolling up to read the context never loses the decision. */}
           {open.map((entry) => (
-            <ApprovalPanel
-              key={entry.callId}
-              entry={entry}
-              canAnswer={!readOnly}
-              others={view.state.presence.filter((p) => p.subject && p.subject !== self).map((p) => p.display_name ?? p.subject)}
-              onAnswer={(d) => view.respond(entry.callId, d)}
-            />
+            <ApprovalPanel key={entry.callId} entry={entry} canAnswer={!readOnly} others={others} onAnswer={(d) => view.respond(entry.callId, d)} />
           ))}
 
           {/* The agent's questions and the harness's budget question, in the same place. */}
@@ -101,16 +144,37 @@ export function Session({
           {readOnly ? (
             <ReadOnly />
           ) : (
-            <Composer view={view} dormant={dormant} busy={isBusy(view.state)} live={view.status === "live"} />
+            <Composer
+              view={view}
+              dormant={dormant}
+              busy={isBusy(view.state)}
+              looping={loop?.state === "running"}
+              live={view.status === "live"}
+              others={others}
+              onCommands={() => setPalette(true)}
+              onSent={seenAway}
+            />
           )}
         </div>
 
-        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} />}
+        {backstage && <Backstage view={view} daemon={daemon} row={row} self={self} pane={pane} onPane={setPane} />}
       </div>
     </section>
   );
 }
 
+/** What was said, for `/copy`: the people's and the agent's words, not the tool traffic. */
+function transcriptText(state: TranscriptState): string {
+  return state.entries
+    .flatMap((e) => (e.kind === "user" ? [`${e.author ?? "You"}: ${e.text}`] : e.kind === "assistant" ? [`Troupe: ${e.text}`] : []))
+    .join("\n\n");
+}
+
+/**
+ * The head: where the session is, as a breadcrumb in mono, over its title and the goal
+ * it works towards; who is here; and the controls, with the loop beside the status
+ * while one runs.
+ */
 function Header({
   row,
   sessionId,
@@ -121,6 +185,9 @@ function Header({
   onBack,
   onToggleBackstage,
   onSwitch,
+  loop,
+  canChange,
+  view,
 }: {
   row: FleetRow | undefined;
   sessionId: string;
@@ -131,6 +198,10 @@ function Header({
   onBack: () => void;
   onToggleBackstage: () => void;
   onSwitch: (p: string) => void;
+  loop: LoopState | undefined;
+  /** Whether this person may set the goal and start or stop a loop: not a reader's. */
+  canChange: boolean;
+  view: SessionHandle;
 }): JSX.Element {
   const working = rootState(state);
   const here = state.presence.filter((p) => p.subject);
@@ -138,54 +209,89 @@ function Header({
 
   return (
     <header className="session-head">
-      <button onClick={onBack} aria-label="Back to all sessions">
-        ←
-      </button>
-
       <div className="subject">
-        <strong>{row?.title ?? sessionId}</strong>
-        <span className="sub">
-          {row && <Where kind={row.kind} />}
-          <span>{state.profile ?? row?.profile ?? "—"}</span>
-          {role && <span>you are {role === "owner" ? "the owner" : role === "collaborator" ? "a collaborator" : "a reader"}</span>}
-          {here.length > 0 && <Here members={here} self={self} />}
-        </span>
+        <div className="crumbs">
+          <button className="link" onClick={onBack} aria-label="Back to all sessions">
+            ← Sessions
+          </button>
+          <span className="sep" aria-hidden="true">
+            /
+          </span>
+          {row && (
+            <>
+              <Where kind={row.kind} />
+              <span className="sep" aria-hidden="true">
+                /
+              </span>
+            </>
+          )}
+          <span className="profile">{state.profile ?? row?.profile ?? "—"}</span>
+          <span className="sep" aria-hidden="true">
+            /
+          </span>
+          <span className="id">{sessionId}</span>
+          {role && (
+            <>
+              <span className="sep" aria-hidden="true">
+                ·
+              </span>
+              <span>you are {role === "owner" ? "the owner" : role === "collaborator" ? "a collaborator" : "a reader"}</span>
+            </>
+          )}
+        </div>
+        <h1 className="title">{row?.title ?? sessionId}</h1>
+        <GoalLine goal={state.goal} loop={loop} canChange={canChange} onSet={view.setGoal} onClear={view.clearGoal} onStartLoop={view.startLoop} />
       </div>
 
-      {state.doneReason ? (
-        <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
-      ) : needsYou(state) ? (
-        <Pill status="waiting">Needs you</Pill>
-      ) : isBusy(state) ? (
-        <Pill status="running">{working === "compacting" ? "Tidying up" : "Working"}</Pill>
-      ) : (
-        <Pill status="queued">Idle</Pill>
-      )}
+      {here.length > 0 && <Here members={here} self={self} />}
 
-      {/* The profiles are the plane's. With no plane there are none to switch to, and an
-          empty control is a broken one. */}
-      {profiles.length > 0 && (
-        <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
-          {profiles.map((p) => (
-            <option key={p.name} value={p.name}>
-              {p.name}
-            </option>
-          ))}
-        </select>
-      )}
+      <div className="controls">
+        {state.doneReason ? (
+          <Pill status={state.doneReason === "budget_exhausted" ? "error" : "allowed"}>Finished</Pill>
+        ) : needsYou(state) ? (
+          <Pill status="waiting">Needs you</Pill>
+        ) : isBusy(state) ? (
+          <Pill status="running">{working === "compacting" ? "Tidying up" : "Working"}</Pill>
+        ) : (
+          <Pill status="idle">Idle</Pill>
+        )}
 
-      <button onClick={onToggleBackstage} aria-pressed={backstage}>
-        {backstage ? "Hide backstage" : "Show backstage"}
-      </button>
+        <LoopStatus loop={loop} canStop={canChange} onStop={view.stopLoop} />
+
+        {/* The profiles are the plane's. With no plane there are none to switch to, and an
+            empty control is a broken one. */}
+        {profiles.length > 0 && (
+          <select value={state.profile ?? ""} onChange={(e) => onSwitch(e.target.value)} aria-label="Profile" title="Applied at the next turn">
+            {profiles.map((p) => (
+              <option key={p.name} value={p.name}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        )}
+
+        <button className="tab" onClick={onToggleBackstage} aria-pressed={backstage}>
+          {backstage ? "Hide backstage" : "Show backstage"}
+        </button>
+      </div>
     </header>
   );
 }
 
-/** Up to three rings, then a plain sentence. Your own ring is the neutral one. */
+/** Up to three rings and a count, with the plain sentence behind them. Your own ring is the dashed one. */
 function Here({ members, self }: { members: TranscriptState["presence"]; self: string | undefined }): JSX.Element {
   const names = members.map((m) => (m.subject === self ? "you" : (m.display_name ?? m.subject)));
   const sentence = names.length === 1 ? `${names[0]} is here` : `${names.slice(0, -1).join(", ")} and ${names.at(-1)} are here`;
-  return <span title={sentence}>{sentence}</span>;
+  return (
+    <div className="here" title={sentence} aria-label={sentence}>
+      {members.slice(0, 3).map((m) => (
+        <span key={m.subject} className={`ring md ${m.subject === self ? "self" : ""}`} style={{ color: personColour(m.subject, self) }} aria-hidden="true">
+          {initials(m.display_name ?? m.subject)}
+        </span>
+      ))}
+      <span className="count">{members.length} here</span>
+    </div>
+  );
 }
 
 function Banners({
@@ -236,17 +342,65 @@ function Banners({
   );
 }
 
+/**
+ * What happened here while nobody was reading it (issue #119), as the list's row said it
+ * when the session was opened: the only moment it can be read, since opening the session
+ * is what clears it. Kept for this visit until it is seen — dismissed, or answered by
+ * sending something — and not again, because the daemon has cleared it.
+ */
+function useAway(sessionId: string, row: FleetRow | undefined): [string | null, () => void] {
+  const [away, setAway] = useState<{ id: string; summary: string | null } | null>(null);
+  useEffect(() => {
+    if (!row || away?.id === sessionId) return;
+    setAway({ id: sessionId, summary: unseenSummary(row) });
+  }, [sessionId, row, away?.id]);
+  const summary = away?.id === sessionId ? away.summary : null;
+  return [summary, () => setAway((a) => (a ? { ...a, summary: null } : a))];
+}
+
+function Away({ summary, onSeen }: { summary: string; onSeen: () => void }): JSX.Element {
+  return (
+    <div className="banner away" role="status">
+      <p>While you were away: {summary}.</p>
+      <button type="button" className="link" onClick={onSeen}>
+        Seen
+      </button>
+    </div>
+  );
+}
+
+/** `session.loop.get`, once per attachment. It reads the log and wakes nothing. */
+function useLoopAnswer(view: SessionHandle["view"]): LoopInfo | null | undefined {
+  const [answer, setAnswer] = useState<LoopInfo | null | undefined>(undefined);
+  useEffect(() => {
+    setAnswer(undefined);
+    if (!view) return;
+    let live = true;
+    view
+      .getLoop()
+      .then((a) => live && setAnswer(a))
+      .catch(() => undefined);
+    return () => {
+      live = false;
+    };
+  }, [view]);
+  return answer;
+}
+
 function Stream({
   state,
   self,
   local,
   readBlob,
+  onSetup,
 }: {
   state: TranscriptState;
   self: string | undefined;
   /** A session on this computer, whose model settings are this person's to change. */
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
+  /** Leave for the Setup screen, offered under a model error a first run can fix. */
+  onSetup?: (() => void) | undefined;
 }): JSX.Element {
   const bottom = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -259,7 +413,7 @@ function Stream({
       {state.entries.length === 0 && <Loading what="Reading the session. The newest part arrives first." />}
 
       {state.entries.map((e) => (
-        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} />
+        <StreamEntry key={`${e.kind}-${e.seq}`} entry={e} self={self} local={local} readBlob={readBlob} onSetup={onSetup} />
       ))}
 
       {state.thinking && (
@@ -300,11 +454,13 @@ function StreamEntry({
   self,
   local,
   readBlob,
+  onSetup,
 }: {
   entry: Entry;
   self: string | undefined;
   local: boolean;
   readBlob: (blob: string) => Promise<string>;
+  onSetup?: (() => void) | undefined;
 }): JSX.Element | null {
   switch (entry.kind) {
     case "user": {
@@ -313,7 +469,9 @@ function StreamEntry({
       return (
         <article className={`turn person ${mine ? "self" : ""}`} style={{ ["--author" as string]: personColour(entry.author, self) }}>
           <div className="byline">
-            <span className="mono micro">{initials(name)}</span>
+            <span className="ring" aria-hidden="true">
+              {initials(name)}
+            </span>
             <span className="name">{name}</span>
             {entry.source !== "user" && <span className="micro muted">via {entry.source}</span>}
           </div>
@@ -358,7 +516,20 @@ function StreamEntry({
       return (
         <>
           <p className={`note ${entry.type === "llm_error" || entry.type === "budget_exhausted" ? "error" : ""}`}>{entry.text}</p>
-          {step && <p className="note">{step}</p>}
+          {step && (
+            <p className="note">
+              {step}
+              {/* The first run's questions fix both, one step at a time (Decision 705). */}
+              {onSetup && (
+                <>
+                  {" "}
+                  <button type="button" className="link" onClick={onSetup}>
+                    Run setup
+                  </button>
+                </>
+              )}
+            </p>
+          )}
         </>
       );
     }
@@ -516,23 +687,27 @@ function Backstage({
   daemon,
   row,
   self,
+  pane,
+  onPane,
 }: {
   view: SessionHandle;
   daemon: DaemonClient | null;
   row: FleetRow | undefined;
   self: string | undefined;
+  /** Which pane is up: the session's, so `/files` from the palette can open it. */
+  pane: "tasks" | "files";
+  onPane: (pane: "tasks" | "files") => void;
 }): JSX.Element {
-  const [pane, setPane] = useState<"tasks" | "files">("tasks");
   const agents = Object.entries(view.state.agentState).filter(([path]) => path !== "");
 
   return (
     <aside className="backstage">
       <section>
         <div className="tabs">
-          <button aria-selected={pane === "tasks"} onClick={() => setPane("tasks")}>
+          <button className="tab" aria-selected={pane === "tasks"} onClick={() => onPane("tasks")}>
             Tasks
           </button>
-          <button aria-selected={pane === "files"} onClick={() => setPane("files")}>
+          <button className="tab" aria-selected={pane === "files"} onClick={() => onPane("files")}>
             Files
           </button>
         </div>
@@ -540,7 +715,7 @@ function Backstage({
 
       {pane === "tasks" ? (
         <section>
-          <h3>What it is doing</h3>
+          <h3>Running order</h3>
           {view.state.todo.length === 0 ? (
             <p className="note">No task list yet.</p>
           ) : (
@@ -554,18 +729,20 @@ function Backstage({
           )}
         </section>
       ) : (
-        <section style={{ padding: 0 }}>
+        <section>
+          <h3>Files</h3>
           <Files view={view.view} />
         </section>
       )}
 
       {agents.length > 0 && (
         <section>
-          <h3>Who is working</h3>
-          <ul className="tasks">
+          <h3>The company</h3>
+          <ul className="cast">
             {agents.map(([path, state]) => (
               <li key={path}>
-                <span className="mono micro">{path}</span> {state}
+                <span className="mono">{path}</span>
+                <span className="state">{state}</span>
               </li>
             ))}
           </ul>
@@ -597,7 +774,28 @@ function Backstage({
   );
 }
 
-function Composer({ view, dormant, busy, live }: { view: SessionHandle; dormant: boolean; busy: boolean; live: boolean }): JSX.Element {
+function Composer({
+  view,
+  dormant,
+  busy,
+  looping,
+  live,
+  others,
+  onCommands,
+  onSent,
+}: {
+  view: SessionHandle;
+  dormant: boolean;
+  busy: boolean;
+  /** A loop towards the goal is running: what is sent goes between two iterations. */
+  looping: boolean;
+  live: boolean;
+  /** Everyone else here, who reads what is sent. */
+  others: string[];
+  /** Open the command palette: `/` on an empty draft, or the button. */
+  onCommands: () => void;
+  onSent: () => void;
+}): JSX.Element {
   const [draft, setDraft] = useState("");
   const [error, setError] = useState<string | null>(null);
 
@@ -608,6 +806,7 @@ function Composer({ view, dormant, busy, live }: { view: SessionHandle; dormant:
     setError(null);
     try {
       await view.send(text);
+      onSent();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setDraft(text);
@@ -622,37 +821,52 @@ function Composer({ view, dormant, busy, live }: { view: SessionHandle; dormant:
         void submit();
       }}
     >
+      <p className="hint">
+        {dormant
+          ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
+          : looping
+            ? "A loop is working towards the goal. What you send goes between two of its iterations."
+            : busy
+              ? "The session is working. What you send is queued and goes next."
+              : !live
+                ? "Not connected. What you send is held and goes when the connection comes back."
+                : "Enter sends, Shift+Enter starts a new line."}
+      </p>
       <textarea
         value={draft}
         onChange={(e) => setDraft(e.target.value)}
         aria-label="Message"
-        placeholder="Write to the session…"
+        placeholder="Write to the troupe"
         onKeyDown={(e) => {
           if (e.key === "Enter" && !e.shiftKey) {
             e.preventDefault();
             void submit();
           }
+          // A slash on an empty draft is a command, not a message: the palette says which.
+          if (e.key === "/" && draft === "") {
+            e.preventDefault();
+            onCommands();
+          }
         }}
       />
       <div className="row">
-        <button type="submit" className="primary" disabled={!draft.trim()}>
-          {dormant ? "Wake and send" : "Send"}
+        {others.length > 0 && (
+          <span className="hint">
+            {others.length === 1 ? `${others[0]} sees what you send` : `${others.slice(0, -1).join(", ")} and ${others.at(-1)} see what you send`}
+          </span>
+        )}
+        <span className="spacer" />
+        <button type="button" onClick={onCommands} title="Every command, filtered as you type (Ctrl-K, or / on an empty line)">
+          / Commands
         </button>
         {busy && (
           <button type="button" onClick={() => void view.cancel()}>
             Stop
           </button>
         )}
-        <span className="spacer" />
-        <p className="hint">
-          {dormant
-            ? "This session is asleep. Sending wakes it, which takes about twenty seconds."
-            : busy
-              ? "The session is working. What you send is queued and goes next."
-              : !live
-                ? "Not connected. What you send is held and goes when the connection comes back."
-                : "Enter sends, Shift+Enter starts a new line."}
-        </p>
+        <button type="submit" className="send" disabled={!draft.trim()}>
+          {dormant ? "Wake and send" : busy ? "Queue" : "Send"}
+        </button>
       </div>
       {error && <p className="hint error">{error}</p>}
     </form>

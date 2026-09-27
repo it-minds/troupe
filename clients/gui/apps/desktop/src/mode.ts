@@ -29,7 +29,7 @@ const KEY = "localOnly";
  *
  * What the person chose wins. With no choice stored, a build can say what it starts in:
  * `pnpm dev:local` sets `VITE_TROUPE_LOCAL_ONLY=1`, so a development build against a
- * daemon opens on the session list instead of on a sign-in nobody can complete.
+ * daemon opens on the launcher instead of on a sign-in nobody can complete.
  */
 export function storedLocalOnly(): boolean {
   const chosen = prefs.get(KEY);

@@ -66,7 +66,7 @@ Session.Log          the log and hash chain; everything persists through it
 Session.Approvals    the permission gate
 Session.Questions    what the agent asks a person
 Session.ClientTools  tools a connected client offered
-Session.MCP          the workspace's own MCP servers
+Session.MCP          the person's and the workspace's own MCP servers, and the workspace's trust question
 [LLM.Fake]           only for provider: fake
 Agent.Node           the root agent: Agent.Tasks, Agent.Children, Agent.Server (one_for_all)
 Session.Watcher      watch mode; after the agent, so its crash restarts nothing above
@@ -211,8 +211,9 @@ settles:
   and a GUI mounted at a sub-path prefills the plane URL with its own origin.
 - **Design tokens are generated**: `pnpm tokens` writes `tokens.css` and `mark.ts` from
   `docs/design/themes/*.tokens.json` and refuses a theme whose token names differ. Theme
-  and mode are `data-theme` and `data-mode` on the root, kept in the browser; Signal is the
-  default.
+  and mode are `data-theme` and `data-mode` on the root, kept in the browser; Afterglow
+  is the default and the design (Decision 702), the other three are palettes on it.
+  `pnpm icons` draws the desktop app's icons from `mark.ts` (Decision 703).
 
 ## 8. Things a reader will trip over
 

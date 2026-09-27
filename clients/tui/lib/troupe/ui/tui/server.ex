@@ -32,12 +32,15 @@ defmodule Troupe.UI.TUI.Server do
             | :sessions
             | :files
             | :mcp
-            | :hq,
+            | :hq
+            | :palette,
           cmd_text: String.t(),
           cmd_pos: non_neg_integer(),
           win_text: String.t(),
           win_pos: non_neg_integer(),
-          commands: [String.t()],
+          agents: [String.t()],
+          commands: [Client.command()],
+          palette: palette() | nil,
           tick: non_neg_integer(),
           now: integer(),
           dirty: boolean(),
@@ -109,6 +112,18 @@ defmodule Troupe.UI.TUI.Server do
   @type picker :: %{choices: [Settings.choice()], cursor: non_neg_integer()}
 
   @typedoc """
+  Command-palette state (Decision 119): the filter typed so far, the cursor over the
+  rows it leaves, and where the palette was opened from — a command picked from a
+  window acts on that window, and Esc goes back there. The rows themselves are a view
+  over `commands`, the harness's table, computed when drawn (`View.palette_view/1`).
+  """
+  @type palette :: %{
+          query: String.t(),
+          cursor: non_neg_integer(),
+          return_to: :command | {:window, String.t()}
+        }
+
+  @typedoc """
   A multiple-choice answer being assembled: which question it belongs to and the
   labels ticked so far. Held in the UI rather than the log because it is a
   cursor, not a decision — nothing outside this process may depend on it, and
@@ -157,7 +172,9 @@ defmodule Troupe.UI.TUI.Server do
       cmd_pos: 0,
       win_text: "",
       win_pos: 0,
-      commands: Client.commands(sid),
+      agents: Client.commands(sid),
+      commands: Client.command_table(sid),
+      palette: nil,
       tick: 0,
       now: System.system_time(:millisecond),
       dirty: false,
@@ -173,6 +190,7 @@ defmodule Troupe.UI.TUI.Server do
       sessions: nil,
       files: nil,
       mcp_cursor: 0,
+      mcp_page: nil,
       hq: nil,
       quitting: false,
       size: initial_size(opts),
@@ -302,16 +320,22 @@ defmodule Troupe.UI.TUI.Server do
     {:stop, state}
   end
 
-  def handle_event(%Key{} = key, %{focus: :command} = state) do
-    case command_key(key, %{state | quit_armed: false}) do
-      %{quitting: true} = state ->
-        state.on_quit.()
-        {:stop, state}
+  # Ctrl-K opens the palette wherever nothing is typed yet; with text on the line it is
+  # still the editor's kill-to-end (Decision 88).
+  def handle_event(%Key{code: "k", modifiers: ["ctrl"]}, %{focus: :command, cmd_text: ""} = state),
+    do: {:noreply, open_palette(%{state | quit_armed: false})}
 
-      state ->
-        {:noreply, state}
-    end
-  end
+  def handle_event(
+        %Key{code: "k", modifiers: ["ctrl"]},
+        %{focus: {:window, _}, win_text: ""} = state
+      ),
+      do: {:noreply, open_palette(%{state | quit_armed: false})}
+
+  def handle_event(%Key{} = key, %{focus: :command} = state),
+    do: finish(command_key(key, %{state | quit_armed: false}))
+
+  def handle_event(%Key{} = key, %{focus: :palette} = state),
+    do: finish(palette_key(key, %{state | quit_armed: false}))
 
   def handle_event(%Key{} = key, %{focus: :settings} = state),
     do: {:noreply, settings_key(key, %{state | quit_armed: false})}
@@ -370,13 +394,16 @@ defmodule Troupe.UI.TUI.Server do
       :hq ->
         {:noreply, state, render?: false}
 
+      :palette ->
+        {:noreply, state, render?: false}
+
       :settings ->
         {:noreply, paste_into_settings(state, content)}
     end
   end
 
   def handle_event(%Mouse{kind: "down"}, %{focus: focus} = state)
-      when focus in [:settings, :observer, :sessions, :files, :mcp, :hq],
+      when focus in [:settings, :observer, :sessions, :files, :mcp, :hq, :palette],
       do: {:noreply, state, render?: false}
 
   # Click-drag inside the transcript selects text: with mouse reporting on the
@@ -458,11 +485,8 @@ defmodule Troupe.UI.TUI.Server do
         {:noreply, %{state | files: %{state.files | cursor: cursor}}}
 
       :mcp ->
-        servers = Model.mcp_servers(state.model)
-
-        cursor =
-          state.mcp_cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(length(servers) - 1, 0))
-
+        count = length(View.mcp_entries(state))
+        cursor = state.mcp_cursor |> Kernel.+(div(step, 3)) |> max(0) |> min(max(count - 1, 0))
         {:noreply, %{state | mcp_cursor: cursor}}
 
       :settings when state.settings.picker != nil ->
@@ -473,12 +497,23 @@ defmodule Troupe.UI.TUI.Server do
       :settings ->
         {:noreply, put_settings(state, scroll: max(state.settings.scroll + step, 0))}
 
+      :palette ->
+        {:noreply, move_cursor(state, div(step, 3))}
+
       _ ->
         {:noreply, state, render?: false}
     end
   end
 
   def handle_event(_event, state), do: {:noreply, state, render?: false}
+
+  # `/quit`, from the line or the palette, is the one command that ends the app.
+  defp finish(%{quitting: true} = state) do
+    state.on_quit.()
+    {:stop, state}
+  end
+
+  defp finish(state), do: {:noreply, state}
 
   # An armed `x`/`d` (Decision 83) must be confirmed by the very next keystroke:
   # any other key — including more typing — takes the arming away, so the letter
@@ -580,6 +615,12 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
+  # `/` on an empty line opens the palette rather than typing a slash the box already
+  # shows (Decision 119); the rest of the command is typed into the palette's filter.
+  defp command_key(%Key{code: "/", modifiers: mods}, %{cmd_text: ""} = state)
+       when mods in [[], ["shift"]],
+       do: open_palette(state)
+
   defp command_key(%Key{code: code, modifiers: mods} = key, state)
        when byte_size(code) >= 1 and mods in [[], ["shift"]] do
     if String.length(code) == 1,
@@ -621,12 +662,25 @@ defmodule Troupe.UI.TUI.Server do
   defp put_win(state, {text, pos}),
     do: %{state | win_text: text, win_pos: Input.clamp(text, pos)}
 
+  # The built-ins this client runs itself, one clause of `builtin/4` each. How each is
+  # typed, described and aliased is the harness's table (`state.commands`, Decision
+  # 698); this is only which of them the TUI implements, and the suite holds the two
+  # equal, so a command added to the table without a clause here fails a test rather
+  # than being dispatched as an agent.
+  @builtins ~w(cancel dismiss compact merge discard goal loop sessions hq observer files
+               upload copy memory context watch settings models mcp skills help agents worktree quit)
+
+  @doc false
+  @spec builtins() :: [String.t()]
+  def builtins, do: @builtins
+
   defp run_command(state, text) do
     sid = state.session_id
     slash? = String.starts_with?(text, "/")
     typed = String.trim(text)
     text = String.trim_leading(text, "/")
     {name, args} = split_first(text)
+    name = canonical(state, name)
 
     active =
       case state.focus do
@@ -637,92 +691,32 @@ defmodule Troupe.UI.TUI.Server do
     target = fn -> if args == "", do: active, else: resolve_window(state, args) end
 
     result =
-      case name do
-        q when q in ["quit", "exit", "q"] ->
-          :quit
+      cond do
+        name == "" ->
+          :palette
 
-        "" ->
-          {:notice, "commands: " <> Enum.map_join(state.commands, " ", &("/" <> &1))}
-
-        "watch" ->
-          toggle_watch(sid, state.model.watch.enabled)
-
-        "cancel" ->
-          with_target(target.(), &Client.cancel_branch(sid, &1))
-
-        "dismiss" ->
-          with_target(target.(), &Client.dismiss(sid, &1))
-
-        "compact" ->
-          with_target(target.(), fn path ->
-            case Client.compact(sid, path) do
-              :ok -> {:notice, "compacting #{path}"}
-              other -> other
-            end
-          end)
-
-        "merge" ->
-          with_target(target.(), &Client.merge(sid, &1))
-
-        "discard" ->
-          with_target(target.(), &Client.discard(sid, &1))
-
-        n when n in ["settings", "help", "?"] ->
-          :settings
-
-        n when n in ["models", "model"] ->
-          :models
-
-        n when n in ["observer", "agents-tree", "tree"] ->
-          :observer
-
-        "agents" ->
-          {:notice, "agents: " <> Enum.map_join(state.commands, ", ", & &1)}
-
-        n when n in ["resume", "sessions"] ->
-          {:sessions, args}
-
-        "memory" ->
-          notice_of(Client.memory(sid, String.trim(args)))
-
-        "goal" ->
-          goal_command(sid, String.trim(args))
-
-        "loop" ->
-          loop_command(sid, String.trim(args))
-
-        "upload" ->
-          notice_of(upload(sid, String.trim(args)))
-
-        "files" ->
-          :files
-
-        "mcp" ->
-          :mcp
-
-        n when n in ["hq", "remote"] ->
-          {:hq, args}
-
-        "copy" ->
-          copy_command(state, String.trim(args))
+        name in @builtins ->
+          builtin(name, args, state, target)
 
         # A line with no slash is what the person wants to say to the session's agent:
         # one agent per session, so there is one place for it to go. A slash names a
         # command, and one this table does not know is asked of the client (a profile
         # to dispatch, where the client supports that).
-        _cmd when not slash? ->
+        not slash? ->
           Client.send_input(sid, "root", typed)
 
-        cmd ->
-          Client.dispatch(sid, cmd, args)
+        true ->
+          Client.dispatch(sid, name, args)
       end
 
     state = put_cmd(state, "")
 
     case result do
       :quit -> %{state | quitting: true}
+      :palette -> open_palette(state)
       :files -> toggle_files(state)
       :mcp -> open_mcp(state)
+      {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
       {:hq, arg} -> open_hq(state, plane_arg(arg))
       :settings -> open_settings(state)
       :models -> open_models(state)
@@ -736,6 +730,199 @@ defmodule Troupe.UI.TUI.Server do
       {:error, other} -> notice(state, inspect(other))
     end
   end
+
+  # An alias is the table's business (`/q`, `/resume`, `/?`); a name the table does not
+  # know, or a table the harness never sent, is taken as typed.
+  defp canonical(state, name) do
+    case Enum.find(state.commands, &(name == &1["name"] or name in &1["aliases"])) do
+      nil -> name
+      entry -> entry["name"]
+    end
+  end
+
+  defp builtin("quit", _args, _state, _target), do: :quit
+  defp builtin("settings", _args, _state, _target), do: :settings
+  defp builtin("help", _args, _state, _target), do: :palette
+  defp builtin("models", _args, _state, _target), do: :models
+  defp builtin("observer", _args, _state, _target), do: :observer
+  defp builtin("files", _args, _state, _target), do: :files
+  defp builtin("mcp", args, state, _target), do: sources_command(state, "mcp", String.trim(args))
+
+  defp builtin("skills", args, state, _target),
+    do: sources_command(state, "skills", String.trim(args))
+
+  defp builtin("sessions", args, _state, _target), do: {:sessions, args}
+  defp builtin("hq", args, _state, _target), do: {:hq, args}
+
+  defp builtin("watch", _args, state, _target),
+    do: toggle_watch(state.session_id, state.model.watch.enabled)
+
+  defp builtin("cancel", _args, state, target),
+    do: with_target(target.(), &Client.cancel_branch(state.session_id, &1))
+
+  defp builtin("dismiss", _args, state, target),
+    do: with_target(target.(), &Client.dismiss(state.session_id, &1))
+
+  defp builtin("compact", _args, state, target) do
+    with_target(target.(), fn path ->
+      case Client.compact(state.session_id, path) do
+        :ok -> {:notice, "compacting #{path}"}
+        other -> other
+      end
+    end)
+  end
+
+  defp builtin("merge", _args, state, target),
+    do: with_target(target.(), &Client.merge(state.session_id, &1))
+
+  defp builtin("discard", _args, state, target),
+    do: with_target(target.(), &Client.discard(state.session_id, &1))
+
+  defp builtin("agents", _args, state, _target),
+    do: {:notice, "agents: " <> Enum.join(state.agents, ", ")}
+
+  defp builtin("memory", args, state, _target),
+    do: notice_of(Client.memory(state.session_id, String.trim(args)))
+
+  defp builtin("context", _args, state, _target),
+    do: notice_of(Client.instructions(state.session_id))
+
+  defp builtin("goal", args, state, _target), do: goal_command(state.session_id, String.trim(args))
+  defp builtin("loop", args, state, _target), do: loop_command(state.session_id, String.trim(args))
+
+  defp builtin("upload", args, state, _target),
+    do: notice_of(upload(state.session_id, String.trim(args)))
+
+  defp builtin("copy", args, state, _target), do: copy_command(state, String.trim(args))
+
+  # The default agent in a worktree of its own: a branch like any agent's, which the
+  # client starts (`/worktree <name>: …` and `/worktree <existing> …` are its business).
+  defp builtin("worktree", args, state, _target),
+    do: Client.dispatch(state.session_id, "worktree", args)
+
+  ## Command palette
+
+  # The palette is a popup over the session (Decision 119): `/` on an empty command line,
+  # Ctrl-K with nothing typed, or `/help` opens it, and what is typed while it is open
+  # filters the harness's table. It remembers where it was opened from, because a
+  # command picked from a window acts on that window.
+  defp open_palette(state) do
+    return_to =
+      case state.focus do
+        {:window, _} = window -> window
+        _ -> :command
+      end
+
+    # The table is read when the session is opened; one that was not attached then is
+    # read now, so a palette is never empty for want of asking.
+    commands =
+      case state.commands do
+        [] -> Client.command_table(state.session_id)
+        commands -> commands
+      end
+
+    %{
+      state
+      | focus: :palette,
+        commands: commands,
+        palette: %{query: "", cursor: 0, return_to: return_to},
+        cmd_text: "",
+        cmd_pos: 0
+    }
+  end
+
+  defp close_palette(state), do: %{state | focus: state.palette.return_to, palette: nil}
+
+  defp palette_key(%Key{code: "esc"}, state), do: close_palette(state)
+  defp palette_key(%Key{code: "enter"}, state), do: pick_command(state)
+  # Tab and Space put the command on the line, as completion does, so `/merge 2⏎` types
+  # exactly as it did before there was a palette.
+  defp palette_key(%Key{code: "tab"}, state), do: take_command(state, :tab)
+  defp palette_key(%Key{code: " "}, state), do: take_command(state, :space)
+
+  defp palette_key(%Key{code: "backspace"}, %{palette: %{query: ""}} = state),
+    do: close_palette(state)
+
+  defp palette_key(%Key{code: "backspace"}, %{palette: %{query: query}} = state),
+    do: put_query(state, String.slice(query, 0..-2//1))
+
+  defp palette_key(%Key{code: "up"}, state), do: move_cursor(state, -1)
+  defp palette_key(%Key{code: "down"}, state), do: move_cursor(state, 1)
+  defp palette_key(%Key{code: "page_up"}, state), do: move_cursor(state, -10)
+  defp palette_key(%Key{code: "page_down"}, state), do: move_cursor(state, 10)
+  defp palette_key(%Key{code: "home"}, state), do: put_palette(state, cursor: 0)
+  defp palette_key(%Key{code: "end"}, state), do: move_cursor(state, 1_000_000)
+
+  defp palette_key(%Key{code: code, modifiers: mods}, %{palette: %{query: query}} = state)
+       when mods in [[], ["shift"]] do
+    if String.length(code) == 1, do: put_query(state, query <> code), else: state
+  end
+
+  defp palette_key(_key, state), do: state
+
+  defp move_cursor(state, by) do
+    {rows, cursor} = View.palette_view(state)
+    put_palette(state, cursor: cursor |> Kernel.+(by) |> max(0) |> min(max(length(rows) - 1, 0)))
+  end
+
+  # A new query starts on the row that matches it exactly, so `/q` + Enter quits as it
+  # always did; else on the first row.
+  defp put_query(state, query) do
+    state = put_palette(state, query: query, cursor: 0)
+    {rows, _cursor} = View.palette_view(state)
+    exact = Enum.find_index(rows, fn %{entry: e} -> query == e["name"] or query in e["aliases"] end)
+    put_palette(state, cursor: exact || 0)
+  end
+
+  defp put_palette(state, changes),
+    do: %{state | palette: Map.merge(state.palette, Map.new(changes))}
+
+  # Enter runs the selected command, or puts it on the line when it wants an argument or
+  # a window the person has to name; a query nothing matches runs as typed, which is
+  # what `/x` did before there was a palette.
+  defp pick_command(%{palette: %{query: query}} = state) do
+    {rows, cursor} = View.palette_view(state)
+
+    case Enum.at(rows, cursor) do
+      nil when query == "" -> state
+      nil -> run_command(close_palette(state), "/" <> query)
+      %{status: {:window, _reason}} -> take_command(state, :tab)
+      %{status: {:no, reason}} -> notice(close_palette(state), reason)
+      %{entry: entry} -> run_or_take(state, entry)
+    end
+  end
+
+  defp run_or_take(state, entry) do
+    if Enum.any?(entry["args"], & &1["required"]),
+      do: take_command(state, :tab),
+      else: run_command(close_palette(state), "/" <> entry["name"])
+  end
+
+  # Space carries the selected command to the line only when what was typed is the start
+  # of its name or an alias — a row found through its description is not what the
+  # fingers meant — and otherwise carries the text itself. Either way the person is on
+  # the command line to finish typing, whatever the palette was opened over.
+  defp take_command(%{palette: %{query: query}} = state, how) do
+    {rows, cursor} = View.palette_view(state)
+
+    case Enum.at(rows, cursor) do
+      %{entry: entry} when how == :tab or query == "" ->
+        to_line(state, "/" <> entry["name"] <> " ")
+
+      %{entry: entry} ->
+        if Enum.any?([entry["name"] | entry["aliases"]], &String.starts_with?(&1, query)),
+          do: to_line(state, "/" <> entry["name"] <> " "),
+          else: to_line(state, "/" <> query <> " ")
+
+      nil when how == :space ->
+        to_line(state, "/" <> query <> " ")
+
+      nil ->
+        state
+    end
+  end
+
+  defp to_line(state, text), do: state |> close_palette() |> to_command_line() |> put_cmd(text)
 
   ## Copying a transcript
 
@@ -1020,7 +1207,9 @@ defmodule Troupe.UI.TUI.Server do
       | session_id: sid,
         model: rebuild(sid),
         workspace: workspace_of(sid),
-        commands: Client.commands(sid),
+        agents: Client.commands(sid),
+        commands: Client.command_table(sid),
+        palette: nil,
         focus: :command,
         cmd_text: "",
         cmd_pos: 0,
@@ -1115,17 +1304,204 @@ defmodule Troupe.UI.TUI.Server do
 
   defp toggle_files(state), do: %{state | focus: :command, files: nil}
 
-  # `/mcp` opens the page on a live query: the fold is transient (driven by
-  # `:mcp_status` events) and empty after a crash, so the page asks the session
-  # for the current state when it opens and folds it in — like `/files` listing.
-  defp open_mcp(state) do
+  ## MCP servers and skills (troupe-remote Decision 700)
+
+  # `/mcp` opens the page on a live query — every server the layers give this
+  # workspace with its state in this session, and every skill — and folds the running
+  # servers into the model for the status line, like `/files` listing. `r` reads it
+  # again, keeping the cursor.
+  defp open_mcp(state, cursor \\ 0) do
+    page =
+      case Client.sources(state.session_id) do
+        {:ok, sources} -> sources
+        {:error, reason} -> %{servers: [], skills: [], warnings: [to_message(reason)]}
+      end
+
     model =
-      Enum.reduce(Client.mcp_status(state.session_id), state.model, fn server, m ->
-        entry = %{state: server.state, tools: server.tools, error: server.error}
-        %{m | mcp: Map.put(m.mcp, server.name, entry)}
+      Enum.reduce(page.servers, state.model, fn
+        %{state: nil}, m ->
+          m
+
+        server, m ->
+          %{
+            m
+            | mcp:
+                Map.put(m.mcp, server.name, %{
+                  state: server.state,
+                  tools: length(server.tools),
+                  error: server.error
+                })
+          }
       end)
 
-    %{put_cmd(state, "") | focus: :mcp, mcp_cursor: 0, model: model}
+    state = %{put_cmd(state, "") | focus: :mcp, mcp_page: page, model: model}
+    %{state | mcp_cursor: min(cursor, max(length(View.mcp_entries(state)) - 1, 0))}
+  end
+
+  # `/mcp import <path>`, `link <path>`, `unlink <path>`, `remove <name>` and
+  # `check <name>` manage the servers, `--workspace` on any of them writing the
+  # workspace's `.troupe/` file instead of the user's; `/skills` has the same verbs for
+  # skills, and either word alone opens the page.
+  defp sources_command(_state, _kind, ""), do: :mcp
+
+  defp sources_command(state, kind, args) do
+    {scope, rest} = scope_flag(args)
+
+    case String.split(rest, " ", parts: 2) do
+      [verb, target]
+      when verb in ["import", "link", "unlink", "remove", "check"] and target != "" ->
+        manage_source(state, kind, verb, String.trim(target), scope)
+
+      _ ->
+        {:error,
+         "usage: /#{kind} [import|link|unlink <path> | remove <name>" <>
+           check_usage(kind) <> "] [--workspace]"}
+    end
+  end
+
+  defp check_usage("mcp"), do: " | check <name>"
+  defp check_usage(_kind), do: ""
+
+  defp scope_flag(args) do
+    if String.contains?(args, "--workspace"),
+      do: {"workspace", args |> String.replace("--workspace", "") |> String.trim()},
+      else: {"user", args}
+  end
+
+  defp manage_source(state, kind, "import", path, scope),
+    do: add_source(state, kind, path, scope, false)
+
+  defp manage_source(state, kind, "link", path, scope),
+    do: add_source(state, kind, path, scope, true)
+
+  defp manage_source(state, kind, "unlink", path, scope),
+    do: remove_source(state, kind, %{include: Path.expand(path)}, scope)
+
+  defp manage_source(state, kind, "remove", name, scope),
+    do: remove_source(state, kind, %{name: name}, scope)
+
+  defp manage_source(state, "mcp", "check", name, _scope), do: check_server(state, name)
+
+  defp manage_source(_state, "skills", "check", _name, _scope),
+    do: {:error, "a skill has nothing to check; the page shows where it is"}
+
+  defp add_source(state, kind, path, scope, link?) do
+    params = %{scope: scope, from: Path.expand(path), link: link?}
+
+    case Client.manage_sources(state.session_id, kind <> ".add", params) do
+      {:ok, answer} -> {:mcp, added_notice(kind, answer)}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp added_notice(kind, answer) do
+    what = if kind == "mcp", do: "servers", else: "skills"
+    verb = if answer["linked"], do: "linked", else: "imported"
+    added = answer["added"] |> List.wrap() |> Enum.join(", ")
+    skipped = answer["skipped"] |> List.wrap() |> Enum.map(&"#{&1["name"]} (#{&1["reason"]})")
+
+    ["#{verb} #{what} #{if added == "", do: "(none)", else: added} into #{answer["path"]}"]
+    |> Kernel.++(if skipped == [], do: [], else: ["skipped " <> Enum.join(skipped, "; ")])
+    |> Kernel.++(List.wrap(answer["warnings"]))
+    |> Enum.join(" · ")
+  end
+
+  # A server taken out of its file is checked afterwards, which is what stops the one
+  # this session still runs under that name; a check that finds no server is the point.
+  defp remove_source(state, kind, what, scope) do
+    case Client.manage_sources(state.session_id, kind <> ".remove", Map.put(what, :scope, scope)) do
+      {:ok, %{"removed" => removed}} ->
+        if kind == "mcp", do: Enum.each(removed, &stop_removed(state, &1))
+        {:mcp, "removed #{Enum.join(removed, ", ")} from the #{scope} #{kind}"}
+
+      {:ok, _answer} ->
+        {:mcp, "removed"}
+
+      {:error, reason} ->
+        {:error, to_message(reason)}
+    end
+  end
+
+  defp stop_removed(state, name),
+    do:
+      Client.manage_sources(state.session_id, "mcp.check", %{
+        session_id: state.session_id,
+        name: name
+      })
+
+  # A check on this session's server reads its file again and starts what it says now,
+  # which is also how one that died is brought back.
+  defp check_server(state, name) do
+    case Client.manage_sources(state.session_id, "mcp.check", %{
+           session_id: state.session_id,
+           name: name
+         }) do
+      {:ok, %{"server" => server}} -> {:mcp, "#{name}: #{server["state"]}#{server_note(server)}"}
+      {:ok, _answer} -> {:mcp, "#{name}: checked"}
+      {:error, reason} -> {:error, to_message(reason)}
+    end
+  end
+
+  defp server_note(%{"error" => error}) when is_binary(error) and error != "", do: " — " <> error
+  defp server_note(%{"tools" => [_ | _] = tools}), do: ", #{length(tools)} tools"
+  defp server_note(_server), do: ""
+
+  # What the page's keys do to the selected entry. A server from `config.yaml` is
+  # edited by hand, as it always was.
+  defp mcp_selected(state), do: Enum.at(View.mcp_entries(state), state.mcp_cursor)
+
+  defp mcp_act(state, nil), do: state
+
+  defp mcp_act(state, result) do
+    case result do
+      {:mcp, text} -> state |> notice(text) |> open_mcp(state.mcp_cursor)
+      {:error, text} -> notice(state, text)
+    end
+  end
+
+  defp mcp_check_selected(state) do
+    case mcp_selected(state) do
+      {:server, server} -> check_server(state, server.name)
+      _other -> nil
+    end
+  end
+
+  defp mcp_toggle_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{layer: layer} = server} when layer in [:user, :workspace] ->
+        params = %{
+          scope: Atom.to_string(layer),
+          name: server.name,
+          server: %{disabled: not server.disabled?}
+        }
+
+        case Client.manage_sources(state.session_id, "mcp.add", params) do
+          {:ok, _} -> check_server(state, server.name)
+          {:error, reason} -> {:error, to_message(reason)}
+        end
+
+      {:server, _server} ->
+        {:error, "a server from config.yaml is enabled or disabled there"}
+
+      _other ->
+        nil
+    end
+  end
+
+  defp mcp_remove_selected(state) do
+    case mcp_selected(state) do
+      {:server, %{layer: layer} = server} when layer in [:user, :workspace] ->
+        remove_source(state, "mcp", %{name: server.name}, Atom.to_string(layer))
+
+      {:server, _server} ->
+        {:error, "a server from config.yaml is removed there"}
+
+      {:skill, skill} ->
+        remove_source(state, "skills", %{name: skill.name}, Atom.to_string(skill.layer))
+
+      nil ->
+        nil
+    end
   end
 
   defp load_files(state, path) do
@@ -1197,11 +1573,14 @@ defmodule Troupe.UI.TUI.Server do
     do: %{state | mcp_cursor: max(state.mcp_cursor - 1, 0)}
 
   defp mcp_key(%Key{code: code}, state) when code in ["down", "j"] do
-    count = length(Model.mcp_servers(state.model))
+    count = length(View.mcp_entries(state))
     %{state | mcp_cursor: min(state.mcp_cursor + 1, max(count - 1, 0))}
   end
 
-  defp mcp_key(%Key{code: "r"}, state), do: open_mcp(state)
+  defp mcp_key(%Key{code: "r"}, state), do: open_mcp(state, state.mcp_cursor)
+  defp mcp_key(%Key{code: "c"}, state), do: mcp_act(state, mcp_check_selected(state))
+  defp mcp_key(%Key{code: "d"}, state), do: mcp_act(state, mcp_toggle_selected(state))
+  defp mcp_key(%Key{code: "x"}, state), do: mcp_act(state, mcp_remove_selected(state))
 
   defp mcp_key(_key, state), do: state
 
@@ -1456,13 +1835,13 @@ defmodule Troupe.UI.TUI.Server do
   defp window_key(%Key{code: "tab"}, path, %{win_text: ""} = state) do
     w = Map.fetch!(state.model.windows, path)
 
-    case state.commands do
+    case state.agents do
       [] ->
         state
 
-      commands ->
-        idx = Enum.find_index(commands, &(&1 == w.profile)) || -1
-        next = Enum.at(commands, rem(idx + 1, length(commands)))
+      agents ->
+        idx = Enum.find_index(agents, &(&1 == w.profile)) || -1
+        next = Enum.at(agents, rem(idx + 1, length(agents)))
 
         case Client.switch_profile(state.session_id, path, next) do
           :ok -> state
@@ -1481,13 +1860,6 @@ defmodule Troupe.UI.TUI.Server do
     case answerable(w, state.pane.agent || path) do
       nil ->
         put_win(state, code)
-
-      # The budget question is a question the harness asks (troupe-remote Decision 660):
-      # the same three keys, answered in the words it listens for. `a` lifts the limit the
-      # question is about, for this agent and its subagents, and no other limit and no
-      # other branch — a branch is a session now (troupe-remote Decision 687).
-      %{kind: :budget, call_id: call_id} ->
-        send_answer(state, call_id, %{"y" => "allow", "n" => "deny", "a" => "always"}[code])
 
       %{call_id: call_id} ->
         decision = %{"y" => :allow, "n" => :deny, "a" => :allow_session}[code]
@@ -1529,11 +1901,12 @@ defmodule Troupe.UI.TUI.Server do
 
   # A digit picks an offered option: with a single-choice question it is the
   # answer, with `multiple` it toggles a tick that Enter later sends. Only while
-  # such a question is on screen — otherwise digits are ordinary typed text.
+  # such a question is on screen — otherwise digits are ordinary typed text. The
+  # budget question is one such (Decision 120).
   defp window_key(%Key{code: <<d>>}, path, %{win_text: ""} = state) when d in ?1..?9 do
     w = Map.fetch!(state.model.windows, path)
 
-    case pending_of(w, state.pane.agent || path, [:question]) do
+    case pending_of(w, state.pane.agent || path, [:question, :budget]) do
       %{options: options} = q when options != [] ->
         case Enum.at(options, d - ?1) do
           nil -> state
@@ -1584,7 +1957,7 @@ defmodule Troupe.UI.TUI.Server do
       String.starts_with?(text, "/upload ") ->
         upload(sid, String.trim(String.trim_leading(text, "/upload ")))
 
-      question = pending_of(w, state.pane.agent || path, [:question]) ->
+      question = pending_of(w, state.pane.agent || path, [:question, :budget]) ->
         Client.answer(sid, question.call_id, text)
 
       true ->
@@ -1605,11 +1978,13 @@ defmodule Troupe.UI.TUI.Server do
 
   defp window_key(key, _path, state), do: editing_key(key, state)
 
-  # y/n/a answers approvals and the budget question — a delegated subagent raises
-  # both, and its pending item lives in the branch's window like the root's. When
-  # more than one is outstanding the agent whose pane is open wins, so the keys
-  # answer the request the reader is looking at rather than the oldest one.
-  defp answerable(w, viewed), do: pending_of(w, viewed, [:approval, :budget])
+  # y/n/a answers approvals — a delegated subagent raises them too, and its pending
+  # item lives in the branch's window like the root's. When more than one is
+  # outstanding the agent whose pane is open wins, so the keys answer the request the
+  # reader is looking at rather than the oldest one. The budget question is answered
+  # by digit or by typing, never by one of these letters (Decision 120): an amount typed
+  # in a person's own words — `no limit` — must not stop the session on its first key.
+  defp answerable(w, viewed), do: pending_of(w, viewed, [:approval])
 
   # A single-choice question is answered by the digit itself; a multiple-choice
   # one accumulates ticks until Enter, and re-pressing a digit unticks it.
@@ -1954,13 +2329,12 @@ defmodule Troupe.UI.TUI.Server do
     end
   end
 
-  @path_commands ~w(merge discard cancel dismiss compact copy)
-
   @doc """
   Tab completion on the command line: command names (`wor` → `worktree `), window paths
-  for `/merge`, `/discard`, `/cancel`, `/dismiss`, `/compact`, `/copy` (repeated Tab cycles through the
-  matches), and `@file` paths anywhere. `/merge` and `/discard` only offer worktree branches
-  that have finished and are neither merged nor discarded.
+  for the commands whose first argument is a window — `/merge`, `/discard`, `/cancel`,
+  `/dismiss`, `/compact`, `/copy` as the table has them (repeated Tab cycles through the
+  matches) — and `@file` paths anywhere. `/merge` and `/discard` only offer worktree
+  branches that have finished and are neither merged nor discarded.
   """
   @spec complete_command(String.t(), map()) :: String.t()
   def complete_command(text, state) do
@@ -1969,26 +2343,41 @@ defmodule Troupe.UI.TUI.Server do
         complete_file(text, state.model.workspace)
 
       not String.contains?(text, " ") ->
-        complete_name(
-          text,
-          state.commands ++
-            @path_commands ++
-            ~w(settings help observer models watch agents sessions resume memory mcp goal loop quit)
-        )
+        complete_name(text, command_names(state))
 
       true ->
         [name, arg] = String.split(text, " ", parts: 2)
+        # A name the palette put on the line carries its slash; the completion keeps it.
+        {slash, name} =
+          if String.starts_with?(name, "/"),
+            do: {"/", String.trim_leading(name, "/")},
+            else: {"", name}
 
         cond do
-          name in @path_commands ->
-            complete_path(name, String.trim(arg), state)
+          takes_window?(state, name) ->
+            slash <> complete_path(name, String.trim(arg), state)
 
           name == "worktree" and not String.contains?(String.trim(arg), " ") ->
-            complete_worktree(arg, state)
+            slash <> complete_worktree(arg, state)
 
           true ->
             text
         end
+    end
+  end
+
+  # What Tab completes on the line: the table's names and aliases (Decision 698), agents
+  # included; before the harness has answered, the agents alone.
+  defp command_names(%{commands: [], agents: agents}), do: agents
+
+  defp command_names(%{commands: commands}),
+    do: Enum.flat_map(commands, &[&1["name"] | &1["aliases"]])
+
+  # A command whose first argument is a window takes a window's number or path after it.
+  defp takes_window?(state, name) do
+    case Enum.find(state.commands, &(&1["name"] == name)) do
+      %{"args" => [%{"kind" => "window"} | _]} -> true
+      _ -> false
     end
   end
 
@@ -2044,6 +2433,8 @@ defmodule Troupe.UI.TUI.Server do
   defp eligible?("dismiss", w), do: w.state in [:done_unread, :failed_unread]
   # Any window has a transcript worth copying, dismissed ones included.
   defp eligible?("copy", _w), do: true
+  # A window command the table gained and this list has no rule for yet: any live window.
+  defp eligible?(_cmd, w), do: w.state != :dismissed
 
   # Exact match: rotate through every candidate. Otherwise the first candidate with that prefix.
   defp pick(candidates, arg) do
