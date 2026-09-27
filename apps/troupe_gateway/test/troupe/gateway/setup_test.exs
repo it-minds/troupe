@@ -90,11 +90,14 @@ defmodule Troupe.Gateway.SetupTest do
 
       assert is_binary(prompt)
 
-      assert {:ok, %{"step" => "done", "session" => session}} =
+      assert {:ok, %{"step" => "done", "session" => %{"session_id" => session_id} = session}} =
                answer(ctx.client, "c-7", "finish", %{})
 
-      assert %{"session_id" => session_id, "workspace" => workspace, "prompt" => ^prompt} =
-               session
+      # The first session is a real one: stopped here, or it keeps the next suite's daemon
+      # busy (`Idle`) and in its `session.list`.
+      on_exit(fn -> Troupe.stop_session(session_id) end)
+
+      assert %{"workspace" => workspace, "prompt" => ^prompt} = session
 
       assert workspace == ctx.workspace
 
