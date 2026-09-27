@@ -49,7 +49,8 @@ and `priv/` where it ships data, and shares the root's `_build`, `deps`, `mix.lo
 | `apps/troupe_gateway/test/conformance/` | the Python conformance client, a test fixture |
 | `apps/troupe_daemon/` | its own `config/runtime.exs`, README and DECISIONS |
 | `charts/troupe/crds/` | `WorkerProfile`, `TeamVolume`, `TroupePolicy`, hand-written; the admission policy is a template |
-| `docs/design/admin/tokens.json`, `docs/design/themes/*.tokens.json` | the console's and the front page's design tokens |
+| `docs/design/admin/tokens.json` | the console's design tokens |
+| `clients/gui/docs/design/themes/*.tokens.json` | the four themes: the GUI's, the front page's (Signal) and the TUI's (Afterglow), one copy |
 
 Generated files and what writes them: [build.md §3](build.md#3-generated-committed-files).
 

@@ -210,10 +210,12 @@ settles:
 - **The base path is baked into the image** (`TROUPE_GUI_BASE`), the Ingress strips it,
   and a GUI mounted at a sub-path prefills the plane URL with its own origin.
 - **Design tokens are generated**: `pnpm tokens` writes `tokens.css` and `mark.ts` from
-  `docs/design/themes/*.tokens.json` and refuses a theme whose token names differ. Theme
-  and mode are `data-theme` and `data-mode` on the root, kept in the browser; Afterglow
-  is the default and the design (Decision 702), the other three are palettes on it.
-  `pnpm icons` draws the desktop app's icons from `mark.ts` (Decision 703).
+  `clients/gui/docs/design/themes/*.tokens.json` and refuses a theme whose token names
+  differ. Those four files are the repository's only copy: the plane's front page and
+  the TUI are generated from them too (Decision 716). Theme and mode are `data-theme`
+  and `data-mode` on the root, kept in the browser; Afterglow is the default and the
+  design (Decision 702), the other three are palettes on it. `pnpm icons` draws the
+  desktop app's icons from `mark.ts` (Decision 703).
 
 ## 8. Things a reader will trip over
 

@@ -16,18 +16,19 @@ defmodule Troupe.Plane.Web.Page do
   **No script and no framework.** The root of a plane should render on a network that can
   reach the plane and nothing else, which rules out every diagram library; the pictures
   in `Troupe.Plane.Web.Diagrams` are hand-authored SVG for that reason. The webfonts are
-  the one exception and they are `optional` — IBM Plex is what the design specifies, the
-  fallback stack is a real one, and a plane with no route to Google renders in the
-  system's own sans and mono rather than waiting for it.
+  the one exception and they are `optional` — Figtree and DM Mono are what the design
+  specifies, the fallback stack is a real one, and a plane with no route to Google
+  renders in the system's own sans and mono rather than waiting for it.
 
   **No colour of its own.** Every value here is a custom property from `theme.css`, which
-  `mix troupe.theme` generates from `docs/design/themes/signal.tokens.json`. A literal
-  hex anywhere in either document fails `front_page_assets_test.exs`.
+  `mix troupe.theme` generates from `clients/gui/docs/design/themes/signal.tokens.json`:
+  Signal's colours on the structure every theme shares (root Decisions 702 and 716). A
+  literal hex anywhere in either document fails `front_page_assets_test.exs`.
 
   **The reserved colour means one thing.** Magenta in Signal means *stopped, a person
-  must decide* (`docs/design/themes/THEMES.md`). It is spent on the mask's filled half,
-  and — on `/docs` alone — on the approval figure, which is a drawing of that exact
-  sentence. Nothing else on either page may have it, and the test pins both.
+  must decide* (`clients/gui/docs/design/themes/THEMES.md`). It is spent on the mask's
+  filled half, and — on `/docs` alone — on the approval figure, which is a drawing of
+  that exact sentence. Nothing else on either page may have it, and the test pins both.
   """
 
   alias Troupe.Plane.Build
@@ -82,7 +83,7 @@ defmodule Troupe.Plane.Web.Page do
     <link rel="apple-touch-icon" href="#{@brand}/apple-touch-icon.png">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+    <link rel="stylesheet" media="print" onload="this.media='all'" href="https://fonts.googleapis.com/css2?family=DM+Mono:wght@400;500&family=Figtree:wght@400;600;800;900&display=swap">
     <link rel="stylesheet" href="#{@static}/theme.css">
     <style>#{css()}#{extra_css}</style>
     </head>
