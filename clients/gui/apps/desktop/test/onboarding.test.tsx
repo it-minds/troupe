@@ -15,7 +15,7 @@ import { Provider } from "../src/views/Onboarding/Provider";
 import { Where } from "../src/views/Onboarding/Where";
 import { Workspace } from "../src/views/Onboarding/Workspace";
 import { FakeDaemon } from "../../../packages/client/test/support/daemon.js";
-import { button, nav, render, says, type, waitFor } from "./support";
+import { button, nav, render, says, startOnTheList, type, waitFor } from "./support";
 
 // jsdom lays nothing out, so it has nothing to scroll; the transcript asks anyway.
 Element.prototype.scrollIntoView = function scrollIntoView() {};
@@ -108,6 +108,7 @@ describe("a fresh machine's first run", () => {
     // The session: open in the app, started by the daemon in the project with the
     // prompt as its first input.
     await waitFor(() => document.querySelector('textarea[aria-label="Message"]'), "the first session");
+    expect(document.querySelector(".launcher")).toBeNull();
     expect(says("/home/ada/project")).toBe(true);
     const created = [...fake.sessions.values()].find((s) => s.workspace === "/home/ada/project");
     expect(created).toBeDefined();
@@ -122,16 +123,18 @@ describe("a fresh machine's first run", () => {
     const keyCalls = fake.calls.filter((c) => JSON.stringify(c.params).includes("sk-right"));
     expect(keyCalls.map((c) => `${c.method} ${(c.params["step"] as string) ?? ""}`)).toEqual(["setup.answer key"]);
 
-    // A relaunch: straight to the list, with the session in it and no questions.
+    // A relaunch: the launcher, with the session among the recent ones and no questions.
     unmount();
     unmount = render(<App />).unmount;
-    await waitFor(() => says("/home/ada/project"), "the session list");
+    await waitFor(() => says("/home/ada/project"), "the launcher");
+    expect(document.querySelector(".launcher")).not.toBeNull();
     expect(says("Welcome.")).toBe(false);
   });
 
   it("is re-run from Setup in the rail, and offered under a key the provider refused", async () => {
     const fake = await start({});
     const session = fake.seed("/home/ada/project");
+    startOnTheList();
     unmount = render(<App />).unmount;
 
     // A machine already set up: the list, and Setup one press away.

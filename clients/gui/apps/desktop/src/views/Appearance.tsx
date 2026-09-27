@@ -24,6 +24,7 @@ import { DEFAULT_MODE, DEFAULT_THEME, MODES, THEMES } from "../theme";
 import type { Mode, ThemeId } from "../theme";
 import { Mask } from "./brand";
 import { Pill } from "./bits";
+import { useOpensOnLauncher } from "./Launcher";
 
 export interface Appearance {
   theme: ThemeId;
@@ -173,6 +174,7 @@ export function AppearanceSettings(props: Appearance): JSX.Element {
           <p>Yours alone. Other people in your sessions see them in their own theme, and nothing about a theme changes what anything means.</p>
           <Chooser {...props} />
           <Notifications />
+          <Start />
         </div>
       </div>
     </>
@@ -208,6 +210,30 @@ function Notifications(): JSX.Element {
         </button>
       </div>
       {note && <p className="note">{note}</p>}
+    </section>
+  );
+}
+
+/**
+ * What the app opens on: the launcher, or the list. The launcher's own checkbox sets the
+ * same thing; this is where it is turned back, since a person who skipped the launcher
+ * no longer starts on it.
+ */
+function Start(): JSX.Element {
+  const { on, setOn } = useOpensOnLauncher();
+  return (
+    <section className="opening">
+      <h2 className="screen">When Troupe starts</h2>
+      <div className="options">
+        <button type="button" className="option" aria-pressed={on} onClick={() => setOn(true)}>
+          <span className="label">Home</span>
+          <span className="consequence">Start something, go back to what was open last, or see what is waiting for you, from one screen. The troupe mark in the rail opens it any time.</span>
+        </button>
+        <button type="button" className="option" aria-pressed={!on} onClick={() => setOn(false)}>
+          <span className="label">Sessions</span>
+          <span className="consequence">Straight to the list of every session. Home is still one press away, on the troupe mark.</span>
+        </button>
+      </div>
     </section>
   );
 }

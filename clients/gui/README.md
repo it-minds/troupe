@@ -62,11 +62,11 @@ pnpm dev:local --port 5185       # anything after the name goes to Vite
 ```
 
 `pnpm dev:local` starts a daemon and the GUI in *local-only* mode against it: no plane,
-no identity provider, no key, and nothing sent anywhere. The app opens on the session
-list; start a session in the `demo` directory it prints, and the answers come from the
-daemon's scripted `fake` provider reading `script.json` in the same place — one step per
-model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each new
-session.
+no identity provider, no key, and nothing sent anywhere. The app opens on the launcher,
+with no sign-in; start a session in the `demo` directory it prints, and the answers come
+from the daemon's scripted `fake` provider reading `script.json` in the same place — one
+step per model call, per agent under `routes` (`Troupe.LLM.Fake`), from the top for each
+new session.
 
 It needs `troupe-daemon` installed (`install.ps1`/`install.sh` at the repository root,
 or `scripts/install-local.ps1` from a checkout); `TROUPE_DAEMON_BIN` names another. The
