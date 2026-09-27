@@ -67,9 +67,10 @@ again. It writes `free` back when it has verified or rolled back, after stopping
 started with scratch homes (a daemon, a dev server): the next fixer's install stops the
 installed daemon, not those.
 
-The dev services (`scripts/dev-up`: Postgres, MinIO, OpenBao) do not survive a restart of
-the machine or the WSL VM. A suite failing with `econnrefused` or a closed connection is
-checked against `docker ps` before anything is blamed on a change.
+The dev services (`scripts/dev-up`: Postgres, MinIO, OpenBao) restart with Docker after a
+restart of the machine or the WSL VM, and OpenBao writes its transit key again as it
+starts, but only once Docker is running. A suite failing with `econnrefused` or a closed
+connection is checked against `docker ps` before anything is blamed on a change.
 
 Besides the install, the plane's tests share one database, `troupe_plane_test`, so one
 plane suite runs at a time: two at once deadlock (Postgrex `40P01`). The suite does not
