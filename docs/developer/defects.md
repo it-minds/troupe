@@ -172,6 +172,16 @@ are gone too. `scripts/dev-up` brings everything back and re-seeds; `restart:
 unless-stopped` on the three services would save the step. Found by the coordinator,
 2026-09-27.
 
+### D33 - A renamed desktop build shares the real app's stored sign-in (medium)
+
+`clients/gui/apps/desktop/src-tauri/src/secrets.rs` names its keyring entry with a fixed
+`SERVICE` ("com.objective-mj.troupe"), not the build's identifier. A test build installed
+under another product name and identifier, as fixers do, still reads and writes the real
+app's stored refresh token: started in plane mode with a remembered plane URL, it would
+restore that sign-in and could rotate the real token. Deriving the service from the
+bundle identifier would separate them. Until then, a renamed build is run in local mode
+only. Found by the wave 3 fixer (PR #222), 2026-09-27.
+
 ### D32 - Small leftovers from the 0.6.0 work (low)
 
 - `/compact` does nothing in the TUI: `Client.Daemon.compact/2` and
