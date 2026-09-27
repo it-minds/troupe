@@ -84,8 +84,13 @@ function notifications(): ShellNotifications {
   const plugin = () => import("@tauri-apps/plugin-notification");
   const state = (s: string): NotifyPermission => (s === "granted" || s === "denied" ? s : "default");
   return {
+    // The plugin's page script reads "denied" on Windows at every start until something
+    // asks, and asking shows nothing on a desktop, the OS keeping a switch per app. So
+    // asking is how to read it: otherwise every launch after the first would wait for
+    // an answer it had been given already, and say nothing.
     async permission() {
-      return (await (await plugin()).isPermissionGranted()) ? "granted" : "default";
+      const p = await plugin();
+      return (await p.isPermissionGranted()) ? "granted" : state(await p.requestPermission());
     },
     async request() {
       return state(await (await plugin()).requestPermission());
