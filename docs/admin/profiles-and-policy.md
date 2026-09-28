@@ -78,7 +78,7 @@ objects that are no longer desired. Deleting a `WorkerProfile` deletes its names
 | `Ready` | every manifest applied; `False` with `PolicyViolation`, `NoPolicy` or `ApplyFailed` |
 | `PolicyViolation` | the profile exceeds the policy, or no policy could be read; **nothing is created** |
 | `SecretMissing` | a referenced Secret was not found in the worker namespace. The operator has no RBAC on Secrets, so do not rely on it |
-| `UpgradePending` | the StatefulSet has a newer revision than the named pods run |
+| `UpgradePending` | the StatefulSet has a newer revision than the named pods run; each keeps its revision until it is drained and deleted ([§3](#3-upgrades-and-drains)) |
 | `EgressByHostname` | the `CiliumNetworkPolicy` was written and applied, so a worker reaches its allowlist and the installation's own OpenBao and object store by name, and nothing else outside the cluster; `False` with `NoCilium` or `CiliumPolicyNotApplied` ([egress](#4-troupepolicy)) |
 
 `SecretMissing`, `UpgradePending` and `EgressByHostname` do not affect `Ready`. `kubectl -n troupe-system get
@@ -134,8 +134,12 @@ whether Cilium is there:
   name when they are outside the cluster, a hosted S3 service say, on whatever port they
   name: they are the platform's, so the operator adds them itself, and they are not in
   the profile's allowlist, which holds the profile's own destinations and is what the
-  plane shows and admission checks. They need no entry in `egress.fqdns`. A host neither
-  the profile nor the installation names does not connect.
+  plane shows and admission checks. They need no entry in `egress.fqdns`. A host given as
+  an IP address, the profile's or the installation's, is admitted as that one address (a
+  `toCIDR` of `/32` or `/128`), since no DNS answer names it; an address inside the
+  cluster, a Service's cluster IP say, is not admitted that way, so name the Service
+  (`*.svc`) instead. A host neither the profile nor the installation names does not
+  connect.
 - **Without Cilium** the external ones are one wide rule, public addresses on 443 and 80,
   and the policy is a check at admission and reconcile, not on the wire. Troupe writes no
   address list in its place: the allowlist holds names, not addresses.
