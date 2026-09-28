@@ -14,6 +14,8 @@ defmodule Troupe.Worker.PlaneLinkTest do
 
   use Troupe.Worker.SessionCase, async: false
 
+  import ExUnit.CaptureLog
+
   alias Ecto.Adapters.SQL.Sandbox
   alias Troupe.LLM.Fake
   alias Troupe.Plane.Control.{Connection, Connections, Listener}
@@ -65,6 +67,27 @@ defmodule Troupe.Worker.PlaneLinkTest do
       assert [worker] = Fleet.list_workers("dev")
       assert worker.pod_name == "troupe-w-dev-0"
       assert worker.healthy
+
+      # And it has asked whether it reaches its object store, which it does.
+      eventually(fn -> Link.info(link).object_store == :ok end)
+    end
+
+    test "a worker that cannot reach its object store says so when it enrols", context do
+      # Nothing listens on port 1: refused at once, where a policy that drops the
+      # connection makes the same failure wait out a connect timeout.
+      store = %{context.store | endpoint: "http://127.0.0.1:1"}
+
+      log =
+        capture_log(fn ->
+          link = start_link!(context, store: store)
+          eventually(fn -> Link.info(link).object_store != nil end)
+
+          assert {:error, {:object_store_unreachable, "http://127.0.0.1:1", :econnrefused}} =
+                   Link.info(link).object_store
+        end)
+
+      assert log =~ "this pod cannot use its object store"
+      assert log =~ "http://127.0.0.1:1"
     end
 
     test "a heartbeat carries how much of the volume is gone", context do
@@ -355,7 +378,7 @@ defmodule Troupe.Worker.PlaneLinkTest do
            "disk_total_bytes" => 1_000_000,
            "version" => "test"
          }
-       ] ++ Keyword.take(opts, [:heartbeat_ms])}
+       ] ++ Keyword.take(opts, [:heartbeat_ms, :store])}
     )
   end
 

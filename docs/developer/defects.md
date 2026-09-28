@@ -193,6 +193,21 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 Found by the chunk 7 fixers, 2026-09-27.
 
+### D38 - `UpgradePending` says every pod is current while one runs the old image (medium)
+
+After an upgrade that changes the worker image, a profile's StatefulSet names the new
+image while its pod, never deleted (`updateStrategy: OnDelete`), still runs the old one,
+and the profile's `UpgradePending` condition is `False`, `UpToDate`, "every pod is on the
+current revision". So nothing tells an operator the pod needs a drain and a delete. The
+cause is read in the code, not tried on a cluster: `pods_on_old_revision/3` in
+`apps/troupe_operator/lib/troupe/operator/reconciler.ex` lists the worker namespace's pods
+by `troupe.dev/managed=operator`, a label the pod template does not carry (`Resources`
+gives it `Names.labels/1`; only the objects the operator writes itself get
+`Names.managed_labels/1`), so it finds no pod and reports none behind. Selecting by
+`Names.labels(profile.name)`, the StatefulSet's own selector, would confirm and fix it.
+Nothing in `apps/troupe_operator/test` covers the condition. Found by the #249 fixer,
+from the maintainer's look at a running installation, 2026-09-28.
+
 ## Taken
 
 | Defect | Taken by |

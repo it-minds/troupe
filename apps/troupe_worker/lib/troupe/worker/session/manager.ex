@@ -366,10 +366,17 @@ defmodule Troupe.Worker.Session.Manager do
   # The manifest is plaintext and needs no key, which is what lets this check happen
   # before anything is decrypted. A session whose stored epoch is ahead of ours has been
   # moved, and this pod is the ghost.
+  #
+  # Storage that does not answer here will not answer the restore after it either, and
+  # each try waits out a connect timeout: it is said now, by name, rather than after a
+  # second wait.
   defp check_epoch(context) do
     case Storage.get_manifest(context.store, context.session_id) do
       {:ok, %{"epoch" => stored}} when is_integer(stored) and stored > context.epoch ->
         {:error, {:stale_epoch, stored, context.epoch}}
+
+      {:error, %Req.TransportError{} = error} ->
+        {:error, Restore.unreachable(context.store, error)}
 
       _ ->
         :ok
