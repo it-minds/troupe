@@ -238,7 +238,7 @@ Found by the chunk 7 fixers, 2026-09-27.
 | Headless runs waited forever on a spent budget: the printer answered its question as an approval (found by the D32 fixer) | PR #234 |
 | The TUI's needs-input, done and failed window states were dead since the daemon move (found by the #228 fixer) | PR #241 |
 | `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
-| D38 - `UpgradePending` says every pod is current while one runs the old image (confirmed) | #251 |
+| D38 - `UpgradePending` says every pod is current while one runs the old image (confirmed) | #251, PR #253 |
 
 ## Checked and not a defect
 
