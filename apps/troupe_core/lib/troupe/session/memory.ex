@@ -126,7 +126,28 @@ defmodule Troupe.Session.Memory do
   """
   @spec refresh_due?(Path.t(), Config.t() | nil) :: boolean()
   def refresh_due?(workspace, config) do
-    status(workspace, config) in [:absent, :stale] and not held_off?(workspace, config)
+    status(workspace, config) in [:absent, :stale] and held_until(workspace, config) == nil
+  end
+
+  @doc """
+  Until when a librarian's try that built nothing holds off the next automatic refresh,
+  or `nil` when none does: what `refresh_due?/2` waits out, for a client to say.
+  """
+  @spec held_until(Path.t(), Config.t() | nil) :: DateTime.t() | nil
+  def held_until(workspace, config) do
+    path = path(workspace)
+
+    # A try holds while it is younger than the age a brief may reach, and only when nothing
+    # built the brief after it: a librarian that got through stamped it, and a brief stale
+    # since then, say because the repository grew, is due at once.
+    with %DateTime{} = at <- attempted_at(path, state_dir(config)),
+         until = DateTime.add(at, max_age(config) * 86_400, :second),
+         true <- DateTime.compare(DateTime.utc_now(), until) != :gt,
+         false <- built_since?(read(path), at) do
+      until
+    else
+      _ -> nil
+    end
   end
 
   @doc "Deletes the brief, and the record of a librarian's try at it."
@@ -151,22 +172,6 @@ defmodule Troupe.Session.Memory do
 
   defp state_dir(%Config{state_dir: dir}), do: dir
   defp state_dir(_config), do: nil
-
-  # A try holds while it is younger than the age a brief may reach, and only when nothing
-  # built the brief after it: a librarian that got through stamped it, and a brief stale
-  # since then, say because the repository grew, is due at once.
-  defp held_off?(workspace, config) do
-    path = path(workspace)
-
-    case attempted_at(path, state_dir(config)) do
-      nil ->
-        false
-
-      at ->
-        DateTime.diff(DateTime.utc_now(), at, :second) <= max_age(config) * 86_400 and
-          not built_since?(read(path), at)
-    end
-  end
 
   defp built_since?(%Memory{built_at: %DateTime{} = built_at}, at),
     do: DateTime.compare(built_at, at) == :gt

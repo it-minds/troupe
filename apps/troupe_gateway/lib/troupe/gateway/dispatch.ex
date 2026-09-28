@@ -328,12 +328,14 @@ defmodule Troupe.Gateway.Dispatch do
   # resolve them, so a picker offers exactly what a `profile` may name.
   # The project brief, as a client shows it: status, where it is, when it was built and
   # what it covers, and the text itself for a client that renders it. `refresh_due` is
-  # whether a client that refreshes it by itself should start a librarian now.
+  # whether a client that refreshes it by itself should start a librarian now, and
+  # `refresh_held_until` until when a try that built nothing holds that off.
   defp handle("memory.get", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace"),
          workspace = Path.expand(workspace),
          {:ok, config} <- workspace_config(workspace) do
       brief = Troupe.Session.Memory.brief(workspace)
+      held = Troupe.Session.Memory.held_until(workspace, config)
 
       {:ok,
        %{
@@ -342,7 +344,8 @@ defmodule Troupe.Gateway.Dispatch do
          "built_at" => brief && brief.built_at && DateTime.to_iso8601(brief.built_at),
          "sections" => if(brief, do: Troupe.Memory.titles(brief), else: []),
          "text" => brief && Troupe.Memory.render(brief),
-         "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config)
+         "refresh_due" => Troupe.Session.Memory.refresh_due?(workspace, config),
+         "refresh_held_until" => held && DateTime.to_iso8601(held)
        }}
     end
   end
