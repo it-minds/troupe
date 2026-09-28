@@ -6,6 +6,11 @@ defmodule Troupe.Worker.RecordingProxy do
   honest way to check that is to look at the bytes. Asserting on the worker's own idea
   of what it sent would prove nothing: the question is precisely whether the code is
   wrong about that.
+
+  `drop:` names bytes a request may carry, and a connection that sends them is closed
+  before they go any further: a service that answered everything up to one request and
+  then went away, which is a failure no configuration of the real service can make on
+  cue.
   """
 
   use GenServer
@@ -24,11 +29,12 @@ defmodule Troupe.Worker.RecordingProxy do
   @impl GenServer
   def init(opts) do
     upstream = Keyword.fetch!(opts, :upstream)
+    drop = Keyword.get(opts, :drop)
     {:ok, listen} = :gen_tcp.listen(0, [:binary, active: false, packet: :raw, reuseaddr: true])
     {:ok, port} = :inet.port(listen)
 
     relay = self()
-    spawn_link(fn -> accept(listen, upstream, relay) end)
+    spawn_link(fn -> accept(listen, {upstream, drop}, relay) end)
 
     {:ok, %{listen: listen, port: port, captured: []}}
   end
@@ -67,7 +73,7 @@ defmodule Troupe.Worker.RecordingProxy do
     end
   end
 
-  defp pair(client, upstream, relay) do
+  defp pair(client, {upstream, drop}, relay) do
     receive do
       :socket_ready -> :ok
     after
@@ -77,24 +83,30 @@ defmodule Troupe.Worker.RecordingProxy do
     case :gen_tcp.connect(~c"127.0.0.1", upstream, [:binary, active: true, packet: :raw]) do
       {:ok, server} ->
         :inet.setopts(client, active: true)
-        pump(client, server, relay)
+        pump(client, server, relay, drop)
 
       {:error, _reason} ->
         :gen_tcp.close(client)
     end
   end
 
-  defp pump(client, server, relay) do
+  defp pump(client, server, relay, drop) do
     receive do
       {:tcp, ^client, data} ->
         send(relay, {:captured, data})
-        :gen_tcp.send(server, data)
-        pump(client, server, relay)
+
+        if drop && String.contains?(data, drop) do
+          :gen_tcp.close(client)
+          :gen_tcp.close(server)
+        else
+          :gen_tcp.send(server, data)
+          pump(client, server, relay, drop)
+        end
 
       {:tcp, ^server, data} ->
         send(relay, {:captured, data})
         :gen_tcp.send(client, data)
-        pump(client, server, relay)
+        pump(client, server, relay, drop)
 
       {:tcp_closed, _socket} ->
         :gen_tcp.close(client)

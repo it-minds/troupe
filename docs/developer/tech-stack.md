@@ -41,6 +41,7 @@ give it.
 | `reaper` | every OS process Troupe starts runs under it, owned by a Port, so killing the VM kills the whole process tree — no cleanup code on the Elixir side can be relied on when the VM dies outright |
 | `bubblewrap` | on a pod, `shell` runs in a mount namespace built from the same mount table the file tools check; worker image only |
 | `git` | worktrees, and a worker cloning a source; worker image only |
+| `inotifywait` | the native watch backend on Linux, which `fs_changed` and watch mode use; installed in the worker image, polled for where it is missing or will not run |
 | `ripgrep` | `grep` uses it when it is on the `PATH`, and a built-in scan when not |
 
 The services the plane and workers talk to, and what each must provide, are in

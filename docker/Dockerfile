@@ -85,10 +85,16 @@ ARG RELEASE=troupe_operator
 # network client are the two things one would least like to find in the image that is
 # internet-facing and the image that holds every cluster privilege — so they go into
 # the worker image alone, and this stays one Dockerfile.
+#
+# `inotify-tools` is `inotifywait`, which `Troupe.Session.Files` watches a session's tree
+# through. Without it the worker polls, which reports a change a second or more late and a
+# deleted file never, so a client attached to a remote session never learned that one was
+# gone. Like `git` it is GPL-2.0 and, like both, a separate program the VM starts, not
+# code linked into the release; Debian keeps its licence at /usr/share/doc/inotify-tools.
 RUN apt-get update -y \
  && apt-get install -y --no-install-recommends \
       libstdc++6 openssl libncurses6 locales ca-certificates \
-      $(if [ "${RELEASE}" = "troupe_worker" ]; then echo git bubblewrap; fi) \
+      $(if [ "${RELEASE}" = "troupe_worker" ]; then echo git bubblewrap inotify-tools; fi) \
  && rm -rf /var/lib/apt/lists/* \
  && sed -i '/en_US.UTF-8/s/^# //g' /etc/locale.gen && locale-gen
 

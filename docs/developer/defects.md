@@ -124,14 +124,6 @@ fixers (PRs #210, #211), 2026-09-26.
 The rest of this entry was fixed in PRs #234 and #237. Found by the chunk 6 fixers,
 2026-09-26/27.
 
-### D34 - On a pod, a deleted file is never reported to clients (medium)
-
-The worker image (`docker/Dockerfile`) installs `git` and `bubblewrap` but not
-`inotify-tools`, so `Troupe.Session.Files` on a pod uses the poll backend, which never
-reports a deletion (`changed_paths` lists additions and changes only) and takes a second
-or more for a change. A remote session's clients never learn a file was deleted. Found by
-the fixer of PR #233, 2026-09-27 (read in code).
-
 ### D35 - Clicking a desktop notification on Windows doesn't open its session (medium)
 
 `tauri-plugin-notification` can't report a click on desktop (its `show()` drops the
@@ -253,6 +245,7 @@ from the maintainer's look at a running installation, 2026-09-28.
 | Headless runs waited forever on a spent budget: the printer answered its question as an approval (found by the D32 fixer) | PR #234 |
 | The TUI's needs-input, done and failed window states were dead since the daemon move (found by the #228 fixer) | PR #241 |
 | `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
+| D34 - On a pod, a deleted file is never reported to clients | #252 |
 
 ## Checked and not a defect
 

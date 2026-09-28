@@ -539,9 +539,10 @@ defmodule Troupe.Worker.Plane.Commands do
   # gone is named as such, so the plane can park the session rather than retry it
   # (Decision 661). An object store the pod cannot reach is named, with its endpoint,
   # because the transport error alone said neither which host nor that it was storage; it
-  # stays a failure the plane may retry. An exception — a `Troupe.Config.Error` from a
-  # profile's config — is its message, which says what to fix, where its inspected struct
-  # said nothing a person reads. Anything else is the opaque failure it always was.
+  # stays a failure the plane may retry. So is a key manager, with its address. An
+  # exception — a `Troupe.Config.Error` from a profile's config — is its message, which
+  # says what to fix, where its inspected struct said nothing a person reads. Anything
+  # else is the opaque failure it always was.
   @doc false
   @spec activation_error(term()) :: Error.t()
   def activation_error({:not_a_directory, path}) do
@@ -552,6 +553,14 @@ defmodule Troupe.Worker.Plane.Commands do
     Error.new(:unavailable, %{
       reason: "object_store_unreachable",
       endpoint: endpoint,
+      detail: inspect(reason)
+    })
+  end
+
+  def activation_error({:kms_unreachable, address, reason}) do
+    Error.new(:unavailable, %{
+      reason: "kms_unreachable",
+      address: address,
       detail: inspect(reason)
     })
   end
