@@ -245,7 +245,7 @@ from the maintainer's look at a running installation, 2026-09-28.
 | Headless runs waited forever on a spent budget: the printer answered its question as an approval (found by the D32 fixer) | PR #234 |
 | The TUI's needs-input, done and failed window states were dead since the daemon move (found by the #228 fixer) | PR #241 |
 | `troupe` on Windows died at boot in a large directory and broke the console (every session start walked the workspace for `.gitignore`) | #231, PR #240 |
-| D34 - On a pod, a deleted file is never reported to clients | #252 |
+| D34 - On a pod, a deleted file is never reported to clients | #252, PR #254 |
 
 ## Checked and not a defect
 
