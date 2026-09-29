@@ -25,6 +25,8 @@ Three kinds, and the difference is what an operator needs:
 | `llm.endpoint (per profile)` | named by a setting | a gateway or a self-hosted model, where a profile names one instead of a provider's own |
 | `egress.gitHosts (per profile)` | named by a setting | the git remotes a session may clone from and push to |
 | `mcpServers[].url (per bundle)` | named by a setting | every MCP server a session's tools reach, named by the profile's bundle |
+| `TROUPE_OBJECT_ENDPOINT` | named by a setting | the bucket a session's log is restored from and sealed into. The operator sets it from `objectStore.endpoint` |
+| `TROUPE_BAO_ADDR` | named by a setting | the key manager: every session's key, and the per-person credentials its tools use. The operator sets it from `bao.address` |
 
 ## plane
 

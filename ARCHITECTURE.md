@@ -346,7 +346,7 @@ object storage, the model, the profile's MCP servers and git hosts. Plain Networ
 cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
 than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
 with the installation's own OpenBao and object storage in it when they are outside the
-cluster, a DNS rule through Cilium's proxy so it can learn addresses, and no wide rule
+cluster (a `toCIDR` of one address for a host given as an address), a DNS rule through Cilium's proxy so it can learn addresses, and no wide rule
 beside it, since Cilium admits the union of every policy on a pod. Which of the two a
 profile has is its `EgressByHostname` condition, and the plane claims egress by hostname
 for a profile only where that condition says so.
