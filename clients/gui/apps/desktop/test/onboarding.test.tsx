@@ -251,6 +251,32 @@ describe("each screen", () => {
     expect(onAnswer).toHaveBeenLastCalledWith({ choice: "plane", plane_url: "https://troupe.example/" });
   });
 
+  it("Where: the plane's address is the daemon's link, or else the one this app last signed in to", async () => {
+    localStorage.setItem("troupe.pref.planeUrl", "https://kept.example");
+    const onAnswer = vi.fn();
+    const addressOn = async (flow: SetupFlow): Promise<string> => {
+      unmount?.();
+      unmount = render(<Where flow={flow} {...idle} onAnswer={onAnswer} />).unmount;
+      await shown("Where does the work run?");
+      button("Sign in to my organisation")!.click();
+      return (await waitFor(() => document.querySelector<HTMLInputElement>('[aria-label="The plane\'s address"]'), "the address field")).value;
+    };
+
+    // Nothing linked: the app's own address.
+    expect(await addressOn(flowAt("where"))).toBe("https://kept.example");
+    button("Continue")!.click();
+    expect(onAnswer).toHaveBeenLastCalledWith({ choice: "plane", plane_url: "https://kept.example" });
+
+    // A daemon linked to a plane says which, and that comes first.
+    const linked = flowAt("where");
+    linked.detected.plane = { url: "https://linked.example", linked: true };
+    expect(await addressOn(linked)).toBe("https://linked.example");
+
+    // Neither: the field waits for one.
+    localStorage.removeItem("troupe.pref.planeUrl");
+    expect(await addressOn(flowAt("where"))).toBe("");
+  });
+
   it("Provider: the four kinds, what is already here first, and a gateway needs its address", async () => {
     const onAnswer = vi.fn();
     const flow = flowAt("provider");

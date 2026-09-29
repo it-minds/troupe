@@ -116,7 +116,9 @@ permission. A write can never leave the workspace root; a read may also reach th
 configured `read_roots`; both compare canonical paths. The runner is the one place
 `rescue` is used: a raise, exit or timeout becomes an error result the model can read.
 Every OS process runs under **`reaper`**, a small Zig program owned by a Port, so killing
-the VM kills everything it started. On a pod, `shell` runs under bubblewrap with the
+the VM kills everything it started. A reaper that will not start is an error, not a crash:
+`shell` says why, `grep` scans in the VM, the brief's `git` reads as no repository, and
+`troupe doctor` fails its line. On a pod, `shell` runs under bubblewrap with the
 session's mount table as its bind list.
 
 Results are **bounded where they are created** — head and tail of command output, a window
@@ -342,10 +344,12 @@ without a cluster, and the reconciler only applies and compares — level-trigge
 idempotent, pruning by label (owner references cannot cross namespaces), led by a `Lease`.
 A pod gets a *projected* token with audience `troupe-plane`, never the ServiceAccount's own,
 so it cannot be replayed against the API server. StatefulSets are `OnDelete` because a pod
-holds live sessions. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
+holds live sessions; the operator replaces a pod on an older revision once the plane, which
+alone knows when a pod holds nothing, has drained it and recorded that on the profile. **Egress** is default-deny: DNS, the plane's control port, OpenBao,
 object storage, the model, the profile's MCP servers and git hosts. Plain NetworkPolicy
-cannot name a host, so without Cilium the external ones are a wide rule, recorded rather
-than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
+cannot name a host, so without Cilium the external ones are a wide rule on 443 and 80,
+with the installation's own OpenBao and object storage beside it on the ports they name,
+recorded rather than hidden; with Cilium the operator writes the `toFQDNs` rule the profile asked for,
 with the installation's own OpenBao and object storage in it when they are outside the
 cluster (a `toCIDR` of one address for a host given as an address), a DNS rule through Cilium's proxy so it can learn addresses, and no wide rule
 beside it, since Cilium admits the union of every policy on a pod. Which of the two a

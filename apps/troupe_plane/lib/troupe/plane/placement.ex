@@ -178,7 +178,16 @@ defmodule Troupe.Plane.Placement do
     end
   end
 
+  # A pod on the current revision first, while one has room. A pod the operator reports
+  # behind is replaced once it holds nothing, and every session put on it is one more it
+  # has to wait for to go dormant; with no current pod that has room it still takes one,
+  # because a session waiting for a pod that is not there yet is worse (Decision 726).
   defp choose(state, workers) do
+    {behind, current} = Enum.split_with(workers, & &1.upgrade_pending)
+    roomiest(state, current) || roomiest(state, behind)
+  end
+
+  defp roomiest(state, workers) do
     workers
     |> Enum.map(&{&1, room(state, &1)})
     |> Enum.filter(fn {_worker, room} -> room > 0 end)

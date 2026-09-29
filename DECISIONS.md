@@ -2320,8 +2320,8 @@ citation keeps meaning what it meant.
        front within 15 seconds of a notification said while it was not is taken as the
        answer to it, however it came forward, and opens the session the last one was
        about. Windows itself can report the click, through the toast's own `Activated`
-       event, but only for a toast the shell shows itself rather than the plugin; that
-       waits for a machine where a toast can be clicked and the result seen.
+       event, but only for a toast the shell shows itself rather than the plugin, which
+       it now does (730).
      - **The launcher's recent rows carry the list's marker**, "2 new" with the sentence
        behind it, from one component the two screens share.
      - **The plane's address is asked once.** A first run that chose a plane and was
@@ -2399,7 +2399,8 @@ citation keeps meaning what it meant.
        both stay on the minor that goes with tauri 2.11, pinned with `~` on both sides
        (`tauri-plugin-http ~2.6` and `~2.6.1`, `tauri-plugin-notification ~2.4` and
        `~2.4.0`), and the pins come off in the change that moves tauri, `@tauri-apps/api`
-       and the CLI to 2.12 together.
+       and the CLI to 2.12 together. `tauri-plugin-single-instance ~2.4` (730) has no
+       JavaScript half, and its 2.5 wants tauri 2.12 too.
      - **Proof:** the renamed desktop build (`pnpm tauri build --bundles nsis`) with the
        pins; with #120's lock as Dependabot wrote it, the same build stops at the check.
 
@@ -2505,6 +2506,86 @@ citation keeps meaning what it meant.
      changes. Proof: `resources_test.exs` (the platform's endpoints as IPv4 and IPv6
      literals; a profile's own addresses beside its names).
 
+724. **Without Cilium, the operator admits the installation's own OpenBao and object store
+     outside the cluster on the port they name: an address as that one address, a name on
+     another port as the public rule's addresses on that port.** Issue #257, the half of
+     #249 that Decisions 721 and 723 left. Without Cilium the worker NetworkPolicy reaches
+     outside the cluster through one rule, public addresses on 443 and 80, so an object
+     store on 9000, or an OpenBao at a private address, was admitted by nothing and no
+     session activated. For `bao.address` and `objectStore.endpoint` that are not `*.svc`
+     hosts, `Resources.platform_rules/1` now adds a rule on the endpoint's own port: an IP
+     address, private or public, as an `ipBlock` of that one address (`/32`, `/128`), and
+     a name on a port other than 443 and 80 as the public rule's ranges on that port. The
+     public rule itself stays 443 and 80: opening it to the private ranges or to more ports
+     would widen it for every destination, to admit two that the installation chose. The
+     cost is that a name on 9000 opens 9000 to every public address, which is as much as a
+     NetworkPolicy can say about a name. About a name that resolves to a private address it
+     can say nothing, and nothing here tries: such an endpoint is given as its address, or
+     admitted by a NetworkPolicy the installation adds to the worker namespace (policies
+     add up, and the operator prunes only what carries its label), or Cilium is used. With
+     Cilium nothing changes. Proof: `resources_test.exs` (a name on another port, a name on
+     443 and 80, a private and a public address, `*.svc` endpoints, and the Cilium path).
+
+725. **An activation that fails takes away the log and the workspace it put on the pod,
+     and leaves what it found there; a read and a fork name an unreachable store or key
+     manager as an activation does.** Issue #259. An activation restores the session's
+     log into the pod's state directory, then its workspace, then starts the sealer and
+     the actor tree. A failure after the log was written (storage that stopped answering
+     at the workspace listing, which Decision 722 made a failure; a config the session
+     would not start with; a raise on the way) left the log and the workspace until the
+     session was next activated on that pod or went dormant there, which for a session
+     that goes on to run on another pod is never. `Manager.put_back/3` now removes them on
+     any such failure, returned or raised. It removes only what the activation added. A
+     log that was there before it started is a reader's, restored for `session.read` and
+     perhaps still served, and a workspace with anything in it is one a pod that stopped
+     without putting the session to sleep left, which may hold files no archive has: both
+     stay, and a failure before the events step touches nothing. The pod's cache is
+     sealed bytes the activation only read and stays too, with 722's rule that it is
+     used only once storage has answered unchanged. `session.read` and the fork step of
+     `session.activate` opened their contexts and read storage without the names
+     Decisions 721 and 722 gave an activation, and answered `internal_error` with the
+     inspected transport error. They now go through `Restore.open_context/2` and
+     `Restore.unreachable/2`, answer `unavailable` with `object_store_unreachable` or
+     `kms_unreachable` and the endpoint or address, and say so in the pod's log, which
+     for a read is the only place: the plane hands the client an endpoint whatever the
+     pod answered. Proof: `failed_activation_test.exs`, and the read and fork cases in
+     `object_store_unreachable_test.exs` and `kms_unreachable_test.exs`.
+     
+
+726. **A worker upgrade finishes by itself: the plane drains a pod behind once it holds no
+     active session and records that on the profile, and the operator then deletes it.**
+     Issue #258. A worker StatefulSet rolls `OnDelete`, and since #253 `UpgradePending`
+     names the pods behind, but nothing replaced them. The operator cannot tell a drained
+     pod from a draining one, since readiness fails as a drain starts, and only the plane
+     knows when a pod holds nothing; the plane has no pod `delete` and gets none (#253's
+     option (c)). So each writes what it alone knows, where it already writes: the
+     operator lists the pods behind in the status it owns (`status.podsBehind`, name, uid,
+     revision), and the plane its finished drains in an annotation (`troupe.dev/drained`,
+     pod to revision), because its grant is `patch` on the resource and not on the status,
+     under a field manager of its own so its profile writes do not remove it. The plane,
+     on the scaler's tick, drains the highest-ordinal pod behind that holds no active
+     session, only while no other pod behind is draining, and records a pod once it is
+     draining and a count taken on a later tick finds it empty. The operator deletes a pod
+     that is behind, recorded at the revision it still runs, and not Ready, one at a time,
+     highest ordinal first, and never while one is terminating or missing; not Ready is
+     what keeps a pod that restarted after its record, and may have been given a session,
+     from being deleted. The operator's list carries each pod's uid, and the plane keeps a
+     worker's uid from its enrolment token's `pod-uid` claim, because a pod's replacement
+     has the same name and can enrol before the next pass: drained by name, it would be a
+     current pod drained for good. Placement puts a new session on a current pod while one
+     has room (`workers.upgrade_pending`), so a busy pod's sessions go dormant in their own
+     time. A profile with one pod gives it new sessions until every one is dormant, then is
+     without a pod while the replacement starts. This is the "removes a drained pod" that
+     Decision 633 still owed, for pods behind only: a drained current pod still waits for
+     a person. What it costs: an idle pod's drain is started without waiting for it, and a
+     drain whose answer never arrived leaves the pod Ready and recorded until somebody
+     drains it again; a CRD without `podsBehind` drops it and the roll stays manual.
+     Proof: `reconciler_test.exs` (behind and drained is deleted; not drained, Ready again
+     or drained on another revision is kept; one at a time; current never), the plane's
+     `upgrade_test.exs` and `placement_test.exs`, and the cluster suite's `upgrade_test.exs`,
+     which rolls a one-pod profile with nobody deleting anything.
+     
+
 727. **A root agent that keeps crashing ends its turn saying why, and its session stops
      instead of starting it again.** D37. A root whose start failed every time, or that
      crashed every time on the turn it came back to (a reaper that could not spawn, under
@@ -2538,3 +2619,68 @@ citation keeps meaning what it meant.
      takes up, which wrote 15 `agent_restarted` before this and 3 now; a session brought
      back with `resume_on_restart` that does not take the turn up) and the A2A app's
      `events_test.exs`.
+
+730. **On Windows the desktop app shows its notifications itself, so that a click on one
+     opens its session, and it runs as one copy.** Defect D35, following 714 and 708.
+     - **The toast is the one the plugin shows underneath.** `tauri-plugin-notification`
+       hands its toast to notify-rust and lets go of the handle that would hear a click
+       (714). On Windows the shell's `notify_show` builds the same WinRT toast through
+       `tauri-winrt-notification`, which notify-rust had already brought into the lock:
+       the same app id (the bundle identifier, which the installer writes on the Start
+       menu shortcut, and PowerShell's for a build run from `target`), silent and short
+       like the plugin's, and an `Activated` handler that holds the session's id. A click
+       sends `troupe://open-session` to the page, then brings the window forward. On
+       macOS and Linux `notify_show` answers false and the page uses the plugin, as it
+       does when the shell's toast fails.
+     - **The window coming back stays the answer where no click is heard** (714): macOS
+       and Linux, a toast the shell could not show, and a click that Windows turns into a
+       launch.
+     - **One copy.** `tauri-plugin-single-instance`, registered first and pinned `~2.4`
+       (717). A second launch, from the Start menu or from a click, hands its arguments
+       to the copy that is running and exits. The running copy comes forward, and opens
+       the session a `--session=<id>` among those arguments names, as a click would. A
+       toast from `tauri-winrt-notification` 0.8 carries no launch argument, so a copy
+       that Windows starts for a click names nothing. The app has no COM activator, and
+       whether Windows starts one at all is unsettled here. In that case the window coming
+       forward is the answer. A debug build does not register the plugin: `tauri dev` has
+       the installed app's identifier and would hand itself over to it.
+     - **Proof:** `cargo test` (the launch argument, and the app id for an installed
+       build and a build run from `target`); the desktop app's `notify` test, where a
+       reported click opens its own session and not the last one's; and a renamed
+       installed build against a fake daemon. Its toast is in Windows' history under the
+       build's id with the shell's two fields, where the plugin's has three. A second copy
+       with `--session=` exits in about 40 ms, and the first comes back on that session,
+       17 s after the last toast. A second copy with no arguments, just after a toast,
+       brings the first back on the toast's session. No toast was clicked: this machine
+       shows no banners, and its notification centre was not opened while in use.
+
+733. **A reaper helper that will not start is an error its caller gets back, never a
+     raise: the session answers, runs no command, and `troupe doctor` says why.** Issue
+     #270. `Troupe.Reaper.open/3` called `Port.open/2` directly, and that raises when the
+     program is there and will not start: no execute bit or a mount that forbids running
+     it on Linux, a file that is not a program on Windows (`eacces` on both). Every model
+     call asks `git` where the repository is, in the agent's own process
+     (`Instructions.load`, then `Session.Memory.path/1`), so such a helper crashed the
+     root agent on every turn and the session never answered; the loop that followed is
+     what Decision 727 bounds. `open/3` and `open_stdio/3` now return
+     `{:reaper_unstartable, reason}` with the OS's reason, and log it once for each helper
+     and reason, not at every call. On Windows a working directory that has gone raises
+     the same way; that is `{:no_directory, cwd}`, and not blamed on the helper. The
+     callers: the brief's `git` calls read the workspace as no repository, as a missing
+     `git` already did, so a session at the repository's root still reads its brief and
+     one in a subdirectory or a worktree reads none that turn; `shell` answers the model
+     with the helper's path, the reason and that nothing runs until it does; `grep` scans
+     in the VM, as it does without a helper; `git_read` and an MCP server say they could
+     not run, and why. `troupe doctor` gains a `reaper` line, `reaper --version` started
+     in the workspace: `ok` with what it printed, `warn` for a build without a helper (a
+     source checkout without Zig, where `shell` never ran), and `FAIL` for one that will
+     not start, since that is an install a person has to put right and a session shows it
+     only through the model's words. A harness note in the session was the other place to
+     say it, and would say in every session what the doctor's one line says once.
+     `config :troupe_core, :reaper` names a helper elsewhere, as `:bwrap` does for
+     bubblewrap; the suite points it at one that will not start. Proof: `reaper_test.exs`
+     (a turn answered, a shell call that is a tool error and a turn that goes on, the
+     brief read as no repository with one warning over three loads, `grep`, `git_read`,
+     an MCP server, a directory that has gone), nine of whose eleven tests fail on the
+     chunk's tip with the config key alone; `doctor_test.exs`; and the installed build
+     with its helper swapped for a file that is not a program.

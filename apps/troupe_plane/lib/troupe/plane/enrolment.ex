@@ -45,6 +45,7 @@ defmodule Troupe.Plane.Enrolment do
           required(:profile) => String.t(),
           required(:namespace) => String.t(),
           required(:pod_name) => String.t() | nil,
+          optional(:pod_uid) => String.t() | nil,
           required(:service_account) => String.t(),
           optional(:host) => Fleet.Host.t() | nil,
           optional(:ordinal) => non_neg_integer() | nil
@@ -108,6 +109,7 @@ defmodule Troupe.Plane.Enrolment do
          profile: profile,
          namespace: namespace,
          pod_name: pod_of(user),
+         pod_uid: extra(user, "authentication.kubernetes.io/pod-uid"),
          service_account: account
        }}
     end
@@ -174,10 +176,15 @@ defmodule Troupe.Plane.Enrolment do
   # Kubernetes puts the bound pod in the token's extra claims when the token was
   # projected into one. Where it is present it is authoritative; where it is not, the
   # worker's own claim is all there is, and it is only used for naming.
-  defp pod_of(user) do
+  defp pod_of(user), do: extra(user, "authentication.kubernetes.io/pod-name")
+
+  # The pod's uid comes only from here, never from the worker: it is what tells a pod the
+  # operator reported behind from its replacement under the same name (Decision 726), and
+  # without it the plane drains nothing for an upgrade.
+  defp extra(user, claim) do
     user
     |> Map.get("extra", %{})
-    |> Map.get("authentication.kubernetes.io/pod-name", [])
+    |> Map.get(claim, [])
     |> List.first()
   end
 
@@ -193,6 +200,7 @@ defmodule Troupe.Plane.Enrolment do
         profile: identity.profile,
         namespace: identity.namespace,
         pod_name: pod_name,
+        pod_uid: Map.get(identity, :pod_uid),
         ordinal: ordinal,
         endpoint: Map.get(claims, "endpoint"),
         node_name: Map.get(claims, "node_name"),

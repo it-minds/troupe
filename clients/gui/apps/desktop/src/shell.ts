@@ -62,7 +62,14 @@ export type NotifyPermission = "granted" | "denied" | "default";
 export interface ShellNotifications {
   permission(): Promise<NotifyPermission>;
   request(): Promise<NotifyPermission>;
-  send(title: string, body: string): Promise<void>;
+  /** Show one about `sessionId`, which a click on it opens where the shell hears clicks. */
+  send(title: string, body: string, sessionId: string): Promise<void>;
+  /**
+   * Hear the shell ask for a session: a click on one of its notifications, or a second
+   * launch that named one. Returns the function that stops listening. A shell that hears
+   * no clicks, or a click it missed, leaves the window coming back as the answer.
+   */
+  onOpen?(listener: (sessionId: string) => void): () => void;
 }
 
 declare global {
