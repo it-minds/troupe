@@ -12,8 +12,10 @@ defmodule Troupe.Worker.Session.Reader do
   exactly as they would from a live one, because it *is* the same log — the same chain,
   the same sequence numbers, verifiable by the same `troupe verify`.
 
-  It exits when its last subscriber leaves, which is what keeps a pod that serves a
-  thousand glances a day from accumulating a thousand processes.
+  It exits when its last subscriber leaves and no client is reading the session through
+  the pod's harness, which is what keeps a pod that serves a thousand glances a day from
+  accumulating a thousand processes; and it takes the log it restored with it, which is
+  what keeps those glances from leaving a thousand plaintext logs on the pod's volume.
   """
 
   use GenServer, restart: :temporary
@@ -25,10 +27,11 @@ defmodule Troupe.Worker.Session.Reader do
   require Logger
 
   # A reader with no subscribers at all — opened by a command that then went away — is
-  # not kept around waiting for one that may never come.
+  # not kept around waiting for one that may never come. Also how often one kept for a
+  # client reading through the harness looks again. `:idle_grace_ms` in a test.
   @idle_grace_ms 30_000
 
-  defstruct [:session_id, :context, :log, :timer, subscribers: %{}]
+  defstruct [:session_id, :context, :log, :timer, :found, :idle_ms, subscribers: %{}]
 
   # -- api --------------------------------------------------------------------
 
@@ -114,13 +117,23 @@ defmodule Troupe.Worker.Session.Reader do
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
     Process.set_label("troupe reader #{session_id}")
+    # So a pod that shuts down takes the log away too.
+    Process.flag(:trap_exit, true)
 
     with {:ok, context} <- context(opts),
          root = Restore.workspace_root(context, opts),
+         found = File.exists?(log_dir(context, root)),
          {:ok, log} <- Restore.events(context, root) do
       Logger.debug("troupe worker: reading #{session_id} from #{log.segments} segment(s)")
 
-      state = %__MODULE__{session_id: session_id, context: context, log: log}
+      state = %__MODULE__{
+        session_id: session_id,
+        context: context,
+        log: log,
+        found: found,
+        idle_ms: Keyword.get(opts, :idle_grace_ms, @idle_grace_ms)
+      }
+
       {:ok, schedule_idle(state)}
     else
       {:error, reason} -> {:stop, reason}
@@ -150,15 +163,68 @@ defmodule Troupe.Worker.Session.Reader do
 
   @impl GenServer
   def handle_info({:DOWN, _reference, :process, pid, _reason}, state) do
-    state = drop(state, pid)
-    if map_size(state.subscribers) == 0, do: {:stop, :normal, state}, else: {:noreply, state}
+    settle(drop(state, pid))
   end
 
-  def handle_info(:idle, state) do
-    if map_size(state.subscribers) == 0, do: {:stop, :normal, state}, else: {:noreply, state}
-  end
+  def handle_info(:idle, state), do: settle(state)
 
   def handle_info(_message, state), do: {:noreply, state}
+
+  @impl GenServer
+  def terminate(_reason, state) do
+    forget(state)
+    :ok
+  end
+
+  # Whether to go, once nobody follows the reader itself.
+  #
+  # A client reading the session through the pod's harness follows the log, not the
+  # reader, and it reads the log from disk, so the reader stays as long as one is attached
+  # — going sooner would take the log from under them. So does an activation of the
+  # session starting over the log, until it has either taken the log over, which it has
+  # once it has written to it and which leaves the reader nothing to serve or remove, or
+  # failed and gone, leaving the log with the reader (Decision 725).
+  defp settle(state) do
+    cond do
+      map_size(state.subscribers) > 0 -> {:noreply, state}
+      not ours?(state) -> {:stop, :normal, state}
+      read?(state.session_id) -> {:noreply, schedule_idle(state)}
+      true -> {:stop, :normal, state}
+    end
+  end
+
+  defp read?(session_id) do
+    Troupe.Events.attached?(session_id) or Sessions.whereis(session_id) != nil
+  end
+
+  # What the reader restored goes when it does, and only that: not a log that was on the
+  # pod before the read, and not one an activation has, is putting back or has written to,
+  # which may hold events storage does not have yet. Under the lock a restore writes the
+  # log under (`Restore.with_log/2`), so an activation starting now is either seen here or
+  # writes its log after this one has gone.
+  defp forget(%__MODULE__{found: true}), do: :ok
+
+  defp forget(state) do
+    Restore.with_log(state.session_id, fn ->
+      if ours?(state) and Sessions.whereis(state.session_id) == nil do
+        File.rm_rf(Path.dirname(state.log.path))
+      end
+    end)
+
+    :ok
+  end
+
+  # The log is still the one this reader wrote: nobody has appended to it or written it
+  # again since, and it has not been removed. The log only grows, so its size says so.
+  defp ours?(state) do
+    case File.stat(state.log.path) do
+      {:ok, %File.Stat{size: size}} -> size == state.log.bytes
+      {:error, _gone} -> false
+    end
+  end
+
+  defp log_dir(context, root),
+    do: Path.dirname(Restore.log_path(context.session_id, root, context.state_dir))
 
   defp drop(state, subscriber) do
     case Map.pop(state.subscribers, subscriber) do
@@ -174,7 +240,7 @@ defmodule Troupe.Worker.Session.Reader do
 
   defp schedule_idle(state) do
     state = cancel_idle(state)
-    %{state | timer: Process.send_after(self(), :idle, @idle_grace_ms)}
+    %{state | timer: Process.send_after(self(), :idle, state.idle_ms)}
   end
 
   defp cancel_idle(state) do

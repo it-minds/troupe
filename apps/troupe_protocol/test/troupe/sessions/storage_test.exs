@@ -147,6 +147,32 @@ defmodule Troupe.Sessions.StorageTest do
       assert {:ok, ^archive} = Storage.get_workspace(store, session_id, key, 40)
     end
 
+    test "the archive at a point is the nearest before it, and a listing that failed is not none",
+         context do
+      {store, session_id, key} = session(context)
+
+      assert Storage.workspace_archives(store, session_id) == {:ok, []}
+      assert Storage.workspace_at(store, session_id, nil) == {:ok, nil}
+
+      {:ok, _} = Storage.put_workspace(store, session_id, key, 2, "at-two")
+      {:ok, _} = Storage.put_workspace(store, session_id, key, 6, "at-six", "tar.zst")
+
+      assert Storage.workspace_archives(store, session_id) == {:ok, [{2, "tar"}, {6, "tar.zst"}]}
+      assert Storage.workspace_at(store, session_id, 5) == {:ok, {2, "tar"}}
+      assert Storage.workspace_at(store, session_id, nil) == {:ok, {6, "tar.zst"}}
+      assert Storage.workspace_at(store, session_id, 1) == {:ok, nil}
+
+      # Nothing listens on port 1. Read as no archives, this made a fork's child without
+      # its parent's tree.
+      gone = %{store | endpoint: "http://127.0.0.1:1"}
+
+      assert {:error, %Req.TransportError{reason: :econnrefused}} =
+               Storage.workspace_archives(gone, session_id)
+
+      assert {:error, %Req.TransportError{reason: :econnrefused}} =
+               Storage.workspace_at(gone, session_id, 5)
+    end
+
     test "a blob is addressed by its own content", context do
       {store, session_id, key} = session(context)
       content = String.duplicate("a very long tool result\n", 1000)
