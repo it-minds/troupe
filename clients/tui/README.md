@@ -210,7 +210,8 @@ in the desktop app is recorded by the daemon, and plain `troupe` asks nothing th
 
 `troupe doctor` checks the setup and prints one line per check: the config files load,
 the default model's provider has a key, the key is accepted (a real request, the
-provider's model listing), where the key is kept, whether a daemon is running,
+provider's model listing), where the key is kept, that the helper every command runs
+under starts, whether a daemon is running,
 `troupe-daemon` and `troupe` on the PATH, and every plane you are logged in to. A line
 that says `FAIL` makes the exit status 1; `warn` does not. `troupe-daemon doctor` prints
 the same lines.

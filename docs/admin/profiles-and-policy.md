@@ -25,7 +25,8 @@ writing, and the console's profile editor shows both before its one apply button
 from the size class and from what is running, and **refuses** a request that sends them
 rather than dropping them. Replicas are recomputed every fifteen seconds as
 `ceil((active + pending) / sessionsPerPod) + warm_workers`, clamped to `max_sessions`; a
-profile idle for two minutes goes to its warm count.
+profile idle for two minutes goes to its warm count. A lower count drains the pods it
+removes first ([§3](#3-upgrades-and-drains)).
 
 **`"image": "release"`** means the worker image of the release the plane runs
 (`worker.image.*` in the chart). The row keeps the word; the plane resolves it whenever it
@@ -117,6 +118,22 @@ waits until every session on it is dormant in object storage. **Nothing then res
 removes it** unless scaling takes it away: its readiness answers 503 and the plane lists it
 as `draining` and places nothing on it until it is deleted. So drain, then
 `kubectl -n troupe-w-<p> delete pod troupe-w-<p>-<ordinal>`.
+
+**A scale-down drains first** (Decision 731). Once a profile has wanted fewer pods for two
+minutes, the plane drains the pods above the new count, the highest ordinals, since those
+are the ones a StatefulSet removes. They take no new session, a running turn gets up to five
+minutes to finish (after that it is cancelled, with everything up to it sealed), and every
+session is put to sleep in object storage. The count comes down past a pod only once the
+plane counts no active session on it. If sessions come back meanwhile, the drained pod
+still goes and the next tick asks for a fresh one, because a drained pod takes no session
+until it restarts. A pod you drained yourself is left to you unless it is above the count
+the profile wants.
+
+**A pod stopped by anything else** (`kubectl delete pod`, a node drain, an eviction) drains
+itself as it stops: running turns get 150 s, half the worker's drain timeout, and then its
+sessions are put to sleep and reported, inside the pod's grace period
+(`operator.drainTimeoutSeconds`). Keep that at 300 s or more; below it, the kill can come
+before the sessions are asleep, as every stop did before 0.6.3.
 
 ## 4. TroupePolicy
 

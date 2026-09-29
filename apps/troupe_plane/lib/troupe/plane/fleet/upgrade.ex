@@ -19,8 +19,8 @@ defmodule Troupe.Plane.Fleet.Upgrade do
   One pod at a time here as well, the highest ordinal first: another is drained only once
   no pod behind is draining, so an upgrade takes at most one pod's room from a profile at
   a time. The drain is the one an administrator starts from the console (`Drain.pod/2`),
-  in the background because it waits for the pod's answer; with no active session there is
-  nothing for the pod to wait on.
+  in the background because it waits for the pod's answer (`Drain.start/2`, as a
+  scale-down's is); with no active session there is nothing for the pod to wait on.
 
   A pod that is always busy is not drained by this, and need not be: new sessions go to a
   pod on the current revision while one has room (`Troupe.Plane.Placement`), so the old
@@ -52,7 +52,8 @@ defmodule Troupe.Plane.Fleet.Upgrade do
   def step(%Profile{} = profile, opts \\ []) do
     with Provisioner.Kubernetes <- Provisioner.for(profile),
          {:ok, %{behind: reported, drained: recorded}} <- Provision.upgrade(profile) do
-      advance(profile, reported, recorded, Keyword.get(opts, :drain, &drain/1))
+      drain = Keyword.get(opts, :drain, &Drain.start(&1, "for an upgrade"))
+      advance(profile, reported, recorded, drain)
     else
       _not_here -> :skipped
     end
@@ -109,20 +110,6 @@ defmodule Troupe.Plane.Fleet.Upgrade do
         drain.(worker)
         worker.pod_name
     end
-  end
-
-  defp drain(worker) do
-    Task.start(fn ->
-      case Drain.pod(worker) do
-        {:ok, _report} ->
-          :ok
-
-        {:error, reason} ->
-          Logger.warning(
-            "troupe plane: #{worker.pod_name} did not drain for an upgrade: #{inspect(reason)}"
-          )
-      end
-    end)
   end
 
   # Written only when it changed. A write that failed is written again on the next step,

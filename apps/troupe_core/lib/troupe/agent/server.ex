@@ -23,7 +23,9 @@ defmodule Troupe.Agent.Server do
   tool that raises, times out or exits: that becomes an error `tool_result` and the
   loop continues, because the model needs the feedback to correct itself. Everything
   else crashes, and `Agent.Node`'s `one_for_all` rebuilds the agent from its own event
-  log while killing its tasks, its OS processes and its subagent subtree.
+  log while killing its tasks, its OS processes and its subagent subtree. A root crashing
+  on the last start its Node allows writes why before it goes (`turn_ended` with
+  `agent_failed`, Decision 727), and crashes all the same.
 
   See `ARCHITECTURE.md` for the transition table and the failure matrix.
   """
@@ -174,11 +176,32 @@ defmodule Troupe.Agent.Server do
   def init(opts) do
     session_id = Keyword.fetch!(opts, :session_id)
     agent_path = Keyword.fetch!(opts, :agent_path)
+
+    Process.set_label("troupe agent #{Enum.join(agent_path, "/")}")
+
+    # Asked before anything that can fail, so a start that fails is counted too.
+    {_max_restarts, window} = limit = restart_limit(opts)
+    start = Log.started(session_id, agent_path, window)
+
+    try do
+      start_agent(opts, start, limit)
+    catch
+      kind, reason ->
+        # The last start the Node allows, and it failed: a root says why before its
+        # session goes down (Decision 727). Supervision still does the rest.
+        if last_start?(start, limit) and not is_pid(Keyword.get(opts, :parent)),
+          do: crash_ended(session_id, agent_path, crash_detail(kind, reason, __STACKTRACE__))
+
+        :erlang.raise(kind, reason, __STACKTRACE__)
+    end
+  end
+
+  defp start_agent(opts, start, limit) do
+    session_id = Keyword.fetch!(opts, :session_id)
+    agent_path = Keyword.fetch!(opts, :agent_path)
     definitions = Keyword.fetch!(opts, :definitions)
     profile = Keyword.fetch!(opts, :profile)
     config = Keyword.fetch!(opts, :config)
-
-    Process.set_label("troupe agent #{Enum.join(agent_path, "/")}")
 
     definition = Definitions.fetch!(definitions, profile)
     {:ok, provider} = Provider.adapter(config.provider)
@@ -196,14 +219,15 @@ defmodule Troupe.Agent.Server do
       watcher: Keyword.get(opts, :watcher),
       bundle: Keyword.get(opts, :bundle),
       budget: opts |> Keyword.get(:budget, Config.budget(config)) |> Budget.start(),
-      fake: Keyword.get(opts, :fake)
+      fake: Keyword.get(opts, :fake),
+      restart_limit: limit
     }
 
     state = apply_definition_budget(state)
 
     # State is a fold over this agent's own events. A fresh agent replays nothing; a
     # restarted one rebuilds its conversation, todos and profile before doing any work.
-    {state, resume} = replay(state, Keyword.get(opts, :task))
+    {state, resume} = replay(state, Keyword.get(opts, :task), start == :cold)
 
     initial = if state.done_reason, do: :done, else: :idle
     publish_state(state, initial)
@@ -221,10 +245,10 @@ defmodule Troupe.Agent.Server do
     %{state | budget: %{state.budget | max_turns: min(state.budget.max_turns, max)}}
   end
 
-  defp replay(state, task) do
-    # Asked first and unconditionally: it is "have I started before under this tree",
-    # and an agent whose log is empty on its first start has still started.
-    cold_start? = Log.cold_start?(state.session_id, state.agent_path)
+  # `cold_start?` is asked first and unconditionally, in `init/1`: it is "have I started
+  # before under this tree", and an agent whose log is empty on its first start has still
+  # started.
+  defp replay(state, task, cold_start?) do
     events = Log.replay(state.session_id, state.agent_path)
 
     case events do
@@ -568,16 +592,21 @@ defmodule Troupe.Agent.Server do
 
   # Whether the last thing that happened to a turn was a cancel: no input, model call or
   # tool call since. A turn the failure guard stopped (Decision 687) counts as one — the
-  # harness cancelled it, and taking it up again after a restart is the loop it stopped.
+  # harness cancelled it, and taking it up again after a restart is the loop it stopped —
+  # and so does one a crashing agent ended (Decision 727), for the same reason.
   defp cancelled?(events) do
     last =
       events
       |> Enum.filter(&(&1.type in ~w(user_input llm_request tool_call_started cancelled turn_ended)))
       |> List.last()
 
-    match?(%Event{type: "cancelled"}, last) or
-      match?(%Event{type: "turn_ended", data: %{"reason" => "tool_failures"}}, last)
+    match?(%Event{type: "cancelled"}, last) or harness_stopped?(last)
   end
+
+  defp harness_stopped?(%Event{type: "turn_ended", data: %{"reason" => reason}}),
+    do: reason in ["tool_failures", "agent_failed"]
+
+  defp harness_stopped?(_event), do: false
 
   defp needs_turn?(%State{conversation: []}), do: false
 
@@ -2940,6 +2969,61 @@ defmodule Troupe.Agent.Server do
     {:keep_state_and_data, [{:reply, from, snapshot}]}
   end
 
+  # -- a root that keeps crashing ---------------------------------------------
+
+  # The Node's limits, with the window a start again is counted in: a second longer than
+  # the Node's, since a supervisor counts its restarts in whole seconds and so looks up to
+  # a second further back. Longer is the side to err on: a word a start early beats none.
+  defp restart_limit(opts) do
+    {max_restarts, max_seconds} = Troupe.Agent.Node.intensity(opts)
+    {max_restarts, (max_seconds + 1) * 1_000}
+  end
+
+  # A start after as many others as the Node allows in the window: if this one fails too,
+  # the Node gives up.
+  defp last_start?({:warm, n}, {max_restarts, _window}), do: n >= max_restarts
+  defp last_start?(:cold, _limit), do: false
+
+  # The root's last word when it has crashed as often as its Node allows (Decision 727):
+  # its turn is over and its session goes down. Straight to the log, since a start that
+  # failed has no state to log through; a log that is going too loses nothing the crash
+  # does not already report.
+  defp crash_ended(session_id, agent_path, detail) do
+    data = %{"reason" => "agent_failed", "detail" => detail}
+    {:ok, _seq} = Log.append(session_id, agent_path, :turn_ended, data)
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
+  defp crash_detail(kind, reason, stacktrace) do
+    kind
+    |> Exception.format_banner(reason, stacktrace)
+    |> String.split("\n", parts: 2)
+    |> hd()
+    |> String.slice(0, 500)
+  end
+
   @impl :gen_statem
+  def terminate(reason, _state_name, _state) when reason in [:normal, :shutdown], do: :ok
+  def terminate({:shutdown, _reason}, _state_name, _state), do: :ok
+
+  # A root crashing in a state callback on the last start its Node allows ends the session
+  # as a failed start does, and says so the same way (Decision 727): a turn it takes up
+  # again after each restart crashes it again, which is the loop this ends. Counted now,
+  # not at the start, since a restart older than the window no longer counts to the Node.
+  def terminate(reason, _state_name, %State{parent: nil} = state) do
+    {max_restarts, window} = state.restart_limit
+
+    # `gen_statem` hands over the reason without its class, and nearly every crash is an
+    # error: read as one, an Erlang error reads as its Elixir exception.
+    if Log.restarts(state.session_id, state.agent_path, window) >= max_restarts,
+      do: crash_ended(state.session_id, state.agent_path, crash_detail(:error, reason, []))
+
+    :ok
+  catch
+    :exit, _ -> :ok
+  end
+
   def terminate(_reason, _state_name, _state), do: :ok
 end

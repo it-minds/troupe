@@ -165,6 +165,57 @@ defmodule Troupe.Worker.ObjectStoreUnreachableTest do
       assert RecordingProxy.captured(proxy) =~
                URI.encode_www_form(Storage.prefix(context.session_id) <> "segments/")
     end
+
+    # Read as "the parent has no archive", this one failed listing made a child with the
+    # parent's history and without its tree; and the child, having segments, was never
+    # forked again.
+    test "a fork whose parent's workspace listing does not come back makes no child", context do
+      context = requires_tier(context)
+      parent = context.session_id
+      child = Troupe.Session.generate_id()
+
+      on_exit(fn ->
+        Storage.erase(context.store, child)
+        KMS.adapter().destroy(context.team, child)
+      end)
+
+      assert {:ok, _} = activate(context)
+      File.write!(Path.join(context.workspace, "notes.md"), "the parent's tree")
+      assert {:ok, _} = Sessions.dormant(parent)
+
+      proxy =
+        start_supervised!(
+          {RecordingProxy,
+           upstream: URI.parse(context.store.endpoint).port,
+           drop: "prefix=" <> URI.encode_www_form(Storage.prefix(parent) <> "workspace/")}
+        )
+
+      endpoint = "http://127.0.0.1:#{RecordingProxy.port(proxy)}"
+      pod_defaults(%{context | store: %{context.store | endpoint: endpoint}})
+
+      params =
+        Map.merge(identity(context), %{"session_id" => child, "fork" => %{"parent" => parent}})
+
+      log =
+        capture_log(fn ->
+          assert {:error, error} = Commands.handle("session.activate", params)
+          assert error.message == "unavailable"
+          assert %{reason: "object_store_unreachable", endpoint: ^endpoint} = error.data
+        end)
+
+      assert log =~ "could not fork into #{child}"
+      assert Sessions.whereis(child) == nil
+      assert Storage.list_segments(context.store, child) == {:ok, []}
+      assert Storage.workspace_archives(context.store, child) == {:ok, []}
+
+      # So the plane's next try forks it whole.
+      pod_defaults(context)
+      on_exit(fn -> quieten(child) end)
+      assert {:ok, %{"activated" => true}} = Commands.handle("session.activate", params)
+      assert {:ok, [_archive]} = Storage.workspace_archives(context.store, child)
+      assert File.read!(Path.join(context.workspace, "notes.md")) == "the parent's tree"
+      assert {:ok, _} = Sessions.dormant(child)
+    end
   end
 
   test "the enrolment check says in the log that the store does not answer, and is quiet when it does",
@@ -191,6 +242,12 @@ defmodule Troupe.Worker.ObjectStoreUnreachableTest do
 
   defp identity(context) do
     %{"session_id" => context.session_id, "team" => context.team, "epoch" => 1}
+  end
+
+  defp quieten(session_id) do
+    Troupe.stop_session(session_id)
+  catch
+    :exit, _ -> :ok
   end
 
   defp unreachable_store do

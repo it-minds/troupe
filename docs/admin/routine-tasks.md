@@ -70,7 +70,8 @@ kubectl -n troupe-w-<profile> delete pod troupe-w-<profile>-<ordinal>
 ```
 
 because nothing else restarts a drained pod that is current. Scale with `max_sessions` and
-`warm_workers` on `admin.profile.put`; the plane computes replicas.
+`warm_workers` on `admin.profile.put`; the plane computes replicas, and drains the pods a
+lower count removes before it removes them ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)).
 
 ## Settings
 

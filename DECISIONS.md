@@ -2550,7 +2550,6 @@ citation keeps meaning what it meant.
      for a read is the only place: the plane hands the client an endpoint whatever the
      pod answered. Proof: `failed_activation_test.exs`, and the read and fork cases in
      `object_store_unreachable_test.exs` and `kms_unreachable_test.exs`.
-     
 726. **A worker upgrade finishes by itself: the plane drains a pod behind once it holds no
      active session and records that on the profile, and the operator then deletes it.**
      Issue #258. A worker StatefulSet rolls `OnDelete`, and since #253 `UpgradePending`
@@ -2583,7 +2582,54 @@ citation keeps meaning what it meant.
      or drained on another revision is kept; one at a time; current never), the plane's
      `upgrade_test.exs` and `placement_test.exs`, and the cluster suite's `upgrade_test.exs`,
      which rolls a one-pod profile with nobody deleting anything.
-     
+727. **A root agent that keeps crashing ends its turn saying why, and its session stops
+     instead of starting it again.** D37. A root whose start failed every time, or that
+     crashed every time on the turn it came back to (a reaper that could not spawn, under
+     the `git` call `Instructions.load` makes), was restarted by its `Agent.Node` three
+     times in five seconds, and then the session's `rest_for_one` started the Node again,
+     three times more: fifteen `agent_restarted` in a fraction of a second, then the
+     session gone, nothing in its log saying why, and every client still showing the turn
+     at work.
+     - **The session does not multiply the Node's restarts.** The root Node is a
+       `significant`, `transient` child, and the session shuts itself down when it exits
+       (`auto_shutdown: :any_significant`). When the Node gives up the session stops and
+       comes back dormant from its log, as `Troupe.Sessions` always said it would. A
+       Node that is killed is still started again.
+     - **The root says why before it goes.** `Session.Log` counts how often each agent
+       has started again, for as long as the tree is up, as it already knew whether one
+       had started at all; the agent reads from it whether this start is the last its Node
+       allows. A start that fails then, or a crash in a state callback then, writes
+       `turn_ended` with `reason: agent_failed` and `detail`, the first line of what was
+       raised, and crashes as before. The count looks a second further back than the
+       Node, which counts restarts in whole seconds: a word one start early, when the Node
+       allows another after all, is better than none.
+     - **That turn is not taken up again.** A restart, and `resume_on_restart`, read it as
+       a cancel, as they read a turn the failure guard stopped (687).
+     - A subagent is unchanged: its parent turns its Node's `:DOWN` into an error result.
+       There is no backoff: a delay in a restart blocks the supervisor making it, and the
+       Node's three quick tries are what it was built around.
+
+     The A2A facade fails the task with the detail. The TUI and the desktop app show
+     `agent_failed` as an ordinary rest until they learn the reason. Proof:
+     `crash_loop_test.exs` (a start that fails every time; one that crashes on the turn it
+     takes up, which wrote 15 `agent_restarted` before this and 3 now; a session brought
+     back with `resume_on_restart` that does not take the turn up) and the A2A app's
+     `events_test.exs`.
+
+729. **Dependabot moves Tauri's crates and its npm packages in one pull request, and keeps
+     `@types/node` on the runtime's major.** defects.md D37, in the 0.6.3 chunk. Decision
+     717's pairs were in two groups, npm `tooling` and cargo `tauri`, so one pull request
+     could move one half alone, as #120 did.
+     - **One group across the two ecosystems.** `multi-ecosystem-groups: tauri`, monthly,
+       takes `@tauri-apps/*` from `clients/gui` and `tauri*` from `src-tauri`, and the
+       ordinary npm and cargo entries ignore those names, so the group's pull request is
+       the only one that moves them. Dependabot still opens it when only one ecosystem
+       has an update, so a registry that lags the other can yet send half a pair; the
+       Tauri CLI's check then refuses the build, as it should, and the pull request waits.
+     - **`@types/node` is the Node the tools run on**, `.tool-versions`' 24, not the
+       newest: 26's types describe APIs 24 does not have. It is back on 24, Dependabot
+       ignores its majors, and the major moves by hand in the change that moves that line.
+
 730. **On Windows the desktop app shows its notifications itself, so that a click on one
      opens its session, and it runs as one copy.** Defect D35, following 714 and 708.
      - **The toast is the one the plugin shows underneath.** `tauri-plugin-notification`
@@ -2617,3 +2663,101 @@ citation keeps meaning what it meant.
        17 s after the last toast. A second copy with no arguments, just after a toast,
        brings the first back on the toast's session. No toast was clicked: this machine
        shows no banners, and its notification centre was not opened while in use.
+
+731. **A scale-down drains the pods it removes before it lowers the count, and finishes
+     once it has started; a worker stopped by anything else drains itself.** Issue #273.
+     The scaler wrote a lower `spec.replicas` as soon as the grace period had passed, and
+     the StatefulSet took the highest ordinals with what they held: a turn in flight and
+     the workspace since its last archive, while clients saw the session vanish until the
+     sweeper marked it dormant from its last seal. `Drain.scale_down/3`, which the
+     scaler's documentation relied on, had no caller but a test, and is gone. Now the
+     scaler marks the pods above the count it wants `retiring` and draining, drains them
+     in the background with the drain an administrator starts (`Drain.start/2`, which the
+     upgrade of 726 uses too), and lowers the count from the top past each retiring pod
+     that is draining and holds no active session on a count taken before that tick,
+     never past one the plane still counts a session on. A turn in flight gets the drain
+     timeout, the number the grace period is set from, and is then cancelled with
+     everything before it sealed: bounded, because a session that never rests would
+     otherwise keep a pod nobody needs, and no harsher than deleting the pod. Nothing
+     retries; the pod is asked once and each tick reads the count. A scale-down that has
+     started is finished even when the sessions come back, because a drained pod takes no
+     session until it restarts (633) and kept it would be room counted that is not there:
+     the count comes down past it and the next tick asks for a fresh pod. `retiring` is
+     what tells this drain from an administrator's, which stays a person's (633, 726)
+     unless its pod is above the wanted count; it is cleared when the count passes the
+     pod and whenever a pod is not draining. 726's `troupe.dev/drained` record is not
+     used: it tells the operator to replace a pod behind, and nobody but the plane is
+     needed to remove a pod, since it writes the count. A count that grows while a
+     retiring pod still drains grows past it, and that pod goes with the next scale-down
+     that reaches it. The worker drains on SIGTERM as well (`prep_stop/1`) for pods the
+     plane did not stop: turns get half its drain timeout and the rest of the grace
+     period is for sealing, archiving and reporting; a shorter grace period ends it as a
+     stop always did. The plane migrates (`workers.retiring`). Proof: the plane's
+     `scaling_test.exs` (drains first, a busy pod delays it, a drained pod goes, a started
+     scale-down finishes, an administrator's drain is left), the worker's `drain_test.exs`
+     (a pod stopped mid-turn puts its session to sleep and its files survive the volume),
+     and the cluster suite's `capacity_test.exs`.
+
+     
+
+732. **A reader takes the log it restored with it, and stays while a client reads the
+     session; a fork whose parent's workspace listing fails makes no child.** Issue #269.
+     `session.read` restores a dormant session's log into the pod's state directory, and
+     nothing removed it: it stayed, in plaintext, until the session was next activated on
+     that pod and put to sleep there. The reader now removes it when it stops, however it
+     stops: its last follower gone, closed, idle, or the pod shutting down. Not a log that
+     was there before the read (725's rule for an activation, from the other side), and not
+     one an activation has: a manager registered for the session, whether it is starting
+     over the log or running, or one that has written to it since, which the reader tells
+     by the log no longer being the size it wrote, a log only growing. Such a log may hold
+     events storage does not have yet. A restore writes the log and a reader removes it
+     under one lock per session on the pod (`Restore.with_log/2`), so an activation that
+     starts as a reader leaves is either seen by it or writes its log after. Taking the log
+     away made the reader's lifetime matter: a client reading through the pod's harness
+     reads the log from disk and follows no process, and a reader that went after its 30
+     seconds would take the log from under them. So a reader stays while a client is
+     attached to the session (`Troupe.Events.attached?/1`) or an activation is starting,
+     and goes once one has taken the log over; the cost is a process and the log on the
+     pod for as long as somebody reads. One case is left as before: an activation that
+     wrote the log again with a longer history and then failed, which by its size is not
+     the reader's. On the fork's side, `Storage.workspace_archives/2` read a failed listing
+     as no archives, so a fork that met storage going away at that one request sealed a
+     child with the parent's history and no tree, and the child, having segments, was never
+     forked again: 722's failure for an activation, in the fork. A failed listing now fails
+     the fork before anything is written for the child, as `object_store_unreachable` where
+     it was the network's, and the plane tries again; `workspace_at/3` says the same, and
+     `Fork.copy/3` is its only caller. Proof: `reader_log_test.exs`, the fork case in
+     `object_store_unreachable_test.exs`, and `storage_test.exs`.
+
+     
+
+733. **A reaper helper that will not start is an error its caller gets back, never a
+     raise: the session answers, runs no command, and `troupe doctor` says why.** Issue
+     #270. `Troupe.Reaper.open/3` called `Port.open/2` directly, and that raises when the
+     program is there and will not start: no execute bit or a mount that forbids running
+     it on Linux, a file that is not a program on Windows (`eacces` on both). Every model
+     call asks `git` where the repository is, in the agent's own process
+     (`Instructions.load`, then `Session.Memory.path/1`), so such a helper crashed the
+     root agent on every turn and the session never answered; the loop that followed is
+     what Decision 727 bounds. `open/3` and `open_stdio/3` now return
+     `{:reaper_unstartable, reason}` with the OS's reason, and log it once for each helper
+     and reason, not at every call. On Windows a working directory that has gone raises
+     the same way; that is `{:no_directory, cwd}`, and not blamed on the helper. The
+     callers: the brief's `git` calls read the workspace as no repository, as a missing
+     `git` already did, so a session at the repository's root still reads its brief and
+     one in a subdirectory or a worktree reads none that turn; `shell` answers the model
+     with the helper's path, the reason and that nothing runs until it does; `grep` scans
+     in the VM, as it does without a helper; `git_read` and an MCP server say they could
+     not run, and why. `troupe doctor` gains a `reaper` line, `reaper --version` started
+     in the workspace: `ok` with what it printed, `warn` for a build without a helper (a
+     source checkout without Zig, where `shell` never ran), and `FAIL` for one that will
+     not start, since that is an install a person has to put right and a session shows it
+     only through the model's words. A harness note in the session was the other place to
+     say it, and would say in every session what the doctor's one line says once.
+     `config :troupe_core, :reaper` names a helper elsewhere, as `:bwrap` does for
+     bubblewrap; the suite points it at one that will not start. Proof: `reaper_test.exs`
+     (a turn answered, a shell call that is a tool error and a turn that goes on, the
+     brief read as no repository with one warning over three loads, `grep`, `git_read`,
+     an MCP server, a directory that has gone), nine of whose eleven tests fail on the
+     chunk's tip with the config key alone; `doctor_test.exs`; and the installed build
+     with its helper swapped for a file that is not a program.

@@ -144,6 +144,59 @@ defmodule Troupe.E2E.CapacityTest do
     end
   end
 
+  describe "a pod a scale-down removes" do
+    test "has its session put to sleep before the count comes down", context do
+      put(context, %{})
+
+      # Five sessions where four fit on a worker: two pods, and the one a StatefulSet
+      # removes first holds at least one of them.
+      ids =
+        for _ <- 1..5 do
+          id = Plane.call!("session.create", %{"profile" => context.cold})["session_id"]
+          on_exit(fn -> Plane.call("session.erase", %{"session_id" => id}) end)
+          id
+        end
+
+      pods =
+        Map.new(ids, fn id ->
+          World.eventually(fn -> placed_on(id) != nil end,
+            timeout: @cold_start,
+            every: 5_000,
+            what: "#{id} to be placed on a worker"
+          )
+
+          {id, placed_on(id)}
+        end)
+
+      # One session left, on the highest ordinal: one worker's worth, so after the grace
+      # period the plane wants one pod fewer, and the pod it removes holds a session.
+      top = pods |> Map.values() |> Enum.max_by(&ordinal/1)
+      kept = Enum.find(ids, &(pods[&1] == top))
+
+      for id <- ids, id != kept, do: Plane.call!("session.erase", %{"session_id" => id})
+
+      # Read the moment the plane has written the lower number. Lowered first, the pod
+      # went with the session on it, and the session was marked dormant only once the
+      # plane noticed the pod had gone; drained first, it is already asleep.
+      World.eventually(fn -> replicas(context.cold) == 1 end,
+        timeout: @cold_start,
+        every: 2_000,
+        what: "#{context.cold} to come down to one worker"
+      )
+
+      assert Plane.call!("session.get", %{"session_id" => kept})["state"] == "dormant"
+
+      World.eventually(
+        fn ->
+          length(World.pods(World.worker_namespace(context.cold), worker_selector())) == 1
+        end,
+        timeout: @cold_start,
+        every: 5_000,
+        what: "#{top} to be removed"
+      )
+    end
+  end
+
   describe "a ceiling somebody set" do
     test "refuses with the number they set, and nothing above it runs", context do
       # One session at a time, decided by a person. This is the only capacity refusal
@@ -264,6 +317,23 @@ defmodule Troupe.E2E.CapacityTest do
       number -> String.to_integer(number)
     end
   end
+
+  # The pod a running session is on, as a client asking for a token is told; `nil` while
+  # it waits for one. Only an active session's answer: a dormant one is given a pod to
+  # read it from, which holds nothing.
+  defp placed_on(session_id) do
+    case Plane.call("token.mint", %{"session_id" => session_id}) do
+      {:ok, %{"state" => "active", "endpoint" => endpoint, "pod" => pod}}
+      when is_binary(endpoint) ->
+        pod
+
+      _waiting ->
+        nil
+    end
+  end
+
+  # A StatefulSet's pods are `<set>-<ordinal>`.
+  defp ordinal(pod), do: pod |> String.split("-") |> List.last() |> String.to_integer()
 
   defp current_class(profile) do
     Plane.call!("admin.profile.get", %{"name" => profile})["profile"]["size_class"]

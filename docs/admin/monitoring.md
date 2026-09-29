@@ -74,6 +74,8 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | Worker heartbeat | every 5 s over the control channel: capacity, bundle hash, version, active sessions, disk, draining |
 | Lease | no heartbeat for 15 s and a pod is unhealthy and not placed on |
 | Placement | healthy, not draining, disk below 80 % |
+| Scale-down | after 2 min wanting fewer pods: the pods above the new count drained, turns given up to 5 min, the count lowered once they hold no active session |
+| Pod stop | a worker stopped without a drain drains itself: turns get 150 s, then every session is put to sleep inside the grace period |
 | Worker disk | caches evicted above 70 %, checked every 30 s |
 | Dormancy | a session sleeps after 10 min idle on the pod; sealed every 60 s and at a turn's end |
 | Caches | ledger sums 60 s per node; settings 5 s; provider JWKS until a bad signature |
@@ -97,6 +99,7 @@ operator, workers and A2A log in Elixir's default text format. Lines worth alert
 | `SecretMissing: True` with the Secrets present | the operator has no RBAC on Secrets; ignore the condition |
 | A profile is saved but no `WorkerProfile` appears; `not_applied`, `no_cluster` | the plane has no Kubernetes connection (`TROUPE_KUBECONFIG`, or the in-pod ServiceAccount) |
 | `PolicyViolation: NoPolicy` on every profile | `policy.name` is not `default`, and nothing sets `TROUPE_POLICY_NAME` |
+| A profile keeps a pod more than its sessions need | a scale-down lowers the count only once the pods above it hold no active session. `did not drain for a scale-down: {:stranded, [...]}` in the plane's log names a session the pod never reported dormant; the pod stays until it is |
 | Pods stay on the old image, `UpgradePending: True` | a pod is replaced once it holds no active session, one at a time; the message says which pod waits and for what. `waits to be drained` for long: its sessions are still in use, so `admin.pod.drain` it to roll it now. A pod the plane recorded in `troupe.dev/drained` that is still Ready: drain it again ([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)) |
 | Console sign-in lands on `/admin/denied`, listing the groups carried | the admin group is not among them, or `groups_claim` names the wrong claim |
 | "token endpoint answered 200 without an id_token" | `openid` not in scope, or the registration cannot issue id tokens |

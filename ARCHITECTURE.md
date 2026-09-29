@@ -116,7 +116,9 @@ permission. A write can never leave the workspace root; a read may also reach th
 configured `read_roots`; both compare canonical paths. The runner is the one place
 `rescue` is used: a raise, exit or timeout becomes an error result the model can read.
 Every OS process runs under **`reaper`**, a small Zig program owned by a Port, so killing
-the VM kills everything it started. On a pod, `shell` runs under bubblewrap with the
+the VM kills everything it started. A reaper that will not start is an error, not a crash:
+`shell` says why, `grep` scans in the VM, the brief's `git` reads as no repository, and
+`troupe doctor` fails its line. On a pod, `shell` runs under bubblewrap with the
 session's mount table as its bind list.
 
 Results are **bounded where they are created** — head and tail of command output, a window
@@ -135,6 +137,7 @@ breakpoint.
 | the model stream | nothing | an `llm_error`; a root rests, a subagent ends `llm_error` and its parent gets what it had |
 | `Agent.Server` | `Agent.Node` (`one_for_all`) restarts it with its tasks and children, from the log | started-but-unfinished calls re-run (at least once), a delegation to a new child, and the old child's calls closed in the log |
 | a subagent's node, past its restart limit | nothing; the parent gets `DOWN` | an error result for that delegation only |
+| the root's node, past its restart limit | nothing; the session stops | `turn_ended` with `agent_failed` and what it raised, then the session is dormant (Decision 727) |
 | `Watcher`, `Files`, `Loop`, `Summary` | that child and those after it | a notice; a loop carries on from its log |
 | `Approvals`, `Log`, or the session past 3 restarts in 10 s | everything below it; the whole session | a restarted tree replays; a stopped one comes back dormant from its log |
 | the VM | nothing | sessions come back dormant; one mid-turn is **interrupted** |
@@ -317,7 +320,9 @@ then erase the local copy. **Epochs** are minted by the plane alone; a pod whose
 passed refuses to activate (checked against the plaintext manifest before decrypting), and
 a fenced running session stops and discards its cache. **Draining** — scale-down, a new
 image, an admin's drain — stops placement in the database, waits for running turns up to
-the grace period, and the plane checks its own index before agreeing the pod is empty.
+the grace period, and the plane checks its own index before agreeing the pod is empty. A
+scale-down lowers the count only past pods drained that way, and a pod stopped by anything
+else drains itself on SIGTERM.
 **Disk pressure** evicts caches, least recently used, never an active workspace. **Erasure**
 is driven by the plane and done by a pod, since only a pod holds the key and storage
 credentials: the key is destroyed **first**, so nothing under the prefix decrypts — not

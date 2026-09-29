@@ -22,15 +22,16 @@ defmodule Troupe.Tools.Output do
 
   def cap(text, limit) do
     kept = binary_part(text, 0, limit)
-    dropped = byte_size(text) - limit
 
-    # Cut back to the last newline so the truncation never lands mid-line.
+    # Cut back to the last newline so the truncation never lands mid-line. What was
+    # dropped is counted after the cut, which dropped the rest of that line too.
     kept =
       case :binary.matches(kept, "\n") do
         [] -> kept
         matches -> binary_part(kept, 0, matches |> List.last() |> elem(0))
       end
 
+    dropped = byte_size(text) - byte_size(kept)
     kept <> "\n\n[truncated: #{dropped} more bytes. Narrow the request to see the rest.]"
   end
 
@@ -53,15 +54,16 @@ defmodule Troupe.Tools.Output do
   def cap_tail(text, limit) when byte_size(text) <= limit, do: text
 
   def cap_tail(text, limit) do
-    dropped = byte_size(text) - limit
-    kept = binary_part(text, dropped, limit)
+    kept = binary_part(text, byte_size(text) - limit, limit)
 
+    # Forward to the first line start, the mirror of `cap/2`, counted after the cut.
     kept =
       case :binary.match(kept, "\n") do
         :nomatch -> kept
         {pos, len} -> binary_part(kept, pos + len, byte_size(kept) - pos - len)
       end
 
+    dropped = byte_size(text) - byte_size(kept)
     "[truncated: #{dropped} earlier bytes omitted]\n\n" <> kept
   end
 

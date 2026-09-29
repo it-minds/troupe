@@ -31,6 +31,9 @@ defmodule Troupe.Worker.Session.Restore do
   winning at every step. Segments from an epoch the session has moved past were written
   by a pod that had already been fenced, and merging them would put events into the
   history that never happened to anyone.
+
+  Written under `with_log/2`, and `:bytes` is how much was written, which is how a reader
+  tells the log it restored from one somebody has since written to.
   """
   @spec events(Context.t(), Path.t()) :: {:ok, map()} | {:error, term()}
   def events(%Context{} = context, workspace_root) do
@@ -38,13 +41,17 @@ defmodule Troupe.Worker.Session.Restore do
          live = Storage.live_segments(all),
          {:ok, events} <- read_all(context, live) do
       path = log_path(context.session_id, workspace_root, context.state_dir)
-      File.mkdir_p!(Path.dirname(path))
+      lines = Enum.map(events, &[Jason.encode_to_iodata!(&1), ?\n])
 
-      File.write!(path, Enum.map(events, &[Jason.encode_to_iodata!(&1), ?\n]))
+      with_log(context.session_id, fn ->
+        File.mkdir_p!(Path.dirname(path))
+        File.write!(path, lines)
+      end)
 
       {:ok,
        %{
          path: path,
+         bytes: IO.iodata_length(lines),
          events: length(events),
          segments: length(live),
          skipped: length(all) - length(live),
@@ -54,6 +61,20 @@ defmodule Troupe.Worker.Session.Restore do
     else
       {:error, reason} -> {:error, unreachable(context.store, reason)}
     end
+  end
+
+  @doc """
+  Run `fun` holding this pod's lock on one session's local log, and return what it returns.
+
+  A restore writes the log under it, and a reader that is going away removes the log it
+  restored under it (`Troupe.Worker.Session.Reader`). So an activation that starts as a
+  reader leaves has either registered by the time the reader looks, and the reader leaves
+  the log to it, or writes its own log after the reader's has gone — never before, which
+  would have the reader remove the log a starting session is about to replay.
+  """
+  @spec with_log(String.t(), (-> result)) :: result when result: term()
+  def with_log(session_id, fun) do
+    :global.trans({{__MODULE__, :log, session_id}, self()}, fun, [node()])
   end
 
   @doc """

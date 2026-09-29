@@ -8,12 +8,15 @@ defmodule Troupe.Plane.Drain do
   the pod's volume afterwards a non-event — by the time it is deleted it holds nothing
   that is not also in object storage.
 
-  Highest ordinals first, because a StatefulSet removes them in that order and draining
-  a pod Kubernetes is not about to remove would be a session moved for no reason.
+  Which pod is the caller's. A scale-down drains the pods above the count it wants, the
+  highest ordinals, because a StatefulSet removes them in that order and draining a pod
+  Kubernetes is not about to remove would be a session moved for no reason
+  (`Troupe.Plane.Fleet.ScaleDown`); an upgrade drains a pod on an older revision
+  (`Troupe.Plane.Fleet.Upgrade`).
 
-  This drives the sequence; it does not delete anything. Removing the pod is the
-  operator's business, and it does it by scaling the StatefulSet — which is the only way
-  to remove a StatefulSet pod that stays removed.
+  This drives the sequence; it does not delete anything. The scaler lowers the count once
+  the pods above it hold nothing, which is the only way to remove a StatefulSet pod that
+  stays removed, and the operator deletes a pod behind once its drain is recorded.
   """
 
   alias Troupe.Plane.{Budget, Fleet, Placement, Sessions}
@@ -49,6 +52,31 @@ defmodule Troupe.Plane.Drain do
       {:ok, result} -> settle(worker, result, before, opts)
       {:error, reason} -> unreachable(worker, before, reason)
     end
+  end
+
+  @doc """
+  `pod/2`, started rather than waited for.
+
+  For the scaler, whose tick cannot wait on a pod and comes round again in fifteen
+  seconds to see how far the drain has got: from the plane's own count, not from this.
+  What the pod answers is only logged, and `why` finishes the sentence when it does not
+  drain: `for an upgrade`, `for a scale-down`.
+  """
+  @spec start(Worker.t(), String.t()) :: {:ok, pid()}
+  def start(%Worker{} = worker, why) do
+    Task.start(fn ->
+      Process.set_label("troupe drain #{worker.pod_name}")
+
+      case pod(worker) do
+        {:ok, _report} ->
+          :ok
+
+        {:error, reason} ->
+          Logger.warning(
+            "troupe plane: #{worker.pod_name} did not drain #{why}: #{inspect(reason)}"
+          )
+      end
+    end)
   end
 
   # The pod says it is empty; the plane checks its own record before agreeing. A pod
@@ -215,28 +243,6 @@ defmodule Troupe.Plane.Drain do
        do: subject
 
   defp answerable_for(%{owner_subject: subject}), do: subject
-
-  @doc """
-  Drain a profile down to `replicas` pods, highest ordinals first.
-
-  Returns one report per pod drained, in the order they were drained, so a caller can
-  scale the StatefulSet down by exactly as many as succeeded.
-  """
-  @spec scale_down(String.t(), non_neg_integer(), keyword()) :: {:ok, [map()]} | {:error, term()}
-  def scale_down(profile, replicas, opts \\ []) do
-    doomed =
-      profile
-      |> Fleet.list_workers()
-      |> Enum.filter(&(&1.ordinal >= replicas))
-      |> Enum.sort_by(& &1.ordinal, :desc)
-
-    Enum.reduce_while(doomed, {:ok, []}, fn worker, {:ok, reports} ->
-      case pod(worker, opts) do
-        {:ok, report} -> {:cont, {:ok, reports ++ [report]}}
-        {:error, reason} -> {:halt, {:error, {worker.pod_name, reason}}}
-      end
-    end)
-  end
 
   @doc "Put a pod back into service, because the drain was called off."
   @spec undrain(Worker.t()) :: {:ok, Worker.t()} | {:error, term()}

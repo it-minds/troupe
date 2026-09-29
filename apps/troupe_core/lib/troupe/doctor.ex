@@ -14,6 +14,9 @@ defmodule Troupe.Doctor do
       warning, not a failure; the `fake` provider asks nobody.
     * `key storage` — where the key is kept: the user's `config.yaml`, there being no
       keychain in this build.
+    * `reaper` — the helper every command runs under starts (`reaper --version`). One
+      that will not start fails: a session still answers, and runs no `shell`, no `git`
+      and no MCP server (Decision 733). A build without one warns.
     * `daemon` — whether one is answering, and where; not running is not a failure,
       since a client starts one.
     * `troupe-daemon on PATH`, `troupe on PATH` — a warning when missing, with what
@@ -25,7 +28,7 @@ defmodule Troupe.Doctor do
   as the next step, `troupe config` through `troupe` and the file through the daemon.
   """
 
-  alias Troupe.Config
+  alias Troupe.{Config, Reaper}
   alias Troupe.Protocol.{Daemon, Endpoint}
 
   @type state :: :ok | :warn | :fail
@@ -51,6 +54,7 @@ defmodule Troupe.Doctor do
       provider_check(resolved, command),
       key_check(resolved, live?),
       storage_check(),
+      reaper_check(workspace),
       daemon_check(),
       path_check("troupe-daemon", "a client starts the daemon from the PATH; troupe embeds one"),
       path_check(
@@ -186,6 +190,41 @@ defmodule Troupe.Doctor do
       :ok,
       "#{Troupe.Paths.display(Config.user_path())}; there is no OS keychain in this build"
     )
+  end
+
+  # Started as a session would start it, in the workspace: what it prints for `--version`
+  # is proof it ran.
+  defp reaper_check(workspace) do
+    case Reaper.run(workspace, ["--version"], timeout_ms: 10_000) do
+      {:ok, out, 0} ->
+        {:ok, path} = Reaper.path()
+        check("reaper", :ok, "#{String.trim(out)}, #{Troupe.Paths.display(path)}")
+
+      {:ok, _out, :timeout} ->
+        check("reaper", :fail, "the reaper helper did not answer `--version` in 10 s; reinstall")
+
+      {:ok, out, status} ->
+        check(
+          "reaper",
+          :fail,
+          "the reaper helper exited #{status}: #{String.trim(out)}; reinstall"
+        )
+
+      {:error, :reaper_missing} ->
+        check(
+          "reaper",
+          :warn,
+          "#{Reaper.explain(:reaper_missing)}; no shell or git: `mix compile.reaper` builds it"
+        )
+
+      {:error, reason} ->
+        check(
+          "reaper",
+          :fail,
+          "#{Reaper.explain(reason)}, so a session runs no shell, git or MCP server; " <>
+            "let it run (an antivirus, a noexec mount) or reinstall"
+        )
+    end
   end
 
   defp daemon_check do
