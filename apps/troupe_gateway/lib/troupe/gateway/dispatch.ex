@@ -323,9 +323,6 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
-  # The agents a session in this workspace could run: the built-ins, the machine's
-  # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
-  # resolve them, so a picker offers exactly what a `profile` may name.
   # The project brief, as a client shows it: status, where it is, when it was built and
   # what it covers, and the text itself for a client that renders it. `refresh_due` is
   # whether a client that refreshes it by itself should start a librarian now, and
@@ -409,6 +406,9 @@ defmodule Troupe.Gateway.Dispatch do
     end
   end
 
+  # The agents a session in this workspace could run: the built-ins, the machine's
+  # `agents/`, the project's `.troupe/agents/` — resolved the way `session.create` will
+  # resolve them, so a picker offers exactly what a `profile` may name.
   defp handle("agents.list", params, _context) do
     with {:ok, workspace} <- fetch(params, "workspace") do
       agents =
