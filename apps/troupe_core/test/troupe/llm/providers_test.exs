@@ -196,10 +196,23 @@ defmodule Troupe.LLM.ProvidersTest do
     end
 
     test "a 400 is not retried" do
-      request = request(chunks: [], fail_first: 99, fail_status: 400, max_retries: 3)
+      request =
+        request(chunks: [], fail_first: 99, fail_status: 400, fail_body: %{"detail" => "bad model id"}, max_retries: 3)
 
-      assert {:error, {:http_status, 400, _}} = run(Anthropic, request)
+      assert {:error, {:http_status, 400, "bad model id"}} = run(Anthropic, request)
       assert length(FakeTransport.drain_requests()) == 1
+    end
+
+    test "a streamed gateway refusal includes its reason" do
+      request =
+        request(
+          chunks: [],
+          fail_first: 1,
+          fail_status: 406,
+          fail_body: %{"detail" => "The requested model is not recognised"}
+        )
+
+      assert {:error, {:http_status, 406, "The requested model is not recognised"}} = run(Anthropic, request)
     end
 
     test "an api error inside the stream is reported, not returned as a response" do
@@ -328,6 +341,18 @@ defmodule Troupe.LLM.ProvidersTest do
       request = request(chunks: [], fail_first: 99, fail_status: 400, fail_body: "bad tool schema")
       assert {:error, {:http_status, 400, "bad tool schema"}} = run(OpenAI, request)
       assert length(FakeTransport.drain_requests()) == 1
+    end
+
+    test "a provider requiring storage for metadata gets a retry without metadata" do
+      refusal = "The 'metadata' parameter is only allowed when 'store' is enabled."
+      request = request(chunks: [openai_text_only()], fail_first: 1, fail_status: 400, fail_body: refusal)
+      request = %{request | attribution: %{owner: "user-1", session: "session-1"}}
+
+      assert {:ok, %Response{}} = run(OpenAI, request)
+      [first, second] = FakeTransport.drain_requests()
+      assert FakeTransport.body(first)["metadata"]["troupe_session"] == "session-1"
+      refute Map.has_key?(FakeTransport.body(second), "metadata")
+      assert FakeTransport.body(second)["user"] == "user-1"
     end
 
     test "a base url that already ends in /v1 does not get a second one" do

@@ -108,6 +108,9 @@ defmodule Troupe.LLM.Providers.Anthropic do
     end
   end
 
+  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _reply_to, _ref) when status != 200,
+    do: Provider.collect_error(resp, chunk)
+
   defp handle_chunk(resp, chunk, reply_to, ref) do
     state = resp.private[:troupe] || %{acc: Collector.new(), sse: SSE.new()}
     {events, sse} = SSE.feed(state.sse, chunk)
@@ -339,8 +342,15 @@ defmodule Troupe.LLM.Providers.Anthropic do
   defp auth_header(%Request{auth: :bearer}, key), do: {"authorization", "Bearer " <> key}
   defp auth_header(_request, key), do: {"x-api-key", key}
 
+  defp describe(%{"error" => %{"message" => message}}), do: message
+  defp describe(%{"detail" => detail}) when is_binary(detail), do: detail
   defp describe(%{"message" => message}), do: message
-  defp describe(body) when is_binary(body), do: String.slice(body, 0, 400)
+  defp describe(body) when is_binary(body) do
+    case Provider.decode_error_body(body) do
+      ^body -> String.slice(body, 0, 400)
+      decoded -> describe(decoded)
+    end
+  end
   defp describe(body), do: inspect(body) |> String.slice(0, 400)
 end
 

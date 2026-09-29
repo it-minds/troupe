@@ -185,6 +185,13 @@ Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 Found by the chunk 7 fixers, 2026-09-27.
 
+### D39 - A local daemon build can report the previous release's version (low)
+
+After `scripts/install-local --tui -y` on the 0.6.2-beta checkout, the installed daemon
+reports `troupe-daemon 0.6.1-beta (harness 0.6.2-beta, protocol 1)`. The TUI reports
+0.6.2-beta. The release appears to retain an old application version while rebuilding
+the harness. Found while fixing streamed provider errors, 2026-09-29.
+
 ## Taken
 
 | Defect | Taken by |

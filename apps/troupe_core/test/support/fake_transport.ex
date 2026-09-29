@@ -55,7 +55,7 @@ defmodule Troupe.Test.FakeTransport do
         {request, %Req.TransportError{reason: :closed}}
 
       attempt < transport_errors + status_errors ->
-        {request, error_response(Map.get(config, :fail_status, 429), Map.get(config, :fail_body, "slow down"))}
+        error_response(request, Map.get(config, :fail_status, 429), Map.get(config, :fail_body, "slow down"))
 
       true ->
         stream(request, Map.get(config, :chunks, []))
@@ -90,11 +90,16 @@ defmodule Troupe.Test.FakeTransport do
     end)
   end
 
-  defp error_response(status, message) do
-    Req.Response.new(
-      status: status,
-      headers: %{"content-type" => ["application/json"]},
-      body: %{"error" => %{"message" => message}}
-    )
+  defp error_response(request, status, message) do
+    response = Req.Response.new(status: status, headers: %{"content-type" => ["application/json"]})
+    body = if is_map(message), do: message, else: %{"error" => %{"message" => message}}
+    encoded = Jason.encode!(body)
+    midpoint = div(byte_size(encoded), 2)
+    chunks = [binary_part(encoded, 0, midpoint), binary_part(encoded, midpoint, byte_size(encoded) - midpoint)]
+
+    Enum.reduce(chunks, {request, response}, fn chunk, {req, resp} ->
+      {:cont, pair} = request.into.({:data, chunk}, {req, resp})
+      pair
+    end)
   end
 end

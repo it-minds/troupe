@@ -47,9 +47,9 @@ defmodule Troupe.LLM.Providers.OpenAI do
   end
 
   defp attempt(%Request{api_key: {:refused, _why} = refused}, _reply_to, _ref), do: {:error, refused}
-  defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, :first)
+  defp attempt(request, reply_to, ref), do: post(request, body(request), reply_to, ref, 0)
 
-  defp post(request, body, reply_to, ref, pass) do
+  defp post(request, body, reply_to, ref, corrections) do
     options = [
       url: Endpoint.build(base_url(request), "/v1/chat/completions"),
       method: :post,
@@ -80,7 +80,7 @@ defmodule Troupe.LLM.Providers.OpenAI do
       # with the other field, once, instead of every user discovering this and
       # configuring it (Decision 658).
       {:ok, %Req.Response{status: 400, body: refused}} ->
-        refused(request, body, describe(refused), reply_to, ref, pass)
+        refused(request, body, describe(refused), reply_to, ref, corrections)
 
       {:ok, %Req.Response{status: status, body: refused}} ->
         {:error, {:http_status, status, describe(refused)}}
@@ -93,15 +93,32 @@ defmodule Troupe.LLM.Providers.OpenAI do
     end
   end
 
-  defp refused(request, body, detail, reply_to, ref, :first) do
-    case output_cap_retry(body, detail) do
+  defp refused(request, body, detail, reply_to, ref, corrections) when corrections < 2 do
+    case request_correction(body, detail) do
       nil -> {:error, {:http_status, 400, detail}}
-      swapped -> post(request, swapped, reply_to, ref, :second)
+      corrected -> post(request, corrected, reply_to, ref, corrections + 1)
     end
   end
 
-  defp refused(_request, _body, detail, _reply_to, _ref, :second),
+  defp refused(_request, _body, detail, _reply_to, _ref, _corrections),
     do: {:error, {:http_status, 400, detail}}
+
+  defp request_correction(body, detail) do
+    case output_cap_retry(body, detail) do
+      nil -> metadata_retry(body, detail)
+      corrected -> corrected
+    end
+  end
+
+  # OpenAI requires store: true for metadata, but turning on storage just to tag a
+  # request is not an acceptable fallback. Gateways that accept it still get the
+  # attribution; a provider that explicitly refuses it gets the call without it.
+  defp metadata_retry(body, detail) do
+    if Map.has_key?(body, :metadata) and String.contains?(detail, "metadata") and
+         String.contains?(detail, "store") do
+      Map.delete(body, :metadata)
+    end
+  end
 
   @doc false
   @spec output_cap_retry(map(), term()) :: map() | nil
@@ -144,6 +161,9 @@ defmodule Troupe.LLM.Providers.OpenAI do
       key -> [{"authorization", "Bearer " <> key} | base]
     end
   end
+
+  defp handle_chunk(%Req.Response{status: status} = resp, chunk, _reply_to, _ref) when status != 200,
+    do: Provider.collect_error(resp, chunk)
 
   defp handle_chunk(resp, chunk, reply_to, ref) do
     state = resp.private[:troupe] || %{acc: Collector.new(), sse: SSE.new()}
@@ -413,7 +433,13 @@ defmodule Troupe.LLM.Providers.OpenAI do
   end
 
   defp describe(%{"error" => %{"message" => message}}), do: message
-  defp describe(body) when is_binary(body), do: String.slice(body, 0, 400)
+  defp describe(%{"detail" => detail}) when is_binary(detail), do: detail
+  defp describe(body) when is_binary(body) do
+    case Provider.decode_error_body(body) do
+      ^body -> String.slice(body, 0, 400)
+      decoded -> describe(decoded)
+    end
+  end
   defp describe(body), do: body |> inspect() |> String.slice(0, 400)
 end
 

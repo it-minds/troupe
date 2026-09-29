@@ -71,11 +71,12 @@ defmodule Troupe.Session.Memory do
   @spec status(Path.t(), Config.t() | nil) :: status()
   def status(workspace, config) do
     brief = brief(workspace)
+    root = repository_root(workspace)
 
     cond do
       not enabled?(config) -> :disabled
       is_nil(brief) -> :absent
-      Memory.stale?(brief, files: tracked_files(workspace), max_age_days: max_age(config)) -> :stale
+      Memory.stale?(brief, files: tracked_files(root), max_age_days: max_age(config)) -> :stale
       true -> :fresh
     end
   end

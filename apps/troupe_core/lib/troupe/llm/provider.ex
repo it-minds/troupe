@@ -13,6 +13,30 @@ defmodule Troupe.LLM.Provider do
 
   alias Troupe.LLM.Request
 
+  # Req does not accumulate the body when `into` is a function. Keep a bounded copy
+  # of a non-200 response so callers can explain the refusal (and, for OpenAI,
+  # choose the other output-limit field). Successful SSE chunks are never buffered.
+  @error_body_limit 16_384
+
+  @doc false
+  @spec collect_error(Req.Response.t(), binary()) :: Req.Response.t()
+  def collect_error(%Req.Response{body: body} = response, chunk) do
+    body = if is_binary(body), do: body, else: ""
+    remaining = max(@error_body_limit - byte_size(body), 0)
+    %{response | body: body <> binary_part(chunk, 0, min(byte_size(chunk), remaining))}
+  end
+
+  @doc false
+  @spec decode_error_body(term()) :: term()
+  def decode_error_body(body) when is_binary(body) do
+    case Jason.decode(body) do
+      {:ok, decoded} -> decoded
+      _ -> body
+    end
+  end
+
+  def decode_error_body(body), do: body
+
   @callback stream(Request.t(), reply_to :: pid(), ref :: reference()) :: :ok
 
   @doc """
