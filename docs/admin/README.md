@@ -6,20 +6,19 @@ and backups on top.
 
 | Document | What it covers |
 |---|---|
-| [installing.md](installing.md) | A cluster with nothing on it, to a first team in the console |
+| [installing.md](installing.md) | A cluster with nothing on it, to a first team in the console; a worked example on managed services |
 | [configuration.md](configuration.md) | Every environment variable, Helm value, platform setting, expected Secret, port and NetworkPolicy |
 | [roles-and-permissions.md](roles-and-permissions.md) | Identity from the provider, admin roles, service principals, break-glass, session roles, how each surface authenticates, RBAC, OpenBao policies, the admin methods |
 | [profiles-and-policy.md](profiles-and-policy.md) | Worker profiles, what the operator creates, conditions, upgrades and drains, `TroupePolicy`, team volumes, provisioning, sizing |
 | [bundles-and-triggers.md](bundles-and-triggers.md) | Config bundles and MCP servers, triggers and the scheduler, unattended terms, budgets |
 | [integrations.md](integrations.md) | What the identity provider, OpenBao, PostgreSQL, object storage, the LLM gateway, Kubernetes, MCP, SCIM and the GUI require |
-| [authentik.md](authentik.md) | Moving a plane's sign-in and provisioning to Authentik, in order |
+| [authentik.md](authentik.md) | Connecting a plane's sign-in and provisioning to Authentik, in order |
 | [single-machine.md](single-machine.md) | A worker on a machine you already have, and what it gives up |
 | [backup-restore.md](backup-restore.md) | Where state lives, what can be rebuilt, restore procedures |
 | [monitoring.md](monitoring.md) | Health endpoints, signals, the audit log, logs worth alerting on, a troubleshooting table |
 | [routine-tasks.md](routine-tasks.md) | Step lists: upgrades, teams, principals, bundles, drains, settings, lock-outs, SCIM, rotations, erasure |
 
-Also: [../deploying-on-scaleway.md](../deploying-on-scaleway.md), [../a2a.md](../a2a.md)
-and [../egress-allowlist.md](../egress-allowlist.md).
+Also: [../a2a.md](../a2a.md) and [../egress-allowlist.md](../egress-allowlist.md).
 
 ## Before the first `helm install`
 

@@ -75,7 +75,6 @@ jobs:
     with:
       version: ${{ needs.plan.outputs.version }}
       ref: ${{ needs.plan.outputs.sha }}
-    secrets: inherit
 
   # The tag, the chart, and a draft for the native builds to attach to.
   draft:
@@ -114,8 +113,9 @@ jobs:
         run: |
           git tag "$TAG" "$SHA"
           git push origin "refs/tags/${TAG}"
-          images="Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`."
-          [ "$IMAGES" = true ] || images="No images were built for this one."
+          owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          images="Images: \`ghcr.io/${owner}/troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`, and the chart as \`oci://ghcr.io/${owner}/charts/troupe\` \`--version ${VERSION}\`."
+          [ "$IMAGES" = true ] || images="No images were built for this one, and the chart is only the file attached below."
           cat > notes.md <<NOTES
           **Untested.** \`${REF}\` at \`${SHA::7}\`, built without running the test suite — for trying out, not for production. A release (\`scripts/release\`) runs the full suite; this did not.
 
@@ -169,8 +169,12 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
-      - name: Checksums, then publish
+      - uses: azure/setup-helm@v5
+        if: inputs.images
+
+      - name: Checksums
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.plan.outputs.tag }}
@@ -180,7 +184,26 @@ jobs:
           rm -f SHA256SUMS
           sha256sum -- * > SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
+
+      # As a release does it (`release.yml`), and only beside images: a chart in the
+      # registry whose images were never built would install nothing that runs. Helm
+      # takes a pre-release version only when it is asked for by name or with `--devel`.
+      - name: The chart, to the registry
+        if: inputs.images
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ needs.plan.outputs.version }}
+        run: |
+          owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "dist/troupe-${VERSION}.tgz" "oci://ghcr.io/${owner}/charts"
+          echo "- \`oci://ghcr.io/${owner}/charts/troupe\` \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.plan.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease
 
       # Only this workflow's own: a tag ending `-pre.<n>`. A release candidate
       # (`0.4.0-rc.1`) is a release and is never touched.

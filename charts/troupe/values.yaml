@@ -8,11 +8,12 @@ namespace: troupe-system
 # every object of that kind, which for WorkerProfile means removing the workers.
 # Changing a CRD is therefore a deliberate `kubectl apply -f charts/troupe/crds/`.
 
-# Names of pull secrets, for a registry that needs a credential. Put on the plane, the
-# migration Job and the operator here, and handed to the operator by name so it puts the
-# same ones on every worker pod. Troupe creates no secrets: each name has to exist in
-# `troupe-system` and in every worker namespace, the same way the object-store secret
-# does.
+# Names of pull secrets, for a registry that needs a credential. The images every
+# `*.image.repository` below names are public on ghcr.io and need none; a mirror of your
+# own may. Put on the plane, the migration Job and the operator here, and handed to the
+# operator by name so it puts the same ones on every worker pod. Troupe creates no
+# secrets: each name has to exist in `troupe-system` and in every worker namespace, the
+# same way the object-store secret does.
 imagePullSecrets: []
 
 # NetworkPolicy for the plane and the operator: HTTP from the ingress namespace, the
@@ -24,7 +25,7 @@ networkPolicy:
 
 operator:
   image:
-    repository: ghcr.io/objective-mj/troupe-operator
+    repository: ghcr.io/it-minds/troupe-operator
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 1
@@ -71,7 +72,7 @@ plane:
   # A cluster that runs only workers, with its plane elsewhere, sets this to false.
   enabled: true
   image:
-    repository: ghcr.io/objective-mj/troupe-plane
+    repository: ghcr.io/it-minds/troupe-plane
     tag: ""
     pullPolicy: IfNotPresent
   replicas: 2
@@ -205,7 +206,7 @@ plane:
 # they were first given. The policy still has to allow the repository.
 worker:
   image:
-    repository: ghcr.io/objective-mj/troupe-worker
+    repository: ghcr.io/it-minds/troupe-worker
     tag: ""            # defaults to the chart's appVersion
 
 # The graphical client (`clients/gui`), served on the plane's own host at `basePath`
@@ -216,7 +217,7 @@ worker:
 gui:
   enabled: true
   image:
-    repository: ghcr.io/objective-mj/troupe-gui
+    repository: ghcr.io/it-minds/troupe-gui
     tag: ""            # defaults to the chart's appVersion
     pullPolicy: IfNotPresent
   # Two because it is 30 MB of nginx and a rolling deploy should not have a window where
@@ -237,7 +238,7 @@ gui:
 a2a:
   enabled: false
   image:
-    repository: ghcr.io/objective-mj/troupe-a2a
+    repository: ghcr.io/it-minds/troupe-a2a
     tag: ""
     pullPolicy: IfNotPresent
   # Two is fine: nothing is serialised in the facade, and a task's state is the
@@ -291,7 +292,7 @@ policy:
   install: true
   name: default
   allowedImageRepositories:
-    - ghcr.io/objective-mj/troupe-worker
+    - ghcr.io/it-minds/troupe-worker
   maxReplicas: 8
   maxSessionsPerPod: 8
   maxResources:
@@ -303,7 +304,7 @@ policy:
   # `Troupe.EgressTest` checks this list against `Troupe.Egress` for exactly that.
   #
   # A deployment that uses neither narrows this to its own gateway, as `values.small.yaml`
-  # and `values.scaleway.yaml` do. Narrowing is the operator's decision; shipping a default
+  # and `values.example.yaml` do. Narrowing is the operator's decision; shipping a default
   # the shipped code cannot work under is not.
   allowedEgress:
     - "*.anthropic.com"

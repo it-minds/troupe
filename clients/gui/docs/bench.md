@@ -38,7 +38,7 @@ docker run -d --name troupe-bench-worker -p 4000:4000 \
   -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json \
   -e TROUPE_STATE_HOME=/workspace/.state -e TROUPE_SESSIONS_PER_POD=64 \
   -e TROUPE_HTTP_PORT=4000 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/objective-mj/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev
 
 # one workspace per client; the worker will not invent directories
 docker exec troupe-bench-worker sh -c 'for i in $(seq 0 63); do mkdir -p /workspace/c$i; done'

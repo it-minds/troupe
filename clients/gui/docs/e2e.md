@@ -26,7 +26,7 @@ migrations run as a release eval before it serves.
 ```sh
 docker compose -f dev/plane-stack.yml up -d --wait --wait-timeout 600 --build
 # or a published build, instead of this checkout's:
-TROUPE_PLANE_IMAGE=rg.fr-par.scw.cloud/troupe/troupe-plane:0.2.14 \
+TROUPE_PLANE_IMAGE=ghcr.io/it-minds/troupe-plane:<version> \
   docker compose -f dev/plane-stack.yml up -d --wait --no-build
 
 cd packages/client
@@ -80,7 +80,7 @@ docker run -d --name troupe-e2e -p 4010:4000 \
   -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json \
   -e TROUPE_STATE_HOME=/workspace/.state -e TROUPE_SESSIONS_PER_POD=64 \
   -e TROUPE_HTTP_PORT=4000 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/objective-mj/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev
 docker exec troupe-e2e sh -c 'mkdir -p /workspace/e2e'   # it will not invent directories
 
 cd packages/client

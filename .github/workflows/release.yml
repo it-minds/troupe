@@ -1,6 +1,7 @@
-# A release: the full suite, then the version's images, the chart, the native builds, a
-# published GitHub release, and production (Decisions 669, 674, 676). `.github/CI.md` has
-# the picture.
+# A release: the full suite, then the version's images, the chart, the native builds and
+# a published GitHub release (Decisions 669, 674, 676). It publishes and it ends there:
+# nothing here deploys, or knows where the release will run (Decision 735).
+# `.github/CI.md` has the picture.
 #
 # Started by a push to `main` that changes VERSION — which is to say, by merging the pull
 # request `scripts/release <version>` opens — and cut only when that version has no tag
@@ -11,7 +12,7 @@
 # Nothing here trusts an earlier run: the whole suite runs again, soak and cluster
 # included, on exactly the commit being released, and the images are built from that
 # commit and tagged with the version. A release candidate (`0.4.0-rc.1`) does all of it
-# and deploys as a dry run.
+# and is published as a GitHub pre-release.
 name: release
 
 on:
@@ -91,7 +92,6 @@ jobs:
       packages: write
     with:
       version: ${{ needs.version.outputs.version }}
-    secrets: inherit
 
   # The tag, the chart, and a draft release for the native builds to attach to.
   cut:
@@ -132,16 +132,22 @@ jobs:
         run: |
           git tag "$TAG" "$GITHUB_SHA"
           git push origin "refs/tags/${TAG}"
+          owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
           cat > notes.md <<NOTES
           Everything in this repository at \`${GITHUB_SHA::7}\`, as one release, after the full suite.
 
-          **On a cluster** — the chart, whose images are this version:
+          **On a cluster** — the chart, whose images are this version, from the registry:
+
+              helm upgrade --install troupe oci://ghcr.io/${owner}/charts/troupe --version ${VERSION} \\
+                --namespace troupe-system --create-namespace --values my-values.yaml
+
+          or the same chart from this page:
 
               helm upgrade --install troupe \\
                 https://github.com/${GITHUB_REPOSITORY}/releases/download/${TAG}/troupe-${VERSION}.tgz \\
                 --namespace troupe-system --create-namespace --values my-values.yaml
 
-          Images: \`troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`.
+          Images, public and pulled without a credential: \`ghcr.io/${owner}/troupe-plane\`, \`troupe-operator\`, \`troupe-worker\`, \`troupe-a2a\` and \`troupe-gui\`, each tagged \`${VERSION}\`. [Installing](https://github.com/${GITHUB_REPOSITORY}/blob/${TAG}/docs/admin/installing.md) has the CRDs, the values nobody can leave unset, and what the chart does not run for you.
 
           **On a machine** — download the installer attached below, read it if you like, and run it. It installs this release: the daemon always, and it asks about the TUI and the desktop app.
 
@@ -172,11 +178,6 @@ jobs:
           gh release create "$TAG" "${flags[@]}" dist/troupe-*.tgz dist/install.sh dist/install.ps1 \
             LICENSE NOTICE THIRD-PARTY-NOTICES.txt
 
-      - uses: actions/upload-artifact@v7
-        with:
-          name: chart
-          path: dist/troupe-*.tgz
-
   native:
     name: native builds
     needs: [version, cut]
@@ -187,19 +188,22 @@ jobs:
       tag: ${{ needs.version.outputs.tag }}
     secrets: inherit
 
-  # Published once everything is attached, with one SHA256SUMS over all of it.
+  # Published once everything is attached, with one SHA256SUMS over all of it, and the
+  # chart in the registry first: a version there is a release that finished.
   publish:
     name: publish ${{ needs.version.outputs.tag }}
     needs: [version, native]
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
-      - name: Checksums, then publish
+      - uses: azure/setup-helm@v5
+
+      - name: Checksums
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ needs.version.outputs.tag }}
-          PRERELEASE: ${{ needs.version.outputs.prerelease }}
         run: |
           mkdir dist && cd dist
           gh release download "$TAG" --repo "$GITHUB_REPOSITORY"
@@ -207,78 +211,22 @@ jobs:
           sha256sum -- * > SHA256SUMS
           cat SHA256SUMS
           gh release upload "$TAG" SHA256SUMS --repo "$GITHUB_REPOSITORY" --clobber
-          gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$PRERELEASE"
 
-  # A release deploys itself (Decision 669). Pushing an image and changing production are
-  # still two decisions, but the second is the reviewed merge of a VERSION change, not a
-  # laptop session. A release candidate runs everything and deploys as a dry run only.
-  #
-  # The `production` environment holds `KUBECONFIG` (the `troupe-deployer` account's,
-  # from `scripts/ci-kubeconfig`) and `DEPLOY_VALUES` (the deployment's values file), and
-  # its variable `PLANE_URL`. Its deployment policy should allow `main` alone, so no pull
-  # request can reach them; a required reviewer on it is optional, and makes this job
-  # wait for a second person. Each run of this job is a row on the repository's
-  # Deployments page: what went where, when, and from which merge.
-  deploy:
-    name: deploy ${{ needs.version.outputs.version }}
-    needs: [version, cut]
-    runs-on: ubuntu-latest
-    environment:
-      name: production
-      url: ${{ vars.PLANE_URL }}
-    # One roll at a time, shared with `deploy.yml`: two overlapping `helm upgrade`s on one
-    # release is a race whose loser is whichever finished second.
-    concurrency:
-      group: deploy-production
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: azure/setup-helm@v5
-
-      - uses: actions/download-artifact@v8
-        with:
-          name: chart
-          path: dist
-
-      - name: Check this deployment is configured
+      # The same file the release page has, as `oci://ghcr.io/<owner>/charts/troupe` at
+      # the version, pushed with this workflow's own token (Decision 735).
+      - name: The chart, to the registry
         env:
-          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
-          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
-        run: |
-          missing=""
-          [ -n "${KUBECONFIG_CONTENT}" ] || missing="${missing} KUBECONFIG"
-          [ -n "${VALUES_CONTENT}" ] || missing="${missing} DEPLOY_VALUES"
-          if [ -n "${missing}" ]; then
-            echo "::error title=Deployment not configured::The production environment has no${missing}. KUBECONFIG is the troupe-deployer account's (deploy/ci-deployer.yaml, then scripts/ci-kubeconfig); DEPLOY_VALUES is the deployment's Helm values file."
-            exit 1
-          fi
-
-      - name: Lay out the credentials
-        env:
-          KUBECONFIG_CONTENT: ${{ secrets.KUBECONFIG }}
-          VALUES_CONTENT: ${{ secrets.DEPLOY_VALUES }}
-        run: |
-          mkdir -p .local
-          printf '%s' "${KUBECONFIG_CONTENT}" > .local/kubeconfig.yaml
-          printf '%s' "${VALUES_CONTENT}" > .local/values.itminds.yaml
-          chmod 600 .local/kubeconfig.yaml .local/values.itminds.yaml
-
-      - name: ${{ needs.version.outputs.prerelease == 'true' && 'Render it (a release candidate)' || 'Roll it' }}
-        env:
-          PLANE_URL: ${{ vars.PLANE_URL }}
-          EXPECT_COMMIT: ${{ github.sha }}
-          DRY_RUN: ${{ needs.version.outputs.prerelease == 'true' && '--dry-run' || '' }}
-        run: scripts/deploy dist/troupe-${{ needs.version.outputs.version }}.tgz $DRY_RUN
-
-      - name: Say what is running
-        if: always()
-        env:
+          GH_TOKEN: ${{ github.token }}
           VERSION: ${{ needs.version.outputs.version }}
-          OUTCOME: ${{ job.status }}
         run: |
-          {
-            echo "### production: ${VERSION} — ${OUTCOME}"
-            echo
-            echo "From \`${GITHUB_SHA::7}\`, started by @${GITHUB_ACTOR}."
-          } >> "$GITHUB_STEP_SUMMARY"
+          owner="$(echo "$GITHUB_REPOSITORY_OWNER" | tr '[:upper:]' '[:lower:]')"
+          echo "$GH_TOKEN" | helm registry login ghcr.io --username "$GITHUB_ACTOR" --password-stdin
+          helm push "dist/troupe-${VERSION}.tgz" "oci://ghcr.io/${owner}/charts"
+          echo "- \`oci://ghcr.io/${owner}/charts/troupe\` \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ needs.version.outputs.tag }}
+          PRERELEASE: ${{ needs.version.outputs.prerelease }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --prerelease="$PRERELEASE"

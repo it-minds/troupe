@@ -148,7 +148,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `namespace` | `troupe-system` | the namespace, and the control host `troupe-plane-control.<namespace>.svc` |
 | `imagePullSecrets` | `[]` | pull secrets on plane, Job, operator, A2A, and (via the operator) workers |
 | `networkPolicy.enabled` | `true` | plane, operator, A2A and GUI NetworkPolicies |
-| `operator.image.*`, `plane.image.*`, `a2a.image.*`, `gui.image.*` | `ghcr.io/objective-mj/troupe-<name>`, tag `appVersion` | the images |
+| `operator.image.*`, `plane.image.*`, `a2a.image.*`, `gui.image.*` | `ghcr.io/it-minds/troupe-<name>` (public), tag `appVersion` | the images |
 | `operator.replicas` | `1` | leader elected by Lease |
 | `plane.enabled` | `true` | whether the plane is rendered at all |
 | `plane.replicas` | `2` | `Recreate` when 1; PDB `minAvailable: 1` when more; more than 1 without `distribution: name` fails the render |
@@ -159,7 +159,7 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 | `gui.enabled`, `gui.replicas`, `gui.basePath` | `true`, `2`, `/app` | the GUI's Deployment, Service, Ingress on `plane.host` and NetworkPolicy. `basePath` must match the image's `TROUPE_GUI_BASE`; `/` is refused |
 | `a2a.enabled`, `a2a.host`, `a2a.ingressClassName`, `a2a.tlsSecretName` | `false`, `a2a.example.test`, `nginx`, `""` | the facade and its Ingress; enabling it also admits facade pods to the plane's HTTP port |
 | `policy.install`, `policy.name` | `true`, `default` | the default `TroupePolicy` (kept on uninstall) and the admission `paramRef` |
-| `policy.allowedImageRepositories` | `[ghcr.io/objective-mj/troupe-worker]` | see [profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy) |
+| `policy.allowedImageRepositories` | `[ghcr.io/it-minds/troupe-worker]` | see [profiles-and-policy.md §4](profiles-and-policy.md#4-troupepolicy) |
 | `policy.maxReplicas`, `maxSessionsPerPod`, `maxResources` | `8`, `8`, 4 CPU / 8Gi | ceilings |
 | `policy.allowedEgress`, `allowedStorageClasses`, `orgVolume` | `["*.anthropic.com", github.com]`, `[standard]`, `{}` | what profiles may reach and mount |
 | `policy.namespacePrefix`, `policy.workersDomain` | `troupe-w-`, `workers.example.test` | worker namespaces and hostnames |
@@ -168,18 +168,20 @@ upgrade. Values that only feed a variable in Part A are listed there; these are 
 Not chart values: worker profiles and team volumes (custom resources), the LLM gateway (a
 profile field plus egress), database TLS and pool size, `TROUPE_LOG_FORMAT`,
 `TROUPE_PLANE_AUDIENCE`, `TROUPE_POLICY_NAME`, and the ingress controller, cert-manager
-and OpenBao themselves (`deploy/scaleway/*`).
+and OpenBao themselves ([installing.md §6](installing.md#6-a-worked-example-on-managed-services)).
 
 ### The overlays
 
 `charts/troupe/values.small.yaml` (two small nodes, one plane replica, `distribution:
-none`, tighter ceilings), `charts/troupe/values.scaleway.yaml` (two clustered replicas)
+none`, tighter ceilings), `charts/troupe/values.example.yaml` (two clustered replicas, the
+worked example of [installing.md §6](installing.md#6-a-worked-example-on-managed-services))
 and `dev/kind/values.yaml` (images tagged `dev`, `ws` on port `30080`, Dex at
-`dex.localtest.me`, a static OpenBao token) differ from the defaults in registry, host,
-OIDC endpoints, egress and storage classes; read the files. Both Scaleway files point
-`plane.tlsSecretName` at `troupe-plane-tls` with no `plane.certIssuer`, and the shipped
-`ClusterIssuer` is HTTP-01 only, so the plane's certificate is yours to provide. With
-`replicas: 1` and `distribution: none` an upgrade is a few seconds without a plane.
+`dex.localtest.me`, a static OpenBao token) differ from the defaults in host, OIDC
+endpoints, egress and storage classes; read the files. Both copyable files point
+`plane.tlsSecretName` at `troupe-plane-tls`. The example has cert-manager issue it
+(`plane.certIssuer: letsencrypt`, HTTP-01); the small file leaves `plane.certIssuer`
+empty, so there the plane's certificate is yours to provide. With `replicas: 1` and
+`distribution: none` an upgrade is a few seconds without a plane.
 
 ---
 
@@ -217,7 +219,7 @@ Troupe creates no Secrets. Each must exist before the pod that references it sta
 |---|---|---|---|
 | `troupe-plane-database` | `troupe-system` | `url` | always |
 | `troupe-plane-secret-key-base` | `troupe-system` | `value` (≥ 64 bytes) | always |
-| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in (both Scaleway overlays leave `plane.oidc.secretName` empty) |
+| `troupe-plane-oidc` | `troupe-system` | `client-secret` | console sign-in (both copyable overlays leave `plane.oidc.secretName` empty) |
 | `troupe-object-store` | `troupe-system` **and every** `troupe-w-<profile>` | `access-key-id`, `secret-access-key` | the plane's index rebuild; every session on a worker |
 | break-glass (your name) | `troupe-system` | `token` | only when the door is wanted |
 | `troupe-plane-scim` | `troupe-system` | `token` | the deployment's SCIM token, with `plane.scim.enabled` |
@@ -272,9 +274,11 @@ be admitted by name without Cilium, so give it as an address instead
 
 **Ingress annotations.** Plane: 3600 s read and send timeouts, `proxy-body-size`, the rate
 limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only): 3600 s
-timeouts, `limit-connections: 50`. The Scaleway controller adds PROXY protocol and
+timeouts, `limit-connections: 50`. The controller of the worked example
+([installing.md §6](installing.md#6-a-worked-example-on-managed-services)) adds
 `proxy-body-size: 16m`, so an oversized `input.send` is refused by the worker rather than
-the proxy. The plane's JSON parser takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
+the proxy, and PROXY protocol where the load balancer sends it. The plane's JSON parser
+takes 4 MiB, control frames 8 MiB, worker frames 16 MiB.
 
 ---
 

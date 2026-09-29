@@ -2,13 +2,25 @@
 
 Three speeds, one set of jobs (Decision 676):
 
-| | when | runs | publishes | deploys |
-|---|---|---|---|---|
-| **Focused CI** — [`ci.yml`](workflows/ci.yml) | every pull request, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` | nothing |
-| **Pre-release** — [`prerelease.yml`](workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers | nothing |
-| **Release** — [`release.yml`](workflows/release.yml) | merging a VERSION change (`scripts/release 0.3.2`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version | production |
+| | when | runs | publishes |
+|---|---|---|---|
+| **Focused CI** — [`ci.yml`](workflows/ci.yml) | every pull request, every push to `main` | only what the change can have broken | `main`: the five images as `sha-<short>` |
+| **Pre-release** — [`prerelease.yml`](workflows/prerelease.yml) | by hand, any branch or commit | builds only, **no test suite** | a GitHub pre-release `v<VERSION>-pre.<n>`: images, chart, `troupe`, `troupe-daemon`, desktop installers |
+| **Release** — [`release.yml`](workflows/release.yml) | merging a VERSION change (`scripts/release 0.3.2`) | **the full suite**: every job, nine soak runs, the cluster suite | the GitHub release `v<VERSION>`, images and chart at that version |
 
-Plus [`nightly.yml`](workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing — and [`deploy.yml`](workflows/deploy.yml), which rolls back to or renders a published release by hand.
+Plus [`nightly.yml`](workflows/nightly.yml) — the full suite, the native builds and the harness against a real model on `main` every night, publishing nothing.
+
+**Nothing here deploys** (Decision 735). A release publishes and ends: a deployment takes the published chart and images and rolls them from somewhere of its own, and no workflow in this repository knows where that is or holds a credential for it.
+
+## Where it is published
+
+| what | where | tags |
+|---|---|---|
+| the five images | `ghcr.io/it-minds/troupe-plane`, `troupe-operator`, `troupe-worker`, `troupe-a2a`, `troupe-gui` | `sha-<short>` for every build; the version for a release or a pre-release |
+| the chart | `oci://ghcr.io/it-minds/charts/troupe`, and `troupe-<version>.tgz` on the release page | the version, for a release, and for a pre-release that built its images |
+| `troupe`, `troupe-daemon`, the desktop installers, `install.sh`, `install.ps1` | the release page | — |
+
+The packages are public, so a cluster pulls them with no credential. They are pushed with the workflow's own `GITHUB_TOKEN` (`packages: write`), which can push to its own owner's packages and nowhere else, so a fork publishes to its own `ghcr.io/<owner>`. There is no registry to configure: a deployment that wants its images in a registry of its own copies them from here. The chart's `values.yaml` names these images, and its image tags default to the chart's version.
 
 ## Focused CI: what a change runs
 
@@ -64,14 +76,14 @@ flowchart LR
 flowchart LR
   plan["name it<br/>0.3.1-pre.&lt;run&gt;"] --> images["images<br/>sha + 0.3.1-pre.n"]
   plan --> draft["tag + chart<br/>draft pre-release"] --> native["native builds<br/>daemon · TUI · desktop"]
-  images & native --> publish["SHA256SUMS, publish<br/>keep newest 5"]
+  images & native --> publish["SHA256SUMS · chart to ghcr.io<br/>publish · keep newest 5"]
 ```
 
 - **No test suite.** The native jobs' own smoke tests still run (`--version`, a headless run in the embedded daemon), because a binary that cannot start is not a build.
 - The daemon, the TUI and the plane report the pre-release's version. The desktop installers keep VERSION's number: an MSI version must be numeric.
 - It is a GitHub *pre-release*, so `/releases/latest` and the installers' default never pick it up. The `install.sh` and `install.ps1` attached to it install it (`scripts/release-installers` pins them), and so does naming it:
   `TROUPE_VERSION=0.3.1-pre.12 sh install.sh` or `$env:TROUPE_VERSION = "0.3.1-pre.12"; .\install.ps1`.
-- Nothing is deployed. Its images can be deployed by hand like any others.
+- Nothing is deployed. Its images and chart are installed like a release's, by naming the version: Helm never picks a pre-release version by itself.
 - Only the newest five are kept (`keep`); older pre-releases and their tags are deleted. Release candidates (`-rc.N`) are releases and are never touched.
 
 ## Release: the full suite, then everything
@@ -82,13 +94,13 @@ flowchart LR
 flowchart LR
   v{"VERSION changed<br/>and untagged?"} -->|yes| suite["full suite<br/>ci.yml full · soak 9 · cluster"]
   suite --> images["images at 0.3.2"] --> cut["tag v0.3.2<br/>chart · draft release"]
-  cut --> native["native builds<br/>attached"] --> publish["SHA256SUMS<br/>publish"]
-  cut --> deploy["deploy to production<br/>/.well-known/troupe says 0.3.2"]
+  cut --> native["native builds<br/>attached"] --> publish["SHA256SUMS · chart to ghcr.io<br/>publish"]
 ```
 
 - The full suite is `ci.yml` called with `full: true`: every job whatever changed, each app's suite nine more times, and the cluster suite on kind. Nothing is trusted from an earlier run.
 - The images are built from the commit being released and tagged with the version; the chart is packaged at that version, so it pulls exactly those.
-- A release candidate (`0.4.0-rc.1`) runs all of it and deploys as a dry run.
+- The chart goes to `oci://ghcr.io/it-minds/charts/troupe` just before the release is published, so a chart version in the registry is a release that finished. The release's notes show both ways to install it.
+- A release candidate (`0.4.0-rc.1`) runs all of it and is published as a GitHub pre-release.
 - A release whose run failed after VERSION merged can be retried with `Actions → release → Run workflow`: by hand it cuts VERSION's version if that has no tag yet.
 
 ## Nightly
@@ -119,30 +131,24 @@ A failure is a harness regression until shown otherwise: the step prints the run
 | `dev-check.yml` | compile, credo, schema, client builds; no tests | every other pull request: into a `development-*` chunk ([fixing-issues.md](../docs/developer/fixing-issues.md)), or stacked on another branch |
 | `licences.yml` | every locked package's licence against the policy in `scripts/licences.exs`, and `docs/third-party-licences.md`, `THIRD-PARTY-NOTICES.txt` and the chart's LICENSE and NOTICE current | every pull request |
 | `dco.yml` | every commit authored from 2026-09-27 has its author's `Signed-off-by:` ([CONTRIBUTING.md](../CONTRIBUTING.md)) | pull requests into `main` and `development-*` |
-| `images.yml` | the five images, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
+| `images.yml` | the five images to ghcr.io, `sha-<short>` and an optional version | `ci.yml` (main), `prerelease.yml`, `release.yml` |
 | `native.yml` | `troupe-daemon` ×5, `troupe` ×5, desktop ×3; optionally attached to a release | `ci.yml` (PRs that touch them, without macOS), `nightly.yml`, `prerelease.yml`, `release.yml` |
 | `prerelease.yml` | an untested pre-release of any commit | by hand |
-| `release.yml` | full suite → tag → publish → deploy | a VERSION change on `main`; by hand to retry |
+| `release.yml` | full suite → images → tag → publish | a VERSION change on `main`; by hand to retry |
 | `nightly.yml` | full suite + native builds + the live check; `only: live` for the last alone | schedule; by hand |
 | `live.yml` | three headless runs against the real gateway | `nightly.yml` |
-| `deploy.yml` | roll back to, or render, a published release | by hand |
 
 ## Secrets and variables
 
+The images and the chart need none: the workflow's own token pushes them.
+
 | Name | Kind | Used by |
 |---|---|---|
-| `REGISTRY`, `REGISTRY_NAMESPACE`, `REGISTRY_USERNAME`, `REGISTRY_PASSWORD` | repository secrets | `images.yml`: all four or none. Without them nothing is published and the run says which are missing; a release fails, because a release is its images |
 | `GUI_BASE` | repository variable | `images.yml`: the GUI's mount path baked into its assets, default `app` |
 | `APPLE_*`, `AZURE_*` | repository secrets | `native.yml`: sign the desktop installers; absent, they are unsigned ([install.md](../clients/gui/docs/install.md)) |
-| `KUBECONFIG`, `DEPLOY_VALUES` | `production` environment secrets | `release.yml`, `deploy.yml`: the `troupe-deployer` account's kubeconfig (`deploy/ci-deployer.yaml`, then `scripts/ci-kubeconfig`) and the deployment's Helm values |
-| `PLANE_URL` | `production` environment variable | where `scripts/deploy` asks `/.well-known/troupe` which version and commit is running |
 | `TROUPE_NIGHTLY_BASE_URL`, `TROUPE_NIGHTLY_API_KEY` | repository secrets | `nightly.yml` → `live.yml`: the LiteLLM gateway (OpenAI-compatible, with `/v1` or without) and a key for it, capped there at about $2 a day. Without both the live check fails and says so |
 | `TROUPE_NIGHTLY_MODEL` | repository variable | the model the live check runs, by the gateway's name for it; default `qwen3-235b`, the model the runaway sessions were on |
 | `TROUPE_NIGHTLY_MODEL_PRICES` | repository variable | `nightly.yml` → `live.yml` → the runs' `TROUPE_MODEL_PRICES`: what the gateway charges for the model, in dollars per million tokens, as `{"qwen3-235b": {"input": <in>, "output": <out>}}` with the rates from the gateway's own model configuration. Unset, the summary's cost column says *not reported*; nothing else changes |
-
-`production` should allow `main` alone, so no pull request reaches its secrets. The review
-of the pull request that changed `VERSION` is the approval, unless the environment adds a
-required reviewer.
 
 The gateway's key is a repository secret and not an environment's, because the live check
 runs on any branch it is dispatched on. What keeps it from a pull request is that only

@@ -32,6 +32,16 @@ require docker
 
 kc() { kubectl --context "$context" "$@"; }
 
+# The model gateway the dev profile calls: an OpenAI-compatible endpoint of your own (a
+# LiteLLM gateway, say), and `TROUPE_GATEWAY_KEY` for it. There is no default worth
+# guessing, so without one the profile names a placeholder under `example.test`, which
+# resolves nowhere: everything comes up, and a session says it cannot reach its model.
+# The host goes into the policy's egress list too, or the profile would be refused.
+gateway_url="${TROUPE_GATEWAY_URL:-https://llm-gw.example.test/v1}"
+gateway_host="${gateway_url#*://}"
+gateway_host="${gateway_host%%/*}"
+gateway_host="${gateway_host%%:*}"
+
 step() { echo; echo "==> $*"; }
 
 # -- the cluster --------------------------------------------------------------
@@ -127,7 +137,7 @@ if [ "${TROUPE_SKIP_BUILD:-}" = "1" ]; then
   # mentions building. Whatever is on this machine is loaded; what is not, is not.
   echo "skipping the build (TROUPE_SKIP_BUILD=1); loading what is already built"
   for release in troupe-operator troupe-plane troupe-worker troupe-a2a troupe-gui; do
-    image="ghcr.io/objective-mj/${release}:${TROUPE_IMAGE_TAG:-dev}"
+    image="ghcr.io/it-minds/${release}:${TROUPE_IMAGE_TAG:-dev}"
     if docker image inspect "$image" >/dev/null 2>&1; then
       kind load docker-image "$image" --name "$cluster"
     else
@@ -173,7 +183,7 @@ retry_apply dev/kind/dependencies.yaml
 llm_secret() {
   kc create secret generic llm-credentials \
     --namespace "$1" \
-    --from-literal=api-key="${ITM_LLM_GW_KEY:-}" \
+    --from-literal=api-key="${TROUPE_GATEWAY_KEY:-}" \
     --dry-run=client -o yaml | kc apply -f -
 }
 
@@ -217,9 +227,12 @@ step "6. Custom resource definitions"
 kc apply -f charts/troupe/crds/
 
 step "7. The chart"
+# The gateway replaces the placeholder that is first in the kind values' egress list; an
+# index in `--set` changes that entry and keeps the rest.
 helm --kube-context "$context" upgrade --install troupe charts/troupe \
   --namespace "$namespace" \
   --values dev/kind/values.yaml \
+  --set "policy.allowedEgress[0]=${gateway_host}" \
   --wait --timeout 5m
 
 # A rebuilt image under the same tag changes nothing in the pod spec, so Kubernetes has
@@ -247,7 +260,7 @@ metadata:
   namespace: ${namespace}
 spec:
   image:
-    repository: ghcr.io/objective-mj/troupe-worker
+    repository: ghcr.io/it-minds/troupe-worker
     tag: dev
   replicas: 1
   sessionsPerPod: 2
@@ -255,7 +268,7 @@ spec:
     requests: {cpu: 100m, memory: 512Mi}
     limits: {cpu: "2", memory: 2Gi}
   llm:
-    endpoint: ${TROUPE_GATEWAY_URL:-https://llm-gw.itmindsinternal.dk/v1}
+    endpoint: ${gateway_url}
     provider: openai
     model: ${TROUPE_GATEWAY_MODEL:-code-default}
     smallModel: ${TROUPE_GATEWAY_SMALL_MODEL:-chat-fast}
@@ -332,3 +345,12 @@ Log in and use it — the GUI at http://plane.localtest.me:30080/app, or the TUI
 Or open the console at /admin, which this repository does serve.
 
 EOF
+
+if [ -z "${TROUPE_GATEWAY_URL:-}" ]; then
+  cat <<EOF
+No model gateway: the ${profile} profile calls ${gateway_url}, which resolves nowhere, so
+a session there cannot answer. Set TROUPE_GATEWAY_URL and TROUPE_GATEWAY_KEY and run this
+again.
+
+EOF
+fi
