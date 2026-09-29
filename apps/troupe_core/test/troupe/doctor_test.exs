@@ -128,6 +128,37 @@ defmodule Troupe.DoctorTest do
     assert detail =~ "not answering"
   end
 
+  # Decision 733: a helper that is there and will not start leaves a session answering
+  # and running no command, and this line is where a person finds out why.
+  test "the reaper line: it starts, it was not built, or it is there and will not start", ctx do
+    File.write!(ctx.config_file, "provider: fake\n")
+    on_exit(fn -> Application.delete_env(:troupe_core, :reaper) end)
+    reaper = fn -> ctx.base |> run_live_free() |> Enum.find(&(&1.name == "reaper")) end
+
+    case Troupe.Reaper.path() do
+      {:ok, _built} -> assert %{state: :ok, detail: "reaper " <> _version} = reaper.()
+      {:error, :reaper_missing} -> assert %{state: :warn} = reaper.()
+    end
+
+    Application.put_env(:troupe_core, :reaper, Path.join(ctx.base, "nowhere"))
+    assert %{state: :warn, detail: detail} = reaper.()
+    assert detail =~ "was not built into this install"
+
+    helper = Path.join(ctx.base, "reaper")
+    File.write!(helper, "not a program\n")
+    File.chmod!(helper, 0o644)
+    Application.put_env(:troupe_core, :reaper, helper)
+
+    checks = run_live_free(ctx.base)
+    assert Doctor.exit_status(checks) == 1
+    assert %{state: :fail, detail: detail} = Enum.find(checks, &(&1.name == "reaper"))
+    assert detail =~ "the reaper helper #{Troupe.Paths.display(helper)} will not start"
+    assert detail =~ "no shell, git or MCP server"
+    assert Doctor.format(checks) =~ ~r/^FAIL  reaper                the reaper helper /m
+  end
+
+  defp run_live_free(workspace), do: Doctor.run(workspace: workspace, live: false)
+
   defp http_server(status, body) do
     {:ok, listen} =
       :gen_tcp.listen(0, [:binary, active: false, reuseaddr: true, ip: {127, 0, 0, 1}])

@@ -79,7 +79,7 @@ defmodule Troupe.Tools.Shell do
 
       case Reaper.open(ctx.workspace.root_real, argv) do
         {:ok, port} -> collect(port, timeout, ctx)
-        {:error, :reaper_missing} -> {:error, reaper_missing_message()}
+        {:error, reason} -> {:error, unavailable(reason)}
       end
     end
   end
@@ -175,10 +175,20 @@ defmodule Troupe.Tools.Shell do
     end
   end
 
-  defp reaper_missing_message do
-    "The shell tool is unavailable: the reaper helper for #{Reaper.triple()} was not " <>
-      "built into this install. Run `mix compile.reaper` from a source checkout."
+  defp unavailable(:reaper_missing) do
+    "The shell tool is unavailable: #{Reaper.explain(:reaper_missing)}. " <>
+      "Run `mix compile.reaper` from a source checkout."
   end
+
+  # What the model reads, so it can tell the person rather than try again: nothing will
+  # run until the helper does (Decision 733).
+  defp unavailable({:reaper_unstartable, _} = reason) do
+    "The shell tool is unavailable: #{Reaper.explain(reason)}, so no command can run on " <>
+      "this machine until it does. `troupe doctor` shows the same to the person."
+  end
+
+  defp unavailable(reason),
+    do: "The shell tool could not run the command: #{Reaper.explain(reason)}."
 
   defp cap(%{config: nil}), do: 60_000
   defp cap(%{config: config}), do: config.tool_output_limit

@@ -281,6 +281,9 @@ defmodule Troupe.Session.Memory do
     end
   end
 
+  # Not a repository, git missing or failing, and a reaper that will not start all read
+  # as no repository: this runs before every model call, and the reaper logs its own
+  # failure once (Decision 733).
   defp git(workspace, args) do
     if File.dir?(workspace) do
       case Reaper.run(workspace, ["git" | args], timeout_ms: 10_000) do

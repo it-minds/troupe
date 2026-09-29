@@ -116,7 +116,9 @@ permission. A write can never leave the workspace root; a read may also reach th
 configured `read_roots`; both compare canonical paths. The runner is the one place
 `rescue` is used: a raise, exit or timeout becomes an error result the model can read.
 Every OS process runs under **`reaper`**, a small Zig program owned by a Port, so killing
-the VM kills everything it started. On a pod, `shell` runs under bubblewrap with the
+the VM kills everything it started. A reaper that will not start is an error, not a crash:
+`shell` says why, `grep` scans in the VM, the brief's `git` reads as no repository, and
+`troupe doctor` fails its line. On a pod, `shell` runs under bubblewrap with the
 session's mount table as its bind list.
 
 Results are **bounded where they are created** — head and tail of command output, a window
