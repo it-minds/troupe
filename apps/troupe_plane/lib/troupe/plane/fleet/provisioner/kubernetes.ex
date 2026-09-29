@@ -8,10 +8,11 @@ defmodule Troupe.Plane.Fleet.Provisioner.Kubernetes do
   point of doing it first: a second implementation is only cheap if the first one is the
   interface rather than a special case beside it.
 
-  The plane writes the resource and the operator reconciles it — or the plane commits the
-  manifest and Flux applies it, which is `Troupe.Plane.Provision`'s business and not a
-  second provisioner. Direct and GitOps are two ways of delivering the same document to the
-  same substrate; that is a different question from which substrate it is.
+  The plane writes the resource and the operator reconciles it — or a repository holds it,
+  Flux applies it and the plane writes only its count, its teams and its servers, which is
+  `Troupe.Plane.Provision`'s business and not a second provisioner. Direct and GitOps are
+  two ways of getting the same document to the same substrate; that is a different
+  question from which substrate it is.
 
   ## Every guarantee where there is Cilium, and this is the only one that can say so
 

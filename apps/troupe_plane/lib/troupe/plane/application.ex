@@ -42,6 +42,10 @@ defmodule Troupe.Plane.Application do
       # typed. Also a `:global` singleton nobody asks for on the happy path, so it gets a
       # keeper of its own for the same reason the scheduler does.
       Troupe.Plane.Fleet.Scaler.Keeper,
+      # In GitOps mode, the pass that reads the cluster's resources into the rows everything
+      # above places and scales by (Decision 736). A `:global` singleton with a keeper, for
+      # the scaler's reasons; in direct mode each tick does nothing.
+      Troupe.Plane.Gitops.Keeper,
       # Once as this replica starts: every profile whose image is `release` is written
       # again if the cluster carries anything but this release's worker image. On every
       # replica rather than as a singleton, which could be on a replica of the release being

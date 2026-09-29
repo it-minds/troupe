@@ -258,6 +258,9 @@ spec:
               value: {{ .Values.namespace | quote }}
             - name: TROUPE_PROVISIONING_MODE
               value: {{ .Values.plane.provisioningMode | quote }}
+            # Shown beside "Locked to gitops"; the plane never reads the repository it names.
+            - name: TROUPE_GITOPS_SOURCE
+              value: {{ .Values.plane.gitops.source | quote }}
             # What a profile whose image is `release` runs: this release's worker, so an
             # upgrade of the chart is an upgrade of those profiles' workers too.
             - name: TROUPE_WORKER_IMAGE

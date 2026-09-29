@@ -223,7 +223,15 @@ defmodule Troupe.Plane.Admin.API do
     %Method{
       name: "admin.profiles.list",
       function: :profiles_list,
-      summary: "Every profile, with its pods, conditions and load.",
+      summary:
+        "Every profile, with its pods, conditions and load. On a gitops plane each carries `gitops`: the repository it comes from, the resource generation it was read at, and any problem the last pass reported — `refused` (the resource fails the plane's checks and is not used, with the reasons), `missing` (a row the cluster has no resource for), `plane_only` (nothing applies it from a repository yet) or `unwritten`. A refused resource with no row is listed too.",
+      risk: :read
+    },
+    %Method{
+      name: "admin.profiles.export",
+      function: :profiles_export,
+      summary:
+        "Every profile and the cluster policy as a repository would hold them, to bootstrap one before switching a plane to gitops mode: a path and the YAML for each, and notes where something needs deciding first. Left out of every manifest is what the plane or the cluster writes (spec.replicas, spec.teams, spec.mcpServers, the troupe.dev/drained annotation, status), listed in left_out: a repository must not hold them.",
       risk: :read
     },
     %Method{
@@ -342,7 +350,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.put",
       function: :profile_put,
       summary:
-        "Create or update a profile, returning the diff that was applied. On a GitOps plane this commits for review rather than changing the cluster.",
+        "Create or update a profile, returning the diff that was applied. Refused on a gitops plane as managed_by_gitops: there a repository holds the profiles, and a change is a commit to it.",
       risk: :write,
       arguments: [
         %Argument{
@@ -375,7 +383,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.profile.delete",
       function: :profile_delete,
       summary:
-        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away.",
+        "Remove a profile. Sessions on it become read-only rather than being erased, and its pods go away. Refused on a gitops plane as managed_by_gitops, except for a row the cluster has no resource for (reported missing), which it deletes and nothing else.",
       risk: :destructive,
       confirm: "name",
       arguments: [
@@ -911,7 +919,7 @@ defmodule Troupe.Plane.Admin.API do
       name: "admin.provisioning.mode",
       function: :provisioning_mode,
       summary:
-        "Whether this plane applies profiles to the cluster directly or commits them for review. Worth knowing before writing one.",
+        "Whether this plane writes profiles to the cluster itself (direct) or reads them from resources a repository holds (gitops), where a write is refused. Worth knowing before writing one.",
       risk: :read
     },
     %Method{

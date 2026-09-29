@@ -1,12 +1,10 @@
 defmodule Troupe.Plane.ProvisionTest do
   @moduledoc """
-  Turning a profile into a custom resource, both ways.
+  Turning a profile into a custom resource.
 
-  The two modes have to produce the same manifest — a profile that meant something
-  different depending on how it reached the cluster would be a trap — so the tests check
-  that first and the differences second. What differs is where it goes and when it counts
-  as applied: direct mode applies, and GitOps mode commits and stays `Pending` until the
-  operator's `observedGeneration` catches up, because a commit is not a deployment.
+  Direct mode applies the whole manifest from the row. GitOps mode never writes git: a
+  repository holds the manifest, which is direct mode's without the three fields the plane
+  writes (`Troupe.Plane.GitopsTest` has the rest of that mode, against a cluster).
   """
 
   use Troupe.Plane.DataCase, async: false
@@ -24,7 +22,6 @@ defmodule Troupe.Plane.ProvisionTest do
     on_exit(fn ->
       Application.delete_env(:troupe_plane, :platform_admin_group)
       Application.delete_env(:troupe_plane, :provisioning_mode)
-      Application.delete_env(:troupe_plane, :gitops)
       Application.delete_env(:troupe_plane, :policy)
     end)
 
@@ -190,74 +187,40 @@ defmodule Troupe.Plane.ProvisionTest do
     end
   end
 
-  describe "GitOps mode" do
-    setup context do
-      repo = Path.join(System.tmp_dir!(), "troupe-gitops-#{System.unique_integer([:positive])}")
-      File.mkdir_p!(repo)
-      {_output, 0} = System.cmd("git", ["-C", repo, "init", "--quiet", "--initial-branch=main"])
-      on_exit(fn -> File.rm_rf!(repo) end)
-
+  describe "GitOps mode (Decision 736)" do
+    setup do
       Application.put_env(:troupe_plane, :provisioning_mode, :gitops)
-      Application.put_env(:troupe_plane, :gitops, path: repo)
-
-      Map.put(context, :repo, repo)
+      :ok
     end
 
-    test "a profile becomes a commit in the repository", context do
-      # Written the way the scaler writes it: `replicas` left the admin surface, so a
-      # test that set it through `profile_put` would be testing a door that is shut.
-      {:ok, _} = Fleet.put_profile(%{name: "dev", replicas: 3})
+    test "a repository's manifest is direct mode's without what the plane writes" do
+      {:ok, profile} =
+        Fleet.put_profile(%{name: "dev", replicas: 3, max_sessions: 8, warm_workers: 1})
 
-      assert {:ok, result} =
-               Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2"})
+      Application.put_env(:troupe_plane, :provisioning_mode, :direct)
+      direct = Provision.manifest(profile)
+      repository = Provision.repository_manifest(profile)
 
-      assert result.provisioning.mode == :gitops
-      assert result.provisioning.state == :pending
-      assert result.provisioning.path == "profiles/dev.yaml"
+      assert Map.drop(repository["spec"], ["configBundleChannel"]) ==
+               Map.drop(direct["spec"], ~w(replicas teams mcpServers))
 
-      written = Path.join([context.repo, "profiles", "dev.yaml"]) |> File.read!()
-      assert written =~ "kind: WorkerProfile"
-      assert written =~ "repository: ghcr.io/troupe/worker"
-      assert written =~ "replicas: 3"
+      # The plane's own answers, which the resource has no field for, and nothing of the
+      # plane's own bookkeeping: no label saying the plane wrote it, because it will not.
+      assert repository["metadata"]["annotations"] == %{
+               "troupe.dev/max-sessions" => "8",
+               "troupe.dev/warm-workers" => "1"
+             }
 
-      {log, 0} = System.cmd("git", ["-C", context.repo, "log", "--oneline"])
-      assert log =~ "dev updated by root@example.test"
-
-      {sha, 0} = System.cmd("git", ["-C", context.repo, "rev-parse", "HEAD"])
-      assert String.trim(sha) == result.provisioning.commit
+      refute Map.has_key?(repository["metadata"], "labels")
     end
 
-    test "deleting a profile removes the file and commits that too", context do
-      {:ok, _} = Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2"})
-      assert File.exists?(Path.join([context.repo, "profiles", "dev.yaml"]))
-
-      assert {:ok, _} = Admin.profile_delete(context.actor, "dev")
-
-      refute File.exists?(Path.join([context.repo, "profiles", "dev.yaml"]))
-      {log, 0} = System.cmd("git", ["-C", context.repo, "log", "--oneline"])
-      assert log =~ "dev removed by root@example.test"
+    test "the plane never removes a profile a repository holds", context do
+      assert {:error, :managed_by_gitops} = Provision.remove(context.profile, context.actor)
     end
 
-    test "the manifest committed is the manifest direct mode would apply", context do
-      {:ok, _} = Fleet.put_profile(%{name: "dev", replicas: 3})
-
-      {:ok, _} =
-        Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2"})
-
-      committed = Path.join([context.repo, "profiles", "dev.yaml"]) |> File.read!()
-      direct = Provision.manifest(Fleet.get_profile("dev"))
-
-      # Parsed back rather than compared as text: what matters is that the document is the
-      # same, not that two serialisers agree about whitespace.
-      assert YamlElixir.read_from_string!(committed) == direct
-    end
-
-    test "pending until the operator has seen it", context do
-      {:ok, _} = Admin.profile_put(context.actor, %{name: "dev", image: "ghcr.io/troupe/worker:2"})
-
-      # With no cluster to ask, a GitOps profile is pending: a commit is not a
-      # deployment, and saying it was would make a failed apply invisible.
-      assert Provision.pending?(Fleet.get_profile("dev"))
+    test "with no cluster, nothing is written and it says so", context do
+      # No commit, no file, no git: the only place a GitOps plane writes is the resource.
+      assert {:error, :no_cluster} = Provision.apply(context.profile, context.actor)
     end
   end
 

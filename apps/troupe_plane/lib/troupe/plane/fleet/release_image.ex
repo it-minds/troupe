@@ -14,8 +14,9 @@ defmodule Troupe.Plane.Fleet.ReleaseImage do
   every write after an upgrade carry the upgrade's image. This is the other half: a plane
   that has just been upgraded has written nothing yet, so as it starts it finds each such
   profile whose `WorkerProfile` carries a different image and writes it again — through
-  `Provision.apply/2`, the function an administrator's edit ends in, so direct and GitOps
-  mode each do what they always do, and after the same policy check.
+  `Provision.apply/2`, the function an administrator's edit ends in, and after the same
+  policy check. Direct mode only: in GitOps mode a repository names every image, and a
+  release reaches the workers when a commit moves it there (Decision 736).
 
   ## Every replica as it starts, not a singleton
 
@@ -83,10 +84,26 @@ defmodule Troupe.Plane.Fleet.ReleaseImage do
   def follow(opts \\ []) do
     following = Enum.filter(Fleet.list_profiles(), &Provision.follows_release?/1)
 
-    case Provision.release_image() do
-      nil -> unnamed(following)
-      image -> Enum.map(following, &follow_profile(&1, image, opts))
+    cond do
+      Provision.mode() == :gitops -> pinned(following)
+      image = Provision.release_image() -> Enum.map(following, &follow_profile(&1, image, opts))
+      true -> unnamed(following)
     end
+  end
+
+  # In GitOps mode a repository names every image and the plane writes none (Decision
+  # 736): a release reaches the workers when the repository's manifest names it. A row
+  # still saying `release` is one from direct mode the first pass has not read over yet,
+  # and is left to it.
+  defp pinned([]), do: []
+
+  defp pinned(following) do
+    Logger.info(
+      "troupe plane: #{Enum.map_join(following, ", ", & &1.name)} followed the release in " <>
+        "direct mode; in gitops mode the repository names their image"
+    )
+
+    Enum.map(following, &%{profile: &1.name, state: :repository})
   end
 
   defp follow_profile(%Profile{} = profile, image, opts) do

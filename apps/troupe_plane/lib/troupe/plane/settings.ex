@@ -19,7 +19,7 @@ defmodule Troupe.Plane.Settings do
   stays the floor, and the worst a bad setting can do is be reset.
 
   Some settings are deliberately **not** editable and are here to be read: the audience,
-  the base URL, the deployment's own tokens. Changing those from inside the console is how
+  the base URL, the deployment's own tokens, and whether a repository holds the profiles. Changing those from inside the console is how
   you lock every administrator out at once, and they belong to the deployment for the same
   reason a lock's keyhole is not adjustable from inside the house. They are listed anyway,
   with their values, because "where is this plane's configuration" should have one answer
@@ -77,17 +77,34 @@ defmodule Troupe.Plane.Settings do
         "Wrong, and every login arrives with no groups: nobody is a platform admin and nobody is in a team. Entra ID calls it groups; some providers use roles.",
       effect: :immediate
     },
+    # The deployment's, not the console's (Decision 736). In gitops a repository holds the
+    # profiles and something outside the plane applies them, which is a fact about how
+    # this plane was deployed; a console that could switch it back to direct would be a
+    # lock with the key hanging next to it, and a profile it then created would be one
+    # the repository never saw and its applier never prunes.
     %Setting{
       key: "provisioning_mode",
       group: :provisioning,
       type: :enum,
       values: [:direct, :gitops],
       app_key: :provisioning_mode,
+      editable: false,
       fallback: :direct,
-      summary: "Whether writing a profile changes the cluster or commits it for review.",
+      summary: "Whether this plane writes profiles to the cluster, or reads them from resources a repository puts there.",
       consequence:
-        "In gitops the console proposes and a reviewer disposes: a profile write lands as a commit and nothing changes until it is applied. In direct it changes the cluster as soon as you apply.",
-      effect: :immediate
+        "In direct the console's profile editor changes the cluster when you apply. In gitops the profiles and the cluster policy are the resources a repository holds and Flux (or anything like it) applies: the console shows them locked, the admin API refuses to change them, and the plane writes only what no repository could know — workers wanted, teams' volumes, MCP servers. Deployment only.",
+      effect: :restart
+    },
+    %Setting{
+      key: "gitops_source",
+      group: :provisioning,
+      type: :string,
+      app_key: :gitops_source,
+      editable: false,
+      summary: "Where the profiles come from in gitops mode, as a person should read it: a repository and a path.",
+      consequence:
+        "Shown beside Locked to gitops, so whoever wants to change a profile knows where to go. Display only: the plane neither reads nor writes that repository. Deployment only.",
+      effect: :restart
     },
     %Setting{
       key: "default_budget_micros",
@@ -421,7 +438,7 @@ defmodule Troupe.Plane.Settings do
     {:administration, "Who administers this platform",
      "Both of these decide whether anybody can use this console at all. Getting one wrong locks everybody out, and the break-glass door is how you get back in."},
     {:provisioning, "How a change reaches the cluster",
-     "Whether the console applies a profile itself or writes a commit for somebody to review."},
+     "Whether the console applies a profile itself, or a repository holds the profiles and something else applies them. Both are the deployment's to decide."},
     {:team_defaults, "What a new team starts with",
      "Applied when a group is enabled as a team. Changing them leaves existing teams alone; each team's own values are on the Teams page."},
     {:client_defaults, "What people's own machines talk to",
@@ -494,7 +511,7 @@ defmodule Troupe.Plane.Settings do
   end
 
   defp describe(%Setting{} = setting, overrides) do
-    stored_value = Map.get(overrides, setting.key)
+    stored_value = if setting.editable, do: Map.get(overrides, setting.key)
     value = value_of(setting, overrides)
 
     base = %{
@@ -598,7 +615,7 @@ defmodule Troupe.Plane.Settings do
   """
   @spec stored_value(String.t()) :: term()
   def stored_value(key) do
-    with {:ok, setting} <- Map.fetch(@by_key, key),
+    with {:ok, %Setting{editable: true} = setting} <- Map.fetch(@by_key, key),
          raw when is_binary(raw) <- Map.get(stored(), key),
          {:ok, parsed} <- parse(setting, raw) do
       parsed
@@ -616,6 +633,11 @@ defmodule Troupe.Plane.Settings do
   end
 
   # -- values -----------------------------------------------------------------
+
+  # A setting the deployment owns has no stored value, whatever the table holds. A row
+  # left from when it was editable — `provisioning_mode` was, until Decision 736 — would
+  # otherwise go on overriding the deployment with nothing in the console able to reset it.
+  defp value_of(%Setting{editable: false} = setting, _overrides), do: deployed(setting)
 
   defp value_of(%Setting{} = setting, overrides) do
     case Map.get(overrides, setting.key) do

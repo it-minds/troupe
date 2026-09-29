@@ -147,6 +147,9 @@ defmodule Troupe.Plane.Admin.Console do
     host_rotate: {:screen, :provisioners},
     host_set_enabled: {:screen, :provisioners},
     profiles_list: {:screen, :fleet},
+    # On Workers rather than in the editor: bootstrapping a repository is every profile at
+    # once, and the page that lists every profile is where somebody about to do it is.
+    profiles_export: {:screen, :fleet},
     provisioning_mode: {:screen, :profiles},
     person_budget: {:screen, :teams},
     budget_explain: {:screen, :budgets}
