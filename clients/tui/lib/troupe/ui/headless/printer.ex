@@ -8,7 +8,17 @@ defmodule Troupe.UI.Headless.Printer do
   when it is done (`agent_done`). All three are read from the log, never from the live
   `agent_state`, which may be dropped under load and says `idle` once before the task is
   even taken. A model that answers in prose and never calls `finish` ends its turn like
-  any other, and that is a rest. The code says how it ended:
+  any other, and that is a rest.
+
+  A rest with a line still queued is not the end of the run. Another client attached to
+  the session can send a line while the target works; it is written as `input_queued`,
+  and the target takes it as its next turn the moment this one ends. So the run waits for
+  that turn and prints its reply, and ends at the first rest with nothing queued. A target
+  that ended short takes no more input and ends the run as it is, and a queued line that is
+  not taken within `:queued_ms` (a minute) ends it too, rather than leaving a script
+  waiting on a turn that is not coming.
+
+  The code says how the run ended:
 
     * `0` — the turn ended, or the agent finished
     * `1` — the agent ended short (budget, refusal, a cut or empty reply, a tool that kept
@@ -38,6 +48,7 @@ defmodule Troupe.UI.Headless.Printer do
   alias Troupe.UI.ModelError
 
   @reconnect_ms 60_000
+  @queued_ms 60_000
 
   def start_link(opts), do: GenServer.start_link(__MODULE__, opts, name: Keyword.get(opts, :name))
 
@@ -71,7 +82,13 @@ defmodule Troupe.UI.Headless.Printer do
       # rides beside it arrives with its options (Decision 120), and is answered once.
       budgets: MapSet.new(),
       rested: false,
+      # Lines sent to the target while it worked and not yet taken, by command id.
+      queued: MapSet.new(),
+      # Set while a rest waits on them: the timer that ends the run if they are not taken,
+      # and how the run ended as that rest said it.
+      held: nil,
       reconnect_ms: Keyword.get(opts, :reconnect_ms, @reconnect_ms),
+      queued_ms: Keyword.get(opts, :queued_ms, @queued_ms),
       # Set while the connection is down: the timer that ends the run if it stays down.
       lost: nil
     }
@@ -89,6 +106,12 @@ defmodule Troupe.UI.Headless.Printer do
   def handle_info({:connection_lost, ref}, %{lost: ref} = state) do
     why = "lost the connection to the daemon, and it did not come back within #{seconds(state)}"
     {:noreply, rest(state, {1, why})}
+  end
+
+  def handle_info({:queued_lost, ref}, %{held: {ref, outcome}, rested: false} = state) do
+    s = div(state.queued_ms, 1000)
+    say(state, state.target, "a line sent while the agent worked was not taken within #{s} s")
+    {:noreply, rest(state, outcome)}
   end
 
   def handle_info(_msg, state), do: {:noreply, state}
@@ -140,15 +163,20 @@ defmodule Troupe.UI.Headless.Printer do
       # `seq`, and is not a rest (see the moduledoc).
       %{type: :agent_state, agent_path: path, seq: seq, data: %{to: to} = data}
       when path == state.target and is_integer(seq) and to in [:idle, :done] ->
-        rest(state, outcome(state, data))
+        if takes_more?(data) and MapSet.size(state.queued) > 0,
+          do: hold(state, outcome(state, data)),
+          else: rest(state, outcome(state, data))
 
-      # `branch_state` is the older local spelling and still read.
-      %{type: :branch_failed, agent_path: path} when path == state.target ->
-        rest(state, {1, nil})
-
-      %{type: :branch_state, agent_path: path, data: %{state: :done_unread}}
-      when path == state.target ->
-        rest(state, {0, nil})
+      # A line sent to the target while it worked (see the moduledoc): queued, then taken
+      # as the `user_input` that names the same send. A copy this VM drew as it sent it is
+      # neither.
+      %{type: :input, agent_path: path, data: %{command_id: id} = d}
+      when path == state.target and is_binary(id) ->
+        cond do
+          Map.get(d, :optimistic, false) -> state
+          Map.get(d, :queued, false) -> %{state | queued: MapSet.put(state.queued, id)}
+          true -> taken(state, id)
+        end
 
       %{type: :llm_error, agent_path: path} when path == state.target ->
         %{state | failed: true}
@@ -204,8 +232,29 @@ defmodule Troupe.UI.Headless.Printer do
   defp refusals(1), do: "an approval was refused"
   defp refusals(n), do: "#{n} approvals were refused"
 
-  # Once: the run ends at its first rest, and a later one (watch input woke the agent
-  # again before the VM went) is not a second answer.
+  # A turn that ended, or was cancelled, leaves the target taking input, and so does a
+  # finish: the next line wakes it. One that ended short drops what it is sent.
+  defp takes_more?(%{to: :done} = data), do: data[:reason] in [nil, "finished"]
+  defp takes_more?(_data), do: true
+
+  # The rest waits on the queued lines: until the target takes them, or for `:queued_ms`.
+  defp hold(%{held: nil} = state, outcome) do
+    ref = make_ref()
+    Process.send_after(self(), {:queued_lost, ref}, state.queued_ms)
+    %{state | held: {ref, outcome}}
+  end
+
+  defp hold(state, _outcome), do: state
+
+  # Taken, the line is the turn the run now waits for, and its end is the rest that counts.
+  defp taken(state, id) do
+    queued = MapSet.delete(state.queued, id)
+    held = if MapSet.size(queued) == 0, do: nil, else: state.held
+    %{state | queued: queued, held: held}
+  end
+
+  # Once: the run ends at its first rest with nothing queued, and a later one (watch input
+  # woke the agent again before the VM went) is not a second answer.
   defp rest(%{rested: true} = state, _outcome), do: state
 
   defp rest(state, {code, why}) do
@@ -324,15 +373,6 @@ defmodule Troupe.UI.Headless.Printer do
 
   defp print(%{type: :compaction_started, agent_path: p, data: d}, state),
     do: say(state, p, "compacting the conversation (#{d[:reason] || :requested})")
-
-  defp print(%{type: :branch_state, agent_path: p, data: d}, state),
-    do: say(state, p, "[#{d.state}]#{if d[:summary], do: " " <> d.summary, else: ""}")
-
-  defp print(%{type: :branch_failed, agent_path: p, data: d}, state),
-    do: say(state, p, "[failed_unread] #{d.message}")
-
-  defp print(%{type: :finished, agent_path: p, data: d}, state),
-    do: say(state, p, "finished (#{d.reason})")
 
   defp print(%{type: :notice, agent_path: p, data: d}, state), do: say(state, p, d.text)
 

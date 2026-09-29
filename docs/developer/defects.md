@@ -99,8 +99,8 @@ Found by the chunk 4, 5 and 7 fixers, 2026-09-26/27.
   remove that directory while the daemon runs (unconfirmed).
 - An A2A task stays `working` after the failure guard stops its turn (`turn_ended`
   reason `tool_failures`).
-- `troupe run --headless` exits at the first rest, so the reply to a line another client
-  queued mid-turn is never printed.
+- Fixed in PR #262: `troupe run --headless` exited at the first rest, so the reply to a
+  line another client queued mid-turn was never printed.
 
 Found by the chunk 5 fixers, 2026-09-26.
 
@@ -136,28 +136,16 @@ handling beside it, because a click may start a second copy from the Start-menu 
 
 ### D36 - TUI leftovers after the attention fix (low)
 
-- `clients/tui/lib/troupe/ui/headless/printer.ex` still reads the dead
-  `:branch_state`/`:branch_failed`.
-- `view.ex`'s `waits_on_you?/1` and its status-line recount (from PR #239) are redundant
-  since PR #241 derives the window state in the model; so is its comment that no daemon
-  sends `branch_state`.
-- `model.ex`'s `:finished`, `:delegation_started` and `:delegation_completed` clauses are
-  dead (`Translate` never emits them), so a finished subagent's `ended_at` is never set,
-  and after a cancel a killed subagent's last activity stays on its window.
-- The session picker's `branch_states` column reads `Client.summary` branches, and
-  `Troupe.Client.Daemon` always returns `branches: []`, so it is always empty.
 - An idle screen stops ticking, so the sessions page's and HQ's ages are only as fresh
   as the last tick.
 - A question for the design rather than a defect: chatting from the command line, the
   session's own window shows `done ●`, dimmed, and "1 done" after every reply until you
   open it (PR #241).
-- `Troupe.Codec.decode_event` restores only its `@enum_keys` as atoms, so on a rebuild
-  from the journal `agent_state` comes back with `to: "idle"` (a string) but
-  `reason: :cancelled` (an atom); readers comparing `to` with atoms break on a reopened
-  screen.
 - `model.ex` highlights code with syntect's dark-only `base16_ocean_dark`, so code keeps
   dark-theme colours on a light terminal.
 
+The rest of this entry (the printer's and the model's dead clauses, the view's recount,
+the picker's empty branches column, `Troupe.Codec`'s `to`/`reason`) was fixed in PR #262.
 Found by the fixers of PRs #234, #239 and #241, 2026-09-27.
 
 ### D37 - Small leftovers from the 0.6.1 work (low)
