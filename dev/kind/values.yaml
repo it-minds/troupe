@@ -87,7 +87,7 @@ policy:
   install: true
   name: default
   allowedImageRepositories:
-    - ghcr.io/objective-mj/troupe-worker
+    - ghcr.io/it-minds/troupe-worker
   maxReplicas: 2
   maxSessionsPerPod: 4
   maxResources: {cpu: "2", memory: 4Gi}

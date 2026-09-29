@@ -7,3 +7,7 @@ appVersion: "0.6.3-beta"
 keywords:
   - troupe
   - coding-agent
+# Also what `helm push` writes as the chart's `org.opencontainers.image.source` on
+# ghcr.io, which links the package to this repository.
+sources:
+  - https://github.com/it-minds/troupe

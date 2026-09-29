@@ -80,7 +80,7 @@ docker run -d --name troupe-e2e -p 4010:4000 \
   -e TROUPE_PROVIDER=fake -e TROUPE_MODEL=fake -e TROUPE_FAKE_SCRIPT=/etc/troupe/fake.json \
   -e TROUPE_STATE_HOME=/workspace/.state -e TROUPE_SESSIONS_PER_POD=64 \
   -e TROUPE_HTTP_PORT=4000 -e RELEASE_DISTRIBUTION=none -e ERL_FLAGS="+Q 65536" \
-  ghcr.io/objective-mj/troupe-worker:dev
+  ghcr.io/it-minds/troupe-worker:dev
 docker exec troupe-e2e sh -c 'mkdir -p /workspace/e2e'   # it will not invent directories
 
 cd packages/client

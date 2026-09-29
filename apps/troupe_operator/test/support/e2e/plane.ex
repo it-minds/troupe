@@ -286,7 +286,7 @@ defmodule Troupe.E2E.Plane do
         "jsonpath={.spec.image.repository}:{.spec.image.tag}"
       ])
 
-    if repo == ":", do: "ghcr.io/objective-mj/troupe-worker:dev", else: repo
+    if repo == ":", do: "ghcr.io/it-minds/troupe-worker:dev", else: repo
   end
 
   # The smallest bundle a session can run on: one agent, no skills, no MCP servers.

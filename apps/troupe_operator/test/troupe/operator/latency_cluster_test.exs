@@ -33,7 +33,7 @@ defmodule Troupe.Operator.LatencyClusterTest do
 
   @namespace "troupe-system"
   @name "troupe-latency-probe"
-  @image "ghcr.io/objective-mj/troupe-worker:dev"
+  @image "ghcr.io/it-minds/troupe-worker:dev"
   @pod_id "latency-probe-0"
 
   @clients 5
