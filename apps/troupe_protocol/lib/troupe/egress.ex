@@ -7,10 +7,12 @@ defmodule Troupe.Egress do
   produces is the worst kind: a NetworkPolicy that looks complete and refuses one host at
   the moment somebody first needs it.
 
-  So the declarations are here, beside nothing else, and three things are derived from
-  them: `docs/egress-allowlist.md` (written by `mix troupe.egress`, checked in CI),
+  So the declarations are here, beside nothing else, and two things are derived from
+  them: `docs/egress-allowlist.md` (written by `mix troupe.egress`, checked in CI), and
   the assertion that every fixed host is covered by the chart's `troupePolicy.allowedEgress`
-  defaults, and the answer the Integrations screen shows per host.
+  defaults. The console's Integrations screen reads none of this: it lists the hosts the
+  profiles and bundles name, each against the cluster's policy, which is the
+  per-deployment answer a list of settings cannot be.
 
   ## Three kinds of entry, and the difference matters
 
@@ -83,6 +85,24 @@ defmodule Troupe.Egress do
       host: nil,
       setting: "mcpServers[].url (per bundle)",
       why: "every MCP server a session's tools reach, named by the profile's bundle"
+    },
+    %{
+      component: "worker",
+      kind: :configured,
+      host: nil,
+      setting: "TROUPE_OBJECT_ENDPOINT",
+      why:
+        "the bucket a session's log is restored from and sealed into. The operator sets it " <>
+          "from `objectStore.endpoint`"
+    },
+    %{
+      component: "worker",
+      kind: :configured,
+      host: nil,
+      setting: "TROUPE_BAO_ADDR",
+      why:
+        "the key manager: every session's key, and the per-person credentials its tools use. " <>
+          "The operator sets it from `bao.address`"
     },
 
     # -- what the plane dials ------------------------------------------------

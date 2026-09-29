@@ -481,7 +481,7 @@ defmodule Troupe.Operator.ResourcesTest do
       [cilium] = all(resources, "CiliumNetworkPolicy")
 
       for rule <- get_in(cilium, ["spec", "egress"]) do
-        assert match?([_ | _], rule["toEndpoints"]) or match?([_ | _], rule["toFQDNs"]),
+        assert Enum.any?(["toEndpoints", "toFQDNs", "toCIDR"], &match?([_ | _], rule[&1])),
                "an egress rule with no peer: #{inspect(rule)}"
       end
     end
@@ -646,6 +646,50 @@ defmodule Troupe.Operator.ResourcesTest do
         })
 
       assert Enum.count(fqdn_names(resources), &(&1 == "objects.example.test")) == 1
+    end
+
+    test "with Cilium, an object store and OpenBao given by address are admitted by address",
+         %{profile: profile, policy: policy} do
+      # Cilium learns the addresses of a `matchName` from the DNS answers it proxies, and
+      # nothing looks an address up, so an address written as a name admitted nothing: a
+      # worker whose object store was `http://192.0.2.10:9000` restored no session.
+      settings = %Settings{
+        cilium_available: true,
+        object_store_endpoint: "http://192.0.2.10:9000",
+        bao_address: "https://[2001:db8::7]:8200"
+      }
+
+      resources = Resources.for_profile(profile, policy, settings)
+
+      assert Enum.sort(cidrs(resources)) == ["192.0.2.10/32", "2001:db8::7/128"]
+      assert Enum.sort(fqdn_names(resources)) == Enum.sort(Profile.egress_destinations(profile))
+
+      # Not a namespace either: an address names no Service.
+      rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
+      refute namespace_rule("troupe-system", 9000) in rules
+      refute namespace_rule("troupe-system", 8200) in rules
+    end
+
+    test "an address the profile names is admitted by address, and a name stays a name",
+         %{policy: policy} do
+      resources =
+        [
+          llm: %{"endpoint" => "http://198.51.100.20:4000/v1"},
+          egress: %{"fqdns" => ["203.0.113.5", "2001:DB8:0::9"], "gitHosts" => ["github.com"]}
+        ]
+        |> profile()
+        |> Profile.from_resource()
+        |> Resources.for_profile(policy, %Settings{cilium_available: true})
+
+      # Written the way Cilium and anyone reading the policy will compare them: one
+      # address, in its shortest form.
+      assert Enum.sort(cidrs(resources)) ==
+               ["198.51.100.20/32", "2001:db8::9/128", "203.0.113.5/32"]
+
+      names = fqdn_names(resources)
+      assert "github.com" in names
+      assert "mcp.internal.test" in names
+      refute Enum.any?(names, &(&1 =~ ~r/^[\d.]+$/ or &1 =~ ":"))
     end
 
     test "an object store and OpenBao inside the cluster stay their namespace, with no FQDN rule",
@@ -878,6 +922,12 @@ defmodule Troupe.Operator.ResourcesTest do
     |> get_in(["spec", "egress"])
     |> Enum.flat_map(&(&1["toFQDNs"] || []))
     |> Enum.flat_map(&List.wrap(&1["matchName"]))
+  end
+
+  # And every address block it admits.
+  defp cidrs(resources) do
+    [cilium] = all(resources, "CiliumNetworkPolicy")
+    cilium |> get_in(["spec", "egress"]) |> Enum.flat_map(&(&1["toCIDR"] || []))
   end
 
   defp namespace_rule(namespace, port) do
