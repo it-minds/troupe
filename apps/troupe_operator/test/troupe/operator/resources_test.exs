@@ -514,6 +514,111 @@ defmodule Troupe.Operator.ResourcesTest do
              ]
     end
 
+    test "without Cilium, an object store and OpenBao outside the cluster are admitted on their own ports",
+         %{profile: profile, policy: policy} do
+      # The public rule is 443 and 80, so a hosted object store on 9000 was admitted by no
+      # rule and no session activated. A NetworkPolicy cannot name the host, so each gets
+      # the public rule's addresses on its own port, and the public rule stays as it was.
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "https://objects.example.test:9000",
+        bao_address: "https://bao.example.test:8200"
+      }
+
+      rules = egress(Resources.for_profile(profile, policy, settings))
+
+      assert Enum.sort(address_rules(rules)) ==
+               Enum.sort([
+                 public_addresses_on([443, 80]),
+                 public_addresses_on([9000]),
+                 public_addresses_on([8200])
+               ])
+
+      refute namespace_rule("troupe-system", 9000) in rules
+      refute namespace_rule("troupe-system", 8200) in rules
+    end
+
+    test "without Cilium, a name on 443 or 80 needs nothing the public rule does not give",
+         %{profile: profile, policy: policy} do
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "https://objects.example.test",
+        bao_address: "http://bao.example.test"
+      }
+
+      rules = egress(Resources.for_profile(profile, policy, settings))
+
+      assert address_rules(rules) == [public_addresses_on([443, 80])]
+    end
+
+    test "without Cilium, an object store and OpenBao at a private address are that address on its port",
+         %{profile: profile, policy: policy} do
+      # The public rule leaves the private ranges out, so an object store on the office
+      # network was admitted on no port at all. An address needs no name to be written in
+      # a NetworkPolicy, so it is admitted as itself, and nothing else in its range is.
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "http://10.20.0.5:9000",
+        bao_address: "https://[fd00::7]:8200"
+      }
+
+      rules = egress(Resources.for_profile(profile, policy, settings))
+
+      assert Enum.sort(address_rules(rules)) ==
+               Enum.sort([
+                 public_addresses_on([443, 80]),
+                 one_address_on("10.20.0.5/32", 9000),
+                 one_address_on("fd00::7/128", 8200)
+               ])
+    end
+
+    test "without Cilium, a public address is that address on its port as well",
+         %{profile: profile, policy: policy} do
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "https://192.0.2.10",
+        bao_address: "https://198.51.100.7:8200"
+      }
+
+      rules = egress(Resources.for_profile(profile, policy, settings))
+
+      assert one_address_on("192.0.2.10/32", 443) in rules
+      assert one_address_on("198.51.100.7/32", 8200) in rules
+      assert length(address_rules(rules)) == 3
+    end
+
+    test "without Cilium, an object store and OpenBao inside the cluster are their namespace and nothing more",
+         %{profile: profile, policy: policy} do
+      settings = %Settings{
+        cilium_available: false,
+        object_store_endpoint: "http://minio.troupe-system.svc:9000",
+        bao_address: "http://openbao.troupe-system.svc.cluster.local:8200"
+      }
+
+      rules = egress(Resources.for_profile(profile, policy, settings))
+
+      assert namespace_rule("troupe-system", 9000) in rules
+      assert namespace_rule("troupe-system", 8200) in rules
+      assert address_rules(rules) == [public_addresses_on([443, 80])]
+    end
+
+    test "with Cilium, the platform's ports and addresses add nothing to the NetworkPolicy",
+         %{profile: profile, policy: policy} do
+      # Cilium admits the union of both policies, so an address block here would be wider
+      # than the allowlist. The CiliumNetworkPolicy admits these hosts, as it did.
+      settings = %Settings{
+        cilium_available: true,
+        object_store_endpoint: "https://objects.example.test:9000",
+        bao_address: "http://10.20.0.5:8200"
+      }
+
+      resources = Resources.for_profile(profile, policy, settings)
+
+      assert address_rules(egress(resources)) == []
+      assert "objects.example.test" in fqdn_names(resources)
+      assert cidrs(resources) == ["10.20.0.5/32"]
+    end
+
     test "DNS is the cluster's resolver in kube-system, and nothing that merely carries its label",
          %{resources: resources} do
       rules = get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
@@ -937,6 +1042,37 @@ defmodule Troupe.Operator.ResourcesTest do
           "namespaceSelector" => %{"matchLabels" => %{"kubernetes.io/metadata.name" => namespace}}
         }
       ],
+      "ports" => [%{"protocol" => "TCP", "port" => port}]
+    }
+  end
+
+  defp egress(resources) do
+    get_in(find(resources, "NetworkPolicy", "troupe-w-dev"), ["spec", "egress"])
+  end
+
+  # The NetworkPolicy's egress rules that admit by address rather than by namespace.
+  defp address_rules(rules) do
+    Enum.filter(rules, fn rule -> Enum.any?(rule["to"], &Map.has_key?(&1, "ipBlock")) end)
+  end
+
+  # The public rule's addresses, on the given ports.
+  defp public_addresses_on(ports) do
+    %{
+      "to" => [
+        %{
+          "ipBlock" => %{
+            "cidr" => "0.0.0.0/0",
+            "except" => ["10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "169.254.0.0/16"]
+          }
+        }
+      ],
+      "ports" => Enum.map(ports, &%{"protocol" => "TCP", "port" => &1})
+    }
+  end
+
+  defp one_address_on(cidr, port) do
+    %{
+      "to" => [%{"ipBlock" => %{"cidr" => cidr}}],
       "ports" => [%{"protocol" => "TCP", "port" => port}]
     }
   end
