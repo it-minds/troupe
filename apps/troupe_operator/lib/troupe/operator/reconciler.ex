@@ -239,22 +239,31 @@ defmodule Troupe.Operator.Reconciler do
     Status.put(status, "SecretMissing", true, "SecretsMissing", message, generation)
   end
 
-  # A pod restarts for an image, config or volume change only when it has no active
-  # sessions, so a profile whose pods are on an older revision is *waiting* rather than
-  # broken. Saying which is the difference between "give it a minute" and "something is
-  # wrong".
+  # A pod takes an image, config or volume change only when it is deleted, and it should
+  # be deleted only once a drain has made its sessions dormant, so a profile whose pods
+  # are on an older revision is *waiting* rather than broken. Saying which is the
+  # difference between "give it a minute" and "something is wrong" — and nothing deletes
+  # the pod by itself, so the message names each one that is waiting and what it waits for.
   defp upgrade_status(status, [], generation) do
     Status.put(status, "UpgradePending", false, "UpToDate", "every pod is on the current revision", generation)
   end
 
   defp upgrade_status(status, behind, generation) do
-    message = "#{length(behind)} pod(s) waiting to restart idle: #{Enum.join(behind, ", ")}"
+    message =
+      "#{length(behind)} pod(s) run an older revision until drained and deleted: " <>
+        Enum.join(behind, ", ")
+
     Status.put(status, "UpgradePending", true, "WaitingForIdle", message, generation)
   end
 
-  # A StatefulSet on `OnDelete` reports the revision it wants and the one each pod has.
-  # Comparing them is how the operator knows a restart is outstanding without tracking
-  # one itself.
+  # A StatefulSet on `OnDelete` reports the revision it wants, and each of its pods
+  # carries the revision it was made from. Comparing them is how the operator knows a
+  # restart is outstanding without tracking one itself.
+  #
+  # Against `updateRevision` alone. `currentRevision` is a rolling update's bookkeeping,
+  # which `OnDelete` does not do, so it says nothing about the pods: a template put back
+  # to the revision the StatefulSet still calls current makes the two equal while every
+  # pod runs a later one.
   defp pods_behind(conn, policy, profile) do
     namespace = Names.namespace(policy.namespace_prefix, profile.name)
     name = Names.workload(policy.namespace_prefix, profile.name)
@@ -262,25 +271,28 @@ defmodule Troupe.Operator.Reconciler do
 
     with {:ok, set} <- K8s.Client.run(conn, operation),
          wanted when is_binary(wanted) <- get_in(set, ["status", "updateRevision"]),
-         current when is_binary(current) <- get_in(set, ["status", "currentRevision"]),
-         true <- wanted != current do
-      pods_on_old_revision(conn, namespace, wanted)
+         %{} = selector <- get_in(set, ["spec", "selector", "matchLabels"]) do
+      pods_on_old_revision(conn, namespace, selector, wanted)
     else
       _ -> []
     end
   end
 
-  defp pods_on_old_revision(conn, namespace, wanted) do
+  # The StatefulSet's own pods, by its own selector: the labels its template gives them.
+  # They were once listed by the operator's marker, which only what the operator writes
+  # itself carries and a pod does not, so the listing was always empty and the condition
+  # said every pod was current while one still ran the old image.
+  defp pods_on_old_revision(conn, namespace, selector, wanted) do
     operation =
       "v1"
       |> K8s.Client.list("Pod", namespace: namespace)
-      |> K8s.Operation.put_selector(K8s.Selector.label({Names.managed_label(), "operator"}))
+      |> K8s.Operation.put_selector(K8s.Selector.label(selector))
 
     case K8s.Client.run(conn, operation) do
       {:ok, %{"items" => pods}} ->
-        for pod <- pods,
+        for pod <- Enum.sort_by(pods, &name_of/1),
             get_in(pod, ["metadata", "labels", "controller-revision-hash"]) != wanted,
-            do: get_in(pod, ["metadata", "name"])
+            do: name_of(pod)
 
       _ ->
         []

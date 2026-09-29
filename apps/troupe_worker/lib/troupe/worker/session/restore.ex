@@ -21,6 +21,8 @@ defmodule Troupe.Worker.Session.Restore do
   alias Troupe.Worker.Cache
   alias Troupe.Worker.Session.Workspace
 
+  require Logger
+
   @doc """
   Write a session's durable log to disk, ready for `Troupe.resume/2` to replay.
 
@@ -48,8 +50,60 @@ defmodule Troupe.Worker.Session.Restore do
          last_seq: events |> List.last() |> seq_of(),
          head_hash: head_hash(path)
        }}
+    else
+      {:error, reason} -> {:error, unreachable(context.store, reason)}
     end
   end
+
+  @doc """
+  An object-store failure that is the network's, named as one.
+
+  A pod that cannot reach object storage restores nothing, and the transport error said
+  as it is — `%Req.TransportError{reason: :timeout}`, some seconds later — names neither
+  the store nor that it was the store. Behind an egress policy that dropped the
+  connection, that was all a person and an operator were told. So a transport failure is
+  `{:object_store_unreachable, endpoint, reason}`, and anything else — a refusal, a
+  segment that will not decrypt — is left as it was.
+
+  Not a report that parks the session (Decision 661): storage that does not answer is the
+  plane's to retry, and the session is fine where it is.
+  """
+  @spec unreachable(ObjectStore.store(), term()) :: term()
+  def unreachable(store, %Req.TransportError{reason: reason}),
+    do: {:object_store_unreachable, endpoint(store), reason}
+
+  def unreachable(store, {:unreadable_segment, _key, %Req.TransportError{} = error}),
+    do: unreachable(store, error)
+
+  def unreachable(_store, reason), do: reason
+
+  @doc """
+  Whether this pod can reach its object store, said in the log when it cannot.
+
+  Asked once when the pod enrols, so that a store the pod cannot reach is a line in its
+  log before it is the first person's session that will not start. One listing and no
+  retry: the next enrolment asks again, and every activation says it anyway.
+  """
+  @spec check_reachable(ObjectStore.store()) :: :ok | {:error, term()}
+  def check_reachable(store) do
+    case ObjectStore.list(store, "reachability-probe/") do
+      {:ok, _keys} ->
+        :ok
+
+      {:error, reason} ->
+        reason = unreachable(store, reason)
+
+        Logger.error(
+          "troupe worker: this pod cannot use its object store, so no session can be " <>
+            "restored or sealed here: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  defp endpoint(%ObjectStore{endpoint: endpoint}), do: endpoint
+  defp endpoint(_signed), do: nil
 
   defp read_all(context, segments) do
     Enum.reduce_while(segments, {:ok, []}, fn segment, {:ok, acc} ->
@@ -84,6 +138,12 @@ defmodule Troupe.Worker.Session.Restore do
 
   A session with no archive is not an error: one that went dormant before it wrote
   anything, or one restored purely to be read, has an empty tree and a full history.
+
+  A listing that failed is not a session with no archive. Read as one, storage that went
+  away between the events and the tree brought the session back with an empty tree, or
+  with an older one from this pod's cache, under a history that had moved past it — and
+  the next archive sealed that over the real one. So it fails the activation, named by
+  `unreachable/2` when it was the network's, and the plane tries again.
   """
   @spec workspace(Context.t(), Path.t()) :: {:ok, map()} | {:error, term()}
   def workspace(%Context{} = context, root) do
@@ -99,29 +159,32 @@ defmodule Troupe.Worker.Session.Restore do
         end
 
       {:error, reason} ->
-        {:error, reason}
+        {:error, unreachable(context.store, reason)}
     end
   end
 
-  # The pod's own cache first. It holds the same sealed bytes that went to object
-  # storage, so using it is a local read instead of a download and is not a different
-  # answer — and a cache that is behind what storage has is ignored rather than trusted.
+  # The pod's own cache where it will do. It holds the same sealed bytes that went to
+  # object storage, so using it is a local read instead of a download and is not a
+  # different answer — and a cache that is behind what storage has is ignored rather than
+  # trusted, which is why storage is asked first and the cache used only once it has
+  # answered.
   defp fetch_archive(context) do
-    remote = newest_archive(context)
-    cached = Cache.get_workspace(context.session_id, context.state_dir)
+    with {:ok, remote} <- newest_archive(context) do
+      cached = Cache.get_workspace(context.session_id, context.state_dir)
 
-    case {remote, cached} do
-      {nil, :miss} ->
-        :none
+      case {remote, cached} do
+        {nil, :miss} ->
+          :none
 
-      {nil, {:ok, seq, sealed}} ->
-        {:ok, :cache, seq, sealed}
+        {nil, {:ok, seq, sealed}} ->
+          {:ok, :cache, seq, sealed}
 
-      {{seq, _extension}, {:ok, seq, sealed}} ->
-        {:ok, :cache, seq, sealed}
+        {{seq, _extension}, {:ok, seq, sealed}} ->
+          {:ok, :cache, seq, sealed}
 
-      {{seq, extension}, _stale_or_missing} ->
-        download(context, seq, extension)
+        {{seq, extension}, _stale_or_missing} ->
+          download(context, seq, extension)
+      end
     end
   end
 
@@ -135,12 +198,10 @@ defmodule Troupe.Worker.Session.Restore do
   end
 
   defp newest_archive(context) do
-    case ObjectStore.list(context.store, Storage.prefix(context.session_id) <> "workspace/") do
-      {:ok, keys} ->
-        keys |> Enum.flat_map(&parse_archive_key/1) |> Enum.max_by(&elem(&1, 0), fn -> nil end)
-
-      _ ->
-        nil
+    with {:ok, keys} <-
+           ObjectStore.list(context.store, Storage.prefix(context.session_id) <> "workspace/") do
+      {:ok,
+       keys |> Enum.flat_map(&parse_archive_key/1) |> Enum.max_by(&elem(&1, 0), fn -> nil end)}
     end
   end
 

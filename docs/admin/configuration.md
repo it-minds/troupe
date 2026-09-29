@@ -33,8 +33,8 @@ A session also reads `config.yaml` files: a machine's and a workspace's (Part F)
 | `TROUPE_PLANE_CONTROL_HOST` | `troupe-plane-control.troupe-system.svc` | host written into every worker's `TROUPE_PLANE_CONTROL` | `troupe-plane-control.<namespace>.svc` |
 | `TROUPE_PLANE_CONTROL_PORT` | `4001` | its port; also the worker egress rule to the plane | `plane.controlPort` |
 | `TROUPE_PLANE_NAMESPACE` | `troupe-system` | namespace the operator watches | `namespace` |
-| `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | copied into worker pods; a `.svc` host adds an in-cluster egress rule | `bao.address` |
-| `TROUPE_OBJECT_ENDPOINT` | `http://minio.troupe-system.svc:9000` | copied into worker pods; same rule | `objectStore.endpoint` |
+| `TROUPE_BAO_ADDR` | `http://openbao.troupe-system.svc:8200` | copied into worker pods; a `.svc` host adds an in-cluster egress rule, and with Cilium any other host is admitted by name in the `CiliumNetworkPolicy` | `bao.address` |
+| `TROUPE_OBJECT_ENDPOINT` | `http://minio.troupe-system.svc:9000` | copied into worker pods; same rules | `objectStore.endpoint` |
 | `TROUPE_OBJECT_BUCKET` | `troupe-sessions` | copied into worker pods | `objectStore.bucket` |
 | `TROUPE_OBJECT_SECRET_NAME` | `troupe-object-store` | Secret in each worker namespace with `access-key-id` and `secret-access-key` | `objectStore.secretName` |
 | `TROUPE_INGRESS_CLASS` | `nginx` | class of every per-pod Ingress; nginx annotations only for `nginx` | `operator.ingressClassName` |
@@ -254,12 +254,14 @@ from those and from operator pods.
 | `troupe-operator` | nothing | unrestricted |
 | `troupe-a2a` | `a2a.port` from ingress namespaces | unrestricted |
 | `troupe-w-<profile>` | TCP 4000 from ingress namespaces | DNS to `k8s-app=kube-dns` in `kube-system`; the plane's control port; OpenBao, object storage, the LLM endpoint and MCP servers when their hosts are `*.svc`; **without Cilium only**, `0.0.0.0/0` minus private and link-local ranges on 443 and 80 |
-| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
+| `troupe-egress` (Cilium only) | — | `toFQDNs` for the LLM endpoint, MCP servers, `egress.fqdns` and `gitHosts`, and for OpenBao and object storage when their hosts are not `*.svc`; `toCIDR` (`/32`, `/128`) instead for any of these given as an IP address; DNS to kube-dns through Cilium's DNS proxy (a `dns` rule), which is how `toFQDNs` learns addresses |
 
-With Cilium a worker reaches the hosts its profile names and nothing else outside the
-cluster: Cilium admits the union of both policies, so the NetworkPolicy carries no address
-block. Without Cilium a worker can reach any public host on 443 and 80; `allowedEgress` is
-then a check at admission and reconcile, not on the wire.
+With Cilium a worker reaches the hosts its profile names, the installation's own OpenBao
+and object store, and nothing else outside the cluster: Cilium admits the union of both
+policies, so the NetworkPolicy carries no address block. The operator admits OpenBao and
+the object store itself, in the cluster or outside it; the profile's allowlist is for the
+profile's own destinations. Without Cilium a worker can reach any public host on 443 and
+80; `allowedEgress` is then a check at admission and reconcile, not on the wire.
 
 **Ingress annotations.** Plane: 3600 s read and send timeouts, `proxy-body-size`, the rate
 limits above. A2A: buffering off, 3600 s timeouts, 2m bodies. Worker (nginx only): 3600 s

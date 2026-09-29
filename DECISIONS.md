@@ -2439,3 +2439,68 @@ citation keeps meaning what it meant.
      terminal's process group. Proof: the Windows release, `troupe-daemon run` in a
      console window and under `troupe daemon run`, with Ctrl-C, before and after, on the
      pull request.
+
+721. **With Cilium, the operator admits the installation's own OpenBao and object store
+     by name when they are outside the cluster; a pod that cannot reach its object store
+     says `object_store_unreachable`.** Issue #249. Since 0.5.0-beta.1 the worker
+     NetworkPolicy has no public rule where Cilium is, only a `.svc` OpenBao or object
+     store had a rule of its own (`in_cluster_rules/2`), and the `CiliumNetworkPolicy`
+     named the profile's hosts alone (`WorkerProfile.egress_destinations/1`). So an
+     installation whose object store was a hosted S3 service activated no session: every
+     restore waited out a connect timeout, and the plane relayed `timeout`. The hosts of
+     `bao.address` and `objectStore.endpoint` that are not in the cluster now go into the
+     `toFQDNs` rule beside the profile's (`Resources.platform_hosts/1`), and not into the
+     profile's allowlist: they are the platform's, set by whoever installed it, and the
+     allowlist is the profile's own destinations, which the plane shows and admission
+     checks against `allowedEgress`. Asking for them in every profile's `egress.fqdns`
+     would make each profile name, and each policy allow, a host no profile chose. On the
+     worker, a transport error from the object store during a restore is
+     `{:object_store_unreachable, endpoint, reason}` (`Restore.unreachable/2`), answered to
+     the plane as `unavailable` with that reason and the endpoint. It is not a
+     `session.unrestorable` (Decision 661): the session is intact and the plane retries.
+     A pod also lists the bucket once at each enrolment and logs when it cannot
+     (`Restore.check_reachable/1`, `Link.info/1`); a log line rather than a readiness
+     condition, because failing readiness over a storage outage would take the pod's
+     attached sessions off its Ingress as well. Proof: `resources_test.exs` (external
+     endpoints with and without a port, in-cluster ones, a host named twice),
+     `object_store_unreachable_test.exs`, `plane_link_test.exs`; and the cluster suite's
+     `egress_test.exs`, which dials the pod's own `TROUPE_OBJECT_ENDPOINT` and
+     `TROUPE_BAO_ADDR` and activates a session that seals, where it runs with Cilium.
+
+722. **A workspace is restored from what storage says it has, or the activation fails; a
+     key manager the pod cannot reach is `kms_unreachable`; the worker image watches with
+     `inotifywait`.** Issue #252. The restore reads the events and then finds the
+     workspace's newest archive by listing `workspace/`, and a listing that failed was read
+     as "no archive": the session came back with an empty tree, or with an older one from
+     the pod's cache, under a history that had moved past it, and its next archive sealed
+     that over the newer one. A failed listing now fails the activation, as
+     `object_store_unreachable` when it was the network's (Decision 721), and the plane
+     tries again. The cost is that a pod whose cache is current cannot use it while
+     storage does not answer; a cache is only trusted once storage has said it is not
+     behind, which is the rule the cache already had. A transport error from
+     `Context.open` is `{:kms_unreachable, address, reason}`, answered as `unavailable`,
+     for the reason 721 names the store: the bare error said neither which host nor that
+     it was the key manager. The worker image installs `inotify-tools` (GPL-2.0, a
+     separate program the VM starts, as `git` is; the licence inventory lists lock files,
+     and Debian keeps the package's licence in the image), so `Troupe.Session.Files` on a
+     pod reports a deletion, inside a second; and where `inotifywait` is installed but
+     refused or stopped, as on a node whose inotify limits are used up, `Files` polls
+     rather than going quiet, as the session watcher already did. Proof:
+     `workspace_listing_test.exs`, `kms_unreachable_test.exs`, core `files_test.exs`, and
+     the worker image with a session deleting a file.
+
+723. **With Cilium, an allowed host that is an IP address is admitted as that one
+     address, by a `toCIDR` rule.** Issue #251. The `CiliumNetworkPolicy` wrote every
+     external host as a `toFQDNs` `matchName`, the installation's OpenBao and object store
+     among them since Decision 721, and Cilium learns what a `matchName` admits from the
+     DNS answers its proxy sees. Nothing looks an address up, so an object store at
+     `http://192.0.2.10:9000`, or an address a profile named, was admitted by nothing. A
+     host that parses strictly as an address (`:inet.parse_strict_address/1`) now goes
+     into one `toCIDR` rule beside the `toFQDNs` one, as `/32`, or `/128` for IPv6, in its
+     shortest form, and with no ports, as the FQDN rule has none. `toCIDR` rather than
+     `toCIDRSet`, which exists for `except`, and nothing here excepts anything. It does
+     not reach an address inside the cluster, because Cilium matches a pod, and a
+     Service's backends, by identity and not by CIDR; an in-cluster endpoint is still
+     named as a `*.svc` host, which is its namespace and port. Without Cilium nothing
+     changes. Proof: `resources_test.exs` (the platform's endpoints as IPv4 and IPv6
+     literals; a profile's own addresses beside its names).

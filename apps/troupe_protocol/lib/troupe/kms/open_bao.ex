@@ -131,7 +131,12 @@ defmodule Troupe.KMS.OpenBao do
 
   defp config(opts), do: Keyword.merge(Application.get_env(:troupe_worker, :kms, []), opts)
 
-  defp address(opts) do
+  @doc """
+  The OpenBao a call with these options goes to, for a caller that has to say which one
+  did not answer.
+  """
+  @spec address(keyword()) :: String.t()
+  def address(opts \\ []) do
     config(opts)[:address] || System.get_env("TROUPE_BAO_ADDR") || "http://localhost:8200"
   end
 

@@ -21,6 +21,7 @@ defmodule Troupe.Worker.Plane.Link do
 
   use GenServer
 
+  alias Troupe.ObjectStore
   alias Troupe.Paths
   alias Troupe.Protocol.{Error, JSONRPC}
   alias Troupe.Worker.Auth
@@ -28,6 +29,7 @@ defmodule Troupe.Worker.Plane.Link do
   alias Troupe.Worker.Disk
   alias Troupe.Worker.Drain
   alias Troupe.Worker.Plane.Commands
+  alias Troupe.Worker.Session.Restore
   alias Troupe.Worker.Sessions
 
   require Logger
@@ -58,6 +60,7 @@ defmodule Troupe.Worker.Plane.Link do
     status: :disconnected,
     profile: nil,
     worker_id: nil,
+    object_store: nil,
     backoff_ms: @reconnect_floor_ms,
     connects: 0
   ]
@@ -156,7 +159,8 @@ defmodule Troupe.Worker.Plane.Link do
        worker_id: state.worker_id,
        queued: length(state.queue),
        connects: state.connects,
-       port: state.port
+       port: state.port,
+       object_store: state.object_store
      }, state}
   end
 
@@ -200,6 +204,8 @@ defmodule Troupe.Worker.Plane.Link do
   end
 
   def handle_info({:respond, id, result}, state), do: {:noreply, write_result(state, id, result)}
+
+  def handle_info({:object_store, result}, state), do: {:noreply, %{state | object_store: result}}
 
   def handle_info(_message, state), do: {:noreply, state}
 
@@ -250,6 +256,7 @@ defmodule Troupe.Worker.Plane.Link do
             # can be verified until the plane has said what that id is.
             announce_identity(result)
             apply_pending_erasures(result)
+            check_object_store(state)
 
             %{
               state
@@ -337,6 +344,20 @@ defmodule Troupe.Worker.Plane.Link do
 
     if pending != [],
       do: Logger.info("troupe worker: applied #{length(pending)} pending erasure(s)")
+  end
+
+  # Once per enrolment and off this process, which must not wait on storage: a pod that
+  # cannot reach its object store restores and seals nothing, and the first anyone heard
+  # of that was a person's session failing to start. The answer is in the pod's log and
+  # in `info/1`; the next enrolment asks again.
+  defp check_object_store(state) do
+    store = Keyword.get_lazy(state.opts, :store, &ObjectStore.from_env/0)
+    link = self()
+
+    {:ok, _pid} =
+      Task.start(fn -> send(link, {:object_store, Restore.check_reachable(store)}) end)
+
+    :ok
   end
 
   defp activate_socket(state) do
