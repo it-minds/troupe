@@ -23,6 +23,7 @@ import type {
   LoopInfo,
   LoopState,
   ProfileOffering,
+  SessionKind,
   TranscriptState,
 } from "@troupe/client";
 import { useProfiles, useSessionView } from "../hooks";
@@ -42,6 +43,7 @@ export function Session({
   machineUser,
   row,
   sessionId,
+  created,
   onBack,
   onGo,
 }: {
@@ -52,6 +54,8 @@ export function Session({
   machineUser: string | null;
   row: FleetRow | undefined;
   sessionId: string;
+  /** Where it was just made, for a session opened straight from the start screen. */
+  created?: SessionKind | undefined;
   onBack: () => void;
   /** Leave for another screen, for the palette's Navigate and Setup commands. */
   onGo?: (screen: PaletteScreen) => void;
@@ -59,8 +63,9 @@ export function Session({
   // Where it runs decides which socket it is reached over and nothing else about this
   // screen: the transcript, the approvals and the composer are the same protocol either
   // way, which is the whole point of the client library. A session the list has not
-  // caught up with yet is a team session only where there is a team to have one.
-  const kind = row?.kind ?? (auth ? "team" : "local");
+  // caught up with yet is where the start screen just made it, if it came from there, and
+  // otherwise a team session only where there is a team to have one.
+  const kind = row?.kind ?? created ?? (auth ? "team" : "local");
   const view = useSessionView(auth, sessionId, { daemon, kind });
   const { profiles } = useProfiles(auth);
   const [backstage, setBackstage] = useState(true);

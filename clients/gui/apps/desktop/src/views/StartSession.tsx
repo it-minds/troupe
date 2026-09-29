@@ -15,7 +15,7 @@
 
 import { useEffect, useState } from "react";
 import type { JSX } from "react";
-import type { AuthSession, DaemonClient, ProfileOffering } from "@troupe/client";
+import type { AuthSession, DaemonClient, ProfileOffering, SessionKind } from "@troupe/client";
 import { useProfiles } from "../hooks";
 import { shell } from "../shell";
 
@@ -31,7 +31,8 @@ export function StartSession({
   daemon: DaemonClient | null;
   linked: boolean;
   onClose: () => void;
-  onCreated: (id: string) => void;
+  /** With where it was made, which the list may not know yet when the session opens. */
+  onCreated: (id: string, kind: SessionKind) => void;
 }): JSX.Element {
   const [where, setWhere] = useState<"team" | "local">(auth ? "team" : "local");
 
@@ -90,7 +91,7 @@ function TeamSession({
 }: {
   auth: AuthSession;
   onClose: () => void;
-  onCreated: (id: string) => void;
+  onCreated: (id: string, kind: SessionKind) => void;
 }): JSX.Element {
   const { profiles, error: profilesError } = useProfiles(auth);
   const [picked, setPicked] = useState<string | null>(null);
@@ -115,7 +116,7 @@ function TeamSession({
         ...(title.trim() ? { title: title.trim() } : {}),
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
       });
-      onCreated(created.session_id);
+      onCreated(created.session_id, "team");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
@@ -229,7 +230,7 @@ function LocalSession({
   daemon: DaemonClient;
   linked: boolean;
   onClose: () => void;
-  onCreated: (id: string) => void;
+  onCreated: (id: string, kind: SessionKind) => void;
 }): JSX.Element {
   const [workspace, setWorkspace] = useState("");
   const [recent, setRecent] = useState<Array<{ path: string; sessions: number }>>([]);
@@ -262,7 +263,7 @@ function LocalSession({
         ...(prompt.trim() ? { prompt: prompt.trim() } : {}),
         config: { watch, ...(privately ? { private: true } : {}) },
       });
-      onCreated(created.session_id);
+      onCreated(created.session_id, privately ? "private" : "local");
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
     } finally {
