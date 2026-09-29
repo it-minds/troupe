@@ -59,15 +59,18 @@ in the answer once. `admin.principal.rotate` (the old secret stops at once) and
 ## Drain, restart, scale
 
 `admin.profiles.list` names the pods; `admin.pod.drain {worker_id}` sends their sessions to
-dormancy, to be placed elsewhere. **Always follow a drain with**
+dormancy, to be placed elsewhere. A pod on an older revision (`UpgradePending: True`, after
+a new image or env) needs nothing more: once it is drained, by you or by the plane when it
+holds no session, the operator replaces it, one at a time, with its volume kept
+([profiles-and-policy.md §3](profiles-and-policy.md#3-upgrades-and-drains)). **Follow a
+drain of any other pod with**
 
 ```bash
 kubectl -n troupe-w-<profile> delete pod troupe-w-<profile>-<ordinal>
 ```
 
-because nothing else restarts a drained pod. The same delete picks up a new image or env
-(`UpgradePending: True`); the volume is kept. Highest ordinal first. Scale with
-`max_sessions` and `warm_workers` on `admin.profile.put`; the plane computes replicas.
+because nothing else restarts a drained pod that is current. Scale with `max_sessions` and
+`warm_workers` on `admin.profile.put`; the plane computes replicas.
 
 ## Settings
 

@@ -132,7 +132,7 @@ defmodule Troupe.Operator.Reconciler do
     desired = Resources.for_profile(profile, policy, settings)
     namespace = namespace_of(desired)
     missing = missing_secrets(conn, profile, settings, namespace)
-    behind = pods_behind(conn, policy, profile)
+    upgrade = upgrade(conn, policy, profile, Profile.drained(resource))
 
     # The namespace first and on its own: nothing else in the list can be created
     # before it exists. Everything after that is independent and goes out together.
@@ -148,7 +148,7 @@ defmodule Troupe.Operator.Reconciler do
       |> status_for(desired, failures, pruned, namespace)
       |> egress_status(desired, failures, generation(resource))
       |> secret_status(missing, generation(resource))
-      |> upgrade_status(behind, generation(resource))
+      |> upgrade_status(upgrade, generation(resource))
 
     write_status(conn, resource, status)
 
@@ -242,19 +242,46 @@ defmodule Troupe.Operator.Reconciler do
   # A pod takes an image, config or volume change only when it is deleted, and it should
   # be deleted only once a drain has made its sessions dormant, so a profile whose pods
   # are on an older revision is *waiting* rather than broken. Saying which is the
-  # difference between "give it a minute" and "something is wrong" — and nothing deletes
-  # the pod by itself, so the message names each one that is waiting and what it waits for.
-  defp upgrade_status(status, [], generation) do
-    Status.put(status, "UpgradePending", false, "UpToDate", "every pod is on the current revision", generation)
+  # difference between "give it a minute" and "something is wrong", so the message names
+  # each pod and how far it has got; `podsBehind` is the same list for the plane, which
+  # drains them (Decision 726).
+  defp upgrade_status(status, %{behind: []}, generation) do
+    status
+    |> Map.put("podsBehind", [])
+    |> Status.put("UpgradePending", false, "UpToDate", "every pod is on the current revision", generation)
   end
 
-  defp upgrade_status(status, behind, generation) do
+  defp upgrade_status(status, %{behind: behind} = upgrade, generation) do
     message =
-      "#{length(behind)} pod(s) run an older revision until drained and deleted: " <>
-        Enum.join(behind, ", ")
+      "#{length(behind)} pod(s) run an older revision: " <>
+        Enum.map_join(behind, ", ", &"#{name_of(&1)} #{stage(&1, upgrade)}")
 
-    Status.put(status, "UpgradePending", true, "WaitingForIdle", message, generation)
+    status
+    |> Map.put("podsBehind", for(pod <- behind, not replacing?(pod, upgrade), do: behind_entry(pod)))
+    |> Status.put("UpgradePending", true, "WaitingForIdle", message, generation)
   end
+
+  # Not Ready is taken for draining: a running worker's readiness says only that, and it
+  # fails the moment a drain starts. Ready is a pod the plane has not drained yet, which it
+  # does once the pod holds no active session.
+  defp stage(pod, upgrade) do
+    cond do
+      replacing?(pod, upgrade) -> "is being replaced"
+      drained?(pod, upgrade.drained) and not ready?(pod) -> "is drained and waits its turn"
+      not ready?(pod) -> "is draining"
+      true -> "waits to be drained"
+    end
+  end
+
+  # The uid as well as the name, so the plane drains the pod this was written about and
+  # not its replacement, which has the same name and may enrol before the next pass.
+  defp behind_entry(pod) do
+    %{"pod" => name_of(pod)}
+    |> put_unless_nil("uid", get_in(pod, ["metadata", "uid"]))
+    |> put_unless_nil("revision", revision(pod))
+  end
+
+  defp replacing?(pod, upgrade), do: name_of(pod) == upgrade.replaced or terminating?(pod)
 
   # A StatefulSet on `OnDelete` reports the revision it wants, and each of its pods
   # carries the revision it was made from. Comparing them is how the operator knows a
@@ -264,17 +291,20 @@ defmodule Troupe.Operator.Reconciler do
   # which `OnDelete` does not do, so it says nothing about the pods: a template put back
   # to the revision the StatefulSet still calls current makes the two equal while every
   # pod runs a later one.
-  defp pods_behind(conn, policy, profile) do
+  defp upgrade(conn, policy, profile, drained) do
     namespace = Names.namespace(policy.namespace_prefix, profile.name)
     name = Names.workload(policy.namespace_prefix, profile.name)
     operation = K8s.Client.get("apps/v1", "StatefulSet", namespace: namespace, name: name)
 
     with {:ok, set} <- K8s.Client.run(conn, operation),
          wanted when is_binary(wanted) <- get_in(set, ["status", "updateRevision"]),
-         %{} = selector <- get_in(set, ["spec", "selector", "matchLabels"]) do
-      pods_on_old_revision(conn, namespace, selector, wanted)
+         %{} = selector <- get_in(set, ["spec", "selector", "matchLabels"]),
+         {:ok, pods} <- set_pods(conn, namespace, selector) do
+      behind = Enum.reject(pods, &(revision(&1) == wanted))
+      replaced = replace(conn, namespace, pods, behind, drained, get_in(set, ["spec", "replicas"]))
+      %{behind: behind, drained: drained, replaced: replaced}
     else
-      _ -> []
+      _ -> %{behind: [], drained: drained, replaced: nil}
     end
   end
 
@@ -282,22 +312,79 @@ defmodule Troupe.Operator.Reconciler do
   # They were once listed by the operator's marker, which only what the operator writes
   # itself carries and a pod does not, so the listing was always empty and the condition
   # said every pod was current while one still ran the old image.
-  defp pods_on_old_revision(conn, namespace, selector, wanted) do
+  defp set_pods(conn, namespace, selector) do
     operation =
       "v1"
       |> K8s.Client.list("Pod", namespace: namespace)
       |> K8s.Operation.put_selector(K8s.Selector.label(selector))
 
     case K8s.Client.run(conn, operation) do
-      {:ok, %{"items" => pods}} ->
-        for pod <- Enum.sort_by(pods, &name_of/1),
-            get_in(pod, ["metadata", "labels", "controller-revision-hash"]) != wanted,
-            do: name_of(pod)
-
-      _ ->
-        []
+      {:ok, %{"items" => pods}} -> {:ok, Enum.sort_by(pods, &ordinal/1)}
+      other -> other
     end
   end
+
+  # Finishing the roll, which nothing else does: `OnDelete` recreates a pod on the new
+  # revision, with the same volume, once it is deleted. Only a pod the plane has said is
+  # empty is deleted, because only the plane knows that; the operator can see a pod that is
+  # not Ready, which it is from the moment a drain starts, while its sessions are still
+  # being sealed. So a pod goes when it is behind, the plane has recorded its drain
+  # finished at the revision it still runs, and it is not Ready — a pod that restarted
+  # since is Ready again, and may have been given a session.
+  #
+  # One at a time, and never while one is still going or has not been made again, so a
+  # profile never has more than one pod missing; the highest ordinal first, as a
+  # StatefulSet takes them. The disruption budget is not asked, because the pods deleted
+  # here hold nothing it protects.
+  defp replace(conn, namespace, pods, behind, drained, replicas) do
+    settled? = not Enum.any?(pods, &terminating?/1) and length(pods) >= (replicas || 0)
+
+    candidate =
+      behind
+      |> Enum.filter(&(drained?(&1, drained) and not ready?(&1)))
+      |> Enum.max_by(&ordinal/1, fn -> nil end)
+
+    if settled? and candidate do
+      name = name_of(candidate)
+      Logger.info("troupe operator: replacing #{namespace}/#{name}, drained on #{revision(candidate)}")
+
+      case K8s.Client.run(conn, K8s.Client.delete("v1", "Pod", namespace: namespace, name: name)) do
+        {:ok, _deleted} ->
+          name
+
+        {:error, reason} ->
+          Logger.warning("troupe operator: could not replace #{namespace}/#{name}: #{inspect(reason)}")
+          nil
+      end
+    end
+  end
+
+  defp drained?(pod, drained) do
+    revision = revision(pod)
+    is_binary(revision) and Map.get(drained, name_of(pod)) == revision
+  end
+
+  defp ready?(pod) do
+    pod
+    |> get_in(["status", "conditions"])
+    |> List.wrap()
+    |> Enum.any?(&match?(%{"type" => "Ready", "status" => "True"}, &1))
+  end
+
+  defp terminating?(pod), do: get_in(pod, ["metadata", "deletionTimestamp"]) != nil
+
+  defp revision(pod), do: get_in(pod, ["metadata", "labels", "controller-revision-hash"])
+
+  # `<set>-<ordinal>`, which is how a StatefulSet names its pods.
+  defp ordinal(pod) do
+    case pod |> name_of() |> to_string() |> String.split("-") |> List.last() |> Integer.parse() do
+      {ordinal, ""} -> ordinal
+      _other -> -1
+    end
+  end
+
+  defp put_unless_nil(map, _key, nil), do: map
+  defp put_unless_nil(map, key, value), do: Map.put(map, key, value)
 
   defp pruned_suffix([]), do: ""
   defp pruned_suffix(pruned), do: ", #{length(pruned)} removed"

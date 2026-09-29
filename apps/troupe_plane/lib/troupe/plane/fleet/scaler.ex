@@ -64,7 +64,7 @@ defmodule Troupe.Plane.Fleet.Scaler do
   use GenServer
 
   alias Troupe.Plane.{ClusterPolicy, Fleet, Harness, Sessions, Singleton}
-  alias Troupe.Plane.Fleet.{Profile, Provisioner, SizeClass}
+  alias Troupe.Plane.Fleet.{Profile, Provisioner, SizeClass, Upgrade}
 
   require Logger
 
@@ -164,10 +164,14 @@ defmodule Troupe.Plane.Fleet.Scaler do
     mark_smaller(profile, plan, now)
     changed = plan.want != plan.have and write(profile, plan)
 
+    # Before admitting, so placement already knows which pods are behind on an upgrade
+    # and puts a waiting session on a current one (Decision 726).
+    upgrade = Upgrade.step(profile)
+
     # Before the scaling and after it: a worker that came up two ticks ago has room now,
     # and a session that has been waiting for it should not wait another fifteen seconds
     # because this tick happened to change nothing.
-    Map.merge(plan, %{changed: changed, admitted: admit(profile)})
+    Map.merge(plan, %{changed: changed, upgrade: upgrade, admitted: admit(profile)})
   end
 
   # Oldest first, one at a time, stopping at the first refusal. Placement is the only
